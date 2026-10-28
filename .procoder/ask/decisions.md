@@ -621,6 +621,46 @@ Feature and paging codes start with `*` and cannot equal a plain number;
 they keep the `dialGuard` prefix rules. Time conditions have no number of
 their own.
 
+## MCP completeness: JSON bodies, skills, drift guards (branch mcp-skills-complete)
+
+- Body-format gaps are closed by adding an `application/json` form to the
+  existing operations (the pattern of `updateExtensionVoicemail`), not by new
+  routes: one handler, one validation path, no route or role table change.
+  - `createAnnouncement` / `replaceAnnouncement`: `{name, audioBase64}` /
+    `{audioBase64}`. Cap 700 KiB of decoded audio, because an MCP request is at
+    most 1 MiB (spec S-13) and base64 adds a third. Same `checkAnnouncementAudio`
+    as multipart. Multipart (64 MiB) stays for the console.
+  - `importPhones`: `{rows: [{mac, vendor, model, extension, label?, blf?}]}`
+    is turned into the CSV records `checkImport` validates; `text/csv` stays.
+  - `importPhonebook`: `{rows: [{first_name, ...}]}` is rendered as CSV and read
+    by `phonebook.ParseCSV`, so every CSV rule applies; multipart stays.
+- Firmware upload stays excluded: images are tens of MB, far over the 1 MiB
+  MCP request, so base64 is not sane. Category `payload-too-large`, only
+  `uploadFirmware` may use it (test).
+- `importMyContacts` stays excluded under `private-data` (its old reason was
+  the body format, which is not accepted; the real reason is that a user's own
+  address book is private).
+- Every `x-hello-mcp.exclude` now has a structured `category`, one of
+  `apispec.ExcludeCategories` (credentials, private-data, self-service,
+  human-in-the-loop, disruptive-device, paid-credits, binary-download,
+  payload-too-large, session, spec-document). `apispec.Load` rejects a missing
+  or unknown category; `TestMCPExclusionCategories` rejects reasons that blame a
+  multipart/CSV/binary request body.
+- Guards against future gaps:
+  1. Route coverage: `TestRoutesMatchOpenAPI` (existing, kept) fails on a route
+     without an operation and on scope/role drift.
+  2. Exclusion reasons: `TestMCPExclusionCategories` + the loader check above.
+  3. Skill coverage: `TestSkillsTeachEveryTool` fails when an included tool is
+     named by no skill, or an API area (first path segment) has no taught tool;
+     `untaught` / `untaughtAreas` are explicit, reasoned allowlists (empty).
+- The skill name check now only treats a camelCase inline identifier as a tool
+  name when it starts like an operationId (list, get, create...), so body fields
+  such as `extensionId` can be written in code.
+- Skills added: hello-ivr-and-hours, hello-call-handling, hello-phones,
+  hello-flow-graph; hello-troubleshoot extended (cluster drain, AI findings,
+  TTS settings, version, concurrency); hello-setup gets revertVoicemailGreeting.
+- No migration needed.
+
 ## Flow canvas P2: the read-only canvas (2026-10-26)
 
 Built per `.procoder/specs/flow-canvas.md` (P2). Choices the spec left open:
@@ -832,6 +872,45 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - Not done: `exhausted` after a forward stage still uses the dialled
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
+## SIP over TLS terminates at the edge (2026-10-26)
+
+Phone-feature-parity S-14 (delivery PR 23) says "hello-sip listens on TLS 5061".
+Hello's phones already reach Kamailio, not hello-sip, so Kamailio (tls module)
+terminates TLS and the hello-sip nodes keep UDP inside the edge network.
+Kamailio reports the phone leg's transport in `X-Hello-Transport` (udp, tcp, tls;
+trusted proxies only), the registrar stores it on the binding, and the `sips:`
+rule uses it: a `sips:` request needs a TLS caller and rings only TLS bindings,
+and is refused with 480 otherwise, also for trunks and external SIP URIs. TLS is
+off until `KAMAILIO_TLS_PORT` is set, so an image without `tls.so` still starts.
+Provisioning points the models in `HELLO_PROV_SIP_TLS_MODELS` (default
+`grandstream:WP`) at `HELLO_PROV_SIP_TLS_SERVER`; Snom has no confirmed transport
+key and stays on UDP. The `HELLO_SIP_TLS` and `HELLO_SIP_TLS_CERT` settings of the
+spec's config list are not used: the certificate belongs to Kamailio. Later PRs
+(SRTP, DTLS-SRTP) offer crypto only on legs where `bindingOnTLS` or the caller's
+`clientTransport` is TLS.
+
+
+## Transfer-to-voicemail phone key (2026-10-26)
+
+Yealink, Snom, Fanvil and Poly templates provision a key that transfers the
+active call to `*97<own extension>` (`internal/prov/keycaps.go`, `PlaceVMKey`).
+Choices:
+
+- The target is the phone's own extension. A key cannot ask for a number, and
+  "send this caller to my voicemail" is the common use; a colleague's box is
+  still reachable by dialling `*97<ext>` after a transfer.
+- The key goes on the first key left after the BLF keys, never ahead of one.
+  A phone whose keys the BLF keys fill gets none (no BLF is dropped for it).
+- Written only when the PBX defines the voicemail feature code and the
+  extension has voicemail enabled (`Line.NoVoicemail`, from
+  `extensions.voicemail_enabled`).
+- Gated like BLF: Yealink, Snom and Fanvil only on a model in the capability
+  table; Poly on every model (a softkey); no Grandstream, since a WP has no key
+  block in its template and the P323 block of the other models is unverified
+  and overlaps the phonebook keys.
+- Every key type is unverified on a phone and marked "(verify)" in the templates
+  (Yealink type 3, Snom `transfer`, Fanvil memory key `/f`, Poly efk macro).
+  The provclient Fanvil parser now counts only `/b` memory keys as BLF.
 
 message. `conference` was left for a follow-up (see below).
 

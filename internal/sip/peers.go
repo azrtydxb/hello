@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -117,13 +118,30 @@ type peers struct {
 	p atomic.Pointer[peerSet]
 	// lastMiss is when a miss last forced a refresh (unix nanoseconds).
 	lastMiss atomic.Int64
+	// Refreshes run concurrently (the background loop, a miss, startup) and
+	// finish in any order. Each takes a ticket when it starts reading the
+	// registry and may store its result only if no refresh that started
+	// later has stored one, so a slow, stale read never replaces a newer set.
+	ticket atomic.Uint64
+	mu     sync.Mutex
+	stored uint64
 }
 
 // missRefreshEvery bounds refreshes forced by unknown sources, so a stranger
 // sending junk cannot turn every datagram into Valkey and DNS calls.
 const missRefreshEvery = time.Second
 
-func (ps *peers) set(s peerSet) { ps.p.Store(&s) }
+// set stores s, the result of the refresh that took ticket, unless a refresh
+// that started after it already stored its own.
+func (ps *peers) set(ticket uint64, s peerSet) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if ticket < ps.stored {
+		return
+	}
+	ps.stored = ticket
+	ps.p.Store(&s)
+}
 
 func (ps *peers) has(addr string) bool {
 	s := ps.p.Load()
@@ -133,6 +151,7 @@ func (ps *peers) has(addr string) bool {
 // refreshPeers announces this node and reloads the peer set. This node is
 // always a peer, so a node works alone even when Valkey is unreachable.
 func (s *Server) refreshPeers(ctx context.Context) {
+	ticket := s.peers.ticket.Add(1)
 	addrs := []string{s.cfg.AdvertisedAddr, s.laddr.String()}
 	if p := s.deps.Presence; p != nil {
 		actx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -151,7 +170,7 @@ func (s *Server) refreshPeers(ctx context.Context) {
 	}
 	rctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	s.peers.set(resolvePeers(rctx, addrs))
+	s.peers.set(ticket, resolvePeers(rctx, addrs))
 }
 
 // isPeer reports whether addr is a cluster SIP node. On a miss it refreshes

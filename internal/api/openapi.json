@@ -59,7 +59,8 @@
         },
         "security": [],
         "x-hello-mcp": {
-          "exclude": "the document itself; tools are generated from it"
+          "exclude": "the document itself; tools are generated from it",
+          "category": "spec-document"
         }
       }
     },
@@ -126,7 +127,8 @@
         },
         "security": [],
         "x-hello-mcp": {
-          "exclude": "starts a browser session"
+          "exclude": "starts a browser session",
+          "category": "session"
         }
       }
     },
@@ -180,7 +182,8 @@
         },
         "security": [],
         "x-hello-mcp": {
-          "exclude": "starts a browser session"
+          "exclude": "starts a browser session",
+          "category": "session"
         }
       }
     },
@@ -224,7 +227,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       }
     },
@@ -278,7 +282,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       }
     },
@@ -352,7 +357,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       }
     },
@@ -419,7 +425,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       }
     },
@@ -483,7 +490,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       }
     },
@@ -527,7 +535,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       },
       "put": {
@@ -592,7 +601,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       }
     },
@@ -647,7 +657,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "user and role management stays in the console"
+          "exclude": "user and role management stays in the console",
+          "category": "credentials"
         }
       }
     },
@@ -674,7 +685,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "ends a browser session"
+          "exclude": "ends a browser session",
+          "category": "session"
         }
       }
     },
@@ -749,7 +761,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "credential management stays in the console"
+          "exclude": "credential management stays in the console",
+          "category": "credentials"
         }
       },
       "post": {
@@ -794,7 +807,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "credential management stays in the console"
+          "exclude": "credential management stays in the console",
+          "category": "credentials"
         }
       }
     },
@@ -829,7 +843,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "credential management stays in the console"
+          "exclude": "credential management stays in the console",
+          "category": "credentials"
         }
       }
     },
@@ -869,7 +884,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "credentials are changed in the console only"
+          "exclude": "credentials are changed in the console only",
+          "category": "credentials"
         }
       }
     },
@@ -903,7 +919,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "user and role management stays in the console"
+          "exclude": "user and role management stays in the console",
+          "category": "credentials"
         }
       },
       "post": {
@@ -951,7 +968,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "user and role management stays in the console"
+          "exclude": "user and role management stays in the console",
+          "category": "credentials"
         }
       }
     },
@@ -993,7 +1011,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "user and role management stays in the console"
+          "exclude": "user and role management stays in the console",
+          "category": "credentials"
         }
       },
       "patch": {
@@ -1056,7 +1075,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "user and role management stays in the console"
+          "exclude": "user and role management stays in the console",
+          "category": "credentials"
         }
       },
       "delete": {
@@ -1099,7 +1119,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "user and role management stays in the console"
+          "exclude": "user and role management stays in the console",
+          "category": "credentials"
         }
       }
     },
@@ -1146,7 +1167,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "extension self-service belongs to the signed-in user in the console"
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
         }
       }
     },
@@ -1180,7 +1202,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "extension self-service belongs to the signed-in user in the console"
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
         }
       }
     },
@@ -1235,7 +1258,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "extension self-service belongs to the signed-in user in the console"
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
         }
       }
     },
@@ -1277,7 +1301,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "extension self-service belongs to the signed-in user in the console"
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
         }
       },
       "put": {
@@ -1359,7 +1384,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "extension self-service belongs to the signed-in user in the console"
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
         }
       }
     },
@@ -1412,7 +1438,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "extension self-service belongs to the signed-in user in the console"
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
         }
       }
     },
@@ -1467,7 +1494,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "extension self-service belongs to the signed-in user in the console"
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
         }
       }
     },
@@ -1502,7 +1530,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "extension self-service belongs to the signed-in user in the console"
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
         }
       }
     },
@@ -1571,7 +1600,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "extension self-service belongs to the signed-in user in the console"
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
         }
       }
     },
@@ -1629,7 +1659,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "extension self-service belongs to the signed-in user in the console"
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
         }
       }
     },
@@ -1666,7 +1697,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "system email settings stay in the console"
+          "exclude": "system email settings stay in the console",
+          "category": "credentials"
         }
       },
       "put": {
@@ -1714,7 +1746,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "system email settings stay in the console"
+          "exclude": "system email settings stay in the console",
+          "category": "credentials"
         }
       }
     },
@@ -1763,7 +1796,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "system email settings stay in the console"
+          "exclude": "system email settings stay in the console",
+          "category": "credentials"
         }
       }
     },
@@ -2235,7 +2269,8 @@
         "x-hello-scope": "secrets",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "secrets-scoped: the new secret is shown only in the console"
+          "exclude": "secrets-scoped: the new secret is shown only in the console",
+          "category": "credentials"
         }
       }
     },
@@ -2535,7 +2570,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
-          "exclude": "CSV download"
+          "exclude": "CSV download",
+          "category": "binary-download"
         }
       }
     },
@@ -4577,7 +4613,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
-          "exclude": "binary audio response"
+          "exclude": "binary audio response",
+          "category": "binary-download"
         }
       }
     },
@@ -4785,7 +4822,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
-          "exclude": "binary audio response"
+          "exclude": "binary audio response",
+          "category": "binary-download"
         }
       }
     },
@@ -4876,7 +4914,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "carries the OpenRouter API key"
+          "exclude": "carries the OpenRouter API key",
+          "category": "credentials"
         }
       }
     },
@@ -4954,7 +4993,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "talks to the provider with the stored key"
+          "exclude": "talks to the provider with the stored key",
+          "category": "credentials"
         }
       }
     },
@@ -5078,7 +5118,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "spends text-to-speech credits; started from the console"
+          "exclude": "spends text-to-speech credits; started from the console",
+          "category": "paid-credits"
         }
       }
     },
@@ -5176,7 +5217,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "spends text-to-speech credits; started from the console"
+          "exclude": "spends text-to-speech credits; started from the console",
+          "category": "paid-credits"
         }
       }
     },
@@ -5246,7 +5288,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "spends text-to-speech credits and returns binary audio; started from the console"
+          "exclude": "spends text-to-speech credits and returns binary audio; started from the console",
+          "category": "paid-credits"
         }
       }
     },
@@ -5337,11 +5380,30 @@
       "post": {
         "operationId": "createAnnouncement",
         "summary": "Upload an announcement",
-        "description": "Uploads an announcement (a WAV file and a name). Stores the WAV in the hello-announcements bucket under ann/<name>.wav.",
+        "description": "Uploads an announcement (a WAV file and a name). Stores the WAV in the hello-announcements bucket under ann/<name>.wav. Send JSON with name and audioBase64 (WAV, at most 700 KiB; this is the form agents use) or multipart/form-data with name and file (WAV, at most 64 MiB; the console).",
         "tags": ["media"],
         "requestBody": {
           "required": true,
           "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "audioBase64"],
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                    "description": "Unique name the announcement is configured by."
+                  },
+                  "audioBase64": {
+                    "type": "string",
+                    "contentEncoding": "base64",
+                    "description": "Base64 of a WAV file, at most 700 KiB decoded (a JSON request is at most 1 MiB; about 20 seconds of 16 kHz 16-bit mono, 40 seconds at 8 kHz). Same audio rules as the multipart file; longer audio is uploaded in the console."
+                  }
+                }
+              }
+            },
             "multipart/form-data": {
               "schema": {
                 "type": "object",
@@ -5397,9 +5459,7 @@
         },
         "x-hello-scope": "write",
         "x-hello-role": "operator",
-        "x-hello-mcp": {
-          "exclude": "multipart file upload"
-        }
+        "x-hello-mcp": true
       }
     },
     "/api/v1/announcements/{id}": {
@@ -5476,7 +5536,7 @@
       "put": {
         "operationId": "replaceAnnouncement",
         "summary": "Replace an announcement's audio",
-        "description": "Replaces an announcement's name or audio. Overwrites the audio at ann/<name>.wav in the hello-announcements bucket, validated like the upload, then moves updatedAt; audited, bumps the configuration revision and notifies hello-sip.",
+        "description": "Replaces an announcement's audio; the name cannot change. Overwrites the audio at ann/<name>.wav in the hello-announcements bucket, validated like the upload, then moves updatedAt; audited, bumps the configuration revision and notifies hello-sip. Send JSON with audioBase64 (WAV, at most 700 KiB; this is the form agents use) or multipart/form-data with file (WAV, at most 64 MiB; the console).",
         "tags": ["media"],
         "parameters": [
           {
@@ -5486,6 +5546,25 @@
         "requestBody": {
           "required": true,
           "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["audioBase64"],
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                    "description": "Optional; must equal the announcement's name, which cannot change."
+                  },
+                  "audioBase64": {
+                    "type": "string",
+                    "contentEncoding": "base64",
+                    "description": "Base64 of a WAV file, at most 700 KiB decoded (a JSON request is at most 1 MiB; about 20 seconds of 16 kHz 16-bit mono, 40 seconds at 8 kHz). Same audio rules as the multipart file; longer audio is uploaded in the console."
+                  }
+                }
+              }
+            },
             "multipart/form-data": {
               "schema": {
                 "type": "object",
@@ -5541,9 +5620,7 @@
         },
         "x-hello-scope": "write",
         "x-hello-role": "operator",
-        "x-hello-mcp": {
-          "exclude": "multipart file upload"
-        }
+        "x-hello-mcp": true
       },
       "delete": {
         "operationId": "deleteAnnouncement",
@@ -5658,7 +5735,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "spends text-to-speech credits; started from the console"
+          "exclude": "spends text-to-speech credits; started from the console",
+          "category": "paid-credits"
         }
       }
     },
@@ -5718,7 +5796,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
-          "exclude": "binary audio response"
+          "exclude": "binary audio response",
+          "category": "binary-download"
         }
       }
     },
@@ -6505,7 +6584,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "spends text-to-speech credits; started from the console"
+          "exclude": "spends text-to-speech credits; started from the console",
+          "category": "paid-credits"
         }
       }
     },
@@ -7152,7 +7232,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "rings a physical phone"
+          "exclude": "rings a physical phone",
+          "category": "disruptive-device"
         }
       }
     },
@@ -7769,8 +7850,8 @@
     "/api/v1/phones/import": {
       "post": {
         "operationId": "importPhones",
-        "summary": "Import phones from CSV (mac,vendor,model,extension[,label][,blf]); dryRun=true only checks. An apply creates every row in one transaction or none (400 with the rows)",
-        "description": "Checks or creates phones from a CSV body.",
+        "summary": "Import phones from rows",
+        "description": "Checks or creates phones from rows. Send JSON {rows: [{mac, vendor, model, extension, label?, blf?}]} (agents) or a text/csv body with the columns mac,vendor,model,extension[,label][,blf] (the console); at most 2000 rows and 1 MiB. Every row is checked (MAC, vendor, model, extension, duplicates in the request and against existing phones). dryRun=true only reports the rows (ok, and the errors per row); an apply creates every phone in one transaction, or none when any row fails (400 with the same rows). A JSON row's line is its 1-based position in rows.",
         "tags": ["phones"],
         "responses": {
           "200": {
@@ -7816,6 +7897,53 @@
         "requestBody": {
           "required": true,
           "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["rows"],
+                "additionalProperties": false,
+                "properties": {
+                  "rows": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 2000,
+                    "description": "One object per phone.",
+                    "items": {
+                      "type": "object",
+                      "required": ["mac", "vendor", "model", "extension"],
+                      "additionalProperties": false,
+                      "properties": {
+                        "mac": {
+                          "type": "string",
+                          "description": "The handset's MAC address, in any common notation."
+                        },
+                        "vendor": {
+                          "type": "string",
+                          "description": "The vendor of the handset, as listed by the provisioning templates (for example yealink)."
+                        },
+                        "model": {
+                          "type": "string",
+                          "description": "The handset model."
+                        },
+                        "extension": {
+                          "type": "string",
+                          "description": "The number of the extension the phone registers as."
+                        },
+                        "label": {
+                          "type": "string",
+                          "description": "Optional display label."
+                        },
+                        "blf": {
+                          "type": "array",
+                          "items": { "type": "string" },
+                          "description": "Optional extension numbers shown as busy-lamp keys."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
             "text/csv": {
               "schema": {
                 "type": "string"
@@ -7835,9 +7963,7 @@
         ],
         "x-hello-scope": "write",
         "x-hello-role": "operator",
-        "x-hello-mcp": {
-          "exclude": "text/csv request body; tools send JSON"
-        }
+        "x-hello-mcp": true
       }
     },
     "/api/v1/phones/{id}": {
@@ -8026,7 +8152,8 @@
         "x-hello-scope": "secrets",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "secrets-scoped: the provisioning URL is shown only in the console"
+          "exclude": "secrets-scoped: the provisioning URL is shown only in the console",
+          "category": "credentials"
         }
       }
     },
@@ -8071,7 +8198,8 @@
         "x-hello-scope": "secrets",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "secrets-scoped: the provisioning URL is shown only in the console"
+          "exclude": "secrets-scoped: the provisioning URL is shown only in the console",
+          "category": "credentials"
         }
       }
     },
@@ -8124,7 +8252,8 @@
         "x-hello-scope": "secrets",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "secrets-scoped: the password is shown only in the console"
+          "exclude": "secrets-scoped: the password is shown only in the console",
+          "category": "credentials"
         }
       }
     },
@@ -8162,7 +8291,8 @@
         "x-hello-scope": "secrets",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "secrets-scoped"
+          "exclude": "secrets-scoped",
+          "category": "credentials"
         }
       }
     },
@@ -8328,7 +8458,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "disruptive: reboots a handset, console only"
+          "exclude": "disruptive: reboots a handset, console only",
+          "category": "disruptive-device"
         }
       }
     },
@@ -8422,7 +8553,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "disruptive: reboots a handset, console only"
+          "exclude": "disruptive: reboots a handset, console only",
+          "category": "disruptive-device"
         }
       }
     },
@@ -8637,7 +8769,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "disruptive: reboots a handset, console only"
+          "exclude": "disruptive: reboots a handset, console only",
+          "category": "disruptive-device"
         }
       }
     },
@@ -9168,7 +9301,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "multipart file upload"
+          "exclude": "too large for a tool call: a firmware image is tens of megabytes, far over the 1 MiB limit of an MCP request even as JSON; it is added in the console",
+          "category": "payload-too-large"
         }
       }
     },
@@ -9548,7 +9682,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
-          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials.",
+          "category": "credentials"
         },
         "parameters": [
           {
@@ -9596,7 +9731,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
-          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials.",
+          "category": "credentials"
         },
         "parameters": [
           {
@@ -9685,7 +9821,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
-          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials.",
+          "category": "credentials"
         },
         "parameters": [
           {
@@ -9741,7 +9878,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
-          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials.",
+          "category": "credentials"
         },
         "responses": {
           "200": {
@@ -9787,7 +9925,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
-          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials.",
+          "category": "credentials"
         },
         "parameters": [
           {
@@ -9822,7 +9961,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials.",
+          "category": "credentials"
         },
         "responses": {
           "200": {
@@ -9866,7 +10006,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials.",
+          "category": "credentials"
         },
         "requestBody": {
           "required": true,
@@ -9919,7 +10060,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials.",
+          "category": "credentials"
         },
         "parameters": [
           {
@@ -9965,7 +10107,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials.",
+          "category": "credentials"
         },
         "parameters": [
           {
@@ -10024,7 +10167,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials.",
+          "category": "credentials"
         },
         "parameters": [
           {
@@ -10065,7 +10209,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials.",
+          "category": "credentials"
         },
         "parameters": [
           {
@@ -10137,7 +10282,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials.",
+          "category": "credentials"
         },
         "parameters": [
           {
@@ -10229,7 +10375,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
-          "exclude": "returns a binary zip archive for a person to install, not data for an agent"
+          "exclude": "returns a binary zip archive for a person to install, not data for an agent",
+          "category": "binary-download"
         },
         "parameters": [
           {
@@ -10440,7 +10587,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "human-in-the-loop"
+          "exclude": "human-in-the-loop",
+          "category": "human-in-the-loop"
         },
         "parameters": [
           {
@@ -10488,7 +10636,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "human-in-the-loop"
+          "exclude": "human-in-the-loop",
+          "category": "human-in-the-loop"
         },
         "parameters": [
           {
@@ -10667,7 +10816,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "human-in-the-loop"
+          "exclude": "human-in-the-loop",
+          "category": "human-in-the-loop"
         },
         "parameters": [
           {
@@ -10722,7 +10872,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "human-in-the-loop"
+          "exclude": "human-in-the-loop",
+          "category": "human-in-the-loop"
         },
         "parameters": [
           {
@@ -10836,7 +10987,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "The in-product assistant's conversations belong to the console."
+          "exclude": "The in-product assistant's conversations belong to the console.",
+          "category": "private-data"
         },
         "requestBody": {
           "required": true,
@@ -10927,7 +11079,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "The in-product assistant's conversations belong to the console."
+          "exclude": "The in-product assistant's conversations belong to the console.",
+          "category": "private-data"
         },
         "parameters": [
           {
@@ -10983,7 +11136,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "The in-product assistant's conversations belong to the console."
+          "exclude": "The in-product assistant's conversations belong to the console.",
+          "category": "private-data"
         },
         "parameters": [
           {
@@ -11024,7 +11178,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "human-in-the-loop"
+          "exclude": "human-in-the-loop",
+          "category": "human-in-the-loop"
         },
         "parameters": [
           {
@@ -11183,7 +11338,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "human-in-the-loop"
+          "exclude": "human-in-the-loop",
+          "category": "human-in-the-loop"
         },
         "parameters": [
           {
@@ -12073,7 +12229,7 @@
       "post": {
         "operationId": "importPhonebook",
         "summary": "Import entries from CSV",
-        "description": "Reads a CSV file (multipart part \"file\", at most 2 MiB and 5000 rows) with the header first_name,last_name,company,work,mobile,home,other,note (any order, comma or semicolon, UTF-8 with or without BOM). dry_run=true checks every row and writes nothing. An import is all or nothing: with failing rows it answers 400 with the result and writes nothing. mode=replace deletes the book's entries first. The extensions book cannot be imported into (409), nor can a book be taken past 5000 entries (409).",
+        "description": "Imports entries into an address book. Send JSON {rows: [{first_name, last_name, company, work, mobile, home, other, note}]} (agents; a row's number in the result is its position in rows plus one) or a CSV file (multipart part \"file\", the console) with the header first_name,last_name,company,work,mobile,home,other,note (any order, comma or semicolon, UTF-8 with or without BOM); at most 2 MiB and 5000 rows either way. dry_run=true checks every row and writes nothing. An import is all or nothing: with failing rows it answers 400 with the result and writes nothing. mode=replace deletes the book's entries first. The extensions book cannot be imported into (409), nor can a book be taken past 5000 entries (409).",
         "tags": ["phonebooks"],
         "parameters": [
           {
@@ -12102,6 +12258,59 @@
         "requestBody": {
           "required": true,
           "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["rows"],
+                "additionalProperties": false,
+                "properties": {
+                  "rows": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 5000,
+                    "description": "One object per entry; a cell not given is empty.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "first_name": {
+                          "type": "string",
+                          "description": "First name."
+                        },
+                        "last_name": {
+                          "type": "string",
+                          "description": "Last name."
+                        },
+                        "company": {
+                          "type": "string",
+                          "description": "Company."
+                        },
+                        "work": {
+                          "type": "string",
+                          "description": "Work number."
+                        },
+                        "mobile": {
+                          "type": "string",
+                          "description": "Mobile number."
+                        },
+                        "home": {
+                          "type": "string",
+                          "description": "Home number."
+                        },
+                        "other": {
+                          "type": "string",
+                          "description": "Other number."
+                        },
+                        "note": {
+                          "type": "string",
+                          "description": "Free note."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
             "multipart/form-data": {
               "schema": {
                 "type": "object",
@@ -12167,9 +12376,7 @@
         },
         "x-hello-scope": "write",
         "x-hello-role": "operator",
-        "x-hello-mcp": {
-          "exclude": "multipart CSV upload"
-        }
+        "x-hello-mcp": true
       }
     },
     "/api/v1/phonebooks/{id}/export": {
@@ -12213,7 +12420,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
-          "exclude": "CSV download"
+          "exclude": "CSV download",
+          "category": "binary-download"
         }
       }
     },
@@ -12274,7 +12482,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "personal data: a user's own contacts are not exposed to an agent"
+          "exclude": "personal data: a user's own contacts are not exposed to an agent",
+          "category": "private-data"
         }
       },
       "post": {
@@ -12325,7 +12534,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "personal data: a user's own contacts are not exposed to an agent"
+          "exclude": "personal data: a user's own contacts are not exposed to an agent",
+          "category": "private-data"
         }
       }
     },
@@ -12422,7 +12632,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "multipart CSV upload"
+          "exclude": "personal data: a user's own contacts are not exposed to an agent",
+          "category": "private-data"
         }
       }
     },
@@ -12459,7 +12670,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "CSV download"
+          "exclude": "CSV download",
+          "category": "binary-download"
         }
       }
     },
@@ -12517,7 +12729,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "personal data: a user's own contacts are not exposed to an agent"
+          "exclude": "personal data: a user's own contacts are not exposed to an agent",
+          "category": "private-data"
         }
       },
       "delete": {
@@ -12553,7 +12766,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "personal data: a user's own contacts are not exposed to an agent"
+          "exclude": "personal data: a user's own contacts are not exposed to an agent",
+          "category": "private-data"
         }
       }
     },
@@ -12649,7 +12863,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "message content is private: it is not exposed to an agent"
+          "exclude": "message content is private: it is not exposed to an agent",
+          "category": "private-data"
         }
       },
       "post": {
@@ -12790,7 +13005,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "message content is private: it is not exposed to an agent"
+          "exclude": "message content is private: it is not exposed to an agent",
+          "category": "private-data"
         }
       }
     },
@@ -12938,7 +13154,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "destroys history; an administrator does this in the console"
+          "exclude": "destroys history; an administrator does this in the console",
+          "category": "human-in-the-loop"
         }
       }
     },
@@ -13025,7 +13242,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "personal data: a user's own messages are not exposed to an agent"
+          "exclude": "personal data: a user's own messages are not exposed to an agent",
+          "category": "private-data"
         }
       },
       "post": {
@@ -13082,7 +13300,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "acts as the user's own extension: not exposed to an agent"
+          "exclude": "acts as the user's own extension: not exposed to an agent",
+          "category": "self-service"
         }
       }
     },
@@ -13153,7 +13372,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "personal data: a user's own messages are not exposed to an agent"
+          "exclude": "personal data: a user's own messages are not exposed to an agent",
+          "category": "private-data"
         }
       }
     },
@@ -15101,7 +15321,8 @@
         "x-hello-scope": "events",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "a long-lived stream does not fit a tool call; the history operation lists events"
+          "exclude": "a long-lived stream does not fit a tool call; the history operation lists events",
+          "category": "stream"
         }
       }
     },
@@ -15138,7 +15359,8 @@
         "x-hello-scope": "events",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "mints a credential-like ticket for a stream; not for an AI agent"
+          "exclude": "mints a credential-like ticket for a stream; not for an AI agent",
+          "category": "credentials"
         }
       }
     }
@@ -21601,7 +21823,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
+            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello reaches an external SIP URI over UDP only). Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean"
@@ -21706,7 +21928,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Empty when destinationKind is \"internal\": the called DID names the extension. Required unless destinationKind is \"internal\", in which case it must be empty."
+            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello reaches an external SIP URI over UDP only). Empty when destinationKind is \"internal\": the called DID names the extension. Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean",
@@ -21812,7 +22034,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Empty when destinationKind is \"internal\": the called DID names the extension."
+            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello reaches an external SIP URI over UDP only). Empty when destinationKind is \"internal\": the called DID names the extension."
           },
           "enabled": {
             "type": "boolean",

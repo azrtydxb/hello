@@ -375,6 +375,32 @@ five pages). A model not in the table keeps every key, from the vendor's
 first free key, as before; Poly has no table (no limit could be cited) and
 keeps its unlimited attendant list.
 
+### Transfer-to-voicemail key
+
+`*97<ext>` leaves a message in extension `<ext>`'s mailbox, and is what a
+phone's transfer-to-voicemail key dials. Hello provisions one such key on each
+phone: it transfers the call in progress to `*97` followed by the phone's own
+extension (so "send this caller to my voicemail"). The key is written when the
+PBX has the voicemail feature code and the extension has voicemail switched on.
+
+| Vendor  | Key                                                                                                                                           |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink | `linekey.N.type = 3` (Transfer), `.value = *97<ext>`, `.label = To voicemail`; `expansion_module.M.key.K.*` the same on an EXP50 key (verify) |
+| Snom    | `<fkey idx="N" context="active">transfer sip:*97<ext>@<domain></fkey>` (verify)                                                              |
+| Fanvil  | a memory key, `FkeyN Type :1`, `Value :*97<ext>@1/f` (the BLF keys' `/b` suffix replaced by speed dial) (verify)                              |
+| Poly    | an enhanced feature key macro `$FTransfer$$Cpause2$*97<ext>$Tinvite$` (`efk.efklist.1.*`) on `softkey.1`, active-call context (verify)        |
+
+The key takes the first key a phone has left after its BLF keys
+(`PlaceVMKey` in `internal/prov/keycaps.go`), so it never displaces a BLF key
+and a phone whose keys the BLF keys fill gets none. Yealink, Snom and Fanvil
+get it only on a model in the capability table above, as BLF keys are only
+counted there; Poly has no table and always has softkeys. Grandstream gets no
+key: a WP has no key block in its template, and the P323 block of the other
+models is unverified and runs into the phonebook keys P330 to P333 past two
+BLF keys. None of these keys has been checked on a phone; the key types, the
+Fanvil `/f` suffix and the Poly macro and softkey slot are the first things to
+verify.
+
 ### HD voice codec order
 
 Every built-in template puts Opus first on the models that have it, then
@@ -688,7 +714,7 @@ Templates see only these values:
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                                                                                                 |
 | `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`                                                                                |
-| `.Server`   | `Host`, `Port`, `Transport` (`udp`), `Expiry` (seconds)                                                                                                              |
+| `.Server`   | `Host`, `Port`, `Transport` (`udp` or `tls`), `Expiry` (seconds)                                                                                                             |
 | `.BLF`      | a list of `Number`, `Label`, `URI`, placed on the model's keys: `Slot`, `Module`, `Page`, `Section`, `PageStart`, `Pickup`                                           |
 | `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `CACertBase64`, `ResyncSeconds`                                                                                          |
 | `.Codes`    | the PBX's star codes: `DNDOn`, `DNDOff`, `ForwardOn`, `ForwardOff`, `ForwardBusyOn`/`Off`, `ForwardNoAnswerOn`/`Off`, `PickupDirected` (empty when the PBX has none) |

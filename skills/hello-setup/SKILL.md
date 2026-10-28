@@ -74,7 +74,9 @@ provisioning service. Voicemail belongs to the extension
 
 `getExtensionVoicemail` reads the box; `updateExtensionVoicemail` sets the
 PIN and the e-mail address for notifications (an empty address turns e-mail
-off). Greetings are audio uploads and are done in the console.
+off). Greetings are audio uploads and are done in the console;
+`revertVoicemailGreeting` (`slot` greeting, busy, unreachable or name) removes
+the box's own audio in a slot so callers hear the default spoken prompt again.
 `listVoicemailBoxes` shows every box with its message counts.
 
 ### Remove someone

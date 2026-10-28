@@ -93,10 +93,13 @@ var Results = []Result{
 // RenderData is the only value a template sees (spec S-8). Nothing outside
 // it is reachable: its fields are plain data with no methods.
 type RenderData struct {
-	Phone    Phone
-	Line     Line
-	Server   Server
-	BLF      []BLFKey
+	Phone  Phone
+	Line   Line
+	Server Server
+	BLF    []BLFKey
+	// VMKey is the transfer-to-voicemail key (see PlaceVMKey); nil when the
+	// phone has no key for it. Render fills it, templates only read it.
+	VMKey    *VMKey
 	Prov     ProvInfo
 	Firmware *FirmwareInfo // nil when no firmware is pinned for the model
 	Book     *BookInfo     // nil when the phone has no address book to fetch
@@ -160,6 +163,10 @@ type Line struct {
 	// VoicemailCode is the feature code the message key dials (spec S-5);
 	// empty when no voicemail feature code is configured.
 	VoicemailCode string
+	// NoVoicemail is set when the extension has voicemail switched off: its
+	// box takes no message, so no transfer-to-voicemail key is provisioned.
+	// The zero value (a box) is what the sample and tests assume.
+	NoVoicemail bool
 	// CallWaiting is the extension's call-waiting flag (spec S-18): the
 	// templates write the phone's own call-waiting (and tone) setting from
 	// it, so the phone and Hello agree about a second call. False means the
@@ -176,10 +183,13 @@ type Line struct {
 
 // Server is the registrar the phone registers with.
 type Server struct {
-	Host      string
-	Port      int
-	Transport string // always "udp": Hello is UDP-only
-	Expiry    int    // registration expiry, seconds
+	Host string
+	Port int
+	// Transport is "udp" (the default) or "tls": TLS for a phone whose
+	// vendor has a transport key and whose model HELLO_PROV_SIP_TLS_MODELS
+	// lists, registering with HELLO_PROV_SIP_TLS_SERVER (S-14).
+	Transport string
+	Expiry    int // registration expiry, seconds
 }
 
 // BLFKey is one busy-lamp-field key. Render places the keys of a Yealink,
@@ -209,6 +219,26 @@ type BLFKey struct {
 	// monitored extension's ringing call (Yealink BLF line keys); empty
 	// when the PBX has none.
 	Pickup string
+}
+
+// VMKey is the transfer-to-voicemail key: pressed during a call it transfers
+// the caller to the phone's own mailbox by dialling the voicemail feature
+// code followed by the extension (*97<ext>, which the PBX takes as "leave a
+// message in that box"). Render places it on the first key a Yealink, Snom
+// or Fanvil phone has left after its BLF keys (see PlaceVMKey); Poly puts it
+// on a softkey, which needs no slot here, and Grandstream has none.
+type VMKey struct {
+	Number string // the dialled string: the feature code and the extension
+	Label  string
+	URI    string // sip:<number>@<domain>
+
+	// Slot, Module, Page, Section and PageStart place the key as BLFKey's
+	// fields do. Zero for Poly.
+	Slot      int
+	Module    int
+	Page      int
+	Section   string
+	PageStart bool
 }
 
 // ProvInfo is the phone's own provisioning URL and re-check settings.

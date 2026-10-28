@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -67,5 +68,60 @@ func TestPeerMissRefreshes(t *testing.T) {
 	fp.add("192.0.2.3:5060")
 	if s.isPeer("192.0.2.9:5060") || s.isPeer("192.0.2.3:5060") {
 		t.Fatal("misses within missRefreshEvery refreshed again")
+	}
+}
+
+// slowPresence lists nodes from a snapshot taken when Nodes is called, and
+// holds the first call until released, so that call's result is stale by the
+// time it returns.
+type slowPresence struct {
+	mu      sync.Mutex
+	nodes   []string
+	calls   int
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (p *slowPresence) Announce(context.Context, string, string, time.Duration) error { return nil }
+
+func (p *slowPresence) Nodes(context.Context) ([]string, error) {
+	p.mu.Lock()
+	p.calls++
+	first := p.calls == 1
+	out := append([]string(nil), p.nodes...)
+	p.mu.Unlock()
+	if first {
+		close(p.entered)
+		<-p.release
+	}
+	return out, nil
+}
+
+// TestPeerRefreshStaleResultDiscarded fails if a refresh that read the
+// registry before a sibling announced, but finishes after a later refresh
+// stored the set that includes it, replaces that newer set and so makes the
+// node distrust the sibling until the next background refresh.
+func TestPeerRefreshStaleResultDiscarded(t *testing.T) {
+	sp := &slowPresence{entered: make(chan struct{}), release: make(chan struct{})}
+	s := &Server{
+		cfg:  Config{NodeID: "sip-1", AdvertisedAddr: "192.0.2.1:5060", StateTimeout: time.Second},
+		deps: Deps{Presence: sp},
+		log:  discard,
+	}
+	s.laddr = sip.Addr{IP: net.ParseIP("127.0.0.1"), Port: 5060}
+	done := make(chan struct{})
+	go func() { s.refreshPeers(context.Background()); close(done) }() // reads the registry without the sibling
+	<-sp.entered
+	sp.mu.Lock()
+	sp.nodes = []string{"192.0.2.2:5060"} // the sibling announces
+	sp.mu.Unlock()
+	s.refreshPeers(context.Background()) // a later refresh sees it and stores it
+	if !s.peers.has("192.0.2.2:5060") {
+		t.Fatal("the newer refresh did not store the sibling")
+	}
+	close(sp.release)
+	<-done
+	if !s.peers.has("192.0.2.2:5060") {
+		t.Fatal("a stale refresh replaced the newer peer set")
 	}
 }

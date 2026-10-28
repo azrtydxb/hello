@@ -138,7 +138,8 @@ Record-Route, so they must be the address and port phones really use
   on the shared address; keep `externalTrafficPolicy: Local` and check that
   your load balancer preserves the client address.
 - A UDP load balancer must support mixed UDP and TCP on one port or you
-  serve UDP only.
+  serve UDP only. SIP over TLS adds TCP 5061 (`kamailio.tls`, see
+  [docs/tls.md](tls.md)).
 - Media does not follow: hello-sip still needs a routable address.
   `sip.hostNetwork: false` with `sip.mediaAnchorHost: podIP` works only when
   the pod network is routable from the phones (native routing, BGP), and a

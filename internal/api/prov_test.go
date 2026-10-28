@@ -972,3 +972,43 @@ func TestFirmwareUploadStoreDown(t *testing.T) {
 		t.Fatalf("upload with the store down = %s, want code upstream", r.body)
 	}
 }
+
+// TestPhoneImportJSON fails if the JSON rows are not checked and created
+// exactly like the CSV import: a dry run reports each bad row and writes
+// nothing, a failing apply creates nothing, a good one creates every row.
+func TestPhoneImportJSON(t *testing.T) {
+	p := newProvEnv(t, ProvConfig{})
+	c := p.c
+	c.header.Set("Content-Type", "application/json")
+	bad := map[string]any{"rows": []map[string]any{
+		{"mac": "aa:bb:cc:00:00:01", "vendor": "yealink", "model": "T54W", "extension": "101", "label": "Desk", "blf": []string{"101"}},
+		{"mac": "zz", "vendor": "yealink", "model": "T54W", "extension": "101"},
+		{"mac": "aabbcc000003", "vendor": "yealink", "model": "T54W", "extension": "999"},
+	}}
+	r := c.must(http.StatusOK, "POST", "/api/v1/phones/import?dryRun=true", bad).json(t)
+	rows := r["rows"].([]any)
+	if r["ok"] != false || len(rows) != 3 {
+		t.Fatalf("dry run = %v", r)
+	}
+	for i, w := range []string{"", "bad MAC", "unknown extension"} {
+		errs := fmt.Sprint(rows[i].(map[string]any)["errors"])
+		if (w == "" && errs != "[]") || !strings.Contains(errs, w) {
+			t.Errorf("row %d errors = %s, want %q", i+1, errs, w)
+		}
+	}
+	before := p.scalar(`SELECT count(*) FROM phones`)
+	c.must(http.StatusBadRequest, "POST", "/api/v1/phones/import", bad)
+	if p.scalar(`SELECT count(*) FROM phones`) != before {
+		t.Fatal("a failed apply created phones")
+	}
+	good := map[string]any{"rows": []map[string]any{
+		{"mac": "aa:bb:cc:00:00:11", "vendor": "yealink", "model": "T54W", "extension": "101", "label": "Alice"},
+		{"mac": "aa:bb:cc:00:00:12", "vendor": "grandstream", "model": "GRP2614", "extension": "102"},
+	}}
+	a := c.must(http.StatusOK, "POST", "/api/v1/phones/import", good).json(t)
+	if a["ok"] != true || a["created"] != float64(2) {
+		t.Fatalf("apply = %v", a)
+	}
+	c.must(http.StatusBadRequest, "POST", "/api/v1/phones/import", map[string]any{"rows": []any{}})
+	c.must(http.StatusBadRequest, "POST", "/api/v1/phones/import", map[string]any{"rows": []map[string]any{{"mac": "a", "nope": 1}}})
+}
