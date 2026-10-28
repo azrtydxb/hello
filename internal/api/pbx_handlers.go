@@ -44,7 +44,7 @@ var (
 		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr",
 		"call_waiting_on", "call_waiting_off",
 		"park", "park_retrieve", "pickup_group", "pickup_directed", "time_condition", "tc_override",
-		"queue_login", "queue_logout", "queue_pause", "queue_unpause"}
+		"queue_login", "queue_logout", "queue_pause", "queue_unpause", "boss_divert"}
 )
 
 // voicemailLimits bound greeting uploads.

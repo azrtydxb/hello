@@ -255,6 +255,12 @@ type call struct {
 	// ivrUnrecoverable is set when a dial-out cannot be done after a takeover.
 	ivrUnrecoverable bool
 
+	// Boss and secretary (boss.go), guarded by mu: the link the call rings
+	// through, and the assistant's extension when the assistant answered
+	// (the CDR's answered_by).
+	boss       *bossCall
+	answeredBy string
+
 	// Call events (events.go), guarded by mu: the extensions that rang, the
 	// one that answered and the subjects of the finished call.
 	ringedExts  []string
@@ -279,6 +285,9 @@ const (
 	evAnswered
 	evFailed
 	evChallenged // a trunk challenged the INVITE (code 401 or 407)
+	// evScreenMessage: the assistant of a screened boss call chose to send the
+	// caller to the boss's voicemail (boss.go).
+	evScreenMessage
 )
 
 type legEvent struct {
@@ -316,6 +325,9 @@ type leg struct {
 	// pl is set on a page member leg (Phase E): it carries the page's
 	// per-member state and offer.
 	pl *pageLeg
+	// screen marks an assistant's leg of a boss link with screening on: its
+	// answer plays the screening prompt instead of taking the call (boss.go).
+	screen bool
 }
 
 func (l *leg) session() *sipgo.DialogClientSession {
@@ -441,7 +453,8 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	} else {
 		dec = s.decide(rs, routing.Call{
 			FromExtension: dev.Extension, Number: c.dialled, CallerID: dev.Extension,
-			SIPDomain: req.Recipient.Host, Header: headerOf(req), At: time.Now(),
+			CallerIDExtension: outboundCallerIDExt(snap, dev.Extension),
+			SIPDomain:         req.Recipient.Host, Header: headerOf(req), At: time.Now(),
 		})
 	}
 	s.dispatch(c, req, tx, snap, dec)
@@ -656,10 +669,15 @@ func (c *call) setup(pending int) {
 			case evAnswered:
 				c.answer(ev.leg)
 				return
+			case evScreenMessage:
+				if c.screenMessage() {
+					return
+				}
 			case evFailed:
 				if ev.leg != nil && ev.leg.stage != c.curStage() {
 					continue // a leg the forwarding stage abandoned
 				}
+				c.bossAssistantFailed(ev.leg)
 				pending--
 				if isBusy(ev.code) {
 					busy++
@@ -868,6 +886,7 @@ func (c *call) answer(w *leg) {
 	c.addTrace("Call established")
 	c.publish()
 	c.noteAnswered(w.binding.Extension)
+	c.noteBossAnswer(w)
 	// record_default recordings start when the call is answered (spec
 	// S-4); the flow re-anchors when needed, but an anchored-for-recording
 	// call is already set up.
@@ -1262,7 +1281,7 @@ func (c *call) record(status int, side, reason, result string) {
 		DurationMs: end.Sub(c.start).Milliseconds(), SIPNode: c.s.cfg.NodeID, MediaMode: "direct",
 		FinalStatus: status, TerminationSide: side, FailureReason: reason,
 		Direction: c.direction, OriginalDestination: c.dialled, RewrittenDestination: c.rewritten,
-		Route: c.route, Trunk: c.trunkName, Trace: trace, Kind: c.kind,
+		Route: c.route, Trunk: c.trunkName, Trace: trace, Kind: c.kind, AnsweredBy: c.answeredBy,
 	}
 	c.mu.Unlock()
 	if !answer.IsZero() {
@@ -1430,6 +1449,9 @@ func (l *leg) drive(report func(legEvent)) {
 	}
 	err = dcs.WaitAnswer(l.ctx, opts)
 	if res := dcs.InviteResponse; err == nil || (res != nil && res.IsSuccess()) {
+		if l.screen && l.c.screenLeg(l, report) {
+			return // the screening prompt took the answer; screenLeg reported the outcome
+		}
 		if l.c.claim(l) {
 			report(legEvent{leg: l, kind: evAnswered})
 			return
@@ -1723,7 +1745,11 @@ func (s *Server) matchDialog(req *sip.Request) (dialogRef, bool) {
 	w := c.winner
 	c.mu.Unlock()
 	if ref.leg != w {
-		return dialogRef{}, false
+		// The assistant being screened is in a dialog of its own (boss.go).
+		if sl := c.screeningLeg(); sl == nil || sl != ref.leg {
+			return dialogRef{}, false
+		}
+		w = ref.leg
 	}
 	res := w.session().InviteResponse // stable once the fork has won
 	want, err1 := sip.DialogIDFromResponse(res)
@@ -1802,6 +1828,9 @@ func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	if c.page != nil {
 		s.pageBye(c, ref, req, tx)
+		return
+	}
+	if ref.leg != nil && c.screenBye(ref.leg, req, tx) {
 		return
 	}
 	c.mu.Lock()

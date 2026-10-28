@@ -215,6 +215,10 @@ func (c *call) originateFor(target string, snap *snapshot.Snapshot) (*call, []*l
 				legs = append(legs, c2.addLeg(&leg{binding: b}))
 			}
 		}
+		// A boss reached by a transfer rings the assistant too.
+		for _, b := range c.transferAssistant(snap, target) {
+			legs = append(legs, c2.addLeg(&leg{binding: b}))
+		}
 		return c2, legs, len(legs) > 0
 	}
 	dec := s.decide(snap.Routing(), routing.Call{

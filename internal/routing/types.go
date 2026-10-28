@@ -171,9 +171,14 @@ type Call struct {
 	FromTrunk     int64
 	Number        string // as dialled (outbound) or the called DID (inbound)
 	CallerID      string // as presented by the caller
-	SIPDomain     string // host of the Request-URI
-	Header        func(name string) string
-	At            time.Time
+	// CallerIDExtension, when set, is the extension whose external number and
+	// outbound caller-ID rule an outbound call uses in place of
+	// FromExtension's: the boss an assistant calls on behalf of (pbx-gaps
+	// S-19). Routes are still matched for FromExtension.
+	CallerIDExtension string
+	SIPDomain         string // host of the Request-URI
+	Header            func(name string) string
+	At                time.Time
 }
 
 // TrunkUsability reports at decision time whether a trunk can take another

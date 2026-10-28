@@ -420,6 +420,10 @@ type FeatureUpdate struct {
 	CallWaiting     *bool
 	// NoAnswerRings is the no-answer ring count (0 = system default).
 	NoAnswerRings *int
+	// BossDivert sets divert_on of the boss link whose boss is Number (the
+	// *64 code, pbx-gaps S-19); nil leaves it alone. A number with no link is
+	// ErrNotFound.
+	BossDivert *bool
 }
 
 // ApplyFeatureUpdate applies one feature-code change the same way every
@@ -450,6 +454,16 @@ func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureU
 		if err := tx.QueryRowContext(ctx,
 			`SELECT id FROM extensions WHERE number = $1`, u.Number).Scan(&id); err != nil {
 			return "", err
+		}
+		if u.BossDivert != nil {
+			res, err := tx.ExecContext(ctx, `UPDATE boss_links SET divert_on = $2, updated_at = now()
+				WHERE boss_extension_id = $1`, id, *u.BossDivert)
+			if err != nil {
+				return "", err
+			}
+			if err := requireRow(res); err != nil {
+				return "", err
+			}
 		}
 		return strconv.FormatInt(id, 10), nil
 	})
@@ -875,6 +889,7 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*46", Action: ActionQueueLogout},
 		{Code: "*47", Action: ActionQueuePause, Argument: "break"},
 		{Code: "*48", Action: ActionQueueUnpause},
+		{Code: "*64", Action: ActionBossDivert},
 	}
 }
 

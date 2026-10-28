@@ -151,6 +151,9 @@ type Store interface {
 	ListFeatureCodes(ctx context.Context) ([]store.FeatureCode, error)
 	PutFeatureCodes(ctx context.Context, actor string, codes []store.FeatureCode, check store.Check) error
 
+	ListBossLinks(ctx context.Context) ([]store.BossLink, error)
+	PutBossLinks(ctx context.Context, actor string, links []store.BossLinkInput) error
+
 	ListDevices(ctx context.Context) ([]store.Device, error)
 	GetDevice(ctx context.Context, id int64) (store.Device, error)
 	CreateDevice(ctx context.Context, actor string, in store.NewDevice) (store.Device, error)
