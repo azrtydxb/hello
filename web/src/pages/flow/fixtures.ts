@@ -183,7 +183,7 @@ export const CANVAS: FlowCanvasDetail = {
   updatedAt: "2026-10-25T10:00:00Z",
   nodes: [
     { node: "inboundRoute:1", x: 0, y: 0, collapsed: false },
-    { node: "ringGroup:1", x: 400, y: 0, collapsed: false },
+    { node: "ringGroup:1", x: 600, y: 0, collapsed: false },
     { node: "extension:1", x: 0, y: 200, collapsed: false },
   ],
 };
