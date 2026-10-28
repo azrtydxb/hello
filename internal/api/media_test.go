@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/azrtydxb/hello/internal/media"
 )
@@ -118,6 +119,27 @@ func TestRecordingsListPaging(t *testing.T) {
 	}
 }
 
+// mustAudio GETs an audio route that reads the shared CI MinIO and wants 200.
+// The route answers 502 when the object store throttles the read (SlowDown),
+// which that service container does under load for longer than the client's
+// own retries; like retrySlowDown for the fixture's writes, the test asks
+// again for up to 90 s. Any other status, or a 502 that outlasts the
+// deadline, fails the test.
+func mustAudio(t *testing.T, c *client, path string) response {
+	t.Helper()
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		r := c.do("GET", path, nil)
+		if r.code == http.StatusOK {
+			return r
+		}
+		if r.code != http.StatusBadGateway || time.Now().After(deadline) {
+			t.Fatalf("GET %s = %d %s, want 200", path, r.code, r.body)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 // TestRecordingAudioAndDelete runs the presigned audio route and the delete
 // against a real MinIO (bucket hello-recordings). It fails if the audio
 // route hands out a URL for a recording that does not exist, or if deletion
@@ -134,7 +156,7 @@ func TestRecordingAudioAndDelete(t *testing.T) {
 	seedRecording(t, e, "corr-abc", object, 5100)
 
 	// The audio route streams the recording bucket's object, inline.
-	rec := c.must(http.StatusOK, "GET", "/api/v1/recordings/1/audio", nil)
+	rec := mustAudio(t, c, "/api/v1/recordings/1/audio")
 	if !bytes.Equal(rec.body, wav) || rec.header.Get("Content-Type") != "audio/wav" {
 		t.Fatalf("audio = %d bytes %q, want the recording", len(rec.body), rec.header.Get("Content-Type"))
 	}
@@ -142,7 +164,7 @@ func TestRecordingAudioAndDelete(t *testing.T) {
 		t.Fatalf("plain audio plays as a download: %q", cd)
 	}
 	// ?download=1 sends the same object as an attachment.
-	dl := c.must(http.StatusOK, "GET", "/api/v1/recordings/1/audio?download=1", nil)
+	dl := mustAudio(t, c, "/api/v1/recordings/1/audio?download=1")
 	if !strings.HasPrefix(dl.header.Get("Content-Disposition"), "attachment") || !bytes.Equal(dl.body, wav) {
 		t.Fatalf("download Content-Disposition %q, want an attachment", dl.header.Get("Content-Disposition"))
 	}
