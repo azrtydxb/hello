@@ -30,6 +30,20 @@ const (
 	AlgMD5    = "MD5"
 )
 
+// Names of the checks Verify reports as the cause of a Bad verdict. They are
+// safe to log: none carries a secret.
+const (
+	CheckAlgorithm = "algorithm"
+	CheckRealm     = "realm"
+	CheckQOP       = "qop"
+	CheckCnonce    = "cnonce"
+	CheckNC        = "nc"
+	CheckHA1       = "ha1"
+	CheckURI       = "uri"
+	CheckResponse  = "response"
+	CheckNonce     = "nonce"
+)
+
 // Verdict is the outcome of checking digest credentials.
 type Verdict int
 
@@ -116,8 +130,9 @@ func ParseCredentials(v string) (*digest.Credentials, error) {
 // Verify checks credentials for a request (method and Request-URI) from
 // source IP ip against the device's HA1 values. The credentials' uri must
 // name the Request-URI (RFC 3261 §22.4), so a response captured for one
-// request cannot authorize another.
-func (d *Digest) Verify(c *digest.Credentials, method string, ruri sip.Uri, ip, ha1MD5, ha1SHA256 string) Verdict {
+// request cannot authorize another. For a Bad verdict the second result names
+// the failed check (Check* constants).
+func (d *Digest) Verify(c *digest.Credentials, method string, ruri sip.Uri, ip, ha1MD5, ha1SHA256 string) (Verdict, string) {
 	var (
 		h   hash.Hash
 		ha1 string
@@ -128,24 +143,35 @@ func (d *Digest) Verify(c *digest.Credentials, method string, ruri sip.Uri, ip, 
 	case AlgSHA256:
 		h, ha1 = sha256.New(), ha1SHA256
 	default:
-		return Bad
+		return Bad, CheckAlgorithm
 	}
-	if c.Realm != d.Realm || c.QOP != "auth" || c.Cnonce == "" || c.Nc <= 0 || ha1 == "" || !sameURI(c.URI, ruri) {
-		return Bad
+	switch {
+	case c.Realm != d.Realm:
+		return Bad, CheckRealm
+	case c.QOP != "auth":
+		return Bad, CheckQOP
+	case c.Cnonce == "":
+		return Bad, CheckCnonce
+	case c.Nc <= 0:
+		return Bad, CheckNC
+	case ha1 == "":
+		return Bad, CheckHA1
+	case !sameURI(c.URI, ruri):
+		return Bad, CheckURI
 	}
 	ha2 := hexHash(h, method+":"+c.URI)
 	want := hexHash(h, fmt.Sprintf("%s:%s:%08x:%s:%s:%s", strings.ToLower(ha1), c.Nonce, c.Nc, c.Cnonce, c.QOP, ha2))
 	if subtle.ConstantTimeCompare([]byte(want), []byte(strings.ToLower(c.Response))) != 1 {
-		return Bad
+		return Bad, CheckResponse
 	}
 	authentic, fresh := d.checkNonce(c.Nonce, ip)
 	switch {
 	case !authentic:
-		return Bad
+		return Bad, CheckNonce
 	case !fresh:
-		return Stale
+		return Stale, ""
 	default:
-		return OK
+		return OK, ""
 	}
 }
 

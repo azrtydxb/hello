@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { errorMessage, fieldErrors, type FieldError } from "../api";
 import {
   createFlowCanvas,
@@ -31,6 +31,7 @@ const KEYS = ["name", "description"] as const;
 export function FlowCanvases() {
   const list = usePolling(listFlowCanvases, 30_000);
   const toast = useToast();
+  const navigate = useNavigate();
   const [editing, setEditing] = useState<
     { kind: "new" } | { kind: "edit"; canvas: FlowCanvas } | null
   >(null);
@@ -134,6 +135,11 @@ export function FlowCanvases() {
           onClose={() => setEditing(null)}
           onSaved={(c, created) => {
             setEditing(null);
+            // A new canvas opens at once: that is where it is filled.
+            if (created) {
+              void navigate(`/flow/${encodeURIComponent(String(c.id))}`);
+              return;
+            }
             list.reload();
             toast.show(
               created ? `Canvas ${c.name} created.` : `Canvas ${c.name} saved.`,
