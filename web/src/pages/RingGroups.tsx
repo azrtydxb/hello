@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { QueueSelect } from "../components/QueueSelect";
 import {
   createRingGroup,
+  listAnnouncements,
   deleteRingGroup,
   errorMessage,
   fieldErrors,
@@ -13,6 +14,7 @@ import {
   EXTENSION_NUMBER_PATTERN,
   RING_STRATEGIES,
   RING_STRATEGY_LABEL,
+  type Announcement,
   type Extension,
   type FailureKind,
   type IvrMenu,
@@ -479,6 +481,9 @@ function validateGroup(d: GroupDraft): Record<string, string> {
       e.failureTarget = "Use 2 to 20 digits, optionally starting with +.";
     }
   }
+  if (d.failureKind === "announcement" && d.failureTarget.trim() === "") {
+    e.failureTarget = "Choose the announcement.";
+  }
   if (d.failureKind === "ivr" && d.failureTarget.trim() === "") {
     e.failureTarget = "Choose the IVR menu.";
   }
@@ -546,8 +551,12 @@ function RingGroupDrawer({
   const [menus, setMenus] = useState<IvrMenu[]>([]);
   const [timeConds, setTimeConds] = useState<TimeCondition[]>([]);
   const [groups, setGroups] = useState<RingGroup[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   useEffect(() => {
     const controller = new AbortController();
+    listAnnouncements(controller.signal)
+      .then(setAnnouncements)
+      .catch(() => undefined); // the picker stays empty; saving still works
     listRingGroups(controller.signal)
       .then(setGroups)
       .catch(() => undefined); // the picker stays empty; saving still works
@@ -849,6 +858,7 @@ function RingGroupDrawer({
               { value: "none", label: "Hang up" },
               { value: "voicemail", label: "Voicemail" },
               { value: "external", label: "External number" },
+              { value: "announcement", label: "Announcement" },
               { value: "ivr", label: "IVR menu" },
               { value: "queue", label: "Call queue" },
               { value: "time_condition", label: "Time condition" },
@@ -891,6 +901,20 @@ function RingGroupDrawer({
                 groups
                   .filter((x) => x.name !== d.name.trim())
                   .map((x) => ({ value: x.name, label: x.name })),
+                d.failureTarget,
+              )}
+              onChange={(e) => set("failureTarget", e.target.value)}
+            />
+          )}
+          {d.failureKind === "announcement" && (
+            <Select
+              id={fid("failureTarget")}
+              label="Announcement"
+              value={d.failureTarget}
+              error={errors.failureTarget}
+              hint="Plays the announcement, then hangs up."
+              options={choices(
+                announcements.map((a) => ({ value: a.name, label: a.name })),
                 d.failureTarget,
               )}
               onChange={(e) => set("failureTarget", e.target.value)}
@@ -950,6 +974,7 @@ function RingGroupDrawer({
             />
           )}
           {d.failureKind !== "none" &&
+            d.failureKind !== "announcement" &&
             d.failureKind !== "ivr" &&
             d.failureKind !== "queue" &&
             d.failureKind !== "time_condition" &&
