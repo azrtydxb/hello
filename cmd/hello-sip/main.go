@@ -71,7 +71,8 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	udp, err := (&net.ListenConfig{}).ListenPacket(ctx, "udp", cfg.SIPBindAddr)
+	media.SetRTPDSCP(cfg.DSCPRTP)
+	udp, err := sip.ListenUDP(ctx, cfg.SIPBindAddr, cfg.DSCPSIP, log)
 	if err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("sip listen: %w", err)
