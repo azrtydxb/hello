@@ -236,8 +236,8 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 27 {
-		t.Fatalf("insert takes %d arguments, want 27", len(db.args))
+	if len(db.args) != 29 {
+		t.Fatalf("insert takes %d arguments, want 29", len(db.args))
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
@@ -252,6 +252,16 @@ func TestCallQualityCDR(t *testing.T) {
 	}
 	if db.args[24] != "call" {
 		t.Fatalf("kind = %v, want the default call", db.args[24])
+	}
+	if db.args[25] != "" || db.args[26] != "" {
+		t.Fatalf("ring tag = %v (%v), want empty for a call that rang no device", db.args[25], db.args[26])
+	}
+	base.RingTag, base.RingRule = "vip", "rule:1 boss"
+	if err := w.write(context.Background(), base); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[25] != "vip" || db.args[26] != "rule:1 boss" {
+		t.Fatalf("ring tag = %v (%v), want vip (rule:1 boss)", db.args[25], db.args[26])
 	}
 	gp, gl, gj := db.args[21].(*int64), db.args[22].(*int64), db.args[23].(*float64)
 	if *gp != 1000 || *gl != 12 || *gj != 37.5 {

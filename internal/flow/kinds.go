@@ -138,6 +138,7 @@ var NonFlowResources = map[string]string{
 	"prov/firmware":                 "phone firmware files, not call routing",
 	"phone-groups":                  "provisioning groups of phones (templates, multicast listening, PTT), not call routing",
 	"phonebooks":                    "directory data shown on phones, not call routing",
+	"ring-tags":                     "names the tone a phone plays, sent to it as Alert-Info; the tag a call gets does not change where it goes",
 	"phonebooks/{id}/entries":       "directory data shown on phones, not call routing",
 	"me/contacts":                   "a user's personal contacts, not call routing",
 	"ai/sessions":                   "assistant conversations, not call routing",
