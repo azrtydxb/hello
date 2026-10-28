@@ -189,6 +189,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Conferences:     st,
 		TwoFactor:       st,
 		TwoFALogins:     api.NewTwoFactorMetrics(metrics.Registry),
+		Batches:         st,
+		BatchMetrics:    api.NewBatchMetrics(metrics.Registry),
 		ConferenceLive:  vk,
 		Messages:        st,
 		Dialing:         cfg.Dial,

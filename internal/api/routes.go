@@ -224,6 +224,10 @@ func (s *server) routes() []route {
 		{"PATCH", "/api/v1/flow/canvases/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.updateFlowCanvas},
 		{"DELETE", "/api/v1/flow/canvases/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteFlowCanvas},
 		{"PUT", "/api/v1/flow/canvases/{id}/layout", auth.ScopeWrite, auth.RoleOperator, false, s.putFlowLayout},
+		{"POST", "/api/v1/config/batch", auth.ScopeWrite, auth.RoleOperator, false, s.applyConfigBatch},
+		{"GET", "/api/v1/config/batches", auth.ScopeRead, auth.RoleViewer, false, s.listConfigBatches},
+		{"GET", "/api/v1/config/batches/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getConfigBatch},
+		{"POST", "/api/v1/config/batches/{id}/revert", auth.ScopeWrite, auth.RoleOperator, false, s.revertConfigBatch},
 
 		{"POST", "/api/v1/routing/test", auth.ScopeWrite, auth.RoleOperator, false, s.routingTest},
 

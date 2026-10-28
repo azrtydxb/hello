@@ -68,7 +68,7 @@ func scanFlowCanvas(r interface{ Scan(...any) error }) (FlowCanvas, error) {
 
 // ListFlowCanvases returns every canvas by name.
 func (s *Store) ListFlowCanvases(ctx context.Context) ([]FlowCanvas, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+flowCanvasCols+` FROM flow_canvases c ORDER BY lower(c.name), c.id`)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+flowCanvasCols+` FROM flow_canvases c ORDER BY lower(c.name), c.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -86,11 +86,11 @@ func (s *Store) ListFlowCanvases(ctx context.Context) ([]FlowCanvas, error) {
 
 // GetFlowCanvas returns one canvas and the positions saved on it.
 func (s *Store) GetFlowCanvas(ctx context.Context, id int64) (FlowCanvas, []FlowCanvasNode, error) {
-	c, err := scanFlowCanvas(s.db.QueryRowContext(ctx, `SELECT `+flowCanvasCols+` FROM flow_canvases c WHERE c.id = $1`, id))
+	c, err := scanFlowCanvas(s.q(ctx).QueryRowContext(ctx, `SELECT `+flowCanvasCols+` FROM flow_canvases c WHERE c.id = $1`, id))
 	if err != nil {
 		return c, nil, mapErr(err)
 	}
-	nodes, err := s.flowCanvasNodes(ctx, s.db, id)
+	nodes, err := s.flowCanvasNodes(ctx, s.q(ctx), id)
 	return c, nodes, err
 }
 
