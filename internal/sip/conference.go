@@ -176,9 +176,15 @@ type confAnn struct {
 type confHub struct {
 	mu    sync.Mutex
 	rooms map[string]*confRoom
+	// tearing holds, per room number, a channel closed when that room's
+	// teardown (state and lease deletion) is done: a room created for the
+	// same number meanwhile would have its fresh state deleted by it.
+	tearing map[string]chan struct{}
 }
 
-func newConfHub() *confHub { return &confHub{rooms: map[string]*confRoom{}} }
+func newConfHub() *confHub {
+	return &confHub{rooms: map[string]*confRoom{}, tearing: map[string]chan struct{}{}}
+}
 
 func (h *confHub) get(number string) *confRoom {
 	h.mu.Lock()
@@ -202,6 +208,15 @@ func (h *confHub) snapshotRooms() []*confRoom {
 func (s *Server) confReserve(cfg snapshot.Conference) (*confRoom, bool) {
 	h := s.conf
 	h.mu.Lock()
+	for {
+		done, busy := h.tearing[cfg.Number]
+		if !busy {
+			break
+		}
+		h.mu.Unlock()
+		<-done
+		h.mu.Lock()
+	}
 	defer h.mu.Unlock()
 	r := h.rooms[cfg.Number]
 	if r == nil {
@@ -231,15 +246,24 @@ func (s *Server) confRelease(r *confRoom) {
 	r.mu.Lock()
 	r.seats--
 	empty := r.seats <= 0 && !r.closed
+	var done chan struct{}
 	if empty {
 		r.closed = true
 		if h.rooms[r.number] == r {
 			delete(h.rooms, r.number)
 		}
+		done = make(chan struct{})
+		h.tearing[r.number] = done
 	}
 	r.mu.Unlock()
 	h.mu.Unlock()
 	if empty {
+		defer func() {
+			h.mu.Lock()
+			delete(h.tearing, r.number)
+			h.mu.Unlock()
+			close(done)
+		}()
 		r.teardown()
 	}
 }
