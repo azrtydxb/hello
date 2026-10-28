@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -145,6 +146,7 @@ func startMinio(t *testing.T) *MinioObjects {
 		// service container): wait for it and create the bucket, exactly as
 		// the throwaway-container path below does.
 		ensureSharedBuckets(t, o)
+		lastMinio.Store(o)
 		return o
 	}
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -190,6 +192,7 @@ func startMinio(t *testing.T) *MinioObjects {
 		t.Fatal(err)
 	}
 	waitBucket(t, o)
+	lastMinio.Store(o)
 	return o
 }
 
@@ -225,6 +228,23 @@ func isSlowDown(err error) bool {
 		strings.Contains(err.Error(), "did not provide the number of bytes specified"))
 }
 
+// isNoBucket reports whether err is a write to a bucket the store does not
+// (yet) hold.
+func isNoBucket(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "bucket does not exist")
+}
+
+// isShortBody reports whether the store saw fewer body bytes than the
+// Content-Length (S3 IncompleteBody): an overloaded MinIO that timed out
+// reading the upload. Fixture bodies are rebuilt per attempt, so it is
+// safe to resend.
+func isShortBody(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "did not provide the number of bytes specified")
+}
+
+// lastMinio is the store the fixtures last started, for re-ensuring buckets.
+var lastMinio atomic.Pointer[MinioObjects]
+
 // retrySlowDown runs a test fixture write against the shared CI MinIO. The
 // client already retries SlowDown for about ten seconds; the service
 // container's drive can stay unwritable for longer than that under load, so
@@ -238,8 +258,18 @@ func retrySlowDown(t *testing.T, op func() error) {
 		if err == nil {
 			return
 		}
-		if !isSlowDown(err) || time.Now().After(deadline) {
+		missing := isNoBucket(err)
+		short := isShortBody(err)
+		if (!isSlowDown(err) && !missing && !short) || time.Now().After(deadline) {
 			t.Fatal(err)
+		}
+		if missing {
+			// The buckets were ensured once per process, but a MinIO whose
+			// drive was unwritable at that moment can answer the check and
+			// still not hold the bucket when the write lands: ensure again.
+			if o := lastMinio.Load(); o != nil {
+				waitBucket(t, o)
+			}
 		}
 		time.Sleep(time.Second)
 	}

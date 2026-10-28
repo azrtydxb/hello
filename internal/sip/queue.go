@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
@@ -131,6 +132,10 @@ func (c *call) queueResume(detail string) {
 		c.queueRun(ctx, snap, q, entered)
 	}()
 }
+
+// queueOfferedHook, when set (tests), runs after every offer round, before
+// the flow looks at the outcome.
+var queueOfferedHook atomic.Pointer[func(c *call)]
 
 // queueSession puts the (answered) caller in q and carries the call to its
 // end: an agent, or a failover destination.
@@ -347,10 +352,16 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 			continue
 		}
 		w, ext, release := c.queueOffer(ctx, snap, q)
+		if h := queueOfferedHook.Load(); h != nil && w != nil {
+			(*h)(c)
+		}
 		if ctx.Err() != nil {
 			if release != nil {
 				release()
 			}
+			// An agent may have answered just as the call ended: nobody is
+			// left to bridge it to, so hang its dialog up.
+			w.bye()
 			return
 		}
 		if w == nil {
@@ -369,13 +380,16 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 		c.qLeg(cdr.QueueWait, q.Name, ext, wait, "answered")
 		c.qLeg(cdr.QueueAnswered, q.Name, ext, wait, "")
 		s.m.QueueWait.WithLabelValues(q.Name, "answered").Observe(wait.Seconds())
-		s.m.QueueCalls.WithLabelValues(q.Name, "answered").Inc()
 		c.mu.Lock()
 		c.qAgent = ext
 		c.mu.Unlock()
-		c.queueLog("queue answered", q.Name, "agent", ext, "wait", wait.String())
 		c.addTrace(fmt.Sprintf("Queue %s: answered by %s after %s", q.Name, ext, wait.Round(time.Second)))
 		c.ivrConnect(w, ext)
+		// Counted once the caller is bridged: the CDR's destination and the
+		// agent's dialog are in place, so a hang-up seen after the count
+		// reaches the agent and the CDR names it.
+		s.m.QueueCalls.WithLabelValues(q.Name, "answered").Inc()
+		c.queueLog("queue answered", q.Name, "agent", ext, "wait", wait.String())
 		release() // the agent shows as busy now
 		return
 	}
