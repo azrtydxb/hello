@@ -19933,7 +19933,7 @@
           "callerCodec": {
             "type": ["string", "null"],
             "example": "opus/48000",
-            "description": "Audio codec the caller leg ended on, as name/clock rate (PCMU/8000, G722/8000, opus/48000); null when none was negotiated (a call that was not answered) and for records written before migration 00046. A re-INVITE that switches codec replaces it, so it is the last codec of the call."
+            "description": "Audio codec the caller leg ended on, as name/clock rate (PCMU/8000, G722/8000, opus/48000); null when none was negotiated (a call that was not answered) and for records written before migration 00054. A re-INVITE that switches codec replaces it, so it is the last codec of the call."
           },
           "calleeCodec": {
             "type": ["string", "null"],

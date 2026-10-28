@@ -75,7 +75,7 @@ type Record struct {
 	RTPJitterMs *float64
 	// CallerCodec and CalleeCodec are the audio codec each leg ended on, as
 	// "name/clock rate" ("PCMU/8000", "opus/48000"); empty (NULL) for a leg
-	// that had no media negotiated (migration 00046).
+	// that had no media negotiated (migration 00054).
 	CallerCodec string
 	CalleeCodec string
 	// Kind is call (default), page or intercom.

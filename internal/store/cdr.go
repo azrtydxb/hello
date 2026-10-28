@@ -38,7 +38,7 @@ type CDR struct {
 	RTPLost              *int64     `json:"rtpLost"`
 	RTPJitterMs          *float64   `json:"rtpJitterMs"`
 	// CallerCodec and CalleeCodec are the audio codec each leg ended on, as
-	// "name/clock rate" (migration 00046); null when none was negotiated.
+	// "name/clock rate" (migration 00054); null when none was negotiated.
 	CallerCodec *string `json:"callerCodec"`
 	CalleeCodec *string `json:"calleeCodec"`
 	// Kind is call, page or intercom (migration 00013).
