@@ -36,7 +36,7 @@ const (
 	KindConference = "conference"
 )
 
-// Call origins (migration 00047).
+// Call origins (migration 00056).
 const (
 	OriginPhone = "phone"
 	OriginAPI   = "api"
@@ -83,7 +83,7 @@ type Record struct {
 	Kind string
 	// Origin is phone (default: dialled at a phone) or api (a click-to-call
 	// request, spec integrations I-37); OriginClient names the OAuth client
-	// or token id behind an api call (migration 00047).
+	// or token id behind an api call (migration 00056).
 	Origin       string
 	OriginClient string
 	// PageLegs is a page's outcome per member (migration 00014), one row

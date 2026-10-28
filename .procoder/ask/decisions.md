@@ -867,7 +867,7 @@ Built from spec `integrations.md` I-37 to I-39. Choices the spec left open:
   changed state into the row; a sweeper in hello-control (one pod at a time,
   advisory lock) copies the rest, closes requests stuck for 60 s
   `node_unavailable` (a connected one after 12 h `ended`), frees the setup
-  slot and purges finished rows after 30 days. Migration 00047 (the highest
+  slot and purges finished rows after 30 days. Migration 00056 (the highest
   open PR migration is 00046; the merge captain renumbers).
 - **Limits** are fixed windows (the window number is in the key, so the
   Retry-After is the time left). A request first takes the extension's setup

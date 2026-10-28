@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// OriginateRecord is one click-to-call request (migration 00047); the live
+// OriginateRecord is one click-to-call request (migration 00056); the live
 // state of a running request is in Valkey and is copied here as it changes.
 type OriginateRecord struct {
 	ID             string

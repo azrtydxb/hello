@@ -141,5 +141,5 @@ purges finished rows after 30 days.
 Metrics: `hello_originate_total{result}` (`connected` or the failure reason)
 and `hello_originate_setup_seconds` on `hello-sip`;
 `hello_integration_rate_limited_total{scope}` on `hello-control`. Migration
-`00047` adds `originate_requests`, `originate_settings` and the CDR columns
+`00056` adds `originate_requests`, `originate_settings` and the CDR columns
 `origin` and `origin_client`.

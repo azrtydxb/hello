@@ -41,7 +41,7 @@ type CDR struct {
 	Kind string `json:"kind"`
 	// Origin is phone (dialled at a phone) or api (click-to-call), and
 	// OriginClient the OAuth client or token id behind an api call (migration
-	// 00047).
+	// 00056).
 	Origin       string `json:"origin"`
 	OriginClient string `json:"originClient"`
 	// PageLegs is a page's outcome per member (migration 00014); set by
