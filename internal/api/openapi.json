@@ -21687,7 +21687,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
+            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello reaches an external SIP URI over UDP only). Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean"
@@ -21792,7 +21792,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Empty when destinationKind is \"internal\": the called DID names the extension. Required unless destinationKind is \"internal\", in which case it must be empty."
+            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello reaches an external SIP URI over UDP only). Empty when destinationKind is \"internal\": the called DID names the extension. Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean",
@@ -21898,7 +21898,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Empty when destinationKind is \"internal\": the called DID names the extension."
+            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello reaches an external SIP URI over UDP only). Empty when destinationKind is \"internal\": the called DID names the extension."
           },
           "enabled": {
             "type": "boolean",
