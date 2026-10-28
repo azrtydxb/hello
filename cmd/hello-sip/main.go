@@ -71,7 +71,8 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	udp, err := (&net.ListenConfig{}).ListenPacket(ctx, "udp", cfg.SIPBindAddr)
+	media.SetRTPDSCP(cfg.DSCPRTP)
+	udp, err := sip.ListenUDP(ctx, cfg.SIPBindAddr, cfg.DSCPSIP, log)
 	if err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("sip listen: %w", err)
@@ -166,6 +167,7 @@ func run(args []string) error {
 		NonceSecret: []byte(cfg.NonceSecret), MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
+		SessionExpires: cfg.SessionExpires, SessionMinSE: cfg.SessionMinSE, MediaDeadAfter: cfg.MediaDeadAfter,
 		PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
 		PageMulticastIface: cfg.PageMulticastIface, PageMulticastTTL: cfg.PageMulticastTTL,
 		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax,

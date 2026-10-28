@@ -833,6 +833,16 @@ another group) is lifted: the ring state machine can open a new ring stage.
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
 
+message. `conference` was left for a follow-up (see below).
+
+## Routes form: conference destination (2026-10-26)
+
+The inbound route drawer also offers `conference` ("Conference room"). The target
+is chosen from the rooms list (`GET /api/v1/conferences`) and stored as the room
+number, labelled "number · name"; a stored number the list no longer has stays
+selectable as "(not found)". An empty target is refused with "Choose a conference
+room." This closes the gap noted for flow canvas P1.
+
 ## Flow canvas P3: the batch backend (2026-10-26)
 
 Built per `.procoder/specs/flow-canvas.md` (P3). Choices the spec left open:
@@ -1027,3 +1037,35 @@ conflict`), and a batch that deleted a device or phone (which a batch cannot
   (spec). The extension drawer is shared but not wired to `commit` (its
   voicemail, device and live panes act on the server at once); the panel edits
   an extension's name and DND and its forwards and hold music as connections.
+
+## DSCP marking, parity item 28 (S-21) (2026-10-27)
+
+Built to the spec: SIP socket DSCP 26, relay/anchor/fanout/party RTP sockets
+DSCP 46, `HELLO_DSCP_SIP` / `HELLO_DSCP_RTP` (0 to 63, validated), Grandstream
+P1558 / P1559 from the same two values.
+
+- RTP DSCP is a process-wide setting (`media.SetRTPDSCP`, default 46) read at
+  every bind, not a parameter of each constructor: one value per process, and
+  the six bind sites keep their signatures.
+- hello-control reads the same two env vars so phones are provisioned with the
+  values hello-sip marks with; set both services alike.
+- A refused mark (platform, sandbox) is logged once and never fails SIP or a
+  call.
+- Originated SIP and the mark. Verified by test: sipgo copies the client's
+  forced local address (the listening socket) into a request only when no
+  request options are passed. The six call sites in `edge.go` and
+  `takeover.go` that pass `ClientRequestAddVia` got an ephemeral socket of
+  sipgo's own (v1.6.0 has no socket-control hook or dialer Control), which
+  nothing can mark and which was not on the SIP port. They now use
+  `Server.addViaFromListener` / `fromListener`, which set the request's local
+  address to the listener, so all originated SIP leaves from the marked
+  socket (`TestDSCPOutboundOnMarkedSocket`). A forked sipgo was rejected as
+  too heavy for this.
+- Other vendors, from the vendors' administrator guides (nothing in this repo
+  documents them): Yealink `static.network.qos.signaltos` / `audiotos`, Poly
+  `qos.ip.callControl.dscp` / `qos.ip.rtp.dscp`, written like Grandstream,
+  unverified on hardware. Snom and Fanvil: no documented DSCP provisioning key
+  could be confirmed (snom uses TOS-byte settings whose exact names are not
+  in this repo; Fanvil's are device-specific), so none is written rather than
+  guessed. Revisit with the vendor guides. Site overrides go through S-12.
+- No migration, no API or UI change; TCP/TLS SIP is not served by hello-sip.

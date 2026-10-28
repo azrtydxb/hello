@@ -333,8 +333,10 @@ jobs:
     # container. The go job must be green first: the lab builds the same
     # images from the same source.
     # Integration tier: the compose lab is far too slow for the PR path, so it
-    # runs only on the nightly schedule and on manual dispatch.
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    # runs only on the nightly schedule and on manual dispatch. The go job is
+    # skipped on dispatch, which would skip this job too; so a dispatch runs
+    # lab regardless, while the schedule still requires go to be green.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && needs.go.result == 'success')) }}
     needs: [go]
     runs-on: arc-azrtydxb
     timeout-minutes: 60
@@ -595,7 +597,7 @@ jobs:
           # are kernel-wide, so they are raised from a privileged container
           # on the runner's Docker daemon; harmless if already high.
           docker run --rm --privileged alpine:3.22 sh -c 'sysctl fs.inotify.max_user_instances fs.inotify.max_user_watches; sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576' || echo "could not raise the inotify limits"
-          kind create cluster --name hello --config kind.yaml --wait 5m --retain || {
+          kind create cluster --name hello --config kind.yaml --wait 10m --retain || {
             docker ps -a
             for n in hello-control-plane hello-worker hello-worker2; do
               echo "=== $n"; docker logs "$n" 2>&1 | tail -40
@@ -604,6 +606,36 @@ jobs:
             tail -n 60 ./kind-logs/*/journal.log 2>/dev/null || true
             exit 1
           }
+          # `kind create --wait` only waits for the control plane's Ready
+          # condition. On a loaded runner the API server can still reset
+          # connections and the admin RBAC binding may not be served yet, which
+          # surfaced later as "cannot watch ..." from helm. Gate on both, with a
+          # deadline: a cluster that never gets there still fails the job here.
+          export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+          deadline=$((SECONDS + 300))
+          until kubectl get --raw='/readyz' >/dev/null 2>&1; do
+            [ $SECONDS -lt $deadline ] || { echo "API server never became ready"; kubectl get --raw='/readyz?verbose' || true; exit 1; }
+            sleep 3
+          done
+          kubectl wait --for=condition=Ready node --all --timeout=300s
+          # RBAC bootstrap: the admin must be able to do what helm --wait does
+          # (list+watch across the kinds the chart renders), and the system
+          # ClusterRoles must exist. Three consecutive passes, so one lucky
+          # answer between resets does not count.
+          rbac_ready() {
+            kubectl auth can-i '*' '*' >/dev/null 2>&1 || return 1
+            for r in pods statefulsets deployments poddisruptionbudgets.policy services; do
+              kubectl auth can-i watch "$r" --all-namespaces >/dev/null 2>&1 || return 1
+            done
+            kubectl get clusterrole cluster-admin >/dev/null 2>&1
+          }
+          ok=0
+          until [ $ok -ge 3 ]; do
+            if rbac_ready; then ok=$((ok + 1)); else ok=0; fi
+            [ $SECONDS -lt $deadline ] || { echo "RBAC never became ready"; kubectl auth can-i watch poddisruptionbudgets.policy --all-namespaces || true; exit 1; }
+            sleep 2
+          done
+          kubectl -n kube-system wait --for=condition=Available deployment/coredns --timeout=300s
           for i in hello-control hello-sip hello-ui kamailio; do
             kind load docker-image --name hello hello.local/$i:ci hello.local/$i:ci-upgrade
           done
@@ -629,24 +661,49 @@ jobs:
             --from-literal=minioSecretKey=kind-minio-pass \
             --from-literal=postgresUser=hello \
             --from-literal=postgresPassword=kind-pg-pass
-          helm install hello deploy/helm/hello -n hello \
-            -f deploy/helm/hello/values-eval.yaml \
-            --set global.imageRegistry=hello.local \
-            --set global.imageTag=ci \
-            --set global.sipDomain=hello.kind \
-            --set sip.hostNetwork=false \
-            --set sip.mediaAnchorHost=podIP \
-            --set sip.trustedProxies=10.0.0.0/8 \
-            --set kamailio.hostNetwork=false \
-            --set kamailio.service.type=NodePort \
-            --set kamailio.service.nodePort=30508 \
-            --set kamailio.publicHost="$edge" \
-            --set kamailio.publicPort=30508 \
-            --set kamailio.phonesPort=5060 \
-            --set-string kamailio.nodeSelector.hello-edge=true \
-            --set control.service.type=NodePort \
-            --set control.service.nodePort=30081 \
-            --wait --timeout 10m
+          # Retry only the install, only on the known transient control-plane
+          # errors (API server reset, RBAC not yet served, etcd timeout), at
+          # most twice more. Anything else, a chart or workload error included,
+          # fails at once and the retry never masks it.
+          transient='cannot watch resource|cannot list resource|connection reset by peer|connection refused|etcdserver: (request timed out|leader changed)|TLS handshake timeout|the server is currently unable to handle the request|unexpected EOF'
+          # The upgrade test's call is signalling only, held for minutes with
+          # no RTP: dead-media teardown (HELLO_MEDIA_DEAD_SECONDS, S-9) is off.
+          helm_args=(
+            -f deploy/helm/hello/values-eval.yaml
+            --set global.imageRegistry=hello.local
+            --set global.imageTag=ci
+            --set global.sipDomain=hello.kind
+            --set sip.hostNetwork=false
+            --set sip.mediaAnchorHost=podIP
+            --set sip.trustedProxies=10.0.0.0/8
+            --set 'sip.extraEnv[0].name=HELLO_MEDIA_DEAD_SECONDS'
+            --set-string 'sip.extraEnv[0].value=0'
+            --set kamailio.hostNetwork=false
+            --set kamailio.service.type=NodePort
+            --set kamailio.service.nodePort=30508
+            --set kamailio.publicHost="$edge"
+            --set kamailio.publicPort=30508
+            --set kamailio.phonesPort=5060
+            --set-string kamailio.nodeSelector.hello-edge=true
+            --set control.service.type=NodePort
+            --set control.service.nodePort=30081
+            --wait --timeout 15m
+          )
+          set -o pipefail
+          attempt=1
+          while :; do
+            if helm install hello deploy/helm/hello -n hello "${helm_args[@]}" 2>&1 | tee "$RUNNER_TEMP/helm-install.log"; then
+              break
+            fi
+            if [ "$attempt" -ge 3 ] || ! grep -qE "$transient" "$RUNNER_TEMP/helm-install.log"; then
+              echo "helm install failed (attempt $attempt); not retrying"
+              exit 1
+            fi
+            echo "::warning::helm install hit a transient API error (attempt $attempt of 3); retrying"
+            helm uninstall hello -n hello --wait --timeout 5m || true
+            sleep 15
+            attempt=$((attempt + 1))
+          done
           kubectl -n hello get pods -o wide
       - name: Follow the pod logs across the rollout
         run: |

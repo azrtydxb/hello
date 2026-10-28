@@ -386,6 +386,7 @@ const DESTINATION_KIND: Record<
   voicemail: { label: "Voicemail", icon: "voicemail" },
   announcement: { label: "Announcement", icon: "megaphone" },
   paging: { label: "Paging group", icon: "megaphone" },
+  conference: { label: "Conference room", icon: "users" },
 };
 
 function Destination({
