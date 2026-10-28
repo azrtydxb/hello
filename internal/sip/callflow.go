@@ -129,6 +129,13 @@ func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *s
 		// announcement or voicemail hand-off, or the force switch.
 		c.considerAnchor(snap, bindingEndpoint(targets[0], ext))
 	}
+	if len(targets) == 0 && c.secure {
+		// A sips: call has no fallback to a non-TLS path: no forward, no
+		// voicemail, a plain refusal.
+		s.refuseSecure(req, tx, secureNoTLSBinding, "sips: no device of the extension is registered over TLS")
+		c.record(sip.StatusTemporarilyUnavailable, cdr.SideSystem, "sips: no TLS registration", ResultUnavailable)
+		return
+	}
 	if len(targets) == 0 {
 		// Nothing registered: the no-answer target applies at once, else
 		// voicemail with the unreachable greeting, else 480.
@@ -186,6 +193,9 @@ func (c *call) bindingsFor(snap *snapshot.Snapshot, ext string) ([]livestate.Bin
 		cancel()
 		if err != nil {
 			return nil, err
+		}
+		if c.secure {
+			bs = secureTargets(bs)
 		}
 		targets = append(targets, bs...)
 	}
