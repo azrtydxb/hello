@@ -131,6 +131,29 @@ func Parse(s string) Lang {
 	return Default
 }
 
+// Valid reports whether s names a language with a complete table. Unlike
+// Parse it does not fold an unknown value to Default, so a setting that
+// names no language can be refused.
+func Valid(s string) bool {
+	_, ok := tables[Lang(strings.ToLower(strings.TrimSpace(s)))]
+	return ok
+}
+
+// Resolve picks the language a voicemail box speaks (S-20). box is the box's
+// own setting ("" inherits): a language with a table is used, an unknown one
+// (a language a later release dropped) is spoken in English. An empty box
+// setting takes global, the deployment language, and Parse folds an unknown
+// or empty global to English.
+func Resolve(box, global string) Lang {
+	if strings.TrimSpace(box) == "" {
+		return Parse(global)
+	}
+	if Valid(box) {
+		return Parse(box)
+	}
+	return Default
+}
+
 // template returns the raw template, falling back to English; ok is false
 // when no table has the key.
 func template(l Lang, k Key) (string, bool) {

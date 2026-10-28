@@ -77,6 +77,10 @@ PIN and the e-mail address for notifications (an empty address turns e-mail
 off). Greetings are audio uploads and are done in the console;
 `revertVoicemailGreeting` (`slot` greeting, busy, unreachable or name) removes
 the box's own audio in a slot so callers hear the default spoken prompt again.
+`getVoicemailBoxLanguage` reads the language a box speaks its prompts in
+(`promptLanguage`, empty when it inherits the deployment language, and the
+`effective` one callers hear); `updateVoicemailBoxLanguage` sets it to one of
+the listed `languages`, or empty to inherit.
 `listVoicemailBoxes` shows every box with its message counts.
 
 ### Remove someone
