@@ -1178,6 +1178,21 @@ the extension's page in the console or `PATCH /api/v1/extensions/{id}`).
   (`P347` and its gain `P1555`, left at their defaults); the lab check
   listens for it with the flag on and expects silence with it off.
 
+## Keep-alive on Wi-Fi handsets
+
+A handset that sleeps loses its NAT mapping and its registration unless it
+pings. The built-in Grandstream template writes the phone's own keep-alive for
+the WP families; the call-side half (session timers, dead-media teardown,
+roaming) is in [phones.md](phones.md#roaming-keep-alive-and-dead-calls).
+
+| Family          | Setting written                                                    | Status                                                                                                  |
+| --------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| WP816/826/836   | `P2397 = 1` (SIP OPTIONS keep-alive)                               | key from the WP8x6 template; the interval (30 s) and max-tries keys are left at the default (verify)    |
+| WP810/820/822/825 | `P84989 = 0` (RFC 5626 keep-alive off)                           | from the WP822 release notes; verify on a phone's exported XML                                          |
+
+The WP856 template has neither key and gets none. Other vendors' keep-alive
+keys are not written yet (verify per vendor).
+
 ## Call park and call pickup
 
 Hello parks a call so any phone can pick it up, and lets a phone answer a
