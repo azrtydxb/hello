@@ -631,6 +631,8 @@ jobs:
             --from-literal=minioSecretKey=kind-minio-pass \
             --from-literal=postgresUser=hello \
             --from-literal=postgresPassword=kind-pg-pass
+          # The upgrade test's call is signalling only, held for minutes with
+          # no RTP: dead-media teardown (HELLO_MEDIA_DEAD_SECONDS, S-9) is off.
           helm install hello deploy/helm/hello -n hello \
             -f deploy/helm/hello/values-eval.yaml \
             --set global.imageRegistry=hello.local \
@@ -639,6 +641,8 @@ jobs:
             --set sip.hostNetwork=false \
             --set sip.mediaAnchorHost=podIP \
             --set sip.trustedProxies=10.0.0.0/8 \
+            --set 'sip.extraEnv[0].name=HELLO_MEDIA_DEAD_SECONDS' \
+            --set-string 'sip.extraEnv[0].value=0' \
             --set kamailio.hostNetwork=false \
             --set kamailio.service.type=NodePort \
             --set kamailio.service.nodePort=30508 \
