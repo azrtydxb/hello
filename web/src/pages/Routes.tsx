@@ -387,6 +387,7 @@ const DESTINATION_KIND: Record<
   announcement: { label: "Announcement", icon: "megaphone" },
   paging: { label: "Paging group", icon: "megaphone" },
   conference: { label: "Conference room", icon: "users" },
+  directory: { label: "Dial-by-name directory", icon: "book-user" },
 };
 
 function Destination({

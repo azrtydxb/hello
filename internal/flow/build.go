@@ -360,6 +360,13 @@ func (b *builder) resolve(owner, kind, target string) Ref {
 		return lookup(b.tcByName, "call", "time condition")
 	case "conference":
 		return lookup(b.confByNumber, "call", "conference room")
+	case "directory":
+		// One node for the whole directory: it names no stored object, and
+		// the extensions it can reach are every one not hidden from it.
+		id := KindDirectory + ":names"
+		b.node(id, KindDirectory, "Dial-by-name directory", nil, nil)
+		b.ends[id] = true
+		return Ref{id, "call"}
 	case "external":
 		return Ref{b.external(target), "call"}
 	case "sip_uri":
@@ -421,7 +428,7 @@ func (b *builder) addRoutes(in Input) {
 			b.node(id, KindInternalDID, "DID "+r.DID+" as extension", map[string]any{"did": r.DID}, nil)
 			b.ends[id] = true
 			b.edge(src, Ref{id, "call"}, owner, false, nil)
-		case "conference", "external", "sip_uri", "ring_group", "voicemail", "announcement", "paging", "ivr", "queue", "time_condition":
+		case "conference", "external", "sip_uri", "ring_group", "voicemail", "announcement", "paging", "ivr", "queue", "time_condition", "directory":
 			b.dest(src, owner, r.DestinationKind, r.Destination, nil)
 		}
 	}
@@ -687,6 +694,10 @@ func (b *builder) addFeatureCodes(in Input) {
 		id := KindFeatureCode + ":" + c.Code
 		b.entries[id] = true
 		b.node(id, KindFeatureCode, c.Code, map[string]any{"code": c.Code, "action": c.Action}, c)
+		if kind == "directory" {
+			b.dest(Ref{id, "target"}, Owner{id, "action"}, kind, "", nil)
+			continue
+		}
 		if c.Argument == "" {
 			continue // the name is dialled after the code
 		}

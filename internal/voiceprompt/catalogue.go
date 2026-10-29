@@ -100,6 +100,16 @@ const (
 	GreetUnavailableTail Key = "greet.unavailable.tail"
 	GreetBusyTail        Key = "greet.busy.tail"
 	GreetUnreachableTail Key = "greet.unreachable.tail"
+
+	// Dial-by-name directory (pbx-gaps S-13). DirectoryOne speaks one choice
+	// ("For {name}, press {digit}"), DirectoryConnecting the hand-over.
+	DirectoryEnter      Key = "directory.enter"
+	DirectoryConnecting Key = "directory.connecting"
+	DirectoryOne        Key = "directory.one"
+	DirectoryChoose     Key = "directory.choose"
+	DirectoryMore       Key = "directory.more"
+	DirectoryNone       Key = "directory.none"
+	DirectoryTooLong    Key = "directory.toolong"
 )
 
 // tables holds the language tables. Add a language here and in its own file.

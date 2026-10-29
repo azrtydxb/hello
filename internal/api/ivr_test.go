@@ -23,6 +23,12 @@ func TestValidateIVRMenu(t *testing.T) {
 	if f := validateIVRMenu(ptr(good())); len(f) > 0 {
 		t.Fatalf("a good menu failed: %v", f)
 	}
+	dir := good()
+	dir.Options[0] = store.IVROption{Digit: "1", Kind: "directory"}
+	dir.PromptLanguage = "nl"
+	if f := validateIVRMenu(ptr(dir)); len(f) > 0 {
+		t.Fatalf("a directory key with a language failed: %v", f)
+	}
 	cases := map[string]func(in *store.IVRMenuInput){
 		"bad name":            func(in *store.IVRMenuInput) { in.Name = "a b" },
 		"bad number":          func(in *store.IVRMenuInput) { in.Number = "8x" },
@@ -38,7 +44,11 @@ func TestValidateIVRMenu(t *testing.T) {
 		"hangup with target": func(in *store.IVRMenuInput) { in.Options[0] = store.IVROption{Digit: "1", Kind: "hangup", Target: "1"} },
 		"extension shape":    func(in *store.IVRMenuInput) { in.Options[0].Target = "x" },
 		"page code shape":    func(in *store.IVRMenuInput) { in.Options[1].Target = "60" },
-		"timeout shape":      func(in *store.IVRMenuInput) { in.Timeout = store.IVRDestination{Kind: "external", Target: "x"} },
+		"directory target": func(in *store.IVRMenuInput) {
+			in.Options[0] = store.IVROption{Digit: "1", Kind: "directory", Target: "x"}
+		},
+		"unknown language": func(in *store.IVRMenuInput) { in.PromptLanguage = "xx" },
+		"timeout shape":    func(in *store.IVRMenuInput) { in.Timeout = store.IVRDestination{Kind: "external", Target: "x"} },
 		"too many options": func(in *store.IVRMenuInput) {
 			for i := 0; i < 12; i++ {
 				in.Options = append(in.Options, store.IVROption{Digit: "2", Kind: "hangup"})

@@ -45,7 +45,7 @@ var (
 		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr",
 		"call_waiting_on", "call_waiting_off",
 		"park", "park_retrieve", "pickup_group", "pickup_directed", "time_condition", "tc_override",
-		"queue_login", "queue_logout", "queue_pause", "queue_unpause"}
+		"queue_login", "queue_logout", "queue_pause", "queue_unpause", "directory"}
 )
 
 // voicemailLimits bound greeting uploads.
@@ -703,6 +703,10 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 		if !usernameRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be the name of a time condition")
 		}
+	case "directory":
+		if in.FailureTarget != "" {
+			f.add("failureTarget", `must be empty when failureKind is "directory"`)
+		}
 	case "extension":
 		if !numberRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be an extension number")
@@ -714,7 +718,7 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 			f.add("failureTarget", "a ring group cannot fail over to itself")
 		}
 	default:
-		f.add("failureKind", `must be "none", "voicemail", "external", "announcement", "ivr", "queue", "time_condition", "extension" or "ring_group"`)
+		f.add("failureKind", `must be "none", "voicemail", "external", "announcement", "ivr", "queue", "time_condition", "directory", "extension" or "ring_group"`)
 	}
 	if len(in.Members) == 0 || len(in.Members) > 50 {
 		f.add("members", "must have 1-50 members")

@@ -407,6 +407,10 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 		if !pageCodeRe.MatchString(in.Destination) {
 			f.add("destination", "must be the code of a paging group")
 		}
+	case "directory":
+		if in.Destination != "" {
+			f.add("destination", `must be empty when destinationKind is "directory"`)
+		}
 	case "internal":
 		// The DID the route matched names the target; the route carries
 		// none of its own, as the engine's compile also requires.
@@ -429,7 +433,7 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 			f.add("destination", "must be a sip: URI of at most 255 characters")
 		}
 	default:
-		f.add("destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "announcement" or "paging"`)
+		f.add("destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "announcement", "paging" or "directory"`)
 	}
 	return f
 }

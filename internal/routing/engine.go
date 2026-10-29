@@ -324,6 +324,10 @@ func (t *Table) checkInboundDestination(errs *[]FieldError, p string, r InboundR
 		if !t.named[r.DestinationKind+":"+r.Destination] {
 			addErr(errs, p+".destination", fmt.Sprintf("%s %s does not exist", namedKindLabel[r.DestinationKind], quote(r.Destination)))
 		}
+	case "directory":
+		if r.Destination != "" {
+			addErr(errs, p+".destination", `must be empty when destinationKind is "directory"`)
+		}
 	case "internal":
 		// The DID the route matched names the target; the route carries
 		// none of its own.
@@ -343,7 +347,7 @@ func (t *Table) checkInboundDestination(errs *[]FieldError, p string, r InboundR
 			addErr(errs, p+".destination", "must be a sip: or sips: URI without whitespace")
 		}
 	default:
-		addErr(errs, p+".destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "announcement" or "paging"`)
+		addErr(errs, p+".destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "announcement", "paging" or "directory"`)
 	}
 }
 

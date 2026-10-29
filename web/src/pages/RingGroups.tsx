@@ -62,6 +62,8 @@ function failureText(g: RingGroup): string {
       return `Queue ${g.failureTarget || UNKNOWN}`;
     case "time_condition":
       return `Time condition ${g.failureTarget || UNKNOWN}`;
+    case "directory":
+      return "Dial-by-name directory";
     case "extension":
       return `Extension ${g.failureTarget || UNKNOWN}`;
     case "ring_group":

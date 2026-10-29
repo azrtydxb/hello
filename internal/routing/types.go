@@ -116,7 +116,7 @@ type InboundRoute struct {
 	HeaderRegex     string
 	Schedule        *Schedule
 	CallerID        Transform
-	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition" | "ring_group" | "voicemail" | "announcement" | "paging"
+	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition" | "ring_group" | "voicemail" | "announcement" | "paging" | "directory"
 	Destination     string // empty for "internal" (the DID names the target); the menu name for "ivr", the room number for "conference", the queue name for "queue"
 	Enabled         bool
 	// MOHClassID is the music on hold class of calls the route delivers

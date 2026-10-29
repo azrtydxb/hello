@@ -36,6 +36,7 @@ Every key, the silence exit and the wrong-key exit use the same kinds:
 | IVR menu     | a menu name               | Continues in that menu (nesting).                                                                                                                                                             |
 | External     | a number                  | Routed through the outbound routes as if the menu dialled it (the menu's number, else its name, is the source "extension"; add it to a route's source extensions if the route is restricted). |
 | Queue        | a queue name              | Joins the call queue (see [queues.md](queues.md)); its own failover destinations apply.                                                                                                       |
+| Directory    | none                      | The dial-by-name directory (below).                                                                                                                                                           |
 
 A destination that does not answer returns the caller to the menu, which says
 the invalid-choice prompt and repeats; it does not end the call.
@@ -47,6 +48,40 @@ collected as an extension number. A number that matches an extension and
 cannot be longer rings at once; otherwise the menu waits the between-digits
 time, or `#`, for more digits. A key whose digit is also the start of
 extension numbers waits the same way and fires when nothing follows.
+
+### Dial-by-name directory
+
+The **Dial-by-name directory** destination lets a caller find an extension by
+spelling its name on the keypad. It is a destination kind like the others, so
+it can be a key of a menu, the silence or wrong-key exit, a queue exit, a time
+condition branch, an inbound route, a ring group's fallback, or the feature
+code `*42` (action **Dial-by-name directory**, added to existing installs when
+the code is free). `*411` from the specification is not the default because it
+extends the directed-pickup code `*41`, which the dial-space check refuses.
+
+1. The caller hears "enter the first three letters of the name" and types the
+   keys (2 ABC, 3 DEF, 4 GHI, 5 JKL, 6 MNO, 7 PQRS, 8 TUV, 9 WXYZ), then `#`.
+   Up to 7 keys are taken; an eighth is refused ("enter fewer letters").
+   `*` starts the entry again; `0` and `1` carry no letters and are ignored.
+2. A name matches when the keypad spelling of its first or last word begins
+   with the keys. Accents fold to their letter. Extensions marked hidden from
+   the directory (the same flag the phone books honour) and extensions with no
+   name are never found, and the search says nothing about them.
+3. One match: the name is spoken after "connecting you to" (the recording
+   made in the extension's voicemail box when it has one, else the name spoken
+   by text-to-speech) and the call is put through to the extension as for a
+   menu key: forwarding, DND and voicemail of that extension apply.
+   Two or three matches are read in last-name order with a digit each. More
+   than three: "enter more letters". No match: "no match".
+4. Three entries that lead nowhere end the directory: in a menu the menu's
+   wrong-key (invalid) destination takes the call; a call that came straight to
+   the directory is hung up.
+
+The prompts are spoken in the menu's **Prompt language** (Default follows the
+system language; English and Dutch are shipped). A call that reaches the
+directory without a menu uses the system language. When speech is
+unavailable the caller hears a tone and the keys still work. Metric:
+`hello_directory_search_total{result}`.
 
 ### Loops
 
