@@ -138,6 +138,7 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 	d.Line.AccountLabel = AccountLabel(d.Line.Label, d.Line.DisplayName)
 	d.Phone.PTTCapable, d.Phone.WP = SupportsPTT(d.Phone.Vendor, d.Phone.Model), WPFamily(d.Phone.Vendor, d.Phone.Model)
 	d.Phone.CWInverted = d.Phone.Vendor == Grandstream && strings.HasPrefix(strings.ToUpper(strings.ReplaceAll(d.Phone.Model, " ", "")), "WP856")
+	d.Phone.FXO = HasFXOPort(d.Phone.Vendor, d.Phone.Model)
 	if d.Phone.Vendor == Grandstream {
 		d.Phone.Family = GrandstreamFamily(d.Phone.Model)
 		if d.Book != nil {
