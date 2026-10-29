@@ -1234,3 +1234,18 @@ P1558 / P1559 from the same two values.
   counted in a note, not drawn.
 - **Not in this change** (their phases): `traceFlow` in `assistantTools` and the
   skill (P6).
+
+## 2026-10-29 FXO line busy after a voicemail call (fix-trunk-slot-leak)
+
+- **Finding.** The trunk slot is a Valkey sorted set with a 30 s TTL per
+  member that the call heartbeat refreshes, so a slot cannot leak
+  persistently on its own; production's cluster-wide `hello_trunk_active_calls`
+  is 0. "full" answers the caller 503, not 486: the 486s are the HT813
+  itself ("rejected"). No migration and no startup sweep are needed.
+- **Real defects fixed.** (1) `end()` stopped closing `stopHB` when Phase 7
+  swapped it for `haStop`, so every ended call leaked its heartbeat goroutine
+  and the voicemail recorder never saw the hangup. (2) A refresh racing the
+  release re-added the freed slot (counts until its TTL); now released again.
+  (3) An Opus decoder that hit the library assertion stayed broken for the
+  whole call; it is rebuilt after a panic or 5 refused packets in a row. The
+  music encoder was also created outside the stack pin.
