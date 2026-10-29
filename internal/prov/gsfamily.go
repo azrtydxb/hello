@@ -46,6 +46,14 @@ func GrandstreamFamily(model string) string {
 	return ""
 }
 
+var ht813RE = regexp.MustCompile(`^HT813`)
+
+// HasFXOPort reports whether the model is a Grandstream HT813, the ATA
+// with an FXO port to the PSTN.
+func HasFXOPort(v Vendor, model string) bool {
+	return v == Grandstream && ht813RE.MatchString(normModel(model))
+}
+
 // SupportsBLF reports whether Hello can provision BLF keys for the model.
 // None of the three WP templates defines the P323 key block the built-in
 // template used to write (the WP856 has its BLF keys in the multi-purpose

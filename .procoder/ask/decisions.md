@@ -1234,3 +1234,16 @@ P1558 / P1559 from the same two values.
   counted in a note, not drawn.
 - **Not in this change** (their phases): `traceFlow` in `assistantTools` and the
   skill (P6).
+
+## HT813 FXO disconnect supervision: where to apply it
+
+Implementation notes (template route, no migration):
+
+- Source for every key: Grandstream ht813_config_1.0.19.6.txt (config-template-10212026.zip), section "FXO Termination Settings" in the FXO PORT block. The FXS-side P892/P856/P205 (loop-current/polarity on the FXS port) are a different feature and are not written.
+- P893 = 1: Enable Current Disconnect (loop-current drop).
+- P764 = 100: Current Disconnect Threshold, 50-800 ms, Grandstream default 100 ms; kept at the default.
+- P28101 = 1: Enable Polarity Reversal (template default 0).
+- P712 = 1: Enable PSTN Disconnect Tone Detection.
+- P841 = f1=400@-32,c=375/375; : PSTN Disconnect Tone, UAE busy tone 400 Hz, 375 ms on/off. Format and -32 dB level from the template's example (f1=480@-32,f2=620@-32,c=500/500;).
+- Unconfirmed, left out: a silence-timeout backstop (the HT813 template has no such key; P3630 is only the PSTN ring timeout for unanswered calls, P4421/P28761 are hard call-duration limits) and the UAE congestion/disconnect tone (no Grandstream source; a single P841 tone only).
+- Applied through Phone.FXO (model HT813), not a new WP family, so the generic Grandstream key set is unchanged. TR-069 untouched.

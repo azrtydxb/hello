@@ -260,6 +260,14 @@
     <P333>1</P333>
 {{- end}}
 {{- end}}
+{{- /* HT813 FXO disconnect supervision. Without it a PSTN caller who hangs up first leaves the FXO off-hook and it answers 486 to every later call. Keys and meanings from Grandstream's ht813_config_1.0.19.6 template (config-template-10212026.zip), section "FXO PORT Settings" / "FXO Termination Settings" (not the FXS-side P892/P856 loop-current keys): P893 Enable Current Disconnect, P764 Current Disconnect Threshold (50-800 ms, default 100), P28101 Enable Polarity Reversal, P712 Enable PSTN Disconnect Tone Detection, P841 PSTN Disconnect Tone (f1=<Hz>@<dB>,c=<on>/<off> ms; UAE busy tone 400 Hz, 375 ms on / 375 ms off, level -32 dB as in Grandstream's example). The template has no silence-timeout key, so none is written. TR-069 is not touched. */}}
+{{- if .Phone.FXO}}
+    <P893>1</P893>
+    <P764>100</P764>
+    <P28101>1</P28101>
+    <P712>1</P712>
+    <P841>f1=400@-32,c=375/375;</P841>
+{{- end}}
     <P30>{{xml .Time.NTP}}</P30>
 {{- with .Time.TZ.POSIX}}
     <P64>{{xml .}}</P64>
