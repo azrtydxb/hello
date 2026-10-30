@@ -11,7 +11,7 @@ on:
   # Three tiers: the unit job goes on every pull request and push; the
   # integration tier — the database-backed suites, the race detector and the
   # HA soak — runs on the nightly cron, a manual dispatch, v* tags and any
-  # pull request that changes database-touching paths (db-changes); the
+  # pull request that changes database-touching paths (changes); the
   # full tier (kind-upgrade, lab) stays off the pull request path. Publish
   # stays on push to main and v* tags; bench stays dispatch-only.
   schedule:
@@ -25,7 +25,7 @@ permissions:
 
 # A newer push to a pull request supersedes the run in progress; on main
 # every commit runs to the end, because publish builds the image of that
-# commit and kind-upgrade seeds the build cache from it.
+# commit and writes the build cache from it.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -62,6 +62,9 @@ jobs:
       # commit so main saves a fresh build cache on every push; a pull request
       # restores the newest one for its go.sum (or any, after a dependency
       # bump) and never saves, so it cannot overwrite what main relies on.
+      # Only the nightly run saves: a save on every push to main took ~6 min
+      # and held up publish, and the build cache is content-addressed, so a
+      # day-old cache costs a little recompilation, never a wrong build.
       # Go checks every cache entry against its inputs, so a stale entry costs
       # a recompile, never a wrong build.
       - name: Restore the Go caches
@@ -74,7 +77,8 @@ jobs:
           restore-keys: |
             go-${{ runner.arch }}-golang1.27-${{ hashFiles('go.sum') }}-
             go-${{ runner.arch }}-golang1.27-
-      - run: go build ./...
+      # go vet type-checks every package and its tests, so a separate
+      # `go build ./...` would only compile the same code a second time.
       - run: go vet ./...
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
@@ -83,7 +87,7 @@ jobs:
       # race detector run in `integration`, off the PR and push-to-main path.
       - run: go test -timeout 10m ./...
       - name: Save the Go caches
-        if: github.event_name == 'push'
+        if: github.event_name == 'schedule'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -91,12 +95,18 @@ jobs:
             /root/.cache/go-build
           key: go-${{ runner.arch }}-golang1.27-${{ hashFiles('go.sum') }}-${{ github.sha }}
 
-  db-changes:
-    # Whether a pull request touches code the database-backed tests cover:
-    # migrations, the store and API, the integration suite, and every package
-    # with a HELLO_TEST_DATABASE_URL test. Only pull requests are filtered;
-    # the other events run the integration job unconditionally.
-    if: github.event_name == 'pull_request'
+  changes:
+    # What a change touches, so the jobs it cannot affect can be skipped:
+    #  - db: code the database-backed tests cover (migrations, the store and
+    #    API, the integration suite, every package with a HELLO_TEST_DATABASE_URL
+    #    test). Pull requests only; the other events run `integration`
+    #    unconditionally.
+    #  - web: the web UI. Pull requests only.
+    #  - chart: the Helm chart and what test/deploy reads. Pull requests only.
+    #  - kind: the images, chart and code the rolling-upgrade test exercises.
+    #    Pushes to main only; the nightly cron and v* tags always run it.
+    # A skipped job reports as skipped, which satisfies a required check.
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/'))
     runs-on: arc-azrtydxb
     timeout-minutes: 5
     permissions:
@@ -104,7 +114,13 @@ jobs:
       pull-requests: read
     outputs:
       db: ${{ steps.filter.outputs.db }}
+      web: ${{ steps.filter.outputs.web }}
+      chart: ${{ steps.filter.outputs.chart }}
+      kind: ${{ steps.filter.outputs.kind }}
     steps:
+      # A push is diffed with git; a pull request through the API.
+      - if: github.event_name == 'push'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
@@ -120,20 +136,46 @@ jobs:
               - 'test/integration/**'
               - 'go.mod'
               - '.github/workflows/ci.yaml'
+            web:
+              - 'web/**'
+              - '.github/workflows/ci.yaml'
+            chart:
+              - 'deploy/**'
+              - 'test/deploy/**'
+              - 'docs/kubernetes.md'
+              - 'README.md'
+              - 'go.mod'
+              - 'go.sum'
+              - '.github/workflows/ci.yaml'
+            kind:
+              - 'Dockerfile'
+              - 'docker/**'
+              - 'deploy/**'
+              - 'cmd/**'
+              - 'migrations/**'
+              - 'internal/sip/**'
+              - 'internal/cluster/**'
+              - 'internal/lifecycle/**'
+              - 'internal/migrate/**'
+              - 'test/kindupgrade/**'
+              - 'test/sipua/**'
+              - 'go.mod'
+              - 'go.sum'
+              - '.github/workflows/ci.yaml'
 
   integration:
     # Integration tier: the database-backed suites (PostgreSQL, Valkey, MinIO)
     # plus the race detector and the HA soak. Runs on the nightly cron, a
     # manual dispatch, v* tags (the full tier) and any pull request that
-    # changes database-touching paths (see db-changes). The unit job skips
+    # changes database-touching paths (see changes). The unit job skips
     # these tests, so this job is what actually proves the database code works.
-    needs: db-changes
+    needs: changes
     if: >-
       !cancelled() && (
         github.event_name == 'schedule' ||
         github.event_name == 'workflow_dispatch' ||
         startsWith(github.ref, 'refs/tags/v') ||
-        (github.event_name == 'pull_request' && needs.db-changes.outputs.db == 'true'))
+        (github.event_name == 'pull_request' && needs.changes.outputs.db == 'true'))
     runs-on: arc-azrtydxb
     timeout-minutes: 40
     container:
@@ -229,8 +271,9 @@ jobs:
           } >> "$GITHUB_ENV"
       # Everything with the services up: the database-backed tests run here
       # (the unit job skips them), and the race detector is affordable once a
-      # night rather than on every push.
-      - run: go test -timeout 30m ./...
+      # night rather than on every push. -race runs every test the plain run
+      # does, so one pass under the detector replaces the two passes this job
+      # used to make (about 7 minutes saved).
       - name: go test -race
         run: go test -race -timeout 30m ./...
       # A MinIO SlowDown cannot be diagnosed from the test output alone: keep
@@ -250,7 +293,13 @@ jobs:
         run: go test -race -count=3 -run 'TestTakeoverScenarioMatrix|TestBackgroundWorkDuringShutdown|TestTakeoverKeepsClaimUntilRecorded' ./internal/sip/
 
   web:
-    if: github.event_name != 'workflow_dispatch'
+    # Pull requests that leave web/ alone skip it; the nightly run skips it
+    # too, because it would repeat the last push to main on the same lockfile.
+    needs: changes
+    if: >-
+      !cancelled() &&
+      github.event_name != 'workflow_dispatch' && github.event_name != 'schedule' &&
+      (github.event_name != 'pull_request' || needs.changes.result == 'failure' || needs.changes.outputs.web == 'true')
     runs-on: arc-azrtydxb
     timeout-minutes: 15
     container:
@@ -381,7 +430,12 @@ jobs:
     # The Helm chart (deploy/helm/hello) rendered and checked: lint, the
     # kubeconform schema check, and the test/deploy invariants. helm and
     # kubeconform are tools here, not services: nothing is installed into a
-    # cluster (kind-upgrade does that).
+    # cluster (kind-upgrade does that). Skipped on pull requests that leave the
+    # chart alone and on the nightly run, which would repeat the last push.
+    needs: changes
+    if: >-
+      !cancelled() && github.event_name != 'schedule' &&
+      (github.event_name != 'pull_request' || needs.changes.result == 'failure' || needs.changes.outputs.chart == 'true')
     runs-on: arc-azrtydxb
     timeout-minutes: 20
     container:
@@ -428,10 +482,17 @@ jobs:
     # then `helm upgrade`s Hello's pods and Kamailio and requires the call to
     # survive and hang up cleanly. Needs the runner's Docker daemon (as the
     # lab job does), kind, kubectl and helm on the runner itself.
-    # Full/integration tier: never on a pull request. Kept on push to main
-    # (not just the nightly cron and v* tags) because it seeds the shared
-    # build cache that publish and the nightly runs read.
-    if: github.event_name != 'pull_request'
+    # Full/integration tier: never on a pull request. On push to main it runs
+    # only when the push touches what the upgrade test exercises (see the
+    # `kind` filter in `changes`); the nightly cron, dispatch and v* tags
+    # always run it. The shared build cache is written by publish.
+    needs: changes
+    if: >-
+      !cancelled() && github.event_name != 'pull_request' && (
+        github.event_name != 'push' ||
+        startsWith(github.ref, 'refs/tags/v') ||
+        needs.changes.result == 'failure' ||
+        needs.changes.outputs.kind == 'true')
     runs-on: arc-azrtydxb
     timeout-minutes: 60
     env:
@@ -479,15 +540,15 @@ jobs:
               insecure = true
             [registry."docker.io"]
               mirrors = ["ant.azrty.com"]
-      # Only a push to main writes the cache, so an untrusted pull request can
-      # never poison the layers main builds from.
-      # Kuvryn Ant buildcache feed (GitHub OIDC): cache-write is off outside push events.
+      # This job only reads the cache: publish writes it on push to main, so an
+      # untrusted pull request can never poison the layers main builds from.
+      # Kuvryn Ant buildcache feed (GitHub OIDC).
       - id: ant-cache-1
         uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
         with:
           build-cache: "true"
           cache-name: control
-          cache-write: ${{ github.event_name == 'push' }}
+          cache-write: "false"
           sccache: "false"
           go: "false"
           npm: "false"
@@ -509,7 +570,7 @@ jobs:
         with:
           build-cache: "true"
           cache-name: sip
-          cache-write: ${{ github.event_name == 'push' }}
+          cache-write: "false"
           sccache: "false"
           go: "false"
           npm: "false"
@@ -529,7 +590,7 @@ jobs:
         with:
           build-cache: "true"
           cache-name: ui
-          cache-write: ${{ github.event_name == 'push' }}
+          cache-write: "false"
           sccache: "false"
           go: "false"
           npm: "false"
@@ -549,7 +610,7 @@ jobs:
         with:
           build-cache: "true"
           cache-name: kamailio
-          cache-write: ${{ github.event_name == 'push' }}
+          cache-write: "false"
           sccache: "false"
           go: "false"
           npm: "false"
@@ -811,7 +872,7 @@ jobs:
           build-cache: "true"
           cache-name: ${{ matrix.image.cache }}
           arch-suffix: arm64
-          cache-write: "false"
+          cache-write: "true"
           sccache: "false"
           docker-login: "true"
           required: "true"
@@ -861,3 +922,4 @@ jobs:
           push: true
           tags: ${{ steps.content.outputs.tags }}
           cache-from: ${{ steps.ant.outputs.cache-from }}
+          cache-to: ${{ steps.ant.outputs.cache-to }}
