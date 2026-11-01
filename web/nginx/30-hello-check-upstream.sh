@@ -14,6 +14,8 @@ set -eu
 
 url="${HELLO_CONTROL_UPSTREAM:?HELLO_CONTROL_UPSTREAM is not set}"
 resolver="${HELLO_DNS_RESOLVER:?HELLO_DNS_RESOLVER is not set}"
+resolver="${resolver#[}" # nginx wants IPv6 bracketed; nslookup does not
+resolver="${resolver%]}"
 
 host="${url#*://}"
 host="${host%%/*}"
