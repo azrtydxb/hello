@@ -44,7 +44,7 @@ jobs:
     # when their HELLO_TEST_* variable is unset; `integration` sets them and
     # runs the same `go test ./...`.
     if: github.event_name != 'workflow_dispatch'
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     container:
       # The Go toolchain comes from the same base the Dockerfile builds
@@ -107,7 +107,7 @@ jobs:
     #    Pushes to main only; the nightly cron and v* tags always run it.
     # A skipped job reports as skipped, which satisfies a required check.
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/'))
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
       contents: read
@@ -176,7 +176,7 @@ jobs:
         github.event_name == 'workflow_dispatch' ||
         startsWith(github.ref, 'refs/tags/v') ||
         (github.event_name == 'pull_request' && needs.changes.outputs.db == 'true'))
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     container:
       image: golang:1.27-bookworm
@@ -300,7 +300,7 @@ jobs:
       !cancelled() &&
       github.event_name != 'workflow_dispatch' && github.event_name != 'schedule' &&
       (github.event_name != 'pull_request' || needs.changes.result == 'failure' || needs.changes.outputs.web == 'true')
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     container:
       image: node:26-bookworm-slim
@@ -324,7 +324,7 @@ jobs:
     # Valkey and seeds for minutes, so it runs only when dispatched:
     # gh workflow run ci.yaml --ref <branch>
     if: github.event_name == 'workflow_dispatch'
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     container:
       image: golang:1.27-bookworm
@@ -387,7 +387,7 @@ jobs:
     # lab regardless, while the schedule still requires go to be green.
     if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && needs.go.result == 'success')) }}
     needs: [go]
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
@@ -436,7 +436,7 @@ jobs:
     if: >-
       !cancelled() && github.event_name != 'schedule' &&
       (github.event_name != 'pull_request' || needs.changes.result == 'failure' || needs.changes.outputs.chart == 'true')
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     container:
       image: golang:1.27-bookworm
@@ -493,7 +493,7 @@ jobs:
         startsWith(github.ref, 'refs/tags/v') ||
         needs.changes.result == 'failure' ||
         needs.changes.outputs.kind == 'true')
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     env:
       KIND_VERSION: v0.30.0
@@ -817,7 +817,7 @@ jobs:
     # nothing more.
     if: github.event_name == 'push'
     needs: [go, web]
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     permissions:
       contents: read
@@ -858,12 +858,10 @@ jobs:
             }
     steps:
       - uses: actions/checkout@v7
-      # The runner pod's BuildKit sidecar (linux/arm64, the kw nodes' arch),
-      # not a builder container on the runner's Docker daemon. Its config
-      # pulls base images through Kuvryn Ant's Docker Hub mirror. BuildKit
-      # pushes with the credentials of the docker login below.
-      - id: builder
-        uses: azrtydxb/.github/actions/setup-builder@main
+      # A native arm64 runner (the kw nodes' arch), so the Dockerfiles build as
+      # they are: nothing is emulated. Buildx pushes with the credentials of
+      # the docker login below.
+      - uses: docker/setup-buildx-action@v4
       # Reads the build cache kind-upgrade writes on main (same cache names,
       # same arch); publish itself never writes it.
       - id: ant
@@ -917,7 +915,6 @@ jobs:
           # images; the other Dockerfiles declare no COMMIT arg.
           build-args: |
             COMMIT=${{ github.sha }}
-          builder: ${{ steps.builder.outputs.name }}
           platforms: linux/arm64
           push: true
           tags: ${{ steps.content.outputs.tags }}
