@@ -1,5 +1,5 @@
 # The shape mirrors kuvryn-scout: test jobs run in containers on the generic
-# ARC runners, and what lands on main is built and pushed to Nexus by the
+# ARC runners, and what lands on main is built and pushed to Kuvryn Ant by the
 # publish runners. Kuvryn Sync then deploys those images (deploy/kuvryn-sync/).
 name: ci
 
@@ -31,8 +31,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Authoritative Kuvryn Ant (OKE); kw replicates oci-hosted and its nodes serve
-  # the old 192.168.10.131/azrtydxb/<image> names from that replica.
+  # Authoritative Kuvryn Ant (OKE); kw replicates oci-hosted and its nodes pull
+  # from that replica as ant.kw.watteel.lab/oci-hosted/<image>.
   REGISTRY: ant.azrty.com/oci-hosted
 
 jobs:
@@ -524,20 +524,12 @@ jobs:
           tar -xzf "$d/helm.tgz" -C "$d" "linux-${a}/helm"
           install "$d/linux-${a}/helm" "$HOME/bin/helm"
           echo "$HOME/bin" >> "$GITHUB_PATH"
-      # The images build with BuildKit against a registry cache on the
-      # in-cluster Nexus rather than a plain docker build, which started cold
-      # on every ephemeral runner. Same buildkitd config as publish: BuildKit
-      # runs in its own container and does not inherit the host trust store,
-      # so both Nexus ports need the exemption (:443 the read-only group,
-      # :5000 the hosted repository that accepts the cache write), and base
-      # images come through the pull-through cache, not Docker Hub.
+      # The images build with BuildKit against the Kuvryn Ant buildcache feed
+      # (below) rather than a plain docker build, which started cold on every
+      # ephemeral runner. Base images come through the Ant docker.io mirror.
       - uses: docker/setup-buildx-action@v4
         with:
           buildkitd-config-inline: |
-            [registry."192.168.10.131"]
-              insecure = true
-            [registry."192.168.10.131:5000"]
-              insecure = true
             [registry."docker.io"]
               mirrors = ["ant.azrty.com"]
       # This job only reads the cache: publish writes it on push to main, so an
