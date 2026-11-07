@@ -1,0 +1,33 @@
+# One-time admin step for Kamailio HA (.procoder/specs/kamailio-ha.md).
+# NOT part of the synced directory (deploy/kuvryn-sync/kw): the deployer
+# cannot grant itself these rules. Apply it as a cluster admin BEFORE the
+# release that carries the kamailio PodDisruptionBudget reaches kw:
+#
+#   kubectl --context kw apply -f deploy/kuvryn-sync/rbac-kamailio-ha.yaml
+#
+# It adds a second Role and RoleBinding next to the existing
+# kuvryn-sync-deployer ones, so the original bootstrap Role stays untouched.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kuvryn-sync-deployer-kamailio-ha
+  namespace: hello
+rules:
+  # The kamailio PodDisruptionBudget.
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kuvryn-sync-deployer-kamailio-ha
+  namespace: hello
+subjects:
+  - kind: ServiceAccount
+    name: kuvryn-sync-deployer
+    namespace: hello
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kuvryn-sync-deployer-kamailio-ha
