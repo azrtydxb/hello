@@ -483,7 +483,7 @@ jobs:
     # change Kamailio rejects would otherwise reach the nodes. Needs the
     # runner's Docker daemon (as kind-upgrade does) to build and run the
     # image; the build reads the shared cache and never writes it from a PR.
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -493,10 +493,6 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           buildkitd-config-inline: |
-            [registry."192.168.10.131"]
-              insecure = true
-            [registry."192.168.10.131:5000"]
-              insecure = true
             [registry."docker.io"]
               mirrors = ["ant.azrty.com"]
       - id: ant-cache-kc
