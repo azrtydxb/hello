@@ -33,6 +33,9 @@ const (
 	ActionQueueLogout  = "queue_logout"
 	ActionQueuePause   = "queue_pause"
 	ActionQueueUnpause = "queue_unpause"
+	// ActionDirectory is the feature-code action of the dial-by-name
+	// directory (migration 00048).
+	ActionDirectory = "directory"
 )
 
 // QueueMember is one agent of a queue. Number and Name are for display.

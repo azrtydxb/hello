@@ -9,6 +9,7 @@ import (
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/snapshot"
+	"github.com/azrtydxb/hello/internal/voiceprompt"
 )
 
 // TestIVRTakeoverDialsOut: the node dies while a caller is in an IVR menu.
@@ -124,5 +125,53 @@ func TestIVRTakeoverUnrecoverableFallsBack(t *testing.T) {
 	noReq(t, b.invites, 200*time.Millisecond, "nobody is rung")
 	if v := taker.metric(t, "hello_ivr_total", map[string]string{"event": "exit_announcement"}); v != 1 {
 		t.Fatalf("exit_announcement = %v, want 1", v)
+	}
+}
+
+// TestDirectoryTakeover: the node dies while a caller who dialled the
+// directory code is at the "enter the letters" prompt. The survivor re-homes
+// the caller, restarts the directory from its first prompt, reads the
+// letters (RFC 4733) and rings the matching extension. It fails if the
+// directory phase is not replicated or not restarted by the taker.
+func TestDirectoryTakeover(t *testing.T) {
+	sp := &fakeSpeaker{}
+	feats := func(s *snapshot.Snapshot) {
+		s.WithFeatureCodes([]snapshot.FeatureCode{{Code: "*42", Action: ActionDirectory}})
+		s.WithExtensionData([]snapshot.Extension{{Number: "100", Name: "Alice Adams"}, {Number: "200", Name: "Bob Smith"}})
+	}
+	shared := newFakeState()
+	ha, mem, owner, taker := haPair(t, callerDevices(), withMedia(false), withFeatures(feats), withVoicemail(newVMStore(), &fakeObjects{}),
+		func(_ *Config, d *Deps) { d.State = shared; d.Speech = sp })
+	a, b := newPhone(t, owner, "a1", "pa"), newPhone(t, taker, "b1", "pb1")
+	a.register(t)
+	b.register(t)
+	b.setCallee(answerAfter(nil))
+	r := waitCall(t, dial(t.Context(), a, "*42"))
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	st := waitRecord(t, ha, "the directory call is replicated", "sip-1", func(s livestate.DialogState) bool {
+		return s.State == haPhaseDirectory && s.Legs[1].CallID == "" && s.Legs[0].RemoteSDP != ""
+	})
+	haReinviteTimeout = time.Second
+	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
+	taker.srv.takeoverPass(t.Context())
+	ra := waitReq(t, a.reinvites, "takeover re-INVITE to the caller")
+	waitReq(t, a.acks, "ACK to the caller's 200")
+	waitSpoke(t, sp, dirText(voiceprompt.DirectoryEnter, nil))
+	noReq(t, b.invites, 300*time.Millisecond, "nothing rings before the letters")
+
+	feed := startRTPFeed(t, ra.Body())
+	for _, d := range "764#" {
+		feed.digit(byte(d))
+		time.Sleep(60 * time.Millisecond)
+	}
+	waitReq(t, b.invites, "the taker rings the extension the letters match")
+	eventually(t, "the match is counted on the taker", func() bool {
+		return dirResult(taker, t, dirOne) == 1
+	})
+	hangupHomed(t, a, taker, ra, st.Legs[0])
+	if z := taker.metric(t, "hello_zombie_calls_total", nil); z != 0 {
+		t.Fatalf("zombies = %v", z)
 	}
 }

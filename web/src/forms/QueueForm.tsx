@@ -3,6 +3,7 @@ import {
   createQueue,
   errorMessage,
   fieldErrors,
+  hasNoTarget,
   putQueue,
   QUEUE_STRATEGIES,
   QUEUE_STRATEGY_LABEL,
@@ -152,7 +153,7 @@ function validateDest(
   key: string,
   d: IvrDestination,
 ) {
-  if (d.kind !== "hangup" && d.target.trim() === "") {
+  if (!hasNoTarget(d.kind) && d.target.trim() === "") {
     out[`${key}.target`] = "Choose a target.";
   }
 }

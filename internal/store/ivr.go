@@ -39,12 +39,16 @@ const (
 	// IVRTimeCondition names a time condition (migration 00038), which picks
 	// one of its own destinations when the call arrives.
 	IVRTimeCondition = "time_condition"
+	// IVRDirectory is the dial-by-name directory (migration 00048): the
+	// caller spells a name on the keypad and is connected to the extension.
+	// It names no object, so its target is empty.
+	IVRDirectory = "directory"
 )
 
 // IVRDestinationKinds lists the destination kinds, in the order the UI shows
 // them.
 var IVRDestinationKinds = []string{IVRHangup, IVRExtension, IVRRingGroup, IVRVoicemail, IVRAnnouncement,
-	IVRPaging, IVRMenuDest, IVRExternal, IVRQueueDest, IVRTimeCondition}
+	IVRPaging, IVRMenuDest, IVRExternal, IVRQueueDest, IVRTimeCondition, IVRDirectory}
 
 // IVRDestination is where an option, a timeout or an invalid choice sends
 // the call.
@@ -63,25 +67,29 @@ type IVROption struct {
 // IVRMenu is a menu as the API shows it. The prompt names are read-only
 // display values of the announcement ids.
 type IVRMenu struct {
-	ID                int64          `json:"id"`
-	Name              string         `json:"name"`
-	Number            string         `json:"number"`
-	Enabled           bool           `json:"enabled"`
-	GreetingID        int64          `json:"greetingId"`
-	GreetingName      string         `json:"greetingName"`
-	InvalidPromptID   *int64         `json:"invalidPromptId"`
-	InvalidPromptName string         `json:"invalidPromptName"`
-	TimeoutPromptID   *int64         `json:"timeoutPromptId"`
-	TimeoutPromptName string         `json:"timeoutPromptName"`
-	DigitTimeout      int            `json:"digitTimeout"`
-	InterDigitTimeout int            `json:"interDigitTimeout"`
-	MaxRetries        int            `json:"maxRetries"`
-	AllowDirectDial   bool           `json:"allowDirectDial"`
-	Timeout           IVRDestination `json:"timeout"`
-	Invalid           IVRDestination `json:"invalid"`
-	Options           []IVROption    `json:"options"`
-	CreatedAt         time.Time      `json:"createdAt"`
-	UpdatedAt         time.Time      `json:"updatedAt"`
+	ID                int64  `json:"id"`
+	Name              string `json:"name"`
+	Number            string `json:"number"`
+	Enabled           bool   `json:"enabled"`
+	GreetingID        int64  `json:"greetingId"`
+	GreetingName      string `json:"greetingName"`
+	InvalidPromptID   *int64 `json:"invalidPromptId"`
+	InvalidPromptName string `json:"invalidPromptName"`
+	TimeoutPromptID   *int64 `json:"timeoutPromptId"`
+	TimeoutPromptName string `json:"timeoutPromptName"`
+	DigitTimeout      int    `json:"digitTimeout"`
+	InterDigitTimeout int    `json:"interDigitTimeout"`
+	MaxRetries        int    `json:"maxRetries"`
+	AllowDirectDial   bool   `json:"allowDirectDial"`
+	// PromptLanguage is the language of the spoken prompts the menu's
+	// applications add (the dial-by-name directory); empty inherits the
+	// deployment language (pbx-gaps S-20).
+	PromptLanguage string         `json:"promptLanguage"`
+	Timeout        IVRDestination `json:"timeout"`
+	Invalid        IVRDestination `json:"invalid"`
+	Options        []IVROption    `json:"options"`
+	CreatedAt      time.Time      `json:"createdAt"`
+	UpdatedAt      time.Time      `json:"updatedAt"`
 }
 
 // IVRMenuInput is the writable shape of a menu; an update replaces the whole
@@ -97,6 +105,7 @@ type IVRMenuInput struct {
 	InterDigitTimeout int
 	MaxRetries        int
 	AllowDirectDial   bool
+	PromptLanguage    string
 	Timeout           IVRDestination
 	Invalid           IVRDestination
 	Options           []IVROption
@@ -104,7 +113,7 @@ type IVRMenuInput struct {
 
 const ivrCols = `m.id, m.name, m.number, m.enabled, m.greeting_id, g.name, m.invalid_prompt_id, COALESCE(i.name, ''),
 	m.timeout_prompt_id, COALESCE(t.name, ''), m.digit_timeout, m.inter_digit_timeout, m.max_retries,
-	m.allow_direct_dial, m.timeout_kind, m.timeout_target, m.invalid_kind, m.invalid_target, m.created_at, m.updated_at`
+	m.allow_direct_dial, m.timeout_kind, m.timeout_target, m.invalid_kind, m.invalid_target, COALESCE(m.prompt_language, ''), m.created_at, m.updated_at`
 
 const ivrFrom = ` FROM ivr_menus m
 	JOIN announcements g ON g.id = m.greeting_id
@@ -124,7 +133,7 @@ func listIVRMenus(ctx context.Context, q querier, where string, args ...any) ([]
 		if err := rows.Scan(&m.ID, &m.Name, &m.Number, &m.Enabled, &m.GreetingID, &m.GreetingName,
 			&m.InvalidPromptID, &m.InvalidPromptName, &m.TimeoutPromptID, &m.TimeoutPromptName,
 			&m.DigitTimeout, &m.InterDigitTimeout, &m.MaxRetries, &m.AllowDirectDial,
-			&m.Timeout.Kind, &m.Timeout.Target, &m.Invalid.Kind, &m.Invalid.Target, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			&m.Timeout.Kind, &m.Timeout.Target, &m.Invalid.Kind, &m.Invalid.Target, &m.PromptLanguage, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, err
 		}
 		m.Options = []IVROption{}
@@ -217,6 +226,10 @@ func checkIVRDestination(ctx context.Context, tx *sql.Tx, d ivrDest) error {
 	case IVRHangup:
 		if d.Target != "" {
 			return fieldError(d.path+".target", `must be empty when kind is "hangup"`)
+		}
+	case IVRDirectory:
+		if d.Target != "" {
+			return fieldError(d.path+".target", `must be empty when kind is "directory"`)
 		}
 	case IVRExtension:
 		return exists(`SELECT count(*) FROM extensions WHERE number = $1`, "extension")
@@ -370,11 +383,11 @@ func (s *Store) CreateIVRMenu(ctx context.Context, actor string, in IVRMenuInput
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO ivr_menus (name, number, enabled, greeting_id, invalid_prompt_id,
 				timeout_prompt_id, digit_timeout, inter_digit_timeout, max_retries, allow_direct_dial,
-				timeout_kind, timeout_target, invalid_kind, invalid_target)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+				timeout_kind, timeout_target, invalid_kind, invalid_target, prompt_language)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULLIF($15, '')) RETURNING id`,
 			in.Name, in.Number, in.Enabled, in.GreetingID, in.InvalidPromptID, in.TimeoutPromptID,
 			in.DigitTimeout, in.InterDigitTimeout, in.MaxRetries, in.AllowDirectDial,
-			in.Timeout.Kind, in.Timeout.Target, in.Invalid.Kind, in.Invalid.Target).Scan(&id); err != nil {
+			in.Timeout.Kind, in.Timeout.Target, in.Invalid.Kind, in.Invalid.Target, in.PromptLanguage).Scan(&id); err != nil {
 			return 0, ivrFK(err)
 		}
 		if err := writeIVROptions(ctx, tx, id, in); err != nil {
@@ -459,10 +472,10 @@ func (s *Store) UpdateIVRMenu(ctx context.Context, actor string, id int64, in IV
 		if _, err := tx.ExecContext(ctx, `UPDATE ivr_menus SET name = $2, number = $3, enabled = $4, greeting_id = $5,
 				invalid_prompt_id = $6, timeout_prompt_id = $7, digit_timeout = $8, inter_digit_timeout = $9,
 				max_retries = $10, allow_direct_dial = $11, timeout_kind = $12, timeout_target = $13,
-				invalid_kind = $14, invalid_target = $15, updated_at = now()
+				invalid_kind = $14, invalid_target = $15, prompt_language = NULLIF($16, ''), updated_at = now()
 			WHERE id = $1`, id, in.Name, in.Number, in.Enabled, in.GreetingID, in.InvalidPromptID, in.TimeoutPromptID,
 			in.DigitTimeout, in.InterDigitTimeout, in.MaxRetries, in.AllowDirectDial,
-			in.Timeout.Kind, in.Timeout.Target, in.Invalid.Kind, in.Invalid.Target); err != nil {
+			in.Timeout.Kind, in.Timeout.Target, in.Invalid.Kind, in.Invalid.Target, in.PromptLanguage); err != nil {
 			return id, ivrFK(err)
 		}
 		if err := writeIVROptions(ctx, tx, id, in); err != nil {

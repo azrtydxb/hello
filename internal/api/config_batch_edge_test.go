@@ -28,6 +28,8 @@ var edgeTargets = map[string]string{
 	"extension": "101", "voicemail": "101", "ring_group": "sales", "ivr": "dest-ivr", "queue": "dest-queue",
 	"announcement": "greet", "paging": "*88", "conference": "800", "time_condition": "dest-tc",
 	"external": "+97142000001", "sip_uri": "sip:agent@ai.example",
+	// The dial-by-name directory names no stored object: its target is empty.
+	"directory": "",
 }
 
 func newEdgeFixtures(t *testing.T) *edgeFixtures {
