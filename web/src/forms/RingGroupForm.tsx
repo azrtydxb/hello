@@ -438,7 +438,7 @@ export function RingGroupDrawer({
         <RingTagSelect
           id={fid("ringTag")}
           label="Ring tag"
-          hint="Chooses the ring tone on phones that map ring tags. Rules on the Ring tags page can still override it."
+          hint="Chooses the ring tone on phones that map ring tags. Rules on the Ringing page can still override it."
           emptyLabel="Default (ringgroup)"
           value={d.ringTag}
           error={errors.ringTag}
