@@ -887,6 +887,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - **CDR.** No `disposition` column exists; `callback_failed` is a queue leg with the attempt's result, and the call's kind is `callback`. Every attempt that dialled has its own CDR. `callback_requested` is on the original call's CDR, whose exit result is `callback` (no abandon).
 - **Cancelling** a request that is dialling stops it: the node holding the call checks the row every 2 s (the lease renewal doubles as the check; a renewal that finds the row no longer dialling means cancelled). While the customer's phone rings the leg is cancelled; a customer already on the line is hung up. The CDR gets `callback_failed` with result `cancelled`, the row stays cancelled and no attempt is counted or retried.
 - **Agent reservation (chosen: lease, plus the existing hold).** When the sweep claims a request it takes the agent lease of the first agent of the strategy's plan that is not leased to another caller (none: no dial), for ring time plus 30 s, and gives it back as soon as the customer answers, so the queue can offer it. That blocks a later waiting caller on any node at once, whereas the earlier `Due` hold map is refreshed every sweep (3 s) and only orders callers against due requests. Skipping ahead was rejected: the order is already by place, and the problem is the window, which a lease closes.
+
 ## SIP over TLS terminates at the edge (2026-10-26)
 
 Phone-feature-parity S-14 (delivery PR 23) says "hello-sip listens on TLS 5061".
@@ -903,7 +904,6 @@ key and stays on UDP. The `HELLO_SIP_TLS` and `HELLO_SIP_TLS_CERT` settings of t
 spec's config list are not used: the certificate belongs to Kamailio. Later PRs
 (SRTP, DTLS-SRTP) offer crypto only on legs where `bindingOnTLS` or the caller's
 `clientTransport` is TLS.
-
 
 ## Transfer-to-voicemail phone key (2026-10-26)
 
@@ -1236,7 +1236,7 @@ P1558 / P1559 from the same two values.
 - **Endpoint.** `GET /api/v1/flow/trace`, `traceFlow`, read/viewer (unlike
   `testRouting`, which is write/operator: it reads the configuration only and
   places no call). Answers `{configRevision, at, from, number, outcome, route,
-  reason, steps, routingTrace}`. A rejected call (no route matched, outside an
+reason, steps, routingTrace}`. A rejected call (no route matched, outside an
   inbound schedule) is `200` with `outcome: reject` and a final step on the
   trunk. Trunk usability uses the same live-state rule as `routingTest`. The
   metric is `hello_flow_trace_total`, registered with the batch metrics.
@@ -1319,6 +1319,7 @@ Implementation notes (template route, no migration):
   `voiceprompt.Resolve`; the PR depends on it.
 
 ## Phone resync/reboot rejected (fix-phone-resync, 2026-11-09)
+
 - Root cause: a Grandstream challenges the check-sync NOTIFY in realm
   "<SIP server host:port>" (kw: 192.168.10.101:30508), not the SIP domain.
   `answerChallenge` only accepts the device realm (the stored HA1 is bound to
@@ -1331,6 +1332,7 @@ Implementation notes (template route, no migration):
   named and answer. The password is never logged. Phones need no change.
 - Rejected: P4428=1 (no NOTIFY auth) would let anyone on the path reboot a
   phone and needs a phone reboot to load.
+
 ## Queue callback merged onto main (merge captain, PR 237) (2026-11-09)
 
 - Main moved the queue drawer to `web/src/forms/QueueForm.tsx` (flow canvas
@@ -1342,3 +1344,9 @@ Implementation notes (template route, no migration):
 - Merged the counter and log of the answered queue leg from main and the
   callback finish from this branch in `internal/sip/queue.go`; both run once.
 - Metric lists in `internal/sip/metrics.go` keep both sides' collectors.
+
+## Completion plan 2026-11-09: how to run it
+
+- Start: run waves 0-6 in order, three or four builder agents in parallel plus the merge captain (recommended)
+- Start with wave 0 and 1 only, then review
+- Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
