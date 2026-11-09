@@ -20,8 +20,8 @@ import (
 func TestWebDevicesDatabase(t *testing.T) {
 	e := newEnv(t, noLive{})
 	admin := e.login()
-	alice, aliceID := e.asRole("alice", auth.RoleUser)
-	bob, bobID := e.asRole("bob", auth.RoleUser)
+	alice, aliceID := e.asRole("anna", auth.RoleUser)
+	bob, bobID := e.asRole("ben", auth.RoleUser)
 	e101 := admin.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]string{"number": "101", "name": "Sales"}).json(t)
 	e102 := admin.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]string{"number": "102", "name": "Support"}).json(t)
 	link := func(uid int64, ext map[string]any) {
