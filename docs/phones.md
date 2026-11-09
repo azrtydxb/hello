@@ -76,7 +76,9 @@ rings, and **Active Calls** shows the call while it is up. After you hang up,
 
 A Wi-Fi handset that drops off the network mid-call, goes to sleep behind NAT
 or moves to another access point must not leave a call hung or a contact
-ringing a dead address.
+ringing a dead address. The networks a handset joins and its roaming settings
+are provisioned from Hello: see
+[Wi-Fi handsets](provisioning.md#wi-fi-handsets).
 
 - **Keep-alive.** A double CRLF ping (RFC 5626) is answered with a single CRLF
   over TCP and TLS, and ignored without an error log over UDP. That is the SIP

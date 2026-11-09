@@ -124,6 +124,10 @@ type RenderData struct {
 	// rules that map each ring tag's Alert-Info to a tone, and the line's
 	// default tone (see RingInfo).
 	Ring RingInfo
+	// Wifi is the Wi-Fi setup of a handset (phone-feature-parity S-23, S-24);
+	// nil when the phone has no profile and no radio setting. Render fills
+	// Wifi.Keys for the phone's model.
+	Wifi *WifiInfo
 	// Emergency is the comma-separated emergency numbers of Hello's
 	// emergency-flagged outbound routes (digits only), empty when none.
 	Emergency string

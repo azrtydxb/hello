@@ -15033,6 +15033,443 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/wifi-profiles": {
+      "get": {
+        "operationId": "listWifiProfiles",
+        "summary": "List Wi-Fi profiles",
+        "description": "Lists every Wi-Fi profile by name. The pre-shared key and 802.1X password are never returned; pskSet and passwordSet say whether they are stored.",
+        "tags": ["wifi"],
+        "responses": {
+          "200": {
+            "description": "Wi-Fi profiles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiProfileList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createWifiProfile",
+        "summary": "Create a Wi-Fi profile",
+        "description": "Creates a profile. name, ssid and security are required. The psk (wpa2-psk, wpa3-sae) or the identity and password (wpa2-enterprise, wpa3-enterprise) are sealed and cannot be read back. A profile reaches phones only when it is assigned to a phone group or a phone, and is written only once the phone's profiles include one marked verified.",
+        "tags": ["wifi"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WifiProfileInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/wifi-profiles/{id}": {
+      "get": {
+        "operationId": "getWifiProfile",
+        "summary": "One Wi-Fi profile",
+        "description": "Returns one Wi-Fi profile without its secrets.",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The Wi-Fi profile id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiProfile"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "patch": {
+        "operationId": "updateWifiProfile",
+        "summary": "Change a Wi-Fi profile",
+        "description": "Changes the fields sent. A psk or password that is absent is kept; an empty one clears it. Changing the security to a mode that does not use a secret clears it.",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The Wi-Fi profile id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WifiProfileInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The changed profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteWifiProfile",
+        "summary": "Delete a Wi-Fi profile",
+        "description": "Deletes a profile no phone group or phone uses; 409 names how many do.",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The Wi-Fi profile id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/wifi": {
+      "get": {
+        "operationId": "getPhoneGroupWifi",
+        "summary": "A phone group's Wi-Fi setup",
+        "description": "Returns the Wi-Fi profiles assigned to the group, its roaming and radio settings, and whether provisioning pushes them (pushing: a verified profile is among them).",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The phone group id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The group's Wi-Fi setup",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiScope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putPhoneGroupWifi",
+        "summary": "Set a phone group's Wi-Fi setup",
+        "description": "Replaces the group's profiles (at most 10) and its roaming and radio settings as a whole; an empty list removes the profiles and an absent radio removes the settings. Settings the model's template has no key for are not written. The change reaches the phones through the automatic resync.",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The phone group id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WifiGroupInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The group's Wi-Fi setup after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiScope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phones/{id}/wifi": {
+      "get": {
+        "operationId": "getPhoneWifi",
+        "summary": "A phone's Wi-Fi profiles",
+        "description": "Returns the Wi-Fi profiles assigned to the phone, those it inherits from its group, and whether provisioning pushes them.",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The phone id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The phone's Wi-Fi setup",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiScope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putPhoneWifi",
+        "summary": "Set a phone's Wi-Fi profiles",
+        "description": "Replaces the profiles assigned to this phone (at most 10). They come after its group's, and one with the same SSID replaces the group's.",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The phone id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WifiPhoneInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The phone's Wi-Fi setup after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiScope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/time-conditions": {
       "get": {
         "operationId": "listTimeConditions",
@@ -17485,9 +17922,19 @@
         "type": "object",
         "required": ["promptLanguage", "effective", "languages"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."},
-          "effective": {"type": "string", "description": "The language callers hear for this box now."},
-          "languages": {"type": "array", "items": {"type": "string"}, "description": "The languages a box can be set to."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."
+          },
+          "effective": {
+            "type": "string",
+            "description": "The language callers hear for this box now."
+          },
+          "languages": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The languages a box can be set to."
+          }
         }
       },
       "VoicemailBoxLanguageUpdate": {
@@ -17495,12 +17942,23 @@
         "additionalProperties": false,
         "required": ["promptLanguage"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."
+          }
         }
       },
       "VoicemailBoxSummary": {
         "type": "object",
-        "required": ["id", "extensionId", "number", "name", "unheard", "total", "promptLanguage"],
+        "required": [
+          "id",
+          "extensionId",
+          "number",
+          "name",
+          "unheard",
+          "total",
+          "promptLanguage"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -18865,9 +19323,15 @@
         "required": ["node", "text"],
         "properties": {
           "node": { "type": "string", "description": "A graph node id." },
-          "port": { "type": "string", "description": "The output port of the node the call leaves through; for a last step, the port it ends at." },
+          "port": {
+            "type": "string",
+            "description": "The output port of the node the call leaves through; for a last step, the port it ends at."
+          },
           "text": { "type": "string" },
-          "at": { "type": "string", "description": "On a time condition step, the instant that was evaluated." },
+          "at": {
+            "type": "string",
+            "description": "On a time condition step, the instant that was evaluated."
+          },
           "branches": {
             "type": "array",
             "description": "The choices of an IVR menu traced without a key.",
@@ -18881,22 +19345,45 @@
         "properties": {
           "port": { "type": "string" },
           "label": { "type": "string" },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } }
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          }
         }
       },
       "FlowTrace": {
         "type": "object",
-        "required": ["configRevision", "at", "from", "number", "outcome", "steps", "routingTrace"],
+        "required": [
+          "configRevision",
+          "at",
+          "from",
+          "number",
+          "outcome",
+          "steps",
+          "routingTrace"
+        ],
         "properties": {
           "configRevision": { "type": "integer", "format": "int64" },
           "at": { "type": "string" },
           "from": { "type": "string" },
           "number": { "type": "string" },
-          "outcome": { "type": "string", "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing." },
+          "outcome": {
+            "type": "string",
+            "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing."
+          },
           "route": { "type": "string" },
-          "reason": { "type": "string", "description": "Why the call was rejected." },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } },
-          "routingTrace": { "type": "array", "items": { "$ref": "#/components/schemas/TraceStep" } }
+          "reason": {
+            "type": "string",
+            "description": "Why the call was rejected."
+          },
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          },
+          "routingTrace": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TraceStep" }
+          }
         }
       },
       "FlowRevision": {
@@ -20585,7 +21072,7 @@
           },
           "languages": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": { "type": "string" },
             "description": "The languages the box can be set to."
           }
         }
@@ -26415,6 +26902,294 @@
           }
         }
       },
+      "WifiProfile": {
+        "type": "object",
+        "required": ["id", "name", "ssid", "security", "pskSet", "passwordSet"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ssid": {
+            "type": "string"
+          },
+          "security": {
+            "type": "string",
+            "enum": [
+              "open",
+              "wpa2-psk",
+              "wpa3-sae",
+              "owe",
+              "wpa2-enterprise",
+              "wpa3-enterprise"
+            ]
+          },
+          "pskSet": {
+            "type": "boolean",
+            "description": "A pre-shared key is stored. The key itself is never returned."
+          },
+          "eapMethod": {
+            "type": "string",
+            "enum": ["", "peap"]
+          },
+          "identity": {
+            "type": "string"
+          },
+          "anonymousIdentity": {
+            "type": "string"
+          },
+          "passwordSet": {
+            "type": "boolean",
+            "description": "An 802.1X password is stored. The password itself is never returned."
+          },
+          "caCert": {
+            "type": "string",
+            "enum": ["system", "tofu", "skip"],
+            "description": "How an enterprise profile verifies the RADIUS server: system certificates, trust on first use, or no verification."
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "hidden": {
+            "type": "boolean"
+          },
+          "preferAccount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3,
+            "description": "0 is automatic."
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "The profile joined a test phone. Provisioning writes no network until the phone's profiles include a verified one."
+          },
+          "groups": {
+            "type": "integer",
+            "description": "Phone groups the profile is assigned to."
+          },
+          "phones": {
+            "type": "integer",
+            "description": "Phones the profile is assigned to."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WifiProfileList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WifiProfile"
+            }
+          }
+        }
+      },
+      "WifiProfileInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "On create name, ssid and security are required.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Unique name of the profile, at most 64 characters."
+          },
+          "ssid": {
+            "type": "string",
+            "description": "1 to 32 bytes."
+          },
+          "security": {
+            "type": "string",
+            "enum": [
+              "open",
+              "wpa2-psk",
+              "wpa3-sae",
+              "owe",
+              "wpa2-enterprise",
+              "wpa3-enterprise"
+            ],
+            "description": "The security mode. A model takes the modes its template has: WP8x6 all, WP810/822/825 open, wpa2-psk and wpa3-sae, WP856 open and wpa2-psk."
+          },
+          "psk": {
+            "type": "string",
+            "writeOnly": true,
+            "x-hello-secret": true,
+            "description": "The pre-shared key, 8 to 63 printable ASCII characters. Write-only."
+          },
+          "eapMethod": {
+            "type": "string",
+            "enum": ["peap"],
+            "description": "The EAP method of an enterprise profile; only peap."
+          },
+          "identity": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The 802.1X identity of an enterprise profile."
+          },
+          "anonymousIdentity": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The anonymous (outer) identity of an enterprise profile."
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true,
+            "x-hello-secret": true,
+            "description": "The 802.1X password. Write-only."
+          },
+          "caCert": {
+            "type": "string",
+            "enum": ["system", "tofu", "skip"],
+            "description": "How an enterprise profile verifies the RADIUS server: system certificates, trust on first use, or no verification."
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "0 to 10; a higher number is listed first. Written to the WP8x6 only."
+          },
+          "hidden": {
+            "type": "boolean",
+            "description": "The network does not broadcast its name. Written to the WP810/822/825 only."
+          },
+          "preferAccount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3,
+            "description": "0 for automatic, else the account 1 to 3 the network prefers. Written to the WP8x6 only."
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "The profile joined a test phone. Provisioning writes no network until the phone's profiles include a verified one."
+          }
+        }
+      },
+      "WifiRadio": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Roaming and radio settings. A field that is absent is not written, so the phone keeps its own. Each model takes the fields its template has a key for: WP8x6 band, roamMode (default, boost), threshold, poorScan, prompt; WP810/822/825 threshold, poorScan, dot11r, dot11v; WP856 all but prompt. 802.11k has no key in any template and is an access point setting.",
+        "properties": {
+          "band": {
+            "type": "string",
+            "enum": ["both", "2.4", "5"],
+            "description": "Radio band: both, 2.4 or 5 (GHz)."
+          },
+          "roamMode": {
+            "type": "string",
+            "enum": ["default", "boost", "fast", "custom"],
+            "description": "Roaming mode; WP8x6 takes default and boost, WP856 all four."
+          },
+          "threshold": {
+            "type": "integer",
+            "minimum": -100,
+            "maximum": -30,
+            "description": "Roaming signal threshold, dBm."
+          },
+          "poorScan": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 300,
+            "description": "Poor signal scan interval, seconds."
+          },
+          "goodScan": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 600,
+            "description": "Good signal scan interval, seconds."
+          },
+          "gain": {
+            "type": "integer",
+            "minimum": 4,
+            "maximum": 20,
+            "description": "Roaming gain, dB."
+          },
+          "dot11r": {
+            "type": "boolean",
+            "description": "802.11r fast BSS transition."
+          },
+          "dot11v": {
+            "type": "boolean",
+            "description": "802.11v BSS transition management."
+          },
+          "prompt": {
+            "type": "boolean",
+            "description": "Show the roaming prompt."
+          }
+        }
+      },
+      "WifiScope": {
+        "type": "object",
+        "required": ["profileIds", "inheritedProfileIds", "pushing"],
+        "properties": {
+          "profileIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "inheritedProfileIds": {
+            "type": "array",
+            "description": "For a phone, the profiles of its group.",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "pushing": {
+            "type": "boolean",
+            "description": "A verified profile is among the profiles, so provisioning writes the networks."
+          },
+          "radio": {
+            "$ref": "#/components/schemas/WifiRadio"
+          }
+        }
+      },
+      "WifiGroupInput": {
+        "type": "object",
+        "required": ["profileIds"],
+        "additionalProperties": false,
+        "properties": {
+          "profileIds": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "The ids of the Wi-Fi profiles, the whole list; at most 10."
+          },
+          "radio": {
+            "$ref": "#/components/schemas/WifiRadio"
+          }
+        }
+      },
+      "WifiPhoneInput": {
+        "type": "object",
+        "required": ["profileIds"],
+        "additionalProperties": false,
+        "properties": {
+          "profileIds": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "The ids of the Wi-Fi profiles, the whole list; at most 10."
+          }
+        }
+      },
       "ScheduleList": {
         "type": "object",
         "required": ["items"],
@@ -27343,23 +28118,73 @@
       },
       "QueueCallback": {
         "type": "object",
-        "required": ["id", "queueId", "number", "callerName", "status", "attempts", "positionKey", "nextAttemptAt", "claimedBy", "agent", "result", "createdAt", "expiresAt"],
+        "required": [
+          "id",
+          "queueId",
+          "number",
+          "callerName",
+          "status",
+          "attempts",
+          "positionKey",
+          "nextAttemptAt",
+          "claimedBy",
+          "agent",
+          "result",
+          "createdAt",
+          "expiresAt"
+        ],
         "properties": {
-          "id": {"type": "integer", "format": "int64"},
-          "queueId": {"type": "integer", "format": "int64"},
-          "number": {"type": "string", "description": "The number to call back."},
-          "callerName": {"type": "string", "description": "From the shared name sources (phonebooks); empty when none."},
-          "status": {"type": "string", "enum": ["waiting", "dialling", "connected", "failed", "cancelled", "expired"]},
-          "attempts": {"type": "integer", "description": "Attempts made, at most 3."},
-          "positionKey": {"type": "integer", "format": "int64", "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."},
-          "nextAttemptAt": {"type": "string", "format": "date-time"},
-          "claimedBy": {"type": "string", "description": "The node working on it while dialling."},
-          "leaseUntil": {"type": "string", "format": "date-time", "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."},
-          "agent": {"type": "string", "description": "The agent it was connected to."},
-          "result": {"type": "string", "description": "The last attempt's outcome or the way the request ended."},
-          "createdAt": {"type": "string", "format": "date-time"},
-          "expiresAt": {"type": "string", "format": "date-time"},
-          "finishedAt": {"type": "string", "format": "date-time"}
+          "id": { "type": "integer", "format": "int64" },
+          "queueId": { "type": "integer", "format": "int64" },
+          "number": {
+            "type": "string",
+            "description": "The number to call back."
+          },
+          "callerName": {
+            "type": "string",
+            "description": "From the shared name sources (phonebooks); empty when none."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "dialling",
+              "connected",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Attempts made, at most 3."
+          },
+          "positionKey": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."
+          },
+          "nextAttemptAt": { "type": "string", "format": "date-time" },
+          "claimedBy": {
+            "type": "string",
+            "description": "The node working on it while dialling."
+          },
+          "leaseUntil": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."
+          },
+          "agent": {
+            "type": "string",
+            "description": "The agent it was connected to."
+          },
+          "result": {
+            "type": "string",
+            "description": "The last attempt's outcome or the way the request ended."
+          },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "finishedAt": { "type": "string", "format": "date-time" }
         }
       },
       "QueueCallbackList": {

@@ -22,6 +22,7 @@ import (
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/phonebook"
+	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
@@ -124,6 +125,15 @@ type Store interface {
 	ReplaceRingRules(ctx context.Context, actor string, in []store.RingRuleInput) ([]store.RingRule, error)
 	GetRingMap(ctx context.Context) (store.RingMap, error)
 	ReplaceRingMap(ctx context.Context, actor string, groupID *int64, in []store.RingMapEntry) (store.RingMap, error)
+	ListWifiProfiles(ctx context.Context) ([]store.WifiProfile, error)
+	GetWifiProfile(ctx context.Context, id int64) (store.WifiProfile, error)
+	CreateWifiProfile(ctx context.Context, actor string, in store.WifiProfileInput) (store.WifiProfile, error)
+	UpdateWifiProfile(ctx context.Context, actor string, id int64, in store.WifiProfileInput) (store.WifiProfile, error)
+	DeleteWifiProfile(ctx context.Context, actor string, id int64) error
+	GetWifiGroup(ctx context.Context, groupID int64) (store.WifiScope, error)
+	PutWifiGroup(ctx context.Context, actor string, groupID int64, ids []int64, radio prov.WifiRadio) (store.WifiScope, error)
+	GetWifiPhone(ctx context.Context, phoneID int64) (store.WifiScope, error)
+	PutWifiPhone(ctx context.Context, actor string, phoneID int64, ids []int64) (store.WifiScope, error)
 	ListTimeConditions(ctx context.Context) ([]store.TimeCondition, error)
 	GetTimeCondition(ctx context.Context, id int64) (store.TimeCondition, error)
 	CreateTimeCondition(ctx context.Context, actor string, in store.TimeConditionInput, check store.Check) (store.TimeCondition, error)

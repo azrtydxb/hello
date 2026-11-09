@@ -1433,6 +1433,7 @@ Implementation notes (template route, no migration):
   right and is unchanged.
 - Under `-race` the Opus build is off (opus_race.go), so the loopback test
   skips there; the -race count proves nothing about the codec.
+
 ## IVR homed-callee data race (ivrHomeCallee vs release)
 
 - Root cause: `homedCall.legs` had no lock of its own. `ivrHomeCallee`
@@ -1448,3 +1449,57 @@ Implementation notes (template route, no migration):
 - Firmware-upgrade confirmation prompt off (P8375=0, P84988=1) for unattended upgrades, or leave it
 - Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
 - Account sharing group password: shared default `AccountSharing`, or a per-group secret
+
+## Wi-Fi profiles and roaming (item 31, S-23, S-24)
+
+Keys come from Grandstream's official templates only (config-template-10212026.zip):
+`wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`, `wp856_config_1.0.3.16`.
+Nothing here is confirmed on a handset.
+
+- **Model scope.** WP816/826/836, WP810/822/825 and WP856 get Wi-Fi keys. The
+  WP820 has its own template (`wp820_config_1.0.7.90`) and is not written. No
+  other vendor is written: no vendor document for their Wi-Fi keys is on hand.
+- **Profiles are named records**, assigned to phone groups and to single phones
+  (a phone's profile with the same SSID replaces its group's). The spec said
+  groups only; phones were asked for. At most 10 per group and per phone; a
+  model writes at most its slots (WP8x6 10, WP810/822/825 17, WP856 1), lowest
+  priority dropped first.
+- **17 networks on the WP810/822/825, not 20.** The template gives networks
+  18 to 20 a security key outside the pattern of the other 17 (P84772, P84872,
+  P84972 against P83002 + 100 (n - 1)). Unconfirmed keys are not written.
+- **No enterprise profile in network 5 of a WP8x6.** The template names its
+  EAP method P83304 where the pattern needs P83404; the profile moves to the
+  next network.
+- **No 802.1X, WPA3 or OWE on models whose template has no key for it.** WP8x6:
+  open, WPA2/WPA3 personal, OWE, WPA2/WPA3 enterprise (PEAP, MSCHAPv2).
+  WP810/822/825: open, WPA2 and WPA3 personal (no EAP keys in the template).
+  WP856: open and WPA2 personal. A profile a model cannot take is skipped for
+  that model. EAP-TLS and an uploaded CA wait for S-25 (device certificates).
+- **Server certificate check** defaults to system certificates (P83016 = 1);
+  trust on first use and skip are offered, uploaded CA is not (S-25).
+- **Band is a group radio setting, not a profile field.** The templates have
+  one band key per phone (P25438 on the WP8x6, P25420 and P25421 on the
+  WP856), none per network. Hidden is written to the WP810/822/825 only
+  (P83050), priority and preferred account to the WP8x6 only (P83049, P83085).
+- **802.11k is not provisioned.** No key for it in any of the three templates.
+  802.11r is P83048 per network (WP810/822/825) and P25315 (WP856); 802.11v is
+  P84992 (WP810/822/825) and P82333 (WP856); the WP8x6 template has neither.
+  The spec's P22232/P22231 map to all three; P82281 is the VoWLAN target delay
+  in the templates (not a roaming threshold), left to S-12 overrides with the
+  power-save mode P82269.
+- **Safety gate (decision 14) is enforced at render time**: profiles are
+  written only when the phone's effective set holds one marked verified. The
+  radio settings do not wait for it. The API shows `pushing`. An assigned but
+  unverified set is accepted (so the test-phone step can be prepared), and
+  writes nothing.
+- **Hello owns the slots once a phone has profiles**: slots it does not fill are
+  written empty so a removed profile disappears from the handset.
+- **P84991 (provisionable OEM override) is never written**, so an OEM Wi-Fi
+  setup survives.
+- **Sealing**: the PSK and the 802.1X password use the store's secret box with
+  contexts `wifi-psk:<id>` and `wifi-password:<id>`; the API shows only
+  `pskSet` and `passwordSet`; previews mask them. A change does not bump the
+  configuration revision (as the ring map): the automatic resync notices the
+  changed render data.
+- Migration 00052 (`wifi_profiles`, `wifi_assignments`, `wifi_radio`); the
+  migrate test counts follow it.

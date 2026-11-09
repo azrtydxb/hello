@@ -540,6 +540,19 @@ func maskSecrets(d *prov.RenderData) {
 		}
 		d.Book = &b
 	}
+	if d.Wifi != nil {
+		w := *d.Wifi
+		w.Profiles = slices.Clone(w.Profiles)
+		for i := range w.Profiles {
+			if w.Profiles[i].PSK != "" {
+				w.Profiles[i].PSK = mask
+			}
+			if w.Profiles[i].Password != "" {
+				w.Profiles[i].Password = mask
+			}
+		}
+		d.Wifi = &w
+	}
 	if d.Firmware != nil {
 		fw := *d.Firmware
 		fw.URL = tokenInPathRe.ReplaceAllString(fw.URL, "/p/"+mask+"/")
