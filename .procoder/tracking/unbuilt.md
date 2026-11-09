@@ -14,7 +14,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 14  | Door-open DTMF `*50` (S-47)                                                   | todo (after 13)             |
 | 15  | Setting overrides and WP extras (S-12)                                        | todo                        |
 | 16  | Doorbell webhook (S-48)                                                       | todo (after 13)             |
-| 17  | Door video preview (S-49)                                                     | todo (code), hw (test)      |
+| 17  | Door video preview (S-49)                                                     | wip (#285)                  |
 | 18  | vCard phonebook slot (S-31), partial                                          | todo                        |
 | 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)    | todo                        |
 | 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                      | todo                        |
