@@ -1,5 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { errorMessage, fieldErrors, type FieldError } from "../api";
+import {
+  errorMessage,
+  fieldErrors,
+  hasNoTarget,
+  type FieldError,
+} from "../api";
 import {
   createTimeCondition,
   putTimeCondition,
@@ -72,7 +77,7 @@ function validateDest(
   key: string,
   d: TcDestination,
 ) {
-  if (d.kind === "hangup") return;
+  if (hasNoTarget(d.kind)) return;
   if (d.target.trim() === "") out[`${key}.target`] = "Choose a target.";
   else if (
     d.kind === "external" &&

@@ -317,6 +317,14 @@ var kwOnlyEnv = map[string]string{
 	"HELLO_AI_TIMEOUT":                   "kw tuning; set through control.extraEnv",
 }
 
+// kwKamailioChartLag lists Kamailio env vars whose kw form (a field
+// reference) the chart does not render yet, each with the kamailio-ha phase
+// that closes the gap. The list must be empty once the chart option for two
+// instances lands (phase 4).
+var kwKamailioChartLag = map[string]string{
+	"KAMAILIO_PUBLIC_HOST": "phase 1: kw's two instances advertise their own node address (status.podIP); the chart option follows in phase 4",
+}
+
 // TestChartEnvParityWithKw fails if a hello-sip, hello-control or Kamailio
 // environment variable in the kw manifests is missing from the chart's
 // render (other than the documented kw-only tuning), or a variable the kw
@@ -354,6 +362,9 @@ func TestChartEnvParityWithKw(t *testing.T) {
 		kwEnv, chartEnv := envOf(kwC), envOf(chartC)
 		for name, e := range kwEnv {
 			if _, skip := kwOnlyEnv[name]; skip && p.name == "hello-control" {
+				continue
+			}
+			if _, lag := kwKamailioChartLag[name]; lag && p.name == "kamailio" {
 				continue
 			}
 			ce, ok := chartEnv[name]

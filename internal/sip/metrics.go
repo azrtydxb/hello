@@ -83,6 +83,10 @@ type Metrics struct {
 	// IVRTotal counts IVR menu events: entered, option, direct_dial,
 	// timeout, invalid, dial, dial_failed, connected and exit_<kind>.
 	IVRTotal *prometheus.CounterVec // event
+	// DirectoryTotal counts dial-by-name searches by result (one, several,
+	// too_many, none, too_long, timeout, chosen, invalid_choice, connected,
+	// failed).
+	DirectoryTotal *prometheus.CounterVec // result
 	// Call queues (migration 00040). QueueWaiting is the callers waiting in
 	// queues this node holds (sum it across nodes); QueueWait is the time
 	// callers waited by outcome (answered, abandoned, timeout, full,
@@ -249,6 +253,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.IVRTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_ivr_total", Help: "IVR menu events (entered, option, direct_dial, timeout, invalid, dial, dial_failed, connected, exit_<kind>).",
 	}, []string{"event"})
+	m.DirectoryTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_directory_search_total", Help: "Dial-by-name searches by result (one, several, too_many, none, too_long, timeout, chosen, invalid_choice, connected, failed).",
+	}, []string{"result"})
 	m.QueueWaiting = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "hello_queue_waiting", Help: "Callers waiting in a queue whose dialogs this node holds; sum across nodes.",
 	}, []string{"queue"})
@@ -286,7 +293,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Parks, m.Forwarded, m.GroupCalls,
-		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.TimeConditionTotal,
+		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.DirectoryTotal, m.TimeConditionTotal,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	m.Conf = newConfMetrics(reg)

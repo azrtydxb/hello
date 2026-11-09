@@ -3,6 +3,7 @@ import {
   deleteQueue,
   errorMessage,
   IVR_DESTINATION_LABEL,
+  hasNoTarget,
   listAnnouncements,
   listExtensions,
   listIvrMenus,
@@ -80,8 +81,8 @@ function useChoices(): { choices: Choices; error: string | null } {
 }
 
 function destinationText(d: IvrDestination): string {
-  return d.kind === "hangup"
-    ? IVR_DESTINATION_LABEL.hangup
+  return hasNoTarget(d.kind)
+    ? IVR_DESTINATION_LABEL[d.kind]
     : `${IVR_DESTINATION_LABEL[d.kind]} ${d.target}`;
 }
 

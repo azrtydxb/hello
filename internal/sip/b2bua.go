@@ -1190,6 +1190,14 @@ func (c *call) end(status int, side, reason, result string) {
 		}
 		c.mu.Unlock()
 		c.sessionStop()
+		// Stop the heartbeat and everything keyed to it (the voicemail
+		// recorder's context). Phase 7 replaced this close with haStop's and
+		// nothing stopped the heartbeat again: every ended call left a
+		// goroutine refreshing its slots forever and a voicemail recorder
+		// running on after the caller was gone.
+		if c.stopHB != nil {
+			close(c.stopHB)
+		}
 		c.endMOH()
 		c.closeMedia()
 		c.stopIVR()

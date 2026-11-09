@@ -27,6 +27,7 @@ var StoredKinds = map[string]Reach{
 	"external":       {KindExternal, "call"},
 	"sip_uri":        {KindSIPURI, "call"},
 	"internal":       {KindInternalDID, "call"},
+	"directory":      {KindDirectory, "call"},
 }
 
 // NoDestination lists the stored values that mean "no edge": the call ends
@@ -65,6 +66,7 @@ var FeatureCodeTargets = map[string]string{
 	"announcement":   "announcement",
 	"ivr":            "ivr",
 	"time_condition": "time_condition",
+	"directory":      "directory",
 }
 
 // FeatureCodeNoTarget lists the other feature-code actions, each with why it

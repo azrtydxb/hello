@@ -7636,7 +7636,7 @@
       "put": {
         "operationId": "putFeatureCodes",
         "summary": "Replace the DTMF feature codes",
-        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, ivr, queue_login, queue_logout, queue_pause, queue_unpause (the argument of queue_pause is the pause reason), call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed, time_condition (the argument is the time condition's name), tc_override (the argument is toggle, open, closed or auto). Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
+        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, ivr, queue_login, queue_logout, queue_pause, queue_unpause (the argument of queue_pause is the pause reason), call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed, time_condition (the argument is the time condition's name), directory (the dial-by-name directory, no argument), tc_override (the argument is toggle, open, closed or auto). Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
         "tags": ["feature-codes"],
         "requestBody": {
           "required": true,
@@ -17079,6 +17079,7 @@
               "announcement",
               "ivr",
               "time_condition",
+              "directory",
               "queue",
               "extension",
               "ring_group"
@@ -17169,6 +17170,7 @@
               "announcement",
               "ivr",
               "time_condition",
+              "directory",
               "queue",
               "extension",
               "ring_group"
@@ -17281,6 +17283,7 @@
               "announcement",
               "ivr",
               "time_condition",
+              "directory",
               "queue",
               "extension",
               "ring_group"
@@ -19099,6 +19102,7 @@
               "pickup_group",
               "pickup_directed",
               "time_condition",
+              "directory",
               "tc_override",
               "queue_login",
               "queue_logout",
@@ -19163,6 +19167,7 @@
                     "pickup_group",
                     "pickup_directed",
                     "time_condition",
+                    "directory",
                     "tc_override",
                     "queue_login",
                     "queue_logout",
@@ -21921,6 +21926,7 @@
               "ivr",
               "conference",
               "time_condition",
+              "directory",
               "queue",
               "ring_group",
               "voicemail",
@@ -21947,7 +21953,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello reaches an external SIP URI over UDP only). Required unless destinationKind is \"internal\", in which case it must be empty."
+            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), the dial-by-name directory (directory, no target), or a sip: URI (sips: is refused: Hello reaches an external SIP URI over UDP only). Required unless destinationKind is \"internal\" or \"directory\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean"
@@ -22025,6 +22031,7 @@
               "ivr",
               "conference",
               "time_condition",
+              "directory",
               "queue",
               "ring_group",
               "voicemail",
@@ -22052,7 +22059,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello reaches an external SIP URI over UDP only). Empty when destinationKind is \"internal\": the called DID names the extension. Required unless destinationKind is \"internal\", in which case it must be empty."
+            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), the dial-by-name directory (directory, no target), or a sip: URI (sips: is refused: Hello reaches an external SIP URI over UDP only). Empty when destinationKind is \"internal\" (the called DID names the extension) or \"directory\". Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean",
@@ -22131,6 +22138,7 @@
               "ivr",
               "conference",
               "time_condition",
+              "directory",
               "queue",
               "ring_group",
               "voicemail",
@@ -22158,7 +22166,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello reaches an external SIP URI over UDP only). Empty when destinationKind is \"internal\": the called DID names the extension."
+            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), the dial-by-name directory (directory, no target), or a sip: URI (sips: is refused: Hello reaches an external SIP URI over UDP only). Empty when destinationKind is \"internal\" (the called DID names the extension) or \"directory\"."
           },
           "enabled": {
             "type": "boolean",
@@ -25030,13 +25038,14 @@
               "ivr",
               "external",
               "time_condition",
+              "directory",
               "queue"
             ],
             "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; an announcement (played, then hang up); a paging group; another IVR menu; a call queue; a time condition; or an external number routed through the outbound routes."
           },
           "target": {
             "type": "string",
-            "description": "Empty for hangup; an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue, time_condition); a page code such as *60 (paging); a number (external)."
+            "description": "Empty for hangup and directory (the dial-by-name directory); an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue, time_condition); a page code such as *60 (paging); a number (external)."
           }
         }
       },
@@ -25142,6 +25151,10 @@
             "type": "boolean",
             "description": "Whether the caller may dial an extension number from the menu."
           },
+          "promptLanguage": {
+            "type": "string",
+            "description": "Language of the spoken prompts the menu's applications add (the dial-by-name directory), such as en or nl. Empty inherits the deployment language."
+          },
           "timeout": {
             "$ref": "#/components/schemas/IVRDestination"
           },
@@ -25219,6 +25232,10 @@
           "allowDirectDial": {
             "type": "boolean",
             "description": "Defaults to false."
+          },
+          "promptLanguage": {
+            "type": "string",
+            "description": "Language of the spoken prompts the menu's applications add, such as en or nl. Empty or absent inherits the deployment language."
           },
           "timeout": {
             "$ref": "#/components/schemas/IVRDestination",
@@ -25574,13 +25591,14 @@
               "ivr",
               "external",
               "queue",
-              "time_condition"
+              "time_condition",
+              "directory"
             ],
             "description": "The IVR destination kinds, plus another time condition."
           },
           "target": {
             "type": "string",
-            "description": "Empty for hangup; an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue, time_condition); a page code (paging); a number (external)."
+            "description": "Empty for hangup and directory (the dial-by-name directory); an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue, time_condition); a page code (paging); a number (external)."
           },
           "thenVoicemail": {
             "type": "string",

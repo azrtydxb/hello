@@ -867,6 +867,8 @@ func TestValidateRingGroupFailover(t *testing.T) {
 		{"group itself", "ring_group", "sales", true},
 		{"group bad name", "ring_group", "a b", true},
 		{"group empty", "ring_group", "", true},
+		{"directory", "directory", "", false},
+		{"directory with a target", "directory", "x", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := validateRingGroup(base(tc.kind, tc.target))

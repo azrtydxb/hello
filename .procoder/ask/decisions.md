@@ -1247,3 +1247,58 @@ Implementation notes (template route, no migration):
 - P841 = f1=400@-32,c=375/375; : PSTN Disconnect Tone, UAE busy tone 400 Hz, 375 ms on/off. Format and -32 dB level from the template's example (f1=480@-32,f2=620@-32,c=500/500;).
 - Unconfirmed, left out: a silence-timeout backstop (the HT813 template has no such key; P3630 is only the PSTN ring timeout for unanswered calls, P4421/P28761 are hard call-duration limits) and the UAE congestion/disconnect tone (no Grandstream source; a single P841 tone only).
 - Applied through Phone.FXO (model HT813), not a new WP family, so the generic Grandstream key set is unchanged. TR-069 untouched.
+
+## 2026-10-29 FXO line busy after a voicemail call (fix-trunk-slot-leak)
+
+- **Finding.** The trunk slot is a Valkey sorted set with a 30 s TTL per
+  member that the call heartbeat refreshes, so a slot cannot leak
+  persistently on its own; production's cluster-wide `hello_trunk_active_calls`
+  is 0. "full" answers the caller 503, not 486: the 486s are the HT813
+  itself ("rejected"). No migration and no startup sweep are needed.
+- **Real defects fixed.** (1) `end()` stopped closing `stopHB` when Phase 7
+  swapped it for `haStop`, so every ended call leaked its heartbeat goroutine
+  and the voicemail recorder never saw the hangup. (2) A refresh racing the
+  release re-added the freed slot (counts until its TTL); now released again.
+  (3) An Opus decoder that hit the library assertion stayed broken for the
+  whole call; it is rebuilt after a panic or 5 refused packets in a row. The
+  music encoder was also created outside the stack pin.
+
+## Dial-by-name directory (pbx-gaps B3, S-13) (2026-10-27)
+
+- A new destination kind `directory` with an empty target, accepted by every
+  output that stores a call destination: inbound routes, ring group fallback,
+  IVR keys / timeout / invalid, time condition branches, queue exits (decision
+  3), plus the feature-code action `directory`. Migration 00048 (renumbered by
+  the merge captain) widens the CHECK lists additively with
+  `pg_temp.hello_check_values`; down removes or hangs up the rows of the kind.
+- Default feature code is `*42`, not `*411` (D11). `*411` extends the default
+  directed-pickup code `*41`, and the dial-space guard refuses a code that is
+  a prefix of or prefixed by another, so it could never be seeded. The action
+  is configurable, so an installation that frees `*41` can use `*411`.
+  Reported to the coordinator: the same clash exists for follow-me `*74`/`*75`
+  against park.
+- The index is built into the snapshot (`Snapshot.DirectorySearch`), with
+  `directory_hidden` carried in the snapshot's extension row. Matching is by
+  keypad spelling of the first or last word of the extension name (the
+  extensions book has one name field); accents fold; digits 0 and 1 carry no
+  letters. More than 7 keys are refused with an extra prompt key
+  `directory.toolong` (the spec lists six keys; "asks for fewer" needs its own
+  sentence).
+- Connection uses the IVR's own dial path (`ivrDial`), not a REFER: the caller
+  is a one-legged B2BUA call on the relay, so putting the extension in front
+  of the relay gives the "blind transfer" result, keeps the CDR as one call and
+  applies the extension's own forwarding and voicemail.
+- The one connected name is the voicemail box's recording (`name_object`)
+  when present, read with one box lookup at hand-over time as the voicemail
+  application does; otherwise spoken with the Speaker (the text-to-speech
+  cache over go-ai-sdk). `directory.connecting` is "Connecting you to" with no
+  name placeholder so the recording and the spoken name both follow it.
+- A call that reaches the directory without a menu (route, time condition,
+  group fallback, `*42`) uses phase `directory` for HA: a taker restarts it
+  from its first prompt. Inside a menu the menu's phase is kept.
+- Canvas: one pseudo-terminal node `directory:names` that every output kind
+  and the feature code draw an edge to.
+- S-20 for menus: `ivr_menus.prompt_language` (NULL inherits), resolved with
+  `voiceprompt.Resolve` as voicemail boxes are; API `promptLanguage`, console
+  select on the IVR form. Merged `origin/gaps-languages` (PR 208) for
+  `voiceprompt.Resolve`; the PR depends on it.
