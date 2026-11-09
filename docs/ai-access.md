@@ -192,7 +192,6 @@ by `go run ./internal/mcp/cmd/doctable` and `TestDocsAIAccess` keeps them
 current.
 
 <!-- doctable:begin -->
-
 | Tool                            | Scope  | Operation                                                  | What it does                                                                                                                             |
 | ------------------------------- | ------ | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `listAIAgents`                  | read   | `GET /api/v1/ai/agents`                                    | Background agents                                                                                                                        |
@@ -253,6 +252,15 @@ current.
 | `getExtensionVoicemail`         | read   | `GET /api/v1/extensions/{id}/voicemail`                    | One extension's voicemail box                                                                                                            |
 | `updateExtensionVoicemail`      | write  | `PUT /api/v1/extensions/{id}/voicemail`                    | Change a voicemail box                                                                                                                   |
 | `revertVoicemailGreeting`       | write  | `DELETE /api/v1/extensions/{id}/voicemail/greeting/{slot}` | Revert a voicemail greeting to the default                                                                                               |
+| `listFaxDestinations`           | read   | `GET /api/v1/fax-destinations`                             | List fax destinations                                                                                                                    |
+| `createFaxDestination`          | admin  | `POST /api/v1/fax-destinations`                            | Create a fax destination                                                                                                                 |
+| `getFaxDestination`             | read   | `GET /api/v1/fax-destinations/{id}`                        | One fax destination                                                                                                                      |
+| `updateFaxDestination`          | admin  | `PUT /api/v1/fax-destinations/{id}`                        | Change a fax destination                                                                                                                 |
+| `deleteFaxDestination`          | admin  | `DELETE /api/v1/fax-destinations/{id}`                     | Delete a fax destination                                                                                                                 |
+| `listFaxes`                     | read   | `GET /api/v1/faxes`                                        | List faxes                                                                                                                               |
+| `sendFax`                       | write  | `POST /api/v1/faxes`                                       | Send a fax                                                                                                                               |
+| `getFax`                        | read   | `GET /api/v1/faxes/{id}`                                   | One fax                                                                                                                                  |
+| `deleteFax`                     | write  | `DELETE /api/v1/faxes/{id}`                                | Delete a fax                                                                                                                             |
 | `listFeatureCodes`              | read   | `GET /api/v1/feature-codes`                                | List DTMF feature codes                                                                                                                  |
 | `putFeatureCodes`               | write  | `PUT /api/v1/feature-codes`                                | Replace the DTMF feature codes                                                                                                           |
 | `listFlowCanvases`              | read   | `GET /api/v1/flow/canvases`                                | List flow canvases                                                                                                                       |
@@ -436,7 +444,6 @@ current.
 | `hello://cdrs/{id}`                | read  | One CDR with its trace.                          |
 | `hello://extensions/{id}`          | read  | One extension.                                   |
 | `hello://diagnostics/devices/{id}` | read  | A device's registration attempts and failures.   |
-
 <!-- doctable:end -->
 
 The server also offers three prompts that start common work from these

@@ -179,6 +179,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "gauge",
       },
       { label: "Call history", path: "/history", phase: 1, icon: "history" },
+      { label: "Faxes", path: "/faxes", phase: 5, icon: "printer" },
       {
         label: "Messages",
         path: "/messages",

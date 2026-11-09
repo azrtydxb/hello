@@ -37,6 +37,7 @@ Every key, the silence exit and the wrong-key exit use the same kinds:
 | External     | a number                  | Routed through the outbound routes as if the menu dialled it (the menu's number, else its name, is the source "extension"; add it to a route's source extensions if the route is restricted). |
 | Queue        | a queue name              | Joins the call queue (see [queues.md](queues.md)); its own failover destinations apply.                                                                                                       |
 | Directory    | none                      | The dial-by-name directory (below).                                                                                                                                                           |
+| Fax          | a fax destination name    | Moves the answered call to G.711 and starts the fax receiver; the PDF goes to the destination's owner (see [fax.md](fax.md)). A fax needs the fax engine; without it the menu says the choice is invalid. |
 
 A destination that does not answer returns the caller to the menu, which says
 the invalid-choice prompt and repeats; it does not end the call.

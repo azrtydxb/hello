@@ -87,6 +87,9 @@ func newEnvConfig(t *testing.T, cfg Config, box *secret.Box) *env {
 	cfg.Messages = st
 	cfg.Conferences = st
 	cfg.Batches = st
+	if cfg.Fax.Store == nil {
+		cfg.Fax.Store = st
+	}
 	if box != nil {
 		cfg.ProvStore = st
 	}

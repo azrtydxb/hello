@@ -14490,6 +14490,681 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/fax-destinations": {
+      "get": {
+        "operationId": "listFaxDestinations",
+        "summary": "List fax destinations",
+        "description": "Lists the fax destinations an inbound route or an IVR key can name: each names the extension that owns the faxes arriving there and, optionally, an email address the PDF is sent to instead of the owner's.",
+        "tags": [
+          "fax"
+        ],
+        "responses": {
+          "200": {
+            "description": "The destinations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaxDestinationList"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createFaxDestination",
+        "summary": "Create a fax destination",
+        "description": "Adds a fax destination. The name (1 to 40 of A-Z a-z 0-9 . _ -) is what a route or IVR key of kind fax names; it cannot change later. The owner extension must exist. With an email the received PDF goes there, otherwise to the users linked to the owner extension.",
+        "tags": [
+          "fax"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FaxDestinationCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaxDestination"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/fax-destinations/{id}": {
+      "get": {
+        "operationId": "getFaxDestination",
+        "summary": "One fax destination",
+        "description": "Returns one fax destination.",
+        "tags": [
+          "fax"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The destination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaxDestination"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "updateFaxDestination",
+        "summary": "Change a fax destination",
+        "description": "Changes the owner extension and the email address. The name cannot change, because routes and IVR keys refer to it.",
+        "tags": [
+          "fax"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FaxDestinationUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The destination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaxDestination"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteFaxDestination",
+        "summary": "Delete a fax destination",
+        "description": "Deletes a fax destination that no inbound route and no IVR key names. Faxes already received keep their owner.",
+        "tags": [
+          "fax"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/faxes": {
+      "get": {
+        "operationId": "listFaxes",
+        "summary": "List faxes",
+        "description": "Lists received and sent faxes, newest first, with their state: pages, the T.30 result, whether a PDF is stored and the email delivery. Filter by direction and status. The PDF is fetched with the pdf route.",
+        "tags": [
+          "fax"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size, 1-200."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The next of the previous page; omit for the first page."
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "inbound",
+                "outbound"
+              ]
+            },
+            "description": "Only received (inbound) or sent (outbound) faxes."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "sending",
+                "receiving",
+                "received",
+                "sent",
+                "partial",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "description": "Only faxes in this state."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of faxes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaxPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "sendFax",
+        "summary": "Send a fax",
+        "description": "Queues a PDF to send. Send multipart/form-data with `file` (the PDF, at most 10 MB and 50 pages), `to` (the destination in E.164, such as +41441234567) and optionally `callerId`, or JSON with `to`, `callerId` and `pdfBase64` (at most 700 KiB decoded). The PDF is rasterised at 204 by 196 dpi by the fax engine; a PDF that cannot be rasterised is refused with 422. Hello places the call through the outbound routes and retries up to 3 times, 5 minutes apart, on busy, no answer or no carrier. The answer is the queued fax; poll the fax for its state.",
+        "tags": [
+          "fax"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file",
+                  "to"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The PDF, at most 10 MB and 50 pages."
+                  },
+                  "to": {
+                    "type": "string",
+                    "pattern": "^\\+[1-9][0-9]{6,14}$",
+                    "description": "Destination number in E.164."
+                  },
+                  "callerId": {
+                    "type": "string",
+                    "pattern": "^\\+?[0-9]{1,20}$",
+                    "description": "Station identifier sent in the T.30 frames; empty for the outbound route's caller ID."
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FaxSend"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fax"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/faxes/{id}": {
+      "get": {
+        "operationId": "getFax",
+        "summary": "One fax",
+        "description": "Returns one fax with its state.",
+        "tags": [
+          "fax"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The fax",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fax"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteFax",
+        "summary": "Delete a fax",
+        "description": "Deletes a fax and its stored PDF. A queued fax is removed; a fax being sent is cancelled (its row stays, as cancelled). A fax being received answers 409.",
+        "tags": [
+          "fax"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted or cancelled"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/faxes/{id}/pdf": {
+      "get": {
+        "operationId": "getFaxPdf",
+        "summary": "Download a fax PDF",
+        "description": "Streams the PDF of a received or sent fax. The attachment name is fax-<yyyymmdd-hhmm>-<id>.pdf. A fax with no stored document answers 404.",
+        "tags": [
+          "fax"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The PDF",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "binary document; read the fax's fields with getFax",
+          "category": "binary-download"
+        }
+      }
+    },
+    "/api/v1/me/faxes": {
+      "get": {
+        "operationId": "listMyFaxes",
+        "summary": "My faxes",
+        "description": "Lists the faxes whose destination is owned by one of the signed-in user's own extensions, newest first.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size, 1-200."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The next of the previous page; omit for the first page."
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "inbound",
+                "outbound"
+              ]
+            },
+            "description": "Only received (inbound) or sent (outbound) faxes."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "sending",
+                "receiving",
+                "received",
+                "sent",
+                "partial",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "description": "Only faxes in this state."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of faxes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaxPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
+        }
+      }
+    },
+    "/api/v1/me/faxes/{id}/pdf": {
+      "get": {
+        "operationId": "getMyFaxPdf",
+        "summary": "Download one of my fax PDFs",
+        "description": "Streams the PDF of a fax owned by one of the signed-in user's own extensions. A fax owned by anyone else answers 404.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The PDF",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
+        }
+      }
+    },
     "/api/v1/ring-tags": {
       "get": {
         "operationId": "listRingTags",
@@ -21695,8 +22370,8 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["call", "page", "intercom", "conference", "callback"],
-            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or callback for a call Hello placed to a queue caller who asked to be called back."
+            "enum": ["call", "page", "intercom", "conference", "callback", "fax"],
+            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or callback for a call Hello placed to a queue caller who asked to be called back, or fax for a fax call (the fax is in the faxes list, by correlation id)."
           },
           "ringTag": {
             "type": "string",
@@ -21864,7 +22539,8 @@
           "destinations",
           "internalDialing",
           "codecs",
-          "messaging"
+          "messaging",
+          "faxMode"
         ],
         "properties": {
           "id": {
@@ -21962,6 +22638,11 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Off by default."
+          },
+          "faxMode": {
+            "type": "string",
+            "enum": ["passthrough", "t38", "off"],
+            "description": "How a fax call on this trunk is carried: passthrough (G.711 audio, the default), t38 (re-INVITE to T.38 when the carrier offers it, falling back to passthrough on 488) or off (fax calls on the trunk are refused with 488)."
           }
         }
       },
@@ -22064,6 +22745,11 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
+          },
+          "faxMode": {
+            "type": "string",
+            "enum": ["passthrough", "t38", "off"],
+            "description": "How a fax call on this trunk is carried: passthrough (G.711 audio, the default), t38 (re-INVITE to T.38 when the carrier offers it, falling back to passthrough on 488) or off (fax calls on the trunk are refused with 488)."
           }
         }
       },
@@ -22166,6 +22852,11 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
+          },
+          "faxMode": {
+            "type": "string",
+            "enum": ["passthrough", "t38", "off"],
+            "description": "How a fax call on this trunk is carried: passthrough (G.711 audio, the default), t38 (re-INVITE to T.38 when the carrier offers it, falling back to passthrough on 488) or off (fax calls on the trunk are refused with 488)."
           }
         }
       },
@@ -22580,6 +23271,7 @@
               "conference",
               "time_condition",
               "directory",
+              "fax",
               "queue",
               "ring_group",
               "voicemail",
@@ -22685,6 +23377,7 @@
               "conference",
               "time_condition",
               "directory",
+              "fax",
               "queue",
               "ring_group",
               "voicemail",
@@ -22792,6 +23485,7 @@
               "conference",
               "time_condition",
               "directory",
+              "fax",
               "queue",
               "ring_group",
               "voicemail",
@@ -25696,13 +26390,14 @@
               "external",
               "time_condition",
               "directory",
-              "queue"
+              "queue",
+              "fax"
             ],
-            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; an announcement (played, then hang up); a paging group; another IVR menu; a call queue; a time condition; or an external number routed through the outbound routes."
+            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; an announcement (played, then hang up); a paging group; another IVR menu; a call queue; a time condition; or a fax destination (the call is answered by the fax engine); or an external number routed through the outbound routes."
           },
           "target": {
             "type": "string",
-            "description": "Empty for hangup and directory (the dial-by-name directory); an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue, time_condition); a page code such as *60 (paging); a number (external)."
+            "description": "Empty for hangup and directory (the dial-by-name directory); an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue, time_condition, fax); a page code such as *60 (paging); a number (external)."
           }
         }
       },
@@ -26085,6 +26780,287 @@
           "usedBy": {
             "type": "integer",
             "description": "How many rules and ring groups name the tag."
+          }
+        }
+      },
+      "Fax": {
+        "type": "object",
+        "required": [
+          "id",
+          "direction",
+          "status",
+          "peerNumber",
+          "localNumber",
+          "destination",
+          "ownerExtension",
+          "pages",
+          "mode",
+          "bitRate",
+          "resultCode",
+          "resultText",
+          "hasPdf",
+          "correlationId",
+          "createdBy",
+          "createdAt",
+          "finishedAt",
+          "attempts",
+          "nextAttemptAt",
+          "mailTo",
+          "mailStatus"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "inbound",
+              "outbound"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "sending",
+              "receiving",
+              "received",
+              "sent",
+              "partial",
+              "failed",
+              "cancelled"
+            ],
+            "description": "queued and sending are outbound, receiving inbound. partial means some pages arrived (or went) before the T.30 session failed; the pages are kept."
+          },
+          "peerNumber": {
+            "type": "string",
+            "description": "The other party: the sender's number for a received fax, the destination for a sent one."
+          },
+          "localNumber": {
+            "type": "string",
+            "description": "The DID a fax arrived on, or the caller ID a fax was sent with."
+          },
+          "destination": {
+            "type": "string",
+            "description": "The fax destination a received fax arrived at; empty for a sent one."
+          },
+          "ownerExtension": {
+            "type": "string",
+            "description": "The extension that owns the fax; a user sees the faxes of their own extensions."
+          },
+          "pages": {
+            "type": "integer"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "",
+              "g711",
+              "t38"
+            ],
+            "description": "How the fax travelled: G.711 audio or T.38."
+          },
+          "bitRate": {
+            "type": "integer",
+            "description": "The modem rate of the last page, in bit/s."
+          },
+          "resultCode": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The T.30 completion code; 0 is success."
+          },
+          "resultText": {
+            "type": "string"
+          },
+          "hasPdf": {
+            "type": "boolean"
+          },
+          "correlationId": {
+            "type": "string",
+            "description": "The call's CDR correlation id."
+          },
+          "createdBy": {
+            "type": "string",
+            "description": "Who queued a sent fax; empty for a received one."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Attempts made to send (0 to 3)."
+          },
+          "nextAttemptAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a queued fax is next tried."
+          },
+          "mailTo": {
+            "type": "string",
+            "description": "The address a received fax is emailed to when its destination names one; empty when it goes to the owner's users."
+          },
+          "mailStatus": {
+            "type": "string",
+            "enum": [
+              "none",
+              "pending",
+              "sending",
+              "sent",
+              "failed"
+            ]
+          }
+        }
+      },
+      "FaxPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Fax"
+            }
+          },
+          "next": {
+            "type": "string",
+            "description": "The cursor of the next page; empty on the last."
+          }
+        }
+      },
+      "FaxSend": {
+        "type": "object",
+        "required": [
+          "to",
+          "pdfBase64"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "to": {
+            "type": "string",
+            "pattern": "^\\+[1-9][0-9]{6,14}$",
+            "description": "Destination number in E.164."
+          },
+          "callerId": {
+            "type": "string",
+            "pattern": "^\\+?[0-9]{1,20}$",
+            "description": "Station identifier sent in the T.30 frames; empty for the outbound route's caller ID."
+          },
+          "pdfBase64": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "description": "Base64 of the PDF, at most 700 KiB decoded; send larger documents as multipart."
+          }
+        }
+      },
+      "FaxDestination": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "extension",
+          "email",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,40}$"
+          },
+          "extension": {
+            "type": "string",
+            "description": "The owner extension number."
+          },
+          "email": {
+            "type": "string",
+            "description": "Where the PDF is emailed instead of to the owner's users; empty for the owner's."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FaxDestinationList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FaxDestination"
+            }
+          }
+        }
+      },
+      "FaxDestinationCreate": {
+        "type": "object",
+        "required": [
+          "name",
+          "extension"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,40}$",
+            "description": "Name routes and IVR keys refer to; it cannot change."
+          },
+          "extension": {
+            "type": "string",
+            "pattern": "^[0-9]{2,10}$",
+            "description": "The extension number that owns the faxes arriving here."
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "description": "Address the PDF is emailed to instead of the owner's users; empty for the owner's."
+          }
+        }
+      },
+      "FaxDestinationUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "May be sent, but must equal the current name."
+          },
+          "extension": {
+            "type": "string",
+            "pattern": "^[0-9]{2,10}$",
+            "description": "The extension number that owns the faxes arriving here."
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "description": "Address the PDF is emailed to instead of the owner's users; empty for the owner's."
           }
         }
       },

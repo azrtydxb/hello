@@ -21,6 +21,7 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/events"
+	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/prov"
@@ -136,6 +137,11 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		return fmt.Errorf("HELLO_PROV_ADDR: %w", err)
 	}
 	go runMailer(ctx, envSMTP(cfg), st, objs, log)
+	faxCfg, err := startFax(ctx, cfg, st, log)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("MINIO_ENDPOINT: %w", err)
+	}
 
 	// External AI access (spec ai-external-access): the OAuth
 	// authorization server and /mcp, only with HELLO_PUBLIC_URL.
@@ -174,6 +180,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Live:            vk,
 		Queues:          vk,
 		Callbacks:       st.QueueCallbacks(),
+		Fax:             faxCfg,
 		Trunks:          vk,
 		Cluster:         vk,
 		Valkey:          vk,
@@ -342,6 +349,37 @@ func envSMTP(cfg config.Control) mailer.Settings {
 	}
 	return mailer.Settings{Host: cfg.SmtpHost, Port: cfg.SmtpPort, Security: sec,
 		Username: cfg.SmtpUser, Password: cfg.SmtpPass, From: cfg.SmtpFrom}
+}
+
+// startFax wires the fax feature of the control plane (pbx-gaps S-15 to S-17):
+// the API's store, the engine client that checks a PDF can be sent, the PDF
+// store, the fax-to-email worker and the retention job. The workers run on
+// every node; the database queue and a lock keep them to one at a time.
+func startFax(ctx context.Context, cfg config.Control, st *store.Store, log *slog.Logger) (api.FaxConfig, error) {
+	objs, err := fax.NewObjects(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioSecure)
+	if err != nil {
+		return api.FaxConfig{}, err
+	}
+	c := api.FaxConfig{Store: st, Objects: objs, Enabled: cfg.Fax.Enabled}
+	if cfg.Fax.Enabled {
+		c.Engine = &fax.Client{Addr: cfg.Fax.Addr, Token: cfg.Fax.Token}
+	}
+	smtpEnv := envSMTP(cfg)
+	go (&fax.Delivery{
+		Queue: st, Objects: objs, Log: log.With("component", "fax-mail"),
+		Settings: func(ctx context.Context) (mailer.Settings, bool, error) {
+			s, source, err := api.EffectiveSMTP(ctx, st, smtpEnv)
+			if err != nil || source == api.SMTPNone {
+				return mailer.Settings{}, false, err
+			}
+			if s.Validate() != nil {
+				return mailer.Settings{}, false, nil // unusable settings: wait for a fix
+			}
+			return s, true, nil
+		},
+	}).Run(ctx)
+	go (&fax.Retention{Store: st, Objects: objs, Locker: st, Days: cfg.Fax.RetentionDays, Log: log.With("component", "fax-retention")}).Run(ctx)
+	return c, nil
 }
 
 // runMailer starts the voicemail email worker. It runs on every node; the

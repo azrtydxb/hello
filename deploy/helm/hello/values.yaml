@@ -212,6 +212,28 @@ ui:
   nodeSelector: {}
   tolerations: []
 
+# The fax engine (docs/fax.md): a separate deployment with spandsp and
+# poppler, reachable only inside the cluster. Off by default; on, hello-sip and
+# hello-control are told where it is (HELLO_FAX_ENABLED, HELLO_FAX_ADDR).
+fax:
+  enabled: false
+  replicas: 1
+  image:
+    name: hello-fax
+    tag: ""
+  # The UDP range a fax session's media port is drawn from, on the pod.
+  rtpPortMin: 40000
+  rtpPortMax: 40999
+  # A Secret holding the key faxToken: the bearer token between hello-sip,
+  # hello-control and hello-fax. Empty: no token (rely on a network policy).
+  tokenSecret: ""
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+
 # Bundled single-instance state services, for evaluation only. Production
 # points at highly available external services (valkey.external, minio.external,
 # and the dsn in the credentials Secret).

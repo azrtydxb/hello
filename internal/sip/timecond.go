@@ -194,6 +194,8 @@ func (c *call) applyTCDest(tx sip.ServerTransaction, snap *snapshot.Snapshot, d 
 		c.forward(c.inv, tx, snap, d.Target, nil)
 	case timecond.KindDirectory:
 		c.startDirectory(tx, snap)
+	case timecond.KindFax:
+		c.startFax(tx, snap, d.Target)
 	case timecond.KindQueue:
 		q, ok := snap.Queue(d.Target)
 		if !ok {

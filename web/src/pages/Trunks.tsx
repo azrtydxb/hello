@@ -91,6 +91,8 @@ interface TrunkDraft {
   destinations: DestinationDraft[];
   /** SMS over SIP (SIP MESSAGE) through this trunk. */
   messaging: boolean;
+  /** How a fax call is carried (docs/fax.md). */
+  faxMode: "passthrough" | "t38" | "off";
   /** What the trunk may dial in the extension namespace. */
   dialingMode: DialingMode;
   /** The patterns, one per line; used only in mode "patterns". */
@@ -148,6 +150,7 @@ const NEW_TRUNK: TrunkDraft = {
   enabled: true,
   destinations: [NEW_DESTINATION],
   messaging: false,
+  faxMode: "passthrough",
   dialingMode: "off",
   dialingPatterns: "",
   dialingConfirm: false,
@@ -175,6 +178,7 @@ function toDraft(t: Trunk): TrunkDraft {
       weight: String(d.weight),
     })),
     messaging: t.messaging === true,
+    faxMode: t.faxMode ?? "passthrough",
     dialingMode:
       dialing?.mode === "patterns" || dialing?.mode === "all"
         ? dialing.mode
@@ -188,6 +192,17 @@ function toDraft(t: Trunk): TrunkDraft {
 const isInt = (v: string) => /^-?[0-9]+$/.test(v.trim());
 
 /** The patterns of a trunk, for the card and the drawer. */
+function faxModeLabel(mode: string | undefined): string {
+  switch (mode) {
+    case "t38":
+      return "T.38 when offered";
+    case "off":
+      return "Refused";
+    default:
+      return "Passthrough (G.711)";
+  }
+}
+
 function dialingLabel(dialing: InternalDialing): string {
   switch (dialing.mode) {
     case "all":
@@ -266,6 +281,7 @@ function toInput(d: TrunkDraft): TrunkInput {
     })),
     internalDialing: toDialingInput(d),
     messaging: d.messaging,
+    faxMode: d.faxMode,
     codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
   };
 }
@@ -307,6 +323,7 @@ function knownKeys(d: TrunkDraft): string[] {
     "internalDialing.patterns",
     "internalDialing.confirm",
     "messaging",
+    "faxMode",
     ...d.destinations.flatMap((_, i) => [
       `destinations[${i}]`,
       ...["host", "port", "priority", "weight"].map(
@@ -559,6 +576,7 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          { label: "Fax", value: faxModeLabel(t.faxMode) },
           { label: "Password", value: password },
         ]
       : [
@@ -579,6 +597,7 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          { label: "Fax", value: faxModeLabel(t.faxMode) },
           { label: "Password", value: password },
         ];
 
@@ -953,6 +972,18 @@ function TrunkDrawer({
             labelPosition="end"
             checked={draft.messaging}
             onChange={(e) => set("messaging", e.target.checked)}
+          />
+          <Select
+            label="Fax"
+            hint="How a fax call on this trunk is carried. Passthrough keeps G.711 audio. T.38 moves the call to T.38 when the carrier offers it or the fax tone is heard; a carrier that refuses leaves it on G.711. Off refuses fax calls."
+            value={draft.faxMode}
+            error={errors.faxMode}
+            options={[
+              { value: "passthrough", label: "Passthrough (G.711)" },
+              { value: "t38", label: "T.38 when the carrier offers it" },
+              { value: "off", label: "Off (refuse fax calls)" },
+            ]}
+            onChange={(e) => set("faxMode", e.target.value as TrunkDraft["faxMode"])}
           />
         </fieldset>
 

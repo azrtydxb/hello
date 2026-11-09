@@ -125,7 +125,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 2FA                                           | done (#209)                    |
 | Dial-by-name                                  | done (#229, B3)                |
 | Voicemail groups                              | wip (#220, A6)                 |
-| Fax                                           | todo (spec done #199)          |
+| Fax                                           | wip (#PRNUM)                   |
 | Boss/secretary                                | todo (spec done #199)          |
 | Multi-language prompts (Dutch option per box) | done (#208, A5)                |
 | Codec in call history                         | wip (spec pbx-gaps; cdr-codec) |

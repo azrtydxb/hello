@@ -53,6 +53,7 @@ func (s *Server) inboundCall(req *sip.Request, tx sip.ServerTransaction, snap *s
 	c := s.newCall(req)
 	from := req.From()
 	c.direction, c.trunkName = cdr.DirectionInbound, t.Name
+	c.faxMode = t.FaxMode
 	if isPageOrIntercomCode(snap, req.Recipient.User) {
 		// Auto-answer turns a phone into a listening device: only an
 		// authenticated internal caller may use it (spec P-16).

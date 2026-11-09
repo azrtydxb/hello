@@ -64,7 +64,7 @@ func (s *Snapshot) WithRouting(r *RoutingState) *Snapshot {
 // silently, and never logged itself (only its ID and reason are).
 func loadTrunks(ctx context.Context, db Querier, box *secret.Box, log *slog.Logger, cfg *routing.Config, bad map[int64]string) error {
 	rows, err := db.Query(ctx, `SELECT id, name, mode, username, password_enc, realm, from_domain, register_expires,
-		options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging FROM trunks ORDER BY id`)
+		options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging, fax_mode FROM trunks ORDER BY id`)
 	if err != nil {
 		return fmt.Errorf("snapshot: trunks: %w", err)
 	}
@@ -79,7 +79,7 @@ func loadTrunks(ctx context.Context, db Querier, box *secret.Box, log *slog.Logg
 			maxCalls  int32
 		)
 		if err := rows.Scan(&t.ID, &t.Name, &t.Mode, &t.Username, &sealed, &t.Realm, &t.FromDomain, &reg,
-			&opts, &t.SourceCIDRs, &maxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging); err != nil {
+			&opts, &t.SourceCIDRs, &maxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging, &t.FaxMode); err != nil {
 			return fmt.Errorf("snapshot: scan trunk: %w", err)
 		}
 		t.RegisterExpires = time.Duration(reg) * time.Second
@@ -237,6 +237,7 @@ func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Log
 	rows, err = db.Query(ctx, `SELECT 'ring_group', name FROM ring_groups
 		UNION ALL SELECT 'announcement', name FROM announcements
 		UNION ALL SELECT 'paging', code FROM paging_groups
+		UNION ALL SELECT 'fax', name FROM fax_destinations
 		UNION ALL SELECT 'voicemail', e.number FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id`)
 	if err != nil {
 		return cfg, nil, fmt.Errorf("snapshot: named destinations: %w", err)

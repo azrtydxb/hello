@@ -26,6 +26,8 @@ const (
 	// IVRDirectory is the dial-by-name directory (migration 00048); it has
 	// no target.
 	IVRDirectory = "directory"
+	// IVRFax names a fax destination (migration 00052).
+	IVRFax = "fax"
 )
 
 // IVRDest is where a menu option, timeout or invalid choice sends the call.

@@ -35,6 +35,7 @@ const (
 	KindIntercom   = "intercom"
 	KindConference = "conference"
 	KindCallback   = "callback" // a call Hello placed to a queue caller who asked for a callback (migration 00049)
+	KindFax        = "fax"      // a fax call, received or sent (migration 00052); the fax is in the faxes table, by correlation id
 )
 
 // Termination sides.

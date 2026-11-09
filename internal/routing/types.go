@@ -84,6 +84,9 @@ type Trunk struct {
 	// caller's order (names: PCMU, PCMA, G722, opus). Empty means the
 	// default, PCMU and PCMA: most carriers accept G.711 only.
 	Codecs []string
+	// FaxMode is how the trunk carries a fax (pbx-gaps S-16): "passthrough"
+	// (G.711, the default; empty reads as passthrough), "t38" or "off".
+	FaxMode string
 }
 
 // OutboundRoute matches calls from extensions to external numbers.
@@ -116,7 +119,7 @@ type InboundRoute struct {
 	HeaderRegex     string
 	Schedule        *Schedule
 	CallerID        Transform
-	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition" | "ring_group" | "voicemail" | "announcement" | "paging" | "directory"
+	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition" | "ring_group" | "voicemail" | "announcement" | "paging" | "fax" | "directory"
 	Destination     string // empty for "internal" (the DID names the target); the menu name for "ivr", the room number for "conference", the queue name for "queue"
 	Enabled         bool
 	// MOHClassID is the music on hold class of calls the route delivers

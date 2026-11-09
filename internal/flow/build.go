@@ -360,6 +360,13 @@ func (b *builder) resolve(owner, kind, target string) Ref {
 		return lookup(b.tcByName, "call", "time condition")
 	case "conference":
 		return lookup(b.confByNumber, "call", "conference room")
+	case "fax":
+		// A fax destination names an owner extension and an address; the
+		// node shows the destination, with no further edge.
+		id := KindFax + ":" + target
+		b.node(id, KindFax, "Fax "+target, map[string]any{"name": target}, nil)
+		b.ends[id] = true
+		return Ref{id, "call"}
 	case "directory":
 		// One node for the whole directory: it names no stored object, and
 		// the extensions it can reach are every one not hidden from it.
@@ -428,7 +435,7 @@ func (b *builder) addRoutes(in Input) {
 			b.node(id, KindInternalDID, "DID "+r.DID+" as extension", map[string]any{"did": r.DID}, nil)
 			b.ends[id] = true
 			b.edge(src, Ref{id, "call"}, owner, false, nil)
-		case "conference", "external", "sip_uri", "ring_group", "voicemail", "announcement", "paging", "ivr", "queue", "time_condition", "directory":
+		case "conference", "external", "sip_uri", "ring_group", "voicemail", "announcement", "paging", "ivr", "queue", "time_condition", "directory", "fax":
 			b.dest(src, owner, r.DestinationKind, r.Destination, nil)
 		}
 	}

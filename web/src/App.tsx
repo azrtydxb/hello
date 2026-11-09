@@ -90,6 +90,7 @@ import { Conferences } from "./pages/Conferences";
 import { Ivr } from "./pages/Ivr";
 import { Queues } from "./pages/Queues";
 import { QueueCallbacks } from "./pages/QueueCallbacks";
+import { Faxes } from "./pages/Faxes";
 import { Wallboard } from "./pages/Wallboard";
 import { TimeConditions } from "./pages/TimeConditions";
 import { ParkPickup } from "./pages/ParkPickup";
@@ -130,6 +131,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/conferences": Conferences,
   "/ivr": Ivr,
   "/queues": Queues,
+  "/faxes": Faxes,
   "/wallboard": Wallboard,
   "/time-conditions": TimeConditions,
   "/park": ParkPickup,

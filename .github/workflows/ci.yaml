@@ -95,6 +95,27 @@ jobs:
             /root/.cache/go-build
           key: go-${{ runner.arch }}-golang1.27-${{ hashFiles('go.sum') }}-${{ github.sha }}
 
+  fax:
+    # The fax engine (pbx-gaps S-15) needs spandsp through cgo, which the unit
+    # job's image does not carry: this job installs it and runs the T.30
+    # pipeline tests (a generated fax through G.711 and T.38 and back to the
+    # pages that were sent) that a build without the spandsp tag skips.
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    container:
+      image: golang:1.27-bookworm
+    steps:
+      - uses: actions/checkout@v7
+      - name: Trust the mounted workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install spandsp and poppler
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends pkg-config libspandsp-dev libtiff-dev poppler-utils
+      - run: go vet -tags spandsp ./cmd/hello-fax/ ./internal/fax/
+      - run: go test -tags spandsp -timeout 10m ./cmd/hello-fax/ ./internal/fax/ ./internal/media/
+
   changes:
     # What a change touches, so the jobs it cannot affect can be skipped:
     #  - db: code the database-backed tests cover (migrations, the store and
@@ -853,7 +874,7 @@ jobs:
     # Only what lands on main becomes an image; a pull request is tested and
     # nothing more.
     if: github.event_name == 'push'
-    needs: [go, web]
+    needs: [go, web, fax]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     permissions:
@@ -875,6 +896,13 @@ jobs:
               file: Dockerfile,
               target: hello-sip,
               cache: sip,
+            }
+          - {
+              name: hello-fax,
+              context: .,
+              file: Dockerfile,
+              target: hello-fax,
+              cache: fax,
             }
           - {
               name: hello-ui,
