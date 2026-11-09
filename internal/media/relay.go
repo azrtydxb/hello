@@ -538,7 +538,7 @@ func (r *Relay) recv(l *relayLeg) {
 		if dtmfPT != 0 && pkt.PayloadType == dtmfPT {
 			if ev, ok := ParseTelephoneEvent(pkt.Payload); ok {
 				ev.Sequence = pkt.Sequence
-				if code, deliver := l.filter.Observe(ev, pkt.Marker); deliver && r.onDTMF != nil {
+				if code, deliver := l.filter.Observe(ev, pkt.Marker); deliver {
 					r.mu.Lock()
 					h := r.onDTMF
 					r.mu.Unlock()
@@ -548,13 +548,14 @@ func (r *Relay) recv(l *relayLeg) {
 				}
 			}
 		}
-		if r.onPacket != nil {
-			r.mu.Lock()
-			h := r.onPacket
-			r.mu.Unlock()
-			if h != nil {
-				h(l.name, pkt)
-			}
+		// The handler is read under the lock: a tap can be installed while
+		// the relay already runs (a queue callback's caller answers after the
+		// relay started).
+		r.mu.Lock()
+		h := r.onPacket
+		r.mu.Unlock()
+		if h != nil {
+			h(l.name, pkt)
 		}
 		if l.muted.Load() {
 			continue
