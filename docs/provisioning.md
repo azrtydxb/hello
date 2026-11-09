@@ -1439,38 +1439,52 @@ templates (the WP8x6 template has the same settings under the same names); see
 ## Provisioning hardening (Grandstream WP, Yealink TR-069)
 
 Every Grandstream WP model (WP810 to WP856) is written these settings, so a
-handset cannot be reconfigured or reached around Hello:
+handset cannot be reconfigured or reached around Hello. The keys, values and
+which models define them are from Grandstream's own configuration templates
+(`wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`,
+`wp820_config_1.0.7.90`, `wp856_config_1.0.3.16`); a key is written only to the
+models whose template has it.
 
-| Setting                                 | Key      | Value                                   |
-| --------------------------------------- | -------- | --------------------------------------- |
-| TR-069 enabled                          | `P1409`  | `0`                                     |
-| TR-069 ACS URL                          | `P4503`  | empty                                   |
-| Disable SSH                             | `P276`   | `1`                                     |
-| User web access                         | `P8469`  | `0` (the admin login stays)             |
-| Configuration via the keypad menu       | `P1357`  | `1` (basic settings only)               |
-| Disable direct IP calls                 | `P1310`  | `1`                                     |
-| Accept incoming SIP from the proxy only | `P2347`  | `1` (the auto-answer restriction, S-32) |
-| Allow SIP reset                         | `P26015` | `0`                                     |
+| Setting                                 | Key      | Value                                   | Models               |
+| --------------------------------------- | -------- | --------------------------------------- | -------------------- |
+| TR-069 enabled                          | `P1409`  | `0`                                     | all                  |
+| TR-069 ACS URL                          | `P4503`  | empty                                   | all                  |
+| Disable SSH                             | `P276`   | `1` (off; the templates ask both ways)  | all                  |
+| User web access                         | `P8469`  | `0` (the admin login stays)             | all                  |
+| Configuration via the keypad menu       | `P1357`  | `1` (basic settings only)               | not the WP856        |
+| Disable direct IP calls                 | `P1310`  | `1`                                     | WP8x6, WP810/822/825 |
+| Accept incoming SIP from the proxy only | `P2347`  | `1` (the auto-answer restriction, S-32) | all (per account)    |
+| Allow SIP reset                         | `P26015` | `0`                                     | all                  |
+| Firmware upgrade confirmation prompt    | `P8375`  | `0` (no prompt)                         | WP8x6                |
+| Disable firmware upgrade confirmation   | `P84988` | `1` (no prompt)                         | WP810/822/825        |
 
 Yealink phones are written `static.managementserver.enable = 0` (TR-069 off).
 TR-069 is turned off on purpose: it is a way for a phone to be given a different
 server. A site that needs it sets it back with the setting overrides of the phone
 group.
 
-**What is not written, and why.** `P2346` (Authenticate Incoming INVITE):
-Hello does not yet answer a phone's digest challenge on an INVITE it originates,
-so switching it on would fail every call to the phone. `P60082` (Trusted
-Domain Name List), `P84988` (firmware upgrade confirmation), `P1` and `P240`
-(config file authentication) and the AES-encrypted config password `P1359`: no
-Grandstream document available to Hello confirms the format or the key for the
-WP models. SSH, TR-069 and similar keys for Poly, Snom and Fanvil are not
-written either, for the same reason.
+**What is not written, and why.**
+
+- `P2346` (Authenticate Incoming INVITE, 0 No, 1 Yes): Hello does not yet answer
+  a phone's digest challenge on an INVITE it originates, so switching it on would
+  fail every call to the phone.
+- `P60082` (Trusted Domain Name List, up to 256 characters; WP8x6 and
+  WP810/822/825) is used with `P2311` (Check Domain Certificates, RFC 5922). The
+  templates do not give the list format, and a wrong list would fail TLS
+  registration.
+- `P240` (Authenticate Conf File) and `P1359` (XML Config File Password): the
+  phone would authenticate the files it fetches, and Hello serves plain files
+  over HTTPS with a token. `P1` is in no WP template.
+- SSH, TR-069 and similar keys for Poly, Snom and Fanvil are not written either:
+  no key is confirmed.
 
 **Check on a phone.** `P2347 = 1` makes the phone drop SIP that does not come
 from its server address. If incoming calls stop arriving, set `P2347 = 0` in the
 group's setting overrides and report it. The keys are from Grandstream's
-GRP261x and WP810/822/825 configuration templates and are not confirmed on a
-WP836, WP856 or WP822.
+configuration templates and are not confirmed on a WP836, WP856 or WP822. On a
+Wi-Fi handset check that the keypad menu at `P1357 = 1` still allows the Wi-Fi
+setup; the WP810/822/825 template also has `P1357 = 4` (basic and network
+settings) and the WP820 `3`.
 
 ## Security model and its limits
 
