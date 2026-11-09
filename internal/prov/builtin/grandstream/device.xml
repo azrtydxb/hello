@@ -264,6 +264,17 @@
 {{- /* Check-sync (spec S-5): P95030 = 0 so a plain check-sync re-provisions without a reboot (WP8x6 fw 1.0.3.20 and later) [R8x6 section 1]; P4428 = 0 authenticates the NOTIFY (ACC-16: the WP8x6 and WP856 templates say "Enable SIP NOTIFY Authentication. 0 - Yes, 1 - No" and the WP8xx one "Disable SIP NOTIFY Authentication. 0 - No, 1 - Yes"; 0 challenges in all three), which hello-sip answers from the device's HA1. */}}
     <P95030>0</P95030>
     <P4428>0</P4428>
+{{- /* Provisioning hardening (phone-feature-parity S-22, S-32), every Grandstream WP model. Keys, values and meanings per Grandstream's GRP261x and WP810/822/825 configuration templates: P1409 Enable TR-069 (0 No), P4503 ACS URL (empty), P276 Disable SSH (1 Yes), P8469 Enable User Web Access (0 Disabled, 1 Enabled; the admin login Hello sets with P2 stays), P1357 Configuration via Keypad Menu (0 Unrestricted, 1 Basic settings only), P1310 Disable Direct IP Call (1 Yes), P2347 Accept Incoming SIP from Proxy Only (1 Yes; this is also the "Accept only from server" cell of the auto-answer restriction, S-32), P26015 Allow SIP Reset (0 No). TR-069 is turned off here on the user's explicit decision of 2026-11-09 (the ACS URL of a TR-069 phone would otherwise be a way around Hello). Not written, on purpose: P2346 Authenticate Incoming INVITE (Hello does not yet answer a phone's challenge on an INVITE it originates; on, every call to the phone would fail), P60082 Trusted Domain Name List, P84988 (firmware confirmation) and P1/P240 (config file authentication): no Grandstream document available to Hello confirms their format or key for the WP models. A group or phone can set any of them through the setting overrides. Not confirmed on a phone (verify, in particular that incoming calls still arrive with P2347 = 1 behind the Kamailio edge). */}}
+{{- if .Phone.Family}}
+    <P1409>0</P1409>
+    <P4503></P4503>
+    <P276>1</P276>
+    <P8469>0</P8469>
+    <P1357>1</P1357>
+    <P1310>1</P1310>
+    <P2347>1</P2347>
+    <P26015>0</P26015>
+{{- end}}
 {{- with .Book}}
     <P330>3</P330>
     <P331>{{xml .HostPath}}</P331>
@@ -272,7 +283,7 @@
     <P333>1</P333>
 {{- end}}
 {{- end}}
-{{- /* HT813 FXO disconnect supervision. Without it a PSTN caller who hangs up first leaves the FXO off-hook and it answers 486 to every later call. Keys and meanings from Grandstream's ht813_config_1.0.19.6 template (config-template-10212026.zip), section "FXO PORT Settings" / "FXO Termination Settings" (not the FXS-side P892/P856 loop-current keys): P893 Enable Current Disconnect, P764 Current Disconnect Threshold (50-800 ms, default 100), P28101 Enable Polarity Reversal, P712 Enable PSTN Disconnect Tone Detection, P841 PSTN Disconnect Tone (f1=<Hz>@<dB>,c=<on>/<off> ms; UAE busy tone 400 Hz, 375 ms on / 375 ms off, level -32 dB as in Grandstream's example). The template has no silence-timeout key, so none is written. TR-069 is not touched. */}}
+{{- /* HT813 FXO disconnect supervision. Without it a PSTN caller who hangs up first leaves the FXO off-hook and it answers 486 to every later call. Keys and meanings from Grandstream's ht813_config_1.0.19.6 template (config-template-10212026.zip), section "FXO PORT Settings" / "FXO Termination Settings" (not the FXS-side P892/P856 loop-current keys): P893 Enable Current Disconnect, P764 Current Disconnect Threshold (50-800 ms, default 100), P28101 Enable Polarity Reversal, P712 Enable PSTN Disconnect Tone Detection, P841 PSTN Disconnect Tone (f1=<Hz>@<dB>,c=<on>/<off> ms; UAE busy tone 400 Hz, 375 ms on / 375 ms off, level -32 dB as in Grandstream's example). The template has no silence-timeout key, so none is written. TR-069 is not touched on the HT813. */}}
 {{- if .Phone.FXO}}
     <P893>1</P893>
     <P764>100</P764>

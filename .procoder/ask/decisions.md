@@ -1426,3 +1426,38 @@ Implementation notes (template route, no migration):
   hello-control has no list of the SIP nodes phones can use (the Kamailio pair
   PRs are not merged). The default stays A-record mode; `P103 = 0` is written to
   every Grandstream file so leaving SRV mode reverts.
+
+### Item 27: provisioning hardening (S-22, S-32)
+
+- TR-069 off is included: the user approved it explicitly on 2026-11-09 (the
+  completion plan's open question). Grandstream WP: P1409 = 0 and an empty
+  P4503; Yealink: `static.managementserver.enable = 0`.
+- Keys and values, from the Pvalue-annotated Grandstream templates mirrored in
+  the FusionPBX repository (GRP261x `grp26xx` and `wp810` files, the
+  WP810/822/825 template): P276 Disable SSH 1 = Yes; P8469 Enable User Web
+  Access 0 = Disabled; P1357 Configuration via Keypad Menu 1 = Basic settings
+  only (the WP810 template also has 4 = Basic and Network Settings, which keeps
+  Wi-Fi setup on the keypad; the spec says basic, so 1 is used and the Wi-Fi
+  question is a hardware check); P1310 Disable Direct IP Call 1 = Yes; P2347
+  Accept Incoming SIP from Proxy Only 1 = Yes (also S-32's restriction); P26015
+  Allow SIP Reset 0 = No. Written to all three WP families; the WP8x6 and WP856
+  numbers are not in a template I could read, only the WP810 and GRP ones.
+- Yealink TR-069 key: Yealink's own comment in the T-series templates,
+  "Enable or disable the TR069 feature; 0-Disabled (default), 1-Enabled".
+- Left out:
+  - P2346 Authenticate Incoming INVITE and the S-22 requirement that Hello answer
+    a phone's 401 on an INVITE it originates (`TestAuthenticatedInviteToPhone`).
+    sipgo's `WaitAnswer` answers a challenge only from a plaintext password and a
+    device leg has HA1 only; a real phone challenges in its own realm
+    (`<server host:port>`, see the resync fix), so the answer needs the sealed
+    device password as `checksync.go` now uses. That is a change to the call
+    setup path that I cannot validate without a phone. Not enabling P2346 is
+    what keeps calls working; the template test asserts it stays unwritten.
+  - P60082 Trusted Domain Name List (the key is in the GRP261x mapping, but
+    nothing says what format the list takes or what a mismatch drops), P84988
+    firmware confirmation (found in no template; the GRP key is P8375 = 0 No),
+    P1 and P240 config file authentication (no P1 in any template), P1359 XML
+    config password (cipher format unconfirmed; the spec itself says off), and
+    Snom, Fanvil and Poly TR-069/SSH keys (Fanvil's text format key not found,
+    Poly and Snom none found).
+- The group can undo any of it with a setting override (item 15).

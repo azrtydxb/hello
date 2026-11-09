@@ -1416,6 +1416,42 @@ The keys are from Grandstream's GRP261x and WP810/822/825 configuration
 templates (the WP8x6 template has the same settings under the same names); see
 `.procoder/ask/decisions.md` for the source. Not confirmed on a phone.
 
+## Provisioning hardening (Grandstream WP, Yealink TR-069)
+
+Every Grandstream WP model (WP810 to WP856) is written these settings, so a
+handset cannot be reconfigured or reached around Hello:
+
+| Setting                                 | Key      | Value                                   |
+| --------------------------------------- | -------- | --------------------------------------- |
+| TR-069 enabled                          | `P1409`  | `0`                                     |
+| TR-069 ACS URL                          | `P4503`  | empty                                   |
+| Disable SSH                             | `P276`   | `1`                                     |
+| User web access                         | `P8469`  | `0` (the admin login stays)             |
+| Configuration via the keypad menu       | `P1357`  | `1` (basic settings only)               |
+| Disable direct IP calls                 | `P1310`  | `1`                                     |
+| Accept incoming SIP from the proxy only | `P2347`  | `1` (the auto-answer restriction, S-32) |
+| Allow SIP reset                         | `P26015` | `0`                                     |
+
+Yealink phones are written `static.managementserver.enable = 0` (TR-069 off).
+TR-069 is turned off on purpose: it is a way for a phone to be given a different
+server. A site that needs it sets it back with the setting overrides of the phone
+group.
+
+**What is not written, and why.** `P2346` (Authenticate Incoming INVITE):
+Hello does not yet answer a phone's digest challenge on an INVITE it originates,
+so switching it on would fail every call to the phone. `P60082` (Trusted
+Domain Name List), `P84988` (firmware upgrade confirmation), `P1` and `P240`
+(config file authentication) and the AES-encrypted config password `P1359`: no
+Grandstream document available to Hello confirms the format or the key for the
+WP models. SSH, TR-069 and similar keys for Poly, Snom and Fanvil are not
+written either, for the same reason.
+
+**Check on a phone.** `P2347 = 1` makes the phone drop SIP that does not come
+from its server address. If incoming calls stop arriving, set `P2347 = 0` in the
+group's setting overrides and report it. The keys are from Grandstream's
+GRP261x and WP810/822/825 configuration templates and are not confirmed on a
+WP836, WP856 or WP822.
+
 ## Security model and its limits
 
 What protects the phones' secrets:
