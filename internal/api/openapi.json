@@ -21911,7 +21911,7 @@
               "optional",
               "required"
             ],
-            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are not TLS today, so optional behaves as off and required refuses calls over the trunk."
+            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are SIP over UDP today, so optional behaves as off, and required is refused with 422 because it needs a TLS trunk transport that Hello does not have yet (a trunk stored as required before that rule refuses its calls until it is changed)."
           },
           "id": {
             "type": "integer",
@@ -22023,7 +22023,7 @@
               "optional",
               "required"
             ],
-            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are not TLS today, so optional behaves as off and required refuses calls over the trunk.",
+            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are SIP over UDP today, so optional behaves as off, and required is refused with 422 because it needs a TLS trunk transport that Hello does not have yet (a trunk stored as required before that rule refuses its calls until it is changed).",
             "default": "off"
           },
           "name": {
@@ -22135,7 +22135,7 @@
               "optional",
               "required"
             ],
-            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are not TLS today, so optional behaves as off and required refuses calls over the trunk."
+            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are SIP over UDP today, so optional behaves as off, and required is refused with 422 because it needs a TLS trunk transport that Hello does not have yet (a trunk stored as required before that rule refuses its calls until it is changed)."
           },
           "name": {
             "type": "string",

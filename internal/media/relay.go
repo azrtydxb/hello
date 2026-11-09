@@ -142,11 +142,10 @@ type relayLeg struct {
 	// stats is the leg's inbound-stream counters (locked).
 	stats legStats
 
-	// sec is the leg's SDES negotiation state and secActive the SRTP state
-	// the packet path reads (nil while the leg is plain RTP).
-	sec       legSecurity
-	secActive atomic.Pointer[legKeys]
-	authFail  atomic.Uint64
+	// secure is the leg's SDES negotiation and SRTP state (plain RTP until
+	// negotiated); the packet path reads it without a lock.
+	secure   Secure
+	authFail atomic.Uint64
 
 	// muted drops what this leg receives instead of forwarding it to the
 	// peer (a holder's stream while music plays to the held party).
@@ -523,23 +522,17 @@ func (r *Relay) recv(l *relayLeg) {
 			continue // not the leg's peer: never counted, tapped or relayed
 		}
 		data := buf[:n]
-		if k := l.secActive.Load(); k != nil {
-			// An SRTP leg: nothing that fails authentication is latched,
-			// counted, tapped or relayed. RTCP on the RTP port (rtcp-mux)
-			// is checked and consumed; Hello sends no RTCP of its own.
-			if isRTCP(data) {
-				if _, err := k.unprotectRTCP(data); err != nil {
-					l.authFail.Add(1)
-				}
-				continue
-			}
-			plain, err := k.unprotect(data)
-			if err != nil {
-				l.authFail.Add(1)
-				continue
-			}
-			data = plain
+		// An SRTP leg: nothing that fails authentication is latched,
+		// counted, tapped or relayed. RTCP on the RTP port (rtcp-mux) is
+		// checked and consumed; Hello sends no RTCP of its own.
+		plain, ok, failed := l.secure.Unprotect(data)
+		if failed {
+			l.authFail.Add(1)
 		}
+		if !ok {
+			continue
+		}
+		data = plain
 		r.lastRx.Store(time.Now().UnixNano())
 		r.latch(l, from)
 		pkt, ok := ParseRTP(data)
@@ -752,13 +745,11 @@ func (l *relayLeg) send(data []byte) {
 // packet retries and Close stops the loop either way. A packet that cannot be
 // protected is dropped, never sent in the clear.
 func (l *relayLeg) write(pkt []byte, dst *net.UDPAddr) {
-	if k := l.secActive.Load(); k != nil {
-		enc, err := k.protect(pkt)
-		if err != nil {
-			return
-		}
-		pkt = enc
+	enc, ok := l.secure.Protect(pkt)
+	if !ok {
+		return
 	}
+	pkt = enc
 	_, _ = l.conn.WriteToUDP(pkt, dst)
 }
 

@@ -198,6 +198,21 @@ func validateSchedule(f *fieldErrs, path string, s *routing.Schedule) {
 	}
 }
 
+// errTrunkSRTPRequired is why a trunk cannot be set to SRTP required. SDES
+// keys travel in the SDP and may only be sent over a TLS signalling leg
+// (docs/tls.md); Hello's trunk legs are SIP over UDP, so a trunk set to
+// required would refuse every call. Until SIP over TLS exists for trunks
+// (the trunks-routing spec lists it as a later phase) the policy is refused
+// instead of being stored.
+const errTrunkSRTPRequired = "required needs a TLS trunk transport, and trunks are SIP over UDP; use off (optional also sends plain RTP until trunk TLS exists)"
+
+// trunkSRTP checks a trunk's media-encryption policy as it is being set.
+func trunkSRTP(f *fieldErrs, srtp string) {
+	if p, ok := secmedia.Parse(srtp); ok && p == secmedia.Required {
+		f.add("srtp", "%s", errTrunkSRTPRequired)
+	}
+}
+
 func validateTrunk(in *store.TrunkInput, hasPassword bool) fieldErrs {
 	var f fieldErrs
 	if !trunkNameRe.MatchString(in.Name) {

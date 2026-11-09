@@ -319,7 +319,7 @@ func (c *call) relearnMedia(fromCaller bool, source string, off media.AudioSDP) 
 	if relay == nil {
 		return
 	}
-	handOverLeg(relay, leg, udpAddr(off.Address, off.Port), source)
+	moveLeg(relay, leg, udpAddr(off.Address, off.Port), source) // the same phone at a new address keeps its keys
 	c.addTrace(fmt.Sprintf("Media address of the %s changed %s -> %s; the anchor relearned it", leg, prev, addr))
 	c.s.log.Info("media address changed mid-call", "correlation_id", c.id, "leg", leg)
 }

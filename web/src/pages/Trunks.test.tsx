@@ -195,11 +195,63 @@ describe("Trunks", () => {
     field("Username", "acct1001");
     field("Password (optional)", PASSWORD);
     field("Host 1", "10.0.0.5");
-    fireEvent.change(srtp, { target: { value: "required" } });
+    fireEvent.change(srtp, { target: { value: "optional" } });
     fireEvent.click(screen.getByRole("button", { name: "Create trunk" }));
     await screen.findByText("Trunk carrier-primary created.");
     expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
-      srtp: "required",
+      srtp: "optional",
+    });
+  });
+
+  it("does not offer Required SRTP on a trunk, since trunks are UDP", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [] }),
+      "GET /api/v1/trunks/status": () => json({ items: [] }),
+    });
+    renderApp("/trunks");
+
+    expect(await screen.findByText("No trunks yet")).toBeVisible();
+    fireEvent.click(screen.getAllByRole("button", { name: "New trunk" })[0]!);
+    const drawer = screen.getByRole("dialog", { name: "New trunk" });
+    const srtp = within(drawer).getByLabelText("SRTP");
+    const values = within(srtp)
+      .getAllByRole("option")
+      .map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(["off", "optional"]);
+    expect(drawer.textContent).toContain("Required is not available");
+  });
+
+  it("flags a trunk stored as Required and refuses to save it that way", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () =>
+        json({ items: [{ ...TRUNK, srtp: "required" }] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+      "PATCH /api/v1/trunks/4": () => json(TRUNK),
+    });
+    renderApp("/trunks");
+
+    expect(
+      await screen.findByText(/Required \(calls are refused/),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit trunk carrier-primary" }),
+    );
+    const drawer = await screen.findByRole("dialog");
+    const srtp = within(drawer).getByLabelText("SRTP");
+    expect(srtp).toHaveValue("required");
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(
+      await within(drawer).findByText(/Required needs a TLS trunk/),
+    ).toBeVisible();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+
+    fireEvent.change(srtp, { target: { value: "off" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    await screen.findByText("Trunk carrier-primary saved.");
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      srtp: "off",
     });
   });
 

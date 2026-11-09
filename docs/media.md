@@ -199,31 +199,58 @@ phone never learns the other phone's key.
 - **TLS only.** The keys travel in the SDP, so Hello offers or accepts crypto
   only on a leg whose signalling is TLS (a phone registered through the
   Kamailio TLS listener, see [tls.md](tls.md)). On a UDP leg the crypto lines
-  are dropped and plain RTP is answered. Trunk legs are UDP, so a trunk never
-  carries SRTP today.
+  are dropped and plain RTP is answered. Trunk legs are UDP (SIP over TLS for
+  trunks is a later phase of the trunks-routing spec), so a trunk never carries
+  SRTP today.
 - **Policy** per device (`PATCH /api/v1/devices/{id}`, **Devices** page) and per
-  trunk (**Trunks** page): `off` offers nothing; `optional` (device default)
+  trunk (**Trunks** page, `off` or `optional`; see below): `off` offers nothing; `optional` (device default)
   offers `RTP/AVP` with crypto lines, which a phone without SRTP ignores, and
   uses SRTP when the answer carries it; `required` offers `RTP/SAVP` only. A
   `required` leg that cannot be encrypted refuses the call with 488 (a caller
   on UDP or without crypto, a callee that answers without crypto), and a
   required callee that is not on TLS is not rung. An `RTP/SAVP` offer on a leg
   Hello cannot encrypt is also refused with 488.
+- **Trunks cannot be `required`.** A trunk's legs are UDP, so `required` would
+  refuse every call over it. The API (`POST`/`PATCH /api/v1/trunks`, so the
+  MCP tools too) answers 422 on the `srtp` field when a trunk is set to
+  `required`, and the Trunks page offers `off` and `optional` only, with the
+  reason. `optional` on a trunk behaves as `off` until trunks gain a TLS
+  transport. A trunk already stored as `required` from before the rule still
+  refuses its calls with 488 (never silently carried in clear); the Trunks page
+  flags it and saving it with another policy fixes it.
 - **Per leg.** One leg can be encrypted and the other plain (a TLS phone calling
   a UDP phone). The CDR's `srtp` says `none`, `caller`, `callee` or `both`, and
   the call's trace names the legs and suite (never the key).
 - **Mid-call.** Hold, resume and refreshes keep the leg's keys and its media
-  profile; a phone that rekeys in a re-INVITE is followed. A leg handed to
-  another party (transfer target, retrieved park, pickup, conference) restarts
-  as plain RTP, because the previous endpoint's keys are not the new one's:
-  such a party is not offered crypto yet.
+  profile; a phone that rekeys in a re-INVITE is followed, and a phone that
+  roams to a new media address keeps its keys. A leg handed to another party
+  (a blind or attended transfer target, a retrieved parked call, a pickup, the
+  parker's device when a parked call returns) drops the previous endpoint's
+  keys and negotiates new ones with the new party under the new party's own
+  policy and transport: it is offered (or, when it offers, answered with)
+  crypto when its policy allows and its contact is on TLS. A party whose policy
+  is `required` that cannot be encrypted is refused (488, or not rung, or the
+  call ends), never carried in the clear; an `optional` party that does not
+  answer with crypto is plain RTP and counted as `plain`. A retrieve or pickup
+  that crosses nodes (the call is held on another node) cannot carry keys
+  through the shared store, so it is plain RTP for an `optional` phone and is
+  refused with 488 for a `required` one.
 - **Authentication.** A packet on an encrypted leg that fails authentication or
   replay checks is dropped, counted (`auth_failed` in the call's stats) and
   never latches the leg's address. RTCP multiplexed on the RTP port is checked
   (SRTCP) and consumed.
-- **Not covered.** Voicemail, paging and the conference mixer answer the caller
-  with plain RTP: an `optional` phone falls back, a phone forced to SRTP cannot
-  use them until they gain SRTP. DTLS-SRTP and ICE are the next item (S-16).
+- **Voicemail, paging and conference rooms** follow the same policy. Voicemail
+  and a conference participant answer a caller's `a=crypto` offer with their own
+  key (one SRTP session per caller, so the mixer encrypts the mix per
+  participant); a call parked then sent to voicemail keeps the encryption it had.
+  A page encrypts its caller leg the same way and each member leg separately:
+  every member is offered its own keys under its device's policy and transport,
+  a member that requires SRTP and is not on TLS is skipped
+  (`srtp_required` in the page legs), and one that answers without crypto is
+  hung up. A page's multicast group is always plain RTP (the stream is
+  one-to-many by design). An HA takeover of voicemail or a conference call
+  offers the caller fresh keys and ends the call if it does not answer with
+  them. DTLS-SRTP and ICE are the next item (S-16).
 
 ## Metrics
 

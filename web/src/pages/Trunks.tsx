@@ -207,6 +207,24 @@ function dialingLabel(dialing: InternalDialing): string {
   }
 }
 
+/**
+ * Why a trunk cannot require SRTP. SDES keys travel in the call setup and
+ * Hello sends them only over TLS; trunk legs are SIP over UDP, so a trunk set
+ * to Required would refuse every call. The API refuses it too.
+ */
+const TRUNK_SRTP_REQUIRED_MESSAGE =
+  "Required needs a TLS trunk transport, and trunks are SIP over UDP. Choose Off.";
+
+/** The policies a trunk can be given; Required is not among them. */
+const TRUNK_SRTP_POLICIES = SRTP_POLICIES.filter((p) => p.value !== "required");
+
+/** What the card shows for a trunk's policy. */
+function srtpLabel(srtp: SrtpPolicy | undefined): string {
+  if (srtp === "required")
+    return "Required (calls are refused: edit and set Off)";
+  return srtp ?? "off";
+}
+
 /** Client-side checks; the server validates everything again. */
 function validate(d: TrunkDraft): Record<string, string> {
   const e: Record<string, string> = {};
@@ -244,6 +262,7 @@ function validate(d: TrunkDraft): Record<string, string> {
   if (d.codecs.length === 0) {
     e.codecs = "Offer at least one codec.";
   }
+  if (d.srtp === "required") e.srtp = TRUNK_SRTP_REQUIRED_MESSAGE;
   if (d.dialingMode === "all" && !d.dialingConfirm) {
     e["internalDialing.confirm"] =
       "Confirm that this trunk may dial every internal number.";
@@ -567,7 +586,7 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
-          { label: "Media encryption", value: t.srtp ?? "off" },
+          { label: "Media encryption", value: srtpLabel(t.srtp) },
           { label: "Password", value: password },
         ]
       : [
@@ -588,7 +607,7 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
-          { label: "Media encryption", value: t.srtp ?? "off" },
+          { label: "Media encryption", value: srtpLabel(t.srtp) },
           { label: "Password", value: password },
         ];
 
@@ -973,14 +992,24 @@ function TrunkDrawer({
             label="SRTP"
             value={draft.srtp}
             error={errors.srtp}
-            options={SRTP_POLICIES}
+            options={
+              draft.srtp === "required"
+                ? [
+                    ...TRUNK_SRTP_POLICIES,
+                    {
+                      value: "required" as SrtpPolicy,
+                      label: "Required (not possible on a trunk)",
+                    },
+                  ]
+                : TRUNK_SRTP_POLICIES
+            }
             onChange={(e) => set("srtp", e.target.value as SrtpPolicy)}
           />
           <p className="cf-form__note">
             SRTP keys travel in the call setup, so Hello offers them only on a
-            leg whose signalling is TLS. Trunk legs are UDP today: Optional
-            behaves as Off, and Required refuses calls over this trunk. Off
-            keeps plain RTP.
+            leg whose signalling is TLS. Trunk legs are SIP over UDP today:
+            Optional behaves as Off, and Required is not available because it
+            would refuse every call over this trunk. Off keeps plain RTP.
           </p>
         </fieldset>
 

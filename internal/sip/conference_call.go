@@ -252,7 +252,13 @@ func (c *call) joinConference(req *sip.Request, tx sip.ServerTransaction, snap *
 	room.mu.Lock()
 	room.cfg = cfg
 	room.mu.Unlock()
-	answer, party, err := s.confParty(req.Body())
+	answer, party, err := s.confParty(req.Body(), c.soloPolicy())
+	if errors.Is(err, media.ErrSRTPRequired) {
+		s.confRelease(room)
+		c.srtpNote("refused")
+		refuse(sip.StatusNotAcceptableHere, ResultFailed, "failed", "SRTP is required but the conference could not negotiate it")
+		return
+	}
 	if err != nil {
 		s.log.Warn("conference media unavailable", "room", cfg.Number, "error", err)
 		s.confRelease(room)
@@ -265,6 +271,7 @@ func (c *call) joinConference(req *sip.Request, tx sip.ServerTransaction, snap *
 		return
 	}
 	p := c.confAttach(room, party, answer)
+	c.setSoloSecure(party.Secure())
 	if !c.answerSelf(answer) {
 		c.confLeave()
 		return
@@ -288,12 +295,12 @@ func (c *call) joinConference(req *sip.Request, tx sip.ServerTransaction, snap *
 
 // confParty binds the participant's media socket on this node and builds the
 // answer.
-func (s *Server) confParty(offer []byte) ([]byte, *media.Party, error) {
+func (s *Server) confParty(offer []byte, pol media.SecurePolicy) ([]byte, *media.Party, error) {
 	a := s.voicemailAnchor(offer)
 	if a == nil {
 		return nil, nil, errors.New("no media address to advertise")
 	}
-	return media.NewParty(a.AdvertisedHost(), s.cfg.RTPPortMin, s.cfg.RTPPortMax, offer)
+	return media.NewPartySecure(a.AdvertisedHost(), s.cfg.RTPPortMin, s.cfg.RTPPortMax, offer, pol)
 }
 
 // confAttach ties a participant to the call.
@@ -808,7 +815,7 @@ func (c *call) confRehome(cfg snapshot.Conference, f *confFwd) {
 		c.endBoth("conference owner lost")
 		return
 	}
-	relay.ResetCrypto(legCallee) // the room's loopback party speaks plain RTP
+	relay.ResetCrypto(legCallee) // the dead owner's keys; the loopback inside this node is plain, the phone's leg keeps its own
 	loop := off.Narrow(off.PayloadType).PlainOffer().Build("127.0.0.1", relay.LegPort(legCallee), "sendrecv")
 	own, err := s.confResolve(cfg.Number)
 	if err != nil || !own.self {
@@ -898,5 +905,5 @@ func (c *call) confHangupHomed() { c.announcementEnd() }
 // confNewParty builds the participant's media for a taken-over dialog from
 // the phone's replicated offer.
 func (s *Server) confNewParty(offer string) ([]byte, *media.Party, error) {
-	return s.confParty([]byte(offer))
+	return s.confParty([]byte(offer), media.SecurePolicy{})
 }

@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
@@ -309,52 +310,54 @@ type legSecurity struct {
 	keys *legKeys
 }
 
-// LocalCrypto returns the keys Hello offers on leg, generating them on first
-// use. Once a key is active the active one is returned alone, so a re-INVITE
-// answer repeats it.
-func (r *Relay) LocalCrypto(leg string) ([]Crypto, error) {
-	l := r.findLeg(leg)
-	if l == nil {
-		return nil, errors.New("media: unknown relay leg " + leg)
+// Secure is the SDES negotiation and SRTP state of one media endpoint: a
+// relay leg, a voicemail session, a conference participant, a page caller or
+// a page member. The zero value is a plain RTP endpoint. offered holds the
+// local keys written into an offer (or the one answer key) until the far end
+// settles on one; the active state is read by the packet path without a lock.
+type Secure struct {
+	sec    legSecurity
+	active atomic.Pointer[legKeys]
+}
+
+// Local returns the keys Hello offers, generating them on first use. Once a
+// key is active the active one is returned alone, so a re-INVITE answer
+// repeats it.
+func (s *Secure) Local() ([]Crypto, error) {
+	s.sec.mu.Lock()
+	defer s.sec.mu.Unlock()
+	if s.sec.keys != nil {
+		return []Crypto{s.sec.keys.local}, nil
 	}
-	l.sec.mu.Lock()
-	defer l.sec.mu.Unlock()
-	if l.sec.keys != nil {
-		return []Crypto{l.sec.keys.local}, nil
-	}
-	if len(l.sec.offered) == 0 {
-		for i, s := range OfferedSuites {
-			c, err := NewCrypto(i+1, s)
+	if len(s.sec.offered) == 0 {
+		for i, suite := range OfferedSuites {
+			c, err := NewCrypto(i+1, suite)
 			if err != nil {
 				return nil, err
 			}
-			l.sec.offered = append(l.sec.offered, c)
+			s.sec.offered = append(s.sec.offered, c)
 		}
 	}
-	return append([]Crypto(nil), l.sec.offered...), nil
+	return append([]Crypto(nil), s.sec.offered...), nil
 }
 
-// AcceptCrypto settles leg on one of the far end's offered keys (Hello is
+// Accept settles the endpoint on one of the far end's offered keys (Hello is
 // the answerer): the first line, in the offerer's order, whose suite Hello
 // speaks. It returns the line to put in the answer, which carries the same
-// tag and a fresh local key; after it the leg is encrypted. It fails when
-// none of the lines is usable.
-func (r *Relay) AcceptCrypto(leg string, offers []Crypto, savp bool) (Crypto, error) {
-	l := r.findLeg(leg)
-	if l == nil {
-		return Crypto{}, errors.New("media: unknown relay leg " + leg)
-	}
-	l.sec.mu.Lock()
-	defer l.sec.mu.Unlock()
+// tag and a fresh local key; after it the endpoint is encrypted. It fails
+// when none of the lines is usable.
+func (s *Secure) Accept(offers []Crypto, savp bool) (Crypto, error) {
+	s.sec.mu.Lock()
+	defer s.sec.mu.Unlock()
 	for _, o := range offers {
 		if !o.Valid() {
 			continue
 		}
-		if k := l.sec.keys; k != nil && k.remote.sameKey(o) {
+		if k := s.sec.keys; k != nil && k.remote.sameKey(o) {
 			return k.local, nil // a re-INVITE repeating the key
 		}
 		local := Crypto{}
-		if k := l.sec.keys; k != nil && k.suite == o.Suite {
+		if k := s.sec.keys; k != nil && k.suite == o.Suite {
 			local = k.local
 		} else {
 			c, err := NewCrypto(o.Tag, o.Suite)
@@ -364,36 +367,32 @@ func (r *Relay) AcceptCrypto(leg string, offers []Crypto, savp bool) (Crypto, er
 			local = c
 		}
 		local.Tag = o.Tag
-		keys, err := newLegKeys(local, o, l.sec.keys)
+		keys, err := newLegKeys(local, o, s.sec.keys)
 		if err != nil {
 			return Crypto{}, err
 		}
 		keys.savp = savp
-		l.sec.keys = keys
-		l.sec.offered = nil
-		l.secActive.Store(keys)
+		s.sec.keys = keys
+		s.sec.offered = nil
+		s.active.Store(keys)
 		return local, nil
 	}
 	return Crypto{}, errors.New("media: the offer has no SRTP suite Hello supports")
 }
 
-// ApplyAnswerCrypto settles leg on the far end's answer to Hello's offer: the
-// answer's line must match the tag and suite of one Hello offered. It
-// returns false (and leaves the leg plain) when the answer carries no usable
-// line.
-func (r *Relay) ApplyAnswerCrypto(leg string, answers []Crypto, savp bool) bool {
-	l := r.findLeg(leg)
-	if l == nil {
-		return false
-	}
-	l.sec.mu.Lock()
-	defer l.sec.mu.Unlock()
+// ApplyAnswer settles the endpoint on the far end's answer to Hello's offer:
+// the answer's line must match the tag and suite of one Hello offered. It
+// returns false (and leaves the endpoint plain) when the answer carries no
+// usable line.
+func (s *Secure) ApplyAnswer(answers []Crypto, savp bool) bool {
+	s.sec.mu.Lock()
+	defer s.sec.mu.Unlock()
 	if len(answers) == 0 {
 		return false
 	}
-	cands := l.sec.offered
-	if l.sec.keys != nil {
-		cands = []Crypto{l.sec.keys.local}
+	cands := s.sec.offered
+	if s.sec.keys != nil {
+		cands = []Crypto{s.sec.keys.local}
 	}
 	for _, a := range answers {
 		if !a.Valid() {
@@ -403,76 +402,51 @@ func (r *Relay) ApplyAnswerCrypto(leg string, answers []Crypto, savp bool) bool 
 			if o.Tag != a.Tag || o.Suite != a.Suite {
 				continue
 			}
-			if k := l.sec.keys; k != nil && k.remote.sameKey(a) {
+			if k := s.sec.keys; k != nil && k.remote.sameKey(a) {
 				return true
 			}
-			keys, err := newLegKeys(o, a, l.sec.keys)
+			keys, err := newLegKeys(o, a, s.sec.keys)
 			if err != nil {
 				return false
 			}
 			keys.savp = savp
-			l.sec.keys = keys
-			l.sec.offered = nil
-			l.secActive.Store(keys)
+			s.sec.keys = keys
+			s.sec.offered = nil
+			s.active.Store(keys)
 			return true
 		}
 	}
 	return false
 }
 
-// Secure reports whether leg's media is SRTP-protected and with which suite.
-func (r *Relay) Secure(leg string) (CryptoSuite, bool) {
-	l := r.findLeg(leg)
-	if l == nil {
-		return "", false
-	}
-	if k := l.secActive.Load(); k != nil {
+// Suite reports whether the endpoint's media is SRTP-protected and with
+// which suite.
+func (s *Secure) Suite() (CryptoSuite, bool) {
+	if k := s.active.Load(); k != nil {
 		return k.suite, true
 	}
 	return "", false
 }
 
-// SecureProfile reports whether leg is encrypted and whether it negotiated
-// RTP/SAVP (true) or RTP/AVP with crypto lines (false).
-func (r *Relay) SecureProfile(leg string) (savp, on bool) {
-	l := r.findLeg(leg)
-	if l == nil {
-		return false, false
-	}
-	if k := l.secActive.Load(); k != nil {
+// Profile reports whether the endpoint is encrypted and whether it
+// negotiated RTP/SAVP (true) or RTP/AVP with crypto lines (false).
+func (s *Secure) Profile() (savp, on bool) {
+	if k := s.active.Load(); k != nil {
 		return k.savp, true
 	}
 	return false, false
 }
 
-// SecureLegs counts the legs that are SRTP-protected (0 to 2).
-func (r *Relay) SecureLegs() int {
-	r.mu.Lock()
-	legs := append([]*relayLeg(nil), r.legs...)
-	r.mu.Unlock()
-	n := 0
-	for _, l := range legs {
-		if l.secActive.Load() != nil {
-			n++
-		}
-	}
-	return n
-}
-
-// UpdateRemoteCrypto applies the far end's a=crypto lines from a re-INVITE or
-// a re-INVITE answer to an encrypted leg: a line with the active suite and the
-// same key changes nothing (the replay window and rollover counter stay), a
-// new key replaces the receive key and keeps the send key. It reports whether
-// the leg now uses one of the lines; a leg that is plain is never switched on
-// by it.
-func (r *Relay) UpdateRemoteCrypto(leg string, lines []Crypto) bool {
-	l := r.findLeg(leg)
-	if l == nil {
-		return false
-	}
-	l.sec.mu.Lock()
-	defer l.sec.mu.Unlock()
-	cur := l.sec.keys
+// UpdateRemote applies the far end's a=crypto lines from a re-INVITE or a
+// re-INVITE answer to an encrypted endpoint: a line with the active suite
+// and the same key changes nothing (the replay window and rollover counter
+// stay), a new key replaces the receive key and keeps the send key. It
+// reports whether the endpoint now uses one of the lines; a plain endpoint
+// is never switched on by it.
+func (s *Secure) UpdateRemote(lines []Crypto) bool {
+	s.sec.mu.Lock()
+	defer s.sec.mu.Unlock()
+	cur := s.sec.keys
 	if cur == nil {
 		return false
 	}
@@ -488,32 +462,155 @@ func (r *Relay) UpdateRemoteCrypto(leg string, lines []Crypto) bool {
 			return false
 		}
 		keys.savp = cur.savp
-		l.sec.keys = keys
-		l.secActive.Store(keys)
+		s.sec.keys = keys
+		s.active.Store(keys)
 		return true
 	}
 	return false
 }
 
-// LearnCrypto applies an SDP's a=crypto lines from the far end of leg: the
-// answer to a key Hello offered activates the leg, a repeat or a rekey on an
-// encrypted leg updates it. It reports whether the leg is encrypted after it.
-// A leg Hello never offered a key on stays plain whatever the lines say.
-func (r *Relay) LearnCrypto(leg string, lines []Crypto, savp bool) bool {
-	l := r.findLeg(leg)
-	if l == nil {
-		return false
+// Learn applies an SDP's a=crypto lines from the far end: the answer to a
+// key Hello offered activates the endpoint, a repeat or a rekey on an
+// encrypted one updates it. It reports whether the endpoint is encrypted
+// after it. An endpoint Hello never offered a key on stays plain whatever
+// the lines say.
+func (s *Secure) Learn(lines []Crypto, savp bool) bool {
+	if s.active.Load() != nil {
+		return s.UpdateRemote(lines)
 	}
-	if l.secActive.Load() != nil {
-		return r.UpdateRemoteCrypto(leg, lines)
-	}
-	l.sec.mu.Lock()
-	pending := len(l.sec.offered) > 0
-	l.sec.mu.Unlock()
+	s.sec.mu.Lock()
+	pending := len(s.sec.offered) > 0
+	s.sec.mu.Unlock()
 	if !pending {
 		return false
 	}
-	return r.ApplyAnswerCrypto(leg, lines, savp)
+	return s.ApplyAnswer(lines, savp)
+}
+
+// Reset drops the endpoint's SRTP state, for when another endpoint takes it
+// over: the keys belonged to the previous one. It is plain RTP until it is
+// negotiated again.
+func (s *Secure) Reset() {
+	s.sec.mu.Lock()
+	s.sec.keys = nil
+	s.sec.offered = nil
+	s.active.Store(nil)
+	s.sec.mu.Unlock()
+}
+
+// Protect encrypts a plain RTP packet for sending when the endpoint is
+// encrypted. ok is false only when it is encrypted and the packet cannot be
+// protected: the caller drops it, never sends it in the clear.
+func (s *Secure) Protect(pkt []byte) (out []byte, ok bool) {
+	k := s.active.Load()
+	if k == nil {
+		return pkt, true
+	}
+	enc, err := k.protect(pkt)
+	if err != nil {
+		return nil, false
+	}
+	return enc, true
+}
+
+// Unprotect checks and decrypts a datagram received by an encrypted
+// endpoint. ok is false for a packet that fails authentication or replay,
+// and for RTCP on the RTP port (rtcp-mux), which is checked and consumed
+// (an RTCP packet that fails authentication counts as a failure too). A
+// plain endpoint passes the datagram through. authFailed reports a packet
+// that did not authenticate. The result may alias an internal buffer: use it
+// before the next call, from one goroutine only.
+func (s *Secure) Unprotect(data []byte) (plain []byte, ok, authFailed bool) {
+	k := s.active.Load()
+	if k == nil {
+		return data, true, false
+	}
+	if isRTCP(data) {
+		if _, err := k.unprotectRTCP(data); err != nil {
+			return nil, false, true
+		}
+		return nil, false, false
+	}
+	p, err := k.unprotect(data)
+	if err != nil {
+		return nil, false, true
+	}
+	return p, true, false
+}
+
+// LocalCrypto returns the keys Hello offers on leg, generating them on first
+// use. Once a key is active the active one is returned alone, so a re-INVITE
+// answer repeats it.
+func (r *Relay) LocalCrypto(leg string) ([]Crypto, error) {
+	l := r.findLeg(leg)
+	if l == nil {
+		return nil, errors.New("media: unknown relay leg " + leg)
+	}
+	return l.secure.Local()
+}
+
+// AcceptCrypto settles leg on one of the far end's offered keys (Hello is
+// the answerer); see Secure.Accept.
+func (r *Relay) AcceptCrypto(leg string, offers []Crypto, savp bool) (Crypto, error) {
+	l := r.findLeg(leg)
+	if l == nil {
+		return Crypto{}, errors.New("media: unknown relay leg " + leg)
+	}
+	return l.secure.Accept(offers, savp)
+}
+
+// ApplyAnswerCrypto settles leg on the far end's answer to Hello's offer; see
+// Secure.ApplyAnswer.
+func (r *Relay) ApplyAnswerCrypto(leg string, answers []Crypto, savp bool) bool {
+	l := r.findLeg(leg)
+	return l != nil && l.secure.ApplyAnswer(answers, savp)
+}
+
+// Secure reports whether leg's media is SRTP-protected and with which suite.
+func (r *Relay) Secure(leg string) (CryptoSuite, bool) {
+	l := r.findLeg(leg)
+	if l == nil {
+		return "", false
+	}
+	return l.secure.Suite()
+}
+
+// SecureProfile reports whether leg is encrypted and whether it negotiated
+// RTP/SAVP (true) or RTP/AVP with crypto lines (false).
+func (r *Relay) SecureProfile(leg string) (savp, on bool) {
+	l := r.findLeg(leg)
+	if l == nil {
+		return false, false
+	}
+	return l.secure.Profile()
+}
+
+// SecureLegs counts the legs that are SRTP-protected (0 to 2).
+func (r *Relay) SecureLegs() int {
+	r.mu.Lock()
+	legs := append([]*relayLeg(nil), r.legs...)
+	r.mu.Unlock()
+	n := 0
+	for _, l := range legs {
+		if l.secure.active.Load() != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// UpdateRemoteCrypto applies the far end's a=crypto lines from a re-INVITE or
+// a re-INVITE answer to an encrypted leg; see Secure.UpdateRemote.
+func (r *Relay) UpdateRemoteCrypto(leg string, lines []Crypto) bool {
+	l := r.findLeg(leg)
+	return l != nil && l.secure.UpdateRemote(lines)
+}
+
+// LearnCrypto applies an SDP's a=crypto lines from the far end of leg; see
+// Secure.Learn.
+func (r *Relay) LearnCrypto(leg string, lines []Crypto, savp bool) bool {
+	l := r.findLeg(leg)
+	return l != nil && l.secure.Learn(lines, savp)
 }
 
 // ResetCrypto drops a leg's SRTP state, for when another endpoint takes the
@@ -521,13 +618,7 @@ func (r *Relay) LearnCrypto(leg string, lines []Crypto, savp bool) bool {
 // belonged to the previous endpoint. The leg is plain RTP until it is
 // negotiated again.
 func (r *Relay) ResetCrypto(leg string) {
-	l := r.findLeg(leg)
-	if l == nil {
-		return
+	if l := r.findLeg(leg); l != nil {
+		l.secure.Reset()
 	}
-	l.sec.mu.Lock()
-	l.sec.keys = nil
-	l.sec.offered = nil
-	l.secActive.Store(nil)
-	l.sec.mu.Unlock()
 }

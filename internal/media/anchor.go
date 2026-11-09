@@ -44,6 +44,15 @@ func (a *Anchor) AdvertisedHost() string { return a.host }
 // can still fail (exhaustion, a race with a just-closed socket), so the
 // bind is retried a few times before Answer gives up.
 func (a *Anchor) Answer(offer []byte) ([]byte, Session, error) {
+	return a.AnswerSecure(offer, SecurePolicy{})
+}
+
+// AnswerSecure is Answer for a caller whose leg may carry SRTP (SDES): with
+// p.Allow the session accepts the caller's a=crypto offer and the answer
+// carries Hello's key, encrypting what it plays and decrypting what it
+// records; a policy that requires SRTP and an offer that cannot deliver it
+// fails with ErrSRTPRequired and binds nothing.
+func (a *Anchor) AnswerSecure(offer []byte, p SecurePolicy) ([]byte, Session, error) {
 	ip := net.ParseIP(a.host)
 	if ip == nil || ip.To4() == nil {
 		return nil, nil, fmt.Errorf("media: advertised host %q is not an IPv4 address", a.host)
@@ -101,6 +110,13 @@ func (a *Anchor) Answer(offer []byte) ([]byte, Session, error) {
 		frame:  2 * off.Codec.FrameSamples(),
 	}
 	s.silent = make([]byte, s.frame)
+	ansSDP, err := s.sec.AnswerSDP(parsed, off, p)
+	if err != nil {
+		_ = conn.Close() // nothing received yet; the close error is irrelevant
+		enc.Close()
+		dec.Close()
+		return nil, nil, err
+	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	if _, err := rand.Read(s.ssrc[:]); err != nil {
 		_ = conn.Close() // nothing received yet; the close error is irrelevant
@@ -112,7 +128,7 @@ func (a *Anchor) Answer(offer []byte) ([]byte, Session, error) {
 	s.audio = make(chan []byte, inboundQueue)
 	s.dtmf = make(chan byte, dtmfQueue)
 	go s.loop()
-	return off.Build(a.host, port, "sendrecv"), s, nil
+	return ansSDP.Build(a.host, port, "sendrecv"), s, nil
 }
 
 // bindRTP binds a wildcard UDP socket on an explicit port of the dynamic
@@ -180,7 +196,13 @@ type anchorSession struct {
 	loopDone chan struct{}
 	// filter runs only in the loop goroutine, so it needs no lock.
 	filter DTMFFilter
+
+	// sec is the session's SRTP state (plain RTP until SDES settles).
+	sec Secure
 }
+
+// Secure is the session's SRTP state, for the SDP exchanges of the call.
+func (s *anchorSession) Secure() *Secure { return &s.sec }
 
 // Queue bounds. inboundQueue holds about 2.5 seconds of 20 ms frames, so a
 // Record that starts a beat late loses nothing; dtmfQueue holds a full
@@ -273,6 +295,12 @@ func (s *anchorSession) sendAudio(pcm []byte) error {
 
 // send writes one datagram to the current peer address.
 func (s *anchorSession) send(packet []byte) error {
+	// An encrypted session never sends in the clear: a packet that cannot be
+	// protected is an error.
+	packet, ok := s.sec.Protect(packet)
+	if !ok {
+		return errors.New("media: SRTP protect failed")
+	}
 	_, err := s.conn.WriteToUDP(packet, s.currentRemote())
 	if err != nil {
 		return fmt.Errorf("media: write RTP: %w", err)
@@ -303,8 +331,14 @@ func (s *anchorSession) loop() {
 		if err != nil {
 			return // socket closed by Close
 		}
+		// An encrypted session drops what fails authentication before it
+		// is latched, decoded or counted; RTCP on the RTP port is consumed.
+		data, ok, _ := s.sec.Unprotect(buf[:n])
+		if !ok {
+			continue
+		}
 		s.lockRemote(from)
-		pkt, ok := ParseRTP(buf[:n])
+		pkt, ok := ParseRTP(data)
 		if !ok {
 			continue // a malformed datagram is dropped, never fatal
 		}

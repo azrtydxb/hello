@@ -1482,3 +1482,70 @@ legs) and `internal/sip/srtp.go` (policy and negotiation). Choices:
 - **Keys are never logged.** `media.Crypto` redacts itself under every fmt verb
   and in slog; traces name the leg and suite only (`TestSRTPKeysNeverFormatted`,
   and the call test checks the CDR trace).
+
+## SRTP SDES: the known gaps of #266 closed (2026-11-09)
+
+Follow-up to "SRTP SDES on the anchor". Choices:
+
+- **One SRTP state type for every media object.** `media.Secure` (SDES
+  negotiation plus the SRTP contexts, with `Protect`/`Unprotect`) is what each
+  relay leg already was; the relay leg now embeds it and a voicemail session
+  (`Anchor.AnswerSecure`), a conference participant (`NewPartySecure`) and a
+  page (`Fanout.CallerSecure`, one `Secure` per member via `AddSecureTarget`)
+  carry their own. Same keys-per-leg rule, same redaction, same drop of anything
+  that fails authentication, no second implementation to keep in step.
+- **Voicemail, conference and paging use the caller leg's policy**
+  (`call.soloPolicy`: allowed = policy not off and the leg is TLS, required =
+  policy required). The answer mirrors the offer's profile. A caller that
+  requires SRTP and cannot get it is refused with 488, never answered in clear.
+  A conference participant has its own SRTP session, so the mixer encrypts the
+  mix per participant. A page encrypts per member: each member's contact is
+  offered its own keys under its device's policy and transport (RTP/SAVP when it
+  requires them), a required member that is not on TLS is skipped
+  (`srtp_required`), one that answers without crypto is hung up. A page's
+  multicast copy stays plain RTP: one stream to a group address cannot carry
+  per-listener keys; multicast paging is a deliberate plain-RTP feature.
+  The test page (`pagetest.go`) follows the same member rule.
+- **A parked call sent to voicemail keeps its encryption**: the voicemail
+  session is offered keys in the profile the party's relay leg had, and the
+  call ends if the party does not answer with crypto.
+- **HA for solo calls.** The replicated mode (`avp`/`savp`) now covers
+  voicemail and conference calls (`call.soloSec`); the taker offers fresh keys
+  and a caller that does not answer with crypto ends the call (zombie count)
+  instead of continuing in clear. Hello's own key (the `SDP` of the leg, which
+  now carries one) is stripped before replication, as the far end's was.
+- **Hand-over legs negotiate again** instead of restarting plain. A transfer
+  target (blind and attended), a retrieved park, a pickup and the parker's
+  device on a park return are new endpoints on a relay leg: the previous
+  endpoint's keys are dropped (`ResetCrypto`) and the new party is offered, or
+  answered with, keys under its own policy and transport (`cryptoOfferOn`,
+  `cryptoAnswerOn`, `learnCryptoOn`). A party whose policy is `required` and
+  that cannot be encrypted is refused (488, or the call ends); an `optional`
+  party that does not answer with crypto is plain RTP, counted as `plain` and
+  traced. A pickup now also answers the ringing caller's SDES offer (the caller
+  had only been given a key when the leg was already negotiated).
+- **Roaming is not a hand-over.** `relearnMedia` (the same phone at a new media
+  address after a re-INVITE) called the hand-over helper and so dropped the
+  leg's keys, silently continuing in clear. It now uses `moveLeg`, which
+  re-aims the leg and keeps the SRTP state.
+- **Across nodes, retrieve and pickup are plain or refused.** The retriever's
+  offer travels to the holding node through the shared store, and a key must
+  not be written there (the replication rule), so its `a=crypto` lines are
+  dropped: an `optional` phone is plain RTP (counted, traced), a phone that
+  requires SRTP or offers `RTP/SAVP` only is refused with 488 before it takes
+  the slot. Same-node retrieve and pickup negotiate fully.
+- **A trunk cannot be set to `required`** (gap 3). The trunks-routing spec lists
+  SIP over TLS for trunks as a later phase, so there is no trunk TLS transport
+  to require. Rather than build one inside an SRTP change, the state is made
+  impossible: `POST`/`PATCH /api/v1/trunks` answer 422 on `srtp` when it is set
+  to `required` (only the value being set is checked, so a trunk stored as
+  `required` earlier can still be edited and fixed), the Trunks page offers
+  `off` and `optional` only and says why, a stored `required` is flagged on its
+  card and refuses to save as it is, and the OpenAPI text and the skills say
+  so. No migration: existing rows are not rewritten, since turning `required`
+  into `off` behind the operator's back would be a silent downgrade. Calls over
+  such a trunk keep failing with 488, and the CDR trace says why. When trunk TLS
+  exists this check becomes "required needs a TLS trunk".
+- **Not changed.** An in-dialog re-INVITE that rekeys a voicemail or conference
+  caller is answered with the call's existing key (a phone that rekeys on its
+  own re-INVITE is followed on relay legs only). AES-256 is still not offered.

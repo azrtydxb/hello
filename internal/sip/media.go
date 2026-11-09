@@ -594,8 +594,10 @@ func (c *call) closeMedia() {
 			c.storeRecording(r, by)
 		}
 	}
-	if relay != nil {
+	if relay != nil || c.soloSecure() != nil {
 		c.srtpGaugeRelease()
+	}
+	if relay != nil {
 		if m := c.s.deps.Media; m != nil {
 			m.NoteEnd()
 		}
@@ -1221,6 +1223,14 @@ func allowSignalSource(relay *media.Relay, leg, source string) {
 // private address) still has its media accepted.
 func handOverLeg(relay *media.Relay, leg string, target *net.UDPAddr, source string) {
 	relay.ResetCrypto(leg) // the previous endpoint's keys are not the new one's
+	moveLeg(relay, leg, target, source)
+}
+
+// moveLeg is handOverLeg for the same endpoint at a new address (or an
+// endpoint whose keys were negotiated already): the leg's source policy
+// starts over from the new address and the SRTP state is left alone, so a
+// phone that roams mid-call keeps its encryption.
+func moveLeg(relay *media.Relay, leg string, target *net.UDPAddr, source string) {
 	host, _ := splitHostPort(source)
 	if ip := net.ParseIP(host); ip != nil {
 		relay.ResetSources(leg, ip)
