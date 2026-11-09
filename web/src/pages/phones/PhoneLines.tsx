@@ -145,9 +145,8 @@ export function PhoneLines({
       </p>
       {lines.some((l) => !l.provisioned) && (
         <Alert tone="info" title="Some lines are held, not written">
-          The Grandstream templates write only line 1 until the account keys of
-          further lines are confirmed on hardware. The line is kept here and
-          reaches the phone then.
+          This model's template does not write further lines. The line is kept
+          here and reaches the phone when the model's template does.
         </Alert>
       )}
       {error && (

@@ -386,7 +386,7 @@ PBX has the voicemail feature code and the extension has voicemail switched on.
 | Vendor  | Key                                                                                                                                           |
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Yealink | `linekey.N.type = 3` (Transfer), `.value = *97<ext>`, `.label = To voicemail`; `expansion_module.M.key.K.*` the same on an EXP50 key (verify) |
-| Snom    | `<fkey idx="N" context="active">transfer sip:*97<ext>@<domain></fkey>` (verify)                                                              |
+| Snom    | `<fkey idx="N" context="active">transfer sip:*97<ext>@<domain></fkey>` (verify)                                                               |
 | Fanvil  | a memory key, `FkeyN Type :1`, `Value :*97<ext>@1/f` (the BLF keys' `/b` suffix replaced by speed dial) (verify)                              |
 | Poly    | an enhanced feature key macro `$FTransfer$$Cpause2$*97<ext>$Tinvite$` (`efk.efklist.1.*`) on `softkey.1`, active-call context (verify)        |
 
@@ -717,7 +717,7 @@ Templates see only these values:
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                                                                                                 |
 | `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`                                                                                |
-| `.Server`   | `Host`, `Port`, `Transport` (`udp` or `tls`), `Expiry` (seconds)                                                                                                             |
+| `.Server`   | `Host`, `Port`, `Transport` (`udp` or `tls`), `Expiry` (seconds)                                                                                                     |
 | `.BLF`      | a list of `Number`, `Label`, `URI`, placed on the model's keys: `Slot`, `Module`, `Page`, `Section`, `PageStart`, `Pickup`                                           |
 | `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `CACertBase64`, `ResyncSeconds`                                                                                          |
 | `.Codes`    | the PBX's star codes: `DNDOn`, `DNDOff`, `ForwardOn`, `ForwardOff`, `ForwardBusyOn`/`Off`, `ForwardNoAnswerOn`/`Off`, `PickupDirected` (empty when the PBX has none) |
@@ -1188,10 +1188,10 @@ pings. The built-in Grandstream template writes the phone's own keep-alive for
 the WP families; the call-side half (session timers, dead-media teardown,
 roaming) is in [phones.md](phones.md#roaming-keep-alive-and-dead-calls).
 
-| Family          | Setting written                                                    | Status                                                                                                  |
-| --------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| WP816/826/836   | `P2397 = 1` (SIP OPTIONS keep-alive)                               | key from the WP8x6 template; the interval (30 s) and max-tries keys are left at the default (verify)    |
-| WP810/820/822/825 | `P84989 = 0` (RFC 5626 keep-alive off)                           | from the WP822 release notes; verify on a phone's exported XML                                          |
+| Family            | Setting written                        | Status                                                                                               |
+| ----------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| WP816/826/836     | `P2397 = 1` (SIP OPTIONS keep-alive)   | key from the WP8x6 template; the interval (30 s) and max-tries keys are left at the default (verify) |
+| WP810/820/822/825 | `P84989 = 0` (RFC 5626 keep-alive off) | from the WP822 release notes; verify on a phone's exported XML                                       |
 
 The WP856 template has neither key and gets none. Other vendors' keep-alive
 keys are not written yet (verify per vendor).
@@ -1330,20 +1330,29 @@ credentials into the phone's configuration at the next fetch; press Resync to
 push it now. **Unbind line** removes it. Each line has its own voicemail light,
 BLF, ring tags and call waiting, because each is a device of its own extension.
 
-- How many lines a model takes: Grandstream WP8x6 three, WP822 two; Yealink and
-  Snom as many as the model has line keys, up to six; Poly and Fanvil up to six.
-  Other Grandstream models take one.
+- How many lines a model takes: Grandstream WP8x6 three, WP810, WP820, WP822
+  and WP825 two, WP856 six (the account blocks of Grandstream's own templates);
+  Yealink and Snom as many as the model has line keys, up to six; Poly and
+  Fanvil up to six. Other Grandstream models take one.
 - A phone has at most one line on an extension, and a device is one line of one
   phone.
 - On a Yealink and a Snom the first keys are the line keys (key N is line N by
   default), so BLF and the transfer-to-voicemail key start after them.
 - The check-sync of a multi-line phone goes to line 1's contacts, or to the
   next line's while line 1 is not registered, so the phone is notified once.
-- Yealink, Poly, Snom and Fanvil templates write lines 2 and up. The
-  Grandstream templates write line 1 only: the account keys of further
-  accounts (account 2 from P401, account 3 from P501) are not confirmed in any
-  Grandstream template Hello holds, so the line is kept in Hello, shown as held,
-  and reaches the phone once the keys are confirmed on a handset.
+- All five vendors' templates write lines 2 and up. Grandstream's are written
+  from the account blocks of its own templates (`wp8x6_config_1.0.3.39`,
+  `wp810_822_825_config_1.0.11.83`, `wp820_config_1.0.7.90`,
+  `wp856_config_1.0.3.16`): account 2 from `P401`, account 3 from `P501`, the
+  WP856's accounts 4 to 6 from `P601`, `P1701` and `P1801`. For each line the
+  file carries the account switch, label, server, user, authentication ID,
+  password, name, voicemail number, expiry, MWI subscription, transport (and the
+  `sips` scheme on TLS), the four-codec choice, the Broadsoft special feature
+  with feature key sync, accept-SIP-from-the-proxy-only (S-32) and call waiting
+  (not on the WP820, whose template has only the phone-wide switch). The WP8x6
+  template labels account 3 "GRP2602/2603/2604 only"; the spec and the
+  template's account choices give the WP8x6 three accounts, so check the third on
+  a handset.
 
 ### One extension on several phones
 
@@ -1358,10 +1367,15 @@ other phones (no bridged line appearance).
 The alternative for WP8x6 handsets is account sharing: several handsets share
 one line, one as the host and the others as guests. Switch it on in the phone
 group's dialog (**Account sharing**), then set each phone's role on its page
-(host by default). Hello writes the host setting P22521 and the guest setting
-P22522 to the group's WP8x6 phones only; the values are 1 for the phone's role
-and 0 for the other. A group without the switch, and every other model, gets
-neither. The WP822 and the other vendors have no such setting. Hot desking is
+(host by default). Hello writes `P22521` (Enable Account Sharing) = 1 and
+`P22522` (Role in Account Sharing: 0 host device, 1 guest device) to the group's
+WP8x6 phones only, from `wp8x6_config_1.0.3.39`. A WP8x6 in a group without the
+switch is written `P22521 = 0`, so taking it out of the group turns sharing off;
+every other model gets neither. The group name (`P22527`), group password
+(`P22523`, both default `AccountSharing`), SIP server port (`P22537`, 15060) and
+the shared account (`P22524`, account 1) stay at their defaults: handsets of
+different groups on one network share them, which a per-group password would
+prevent. The WP822 and the other vendors have no such setting. Hot desking is
 not offered by either WP family.
 
 ## Security model and its limits

@@ -1,6 +1,9 @@
 package prov
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+)
 
 // linesSample is a two-extension sample: line 1 is extension 1001, lines 2
 // and 3 are extensions 1002 and 1003.
@@ -89,17 +92,69 @@ func TestMultiLineProvisioning(t *testing.T) {
 		out := renderFor(t, Yealink, linesFile(Yealink, d), d)
 		wantNoLines(t, "T19", out, "account.2.", "1002-aabbcc")
 	})
-	t.Run("grandstream writes no unconfirmed account block", func(t *testing.T) {
-		for _, model := range []string{"WP836", "WP822"} {
+	// Account blocks per Grandstream's own templates (wp8x6_config_1.0.3.39
+	// accounts 2 and 3, wp810_822_825_config_1.0.11.83 and wp820_config_1.0.7.90
+	// account 2, wp856_config_1.0.3.16 accounts 2 to 6): active, label, server,
+	// user, auth ID, password, name, voicemail number and expiry, MWI, vocoders,
+	// Broadsoft special feature with feature key sync, accept-from-proxy-only.
+	t.Run("grandstream wp8x6", func(t *testing.T) {
+		out := renderFor(t, Grandstream, linesFile(Grandstream, linesSample(Grandstream, "WP836", 2)), linesSample(Grandstream, "WP836", 2))
+		wantLines(t, "wp836", out,
+			"<P401>1</P401>", "<P417>1002 (Carol)</P417>", "<P402>192.168.10.101:30508</P402>", "<P404>1002-aabbcc</P404>", "<P405>1002-aabbcc</P405>",
+			"<P406>pw-two</P406>", "<P407>Carol</P407>", "<P426>*97</P426>", "<P412>60</P412>", "<P415>1</P415>", "<P448>0</P448>",
+			"<P451>123</P451>", "<P452>9</P452>", "<P424>102</P424>", "<P2425>1</P2425>", "<P2447>1</P2447>", "<P2497>1</P2497>", "<P26163>1</P26163>",
+			"<P501>1</P501>", "<P517>1003 (Dave)</P517>", "<P504>1003-aabbcc</P504>", "<P506>pw-three</P506>", "<P524>102</P524>", "<P2525>1</P2525>",
+			"<P2547>1</P2547>", "<P2597>1</P2597>", "<P26263>2</P26263>", "<P548>0</P548>")
+		wantNoLines(t, "wp836", out, "<P601>")
+	})
+	t.Run("grandstream wp822 and wp820", func(t *testing.T) {
+		for _, model := range []string{"WP822", "WP825", "WP820"} {
 			d := linesSample(Grandstream, model, 2)
 			out := renderFor(t, Grandstream, linesFile(Grandstream, d), d)
-			wantNoLines(t, model, out, "1002-aabbcc", "pw-two", "<P401>", "<P501>")
+			wantLines(t, model, out, "<P401>1</P401>", "<P404>1002-aabbcc</P404>", "<P406>pw-two</P406>", "<P2447>1</P2447>", "<P424>102</P424>")
+			// A WP822 takes two lines: the third is not written.
+			wantNoLines(t, model, out, "1003-aabbcc", "pw-three", "<P501>", "<P2497>")
 		}
+		// The WP820 template has no per-account call waiting key (P91 is phone-wide).
+		wp820 := linesSample(Grandstream, "WP820", 2)
+		wantNoLines(t, "WP820", renderFor(t, Grandstream, linesFile(Grandstream, wp820), wp820), "<P26163>")
+	})
+	t.Run("grandstream wp856 six lines", func(t *testing.T) {
+		d := linesSample(Grandstream, "WP856", 2)
+		for i := 4; i <= 6; i++ {
+			n := strconv.Itoa(i)
+			d.Lines = append(d.Lines, Line{Username: "100" + n + "-aabbcc", AuthName: "100" + n + "-aabbcc", Password: "pw-" + n, DisplayName: "Line" + n, Label: "100" + n})
+		}
+		d.Lines = append(d.Lines, Line{Username: "1007-aabbcc", AuthName: "1007-aabbcc", Password: "pw-7", DisplayName: "Line7", Label: "1007"})
+		out := renderFor(t, Grandstream, linesFile(Grandstream, d), d)
+		wantLines(t, "wp856", out,
+			"<P401>1</P401>", "<P404>1002-aabbcc</P404>", "<P26163>2</P26163>", // account 2 has call waiting on; the WP856 reads the key the other way round
+			"<P501>1</P501>", "<P504>1003-aabbcc</P504>", "<P26263>1</P26263>",
+			"<P601>1</P601>", "<P604>1004-aabbcc</P604>", "<P606>pw-4</P606>", "<P2647>1</P2647>",
+			"<P1701>1</P1701>", "<P1704>1005-aabbcc</P1704>", "<P1705>1005-aabbcc</P1705>", "<P1706>pw-5</P1706>", "<P1717>1005 (Line5)</P1717>",
+			"<P1724>102</P1724>", "<P2725>1</P2725>", "<P2747>1</P2747>", "<P1748>0</P1748>",
+			"<P1801>1</P1801>", "<P1804>1006-aabbcc</P1804>", "<P1806>pw-6</P1806>", "<P1807>Line6</P1807>", "<P2847>1</P2847>")
+		wantNoLines(t, "wp856", out, "1007-aabbcc", "pw-7", "<P2701>", "<P1901>")
+	})
+	t.Run("grandstream account keys follow the transport", func(t *testing.T) {
+		d := linesSample(Grandstream, "WP836", 2)
+		d.Server.Transport = "tls"
+		wantLines(t, "tls", renderFor(t, Grandstream, linesFile(Grandstream, d), d), "<P448>2</P448>", "<P2429>1</P2429>", "<P548>2</P548>", "<P2529>1</P2529>")
+		d.Server.Transport = "tcp"
+		out := renderFor(t, Grandstream, linesFile(Grandstream, d), d)
+		wantLines(t, "tcp", out, "<P448>1</P448>", "<P548>1</P548>")
+		wantNoLines(t, "tcp", out, "<P2429>")
+	})
+	t.Run("grandstream line without voicemail code keeps the default", func(t *testing.T) {
+		d := linesSample(Grandstream, "WP836", 1)
+		d.Line.VoicemailCode = ""
+		wantLines(t, "default", renderFor(t, Grandstream, linesFile(Grandstream, d), d), "<P426>*97</P426>")
 	})
 }
 
-// TestMaxLines pins the line counts the spec gives (WP8x6 three accounts,
-// WP822 two) and the one-line default of models without a confirmed count.
+// TestMaxLines pins the line counts: the Grandstream ones from the account
+// blocks of the vendor's own templates (WP8x6 three, WP810/820/822/825 two,
+// WP856 six), and the one-line default of models without a known count.
 func TestMaxLines(t *testing.T) {
 	for _, c := range []struct {
 		v     Vendor
@@ -107,7 +162,8 @@ func TestMaxLines(t *testing.T) {
 		want  int
 	}{
 		{Grandstream, "WP836", 3}, {Grandstream, "WP816", 3}, {Grandstream, "WP826", 3}, {Grandstream, "WP822", 2},
-		{Grandstream, "WP825", 1}, {Grandstream, "WP856", 1}, {Grandstream, "GRP2614", 1},
+		{Grandstream, "WP825", 2}, {Grandstream, "WP810", 2}, {Grandstream, "WP820", 2}, {Grandstream, "WP856", 6},
+		{Grandstream, "GRP2614", 1}, {Grandstream, "HT813", 1},
 		{Yealink, "T19P", 1}, {Yealink, "T21P_E2", 2}, {Yealink, "T54W", 6}, {Yealink, "T99", 6},
 		{Snom, "D120", 2}, {Snom, "D785", 6}, {Poly, "VVX 450", 6}, {Fanvil, "X4U", 6}, {Generic, "x", 1},
 	} {
@@ -115,8 +171,15 @@ func TestMaxLines(t *testing.T) {
 			t.Errorf("MaxLines(%s, %s) = %d, want %d", c.v, c.model, got, c.want)
 		}
 	}
-	if SupportsLineKeys(Grandstream, "WP836") {
-		t.Error("Grandstream line keys are not confirmed, but SupportsLineKeys says they are")
+	for _, model := range []string{"WP836", "WP822", "WP856", "WP820"} {
+		if !SupportsLineKeys(Grandstream, model) {
+			t.Errorf("%s takes more than one line, but SupportsLineKeys is false", model)
+		}
+	}
+	for _, model := range []string{"GRP2614", "HT813"} {
+		if SupportsLineKeys(Grandstream, model) {
+			t.Errorf("%s takes one line, but SupportsLineKeys is true", model)
+		}
 	}
 }
 
@@ -130,11 +193,26 @@ func TestAccountSharing(t *testing.T) {
 		d.Sharing = sh
 		return renderFor(t, Grandstream, "cfg"+d.Phone.MAC+".xml", d)
 	}
-	wantNoLines(t, "off", render("WP836", NewSharing(Grandstream, "WP836", false, SharingHost)), "P22521", "P22522")
-	wantNoLines(t, "WP822", render("WP822", NewSharing(Grandstream, "WP822", true, SharingHost)), "P22521", "P22522")
-	wantNoLines(t, "unset", render("WP836", nil), "P22521", "P22522")
-	wantLines(t, "host", render("WP836", NewSharing(Grandstream, "WP836", true, SharingHost)), "<P22521>1</P22521>", "<P22522>0</P22522>")
-	wantLines(t, "guest", render("WP826", NewSharing(Grandstream, "WP826", true, SharingGuest)), "<P22521>0</P22521>", "<P22522>1</P22522>")
+	// P22521 Enable Account Sharing (0 No, 1 Yes) and P22522 Role in Account
+	// Sharing (0 Host Device, 1 Guest Device) are WP8x6 keys in
+	// wp8x6_config_1.0.3.39; no other WP template has them. A WP8x6 outside a
+	// sharing group is written P22521 = 0 so leaving the group turns it off.
+	for name, out := range map[string]string{
+		"off":   render("WP836", NewSharing(Grandstream, "WP836", false, SharingHost)),
+		"unset": render("WP836", nil),
+	} {
+		wantLines(t, name, out, "<P22521>0</P22521>")
+		wantNoLines(t, name, out, "P22522")
+	}
+	for _, model := range []string{"WP822", "WP856", "WP820"} {
+		wantNoLines(t, model, render(model, NewSharing(Grandstream, model, true, SharingHost)), "P22521", "P22522")
+	}
+	host := render("WP836", NewSharing(Grandstream, "WP836", true, SharingHost))
+	wantLines(t, "host", host, "<P22521>1</P22521>", "<P22522>0</P22522>")
+	// A guest is enabled too: P22521 = 1 with the guest role, not 0.
+	guest := render("WP826", NewSharing(Grandstream, "WP826", true, SharingGuest))
+	wantLines(t, "guest", guest, "<P22521>1</P22521>", "<P22522>1</P22522>")
+	wantNoLines(t, "guest", guest, "<P22521>0</P22521>")
 	if NewSharing(Yealink, "T54W", true, SharingHost) != nil {
 		t.Error("a Yealink has account sharing")
 	}

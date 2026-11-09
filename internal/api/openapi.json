@@ -13945,7 +13945,7 @@
       "put": {
         "operationId": "setPhoneGroupAccountSharing",
         "summary": "Switch account sharing on or off for a phone group",
-        "description": "Account sharing lets several Grandstream WP8x6 handsets share one line: the host settings P22521 and the guest settings P22522 are written to the group's WP8x6 phones by their sharingRole (PATCH /phones/{id}, host by default). Other models and groups without it get neither key. It is the alternative to binding several devices to one extension (several phones each with a line on the extension, a shared line appearance). Admin only.",
+        "description": "Account sharing lets several Grandstream WP8x6 handsets share one line: P22521 (Enable Account Sharing) is written 1 to the group's WP8x6 phones and P22522 (Role in Account Sharing) 0 for the host or 1 for a guest by their sharingRole (PATCH /phones/{id}, host by default). A WP8x6 in a group without it is written P22521 = 0; other models get neither key. It is the alternative to binding several devices to one extension (several phones each with a line on the extension, a shared line appearance). Admin only.",
         "tags": ["phone-groups"],
         "parameters": [
           {
@@ -16903,7 +16903,15 @@
       },
       "PhoneLine": {
         "type": "object",
-        "required": ["line", "deviceId", "extensionId", "extensionNumber", "extensionName", "sipUsername", "provisioned"],
+        "required": [
+          "line",
+          "deviceId",
+          "extensionId",
+          "extensionNumber",
+          "extensionName",
+          "sipUsername",
+          "provisioned"
+        ],
         "properties": {
           "line": {
             "type": "integer",
@@ -17742,9 +17750,19 @@
         "type": "object",
         "required": ["promptLanguage", "effective", "languages"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."},
-          "effective": {"type": "string", "description": "The language callers hear for this box now."},
-          "languages": {"type": "array", "items": {"type": "string"}, "description": "The languages a box can be set to."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."
+          },
+          "effective": {
+            "type": "string",
+            "description": "The language callers hear for this box now."
+          },
+          "languages": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The languages a box can be set to."
+          }
         }
       },
       "VoicemailBoxLanguageUpdate": {
@@ -17752,12 +17770,23 @@
         "additionalProperties": false,
         "required": ["promptLanguage"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."
+          }
         }
       },
       "VoicemailBoxSummary": {
         "type": "object",
-        "required": ["id", "extensionId", "number", "name", "unheard", "total", "promptLanguage"],
+        "required": [
+          "id",
+          "extensionId",
+          "number",
+          "name",
+          "unheard",
+          "total",
+          "promptLanguage"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -19122,9 +19151,15 @@
         "required": ["node", "text"],
         "properties": {
           "node": { "type": "string", "description": "A graph node id." },
-          "port": { "type": "string", "description": "The output port of the node the call leaves through; for a last step, the port it ends at." },
+          "port": {
+            "type": "string",
+            "description": "The output port of the node the call leaves through; for a last step, the port it ends at."
+          },
           "text": { "type": "string" },
-          "at": { "type": "string", "description": "On a time condition step, the instant that was evaluated." },
+          "at": {
+            "type": "string",
+            "description": "On a time condition step, the instant that was evaluated."
+          },
           "branches": {
             "type": "array",
             "description": "The choices of an IVR menu traced without a key.",
@@ -19138,22 +19173,45 @@
         "properties": {
           "port": { "type": "string" },
           "label": { "type": "string" },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } }
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          }
         }
       },
       "FlowTrace": {
         "type": "object",
-        "required": ["configRevision", "at", "from", "number", "outcome", "steps", "routingTrace"],
+        "required": [
+          "configRevision",
+          "at",
+          "from",
+          "number",
+          "outcome",
+          "steps",
+          "routingTrace"
+        ],
         "properties": {
           "configRevision": { "type": "integer", "format": "int64" },
           "at": { "type": "string" },
           "from": { "type": "string" },
           "number": { "type": "string" },
-          "outcome": { "type": "string", "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing." },
+          "outcome": {
+            "type": "string",
+            "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing."
+          },
           "route": { "type": "string" },
-          "reason": { "type": "string", "description": "Why the call was rejected." },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } },
-          "routingTrace": { "type": "array", "items": { "$ref": "#/components/schemas/TraceStep" } }
+          "reason": {
+            "type": "string",
+            "description": "Why the call was rejected."
+          },
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          },
+          "routingTrace": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TraceStep" }
+          }
         }
       },
       "FlowRevision": {
@@ -20842,7 +20900,7 @@
           },
           "languages": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": { "type": "string" },
             "description": "The languages the box can be set to."
           }
         }
@@ -27604,23 +27662,73 @@
       },
       "QueueCallback": {
         "type": "object",
-        "required": ["id", "queueId", "number", "callerName", "status", "attempts", "positionKey", "nextAttemptAt", "claimedBy", "agent", "result", "createdAt", "expiresAt"],
+        "required": [
+          "id",
+          "queueId",
+          "number",
+          "callerName",
+          "status",
+          "attempts",
+          "positionKey",
+          "nextAttemptAt",
+          "claimedBy",
+          "agent",
+          "result",
+          "createdAt",
+          "expiresAt"
+        ],
         "properties": {
-          "id": {"type": "integer", "format": "int64"},
-          "queueId": {"type": "integer", "format": "int64"},
-          "number": {"type": "string", "description": "The number to call back."},
-          "callerName": {"type": "string", "description": "From the shared name sources (phonebooks); empty when none."},
-          "status": {"type": "string", "enum": ["waiting", "dialling", "connected", "failed", "cancelled", "expired"]},
-          "attempts": {"type": "integer", "description": "Attempts made, at most 3."},
-          "positionKey": {"type": "integer", "format": "int64", "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."},
-          "nextAttemptAt": {"type": "string", "format": "date-time"},
-          "claimedBy": {"type": "string", "description": "The node working on it while dialling."},
-          "leaseUntil": {"type": "string", "format": "date-time", "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."},
-          "agent": {"type": "string", "description": "The agent it was connected to."},
-          "result": {"type": "string", "description": "The last attempt's outcome or the way the request ended."},
-          "createdAt": {"type": "string", "format": "date-time"},
-          "expiresAt": {"type": "string", "format": "date-time"},
-          "finishedAt": {"type": "string", "format": "date-time"}
+          "id": { "type": "integer", "format": "int64" },
+          "queueId": { "type": "integer", "format": "int64" },
+          "number": {
+            "type": "string",
+            "description": "The number to call back."
+          },
+          "callerName": {
+            "type": "string",
+            "description": "From the shared name sources (phonebooks); empty when none."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "dialling",
+              "connected",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Attempts made, at most 3."
+          },
+          "positionKey": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."
+          },
+          "nextAttemptAt": { "type": "string", "format": "date-time" },
+          "claimedBy": {
+            "type": "string",
+            "description": "The node working on it while dialling."
+          },
+          "leaseUntil": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."
+          },
+          "agent": {
+            "type": "string",
+            "description": "The agent it was connected to."
+          },
+          "result": {
+            "type": "string",
+            "description": "The last attempt's outcome or the way the request ended."
+          },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "finishedAt": { "type": "string", "format": "date-time" }
         }
       },
       "QueueCallbackList": {

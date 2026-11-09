@@ -606,8 +606,9 @@ func loadGroupChannels(ctx context.Context, q querier, gs []phonebook.Group) err
 
 // SetPhoneGroupAccountSharing switches WP8x6 account sharing on or off for a
 // group (phone-feature-parity S-11). The group's WP8x6 phones are given
-// P22521 and P22522 by their role, at their next fetch or the automatic
-// resync.
+// P22521 = 1 (Enable Account Sharing) and P22522 by their role (0 host, 1
+// guest), at their next fetch or the automatic resync; switched off, P22521 =
+// 0.
 func (s *Store) SetPhoneGroupAccountSharing(ctx context.Context, actor string, id int64, enabled bool) (phonebook.Group, error) {
 	var out phonebook.Group
 	err := s.tx(ctx, func(tx *sql.Tx) error {

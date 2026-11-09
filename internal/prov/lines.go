@@ -1,9 +1,5 @@
 package prov
 
-import "regexp"
-
-var wp822RE = regexp.MustCompile(`^WP822`)
-
 // Multiple lines per phone and account sharing (phone-feature-parity S-10,
 // S-11).
 //
@@ -23,9 +19,14 @@ const maxLinesCap = 6
 // MaxLines is the number of lines (SIP accounts) the model takes, 1 when it
 // takes no more than the first.
 //
-//   - Grandstream WP8x6 has three accounts and the WP822 two (phone-feature-
-//     parity S-10); every other Grandstream model keeps one, because no
-//     published template Hello holds gives its further account keys.
+//   - Grandstream, from the vendor's own configuration templates
+//     (wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83,
+//     wp820_config_1.0.7.90, wp856_config_1.0.3.16): the WP8x6 three accounts
+//     (the template labels account 3 "GRP2602/2603/2604 only", an artefact of
+//     a template shared with that family: its account sharing and default
+//     account choices list Account 3, and the phone-feature-parity spec gives
+//     the WP8x6 three; to confirm on a handset), the WP810, WP820, WP822 and
+//     WP825 two, the WP856 six. Every other Grandstream model keeps one.
 //   - Yealink and Snom models in the key table (keycaps.go) take as many
 //     lines as they have line keys, up to maxLinesCap; a model outside the
 //     table, and Poly and Fanvil, take maxLinesCap (their line count is not
@@ -39,9 +40,9 @@ func MaxLines(v Vendor, model string) int {
 		case FamilyWP8x6:
 			return 3
 		case FamilyWP8xx:
-			if wp822RE.MatchString(normModel(model)) {
-				return 2
-			}
+			return 2
+		case FamilyWP856:
+			return 6
 		}
 		return 1
 	case Yealink, Snom:
@@ -64,16 +65,15 @@ func MaxLines(v Vendor, model string) int {
 }
 
 // SupportsLineKeys reports whether the built-in template writes the account
-// of lines 2 and up for the vendor and model. It is false for Grandstream:
-// the account block of a further account (account 2 from P401, account 3
-// from P501) is named by the spec, but no template in hand gives the keys of
-// its server, user, authentication and name settings, and Hello writes only
-// keys a vendor document or an existing template confirms. A Grandstream
-// phone may still hold the lines in Hello; they reach the phone when the
-// keys are confirmed in the lab (decisions, "Multiple lines").
+// of lines 2 and up for the vendor and model: every vendor with a built-in
+// template that has a model taking more than one line. The Grandstream WP
+// templates write them from the account blocks of Grandstream's own
+// templates (account 2 from P401, account 3 from P501, accounts 4 to 6 of the
+// WP856 from P601, P1701 and P1801). A Grandstream model that takes one line
+// has no account block to write.
 func SupportsLineKeys(v Vendor, model string) bool {
 	switch v {
-	case Yealink, Poly, Snom, Fanvil:
+	case Yealink, Poly, Snom, Fanvil, Grandstream:
 		return MaxLines(v, model) > 1
 	}
 	return false

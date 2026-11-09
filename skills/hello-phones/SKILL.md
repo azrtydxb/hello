@@ -208,15 +208,15 @@ its own voicemail light, BLF and ring tags.
 - Several phones can answer one extension: give each phone a line on it
   (`setPhoneLine` on each). A call to the extension rings all of them, and each
   phone has its own device and secret. This is the shared line appearance.
-- Yealink, Poly, Snom and Fanvil templates write lines 2 and up. The
-  Grandstream templates write line 1 only until the account keys of further
-  lines are confirmed on a handset: such a line shows `provisioned` false, is
-  kept, and tell the administrator it is not yet on the phone.
+- The templates of all five vendors write lines 2 and up (Grandstream's from
+  its own templates: WP8x6 three lines, WP810/820/822/825 two, WP856 six). A line
+  of a model whose template does not write it shows `provisioned` false and is
+  kept; tell the administrator it is not yet on the phone.
 - Account sharing is the other way to let handsets share one line, for
   Grandstream WP8x6 only. `setPhoneGroupAccountSharing` (admin) switches it on
   for a phone group; each phone of the group is the host or a guest
   (`updatePhone` with `sharingRole`, host by default). Without the group
-  switch nothing is written. Resync the group after.
+  switch the phone is written account sharing off. Resync the group after.
 - The check-sync of a multi-line phone goes to line 1, or to the next line
   while line 1 is not registered.
 

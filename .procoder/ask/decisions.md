@@ -929,6 +929,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
   route is gone, it was never linked outside the nav) with a new Ring map tab; the tone library tab arrives with S-43.
 - Tests that touch real configs assert on lines inline; no golden file of a
   rendered phone configuration is added.
+
 ## Queue callback (pbx-gaps wave B, B4)
 
 - **Merged gaps-languages.** PR #208 (voicemail box languages, `voiceprompt.Resolve`) was not on main, so origin/gaps-languages is merged into this branch. The queue's language is `Resolve(queue.prompt_language, deployment language)`; `queues.prompt_language` is NULL for inherit, no CHECK (validated by the API), migration 00049.
@@ -1422,8 +1423,15 @@ Implementation notes (template route, no migration):
   `clearPhoneLine`), `lines`/`maxLines`/`sharingRole` on the phone,
   `PUT /phone-groups/{id}/account-sharing`. Line 1 keeps `extensionId`/`deviceId`
   on create and update, so existing clients do not change.
-- **Line counts** (`prov.MaxLines`): WP8x6 3 and WP822 2 (spec); other
-  Grandstream models 1 (no template in hand gives their account keys); Yealink
+- **Line counts** (`prov.MaxLines`): Grandstream from the account blocks of its
+  own templates (config-template-10212026.zip, checked 2026-11-09): WP8x6 3
+  (`wp8x6_config_1.0.3.39` has accounts 1 to 3; its header labels account 3
+  "GRP2602/2603/2604 only", a template shared with that family, while the
+  account-sharing and default-account choices list Account 3 and the spec gives
+  the WP8x6 three: confirm the third on a handset), WP810, WP820, WP822 and
+  WP825 2 (`wp810_822_825_config_1.0.11.83` and `wp820_config_1.0.7.90` have
+  accounts 1 and 2), WP856 6 (`wp856_config_1.0.3.16` has accounts 1 to 6; this
+  was 1 before, for lack of a template); other Grandstream models 1. Yealink
   and Snom the line-key count of the key table capped at 6; Poly and Fanvil 6.
   The cap of 6 is Hello's, not a vendor figure. A model change that would leave
   a phone with more lines than the new model takes is refused with 409.
@@ -1432,24 +1440,53 @@ Implementation notes (template route, no migration):
   takes the same keys), Poly `reg.N.*` and `msg.mwi.N.*`, Snom `idx="N"` on the
   per-identity settings, Fanvil `SIPN ...` (the Fanvil template names SIP2, SIP3).
   Each is marked unverified in the template.
-- **Grandstream lines 2 and 3 are NOT written.** The spec names the blocks
-  (account 2 from P401, account 3 from P501) and the codec keys P451/P551 appear
-  in a template comment, but the server, user, authentication, password and name
-  keys of those accounts are in no file in hand (the vendor documents are not in
-  the repo). Writing recalled P-numbers could overwrite another setting, so the
-  line is stored, shown as "held, not written" (`provisioned: false`) and the
-  renderer drops it. To close: export a WP8x6 and a WP822 configuration with
-  two accounts, add the keys to `grandstream/device.xml`, and set
-  `SupportsLineKeys` for the WP families. `TestMultiLineProvisioning` pins the
-  current behaviour ("grandstream writes no unconfirmed account block") and must
-  be changed with that.
+- **Grandstream lines are written** (reversing the earlier "held, not
+  written"; the templates were not in hand then). Account N of the
+  four WP templates starts at `b = 201 + 100 N` (account 2 `P401`, 3 `P501`, 4
+  `P601`) and at `b = 1201 + 100 N` for the WP856's accounts 5 and 6 (`P1701`,
+  `P1801`). Inside it, all confirmed in the templates for every family and
+  account (checked programmatically against each file): `b` Account Active,
+  `b+1` SIP Server, `b+3` SIP User ID, `b+4` SIP Authentication ID, `b+5` SIP
+  Authentication Password, `b+6` Name, `b+11` Register Expiration (minutes),
+  `b+14` SUBSCRIBE for MWI, `b+16` Account Name, `b+23` Special Feature,
+  `b+25` Voice Mail Access Number, `b+47` SIP Transport, `b+50` to `b+55`
+  Preferred Vocoder choices 1 to 6 (`P451` to `P456` for account 2: the codec
+  keys the earlier note had only from a template comment). Other keys sit
+  100 (N - 1) above account 1's: `P2325` Feature Key Synchronization (account 2
+  `P2425`), `P2347` Accept Incoming SIP from Proxy Only (`P2447`), `P26063` call
+  waiting (`P26163`; the WP820 template has no such key, only the phone-wide
+  `P91`), `P2397` OPTIONS Keep Alive (WP8x6 only, as for line 1) and `P2329`
+  SIP URI Scheme when using TLS. Values are line 1's: Special Feature 102
+  (Broadsoft, which the feature key sync needs), `P2347` = 1 so a second line
+  is as closed as the first (S-32), call waiting 1 on / 2 off (WP856 2 on / 1
+  off, as for line 1), transport 0 / 1 / 2 for UDP / TCP / TLS (the TCP value
+  needs the SIP-over-TCP item). Not written for lines: SRTP (`P443`, `P543`,
+  WP856 `P643`, `P1743`, `P1843`, with the SRTP item), DNS SRV and backup
+  (`P408`, `P2412`, `P2433`, `P29195`, `P26140`, `P60156`, with the backup
+  item: a phone in SRV mode still registers lines 2 and up by A record until
+  those are added), RTCP-XR (`P26193`, `P60187`, `P26194`, `P26195`),
+  PUBLISH/Subscribe for Registration (`P488`, `P2419`; both off by default) and
+  send anonymous (`P421`). `TestMultiLineProvisioning` pins the keys for the WP8x6
+  (two lines), WP822/825/820, and the WP856's six, and that a seventh and a
+  third on a WP822 are not written. The deny list of the setting overrides
+  covers the identity keys of accounts 2 to 6.
 - **Account sharing (S-11).** `phone_groups.account_sharing` (the group switch)
-  and `phones.sharing_role` host|guest (default host). The WP8x6 template writes
-  `P22521` and `P22522` only for a WP8x6 in a group with the switch on: host
-  gives 1/0, guest 0/1. The spec names the two keys as host and guest settings
-  [R8x6 AS] but no template text for their values is in hand; reading them as
-  0/1 enable switches is a guess to confirm on a handset. Rejected: a per-group
-  host/guest value (a group of handsets needs a role per handset).
+  and `phones.sharing_role` host|guest (default host). Corrected against
+  `wp8x6_config_1.0.3.39` ("Application/Account Sharing"): `P22521` is "Enable
+  Account Sharing" (0 No, 1 Yes, default 0) and `P22522` is "Role in Account
+  Sharing" (0 Host Device, 1 Guest Device, default 1), so they are not a
+  host/guest pair of switches. The first version wrote host 1/0 and guest 0/1,
+  which was right for a host by chance and switched sharing off for a guest.
+  Now a WP8x6 in a group with the switch on gets `P22521 = 1` and `P22522` 0
+  (host) or 1 (guest); any other WP8x6 gets `P22521 = 0`, so leaving the group
+  turns sharing off. The WP810/822/825, WP820 and WP856 templates have no such
+  key. Newly found, left at their defaults: `P22527` Group Name and `P22523`
+  Group Password (both `AccountSharing`), `P22537` SIP Server Port (15060),
+  `P22524` Account (0 Account 1, 1 Account 2, 2 Account 3, default 0) and
+  `P22525` Account Name. Every Hello group therefore shares one group name and
+  password; a per-group password would need a stored secret and is a follow-up.
+  Rejected: a per-group host/guest value (a group of handsets needs a role per
+  handset).
 - **Key placement.** On a Yealink and a Snom, line key N is account N by default,
   so BLF and the voicemail key start after the lines (`PlaceBLFLines`). Fanvil's
   DSS keys are on the extended screen and Poly's attendant list is unbounded, so

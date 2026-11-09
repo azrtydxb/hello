@@ -124,12 +124,12 @@ func TestPhoneLines(t *testing.T) {
 	c.must(http.StatusBadRequest, "PUT", "/api/v1/phones/"+fmt.Sprint(one["id"])+"/lines/2", map[string]any{"extensionId": p.ext101["id"]})
 	// A phone with lines does not change to a model with fewer.
 	c.must(http.StatusConflict, "PATCH", "/api/v1/phones/"+id, map[string]any{"model": "T19P"})
-	// A WP822 takes two lines, not three.
+	// A WP822 takes two lines, not three, and writes the second.
 	wp := p.phone("0004f2000013", map[string]any{"vendor": "grandstream", "model": "WP822"})
 	wpLines := "/api/v1/phones/" + fmt.Sprint(wp["id"]) + "/lines/"
 	w2 := c.must(http.StatusOK, "PUT", wpLines+"2", map[string]any{"extensionId": p.ext102["id"]}).json(t)
-	if wl := w2["lines"].([]any)[1].(map[string]any); wl["provisioned"] != false {
-		t.Fatalf("a Grandstream line 2 is provisioned = %v, want false until its keys are confirmed", wl["provisioned"])
+	if wl := w2["lines"].([]any)[1].(map[string]any); wl["provisioned"] != true {
+		t.Fatalf("a Grandstream line 2 is provisioned = %v, want true: the WP822 template has the account 2 keys", wl["provisioned"])
 	}
 	c.must(http.StatusBadRequest, "PUT", wpLines+"3", map[string]any{"extensionId": ext103["id"]})
 
@@ -199,8 +199,8 @@ func TestAccountSharing(t *testing.T) {
 	preview := func() string {
 		return string(c.must(http.StatusOK, "GET", "/api/v1/phones/"+pid+"/preview?file=cfg0015651234ab.xml", nil).body)
 	}
-	if b := preview(); strings.Contains(b, "P22521") || strings.Contains(b, "P22522") {
-		t.Fatal("a group that did not enable account sharing renders P22521 or P22522")
+	if b := preview(); !strings.Contains(b, "<P22521>0</P22521>") || strings.Contains(b, "P22522") {
+		t.Fatal("a group that did not enable account sharing renders anything but P22521 = 0")
 	}
 
 	c.must(http.StatusBadRequest, "PUT", path, map[string]any{})
@@ -216,8 +216,8 @@ func TestAccountSharing(t *testing.T) {
 	if g := c.must(http.StatusOK, "PATCH", "/api/v1/phones/"+pid, map[string]any{"sharingRole": "guest"}).json(t); g["sharingRole"] != "guest" {
 		t.Fatalf("role = %v", g["sharingRole"])
 	}
-	if b := preview(); !strings.Contains(b, "<P22521>0</P22521>") || !strings.Contains(b, "<P22522>1</P22522>") {
-		t.Fatal("the guest does not render P22521 = 0 and P22522 = 1")
+	if b := preview(); !strings.Contains(b, "<P22521>1</P22521>") || !strings.Contains(b, "<P22522>1</P22522>") {
+		t.Fatal("the guest does not render P22521 = 1 and P22522 = 1")
 	}
 
 	// A WP822 and a phone of another vendor in the group get neither key.
@@ -229,7 +229,7 @@ func TestAccountSharing(t *testing.T) {
 	if off["accountSharing"] != false {
 		t.Fatalf("group = %v", off)
 	}
-	if b := preview(); strings.Contains(b, "P22521") {
-		t.Fatal("switching account sharing off left P22521 in the configuration")
+	if b := preview(); !strings.Contains(b, "<P22521>0</P22521>") || strings.Contains(b, "P22522") {
+		t.Fatal("switching account sharing off left it on in the configuration")
 	}
 }
