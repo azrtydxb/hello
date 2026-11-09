@@ -1393,23 +1393,25 @@ Wi-Fi handset), so leave both off until it has.
 registrars, at most two; the first is written to the phones that take one. List
 the other HA nodes here.
 
-| Vendor      | Keys written                                                                                                                                               |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.1.sip_server.2.address`, `.port`, `.transport_type = 0`, `.expires`                                                                               |
-| Poly        | `reg.1.server.2.address`, `.port`, `.transport = "UDPOnly"`, `.expires`                                                                                    |
-| Grandstream | `P48` Outbound Proxy (the primary, `host:port`) and `P2333` Backup Outbound Proxy (the backup); the phone uses the backup when the primary does not answer |
+| Vendor      | Keys written                                                                                                                                                                                                                                  |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.1.sip_server.2.address`, `.port`, `.transport_type = 0`, `.expires`                                                                                                                                                                  |
+| Poly        | `reg.1.server.2.address`, `.port`, `.transport = "UDPOnly"`, `.expires`                                                                                                                                                                       |
+| Grandstream | `P48` Outbound Proxy (the primary, `host:port`), `P2333` Backup Outbound Proxy (the backup) and, on the WP8x6, WP810/822/825 and WP856, `P2312` Secondary SIP Server (the backup); the phone uses the backup when the primary does not answer |
 
 Snom and Fanvil get none: no key for a second registrar is in a vendor
 document Hello was checked against. A phone that registers over TLS gets none
 (the TLS registrar has no backup setting). Taking the setting away later does
-not clear `P2333` on a Grandstream phone: put `P2333` with an empty value in the
-phone group's setting overrides, then resync.
+not clear `P2333` or `P2312` on a Grandstream phone: put them with an empty value
+in the phone group's setting overrides, then resync.
 
 **DNS SRV (Grandstream).** `HELLO_PROV_SIP_SRV` (chart value
 `control.provisioning.sipSrv`) is a DNS name. Grandstream phones are then
 written `P103 = 1` (DNS Mode: SRV), register with that name (`P47`, no port),
-`P29095 = 1` (register with the next server before failing calls over to it)
-and `P60056 = 60` (failback timer, minutes). Every Grandstream file carries
+`P29095 = 1` (register with the next server before failing calls over to it),
+`P26040 = 3` (failback follows the failback timer) and `P60056 = 60` (failback
+timer, minutes; the WP810/822/825 template has no such key, so those phones keep
+their default of 60). Every Grandstream file carries
 `P103 = 0` otherwise, so a phone taken out of SRV mode goes back to A records.
 Other vendors keep the A-record address: their SRV settings (DNS-NAPTR) are not
 plain SRV.
