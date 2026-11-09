@@ -929,6 +929,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
   route is gone, it was never linked outside the nav) with a new Ring map tab; the tone library tab arrives with S-43.
 - Tests that touch real configs assert on lines inline; no golden file of a
   rendered phone configuration is added.
+
 ## Queue callback (pbx-gaps wave B, B4)
 
 - **Merged gaps-languages.** PR #208 (voicemail box languages, `voiceprompt.Resolve`) was not on main, so origin/gaps-languages is merged into this branch. The queue's language is `Resolve(queue.prompt_language, deployment language)`; `queues.prompt_language` is NULL for inherit, no CHECK (validated by the API), migration 00049.
@@ -1416,3 +1417,9 @@ Implementation notes (template route, no migration):
   lock either. Seen in `TestIVRHuntAnswerAtMemberTimeout` under `-race`.
 - Fix: `homedCall` carries a leaf mutex; all access goes through `leg`,
   `pair` and `setCallee`. Regression test: `homed_race_test.go`.
+
+## Grandstream key choices from the official templates (2026-11-09)
+
+- Firmware-upgrade confirmation prompt off (P8375=0, P84988=1) for unattended upgrades, or leave it
+- Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
+- Account sharing group password: shared default `AccountSharing`, or a per-group secret
