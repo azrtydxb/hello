@@ -1302,3 +1302,17 @@ Implementation notes (template route, no migration):
   `voiceprompt.Resolve` as voicemail boxes are; API `promptLanguage`, console
   select on the IVR form. Merged `origin/gaps-languages` (PR 208) for
   `voiceprompt.Resolve`; the PR depends on it.
+
+## Phone resync/reboot rejected (fix-phone-resync, 2026-11-09)
+- Root cause: a Grandstream challenges the check-sync NOTIFY in realm
+  "<SIP server host:port>" (kw: 192.168.10.101:30508), not the SIP domain.
+  `answerChallenge` only accepts the device realm (the stored HA1 is bound to
+  it), so every challenged push became `auth_failed` ("needs one manual
+  reboot"). hello-sip-1 logged "challenge realm ... is not the device's realm".
+  Not the Kamailio pair: NOTIFY is routed by the binding's Path, and the
+  device registered through the replica that holds the flow.
+- Fix: when the queue can open the device's sealed password
+  (`DeviceSecrets`, `Store.DeviceSecret`), hash it for the realm the phone
+  named and answer. The password is never logged. Phones need no change.
+- Rejected: P4428=1 (no NOTIFY auth) would let anyone on the path reboot a
+  phone and needs a phone reboot to load.

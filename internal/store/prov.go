@@ -553,6 +553,31 @@ func (s *Store) sealDeviceSecret(ctx context.Context, tx *sql.Tx, deviceID int64
 	return err
 }
 
+// DeviceSecret opens the sealed SIP password of the enabled device with this
+// SIP username. It is for hello-sip's check-sync NOTIFY, which must answer a
+// phone's digest challenge in a realm the stored HA1 does not cover; the
+// value is never logged or returned over an API.
+func (s *Store) DeviceSecret(ctx context.Context, username string) (string, error) {
+	if s.box == nil {
+		return "", errors.New("store: no secret box to open provisioning secrets")
+	}
+	var (
+		id  int64
+		enc []byte
+	)
+	if err := s.db.QueryRowContext(ctx, `SELECT id, secret_enc FROM devices WHERE sip_username = $1 AND enabled`, username).Scan(&id, &enc); err != nil {
+		return "", err
+	}
+	if len(enc) == 0 {
+		return "", prov.ErrSealed
+	}
+	pw, err := s.box.Open(enc, prov.DeviceSecretAAD(id))
+	if err != nil {
+		return "", prov.ErrSealed
+	}
+	return pw, nil
+}
+
 // unbindDevice drops a device's sealed secret; it keeps its HA1 values.
 func unbindDevice(ctx context.Context, tx *sql.Tx, deviceID int64) error {
 	_, err := tx.ExecContext(ctx, `UPDATE devices SET secret_enc = NULL, updated_at = now() WHERE id = $1`, deviceID)
