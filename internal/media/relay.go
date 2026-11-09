@@ -231,6 +231,26 @@ func (r *Relay) AddLeg(name string) (int, error) {
 	return port, nil
 }
 
+// addLegAt is AddLeg on one given port.
+func (r *Relay) addLegAt(name string, port int) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || len(r.legs) >= 2 {
+		return 0, errors.New("media: relay takes exactly two legs")
+	}
+	if r.used[port] {
+		return 0, fmt.Errorf("media: port %d is in use", port)
+	}
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: port})
+	if err != nil {
+		return 0, fmt.Errorf("media: bind leg %q RTP socket: %w", name, err)
+	}
+	l := &relayLeg{name: name, r: r, conn: conn, port: port, q: make(chan relayMsg, relayQueue)}
+	r.legs = append(r.legs, l)
+	r.used[port] = true
+	return port, nil
+}
+
 // SetTarget aims leg at addr: the address from the remote SDP until the
 // first inbound packet latches the peer's real source (symmetric RTP, so a
 // phone behind NAT reaches the leg from a different port than its SDP
