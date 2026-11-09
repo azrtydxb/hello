@@ -464,12 +464,20 @@ one in the meantime.
 - **Poly pickup.** `call.groupCallPickupString` and `call.directedCallPickupString`
   are written (see Call park and call pickup). A Poly BLF key that picks up on
   press has no confirmed attribute, so the BLF entries carry no pickup prefix.
-- **Record keys.** Grandstream (`P26028`/`P26029`, `P6760`), Snom
+- **Record keys.** Grandstream (`P26028`/`P26029`, `P6760`; see below), Snom
   (`recording_mechanism`) and Fanvil (`SIP1 Record Start`/`Stop`) are written.
   Yealink and Poly have no Record-key setting that sends the `*1` toggle to the
   PBX in any document Hello was checked against: Yealink's recording keys
   (`bw.call_recording.mode`, `account.N.call_recording.enable`) are BroadSoft
-  server-side recording, not a code dialled to the PBX.
+  server-side recording, not a code dialled to the PBX. The Grandstream keys are
+  in the vendor's own templates: `P26028` Call Recording On and `P26029` Call
+  Recording Off (strings, the codes the Record key sends) and `P29066` Record
+  Key Default Function (0 Record On, 1 Record Off) are in
+  `wp8x6_config_1.0.3.39` only; `P6760` Record Mode (0 Locally, 2 on UCM, 4
+  Disabled) is in `wp856_config_1.0.3.16` only. The WP810/822/825 and WP820
+  templates have no record key, so those phones get none. Mode 2, "on UCM", is
+  written for the WP856; whether it sends Hello's `*1` toggle rather than
+  Grandstream UCM's own signalling is a hardware check.
 - **Fanvil CA.** No Fanvil configuration key for a trusted CA certificate is in
   any Fanvil document or export Hello was checked against, so none is written.
   Install Hello's CA on Fanvil phones by hand (see Install Hello's CA

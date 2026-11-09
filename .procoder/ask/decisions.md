@@ -1578,7 +1578,14 @@ Implementation notes (template route, no migration):
     default, not a documented limit. No BLF pickup attribute on a Poly key found.
   - Record keys: Yealink's `bw.call_recording.mode` and
     `account.N.call_recording.enable` are BroadSoft server-side recording, not a
-    key that sends the `*1` toggle. No Poly equivalent found.
+    key that sends the `*1` toggle. No Poly equivalent found. The Grandstream
+    record keys checked against Grandstream's own templates (2026-11-09):
+    `P26028`/`P26029` (Call Recording On/Off codes) and `P29066` (Record Key
+    Default Function, 0 Record On, 1 Record Off) are only in
+    `wp8x6_config_1.0.3.39`, `P6760` (Record Mode, 0 Locally, 2 on UCM, 4
+    Disabled) only in `wp856_config_1.0.3.16`: confirmed for those two families,
+    absent from the WP810/822/825 and WP820 templates (nothing to write). Mode 2
+    "on UCM" for the WP856 is a hardware check.
   - Fanvil CA: re-checked in the FusionPBX Fanvil templates (X-series, text and
     XML forms): no CA certificate key. Still none.
   - Yealink and Snom expansion modules: no Yealink Administrator Guide or Snom
