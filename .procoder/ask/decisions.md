@@ -1598,8 +1598,10 @@ Spec: `phone-feature-parity.md` S-16, with `clients-webrtc-mobile-video.md` S-4
 - **Fingerprints.** `sha-1`, `sha-256`, `sha-384`, `sha-512` accepted for the
   peer (matching any listed one; sha-1 is only compared against a certificate
   the peer must already hold, a second-preimage problem, and some phone stacks
-  only send it); md5/md2 refused. Hello's own is sha-256. Extended master secret
-  required. SRTP profiles offered: AEAD_AES_128_GCM, AES128_CM_HMAC_SHA1_80,
+  only send it); md5/md2 refused. Hello's own is sha-256. The extended master
+  secret is requested, not required (phones on an old TLS stack lack it, and the
+  certificate is pinned by fingerprint either way); the WebRTC leg should
+  require it. SRTP profiles offered: AEAD_AES_128_GCM, AES128_CM_HMAC_SHA1_80,
   AES128_CM_HMAC_SHA1_32. GCM is a DTLS-only suite: SDES still offers the two
   CM suites and refuses a GCM `a=crypto` line.
 - **Certificate.** One self-signed ECDSA P-256 certificate per hello-sip process,

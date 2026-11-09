@@ -349,7 +349,10 @@ func dtlsOptions(cert *Cert, want []Fingerprint) []dtls.Option {
 	return []dtls.Option{
 		dtls.WithCertificates(cert.tls),
 		dtls.WithSRTPProtectionProfiles(dtlsProfiles...),
-		dtls.WithExtendedMasterSecret(dtls.RequireExtendedMasterSecret),
+		// Requested, not required: phones on an old TLS stack do not offer it,
+		// and the peer's certificate is pinned by fingerprint either way. The
+		// WebRTC leg, whose peers all do, should require it.
+		dtls.WithExtendedMasterSecret(dtls.RequestExtendedMasterSecret),
 		// The peer's certificate is self-signed and carries no name: it is
 		// trusted by fingerprint alone, checked here.
 		dtls.WithInsecureSkipVerify(true),

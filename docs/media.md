@@ -300,7 +300,9 @@ BUNDLE) on top of the code below.
   re-INVITE carries the new one.
 - **SRTP profiles.** `SRTP_AEAD_AES_128_GCM`, `SRTP_AES128_CM_HMAC_SHA1_80`,
   `SRTP_AES128_CM_HMAC_SHA1_32` are offered in the handshake, in that order.
-  Extended master secret is required.
+  The extended master secret (RFC 7627) is requested but not required, for
+  phones on an old TLS stack; the peer's certificate is pinned by fingerprint
+  either way.
 - **A failed handshake** (timeout after 8 s, a certificate that does not match,
   a protocol error) ends the call: the leg's offer was DTLS only, so there is
   nothing to fall back to. The trace says which leg and why, and
