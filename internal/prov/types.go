@@ -146,6 +146,10 @@ type Phone struct {
 	// Family is the Grandstream WP family of the model ("8x6", "856",
 	// "8xx"), empty for any other phone. Render fills it from Model.
 	Family string
+	// FXO is set for the Grandstream HT813 (FXS port plus an FXO port to
+	// the PSTN): the template then writes the FXO disconnect supervision
+	// keys. Render fills it from Vendor and Model.
+	FXO bool
 }
 
 // Line is the SIP account of the phone's bound device.
