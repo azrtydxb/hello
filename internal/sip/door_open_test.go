@@ -3,6 +3,7 @@ package sip
 import (
 	"encoding/json"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,15 +42,19 @@ type rtpSink struct {
 
 func newRTPSink(t *testing.T, p *phone) *rtpSink {
 	t.Helper()
-	sdp, err := media.ParseAudioSDP([]byte(p.sdp))
-	if err != nil {
-		t.Fatal(err)
-	}
-	conn, err := net.ListenPacket("udp", net.JoinHostPort("127.0.0.1", strconv.Itoa(sdp.Port)))
+	// The phone's own media port is its signalling port + 1000, which can
+	// fall past 65535; take a free one and put it in the phone's SDP.
+	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
+	port := conn.LocalAddr().(*net.UDPAddr).Port
+	p.sdp = regexp.MustCompile(`m=audio \d+`).ReplaceAllString(p.sdp, "m=audio "+strconv.Itoa(port))
+	sdp, err := media.ParseAudioSDP([]byte(p.sdp))
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := &rtpSink{conn: conn, seen: map[[2]uint32]bool{}}
 	go s.run(sdp.DTMFPayloadType)
 	return s
