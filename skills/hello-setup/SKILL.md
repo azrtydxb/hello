@@ -77,6 +77,16 @@ PIN and the e-mail address for notifications (an empty address turns e-mail
 off). Greetings are audio uploads and are done in the console.
 `listVoicemailBoxes` shows every box with its message counts.
 
+### Door stations
+
+A door unit (GDS, 2N, Akuvox, DoorBird) is an extension with kind `door`
+(`getExtension` shows its kind and door targets). `getDoorOpen` says whether
+its door-open code is set and whether the call hangs up after the door opens;
+it never shows the code. The code is set in the console only (Extensions, the
+station's drawer, administrators): tell the administrator to do that, and that
+the user who answers a door call opens the door by dialling `*50` or pressing
+Open door under **My phone**.
+
 ### Remove someone
 
 `deleteExtension` deletes the extension and its devices. Delete their phones

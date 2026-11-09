@@ -230,6 +230,9 @@ type Snapshot struct {
 	// ringTags are the ring tags and rules (migration 00050); nil means the
 	// built-in tags and no rules.
 	ringTags *ringtag.Table
+	// doorOpens are the door stations' door-open codes by number (migration
+	// 00054); unexported and redacting, see doorOpen.
+	doorOpens map[string]doorOpen
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState
 }
@@ -1115,6 +1118,11 @@ func (w *Watcher) loadAll(ctx context.Context, conn Querier) (*Snapshot, error) 
 		return nil, err
 	}
 	s.WithConferences(rooms)
+	doors, err := loadDoorOpen(ctx, q, w.Box, w.Log)
+	if err != nil {
+		return nil, err
+	}
+	s.WithDoorOpen(doors)
 	cfg, bad, err := loadRouting(ctx, q, w.Box, w.Log)
 	if err != nil {
 		return nil, err

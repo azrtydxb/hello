@@ -109,6 +109,9 @@ type call struct {
 	// the one dialled after the code).
 	vmTarget string
 	held     bool
+	// doorOpening is set while a door-open code is being sent (spec S-47),
+	// guarded by mu, so two presses never interleave their events.
+	doorOpening bool
 
 	// Music on hold (S-33), guarded by mu: moh plays to the held party,
 	// ringMOH to a caller in place of ringback; the route and group carry
@@ -1314,6 +1317,7 @@ func (c *call) record(status int, side, reason, result string) {
 }
 
 func (c *call) live() livestate.Call {
+	door, _, _ := c.doorStation(c.s.deps.Snapshots.Current()) // takes c.mu itself
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	state := "ringing"
@@ -1330,7 +1334,7 @@ func (c *call) live() livestate.Call {
 		callee = c.winner.binding.Extension
 	}
 	return livestate.Call{
-		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, Callee: callee, State: state,
+		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, Callee: callee, Door: door, State: state,
 		Node: c.s.cfg.NodeID, Media: "direct", StartedAt: c.start, AnsweredAt: answered, HA: ha, Direction: c.direction,
 	}
 }

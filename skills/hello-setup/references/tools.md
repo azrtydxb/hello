@@ -10,6 +10,7 @@ the `viewer` role; change tools need `write` and `operator`.
 | `createExtension`          | write | Create an extension (number of 2 to 10 digits, and a name).                              |
 | `updateExtension`          | write | Change number, name, external number, DND, forwarding, voicemail and recording defaults. |
 | `deleteExtension`          | write | Delete an extension and its devices.                                                     |
+| `getDoorOpen`              | read  | Whether a door station has a door-open code (never the code) and hangs up after opening. |
 | `listDevices`              | read  | Every device, ordered by SIP username.                                                   |
 | `getDevice`                | read  | One device; never its secret.                                                            |
 | `createDevice`             | write | Create a device for an extension; its secret is withheld from MCP results.               |

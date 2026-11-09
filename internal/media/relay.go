@@ -943,3 +943,122 @@ func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate 
 	}
 	return nil
 }
+
+// Telephone-event timing of SendDTMF (RFC 4733): a press lasts
+// dtmfPressPackets packets of one frame each, then the end packet is sent
+// dtmfEndRepeats times (RFC 4733 section 2.5.1.4), and digits are
+// dtmfGap apart.
+const (
+	dtmfPressPackets = 5
+	dtmfEndRepeats   = 3
+	dtmfGap          = 60 * time.Millisecond
+	dtmfVolume       = 10 // -10 dBm0, the usual level
+	dtmfClockRate    = 8000
+)
+
+// ErrNoTelephoneEvent is returned by SendDTMF when the leg's SDP negotiated
+// no telephone-event payload type.
+var ErrNoTelephoneEvent = errors.New("media: the leg has no telephone-event payload type")
+
+// telephoneEventCode maps a key to its RFC 4733 event code.
+func telephoneEventCode(d byte) (byte, bool) {
+	switch {
+	case d >= '0' && d <= '9':
+		return d - '0', true
+	case d == '*':
+		return 10, true
+	case d == '#':
+		return 11, true
+	case d >= 'A' && d <= 'D':
+		return 12 + d - 'A', true
+	}
+	return 0, false
+}
+
+// SendDTMF sends digits into one leg as RFC 2833/4733 telephone events, in
+// real time, as an own stream (a fresh SSRC with its own sequence and
+// timestamp space, like PlayPCMTo). Digits are 0-9, *, # and A-D. It returns
+// ErrNoTelephoneEvent when the leg's SDP offered no telephone-event, and
+// ctx.Err() when ctx is cancelled mid-way.
+func (r *Relay) SendDTMF(ctx context.Context, legName, digits string) error {
+	l := r.findLeg(legName)
+	if l == nil {
+		return errors.New("media: unknown relay leg " + legName)
+	}
+	pt := l.eventType()
+	if pt == 0 {
+		return ErrNoTelephoneEvent
+	}
+	codes := make([]byte, 0, len(digits))
+	for i := 0; i < len(digits); i++ {
+		code, ok := telephoneEventCode(digits[i])
+		if !ok {
+			return errors.New("media: not a DTMF digit")
+		}
+		codes = append(codes, code)
+	}
+	var b [10]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Errorf("media: dtmf stream: %w", err)
+	}
+	seq := binary.BigEndian.Uint16(b[0:2])
+	ts := binary.BigEndian.Uint32(b[2:6])
+	ssrc := binary.BigEndian.Uint32(b[6:10])
+	frameTicks := uint16(dtmfClockRate * frameDur / time.Second)
+	ticker := time.NewTicker(frameDur)
+	defer ticker.Stop()
+	wait := func(d time.Duration) error {
+		if d == frameDur {
+			select {
+			case <-ticker.C:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-r.ctx.Done():
+				return errors.New("media: relay closed")
+			}
+		}
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-t.C:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-r.ctx.Done():
+			return errors.New("media: relay closed")
+		}
+	}
+	for _, code := range codes {
+		// Every packet of one press carries the timestamp of its first;
+		// only the duration grows.
+		for i := 0; i < dtmfPressPackets+dtmfEndRepeats; i++ {
+			end := i >= dtmfPressPackets
+			n := min(i+1, dtmfPressPackets)
+			flags := byte(dtmfVolume)
+			if end {
+				flags |= 0x80
+			}
+			payload := make([]byte, 4)
+			payload[0], payload[1] = code, flags
+			binary.BigEndian.PutUint16(payload[2:], uint16(n)*frameTicks)
+			pkt := BuildRTP(pt, seq, ts, ssrc, i == 0, payload)
+			seq++
+			l.remoteMu.Lock()
+			dst := l.remote
+			l.remoteMu.Unlock()
+			if dst == nil {
+				return errors.New("media: the leg has no address yet")
+			}
+			_, _ = l.conn.WriteToUDP(pkt, dst)
+			if err := wait(frameDur); err != nil {
+				return err
+			}
+		}
+		ts += uint32(dtmfPressPackets)*uint32(frameTicks) + uint32(dtmfGap*dtmfClockRate/time.Second)
+		if err := wait(dtmfGap); err != nil {
+			return err
+		}
+	}
+	return nil
+}

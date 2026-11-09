@@ -417,6 +417,21 @@ func (s *Server) runParkCommand(cmd livestate.ParkCommand) {
 				res: make(chan pickupRes, 1)})
 			rep.OK, rep.Answer, rep.Code, rep.Reason, rep.CallID = r.ok, string(r.answer), r.code, r.why, r.callID
 		}
+	case livestate.ParkOpDoorOpen:
+		var target *call
+		s.mu.Lock()
+		for c := range s.calls {
+			if c.id == cmd.Correlation {
+				target = c
+			}
+		}
+		s.mu.Unlock()
+		if target == nil {
+			rep.Code, rep.Reason = sip.StatusNotFound, "the call is gone"
+			break
+		}
+		code, why := target.openDoorBy(cmd.Retriever)
+		rep.OK, rep.Code, rep.Reason = code == doorOpenOK, code, why
 	default:
 		return
 	}

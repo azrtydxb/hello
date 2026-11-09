@@ -75,6 +75,8 @@ type Store interface {
 	CreateExtensionKind(ctx context.Context, actor, number, name, externalNumber, kind string, targets store.DoorTargets, check store.Check) (store.Extension, error)
 	UpdateExtension(ctx context.Context, actor string, id int64, c store.ExtensionChange, check store.Check) (store.Extension, error)
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
+	GetDoorOpen(ctx context.Context, id int64) (store.DoorOpen, error)
+	SetDoorOpen(ctx context.Context, actor string, id int64, c store.DoorOpenChange, check store.Check) (store.DoorOpen, error)
 
 	GetVoicemailBox(ctx context.Context, extensionID int64) (store.VoicemailBox, error)
 	ListVoicemailBoxes(ctx context.Context) ([]store.VoicemailBoxSummary, error)
@@ -276,6 +278,10 @@ type Config struct {
 	Events EventService
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
+	// DoorCalls carries door-open requests to the hello-sip node holding a
+	// call; nil answers 503. DoorOpenWait bounds the wait (0 means 5 s).
+	DoorCalls    DoorControl
+	DoorOpenWait time.Duration
 	// Objects is the voicemail audio store; nil makes the audio routes and
 	// greeting uploads answer 503 instead of touching MinIO.
 	Objects Objects

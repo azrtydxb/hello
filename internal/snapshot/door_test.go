@@ -1,7 +1,9 @@
 package snapshot
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -35,5 +37,30 @@ func TestDoorTargets(t *testing.T) {
 	}
 	if got := s.PickupScope("200"); slices.Contains(got, "900") {
 		t.Errorf("pickup scope of 200 = %v contains the door station", got)
+	}
+}
+
+// TestDoorOpenSettings fails if the door-open code of anything but a door
+// station is returned, if an empty code counts as one, or if a snapshot dump
+// prints the code (spec S-47).
+func TestDoorOpenSettings(t *testing.T) {
+	const code = "7*3#"
+	s := New(1, "d", nil).WithExtensionData([]Extension{
+		{Number: "100"}, {Number: "900", Door: true}, {Number: "901", Door: true},
+	}).WithDoorOpen(map[string]DoorOpenSetting{
+		"100": {Code: code}, "900": {Code: code, Hangup: true}, "901": {},
+	})
+	if c, hangup, ok := s.DoorOpen("900"); !ok || c != code || !hangup {
+		t.Errorf("DoorOpen(900) = %q, %v, %v", c, hangup, ok)
+	}
+	for _, n := range []string{"100", "901", "902"} {
+		if _, _, ok := s.DoorOpen(n); ok {
+			t.Errorf("DoorOpen(%s) reported a code", n)
+		}
+	}
+	for _, f := range []string{"%v", "%+v", "%#v", "%s"} {
+		if out := fmt.Sprintf(f, s.doorOpens["900"]); strings.Contains(out, code) {
+			t.Errorf("format %s prints the door-open code: %s", f, out)
+		}
 	}
 }

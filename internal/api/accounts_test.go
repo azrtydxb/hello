@@ -1227,6 +1227,11 @@ func TestSMTPSettings(t *testing.T) {
 	}
 }
 
+// TestDoorCallRoutes covers the door-open routes (spec S-47); the details are
+// in doorCallRoutes. It sits before TestAccountRoutesDocumentedStatuses so the
+// statuses it produces count there.
+func TestDoorCallRoutes(t *testing.T) { doorCallRoutes(t) }
+
 // TestAccountRoutesDocumentedStatuses runs last among the account tests and
 // fails if a documented status of an account route was never produced by
 // them (the package conformance check does this over the whole suite when

@@ -458,3 +458,20 @@ func TestLoadVoicemailVoice(t *testing.T) {
 		t.Fatalf("control language = %q %v", ctl.VoicePromptLanguage, err)
 	}
 }
+
+// TestLoadDoorHangup fails if HELLO_DOOR_HANGUP_SECONDS does not default to
+// 3 s, parse, or reject zero, negative and junk values.
+func TestLoadDoorHangup(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil || c.DoorHangup != 3*time.Second {
+		t.Fatalf("default = %v, %v; want 3s", c.DoorHangup, err)
+	}
+	if c, err := LoadSIP(env(map[string]string{"HELLO_DOOR_HANGUP_SECONDS": "10"})); err != nil || c.DoorHangup != 10*time.Second {
+		t.Fatalf("10 = %v, %v", c.DoorHangup, err)
+	}
+	for _, bad := range []string{"0", "-2", "soon"} {
+		if _, err := LoadSIP(env(map[string]string{"HELLO_DOOR_HANGUP_SECONDS": bad})); err == nil || !strings.Contains(err.Error(), "HELLO_DOOR_HANGUP_SECONDS") {
+			t.Fatalf("%q accepted: %v", bad, err)
+		}
+	}
+}
