@@ -21,7 +21,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                      | todo                   |
 | 21  | Multiple lines and account sharing (S-10, S-11)                               | todo                   |
 | 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial      | todo                   |
-| 23  | SIP over TLS and sips (S-14)                                                  | wip (parity-tls)       |
+| 23  | SIP over TLS and sips (S-14)                                                  | done (#202)            |
 | 24  | SRTP SDES (S-15)                                                              | todo (after 23)        |
 | 25  | DTLS-SRTP and ICE-lite (S-16)                                                 | todo (after 24)        |
 | 26  | PRACK/100rel, anonymous outbound (Privacy), partial                           | todo                   |
@@ -100,7 +100,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P2  | Read-only canvas, canvases, layout API                    | done (#191)             |
 | P3  | Batch backend                                             | done (#214)             |
 | P4  | Editing UI                                                | done (#227)             |
-| P5  | traceFlow, trace mode                                     | wip (#224)              |
+| P5  | traceFlow, trace mode                                     | done (#224)             |
 | P6  | AI on the canvas                                          | todo (after P4)         |
 | P7  | New node types: batch ops, trace, override badge          | todo (after P5)         |
 | D3  | Every call output accepts every target kind               | done (#196)             |
@@ -112,7 +112,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | #   | Item                                              | Status                   |
 | --- | ------------------------------------------------- | ------------------------ |
 | -   | Choose option A or B, VIP IP                      | done (A, 192.168.10.109) |
-| 1-4 | Second instance, VIP, re-point phones, chart/docs | wip (kamailio-ha)        |
+| 1-4 | Second instance, VIP, re-point phones, chart/docs | partial (#201, 1/4)      |
 
 ## Competitor gaps (spec pbx-gaps, #199)
 
@@ -123,11 +123,11 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | Blocklist, anonymous reject, country limits   | wip (#210, A1)                 |
 | Queue callback                                | todo (spec done #199)          |
 | 2FA                                           | done (#209)                    |
-| Dial-by-name                                  | wip (#229, B3)                 |
+| Dial-by-name                                  | done (#229, B3)                |
 | Voicemail groups                              | wip (#220, A6)                 |
 | Fax                                           | todo (spec done #199)          |
 | Boss/secretary                                | todo (spec done #199)          |
-| Multi-language prompts (Dutch option per box) | wip (#208, A5)                 |
+| Multi-language prompts (Dutch option per box) | done (#208, A5)                |
 | Codec in call history                         | wip (spec pbx-gaps; cdr-codec) |
 | Phone LDAP directory                          | wip (#223, A7)                 |
 
@@ -135,19 +135,22 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                                                                                      | Status                |
 | --------------------------------------------------------------------------------------------------------- | --------------------- |
-| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-80a5de8)    |
-| MCP skills, JSON bodies (#189)                                                                            | wip (#189)            |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-0fd53d6)    |
+| MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
-| Transfer-to-voicemail phone key                                                                           | wip (transfer-vm-key) |
+| Transfer-to-voicemail phone key                                                                           | done (#200)           |
 | Vendor template keys left out (Poly caps/pickup, record keys, Fanvil CA, Snom/Yealink EXP, pickup values) | todo                  |
 | Competitor report into the repo (docs)                                                                    | done (#199)           |
 | Voicemail box after an extension forward stage uses the forwarded target                                  | done (#213)           |
 | Ring groups form: `announcement` failure kind chooser                                                     | done (#213)           |
 | Integration flakes on main: TestFlowCanvasAPI teardown, TestMessageDeliveredOnce                          | done (#212)           |
-| Messages claimed by another node fail permanently on edge-proxy 403 when the peer set is briefly lost     | wip (#217)            |
+| Messages claimed by another node fail permanently on edge-proxy 403 when the peer set is briefly lost     | done (#217)           |
 | CI: kind-upgrade job fails on transient kind API/RBAC errors                                              | done (#218)           |
 | Integration flakes: queue HA BYE, takeover voicemail, queue timeout, conference two nodes, MinIO bucket   | done (#221)           |
 | Remove MOH test queue 8888                                                                                | todo (when user done) |
+| Call heartbeat leak, trunk slot race, Opus decoder rebuild (fix-trunk-slot-leak)                          | done (#243)           |
+| HT813 FXO disconnect supervision                                                                          | done (#244)           |
+| Onboarding sends the adopted extension id as a number                                                     | done (#256)           |
 
 ## Waiting on hardware or outside accounts
 
