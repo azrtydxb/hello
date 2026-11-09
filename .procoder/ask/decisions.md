@@ -1469,11 +1469,27 @@ legs) and `internal/sip/srtp.go` (policy and negotiation). Choices:
   relay legs) answer plain RTP too. A phone forced to SRTP cannot use them;
   recorded here as a known gap, not a hidden one.
 - **Provisioning.** Only Grandstream is written: `P183` for a phone on TLS
-  (`0` off, `1` optional, `2` required). The key is from the WP8x6 gap analysis;
-  the 0/1/2 values are Grandstream's SRTP Mode choices from its provisioning
-  guide and are not confirmed on a phone. No vendor documentation file is in
-  the repository, so Yealink, Poly, Fanvil and Snom write nothing until their
-  key is confirmed from vendor documentation (the Snom TLS precedent).
+  (`0` off, `1` optional, `2` required), plus `P60078 = 0` (SDES) where the
+  template has it. Checked against Grandstream's own configuration templates
+  (config-template-10212026.zip, 2026-11-09 review): `P183` "SRTP Mode" with
+  `0` disabled, `1` enabled but not forced and `2` enabled and forced is in
+  `wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`,
+  `wp820_config_1.0.7.90` and `wp856_config_1.0.3.16` (confirmed; also
+  `ht813_config_1.0.19.6`). The WP8x6 and WP810/822/825 add `3` Optional and
+  `4` Follow SIP Transport; the WP820 has `3` Follow SIP transport and no
+  Optional; the WP856 stops at `2`. Hello writes only `0`, `1` and `2`, so the
+  mapping holds on every WP. Which of `1` ("enabled but not forced") and `3`
+  ("Optional") is the mode that offers `a=crypto` on an RTP/AVP line is not
+  stated by a template, so the choice of `1` stays a hardware check. Newly
+  found: `P60078` "SRTP Key Exchange" (`0` SDES, `1` DTLS, default 0) in the
+  WP8x6 and WP856 templates, written `0` next to `P183`; the WP810/822/825 and
+  WP820 templates have no such key. `P2383` SRTP Key Length (default `0`, both
+  AES-128 and AES-256) and `P2363` Crypto Life Time stay at their defaults:
+  Hello offers AES_CM_128, accepts AES-256 and ignores a lifetime. Account 2 is
+  `P443` and account 3 `P543` (WP856: `P643`, `P1743`, `P1843`), written with
+  the lines of item 21. No vendor documentation file for Yealink, Poly, Fanvil
+  and Snom is in the repository, so they write nothing until their key is
+  confirmed (the Snom TLS precedent).
 - **Metrics and CDR.** `hello_srtp_legs` (gauge of encrypted legs, moved with
   the relay across a transfer), `hello_srtp_negotiations_total{result}`
   (`srtp`, `plain`, `refused`); the CDR `srtp` column, the CallDetail card and
