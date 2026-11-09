@@ -1433,8 +1433,22 @@ Implementation notes (template route, no migration):
   web page upload only, so the slot is unused by the template (spec: "unused by
   default"). The vCard version the phone exports is not documented; 3.0 is the
   widest-read form and is **verify** on a phone.
-- Left out: "Import Group Method" (P-value unknown; the guide only gives the
-  setting and its default, Replace) and any change to "Remove Manually-edited
-  Entries on Download" (default Yes already; P333 is written as before). The
-  firmware gate "1.0.3.24 and later" is not checked: the page simply does not
-  exist on older firmware.
+- The two settings the Administration Guide names are in Grandstream's own
+  configuration templates (config-template-10212026.zip, 2026-11-09 review), so
+  they are written: `P333` "Remove Manually-edited Entries on Download" (0 No, 1
+  Yes, default 1) is in `wp8x6_config_1.0.3.39` and
+  `wp810_822_825_config_1.0.11.83` (confirmed; already written as 1);
+  `P8462` "Import Group Method" (0 Replace, 1 Append, default 0) is in
+  `wp8x6_config_1.0.3.39` only (newly found, written 0). `wp820_config_1.0.7.90`
+  and `wp856_config_1.0.3.16` have neither; they have `P1435` "Clear The Old
+  List" (0 No, 1 Clear all, 2 Keep Local Contacts, default 0) and `P1436`
+  "Replace Duplicate Items" (WP820 default 0, WP856 default 1: 0 No, 1 by name,
+  2 by number) in "Download Contacts". `P1435 = 1` is written for those two, the
+  same effect as `P333 = 1`, and `P333` is no longer written to a WP820, which
+  has no such key (corrected). `P1436` stays at its default.
+- Corrected: `P332` on the WP820 and WP856 takes only 0, 5, 30, 60, 120, 240,
+  360, 480 or 720 (both templates), not any value from 5 to 720; the WP820 now
+  gets the WP856's rounding (`BookRefreshForPhone`). `P330` is 3 for HTTPS in
+  every WP template, though the numbers 1 and 2 differ (WP8x6 1 HTTP, 2 TFTP;
+  WP856 1 TFTP, 2 HTTP). The firmware gate "1.0.3.24 and later" is not checked:
+  the page simply does not exist on older firmware.

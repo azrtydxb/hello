@@ -57,6 +57,22 @@ func TestBookRefreshFor(t *testing.T) {
 	}
 }
 
+// TestBookRefreshForPhone fails if the WP820 is not held to the intervals its
+// template lists, or any other family changes.
+func TestBookRefreshForPhone(t *testing.T) {
+	for _, c := range []struct {
+		family, wp string
+		in, want   int
+	}{
+		{FamilyWP8xx, WP820, 15, 30}, {FamilyWP8xx, WP820, 0, 0}, {FamilyWP8xx, WP820, 1, 5}, {FamilyWP8xx, WP820, 721, 720},
+		{FamilyWP8xx, WP8xx, 15, 15}, {FamilyWP8x6, WP8x6, 15, 15}, {FamilyWP856, WP856, 15, 30},
+	} {
+		if got := BookRefreshForPhone(c.family, c.wp, c.in); got != c.want {
+			t.Errorf("BookRefreshForPhone(%q, %q, %d) = %d, want %d", c.family, c.wp, c.in, got, c.want)
+		}
+	}
+}
+
 func TestAddEmergencyNumber(t *testing.T) {
 	var n []string
 	for _, m := range []string{"112", " 911 ", "112", "^0[0-9]+$", "", "9-1-1", "*67"} {
