@@ -1,7 +1,8 @@
 # One-time admin step for Kamailio HA (.procoder/specs/kamailio-ha.md).
 # NOT part of the synced directory (deploy/kuvryn-sync/kw): the deployer
 # cannot grant itself these rules. Apply it as a cluster admin BEFORE the
-# release that carries the kamailio PodDisruptionBudget reaches kw:
+# release that carries the kamailio PodDisruptionBudget and the SIP TLS
+# Certificate reaches kw:
 #
 #   kubectl --context kw apply -f deploy/kuvryn-sync/rbac-kamailio-ha.yaml
 #
@@ -16,7 +17,11 @@ rules:
   # The kamailio PodDisruptionBudget.
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The SIP TLS Certificate (hello-sip-tls) the kw manifests carry.
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # kube-vip's election Lease. Sync creates the kamailio-vip Role that grants
   # it, and Kubernetes only lets a subject create a Role (or bind it) whose
   # rules it holds itself, so the deployer must hold them too. The verbs are

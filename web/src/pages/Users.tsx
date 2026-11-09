@@ -18,6 +18,11 @@ import {
   type User,
   type UserChange,
 } from "../api/users";
+import {
+  getTwoFactorPolicy,
+  putTwoFactorPolicy,
+  resetUserTwoFactor,
+} from "../api/twofactor";
 import { useAuth } from "../auth";
 import {
   Alert,
@@ -65,7 +70,10 @@ export function Users() {
         description="Who can sign in to Hello, what their role allows and which extensions they manage themselves."
       />
       {isAdmin ? (
-        <UserList />
+        <>
+          <TwoFactorPolicyCard />
+          <UserList />
+        </>
       ) : (
         <Alert tone="warn" title="Administrators only">
           Your role cannot manage users.
@@ -81,6 +89,7 @@ function UserList() {
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [editing, setEditing] = useState<User | "new" | null>(null);
   const [deleting, setDeleting] = useState<User | null>(null);
+  const [resetting, setResetting] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
 
@@ -208,6 +217,19 @@ function UserList() {
                 ),
             },
             {
+              key: "2fa",
+              label: "2FA",
+              primary: false,
+              render: (u) =>
+                u.totpEnabled ? (
+                  <Badge tone="good">On</Badge>
+                ) : u.totpRequired ? (
+                  <Badge tone="warn">Required</Badge>
+                ) : (
+                  "—"
+                ),
+            },
+            {
               key: "actions",
               label: "Actions",
               primary: false,
@@ -221,6 +243,16 @@ function UserList() {
                   >
                     Edit
                   </Button>
+                  {u.totpEnabled && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      aria-label={`Reset 2FA for ${u.username}`}
+                      onClick={() => setResetting(u)}
+                    >
+                      Reset 2FA
+                    </Button>
+                  )}
                   {u.username !== me && (
                     <>
                       <Button
@@ -264,6 +296,24 @@ function UserList() {
           }}
         />
       )}
+      {resetting && (
+        <ConfirmDialog
+          title={`Reset two-factor authentication for ${resetting.username}?`}
+          description="Their authenticator and recovery codes are removed and their sessions end. They sign in with the password alone, or set 2FA up again if it is required of them."
+          confirmLabel="Reset 2FA"
+          onClose={() => setResetting(null)}
+          onConfirm={async () => {
+            try {
+              await resetUserTwoFactor(resetting.id);
+            } catch (err) {
+              setError(userError(err));
+              return;
+            }
+            upsert({ ...resetting, totpEnabled: false });
+            toast.show(`2FA reset for ${resetting.username}.`);
+          }}
+        />
+      )}
       {deleting && (
         <ConfirmDialog
           title={`Delete user ${deleting.username}?`}
@@ -299,6 +349,10 @@ function userError(err: unknown): string {
       return "You cannot disable your own account.";
     if (err.code === "self_delete")
       return "You cannot delete your own account.";
+    if (err.code === "two_factor_required")
+      return "Set up two-factor authentication for your own account first.";
+    if (err.code === "last_enrolled_admin")
+      return "This is the only administrator with two-factor authentication. Use hello-control user 2fa-reset on the control plane instead.";
   }
   return errorMessage(err);
 }
@@ -333,6 +387,7 @@ function UserDialog({
   const [role, setRole] = useState<Role>(user?.role ?? "user");
   const [password, setPassword] = useState("");
   const [must, setMust] = useState(true);
+  const [totpRequired, setTotpRequired] = useState(user?.totpRequired ?? false);
   const [exts, setExts] = useState<Set<string>>(
     new Set((user?.extensionIds ?? []).map(String)),
   );
@@ -403,6 +458,8 @@ function UserDialog({
           extensionIds,
           voicemailEmail,
         };
+        if (totpRequired !== (user.totpRequired ?? false))
+          change.totpRequired = totpRequired;
         if (password !== "") {
           change.password = password;
           change.mustChangePassword = must;
@@ -545,6 +602,14 @@ function UserDialog({
             onChange={(e) => setMust(e.target.checked)}
           />
         )}
+        {!isNew && (
+          <Switch
+            label="Require two-factor authentication"
+            hint="The user must set up an authenticator at next sign-in."
+            checked={totpRequired}
+            onChange={(e) => setTotpRequired(e.target.checked)}
+          />
+        )}
         <fieldset className="pf-stack">
           <legend className="az-field__label">Voicemail to email</legend>
           <Switch
@@ -573,5 +638,66 @@ function UserDialog({
         </fieldset>
       </form>
     </Modal>
+  );
+}
+
+/** The roles whose users must use two-factor authentication (admin only). */
+function TwoFactorPolicyCard() {
+  const [roles, setRoles] = useState<Role[] | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => {
+    const ctl = new AbortController();
+    getTwoFactorPolicy(ctl.signal)
+      .then((p) => setRoles(p.require2faRoles))
+      .catch((err: unknown) => {
+        if (!ctl.signal.aborted) setProblem(errorMessage(err));
+      });
+    return () => ctl.abort();
+  }, []);
+
+  async function toggle(role: Role, on: boolean) {
+    if (roles === null || busy) return;
+    const next = on ? [...roles, role] : roles.filter((r) => r !== role);
+    setBusy(true);
+    setProblem(null);
+    try {
+      const saved = await putTwoFactorPolicy(next);
+      setRoles(saved.require2faRoles);
+      toast.show("Two-factor policy saved.");
+    } catch (err) {
+      setProblem(userError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <fieldset className="az-card pf-stack" aria-label="Two-factor policy">
+      <legend className="az-field__label">Two-factor policy</legend>
+      <p className="az-field__hint">
+        Users of the roles ticked here must set up an authenticator at their
+        next sign-in. API tokens and service accounts are not affected. Ticking
+        administrator needs two-factor authentication on your own account first.
+      </p>
+      {problem && (
+        <Alert tone="bad" title="Policy not changed">
+          {problem}
+        </Alert>
+      )}
+      {roles !== null &&
+        ROLES.map((r) => (
+          <Checkbox
+            key={r}
+            label={`Require for ${r}`}
+            checked={roles.includes(r)}
+            disabled={busy}
+            onChange={(e) => void toggle(r, e.target.checked)}
+          />
+        ))}
+      {toast.node}
+    </fieldset>
   );
 }

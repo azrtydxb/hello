@@ -45,6 +45,20 @@ export interface Me {
   voicemailEmail?: VoicemailEmailPrefs;
   /** Whether the system can send email at all. */
   emailDelivery?: boolean;
+  /** 2FA is required of the user and not enrolled: only the enrolment works. */
+  mustEnrollMfa?: boolean;
+  /** The user's own two-factor state. */
+  twoFactor?: TwoFactorState;
+}
+
+/** GET /api/v1/me/2fa */
+export interface TwoFactorState {
+  enabled: boolean;
+  /** A secret was issued and not yet confirmed. */
+  pending: boolean;
+  /** The account or its role requires 2FA. */
+  required: boolean;
+  recoveryCodesLeft: number;
 }
 
 /** An API token as listed; the token itself is never returned. */
@@ -371,7 +385,9 @@ export interface InboundRouteFields {
     | "ring_group"
     | "voicemail"
     | "announcement"
-    | "paging";
+    | "paging"
+    | "conference"
+    | "directory";
   destination: string;
   enabled: boolean;
   /** Music on hold class of the calls this route delivers; null = the default. */
@@ -435,18 +451,22 @@ export class ApiError extends Error {
   readonly code: string;
   /** Per-field validation failures from a 400, if any. */
   readonly fields: FieldError[];
+  /** The whole error object, for answers that carry more than a message (a batch's conflicts). */
+  readonly details: Record<string, unknown>;
 
   constructor(
     status: number,
     code: string,
     message: string,
     fields: FieldError[] = [],
+    details: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.fields = fields;
+    this.details = details;
   }
 }
 
@@ -510,9 +530,12 @@ function isFieldError(value: unknown): value is FieldError {
   return typeof v.path === "string" && typeof v.message === "string";
 }
 
-function envelope(
-  value: unknown,
-): { code: string; message: string; fields: FieldError[] } | null {
+function envelope(value: unknown): {
+  code: string;
+  message: string;
+  fields: FieldError[];
+  details: Record<string, unknown>;
+} | null {
   if (typeof value !== "object" || value === null) return null;
   const err = (value as Record<string, unknown>).error;
   if (typeof err !== "object" || err === null) return null;
@@ -522,6 +545,7 @@ function envelope(
     code: typeof code === "string" ? code : "",
     message,
     fields: Array.isArray(fields) ? fields.filter(isFieldError) : [],
+    details: err as Record<string, unknown>,
   };
 }
 
@@ -537,7 +561,13 @@ async function errorFrom(
     // Not JSON: fall through to the generic message.
   }
   if (parsed) {
-    return new ApiError(res.status, parsed.code, parsed.message, parsed.fields);
+    return new ApiError(
+      res.status,
+      parsed.code,
+      parsed.message,
+      parsed.fields,
+      parsed.details,
+    );
   }
   return new ApiError(
     res.status,
@@ -652,9 +682,35 @@ export async function fetchVersion(signal?: AbortSignal): Promise<VersionInfo> {
 // --- auth ------------------------------------------------------------------
 
 /** POST /api/v1/auth/login; a 401 is thrown to the caller, never redirected. */
-export async function login(username: string, password: string): Promise<void> {
-  await request<void>("POST", "/api/v1/auth/login", {
-    body: { username, password },
+export async function login(
+  username: string,
+  password: string,
+): Promise<LoginResult> {
+  const r = await request<MfaChallenge | undefined>(
+    "POST",
+    "/api/v1/auth/login",
+    { body: { username, password }, redirectOn401: false },
+  );
+  return r && r.mfa === "required" ? r : { mfa: "none" };
+}
+
+/** A password-verified login that still needs its second factor (202). */
+export interface MfaChallenge {
+  mfa: "required";
+  /** Single use, valid 5 minutes; give it to loginSecondFactor. */
+  mfaToken: string;
+}
+
+/** What POST /auth/login came to: a session, or a challenge to answer. */
+export type LoginResult = MfaChallenge | { mfa: "none" };
+
+/** POST /api/v1/auth/login/2fa: an authenticator code or a recovery code. */
+export async function loginSecondFactor(
+  mfaToken: string,
+  code: string,
+): Promise<void> {
+  await request<void>("POST", "/api/v1/auth/login/2fa", {
+    body: { mfaToken, code },
     redirectOn401: false,
   });
 }
@@ -1092,7 +1148,10 @@ export type FailureKind =
   | "announcement"
   | "ivr"
   | "queue"
-  | "time_condition";
+  | "time_condition"
+  | "directory"
+  | "extension"
+  | "ring_group";
 
 export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   none: "Hang up",
@@ -1102,6 +1161,9 @@ export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   ivr: "An IVR menu",
   queue: "A call queue",
   time_condition: "A time condition",
+  directory: "The dial-by-name directory",
+  extension: "An extension",
+  ring_group: "Another ring group",
 };
 
 /** One member of a ring group; `position` is 1-based ring order. */
@@ -1138,6 +1200,8 @@ export interface RingGroupFields {
   mohClassId?: Id | null;
   /** Play the class to the caller instead of ringback while the group rings. */
   mohRingback?: boolean;
+  /** Ring tag that replaces ringgroup for calls through the group; "" keeps it. */
+  ringTag?: string;
 }
 
 /** A ring group as returned. */
@@ -1368,9 +1432,14 @@ export const IVR_DESTINATION_KINDS = [
   "external",
   "queue",
   "time_condition",
+  "directory",
 ] as const;
 
 export type IvrDestinationKind = (typeof IVR_DESTINATION_KINDS)[number];
+
+/** Destination kinds that name nothing: the target stays empty. */
+export const hasNoTarget = (kind: string): boolean =>
+  kind === "hangup" || kind === "directory";
 
 export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   hangup: "Hang up",
@@ -1383,6 +1452,7 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   external: "External number",
   queue: "Call queue",
   time_condition: "Time condition",
+  directory: "Dial-by-name directory",
 };
 
 /**
@@ -1415,6 +1485,8 @@ export interface IvrMenuFields {
   interDigitTimeout: number;
   maxRetries: number;
   allowDirectDial: boolean;
+  /** Language of the menu's spoken prompts (en, nl); "" inherits the deployment language. */
+  promptLanguage: string;
   timeout: IvrDestination;
   invalid: IvrDestination;
   options: IvrOption[];
@@ -1590,6 +1662,14 @@ export interface QueueFields {
   breakoutKey: string;
   breakoutPromptId: Id | null;
   breakoutVoicemail: string;
+  /** Offer a waiting caller a call back instead of holding the line. */
+  callbackEnabled: boolean;
+  /** Offer once the estimated wait exceeds this many seconds. */
+  callbackOfferAfterSeconds: number;
+  /** The key that accepts the offer, or asks for a callback. */
+  callbackDigit: string;
+  /** The queue's prompt language; "" inherits. */
+  promptLanguage: string;
   members: QueueMember[];
 }
 
@@ -1616,6 +1696,38 @@ export const putQueue = (queueId: Id, input: QueueFields) =>
 
 export const deleteQueue = (queueId: Id) =>
   request<void>("DELETE", `/api/v1/queues/${id(queueId)}`);
+
+export type QueueCallbackStatus =
+  "waiting" | "dialling" | "connected" | "failed" | "cancelled" | "expired";
+
+/** A callback request of a queue: GET /api/v1/queues/{id}/callbacks. */
+export interface QueueCallback {
+  id: Id;
+  queueId: Id;
+  number: string;
+  callerName: string;
+  status: QueueCallbackStatus;
+  attempts: number;
+  /** The caller's original enqueue time (Unix ms): its place in the queue. */
+  positionKey: number;
+  nextAttemptAt: string;
+  claimedBy: string;
+  leaseUntil?: string;
+  agent: string;
+  result: string;
+  createdAt: string;
+  expiresAt: string;
+  finishedAt?: string;
+}
+
+export const listQueueCallbacks = (queueId: Id, signal?: AbortSignal) =>
+  list<QueueCallback>(`/api/v1/queues/${id(queueId)}/callbacks`, signal);
+
+export const cancelQueueCallback = (queueId: Id, callbackId: Id) =>
+  request<void>(
+    "DELETE",
+    `/api/v1/queues/${id(queueId)}/callbacks/${id(callbackId)}`,
+  );
 
 /** An agent's state on the wallboard. */
 export type QueueAgentState =
@@ -1723,6 +1835,7 @@ export const FEATURE_CODE_ACTIONS = [
   "pickup_directed",
   "time_condition",
   "tc_override",
+  "directory",
 ] as const;
 
 /** One of FEATURE_CODE_ACTIONS: what dialling a feature code performs. */
@@ -1753,6 +1866,7 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   pickup_directed: "Pick up an extension's call",
   time_condition: "Route to a time condition",
   tc_override: "Day/night toggle (code plus toggle number)",
+  directory: "Dial-by-name directory",
 };
 
 /** GET /api/v1/feature-codes. */

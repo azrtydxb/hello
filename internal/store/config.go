@@ -60,7 +60,7 @@ func scanExtension(r interface{ Scan(...any) error }) (Extension, error) {
 
 // ListExtensions returns every extension ordered by number.
 func (s *Store) ListExtensions(ctx context.Context) ([]Extension, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+extensionCols+` FROM extensions ORDER BY number`)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+extensionCols+` FROM extensions ORDER BY number`)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +78,7 @@ func (s *Store) ListExtensions(ctx context.Context) ([]Extension, error) {
 
 // GetExtension returns one extension.
 func (s *Store) GetExtension(ctx context.Context, id int64) (Extension, error) {
-	e, err := scanExtension(s.db.QueryRowContext(ctx, `SELECT `+extensionCols+` FROM extensions WHERE id = $1`, id))
+	e, err := scanExtension(s.q(ctx).QueryRowContext(ctx, `SELECT `+extensionCols+` FROM extensions WHERE id = $1`, id))
 	return e, mapErr(err)
 }
 
@@ -140,6 +140,9 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 				IVRExtension, IVRVoicemail); err != nil {
 				return id, err
 			}
+			if err := refuseIfGroupFailsTo(ctx, tx, "extension "+number+", which cannot be renumbered while it is the fallback of", number, "extension"); err != nil {
+				return id, err
+			}
 			if err := checkDialNumber(ctx, tx, "number", *c.Number, numExtension); err != nil {
 				return id, err
 			}
@@ -179,6 +182,9 @@ func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64, che
 		if err := refuseIfIVRPoints(ctx, tx, "extension "+number, number, IVRExtension, IVRVoicemail); err != nil {
 			return id, err
 		}
+		if err := refuseIfGroupFailsTo(ctx, tx, "extension "+number, number, "extension"); err != nil {
+			return id, err
+		}
 		if err := boundPhone(ctx, tx, `d.extension_id = $1`, id); err != nil {
 			return id, err
 		}
@@ -211,7 +217,7 @@ func scanDevice(r interface{ Scan(...any) error }) (Device, error) {
 
 // ListDevices returns every device ordered by SIP username.
 func (s *Store) ListDevices(ctx context.Context) ([]Device, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+deviceCols+` FROM devices ORDER BY sip_username`)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+deviceCols+` FROM devices ORDER BY sip_username`)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +235,7 @@ func (s *Store) ListDevices(ctx context.Context) ([]Device, error) {
 
 // GetDevice returns one device.
 func (s *Store) GetDevice(ctx context.Context, id int64) (Device, error) {
-	d, err := scanDevice(s.db.QueryRowContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE id = $1`, id))
+	d, err := scanDevice(s.q(ctx).QueryRowContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE id = $1`, id))
 	return d, mapErr(err)
 }
 

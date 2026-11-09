@@ -859,13 +859,14 @@ func (c *call) storeRecording(rec *media.Recorder, by string) {
 	}
 	if s.deps.Recordings != nil {
 		rctx, rcancel := context.WithTimeout(context.Background(), s.cfg.StateTimeout)
-		_, err := s.deps.Recordings.InsertRecording(rctx, c.id, obj, by, durMs)
+		recID, err := s.deps.Recordings.InsertRecording(rctx, c.id, obj, by, durMs)
 		rcancel()
 		if err != nil {
 			c.addTrace("Recording metadata store failed")
 			s.log.Warn("recording row failed", "error", err)
 			return
 		}
+		s.recordingEvents(c, recID, durMs)
 	}
 	if m := s.deps.Media; m != nil {
 		n := s.vmBytes.Add(int64(len(audio)))
@@ -903,6 +904,9 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 		return
 	}
 	dir := media.SDPDirection(body)
+	// A new media address after a roam (a handset on another AP or subnet)
+	// re-learns the leg's address before anything is relayed (S-9).
+	c.relearnMedia(fromCaller, req.Source(), off)
 	c.setHADirs(fromCaller, dir)
 	// An inactive hold stays inactive toward the holder, but the held peer
 	// is offered sendonly so it can hear the music (S-33).
@@ -927,6 +931,13 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	// The peer gets our SDP in the same direction (a held side hears
 	// silence because the held side stopped sending).
 	peer := off.Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir)
+	if fromCaller {
+		c.noteSDP(sessCaller, ans)
+		c.noteSDP(sessCallee, peer)
+	} else {
+		c.noteSDP(sessCallee, ans)
+		c.noteSDP(sessCaller, peer)
+	}
 	c.mu.Lock()
 	w := c.winner
 	c.mu.Unlock()

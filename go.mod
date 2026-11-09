@@ -4,11 +4,11 @@ go 1.27.1
 
 require (
 	github.com/azrtydxb/go-ai-sdk v0.8.0
-	github.com/emiago/sipgo v1.6.0
+	github.com/emiago/sipgo v1.7.2
 	github.com/google/jsonschema-go v0.4.3
 	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/icholy/digest v1.2.0
-	github.com/jackc/pgx/v5 v5.11.0
+	github.com/jackc/pgx/v5 v5.12.0
 	github.com/kazzmir/opus-go v1.7.0
 	github.com/minio/minio-go/v7 v7.4.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
@@ -16,9 +16,9 @@ require (
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3
 	github.com/valkey-io/valkey-go v1.0.79
-	go.yaml.in/yaml/v3 v3.0.5
+	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/crypto v0.58.0
-	golang.org/x/net v0.61.0
+	golang.org/x/net v0.62.0
 )
 
 require (

@@ -10,7 +10,9 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/routing"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -32,6 +34,7 @@ const (
 	KindPage       = "page"
 	KindIntercom   = "intercom"
 	KindConference = "conference"
+	KindCallback   = "callback" // a call Hello placed to a queue caller who asked for a callback (migration 00049)
 )
 
 // Termination sides.
@@ -73,12 +76,20 @@ type Record struct {
 	RTPJitterMs *float64
 	// Kind is call (default), page or intercom.
 	Kind string
+	// RingTag is the ring tag the call's device legs carried and RingRule
+	// what chose it (migration 00050); empty for a call that rang no
+	// internal device.
+	RingTag, RingRule string
 	// PageLegs is a page's outcome per member (migration 00014), one row
 	// each; empty for any other call.
 	PageLegs []PageLeg
 	// QueueLegs is what the call did in a call queue (migration 00040): one
 	// row per event, in order; empty for a call that never queued.
 	QueueLegs []QueueLeg
+	// Events are the call.completed events of the call, one per extension it
+	// involved. They are not stored: the Writer publishes them, carrying the
+	// new row's id, once the record is in the table.
+	Events []events.Event
 }
 
 // Queue leg events.
@@ -89,6 +100,12 @@ const (
 	QueueWait     = "wait"     // how long the caller waited (WaitMs)
 	QueueAbandon  = "abandon"  // the caller hung up while waiting
 	QueueExit     = "exit"     // the queue sent the caller elsewhere (Result: timeout, full, no_agents, breakout)
+
+	// Callback events (migration 00049, pbx-gaps S-9, S-10).
+	QueueCallbackRequested = "callback_requested" // the caller asked to be called back (Result: accepted)
+	QueueCallbackDialled   = "callback_dialled"   // Hello rang the caller back
+	QueueCallbackConnected = "callback_connected" // the caller and an agent were connected (Extension: the agent)
+	QueueCallbackFailed    = "callback_failed"    // an attempt failed (Result: no_answer, busy, failed, abandoned)
 )
 
 // QueueLeg is one event of a call in a queue.
@@ -110,6 +127,17 @@ type PageLeg struct {
 	Result    string `json:"result"`
 }
 
+// EventSink receives events; *events.Emitter satisfies it.
+type EventSink interface {
+	Emit(events.Event)
+}
+
+// rowQuerier is the optional part of a pgx pool the Writer uses to read the
+// id of the row it inserted (only for the call.completed events).
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // Execer is the subset of a pgx pool or connection the writer needs.
 type Execer interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
@@ -121,6 +149,9 @@ type Writer struct {
 	log     *slog.Logger
 	dropped prometheus.Counter
 	queue   chan Record
+	// Events, when set, receives each record's call.completed events after
+	// the record is stored. Set it before Run.
+	Events EventSink
 
 	// MaxBackoff caps the retry delay; InitialBackoff is the first delay.
 	InitialBackoff time.Duration
@@ -166,17 +197,17 @@ const insert = `WITH c AS (INSERT INTO cdrs (correlation_id, sip_call_id, source
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason,
     direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
-    rtp_packets, rtp_lost, rtp_jitter_ms, kind)
+    rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
 ON CONFLICT (correlation_id) DO NOTHING RETURNING id),
 p AS (INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
 SELECT c.id, l.ord, l.leg->>'extension', l.leg->>'device', l.leg->>'result'
-FROM c, jsonb_array_elements($26::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1)
+FROM c, jsonb_array_elements($28::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1)
 INSERT INTO cdr_queue_legs (cdr_id, position, event, queue, extension, wait_ms, result, at)
 SELECT c.id, l.ord, l.leg->>'event', l.leg->>'queue', l.leg->>'extension', (l.leg->>'waitMs')::bigint,
        l.leg->>'result', (l.leg->>'at')::timestamptz
-FROM c, jsonb_array_elements($27::jsonb) WITH ORDINALITY AS l(leg, ord)`
+FROM c, jsonb_array_elements($29::jsonb) WITH ORDINALITY AS l(leg, ord)`
 
 // Run writes queued records until ctx is cancelled, retrying each with
 // exponential backoff. After cancellation it tries to flush what is left for
@@ -277,8 +308,31 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 		r.StartTime, nullTime(r.RingTime), nullTime(r.AnswerTime), r.EndTime, r.DurationMs, r.BillableMs,
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
-		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, string(lj), string(qj))
-	return err
+		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, r.RingTag, r.RingRule, string(lj), string(qj))
+	if err != nil {
+		return err
+	}
+	w.publish(wctx, r)
+	return nil
+}
+
+// publish emits the record's call.completed events with the stored row's
+// id. A lookup that fails still emits them (cdrId 0): the event matters more
+// than the id, and the call id finds the row.
+func (w *Writer) publish(ctx context.Context, r Record) {
+	if w.Events == nil || len(r.Events) == 0 {
+		return
+	}
+	var id int64
+	if q, ok := w.db.(rowQuerier); ok {
+		if err := q.QueryRow(ctx, `SELECT id FROM cdrs WHERE correlation_id = $1`, r.CorrelationID).Scan(&id); err != nil {
+			w.log.Debug("cdr id lookup for events failed", "correlation_id", r.CorrelationID, "error", err)
+		}
+	}
+	for _, e := range r.Events {
+		e.Data.CDRID = id
+		w.Events.Emit(e)
+	}
 }
 
 func nullTime(t time.Time) any {
