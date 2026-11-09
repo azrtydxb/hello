@@ -17485,9 +17485,19 @@
         "type": "object",
         "required": ["promptLanguage", "effective", "languages"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."},
-          "effective": {"type": "string", "description": "The language callers hear for this box now."},
-          "languages": {"type": "array", "items": {"type": "string"}, "description": "The languages a box can be set to."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."
+          },
+          "effective": {
+            "type": "string",
+            "description": "The language callers hear for this box now."
+          },
+          "languages": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The languages a box can be set to."
+          }
         }
       },
       "VoicemailBoxLanguageUpdate": {
@@ -17495,12 +17505,23 @@
         "additionalProperties": false,
         "required": ["promptLanguage"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."
+          }
         }
       },
       "VoicemailBoxSummary": {
         "type": "object",
-        "required": ["id", "extensionId", "number", "name", "unheard", "total", "promptLanguage"],
+        "required": [
+          "id",
+          "extensionId",
+          "number",
+          "name",
+          "unheard",
+          "total",
+          "promptLanguage"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -18865,9 +18886,15 @@
         "required": ["node", "text"],
         "properties": {
           "node": { "type": "string", "description": "A graph node id." },
-          "port": { "type": "string", "description": "The output port of the node the call leaves through; for a last step, the port it ends at." },
+          "port": {
+            "type": "string",
+            "description": "The output port of the node the call leaves through; for a last step, the port it ends at."
+          },
           "text": { "type": "string" },
-          "at": { "type": "string", "description": "On a time condition step, the instant that was evaluated." },
+          "at": {
+            "type": "string",
+            "description": "On a time condition step, the instant that was evaluated."
+          },
           "branches": {
             "type": "array",
             "description": "The choices of an IVR menu traced without a key.",
@@ -18881,22 +18908,45 @@
         "properties": {
           "port": { "type": "string" },
           "label": { "type": "string" },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } }
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          }
         }
       },
       "FlowTrace": {
         "type": "object",
-        "required": ["configRevision", "at", "from", "number", "outcome", "steps", "routingTrace"],
+        "required": [
+          "configRevision",
+          "at",
+          "from",
+          "number",
+          "outcome",
+          "steps",
+          "routingTrace"
+        ],
         "properties": {
           "configRevision": { "type": "integer", "format": "int64" },
           "at": { "type": "string" },
           "from": { "type": "string" },
           "number": { "type": "string" },
-          "outcome": { "type": "string", "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing." },
+          "outcome": {
+            "type": "string",
+            "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing."
+          },
           "route": { "type": "string" },
-          "reason": { "type": "string", "description": "Why the call was rejected." },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } },
-          "routingTrace": { "type": "array", "items": { "$ref": "#/components/schemas/TraceStep" } }
+          "reason": {
+            "type": "string",
+            "description": "Why the call was rejected."
+          },
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          },
+          "routingTrace": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TraceStep" }
+          }
         }
       },
       "FlowRevision": {
@@ -20585,7 +20635,7 @@
           },
           "languages": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": { "type": "string" },
             "description": "The languages the box can be set to."
           }
         }
@@ -20924,6 +20974,7 @@
           "allowIntercom",
           "callWaiting",
           "anonymousOutbound",
+          "phoneSendAnonymous",
           "noAnswerRings",
           "directoryHidden"
         ],
@@ -20992,6 +21043,10 @@
           "anonymousOutbound": {
             "type": "boolean",
             "description": "Anonymous outbound calls. On: every call this extension places through a trunk is anonymous (RFC 3323/3325): the trunk leg carries Privacy: id, an anonymous From, and the trunk's asserted identity in P-Asserted-Identity (or P-Preferred-Identity, per the trunk). Off (the default): a call is anonymous only when the device asks (a Privacy header or an anonymous From) or the trunk's anonymousPolicy is always."
+          },
+          "phoneSendAnonymous": {
+            "type": "boolean",
+            "description": "Phone Send Anonymous (Grandstream P65, line 1). On: provisioning writes the phone's own Send Anonymous setting, so the phone hides its caller ID on every call it makes, internal calls included; applied at the phone's next resync. Off (the default): nothing is written and the phone keeps its own setting. Distinct from anonymousOutbound, which only makes the calls Hello places through a trunk anonymous and leaves internal caller ID alone."
           },
           "mohClassId": {
             "oneOf": [
@@ -21101,6 +21156,10 @@
           "anonymousOutbound": {
             "type": "boolean",
             "description": "Anonymous outbound calls. On: every call this extension places through a trunk is anonymous (RFC 3323/3325): the trunk leg carries Privacy: id, an anonymous From, and the trunk's asserted identity in P-Asserted-Identity (or P-Preferred-Identity, per the trunk). Off (the default): a call is anonymous only when the device asks (a Privacy header or an anonymous From) or the trunk's anonymousPolicy is always."
+          },
+          "phoneSendAnonymous": {
+            "type": "boolean",
+            "description": "Phone Send Anonymous (Grandstream P65, line 1). On: provisioning writes the phone's own Send Anonymous setting, so the phone hides its caller ID on every call it makes, internal calls included; applied at the phone's next resync. Off (the default): nothing is written and the phone keeps its own setting. Distinct from anonymousOutbound, which only makes the calls Hello places through a trunk anonymous and leaves internal caller ID alone."
           },
           "mohClassId": {
             "oneOf": [
@@ -21989,7 +22048,6 @@
             "enum": ["pai", "ppi"],
             "description": "The header carrying the asserted identity of an anonymous call: pai (P-Asserted-Identity, the default) or ppi (P-Preferred-Identity, for carriers that assert the identity themselves)."
           }
-
         }
       },
       "TrunkCreate": {
@@ -22106,7 +22164,6 @@
             "enum": ["pai", "ppi"],
             "description": "The header carrying the asserted identity of an anonymous call: pai (P-Asserted-Identity, the default) or ppi (P-Preferred-Identity, for carriers that assert the identity themselves)."
           }
-
         }
       },
       "TrunkUpdate": {
@@ -22223,7 +22280,6 @@
             "enum": ["pai", "ppi"],
             "description": "The header carrying the asserted identity of an anonymous call: pai (P-Asserted-Identity, the default) or ppi (P-Preferred-Identity, for carriers that assert the identity themselves)."
           }
-
         }
       },
       "DestinationHealth": {
@@ -27400,23 +27456,73 @@
       },
       "QueueCallback": {
         "type": "object",
-        "required": ["id", "queueId", "number", "callerName", "status", "attempts", "positionKey", "nextAttemptAt", "claimedBy", "agent", "result", "createdAt", "expiresAt"],
+        "required": [
+          "id",
+          "queueId",
+          "number",
+          "callerName",
+          "status",
+          "attempts",
+          "positionKey",
+          "nextAttemptAt",
+          "claimedBy",
+          "agent",
+          "result",
+          "createdAt",
+          "expiresAt"
+        ],
         "properties": {
-          "id": {"type": "integer", "format": "int64"},
-          "queueId": {"type": "integer", "format": "int64"},
-          "number": {"type": "string", "description": "The number to call back."},
-          "callerName": {"type": "string", "description": "From the shared name sources (phonebooks); empty when none."},
-          "status": {"type": "string", "enum": ["waiting", "dialling", "connected", "failed", "cancelled", "expired"]},
-          "attempts": {"type": "integer", "description": "Attempts made, at most 3."},
-          "positionKey": {"type": "integer", "format": "int64", "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."},
-          "nextAttemptAt": {"type": "string", "format": "date-time"},
-          "claimedBy": {"type": "string", "description": "The node working on it while dialling."},
-          "leaseUntil": {"type": "string", "format": "date-time", "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."},
-          "agent": {"type": "string", "description": "The agent it was connected to."},
-          "result": {"type": "string", "description": "The last attempt's outcome or the way the request ended."},
-          "createdAt": {"type": "string", "format": "date-time"},
-          "expiresAt": {"type": "string", "format": "date-time"},
-          "finishedAt": {"type": "string", "format": "date-time"}
+          "id": { "type": "integer", "format": "int64" },
+          "queueId": { "type": "integer", "format": "int64" },
+          "number": {
+            "type": "string",
+            "description": "The number to call back."
+          },
+          "callerName": {
+            "type": "string",
+            "description": "From the shared name sources (phonebooks); empty when none."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "dialling",
+              "connected",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Attempts made, at most 3."
+          },
+          "positionKey": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."
+          },
+          "nextAttemptAt": { "type": "string", "format": "date-time" },
+          "claimedBy": {
+            "type": "string",
+            "description": "The node working on it while dialling."
+          },
+          "leaseUntil": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."
+          },
+          "agent": {
+            "type": "string",
+            "description": "The agent it was connected to."
+          },
+          "result": {
+            "type": "string",
+            "description": "The last attempt's outcome or the way the request ended."
+          },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "finishedAt": { "type": "string", "format": "date-time" }
         }
       },
       "QueueCallbackList": {

@@ -113,6 +113,12 @@ export interface Extension {
    * identity.
    */
   anonymousOutbound?: boolean;
+  /**
+   * The phone's own "Send Anonymous" (Grandstream P65); false by default. On:
+   * the provisioned phone blanks its caller ID on every call, internal ones
+   * included. Not the trunk-only anonymousOutbound.
+   */
+  phoneSendAnonymous?: boolean;
   /** Rings before the no-answer forward (the phone's ring count); 0 = the system default. */
   noAnswerRings?: number;
   /** The extension's voicemail box, when it has one. */
@@ -789,6 +795,7 @@ export const updateExtension = (
     allowIntercom?: boolean;
     callWaiting?: boolean;
     anonymousOutbound?: boolean;
+    phoneSendAnonymous?: boolean;
     /** null clears the pick (the global default plays). */
     mohClassId?: Id | null;
     noAnswerRings?: number;

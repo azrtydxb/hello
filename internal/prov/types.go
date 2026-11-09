@@ -180,6 +180,10 @@ type Line struct {
 	// it, so the phone and Hello agree about a second call. False means the
 	// phone must not announce one.
 	CallWaiting bool
+	// SendAnonymous is the extension's phoneSendAnonymous flag: the
+	// Grandstream template writes the phone's "Send Anonymous" (P65, account
+	// 1) as 1 only when it is set, and writes nothing otherwise.
+	SendAnonymous bool
 	// ParkCode and ParkRetrieveCode are the call-park and park-retrieve
 	// feature codes, empty when none is configured.
 	ParkCode, ParkRetrieveCode string

@@ -234,6 +234,7 @@ export function ExtensionDrawer({
   const [intercom, setIntercom] = useState(ext.allowIntercom !== false);
   const [callWaiting, setCallWaiting] = useState(ext.callWaiting !== false);
   const [anonymous, setAnonymous] = useState(ext.anonymousOutbound === true);
+  const [phoneAnon, setPhoneAnon] = useState(ext.phoneSendAnonymous === true);
   const [mohClass, setMohClass] = useState<Id | null>(ext.mohClassId ?? null);
   const [errors, setErrors] = useState<Errors>({});
   const [serverError, setServerError] = useState<string | null>(null);
@@ -276,6 +277,9 @@ export function ExtensionDrawer({
     }
     if (anonymous !== (ext.anonymousOutbound === true)) {
       patch.anonymousOutbound = anonymous;
+    }
+    if (phoneAnon !== (ext.phoneSendAnonymous === true)) {
+      patch.phoneSendAnonymous = phoneAnon;
     }
     if (String(mohClass ?? "") !== String(ext.mohClassId ?? "")) {
       patch.mohClassId = mohClass;
@@ -419,10 +423,17 @@ export function ExtensionDrawer({
             />
             <Switch
               label="Anonymous outbound"
-              hint="Every call this extension places through a trunk hides its number: Privacy: id, an anonymous From and the trunk's asserted identity. Off: only when the phone asks for it or the trunk is set to always"
+              hint="Every call this extension places through a trunk hides its number: Privacy: id, an anonymous From and the trunk's asserted identity. Off: only when the phone asks for it or the trunk is set to always. Trunk calls only; internal caller ID is untouched"
               labelPosition="end"
               checked={anonymous}
               onChange={(e) => setAnonymous(e.target.checked)}
+            />
+            <Switch
+              label="Phone sends anonymous"
+              hint="Switches on the desk phone's own Send Anonymous setting (Grandstream, line 1), pushed at the next resync: the phone hides its caller ID on every call, internal calls included. This differs from Anonymous outbound, which only hides the number on calls Hello places through a trunk and leaves internal caller ID alone. Off writes nothing to the phone"
+              labelPosition="end"
+              checked={phoneAnon}
+              onChange={(e) => setPhoneAnon(e.target.checked)}
             />
             <MOHSelect
               id="ext-moh"

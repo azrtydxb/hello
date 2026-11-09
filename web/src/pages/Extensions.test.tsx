@@ -456,7 +456,7 @@ describe("Extensions", () => {
     renderApp("/extensions");
     const drawer = await openDrawer();
     const sw = within(drawer).getByRole("switch", {
-      name: /Anonymous outbound/,
+      name: /^Anonymous outbound/,
     });
     expect(sw).not.toBeChecked();
     fireEvent.click(sw);
@@ -466,6 +466,30 @@ describe("Extensions", () => {
       method: "PATCH",
       url: "/api/v1/extensions/1",
       body: { anonymousOutbound: true },
+    });
+  });
+
+  it("turns the phone's send anonymous on, off by default", async () => {
+    const calls = api([EXT], {
+      "GET /api/v1/devices": () => json({ items: [DEVICE] }),
+      "GET /api/v1/registrations": () => json({ items: [] }),
+      "GET /api/v1/presence": () => json({ items: [] }),
+      "PATCH /api/v1/extensions/1": () =>
+        json({ ...EXT, phoneSendAnonymous: true }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer();
+    const sw = within(drawer).getByRole("switch", {
+      name: /Phone sends anonymous/,
+    });
+    expect(sw).not.toBeChecked();
+    fireEvent.click(sw);
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Extension 100 saved.")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/extensions/1",
+      body: { phoneSendAnonymous: true },
     });
   });
 

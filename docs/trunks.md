@@ -99,8 +99,8 @@ exactly as a real call would see them.
 ## Anonymous calls and 100rel
 
 A call through a trunk is **anonymous** (RFC 3323 and 3325) when any of these
-holds: the trunk's **Anonymous calls** setting is *Every call through this
-trunk* (`anonymousPolicy: always`), the calling extension has **Anonymous
+holds: the trunk's **Anonymous calls** setting is _Every call through this
+trunk_ (`anonymousPolicy: always`), the calling extension has **Anonymous
 outbound** on, or the phone asks for it with a `Privacy` header naming `id`,
 `user` or `header`, or an `anonymous` From (the phone's "send anonymous"
 setting or a dialled anonymous prefix). `Privacy: none` is not anonymous.
@@ -119,6 +119,13 @@ The trunk leg then carries:
 
 Calls between extensions are not affected: the phone shows the caller as
 usual.
+
+The extension's **Phone sends anonymous** setting (`phoneSendAnonymous`) is a
+different thing: it switches on the desk phone's own Grandstream "Send
+Anonymous" (P65, line 1), so the phone hides its caller ID on every call,
+internal ones included. It is off by default, and off writes nothing to the
+phone. **Anonymous outbound** acts only on the calls Hello places through a
+trunk.
 
 Hello offers `Supported: 100rel` on every leg it originates. A provisional
 response that requires 100rel (RFC 3262) is acknowledged with a PRACK on that

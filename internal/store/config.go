@@ -35,6 +35,11 @@ type Extension struct {
 	// (migration 00051, spec S-19): Privacy: id and an anonymous From, the
 	// identity asserted by the trunk.
 	AnonymousOutbound bool `json:"anonymousOutbound"`
+	// PhoneSendAnonymous is the phone's own "Send Anonymous" setting
+	// (migration 00053): provisioning writes P65=1 to the bound Grandstream
+	// phone, which then blanks its caller ID on every call, internal ones
+	// included. Not the trunk-only AnonymousOutbound.
+	PhoneSendAnonymous bool `json:"phoneSendAnonymous"`
 	// NoAnswerRings is the ring count before the no-answer forward (migration
 	// 00035); 0 uses the system ring timeout.
 	NoAnswerRings int `json:"noAnswerRings"`
@@ -49,13 +54,13 @@ type Extension struct {
 }
 
 const extensionCols = `id, number, name, external_number, dnd, forward_always, forward_busy, forward_no_answer,
-	voicemail_enabled, record_default, allow_intercom, call_waiting, no_answer_rings, directory_hidden, moh_class_id, anonymous_outbound, created_at, updated_at`
+	voicemail_enabled, record_default, allow_intercom, call_waiting, no_answer_rings, directory_hidden, moh_class_id, anonymous_outbound, phone_send_anonymous, created_at, updated_at`
 
 func scanExtension(r interface{ Scan(...any) error }) (Extension, error) {
 	var e Extension
 	var moh sql.NullInt64
 	err := r.Scan(&e.ID, &e.Number, &e.Name, &e.ExternalNumber, &e.DND, &e.ForwardAlways, &e.ForwardBusy,
-		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.CallWaiting, &e.NoAnswerRings, &e.DirectoryHidden, &moh, &e.AnonymousOutbound, &e.CreatedAt, &e.UpdatedAt)
+		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.CallWaiting, &e.NoAnswerRings, &e.DirectoryHidden, &moh, &e.AnonymousOutbound, &e.PhoneSendAnonymous, &e.CreatedAt, &e.UpdatedAt)
 	if moh.Valid {
 		e.MOHClassID = &moh.Int64
 	}
@@ -121,6 +126,7 @@ type ExtensionChange struct {
 	NoAnswerRings                *int
 	DirectoryHidden              *bool
 	AnonymousOutbound            *bool
+	PhoneSendAnonymous           *bool
 	// MOHClassID sets the extension's MOH class; ClearMOHClass clears it
 	// (a nil MOHClassID alone keeps the current value).
 	MOHClassID    *int64
@@ -163,10 +169,11 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 			       record_default = COALESCE($10, record_default), allow_intercom = COALESCE($11, allow_intercom),
 			       directory_hidden = COALESCE($12, directory_hidden), call_waiting = COALESCE($13, call_waiting),
 			       moh_class_id = CASE WHEN $15 THEN NULL ELSE COALESCE($14, moh_class_id) END,
-			       no_answer_rings = COALESCE($16, no_answer_rings), anonymous_outbound = COALESCE($17, anonymous_outbound), updated_at = now()
+			       no_answer_rings = COALESCE($16, no_answer_rings), anonymous_outbound = COALESCE($17, anonymous_outbound),
+			       phone_send_anonymous = COALESCE($18, phone_send_anonymous), updated_at = now()
 			WHERE id = $1 RETURNING `+extensionCols, id, c.Number, c.Name, c.ExternalNumber,
 			c.DND, c.ForwardAlways, c.ForwardBusy, c.ForwardNoAnswer, c.VoicemailEnabled, c.RecordDefault, c.AllowIntercom, c.DirectoryHidden, c.CallWaiting,
-			c.MOHClassID, c.ClearMOHClass, c.NoAnswerRings, c.AnonymousOutbound))
+			c.MOHClassID, c.ClearMOHClass, c.NoAnswerRings, c.AnonymousOutbound, c.PhoneSendAnonymous))
 		return id, err
 	})
 	return e, err
