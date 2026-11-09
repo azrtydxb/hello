@@ -109,4 +109,3 @@ func TestDoorStationStore(t *testing.T) {
 		t.Errorf("voicemail box after turning back into a user: %v", err)
 	}
 }
-
