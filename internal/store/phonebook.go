@@ -479,7 +479,7 @@ const phoneGroupCols = `g.id, g.name, g.description, g.include_extensions, g.inc
 	g.ptt_enabled, g.ptt_address, g.ptt_codec, g.ptt_default_channel, g.ptt_accept_busy, g.ptt_channel_id,
 	g.ptt_priority_channel, g.ptt_emergency_channel, g.group_paging_enabled, g.group_paging_default,
 	g.group_paging_priority, g.group_paging_emergency, g.paging_allow_in_dnd, g.paging_barge,
-	g.paging_priority_active, g.paging_timeout, g.intercom_barge`
+	g.paging_priority_active, g.paging_timeout, g.intercom_barge, g.account_sharing`
 
 func scanPhoneGroup(r interface{ Scan(...any) error }) (phonebook.Group, error) {
 	var (
@@ -491,7 +491,7 @@ func scanPhoneGroup(r interface{ Scan(...any) error }) (phonebook.Group, error) 
 		&g.PTT.Enabled, &g.PTT.Address, &g.PTT.Codec, &g.PTT.DefaultChannel, &g.PTT.AcceptBusy, &ptt,
 		&g.PTT.PriorityChannel, &g.PTT.EmergencyChannel, &g.PTT.GroupPaging, &g.PTT.DefaultGroup,
 		&g.PTT.PriorityGroup, &g.PTT.EmergencyGroup, &g.PagingOptions.AllowInDND, &g.PagingOptions.Barge,
-		&g.PagingOptions.PriorityActive, &g.PagingOptions.Timeout, &g.PagingOptions.IntercomBarge); err != nil {
+		&g.PagingOptions.PriorityActive, &g.PagingOptions.Timeout, &g.PagingOptions.IntercomBarge, &g.AccountSharing); err != nil {
 		return g, err
 	}
 	g.PTT.ChannelID = nullInt(ptt)
@@ -602,6 +602,28 @@ func loadGroupChannels(ctx context.Context, q querier, gs []phonebook.Group) err
 		byID[gid].PTT.Channels = append(byID[gid].PTT.Channels, c)
 	}
 	return prows.Err()
+}
+
+// SetPhoneGroupAccountSharing switches WP8x6 account sharing on or off for a
+// group (phone-feature-parity S-11). The group's WP8x6 phones are given
+// P22521 and P22522 by their role, at their next fetch or the automatic
+// resync.
+func (s *Store) SetPhoneGroupAccountSharing(ctx context.Context, actor string, id int64, enabled bool) (phonebook.Group, error) {
+	var out phonebook.Group
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET account_sharing = $2, updated_at = now() WHERE id = $1`, id, enabled)
+		if err != nil {
+			return err
+		}
+		if err := requireRow(res); err != nil {
+			return err
+		}
+		if out, err = getPhoneGroup(ctx, tx, id); err != nil {
+			return err
+		}
+		return insertAudit(ctx, tx, actor, "set-account-sharing", "phone_group", strconv.FormatInt(id, 10))
+	})
+	return out, err
 }
 
 // SetPhoneGroupMulticast replaces the catalog paging channels a group

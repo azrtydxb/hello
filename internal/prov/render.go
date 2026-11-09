@@ -2,6 +2,7 @@ package prov
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/xml"
 	"errors"
@@ -148,10 +149,13 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 		}
 	}
 	d.Prov.CACertBase64 = pemBase64(d.Prov.CACertPEM)
-	d.BLF = PlaceBLF(d.Phone.Vendor, d.Phone.Model, d.BLF, d.Codes.PickupDirected)
+	d.Line.N = 1
+	d.Lines = renderLines(d)
+	lines := 1 + len(d.Lines)
+	d.BLF = PlaceBLFLines(d.Phone.Vendor, d.Phone.Model, d.BLF, d.Codes.PickupDirected, lines)
 	d.VMKey = nil
 	if !d.Line.NoVoicemail {
-		d.VMKey = PlaceVMKey(d.Phone.Vendor, d.Phone.Model, len(d.BLF), d.Line.VoicemailCode, d.Line.Label, d.Line.Domain)
+		d.VMKey = PlaceVMKeyLines(d.Phone.Vendor, d.Phone.Model, len(d.BLF), d.Line.VoicemailCode, d.Line.Label, d.Line.Domain, lines)
 	}
 	w := &cappedWriter{ctx: ctx}
 	if err := tmpl.Execute(w, toData(reflect.ValueOf(d))); err != nil {
@@ -164,6 +168,32 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 		return nil, w.err
 	}
 	return w.buf.Bytes(), nil
+}
+
+// renderLines returns the further lines of d ready for a template: numbered
+// 2 and up, labelled, and carrying the PBX-wide codes and server settings of
+// line 1. It returns none for a vendor and model whose template does not
+// write further lines (SupportsLineKeys), and no more than the model takes
+// (MaxLines), so a template never writes a line the phone cannot hold.
+func renderLines(d RenderData) []Line {
+	if !SupportsLineKeys(d.Phone.Vendor, d.Phone.Model) {
+		return nil
+	}
+	room := MaxLines(d.Phone.Vendor, d.Phone.Model) - 1
+	out := make([]Line, 0, min(len(d.Lines), room))
+	for i, l := range d.Lines {
+		if i >= room {
+			break
+		}
+		l.N = i + 2
+		l.AuthName = cmp.Or(l.AuthName, l.Username)
+		l.AccountLabel = AccountLabel(l.Label, l.DisplayName)
+		l.Domain = cmp.Or(l.Domain, d.Line.Domain)
+		l.VoicemailCode, l.ParkCode, l.ParkRetrieveCode = d.Line.VoicemailCode, d.Line.ParkCode, d.Line.ParkRetrieveCode
+		l.PickupGroupCode, l.PickupDirectedCode = d.Line.PickupGroupCode, d.Line.PickupDirectedCode
+		out = append(out, l)
+	}
+	return out
 }
 
 var (
@@ -509,6 +539,7 @@ func SampleData(full bool) RenderData {
 		d.Codecs = CodecInfo{Opus: true}
 		d.Phone.Label = "Reception"
 		d.Line.VoicemailCode = "*97"
+		d.Lines = []Line{{Username: "1002-1234ab", AuthName: "1002-1234ab", Password: "sample-secret-2", DisplayName: "Second User", Label: "1002", Domain: "hello.example", CallWaiting: true}}
 		d.Line.ParkCode, d.Line.ParkRetrieveCode = "*74", "*75"
 		d.Line.PickupGroupCode, d.Line.PickupDirectedCode = "*40", "*41"
 		d.Firmware = &FirmwareInfo{URL: "https://prov.hello.example/p/sample/fw/firmware.rom", Dir: "https://prov.hello.example/p/sample/fw", Via: 2, Version: "1.2.3"}

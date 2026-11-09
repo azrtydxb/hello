@@ -25,6 +25,24 @@
     <user_mailbox idx="1" perm="R">{{xml (or .Line.VoicemailCode "*97")}}</user_mailbox>
 {{- /* Call waiting (phone-feature-parity S-18): call_waiting per line is on (waiting tone), visual (no tone) or off; Hello writes on or off from the extension's flag. Key and values as in Snom's own settings reference and the Tancredi snom template. Unverified on hardware (verify, lab item 26). */}}
     <call_waiting idx="1" perm="R">{{if .Line.CallWaiting}}on{{else}}off{{end}}</call_waiting>
+{{- /* Further lines (phone-feature-parity S-10): identity N takes the same settings as identity 1 under idx N (Snom Service Hub, user_active, user_name, user_pname, user_pass, user_host, user_realname, user_idle_text, user_expiry, user_mailbox, call_waiting, codec_priority_list, ring_sound: all per identity), written for each further line in order. The phone puts identity N on function key N-1 by default; BLF keys start after them (keycaps.go). Unverified on hardware (verify). */}}
+{{- range .Lines}}
+{{- $n := .N}}
+    <user_active idx="{{.N}}" perm="R">on</user_active>
+    <user_name idx="{{.N}}" perm="R">{{xml .Username}}</user_name>
+    <user_pname idx="{{.N}}" perm="R">{{xml .AuthName}}</user_pname>
+    <user_pass idx="{{.N}}" perm="R">{{xml .Password}}</user_pass>
+    <user_host idx="{{.N}}" perm="R">{{xml $.Server.Host}}:{{$.Server.Port}}</user_host>
+    <user_realname idx="{{.N}}" perm="R">{{xml .DisplayName}}</user_realname>
+    <user_idle_text idx="{{.N}}" perm="R">{{xml .AccountLabel}}</user_idle_text>
+    <user_expiry idx="{{.N}}" perm="R">{{$.Server.Expiry}}</user_expiry>
+    <codec_priority_list idx="{{.N}}" perm="R">{{if $.Codecs.Opus}}opus,{{end}}g722,pcmu,pcma,telephone-event</codec_priority_list>
+{{- with $.Ring.Default}}
+    <ring_sound idx="{{$n}}" perm="R">{{xml .}}</ring_sound>
+{{- end}}
+    <user_mailbox idx="{{.N}}" perm="R">{{xml (or .VoicemailCode "*97")}}</user_mailbox>
+    <call_waiting idx="{{.N}}" perm="R">{{if .CallWaiting}}on{{else}}off{{end}}</call_waiting>
+{{- end}}
     <admin_mode_password perm="R">{{xml .Phone.AdminPassword}}</admin_mode_password>
 {{- /* Web UI password. admin_mode_password is the keypad/admin-mode PIN only. The D3xx/D7xx web UI is protected by http_user with http_pass (Snom Service Hub, http_user and http_pass); the D86x/D89x replace them with webserver_admin_password (Hub, since 10.1.115.0). The same per-phone password every other vendor gets (Phone.AdminPassword). */}}
     <http_user perm="R">admin</http_user>

@@ -47,6 +47,7 @@ type PhonebookStore interface {
 	SetPhoneGroupBooks(ctx context.Context, actor string, id int64, bookIDs []int64) (phonebook.Group, error)
 	SetPhoneGroupMulticast(ctx context.Context, actor string, id int64, in []phonebook.MulticastInput, opts *phonebook.PagingOptions) (phonebook.Group, error)
 	SetPhoneGroupPTT(ctx context.Context, actor string, id int64, in phonebook.PTT) (phonebook.Group, error)
+	SetPhoneGroupAccountSharing(ctx context.Context, actor string, id int64, enabled bool) (phonebook.Group, error)
 }
 
 // Page sizes of the address-book lists.

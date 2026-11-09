@@ -1316,6 +1316,54 @@ group, and a change is pushed to the affected phones by the automatic resync.
 Page and intercom calls keep the auto-answer `Alert-Info` described under
 paging and intercom above.
 
+## Multiple lines and shared lines
+
+A phone registers one SIP account per line. Line 1 is the extension chosen
+when the phone was added; lines 2 and up are further extensions on the same
+handset, for a reception phone that also answers the sales line, or a
+cordless that carries two numbers.
+
+On the phone's page, under **Lines**, pick a line number and an extension and
+press **Bind line**. Hello creates a device for the extension on that phone
+(named `<extension>-<last six MAC digits>`, like line 1) and writes its
+credentials into the phone's configuration at the next fetch; press Resync to
+push it now. **Unbind line** removes it. Each line has its own voicemail light,
+BLF, ring tags and call waiting, because each is a device of its own extension.
+
+- How many lines a model takes: Grandstream WP8x6 three, WP822 two; Yealink and
+  Snom as many as the model has line keys, up to six; Poly and Fanvil up to six.
+  Other Grandstream models take one.
+- A phone has at most one line on an extension, and a device is one line of one
+  phone.
+- On a Yealink and a Snom the first keys are the line keys (key N is line N by
+  default), so BLF and the transfer-to-voicemail key start after them.
+- The check-sync of a multi-line phone goes to line 1's contacts, or to the
+  next line's while line 1 is not registered, so the phone is notified once.
+- Yealink, Poly, Snom and Fanvil templates write lines 2 and up. The
+  Grandstream templates write line 1 only: the account keys of further
+  accounts (account 2 from P401, account 3 from P501) are not confirmed in any
+  Grandstream template Hello holds, so the line is kept in Hello, shown as held,
+  and reaches the phone once the keys are confirmed on a handset.
+
+### One extension on several phones
+
+To let a call to an extension ring on several phones (a shared line
+appearance), give each phone a line on that extension. Each phone gets its own
+device and secret, so the extension rings on every one of them and the first to
+answer takes the call. Hello does not mirror the line's busy state onto the
+other phones (no bridged line appearance).
+
+### Account sharing (Grandstream WP8x6)
+
+The alternative for WP8x6 handsets is account sharing: several handsets share
+one line, one as the host and the others as guests. Switch it on in the phone
+group's dialog (**Account sharing**), then set each phone's role on its page
+(host by default). Hello writes the host setting P22521 and the guest setting
+P22522 to the group's WP8x6 phones only; the values are 1 for the phone's role
+and 0 for the other. A group without the switch, and every other model, gets
+neither. The WP822 and the other vendors have no such setting. Hot desking is
+not offered by either WP family.
+
 ## Security model and its limits
 
 What protects the phones' secrets:

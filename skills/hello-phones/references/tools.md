@@ -8,6 +8,8 @@
 | `importPhones`                  | write | Check or create many phones from JSON rows, all or none.  |
 | `updatePhone`                   | write | Change the sent fields of a phone.                        |
 | `deletePhone`                   | write | Delete a phone; its device stays.                         |
+| `setPhoneLine`                  | write | Bind line 2 to 6 of a phone to an extension's device.     |
+| `clearPhoneLine`                | write | Unbind line 2 to 6 of a phone.                            |
 | `listPhoneFetches`              | read  | When a phone fetched its configuration.                   |
 | `previewPhoneFile`              | read  | Render a provisioning file with secrets masked.           |
 | `resyncPhone`                   | write | Check-sync one phone.                                     |
@@ -44,6 +46,7 @@
 | `setPhoneGroupBooks`            | admin | Set the ordered named books.                              |
 | `setPhoneGroupMulticast`        | admin | Set the multicast paging channels.                        |
 | `setPhoneGroupPTT`              | admin | Set push-to-talk and group paging.                        |
+| `setPhoneGroupAccountSharing`   | admin | Switch WP8x6 account sharing on or off for a group.       |
 | `listPhonebooks`                | read  | Address books with entry counts.                          |
 | `getPhonebook`                  | read  | One book.                                                 |
 | `createPhonebook`               | admin | Create a named book.                                      |

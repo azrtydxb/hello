@@ -54,6 +54,11 @@ import {
 } from "./phones/ui";
 import { PushLine, RebootDialog } from "./phones/push";
 import { hasPttKey, PttOverride } from "./phones/PttOverride";
+import {
+  hasAccountSharing,
+  PhoneLines,
+  SharingRoleField,
+} from "./phones/PhoneLines";
 import "./phones/inventory.css";
 import { Can } from "../role";
 
@@ -286,6 +291,24 @@ export function PhoneDetail() {
                 { label: "Updated", value: formatTime(phone.updatedAt) },
               ]}
             />
+
+            <PhoneLines
+              phone={phone}
+              onChanged={(p) => {
+                setState({ status: "ready", phone: p });
+                toast.show("Lines saved. Resync the phone to apply them.");
+              }}
+            />
+
+            {hasAccountSharing(phone) && (
+              <SharingRoleField
+                phone={phone}
+                onSaved={(p) => {
+                  setState({ status: "ready", phone: p });
+                  toast.show("Role saved. Resync the phone to apply it.");
+                }}
+              />
+            )}
 
             {hasPttKey(phone) && (
               <PttOverride

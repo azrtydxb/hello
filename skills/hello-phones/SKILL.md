@@ -190,6 +190,36 @@ The ring map turns a ring tag into a tone on each vendor's phones.
   overrides; an empty list removes them. An override wins over the global choice
   for that group's phones.
 
+## Lines and account sharing
+
+A phone has one line per SIP account. Line 1 is the extension `createPhone`
+bound; lines 2 and up are further extensions on the same handset, each with
+its own voicemail light, BLF and ring tags.
+
+- `getPhone` shows `lines` (line 1 first, each with its extension, device user
+  name and whether the template writes it), `maxLines` for the model and
+  `sharingRole`. A WP8x6 takes three lines, a WP822 two; Yealink, Poly, Snom
+  and Fanvil up to six.
+- `setPhoneLine` (`/phones/{id}/lines/{line}`, line 2 to 6) with `{
+"extensionId": 9 }` binds the line to a device of that extension; a new device
+  is made unless `deviceId` names one, and its secret is rotated. A phone has at
+  most one line on an extension, and a device is one line of one phone. Line 1
+  has to be bound first. `clearPhoneLine` unbinds it. Resync the phone after.
+- Several phones can answer one extension: give each phone a line on it
+  (`setPhoneLine` on each). A call to the extension rings all of them, and each
+  phone has its own device and secret. This is the shared line appearance.
+- Yealink, Poly, Snom and Fanvil templates write lines 2 and up. The
+  Grandstream templates write line 1 only until the account keys of further
+  lines are confirmed on a handset: such a line shows `provisioned` false, is
+  kept, and tell the administrator it is not yet on the phone.
+- Account sharing is the other way to let handsets share one line, for
+  Grandstream WP8x6 only. `setPhoneGroupAccountSharing` (admin) switches it on
+  for a phone group; each phone of the group is the host or a guest
+  (`updatePhone` with `sharingRole`, host by default). Without the group
+  switch nothing is written. Resync the group after.
+- The check-sync of a multi-line phone goes to line 1, or to the next line
+  while line 1 is not registered.
+
 ## References
 
 - [Tools](references/tools.md) - every tool with its scope.

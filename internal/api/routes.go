@@ -258,6 +258,8 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/phones/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getPhone},
 		{"PATCH", "/api/v1/phones/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.updatePhone},
 		{"DELETE", "/api/v1/phones/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deletePhone},
+		{"PUT", "/api/v1/phones/{id}/lines/{line}", auth.ScopeWrite, auth.RoleOperator, false, s.putPhoneLine},
+		{"DELETE", "/api/v1/phones/{id}/lines/{line}", auth.ScopeWrite, auth.RoleOperator, false, s.deletePhoneLine},
 		{"POST", "/api/v1/phones/{id}/rotate-token", auth.ScopeSecrets, auth.RoleAdmin, false, s.rotatePhoneToken},
 		{"POST", "/api/v1/phones/{id}/rearm", auth.ScopeSecrets, auth.RoleAdmin, false, s.rearmPhone},
 		{"POST", "/api/v1/phones/{id}/admin-password/reveal", auth.ScopeSecrets, auth.RoleAdmin, false, s.revealAdminPassword},
@@ -335,6 +337,7 @@ func (s *server) routes() []route {
 		{"PUT", "/api/v1/phone-groups/{id}/books", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupBooks},
 		{"PUT", "/api/v1/phone-groups/{id}/multicast", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupMulticast},
 		{"PUT", "/api/v1/phone-groups/{id}/ptt", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupPTT},
+		{"PUT", "/api/v1/phone-groups/{id}/account-sharing", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupAccountSharing},
 
 		{"GET", "/api/v1/prov/templates", auth.ScopeRead, auth.RoleViewer, false, s.listTemplates},
 		{"POST", "/api/v1/prov/templates", auth.ScopeWrite, auth.RoleOperator, false, s.createTemplate},

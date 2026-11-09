@@ -172,9 +172,12 @@ type Group struct {
 	Multicast     []MulticastChannel `json:"multicast"`
 	PagingOptions PagingOptions      `json:"pagingOptions"`
 	PTT           PTT                `json:"ptt"`
-	PhoneCount    int                `json:"phoneCount"`
-	CreatedAt     time.Time          `json:"createdAt"`
-	UpdatedAt     time.Time          `json:"updatedAt"`
+	// AccountSharing switches Grandstream WP8x6 account sharing on for the
+	// group's phones, each a host or a guest (phone-feature-parity S-11).
+	AccountSharing bool      `json:"accountSharing"`
+	PhoneCount     int       `json:"phoneCount"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // ValidName reports whether s is a usable book or group name: 1 to max

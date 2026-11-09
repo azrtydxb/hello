@@ -7,6 +7,7 @@ import {
   listBooks,
   listGroups,
   listMulticastChannels,
+  setGroupAccountSharing,
   setGroupBooks,
   setGroupMulticast,
   setGroupPtt,
@@ -393,6 +394,9 @@ function GroupModal({
     channelInputs(group?.multicast),
   );
   const [ptt, setPtt] = useState<Ptt>(pttInput(group?.ptt));
+  const [accountSharing, setAccountSharing] = useState(
+    group?.accountSharing ?? false,
+  );
   const [options, setOptions] = useState<PagingOptions>(
     optionsInput(group?.pagingOptions),
   );
@@ -469,6 +473,17 @@ function GroupModal({
           setPttErrors(pathErrors(err));
           setFormError(
             `The group was saved, but its push-to-talk settings were not: ${errorMessage(err)}`,
+          );
+          setBusy(false);
+          return;
+        }
+      }
+      if ((saved.accountSharing ?? false) !== accountSharing) {
+        try {
+          saved = await setGroupAccountSharing(saved.id, accountSharing);
+        } catch (err) {
+          setFormError(
+            `The group was saved, but account sharing was not: ${errorMessage(err)}`,
           );
           setBusy(false);
           return;
@@ -644,6 +659,14 @@ function GroupModal({
           catalog={catalog}
           errors={pttErrors}
           onChange={setPtt}
+        />
+
+        <Switch
+          label="Account sharing"
+          hint="Grandstream WP8x6 only: the group's handsets share one line, each as host or guest (set on the phone)"
+          labelPosition="end"
+          checked={accountSharing}
+          onChange={(e) => setAccountSharing(e.target.checked)}
         />
 
         {group && (

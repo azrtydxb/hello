@@ -13816,6 +13816,194 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/phones/{id}/lines/{line}": {
+      "put": {
+        "operationId": "setPhoneLine",
+        "summary": "Bind a further line of a phone to an extension",
+        "description": "Binds line 2 or up of a phone (the model's line count: Grandstream WP8x6 three, WP822 two, up to six on the other vendors) to a device of the extension. Without deviceId a device is created for the extension; with one, that device is bound and its secret rotated. A line is a device, so the phone registers one SIP account per line, and each line has its own MWI, BLF, ring tags and check-sync. A device is one line of one phone, and a phone has at most one line on an extension; several phones may each have a line on the same extension (a shared line appearance: a call to the extension rings every one of them). The phone must have line 1 bound first. Yealink, Poly, Snom and Fanvil templates write the line; the Grandstream templates do not write lines 2 and up until their account keys are confirmed on hardware, and the line shows provisioned false.",
+        "tags": ["phones"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "line",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 6
+            },
+            "description": "The line of the phone, 2 and up. Line 1 is the phone's own binding (extensionId and deviceId of the phone)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneLineInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The phone with its lines",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Phone"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "clearPhoneLine",
+        "summary": "Unbind a further line of a phone",
+        "description": "Unbinds line 2 or up of a phone. The device keeps its credentials but the phone no longer receives them, so the line stops registering at the phone's next sync. Line 1 is unbound with updatePhone (deviceId null).",
+        "tags": ["phones"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "line",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 6
+            },
+            "description": "The line of the phone, 2 and up. Line 1 is the phone's own binding (extensionId and deviceId of the phone)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The phone with its remaining lines",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Phone"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/account-sharing": {
+      "put": {
+        "operationId": "setPhoneGroupAccountSharing",
+        "summary": "Switch account sharing on or off for a phone group",
+        "description": "Account sharing lets several Grandstream WP8x6 handsets share one line: the host settings P22521 and the guest settings P22522 are written to the group's WP8x6 phones by their sharingRole (PATCH /phones/{id}, host by default). Other models and groups without it get neither key. It is the alternative to binding several devices to one extension (several phones each with a line on the extension, a shared line appearance). Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["enabled"],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "Whether the group's WP8x6 phones share a line."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/phone-groups/{id}/ptt": {
       "put": {
         "operationId": "setPhoneGroupPTT",
@@ -16694,6 +16882,70 @@
           "pttChannelId": {
             "type": ["integer", "null"],
             "description": "The phone's own PTT channel (a catalog PTT channel); null uses its group's."
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PhoneLine"
+            },
+            "description": "The phone's lines in order, line 1 first: the device each registers and its extension."
+          },
+          "maxLines": {
+            "type": "integer",
+            "description": "How many lines the model takes."
+          },
+          "sharingRole": {
+            "type": "string",
+            "enum": ["host", "guest"],
+            "description": "The phone's role when its group has account sharing on (WP8x6 only)."
+          }
+        }
+      },
+      "PhoneLine": {
+        "type": "object",
+        "required": ["line", "deviceId", "extensionId", "extensionNumber", "extensionName", "sipUsername", "provisioned"],
+        "properties": {
+          "line": {
+            "type": "integer",
+            "description": "1 for the phone's first line, 2 and up for the others."
+          },
+          "deviceId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "extensionNumber": {
+            "type": "string"
+          },
+          "extensionName": {
+            "type": "string"
+          },
+          "sipUsername": {
+            "type": "string",
+            "description": "The SIP username of the line's device."
+          },
+          "provisioned": {
+            "type": "boolean",
+            "description": "Whether the phone's template writes the line; false for lines 2 and up of a Grandstream phone until their account keys are confirmed."
+          }
+        }
+      },
+      "PhoneLineInput": {
+        "type": "object",
+        "required": ["extensionId"],
+        "properties": {
+          "extensionId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Id of the extension the line registers to."
+          },
+          "deviceId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Id of an existing device of the extension to bind (its secret is rotated); omit to create one."
           }
         }
       },
@@ -17090,6 +17342,11 @@
           "pttChannelId": {
             "type": ["integer", "null"],
             "description": "A catalog PTT channel the phone's PTT button uses instead of its group's (Grandstream WP8x6 only); null for the group's."
+          },
+          "sharingRole": {
+            "type": "string",
+            "enum": ["host", "guest"],
+            "description": "The phone's role when its group has account sharing on (Grandstream WP8x6 only)."
           }
         }
       },
@@ -25603,6 +25860,10 @@
           },
           "pagingOptions": {
             "$ref": "#/components/schemas/PagingOptions"
+          },
+          "accountSharing": {
+            "type": "boolean",
+            "description": "Grandstream WP8x6 account sharing is on for the group's phones (setPhoneGroupAccountSharing)."
           },
           "phoneCount": {
             "type": "integer"

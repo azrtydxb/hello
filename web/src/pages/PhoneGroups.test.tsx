@@ -270,6 +270,43 @@ describe("Phone groups", () => {
     });
   });
 
+  it("switches account sharing on and off with its own call", async () => {
+    const calls = api("admin", {
+      "PUT /api/v1/phone-groups/9": () => json(group()),
+      "PUT /api/v1/phone-groups/9/account-sharing": () =>
+        json(group({ accountSharing: true })),
+    });
+    renderApp("/phones/groups");
+    await groupsTable();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Site A" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Site A" });
+    const sharing = within(dialog).getByRole("switch", {
+      name: /^Account sharing/,
+    });
+    expect(sharing).not.toBeChecked();
+    fireEvent.click(sharing);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls).toContainEqual({
+      method: "PUT",
+      url: "/api/v1/phone-groups/9/account-sharing",
+      body: { enabled: true },
+    });
+  });
+
+  it("does not call account sharing when it is unchanged", async () => {
+    const calls = api("admin", {
+      "PUT /api/v1/phone-groups/9": () => json(group()),
+    });
+    renderApp("/phones/groups");
+    await groupsTable();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Site A" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Site A" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls.some((c) => c.url.endsWith("/account-sharing"))).toBe(false);
+  });
+
   it("saves group paging channels and the paging options", async () => {
     const calls = api("admin", {
       "GET /api/v1/multicast-channels": () => json({ items: CATALOG }),

@@ -265,6 +265,11 @@
 {{- /* Check-sync (spec S-5): P95030 = 0 so a plain check-sync re-provisions without a reboot (WP8x6 fw 1.0.3.20 and later) [R8x6 section 1]; P4428 = 0 authenticates the NOTIFY (ACC-16: the WP8x6 and WP856 templates say "Enable SIP NOTIFY Authentication. 0 - Yes, 1 - No" and the WP8xx one "Disable SIP NOTIFY Authentication. 0 - No, 1 - Yes"; 0 challenges in all three), which hello-sip answers from the device's HA1. */}}
     <P95030>0</P95030>
     <P4428>0</P4428>
+{{- /* Account sharing (phone-feature-parity S-11): the WP8x6 host and guest settings P22521 and P22522 [R8x6 AS], written only for a WP8x6 in a phone group that enabled account sharing (RenderData.Sharing is nil for any other phone). The host holds the shared line; every guest handset shares it. The values are 1 for the role the phone has and 0 for the other, read as enable switches: Grandstream's template text for the two settings is not in hand, so the values are confirmed in the lab (verify). */}}
+{{- with .Sharing}}
+    <P22521>{{if .Host}}1{{else}}0{{end}}</P22521>
+    <P22522>{{if .Guest}}1{{else}}0{{end}}</P22522>
+{{- end}}
 {{- with .Book}}
     <P330>3</P330>
     <P331>{{xml .HostPath}}</P331>

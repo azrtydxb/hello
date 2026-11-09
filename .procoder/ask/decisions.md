@@ -1406,3 +1406,60 @@ Implementation notes (template route, no migration):
 - Start: run waves 0-6 in order, three or four builder agents in parallel plus the merge captain (recommended)
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
+
+## Multiple lines and account sharing (parity item 21, S-10 and S-11) (2026-11-09)
+
+- **Data model.** Line 1 stays `phones.device_id`. Lines 2 to 6 are rows of
+  `phone_lines (phone_id, line, device_id UNIQUE)` (migration `00052_phone_lines.sql`).
+  A device is one line of one phone (the store refuses a device that is line 1
+  or another line of any phone, and a second line of a phone on the same
+  extension). One extension on several phones (the shared line appearance) is
+  each phone binding a device of its own on the extension; hello-sip already
+  forks a call to every device of an extension, so no SIP change was needed for
+  it. No bridged line appearance (dialog-state mirroring) is built: S-10 and S-11
+  do not ask for it.
+- **API.** `PUT/DELETE /phones/{id}/lines/{line}` (`setPhoneLine`,
+  `clearPhoneLine`), `lines`/`maxLines`/`sharingRole` on the phone,
+  `PUT /phone-groups/{id}/account-sharing`. Line 1 keeps `extensionId`/`deviceId`
+  on create and update, so existing clients do not change.
+- **Line counts** (`prov.MaxLines`): WP8x6 3 and WP822 2 (spec); other
+  Grandstream models 1 (no template in hand gives their account keys); Yealink
+  and Snom the line-key count of the key table capped at 6; Poly and Fanvil 6.
+  The cap of 6 is Hello's, not a vendor figure. A model change that would leave
+  a phone with more lines than the new model takes is refused with 409.
+- **Keys written: only those the repo's templates already confirm.**
+  Yealink `account.N.*` (the existing Yealink template states another account
+  takes the same keys), Poly `reg.N.*` and `msg.mwi.N.*`, Snom `idx="N"` on the
+  per-identity settings, Fanvil `SIPN ...` (the Fanvil template names SIP2, SIP3).
+  Each is marked unverified in the template.
+- **Grandstream lines 2 and 3 are NOT written.** The spec names the blocks
+  (account 2 from P401, account 3 from P501) and the codec keys P451/P551 appear
+  in a template comment, but the server, user, authentication, password and name
+  keys of those accounts are in no file in hand (the vendor documents are not in
+  the repo). Writing recalled P-numbers could overwrite another setting, so the
+  line is stored, shown as "held, not written" (`provisioned: false`) and the
+  renderer drops it. To close: export a WP8x6 and a WP822 configuration with
+  two accounts, add the keys to `grandstream/device.xml`, and set
+  `SupportsLineKeys` for the WP families. `TestMultiLineProvisioning` pins the
+  current behaviour ("grandstream writes no unconfirmed account block") and must
+  be changed with that.
+- **Account sharing (S-11).** `phone_groups.account_sharing` (the group switch)
+  and `phones.sharing_role` host|guest (default host). The WP8x6 template writes
+  `P22521` and `P22522` only for a WP8x6 in a group with the switch on: host
+  gives 1/0, guest 0/1. The spec names the two keys as host and guest settings
+  [R8x6 AS] but no template text for their values is in hand; reading them as
+  0/1 enable switches is a guess to confirm on a handset. Rejected: a per-group
+  host/guest value (a group of handsets needs a role per handset).
+- **Key placement.** On a Yealink and a Snom, line key N is account N by default,
+  so BLF and the voicemail key start after the lines (`PlaceBLFLines`). Fanvil's
+  DSS keys are on the extended screen and Poly's attendant list is unbounded, so
+  they do not shift. Line keys are not written explicitly (their types are not
+  confirmed in the repo); the phones' defaults are relied on.
+- **hello-sip.** Check-sync goes to line 1's contacts and falls back to the next
+  line only while line 1 has none registered (`PushJob.Lines`), so a phone with
+  two registered lines is notified once and one with line 1 down is still
+  reached. Registration, MWI, ring tags and call handling are per device already.
+- **Unchanged and open:** an incoming INVITE has the binding's contact as
+  request URI and the dialled number in To (`b2bua.go`), so which line of a
+  multi-line phone rings depends on the phone telling its accounts apart by the
+  contact user it registered. To confirm on hardware.
