@@ -1369,12 +1369,52 @@ Implementation notes (template route, no migration):
 - Deny list: the account, provisioning URL (carries the token), CA and admin
   password keys, from what the built-in templates write for them
   (`internal/prov/builtin/grandstream/device.xml`, `yealink/device.cfg`).
-- Left out, and why: the first-class side-key (PTT, paging, alarm) and speed
-  dial fields, and the niche keys P23001/P23003, P71/P8388, P2916/P2917,
-  P82281, P82269, P25438. The spec cites them to the WP822 release notes and the
-  WP8x6 template, which are not in the repo; the Grandstream 1.0.3.39 and
-  1.0.11.83 release notes (firmware.grandstream.com) carry no P-values and the
-  configuration template archive could not be fetched. The only value for P82317
-  Hello can cite is 0 (PTT/Paging), which the template already writes; the
-  alarm value is unknown. Administrators reach any of these keys through the
-  overrides. Speed dials replacing BLF on WP stay unbuilt for the same reason.
+- Grandstream keys reachable through overrides, checked 2026-11-09 against
+  Grandstream's own templates (config-template-10212026.zip): the numbers and
+  values below replace the earlier "unconfirmed" note, which was written without
+  the templates. Still no first-class fields (database, API, console) for side
+  keys or speed dials: the overrides carry them, and building fields is a
+  product decision rather than a missing key.
+  - Speed dial, WP810/822/825 (`wp810_822_825_config_1.0.11.83`, section "P
+    values not on WEB"): `P23001` account (0 Account 1, 1 Account 2) and
+    `P23003` number (up to 64 characters, must match the dial plan) for key 0;
+    keys 2 to 9 are `P23011`/`P23013`, `P23016`/`P23018`, `P23021`/`P23023`,
+    `P23026`/`P23028`, `P23031`/`P23033`, `P23036`/`P23038`,
+    `P23041`/`P23043`, `P23046`/`P23048`. The WP820 template lists the same
+    numbers commented out (`wp820_config_1.0.7.90`, "Handset/Speed Dial") and
+    adds the multi-function button: `P22258` function (0 PTT/Paging, 1 Mute, 2
+    SAFE/Panic call, 3 Speed dial, 4 Disable), `P23051` account, `P23053`
+    number. The same `P23001`/`P23003` in `wp856_config_1.0.3.16` are the
+    account and user ID of expansion key 1 (`P23000` is its mode, 0 Speed Dial,
+    1 BLF, 4 Speed Dial via active account, 5 DialDTMF, 8 Call Transfer, 9
+    CallPark, 10 Call Intercom, 13 Multicast Paging, 15 Speed Conference, 16
+    Dial prefix, 17 Send URL): a different feature, not the handset speed dial.
+    The WP8x6 template has no speed dial key.
+  - Off-hook auto dial `P71` (string, up to 512 characters) and its delay
+    `P8388` (WP810/822/825: 0 to 30, default 4; WP820: 0 to 60): in those two
+    templates and `ht813_config_1.0.19.6` (`P71`), not in the WP8x6 or WP856.
+  - Wallpaper `P2916` (0 Default, 1 Download, 2 Uploaded) and `P2917` (server
+    path): `wp810_822_825_config_1.0.11.83` and `wp820_config_1.0.7.90` only.
+  - `P82281` VoWLAN Target Delay (0 low, 1 medium, 2 high, default 0):
+    `wp8x6_config_1.0.3.39` and `wp810_822_825_config_1.0.11.83`.
+  - `P82269` Wi-Fi power saving: the two templates disagree on the values, so
+    the key is correct but the value is not portable. WP8x6: 0 Generic, 1
+    Disabled, 2 U-APSD. WP810/822/825: 0 Optimum, 1 Relaxed Fast-PS, 2 Disable
+    During Calling, 3 Disable. Not in the WP820 or WP856 templates.
+  - `P25438` Wi-Fi Band (0 5G and 2.4G, 1 2.4G, 2 5G): `wp8x6_config_1.0.3.39`
+    only. The WP820 uses two flags, `P25420` (2.4G) and `P25421` (5G), both 1 by
+    default.
+  - Side key `P82317`: `wp8x6_config_1.0.3.39` "Side Key Funtions", 0
+    PTT/Paging, 2 Alarm, 4 None (default 0; the alarm value, 2, was unknown
+    before). `wp856_config_1.0.3.16` calls it the PTT button with different
+    values (0 PTT, 1 Mute, 3 Speed Dial, 4 Disable, 5 Scan, 6 Open the app) and
+    adds `P82318` account (-1 dynamic, 0 to 5), `P82319` value and `P82320`
+    description, and the left button `P82321` to `P82324` (default 5) and right
+    button `P82325` to `P82328` (default 5). Hello writes `P82317 = 0` for a
+    WP8x6 and a WP856 with PTT, which is PTT/Paging in both.
+  - `TestOverrideWPKeys` renders each of these through the overrides. The
+    deny list now also holds the identity keys of accounts 2 to 6 (active,
+    server, user, auth ID, password, name, account name: `P401`, `P501`,
+    `P601`, `P1701`, `P1801` and the offsets 0, 1, 3, 4, 5, 6, 16 in the WP8x6,
+    WP810/822/825, WP820 and WP856 templates), which the lines of item 21 write.
+    Speed dials replacing BLF on WP stay unbuilt as a feature.
