@@ -16,6 +16,7 @@ func renderKeys(t *testing.T, v Vendor, model, file string, n int, codes Feature
 	d := renderSample(false)
 	d.Phone.Vendor, d.Phone.Model = v, model
 	d.Codes = codes
+	d.Line.NoVoicemail = true // the key tests count BLF keys; the transfer key has its own test
 	d.BLF = nil
 	for i := range n {
 		num := fmt.Sprint(2000 + i)

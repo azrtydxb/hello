@@ -250,8 +250,8 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 29 {
-		t.Fatalf("insert takes %d arguments, want 29", len(db.args))
+	if len(db.args) != 31 {
+		t.Fatalf("insert takes %d arguments, want 31", len(db.args))
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
@@ -267,14 +267,24 @@ func TestCallQualityCDR(t *testing.T) {
 	if db.args[24] != "call" {
 		t.Fatalf("kind = %v, want the default call", db.args[24])
 	}
+	if db.args[25] != "" || db.args[26] != "" {
+		t.Fatalf("ring tag = %v (%v), want empty for a call that rang no device", db.args[25], db.args[26])
+	}
+	base.RingTag, base.RingRule = "vip", "rule:1 boss"
+	if err := w.write(context.Background(), base); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[25] != "vip" || db.args[26] != "rule:1 boss" {
+		t.Fatalf("ring tag = %v (%v), want vip (rule:1 boss)", db.args[25], db.args[26])
+	}
 	gp, gl, gj := db.args[21].(*int64), db.args[22].(*int64), db.args[23].(*float64)
 	if *gp != 1000 || *gl != 12 || *gj != 37.5 {
 		t.Fatalf("quality = %d, %d, %v", *gp, *gl, *gj)
 	}
 }
 
-// TestCDRCodecColumns fails if the codec columns are not the last two insert
-// arguments, are not NULL for a leg without a codec, or carry anything but
+// TestCDRCodecColumns fails if the codec columns are not the two arguments
+// after the ring tag and rule (before the legs JSON), are not NULL for a leg without a codec, or carry anything but
 // the record's strings.
 func TestCDRCodecColumns(t *testing.T) {
 	db := &argsDB{}
@@ -284,8 +294,8 @@ func TestCDRCodecColumns(t *testing.T) {
 	if err := w.write(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 29 || db.args[27] != nil || db.args[28] != nil {
-		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 29", db.args[27], db.args[28], len(db.args))
+	if len(db.args) != 31 || db.args[27] != nil || db.args[28] != nil {
+		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 31", db.args[27], db.args[28], len(db.args))
 	}
 	r.CallerCodec, r.CalleeCodec = "opus/48000", "PCMU/8000"
 	if err := w.write(context.Background(), r); err != nil {

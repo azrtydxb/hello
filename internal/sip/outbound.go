@@ -255,6 +255,9 @@ type heldSlot struct {
 // emergency call ignores the limit and is never blocked by the trunk state
 // being unreachable.
 func (c *call) acquireSlot(t *routing.Trunk, emergency bool, member string) (bool, string) {
+	if c.doorBlocksTrunk(emergency) {
+		return false, "a door station may not use a trunk"
+	}
 	st := c.s.deps.Trunks
 	if st == nil {
 		if emergency {
@@ -311,6 +314,18 @@ func (c *call) releaseSlots() {
 	c.freeSlots(gone)
 }
 
+// holdsSlot reports whether the call still holds h.
+func (c *call) holdsSlot(h heldSlot) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, k := range c.slots {
+		if k.trunk == h.trunk && k.member == h.member {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *call) freeSlots(slots []heldSlot) {
 	if len(slots) == 0 || c.s.deps.Trunks == nil {
 		return
@@ -339,6 +354,13 @@ func (c *call) refreshSlots() {
 		ctx, cancel := c.s.stateCtx()
 		r, err := c.s.deps.Trunks.RefreshTrunkCall(ctx, h.trunk, h.member, h.max, c.s.cfg.CallTTL)
 		cancel()
+		if err == nil && !c.holdsSlot(h) {
+			// The call ended (or gave the trunk up) while this refresh was
+			// in flight, and the refresh re-added the slot the release had
+			// just freed: free it again, or it counts until its TTL.
+			c.freeSlots([]heldSlot{h})
+			continue
+		}
 		switch {
 		case err != nil:
 			c.s.log.Warn("could not refresh trunk slot", "correlation_id", c.id, "trunk", h.name, "error", err)

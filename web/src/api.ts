@@ -80,6 +80,12 @@ export interface CreatedApiToken extends ApiToken {
   token: string;
 }
 
+/** The extra destinations a door station may call (ids); every Door group is allowed too. */
+export interface DoorTargets {
+  extensions: Id[];
+  ringGroups: Id[];
+}
+
 /** An extension: a dialable number, with its Phase 4 call features. */
 export interface Extension {
   id: Id;
@@ -113,6 +119,10 @@ export interface Extension {
   voicemailBoxId?: Id | null;
   /** Music on hold class callers hear while this extension holds them; null = the default. */
   mohClassId?: Id | null;
+  /** user (default) or door: a door station calls only its targets and the Door groups. */
+  kind?: "user" | "door";
+  /** The destinations a door station may call besides the Door groups. */
+  doorTargets?: DoorTargets;
   createdAt: string;
   updatedAt: string;
 }
@@ -294,6 +304,12 @@ export interface TrunkFields {
   /** SMS over SIP: text messages may be sent and received through it. */
   messaging: boolean;
   /**
+   * RFC 4028 session timers on the trunk's calls: "on" asks for and keeps
+   * one, "off" never does, "default" follows Hello's own setting
+   * (HELLO_SIP_SESSION_TIMERS_TRUNKS).
+   */
+  sessionTimers: "default" | "on" | "off";
+  /**
    * The audio codecs offered to the trunk (store.Trunk.codecs): any of
    * "PCMU", "PCMA", "G722", "opus". Default ["PCMU", "PCMA"]: most carriers
    * accept G.711 only.
@@ -391,7 +407,9 @@ export interface InboundRouteFields {
     | "ring_group"
     | "voicemail"
     | "announcement"
-    | "paging";
+    | "paging"
+    | "conference"
+    | "directory";
   destination: string;
   enabled: boolean;
   /** Music on hold class of the calls this route delivers; null = the default. */
@@ -455,18 +473,22 @@ export class ApiError extends Error {
   readonly code: string;
   /** Per-field validation failures from a 400, if any. */
   readonly fields: FieldError[];
+  /** The whole error object, for answers that carry more than a message (a batch's conflicts). */
+  readonly details: Record<string, unknown>;
 
   constructor(
     status: number,
     code: string,
     message: string,
     fields: FieldError[] = [],
+    details: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.fields = fields;
+    this.details = details;
   }
 }
 
@@ -530,9 +552,12 @@ function isFieldError(value: unknown): value is FieldError {
   return typeof v.path === "string" && typeof v.message === "string";
 }
 
-function envelope(
-  value: unknown,
-): { code: string; message: string; fields: FieldError[] } | null {
+function envelope(value: unknown): {
+  code: string;
+  message: string;
+  fields: FieldError[];
+  details: Record<string, unknown>;
+} | null {
   if (typeof value !== "object" || value === null) return null;
   const err = (value as Record<string, unknown>).error;
   if (typeof err !== "object" || err === null) return null;
@@ -542,6 +567,7 @@ function envelope(
     code: typeof code === "string" ? code : "",
     message,
     fields: Array.isArray(fields) ? fields.filter(isFieldError) : [],
+    details: err as Record<string, unknown>,
   };
 }
 
@@ -557,7 +583,13 @@ async function errorFrom(
     // Not JSON: fall through to the generic message.
   }
   if (parsed) {
-    return new ApiError(res.status, parsed.code, parsed.message, parsed.fields);
+    return new ApiError(
+      res.status,
+      parsed.code,
+      parsed.message,
+      parsed.fields,
+      parsed.details,
+    );
   }
   return new ApiError(
     res.status,
@@ -746,6 +778,8 @@ export const createExtension = (input: {
   number: string;
   name: string;
   externalNumber?: string;
+  kind?: "user" | "door";
+  doorTargets?: DoorTargets;
 }) => request<Extension>("POST", "/api/v1/extensions", { body: input });
 
 export const updateExtension = (
@@ -763,6 +797,8 @@ export const updateExtension = (
     directoryHidden?: boolean;
     allowIntercom?: boolean;
     callWaiting?: boolean;
+    kind?: "user" | "door";
+    doorTargets?: DoorTargets;
     /** null clears the pick (the global default plays). */
     mohClassId?: Id | null;
     noAnswerRings?: number;
@@ -1139,6 +1175,7 @@ export type FailureKind =
   | "ivr"
   | "queue"
   | "time_condition"
+  | "directory"
   | "extension"
   | "ring_group";
 
@@ -1150,6 +1187,7 @@ export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   ivr: "An IVR menu",
   queue: "A call queue",
   time_condition: "A time condition",
+  directory: "The dial-by-name directory",
   extension: "An extension",
   ring_group: "Another ring group",
 };
@@ -1188,6 +1226,10 @@ export interface RingGroupFields {
   mohClassId?: Id | null;
   /** Play the class to the caller instead of ringback while the group rings. */
   mohRingback?: boolean;
+  /** Ring tag that replaces ringgroup for calls through the group; "" keeps it. */
+  ringTag?: string;
+  /** The Door group: a door station may call it; its calls ring as a doorbell. */
+  isDoor?: boolean;
 }
 
 /** A ring group as returned. */
@@ -1418,9 +1460,14 @@ export const IVR_DESTINATION_KINDS = [
   "external",
   "queue",
   "time_condition",
+  "directory",
 ] as const;
 
 export type IvrDestinationKind = (typeof IVR_DESTINATION_KINDS)[number];
+
+/** Destination kinds that name nothing: the target stays empty. */
+export const hasNoTarget = (kind: string): boolean =>
+  kind === "hangup" || kind === "directory";
 
 export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   hangup: "Hang up",
@@ -1433,6 +1480,7 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   external: "External number",
   queue: "Call queue",
   time_condition: "Time condition",
+  directory: "Dial-by-name directory",
 };
 
 /**
@@ -1465,6 +1513,8 @@ export interface IvrMenuFields {
   interDigitTimeout: number;
   maxRetries: number;
   allowDirectDial: boolean;
+  /** Language of the menu's spoken prompts (en, nl); "" inherits the deployment language. */
+  promptLanguage: string;
   timeout: IvrDestination;
   invalid: IvrDestination;
   options: IvrOption[];
@@ -1640,6 +1690,14 @@ export interface QueueFields {
   breakoutKey: string;
   breakoutPromptId: Id | null;
   breakoutVoicemail: string;
+  /** Offer a waiting caller a call back instead of holding the line. */
+  callbackEnabled: boolean;
+  /** Offer once the estimated wait exceeds this many seconds. */
+  callbackOfferAfterSeconds: number;
+  /** The key that accepts the offer, or asks for a callback. */
+  callbackDigit: string;
+  /** The queue's prompt language; "" inherits. */
+  promptLanguage: string;
   members: QueueMember[];
 }
 
@@ -1666,6 +1724,38 @@ export const putQueue = (queueId: Id, input: QueueFields) =>
 
 export const deleteQueue = (queueId: Id) =>
   request<void>("DELETE", `/api/v1/queues/${id(queueId)}`);
+
+export type QueueCallbackStatus =
+  "waiting" | "dialling" | "connected" | "failed" | "cancelled" | "expired";
+
+/** A callback request of a queue: GET /api/v1/queues/{id}/callbacks. */
+export interface QueueCallback {
+  id: Id;
+  queueId: Id;
+  number: string;
+  callerName: string;
+  status: QueueCallbackStatus;
+  attempts: number;
+  /** The caller's original enqueue time (Unix ms): its place in the queue. */
+  positionKey: number;
+  nextAttemptAt: string;
+  claimedBy: string;
+  leaseUntil?: string;
+  agent: string;
+  result: string;
+  createdAt: string;
+  expiresAt: string;
+  finishedAt?: string;
+}
+
+export const listQueueCallbacks = (queueId: Id, signal?: AbortSignal) =>
+  list<QueueCallback>(`/api/v1/queues/${id(queueId)}/callbacks`, signal);
+
+export const cancelQueueCallback = (queueId: Id, callbackId: Id) =>
+  request<void>(
+    "DELETE",
+    `/api/v1/queues/${id(queueId)}/callbacks/${id(callbackId)}`,
+  );
 
 /** An agent's state on the wallboard. */
 export type QueueAgentState =
@@ -1773,6 +1863,7 @@ export const FEATURE_CODE_ACTIONS = [
   "pickup_directed",
   "time_condition",
   "tc_override",
+  "directory",
 ] as const;
 
 /** One of FEATURE_CODE_ACTIONS: what dialling a feature code performs. */
@@ -1803,6 +1894,7 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   pickup_directed: "Pick up an extension's call",
   time_condition: "Route to a time condition",
   tc_override: "Day/night toggle (code plus toggle number)",
+  directory: "Dial-by-name directory",
 };
 
 /** GET /api/v1/feature-codes. */

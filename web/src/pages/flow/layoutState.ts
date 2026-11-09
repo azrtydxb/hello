@@ -5,6 +5,7 @@
 // everyone else's moves are kept.
 
 import type { FlowCanvasNode } from "../../api/flow";
+import { isPending } from "./draft";
 
 export interface Pos {
   x: number;
@@ -27,6 +28,8 @@ export type LayoutAction =
   | { type: "move"; node: string; x: number; y: number }
   | { type: "place"; nodes: readonly { node: string; x: number; y: number }[] }
   | { type: "remove"; node: string }
+  /** Drops nodes without saving anything (a draft node that was discarded). */
+  | { type: "forget"; nodes: readonly string[] }
   | {
       /** A save succeeded (or, with empty `sent`, the canvas was reloaded). */
       type: "synced";
@@ -103,6 +106,17 @@ export function layoutReducer(
         removed: { ...state.removed, [action.node]: true },
       };
     }
+    case "forget": {
+      const gone = new Set(action.nodes);
+      const keep = <T>(m: Record<string, T>): Record<string, T> =>
+        Object.fromEntries(Object.entries(m).filter(([k]) => !gone.has(k)));
+      return {
+        ...state,
+        positions: keep(state.positions),
+        dirty: keep(state.dirty),
+        removed: keep(state.removed),
+      };
+    }
     case "synced": {
       const server = fromNodes(action.nodes);
       const sentPos = fromNodes(action.sent?.nodes ?? []);
@@ -147,10 +161,14 @@ export function pendingWrite(state: LayoutState): {
 } | null {
   const nodes: FlowCanvasNode[] = [];
   for (const id of Object.keys(state.dirty).sort()) {
+    // A node that only exists in the draft has no place on the server yet.
+    if (isPending(id)) continue;
     const p = state.positions[id];
     if (p) nodes.push({ node: id, ...p });
   }
-  const remove = Object.keys(state.removed).sort();
+  const remove = Object.keys(state.removed)
+    .filter((id) => !isPending(id))
+    .sort();
   if (nodes.length === 0 && remove.length === 0) return null;
   return { layoutVersion: state.version, nodes, remove };
 }

@@ -229,12 +229,12 @@ func TestExtensionReviewFixes(t *testing.T) {
 }
 
 // TestInboundSIPSRejected fails if a sips: destination is accepted while
-// Hello speaks UDP only.
+// Hello reaches external destinations over UDP only.
 func TestInboundSIPSRejected(t *testing.T) {
 	p := newP2Env(t, nil, false)
 	c := p.login()
 	r := c.do("POST", "/api/v1/routes/inbound", map[string]any{"name": "Agent", "destinationKind": "sip_uri", "destination": "sips:agent@ai.example"})
-	if got := fieldPaths(t, r); fmt.Sprint(got) != "[destination]" || !strings.Contains(string(r.body), "UDP-only") {
+	if got := fieldPaths(t, r); fmt.Sprint(got) != "[destination]" || !strings.Contains(string(r.body), "over UDP only") {
 		t.Fatalf("sips: %s", r.body)
 	}
 	c.must(http.StatusCreated, "POST", "/api/v1/routes/inbound", map[string]any{"name": "Agent", "destinationKind": "sip_uri", "destination": "sip:agent@ai.example"})

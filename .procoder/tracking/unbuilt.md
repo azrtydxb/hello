@@ -6,11 +6,11 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | #   | Item                                                                          | Status                 |
 | --- | ----------------------------------------------------------------------------- | ---------------------- |
-| 9   | Session timers, CRLF keep-alive, dead-media teardown, roaming relearn (S-9)   | wip (#203)             |
+| 9   | Session timers, CRLF keep-alive, dead-media teardown, roaming relearn (S-9)   | done (#203)            |
 | 9b  | Session timers on parked/picked-up/transferred dialogs and trunk legs         | wip (#228)             |
-| 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                          | wip (#204)             |
-| 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | wip (ring-map)         |
-| 12  | Tone library (S-43)                                                           | todo (after 11)        |
+| 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                          | done (#204)            |
+| 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | done (#226)            |
+| 12  | Tone library (S-43)                                                           | wip (#238)             |
 | 13  | Door station extension kind, Door group (S-45, S-46)                          | wip (#225)             |
 | 14  | Door-open DTMF `*50` (S-47)                                                   | todo (after 13)        |
 | 15  | Setting overrides and WP extras (S-12)                                        | todo                   |
@@ -21,12 +21,12 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                      | todo                   |
 | 21  | Multiple lines and account sharing (S-10, S-11)                               | todo                   |
 | 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial      | todo                   |
-| 23  | SIP over TLS and sips (S-14)                                                  | wip (parity-tls)       |
+| 23  | SIP over TLS and sips (S-14)                                                  | done (#202)            |
 | 24  | SRTP SDES (S-15)                                                              | todo (after 23)        |
 | 25  | DTLS-SRTP and ICE-lite (S-16)                                                 | todo (after 24)        |
 | 26  | PRACK/100rel, anonymous outbound (Privacy), partial                           | todo                   |
 | 27  | Provisioning hardening (S-22, S-32), TR-069 off etc. (explicitly in spec)     | todo                   |
-| 28  | DSCP marking (S-21)                                                           | wip (parity-dscp)      |
+| 28  | DSCP marking (S-21)                                                           | done (#231)            |
 | 29  | Phone backup/secondary servers (S-20), partial                                | todo                   |
 | 30  | HELD, Geolocation, locations, callback tag, alarm `*55` (S-28, S-29), partial | todo                   |
 | 31  | Wi-Fi profiles and roaming (S-23, S-24)                                       | todo                   |
@@ -41,7 +41,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | --- | ---------------------------------------------- | ----------- |
 | P1  | Call events: stream, integration_events, SSE   | done (#205) |
 | P2  | Webhooks: signing, retries, DLQ                | wip (#222)  |
-| P3  | Click-to-call: originate API, /dial, tel:      | todo        |
+| P3  | Click-to-call: originate API, /dial, tel:      | wip (#234)  |
 | P4  | Recording links and lookup API                 | todo        |
 | P5  | Browser extension (MV3), fixed signing key     | todo        |
 | P6  | HubSpot and internal/crm framework             | todo        |
@@ -89,29 +89,30 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 6b  | Video recording                             | blocked (6)                  |
 | 10  | Video phones and door stations              | todo (code), hw (test)       |
 | 11  | Conference-room video                       | blocked (6)                  |
-| 13  | Teams SBC-peer trunk profile, docs/teams.md | todo                         |
+| 13  | Teams SBC-peer trunk profile, docs/teams.md | wip (#225)                   |
 | 7-9 | Push gateway, mobile apps, mobile video     | not now                      |
 | 12  | Public reach                                | not now (user decides later) |
 
 ## flow-canvas
 
-| #   | Item                                             | Status                  |
-| --- | ------------------------------------------------ | ----------------------- |
-| P2  | Read-only canvas, canvases, layout API           | done (#191)             |
-| P3  | Batch backend                                    | wip (#214)              |
-| P4  | Editing UI                                       | wip (#227)              |
-| P5  | traceFlow, trace mode                            | wip (#224)              |
-| P6  | AI on the canvas                                 | todo (after P4)         |
-| P7  | New node types: batch ops, trace, override badge | todo (after P5)         |
-| D3  | Every call output accepts every target kind      | done (#196)             |
-| -   | Routes form `conference` destination chooser     | wip (routes-conference) |
+| #   | Item                                                      | Status                  |
+| --- | --------------------------------------------------------- | ----------------------- |
+| P2  | Read-only canvas, canvases, layout API                    | done (#191)             |
+| P3  | Batch backend                                             | done (#214)             |
+| P4  | Editing UI                                                | done (#227)             |
+| P5  | traceFlow, trace mode                                     | done (#224)             |
+| P6  | AI on the canvas                                          | todo (after P4)         |
+| P7  | New node types: batch ops, trace, override badge          | todo (after P5)         |
+| D3  | Every call output accepts every target kind               | done (#196)             |
+| -   | Routes form `conference` destination chooser              | wip (routes-conference) |
+| -   | Canvas usability: Add everything, Arrange, open on create | wip (#233)              |
 
 ## kamailio-ha
 
 | #   | Item                                              | Status                   |
 | --- | ------------------------------------------------- | ------------------------ |
 | -   | Choose option A or B, VIP IP                      | done (A, 192.168.10.109) |
-| 1-4 | Second instance, VIP, re-point phones, chart/docs | wip (kamailio-ha)        |
+| 1-4 | Second instance, VIP, re-point phones, chart/docs | partial (#201, 1/4)      |
 
 ## Competitor gaps (spec pbx-gaps, #199)
 
@@ -120,13 +121,13 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | Backup and restore                            | wip (#219, A2)                 |
 | Follow-me                                     | todo (spec done #199)          |
 | Blocklist, anonymous reject, country limits   | wip (#210, A1)                 |
-| Queue callback                                | todo (spec done #199)          |
+| Queue callback                                | done (#237)                    |
 | 2FA                                           | done (#209)                    |
-| Dial-by-name                                  | todo (spec done #199)          |
-| Voicemail groups                              | wip (gaps-vmgroups, A6)        |
+| Dial-by-name                                  | done (#229, B3)                |
+| Voicemail groups                              | wip (#220, A6)                 |
 | Fax                                           | todo (spec done #199)          |
 | Boss/secretary                                | todo (spec done #199)          |
-| Multi-language prompts (Dutch option per box) | wip (#208, A5)                 |
+| Multi-language prompts (Dutch option per box) | done (#208, A5)                |
 | Codec in call history                         | wip (spec pbx-gaps; cdr-codec) |
 | Phone LDAP directory                          | wip (#223, A7)                 |
 
@@ -134,19 +135,25 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                                                                                      | Status                |
 | --------------------------------------------------------------------------------------------------------- | --------------------- |
-| Deploy main to kw (#196, #199, #205, #209, #212; earlier #187-#197)                                       | done (sha-f64d239)    |
-| MCP skills, JSON bodies (#189)                                                                            | wip (#189)            |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-67b5995)    |
+| MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
-| Transfer-to-voicemail phone key                                                                           | wip (transfer-vm-key) |
+| Transfer-to-voicemail phone key                                                                           | done (#200)           |
 | Vendor template keys left out (Poly caps/pickup, record keys, Fanvil CA, Snom/Yealink EXP, pickup values) | todo                  |
 | Competitor report into the repo (docs)                                                                    | done (#199)           |
-| Voicemail box after an extension forward stage uses the forwarded target                                  | wip (#213)            |
-| Ring groups form: `announcement` failure kind chooser                                                     | wip (#213)            |
+| Voicemail box after an extension forward stage uses the forwarded target                                  | done (#213)           |
+| Ring groups form: `announcement` failure kind chooser                                                     | done (#213)           |
 | Integration flakes on main: TestFlowCanvasAPI teardown, TestMessageDeliveredOnce                          | done (#212)           |
-| Messages claimed by another node fail permanently on edge-proxy 403 when the peer set is briefly lost     | wip (#217)            |
-| CI: kind-upgrade job fails on transient kind API/RBAC errors                                              | wip (#218)            |
-| Integration flakes: queue HA BYE, takeover voicemail, queue timeout, conference two nodes, MinIO bucket   | wip (#221)            |
+| Messages claimed by another node fail permanently on edge-proxy 403 when the peer set is briefly lost     | done (#217)           |
+| CI: kind-upgrade job fails on transient kind API/RBAC errors                                              | done (#218)           |
+| Integration flakes: queue HA BYE, takeover voicemail, queue timeout, conference two nodes, MinIO bucket   | done (#221)           |
 | Remove MOH test queue 8888                                                                                | todo (when user done) |
+| Call heartbeat leak, trunk slot race, Opus decoder rebuild (fix-trunk-slot-leak)                          | done (#243)           |
+| Phone resync/reboot: answer digest challenges in the phone realm                                          | done (#257)           |
+| Data race on homed calls (ivrHomeCallee)                                                                  | done (#267)           |
+| Opus codec stack pin (decoder failures, TestOpusSessionLoopback)                                          | done (#269)           |
+| HT813 FXO disconnect supervision                                                                          | done (#244)           |
+| Onboarding sends the adopted extension id as a number                                                     | done (#256)           |
 
 ## Waiting on hardware or outside accounts
 

@@ -54,10 +54,14 @@ type Metrics struct {
 	Parks                 *prometheus.CounterVec // kind, result
 	Forwarded             *prometheus.CounterVec // kind
 	GroupCalls            *prometheus.CounterVec // group, strategy, result
+	RingTags              *prometheus.CounterVec // tag: calls that rang an internal device with the tag (S-39)
 	PresenceSubscriptions prometheus.Gauge
 	// MWINotify counts message-summary NOTIFYs by kind and result (S-1).
 	MWINotify  *prometheus.CounterVec // kind, result
 	HoldActive prometheus.Gauge
+	// Session counts the refreshes and the teardowns of session timers and
+	// dead-media detection (S-9).
+	Session *SessionMetrics
 	// CheckSync counts check-sync NOTIFYs by event and result (S-5).
 	CheckSync *prometheus.CounterVec // event, result
 	// MessagesIn counts SIP MESSAGE requests by source (phone, trunk) and
@@ -66,6 +70,13 @@ type Metrics struct {
 	MessagesIn        *prometheus.CounterVec // source, outcome
 	MessageDeliveries *prometheus.CounterVec // via, result
 
+	// Transports (phone-feature-parity S-14). RegistrationsByTransport is
+	// this node's bindings by the transport the phone registered over
+	// (udp, tcp, tls); SecureRefused counts sips: requests refused for want
+	// of a TLS path, by reason (caller_not_tls, no_tls_binding, no_tls_route).
+	RegistrationsByTransport *prometheus.GaugeVec   // transport
+	SecureRefused            *prometheus.CounterVec // reason
+
 	// Phase E (spec P-12, P-13): server pages and intercom calls.
 	PagingTotal   *prometheus.CounterVec // result
 	PagingLegs    *prometheus.CounterVec // result
@@ -73,6 +84,10 @@ type Metrics struct {
 	// IVRTotal counts IVR menu events: entered, option, direct_dial,
 	// timeout, invalid, dial, dial_failed, connected and exit_<kind>.
 	IVRTotal *prometheus.CounterVec // event
+	// DirectoryTotal counts dial-by-name searches by result (one, several,
+	// too_many, none, too_long, timeout, chosen, invalid_choice, connected,
+	// failed).
+	DirectoryTotal *prometheus.CounterVec // result
 	// Call queues (migration 00040). QueueWaiting is the callers waiting in
 	// queues this node holds (sum it across nodes); QueueWait is the time
 	// callers waited by outcome (answered, abandoned, timeout, full,
@@ -83,6 +98,9 @@ type Metrics struct {
 	QueueAbandoned *prometheus.CounterVec   // queue
 	QueueCalls     *prometheus.CounterVec   // queue, event
 	QueueAgents    *prometheus.GaugeVec     // queue, state
+	// CallbackTotal counts queue callback outcomes: requested, coalesced,
+	// full, dialled, connected, no_answer, busy, failed, abandoned, no_agent.
+	CallbackTotal *prometheus.CounterVec // result
 	// TimeConditionTotal counts time condition decisions: open, closed,
 	// holiday, forced_open, forced_closed, loop, missing and toggled.
 	TimeConditionTotal *prometheus.CounterVec // result
@@ -207,6 +225,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.GroupCalls = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_group_calls_total", Help: "Group call attempts by group, strategy and result.",
 	}, []string{"group", "strategy", "result"})
+	m.RingTags = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_ring_tag_total", Help: "Calls that rang an internal device, by ring tag.",
+	}, []string{"tag"})
 	m.PresenceSubscriptions = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hello_presence_subscriptions", Help: "Live dialog (BLF) subscriptions served by this node.",
 	})
@@ -224,6 +245,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Name: "hello_sip_message_deliveries_total",
 		Help: "Stored message deliveries by route (phone, trunk) and result (delivered, not_registered, retry, failed).",
 	}, []string{"via", "result"})
+	m.RegistrationsByTransport = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hello_sip_registrations_by_transport", Help: "Bindings last registered through this node, by the phone's transport (udp, tcp, tls).",
+	}, []string{"transport"})
+	m.SecureRefused = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_sip_sips_refused_total", Help: "sips: requests refused because no TLS path exists, by reason.",
+	}, []string{"reason"})
 	m.HoldActive = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hello_hold_active", Help: "Calls currently held on this node (either leg sendonly).",
 	})
@@ -233,6 +260,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.IVRTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_ivr_total", Help: "IVR menu events (entered, option, direct_dial, timeout, invalid, dial, dial_failed, connected, exit_<kind>).",
 	}, []string{"event"})
+	m.DirectoryTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_directory_search_total", Help: "Dial-by-name searches by result (one, several, too_many, none, too_long, timeout, chosen, invalid_choice, connected, failed).",
+	}, []string{"result"})
 	m.QueueWaiting = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "hello_queue_waiting", Help: "Callers waiting in a queue whose dialogs this node holds; sum across nodes.",
 	}, []string{"queue"})
@@ -249,6 +279,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.QueueAgents = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "hello_queue_agents", Help: "Agents per queue by state (available, on_call, ringing, dnd, wrapping, paused, logged_out); reported by one node at a time.",
 	}, []string{"queue", "state"})
+	m.CallbackTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_callback_total", Help: "Queue callback outcomes (requested, coalesced, full, dialled, connected, no_answer, busy, failed, abandoned, no_agent).",
+	}, []string{"result"})
 	m.TimeConditionTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_time_condition_total", Help: "Time condition decisions (open, closed, holiday, forced_open, forced_closed, loop, missing, toggled).",
 	}, []string{"result"})
@@ -269,11 +302,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	})
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
-		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Parks, m.Forwarded, m.GroupCalls,
-		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.TimeConditionTotal,
-		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents,
+		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags,
+		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.DirectoryTotal, m.TimeConditionTotal,
+		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	m.Conf = newConfMetrics(reg)
+	m.Session = newSessionMetrics(reg)
 	return m
 }
 

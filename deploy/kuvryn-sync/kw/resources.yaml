@@ -13,7 +13,10 @@
 # 2026-10-04): HELLO_SIP_TRUSTED_PROXIES is kw's pod CIDR 10.42.0.0/16 (node
 # podCIDRs), HELLO_DNS_RESOLVER is kube-dns 10.43.0.10, KAMAILIO_PUBLIC_HOST
 # is node master-11 192.168.10.101, where the hostNetwork kamailio pod binds
-# 30508 (udp+tcp) itself.
+# 30508 (udp+tcp) itself. Since kamailio-ha phase 1 a second kamailio pod runs
+# on master-12 (192.168.10.102) beside it, each advertising its own node
+# address; the phones stay provisioned with 192.168.10.101 until the VIP
+# phases (.procoder/specs/kamailio-ha.md).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -30,9 +33,9 @@ data:
   # Verbatim copy of deploy/kamailio/kamailio.cfg, enforced by
   # test/deploy (TestKwKamailioConfigMatchesSource); kw-specific values come
   # from the #!trydefenv parameters, never text edits. The pod runs with
-  # hostNetwork on master-11 and its env sets KAMAILIO_LISTEN_IP from
-  # status.podIP (the node address 192.168.10.101), so the "hello" socket's
-  # Path and Record-Route name it, and the phones sockets bind
+  # hostNetwork on master-11 and master-12 and its env sets KAMAILIO_LISTEN_IP
+  # from status.podIP (the node address, 192.168.10.101 on master-11), so the
+  # "hello" socket's Path and Record-Route name it, and the phones sockets bind
   # KAMAILIO_PHONES_PORT 30508 there and advertise
   # KAMAILIO_PUBLIC_HOST:30508.
   kamailio.cfg: |
@@ -48,7 +51,9 @@ data:
     #   - adds Path (with the phone's received address) to REGISTER, so any
     #     Hello node reaches any phone through Kamailio;
     #   - record-routes initial INVITEs in both directions;
-    #   - tells Hello the phone's real source in X-Hello-Client;
+    #   - tells Hello the phone's real source in X-Hello-Client and the transport
+    #     of the phone's connection (udp, tcp or tls) in X-Hello-Transport;
+    #   - terminates SIP over TLS for phones (optional, see TLS below);
     #   - rate-limits REGISTER, INVITE and MESSAGE per source IP (pike).
     #
     # SIP MESSAGE (RFC 3428, text messaging) is routed like an initial INVITE:
@@ -71,6 +76,18 @@ data:
     #     there, both of which name the hello socket).
     #   - Phones: requests received on the "phones" sockets (PHONES_PORT). Their
     #     requests only ever go to Hello nodes.
+    #
+    # High availability (EDGE_VIP, kamailio-ha): two identical instances on two
+    # nodes, one virtual IP that follows a healthy one. The phones and hello
+    # sockets bind the VIP, so every address a dialog names (Via, Path,
+    # Record-Route, the phone's registered proxy) is the VIP and survives the
+    # instance: after a failover the survivor receives the same requests on the
+    # same address. Kamailio keeps no state Hello needs (bindings live in Valkey,
+    # the dispatcher view is rebuilt by probes), so either instance serves any
+    # phone and any in-dialog request that carries a Route. Phones still using an
+    # instance's own node address (the address they were provisioned with before
+    # the VIP) are served by LEGACY_IP sockets until they are re-provisioned; the
+    # two families never mix, see route[EDGE_SIDE].
     # The source address cannot decide this: on kw the hello-sip pods run with
     # hostNetwork, so their datagrams reach Kamailio SNAT'd from a node address
     # that matches no dispatcher entry (those are Service names/ClusterIPs).
@@ -101,6 +118,23 @@ data:
     #!define LISTEN_IP 10.89.53.10
     #!endif
 
+    # EDGE_VIP (optional): the virtual IP shared by the edge instances. When set,
+    # the "phones" sockets and the "hello" socket bind it instead of LISTEN_IP, and
+    # PUBLIC_HOST must be the same address (phones are told to use it). The VIP is
+    # held by one node at a time (kube-vip, ARP), so each instance binds it before
+    # it holds it (ip_free_bind) and receives traffic only while it does. The
+    # dispatcher's probes then leave from a socket on LISTEN_IP (the "probe"
+    # socket): a probe sent from the VIP would be answered to whichever node holds
+    # it, and the other instance would see every Hello node down.
+    #!trydefenv EDGE_VIP=KAMAILIO_EDGE_VIP
+
+    # LEGACY_IP (optional, only with EDGE_VIP): this instance's own node address.
+    # Phones provisioned before the VIP point at it (192.168.10.101 on kw); the
+    # "phones_legacy" and "hello_legacy" sockets keep serving them exactly as
+    # before, with the node address in Via, Path and Record-Route, until the last
+    # phone has moved to the VIP and the variable is dropped.
+    #!trydefenv LEGACY_IP=KAMAILIO_LEGACY_IP
+
     # The port the "phones" sockets (UDP and TCP) bind on LISTEN_IP, and the
     # metrics socket's TCP port. The lab keeps the defaults; on kw Kamailio runs
     # with hostNetwork on master-11 and binds the phones' port (30508) directly
@@ -114,6 +148,23 @@ data:
     #!trydefenv METRICS_PORT=KAMAILIO_METRICS_PORT
     #!ifndef METRICS_PORT
     #!define METRICS_PORT 9090
+    #!endif
+
+    # SIP over TLS (phone-feature-parity S-14), off unless KAMAILIO_TLS_PORT is
+    # set. Phones connect to PUBLIC_HOST:PUBLIC_TLS_PORT; Kamailio ends TLS and
+    # talks plain UDP to the hello-sip nodes inside the edge network, telling
+    # them the phone leg was TLS in X-Hello-Transport. The certificate and key
+    # (issued by the Hello CA: cert-manager on kw, the lab CA in compose) are
+    # read from /etc/hello-tls/tls.crt and tls.key by tls.cfg. TLS 1.2 is the
+    # minimum, 1.3 is used when the phone offers it. Enabling it needs an image
+    # with the tls module (docker/kamailio installs kamailio-tls-modules); an
+    # image without it must run with KAMAILIO_TLS_PORT unset.
+    #!trydefenv TLS_PORT=KAMAILIO_TLS_PORT
+    #!trydefenv PUBLIC_TLS_PORT=KAMAILIO_PUBLIC_TLS_PORT
+    #!ifdef TLS_PORT
+    #!ifndef PUBLIC_TLS_PORT
+    #!define PUBLIC_TLS_PORT 5061
+    #!endif
     #!endif
 
     # How long (ms) an INVITE towards Hello may stay unanswered after its first
@@ -177,21 +228,51 @@ data:
     # coming from a Hello node (request_route sets FLT_FROM_HELLO on it) and may
     # be relayed to any phone. So 5070 must stay internal: never published to
     # the host in compose, never exposed through a NodePort/LoadBalancer
-    # Service on Kubernetes (on kw the hostNetwork pod binds it on the node
-    # address, which only the Hello nodes are told about). Phones only ever
+    # Service on Kubernetes (on kw the hostNetwork pod binds it on the VIP, or
+    # on the node address for LEGACY_IP phones, which only the Hello nodes are
+    # told about). Phones only ever
     # learn the advertised phones socket. Because that socket can still be
     # reached from the LAN, request_route also refuses anything received on it
     # whose source address is not a dispatcher (set 1) destination.
     # A request crossing from one socket to the other gets two Record-Route
     # headers (rr enable_double_rr), each naming the socket its side uses.
+    #!ifdef EDGE_VIP
+    # Bind the VIP before this node holds it (the VIP follows the healthy node).
+    ip_free_bind=1
+    listen=udp:EDGE_VIP:PHONES_PORT advertise PUBLIC_HOST:PUBLIC_PORT name "phones"
+    listen=tcp:EDGE_VIP:PHONES_PORT advertise PUBLIC_HOST:PUBLIC_PORT name "phones_tcp"
+    #!ifdef TLS_PORT
+    listen=tls:EDGE_VIP:TLS_PORT advertise PUBLIC_HOST:PUBLIC_TLS_PORT name "phones_tls"
+    #!endif
+    listen=udp:EDGE_VIP:5070 name "hello"
+    # Dispatcher probes (ds_default_sockname): on this node's own address, so a
+    # Hello node answers the instance that asked.
+    listen=udp:LISTEN_IP:5071 name "probe"
+    #!else
     listen=udp:LISTEN_IP:PHONES_PORT advertise PUBLIC_HOST:PUBLIC_PORT name "phones"
     listen=tcp:LISTEN_IP:PHONES_PORT advertise PUBLIC_HOST:PUBLIC_PORT name "phones_tcp"
+    #!ifdef TLS_PORT
+    listen=tls:LISTEN_IP:TLS_PORT advertise PUBLIC_HOST:PUBLIC_TLS_PORT name "phones_tls"
+    #!endif
     listen=udp:LISTEN_IP:5070 name "hello"
+    #!endif
+    #!ifdef LEGACY_IP
+    listen=udp:LEGACY_IP:PHONES_PORT name "phones_legacy"
+    listen=tcp:LEGACY_IP:PHONES_PORT name "phones_legacy_tcp"
+    listen=udp:LEGACY_IP:5070 name "hello_legacy"
+    #!endif
     # Prometheus metrics (xhttp_prom), internal only: not published to the host.
     # HTTP is served only here (event_route[xhttp:request] refuses it on the
     # phones TCP socket); SIP sent to it is dropped in request_route.
     listen=tcp:LISTEN_IP:METRICS_PORT name "metrics"
     tcp_accept_no_cl=yes
+    # A phone's TCP or TLS connection is also the path Hello's requests (INVITE,
+    # NOTIFY, MESSAGE) take back to it, so an idle one stays open for an hour
+    # (phone-feature-parity S-13); a phone's keep-alive (OPTIONS, CRLF) resets it.
+    tcp_connection_lifetime=3600
+    #!ifdef TLS_PORT
+    enable_tls=yes
+    #!endif
 
     # Answer quickly when a Hello node is gone: DNS failover and SRV are not
     # used (the dispatcher list holds the nodes' addresses), and the DNS blocklist would
@@ -233,10 +314,18 @@ data:
     loadmodule "xhttp.so"
     loadmodule "xhttp_prom.so"
     loadmodule "rtimer.so"
+    #!ifdef TLS_PORT
+    loadmodule "tls.so"
+    #!endif
 
     # ctl: kamcmd's default socket (/run/kamailio/kamailio_ctl), so
     # `docker compose exec kamailio kamcmd dispatcher.list` works as the
     # kamailio user the container runs as.
+
+    #!ifdef TLS_PORT
+    # tls: certificate, key and the 1.2 minimum are in tls.cfg (next to this file).
+    modparam("tls", "config", "/etc/kamailio/tls.cfg")
+    #!endif
 
     # jsonrpcs: RPC over the FIFO only (no HTTP transport here).
     modparam("jsonrpcs", "transport", 1)
@@ -272,7 +361,11 @@ data:
     modparam("dispatcher", "xavp_dst", "_dsdst_")
     modparam("dispatcher", "xavp_ctx", "_dsctx_")
     modparam("dispatcher", "ds_load_mode", 1)           # a bad entry is fatal
+    #!ifdef EDGE_VIP
+    modparam("dispatcher", "ds_default_sockname", "probe") # probes from LISTEN_IP:5071
+    #!else
     modparam("dispatcher", "ds_default_sockname", "hello") # probes from 5070
+    #!endif
     # Re-resolve destination names in place (kw: hello-sip-N.hello.svc names
     # of headless Services; a hostNetwork pod that returns on another node has a
     # new IP). ds_dns_mode 1|4: resolve at load and again every ds_dns_interval
@@ -322,6 +415,11 @@ data:
     modparam("xhttp_prom", "prom_gauge", "name=dispatcher_destination_active; label=uri")
     modparam("xhttp_prom", "prom_counter", "name=dispatcher_transitions_total; label=uri:state")
     modparam("xhttp_prom", "prom_counter", "name=pike_blocked_total")
+    # Requests per receiving socket (phones, phones_tcp, hello, phones_legacy,
+    # phones_legacy_tcp, hello_legacy): once the legacy sockets (LEGACY_IP) see no
+    # traffic for longer than a registration lasts, every phone has moved to the
+    # VIP and the legacy address can be retired.
+    modparam("xhttp_prom", "prom_counter", "name=edge_requests_total; label=socket")
 
     # rtimer: refresh the dispatcher set gauges every 5s.
     modparam("rtimer", "timer", "name=dsmetrics;interval=5;mode=1;")
@@ -330,12 +428,17 @@ data:
     ####### Routing #######
 
     request_route {
-    	# The metrics socket is HTTP only: no SIP over it.
-    	if ($Rp == METRICS_PORT) {
+    	# The metrics socket is HTTP only: no SIP over it. The probe socket only
+    	# carries the answers to the dispatcher's own OPTIONS (replies never reach
+    	# request_route): a request there is nobody's.
+    	if ($Rp == METRICS_PORT || $Rn == "probe") {
     		drop;
     	}
 
-    	if ($Rn == "hello") {
+    	route(EDGE_SIDE);
+    	prom_counter_inc("edge_requests_total", "1", "$Rn");
+
+    	if ($Rn == "hello" || $Rn == "hello_legacy") {
     		# Received on the Hello-facing socket (5070). On kw that socket is on
     		# the node address (hostNetwork), reachable from the whole LAN, so it
     		# is trusted only from an address the dispatcher holds (set 1, the
@@ -354,7 +457,7 @@ data:
 
     	route(REQINIT);
 
-    	if ($Rn == "hello") {
+    	if ($Rn == "hello" || $Rn == "hello_legacy") {
     		# A hello-sip node (vetted above).
     		setflag(FLT_FROM_HELLO);
     	}
@@ -397,11 +500,35 @@ data:
     	}
     }
 
+    # Which family of sockets this request belongs to: $var(legacy) is 1 when it
+    # arrived on a LEGACY_IP socket (a phone still using the node address, or a
+    # Hello node answering one through the Path or Record-Route naming it), 0 for
+    # the primary sockets (the VIP with EDGE_VIP, the node address without). Every
+    # socket a request or its replies leave from is picked in the same family, so
+    # a phone that registered through its node address is never answered from the
+    # VIP, nor a VIP phone from a node address. Without LEGACY_IP it is always 0.
+    route[EDGE_SIDE] {
+    	$var(legacy) = 0;
+    	if ($Rn == "phones_legacy" || $Rn == "phones_legacy_tcp" || $Rn == "hello_legacy") {
+    		$var(legacy) = 1;
+    	}
+    }
+
+    # The Hello-facing socket of this request's family.
+    route[HELLO_SOCKET] {
+    	if ($var(legacy) == 1) {
+    		$fsn = "hello_legacy";
+    	} else {
+    		$fsn = "hello";
+    	}
+    }
+
     ####### Requests from phones (towards Hello) #######
 
     route[FROM_PHONE] {
-    	# Only Kamailio says where a request came from.
+    	# Only Kamailio says where a request came from and over what.
     	remove_hf("X-Hello-Client");
+    	remove_hf("X-Hello-Transport");
     	force_rport();
 
     	if (is_method("REGISTER|INVITE|MESSAGE") && !has_totag()) {
@@ -444,7 +571,7 @@ data:
     		# Dialog-forming: in-dialog requests from both sides cross Kamailio
     		# (two Record-Route headers: the hello socket, then the advertised
     		# phones socket).
-    		$fsn = "hello";
+    		route(HELLO_SOCKET);
     		record_route();
     		# Hello reaches the phone's NAT binding through ;alias=ip~port~udp on
     		# its Contact (handle_ruri_alias in route[FROM_HELLO]).
@@ -559,7 +686,7 @@ data:
 
     # Forward to the Hello node in $du with the client's address.
     route[TO_HELLO] {
-    	$fsn = "hello";
+    	route(HELLO_SOCKET);
     	# Hello answers at the source port of what we send it (rport), not at a
     	# Via port that a replaced pod or a NAT no longer owns (kw: stale
     	# conntrack on 5070 after a Kamailio pod replacement).
@@ -574,6 +701,10 @@ data:
     	} else {
     		append_hf("X-Hello-Client: $si:$sp\r\n");
     	}
+    	# The phone's transport (udp, tcp or tls): Hello records it on the
+    	# registration and uses it to decide whether a sips: request has a TLS
+    	# path. Set from the socket the request arrived on, never from the phone.
+    	append_hf("X-Hello-Transport: $pr\r\n");
     	if (!has_totag()) {
     		t_on_failure("HELLO_FAILOVER"); # initial requests only
     	}
@@ -619,14 +750,32 @@ data:
     	route(TO_PHONE);
     }
 
-    # Send towards a phone from the phones socket of the phone's transport: TCP
-    # when the destination (the Path's received, an alias or the R-URI) says so,
-    # UDP otherwise.
+    # Send towards a phone from the phones socket of the phone's transport: TLS
+    # or TCP when the destination (the Path's received, an alias or the R-URI)
+    # says so, UDP otherwise.
     route[PHONES_SOCKET] {
-    	if ($dP == "tcp") {
-    		$fsn = "phones_tcp";
+    	if ($dP == "tls") {
+    #!ifdef TLS_PORT
+    		$fsn = "phones_tls";
+    #!else
+    		if ($var(legacy) == 1) {
+    			$fsn = "phones_legacy_tcp";
+    		} else {
+    			$fsn = "phones_tcp";
+    		}
+    #!endif
+    	} else if ($dP == "tcp") {
+    		if ($var(legacy) == 1) {
+    			$fsn = "phones_legacy_tcp";
+    		} else {
+    			$fsn = "phones_tcp";
+    		}
     	} else {
-    		$fsn = "phones";
+    		if ($var(legacy) == 1) {
+    			$fsn = "phones_legacy";
+    		} else {
+    			$fsn = "phones";
+    		}
     	}
     }
 
@@ -761,6 +910,32 @@ data:
     	}
     	xhttp_reply("404", "Not Found", "text/plain", "not found\n");
     }
+  # Verbatim copy of deploy/kamailio/tls.cfg (test/deploy). Read only when
+  # KAMAILIO_TLS_PORT is set on the pod (see the kamailio Deployment).
+  tls.cfg: |
+    # Kamailio tls module configuration (phone-feature-parity S-14). Read only
+    # when KAMAILIO_TLS_PORT is set (see kamailio.cfg).
+    #
+    # The server certificate is issued by the Hello CA (cert-manager's
+    # cluster-ca on kw, the lab CA in compose) and mounted at /etc/hello-tls,
+    # which phones already trust through the CA push of provisioning (P8433 and
+    # the other vendors' trusted-certificate keys). TLS 1.2 is the minimum and
+    # TLS 1.3 is used when the phone supports it ("TLSv1.2+").
+    #
+    # Phones are not asked for a certificate: they authenticate with SIP digest
+    # like on UDP, TLS protects the transport.
+    [server:default]
+    method = TLSv1.2+
+    certificate = /etc/hello-tls/tls.crt
+    private_key = /etc/hello-tls/tls.key
+    verify_certificate = no
+    require_certificate = no
+
+    # Connections Kamailio itself opens (it normally reuses the phone's own).
+    [client:default]
+    method = TLSv1.2+
+    verify_certificate = no
+    require_certificate = no
   dispatcher.list: |
     # Hello SIP edge dispatcher destinations (lab twin:
     # deploy/kamailio/dispatcher.list). Format:
@@ -835,11 +1010,26 @@ metadata:
     app.kubernetes.io/component: edge
     app.kubernetes.io/managed-by: kuvryn-sync
 spec:
-  replicas: 1
-  # hostNetwork: the new pod binds the same host ports, so the old one
-  # must be gone first; a rolling update crash-loops it until then.
+  # Two Kamailio, one per node (master-11, master-12), identically
+  # configured: either serves any phone and any in-dialog request that
+  # carries a Route (it keeps no state Hello needs).
+  replicas: 2
+  # One at a time, by construction. hostNetwork pods bind the node's ports,
+  # so a surge pod could not start beside the one it replaces; maxSurge 0
+  # takes the old pod down first, and maxUnavailable 1 lets the controller
+  # touch the second only once the first replacement is Ready (and has stayed
+  # so for minReadySeconds). Sync applies every Deployment at once, so this
+  # is what keeps a config or image change from restarting both. The
+  # required anti-affinity below puts a replacement back on its own node (it
+  # also keeps it off the node that still holds the pod being replaced).
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  # A replacement must be up for a while before its peer is touched: the
+  # dispatcher's first OPTIONS probes (every 4s) have run by then.
+  minReadySeconds: 10
   selector:
     matchLabels:
       app.kubernetes.io/name: hello
@@ -856,7 +1046,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: c2181bb13ef995400c3f323fb0de08b660b9174452d0addbee1c8afbd24d9559
+        hello.watteel.com/kamailio-config-sha256: 4f9c03d844b862a1c43a8c404ef4f00094e64852c21908a09372ca51b7de25d0
     spec:
       # Phones must reach Kamailio with no NAT in between: through a NodePort
       # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's
@@ -865,8 +1055,29 @@ spec:
       hostNetwork: true
       # Keep cluster DNS (the dispatcher's hello-sip-N Service names).
       dnsPolicy: ClusterFirstWithHostNet
-      nodeSelector:
-        kubernetes.io/hostname: master-11
+      affinity:
+        # Only the two nodes phones may reach Kamailio on: master-11
+        # (192.168.10.101, the address every phone is provisioned with) and
+        # master-12 (192.168.10.102).
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - master-11
+                      - master-12
+        # One per node: both bind the node's own ports, and two on one node
+        # would make the other node a spare that serves nobody.
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: hello
+                  app.kubernetes.io/instance: hello
+                  app.kubernetes.io/component: edge
+              topologyKey: kubernetes.io/hostname
       securityContext:
         # /run/kamailio is an emptyDir the kamailio user (102) must write its
         # ctl socket and RPC FIFO into; group ownership via fsGroup.
@@ -939,27 +1150,39 @@ spec:
                 - ALL
           env:
             - name: KAMAILIO_LISTEN_IP
-              # The pod IP, i.e. master-11's address (hostNetwork): the
+              # The pod IP, i.e. its node's address (hostNetwork): the
               # "hello" socket (5070) carries it to hello nodes, and the
               # phones sockets bind it at KAMAILIO_PHONES_PORT.
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
             - name: KAMAILIO_PUBLIC_HOST
-              # Where phones reach this Kamailio: master-11's address, which
-              # the pod binds directly (nodeSelector above).
-              value: 192.168.10.101
+              # Where phones reach this Kamailio: its own node's address,
+              # which the pod binds directly (master-11 is 192.168.10.101, the
+              # address the phones are provisioned with; master-12 is
+              # 192.168.10.102, reached by a test phone only). The VIP
+              # phases replace this with one shared address.
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
             - name: KAMAILIO_PUBLIC_PORT
               value: "30508"
             - name: KAMAILIO_PHONES_PORT
               # Bound on the node, so the same as the advertised port.
               value: "30508"
             - name: KAMAILIO_METRICS_PORT
-              # 9090 is taken on master-11 (truenas-csi-node).
+              # 9090 is taken on master-11 and master-12 (truenas-csi-node).
               value: "9071"
             - name: KAMAILIO_INVITE_TIMEOUT
               # Above HELLO_SIP_RING_TIMEOUT (10s), as in the lab.
               value: "25000"
+            # SIP over TLS (phone-feature-parity S-14) is switched on by
+            # adding KAMAILIO_TLS_PORT="30509" (and KAMAILIO_PUBLIC_TLS_PORT
+            # "30509") here and the phones-tls port below, in the same change
+            # that pins a kamailio image built with kamailio-tls-modules
+            # (docker/kamailio): an image without tls.so exits on loading it.
+            # The certificate (Certificate hello-sip-tls below) is already
+            # issued and mounted at /etc/hello-tls.
           ports:
             - name: phones
               containerPort: 30508
@@ -993,6 +1216,9 @@ spec:
               # The ctl socket and RPC FIFO (/run/kamailio) must be writable
               # by the kamailio user.
               mountPath: /run/kamailio
+            - name: tls
+              mountPath: /etc/hello-tls
+              readOnly: true
           resources:
             requests:
               cpu: 50m
@@ -1006,6 +1232,52 @@ spec:
             defaultMode: 420
         - name: run
           emptyDir: {}
+        - name: tls
+          secret:
+            secretName: hello-sip-tls
+            defaultMode: 288
+            # Absent until cert-manager has issued it; only read when TLS is
+            # on, so the pod starts either way.
+            optional: true
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: hello-sip-tls
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  # The SIP-over-TLS certificate Kamailio presents to phones (S-14), issued
+  # by the Hello CA (cluster-ca) that phones already trust through the CA
+  # push of provisioning. Phones connect to the node address, so it is an IP
+  # SAN; the DNS names serve a phone provisioned with a name. RSA, because
+  # the older phone TLS stacks handle it everywhere. Renewed 30 days before
+  # expiry: cert-manager keeps serving the old certificate if a renewal
+  # fails, and the alert in docs/tls.md fires 14 days before it runs out.
+  secretName: hello-sip-tls
+  issuerRef:
+    name: cluster-ca
+    kind: ClusterIssuer
+  commonName: hello.kw.watteel.lab
+  dnsNames:
+    - hello.kw.watteel.lab
+    - sip.hello.kw.watteel.lab
+  ipAddresses:
+    - 192.168.10.101
+  duration: 2160h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
 ---
 apiVersion: v1
 kind: Service
@@ -1018,8 +1290,9 @@ metadata:
     app.kubernetes.io/component: edge
     app.kubernetes.io/managed-by: kuvryn-sync
 spec:
-  # In-cluster only (metrics). Phones reach the hostNetwork pod directly at
-  # 192.168.10.101:30508; a NodePort would SNAT them (and hold the port).
+  # In-cluster only (metrics). Phones reach a hostNetwork pod directly at its
+  # node address (192.168.10.101:30508 for every provisioned phone); a
+  # NodePort would SNAT them (and hold the port).
   type: ClusterIP
   selector:
     app.kubernetes.io/name: hello
@@ -1030,6 +1303,29 @@ spec:
       port: 9090
       protocol: TCP
       targetPort: metrics
+---
+# At most one Kamailio is voluntarily disrupted at a time (a node drain by
+# kured, an eviction): the other is the survivor that carries the phones. The
+# Deployment's own rollout rule (maxUnavailable 1) covers updates; this covers
+# everything else. Needs the deployer Role extended once
+# (deploy/kuvryn-sync/rbac-kamailio-ha.yaml).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kamailio
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: edge
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -1085,7 +1381,7 @@ spec:
       terminationGracePeriodSeconds: 270
       containers:
         - name: hello-sip
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-f64d2393f385ac1c3e18299c8ae868f629103853
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-67b59954f4260d8ea1c4b6171cb495904fbebb50
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1307,7 +1603,7 @@ spec:
       terminationGracePeriodSeconds: 270
       containers:
         - name: hello-sip
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-f64d2393f385ac1c3e18299c8ae868f629103853
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-67b59954f4260d8ea1c4b6171cb495904fbebb50
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1502,7 +1798,7 @@ spec:
           # hello-migrate); a Sync-managed Job would need RBAC the deployer
           # does not have, so it runs as an init container instead. The retry
           # loop absorbs PostgreSQL and the Sentinel quorum still coming up.
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-f64d2393f385ac1c3e18299c8ae868f629103853
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-67b59954f4260d8ea1c4b6171cb495904fbebb50
           command:
             - sh
             - -c
@@ -1549,7 +1845,7 @@ spec:
               value: "false"
       containers:
         - name: hello-control
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-f64d2393f385ac1c3e18299c8ae868f629103853
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-67b59954f4260d8ea1c4b6171cb495904fbebb50
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1656,7 +1952,8 @@ spec:
               value: https://prov.hello.kw.watteel.lab
             - name: HELLO_PROV_SIP_SERVER
               # Where provisioned phones register: Kamailio on master-11's
-              # address, as KAMAILIO_PUBLIC_HOST/PORT advertise it.
+              # address, as KAMAILIO_PUBLIC_HOST/PORT advertise it. The VIP
+              # go-live (deploy/kuvryn-sync/kamailio-vip) points it at the VIP.
               value: 192.168.10.101:30508
             - name: HELLO_PROV_TRUSTED_PROXIES
               # kw's pod CIDR: ingress-nginx's X-Forwarded-Proto/-For are
@@ -1841,7 +2138,7 @@ spec:
     spec:
       containers:
         - name: hello-ui
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-ui:sha-f64d2393f385ac1c3e18299c8ae868f629103853
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-ui:sha-67b59954f4260d8ea1c4b6171cb495904fbebb50
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.

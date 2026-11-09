@@ -1,6 +1,6 @@
 import { CATALOGUE, GRAPH } from "./flow/fixtures";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { apiError, json, mockApi, noContent, renderApp } from "../test/api";
 
 const NOW = "2026-10-25T10:00:00Z";
@@ -20,6 +20,12 @@ const LIST = {
 const me = (role: string) => ({
   "GET /api/v1/auth/me": () => json({ username: "u", role }),
 });
+
+// Creating a canvas opens the lazily loaded canvas page; warm that import once
+// so a cold transform on a loaded runner is not charged to findBy's 5 s.
+beforeAll(async () => {
+  await import("./flow/FlowCanvasPage");
+}, 60000);
 
 describe("Call flows page", () => {
   it("is in the Call flow section of the navigation", async () => {

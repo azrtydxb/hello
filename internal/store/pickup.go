@@ -82,12 +82,12 @@ func listPickupGroups(ctx context.Context, q querier, where string, args ...any)
 
 // ListPickupGroups returns every pickup group.
 func (s *Store) ListPickupGroups(ctx context.Context) ([]PickupGroup, error) {
-	return listPickupGroups(ctx, s.db, "")
+	return listPickupGroups(ctx, s.q(ctx), "")
 }
 
 // GetPickupGroup returns one pickup group.
 func (s *Store) GetPickupGroup(ctx context.Context, id int64) (PickupGroup, error) {
-	gs, err := listPickupGroups(ctx, s.db, `WHERE g.id = $1`, id)
+	gs, err := listPickupGroups(ctx, s.q(ctx), `WHERE g.id = $1`, id)
 	if err != nil {
 		return PickupGroup{}, err
 	}
@@ -99,6 +99,9 @@ func (s *Store) GetPickupGroup(ctx context.Context, id int64) (PickupGroup, erro
 
 func writePickupMembers(ctx context.Context, tx *sql.Tx, id int64, members []int64) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM pickup_group_members WHERE group_id = $1`, id); err != nil {
+		return err
+	}
+	if err := checkNoDoor(ctx, tx, "members", members); err != nil {
 		return err
 	}
 	for _, ext := range members {

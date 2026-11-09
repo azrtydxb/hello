@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -60,7 +61,7 @@ func (s *server) getFlowGraph(w http.ResponseWriter, r *http.Request) {
 			s.internal(w, "read config revision", err)
 			return
 		}
-		in, err := s.flowInput(r, opt.Devices)
+		in, err := s.flowInput(r.Context(), opt.Devices)
 		if err != nil {
 			s.internal(w, "read configuration for the flow graph", err)
 			return
@@ -94,8 +95,8 @@ func (s *server) getFlowGraph(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusServiceUnavailable, "config_changing", "the configuration kept changing; try again")
 }
 
-func (s *server) flowInput(r *http.Request, devices bool) (flow.Input, error) {
-	ctx, st := r.Context(), s.Store
+func (s *server) flowInput(ctx context.Context, devices bool) (flow.Input, error) {
+	st := s.Store
 	var in flow.Input
 	var err error
 	if in.Trunks, err = st.ListTrunks(ctx); err != nil {
