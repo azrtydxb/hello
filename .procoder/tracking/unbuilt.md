@@ -119,7 +119,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | Item                                          | Status                         |
 | --------------------------------------------- | ------------------------------ |
 | Backup and restore                            | wip (#219, A2)                 |
-| Follow-me                                     | wip (#PR)                      |
+| Follow-me                                     | wip (#272)                     |
 | Blocklist, anonymous reject, country limits   | wip (#210, A1)                 |
 | Queue callback                                | wip (#237, B4)                 |
 | 2FA                                           | done (#209)                    |
