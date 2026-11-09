@@ -1350,3 +1350,13 @@ Implementation notes (template route, no migration):
 - Start: run waves 0-6 in order, three or four builder agents in parallel plus the merge captain (recommended)
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
+
+## IVR homed-callee data race (ivrHomeCallee vs release)
+
+- Root cause: `homedCall.legs` had no lock of its own. `ivrHomeCallee`
+  (IVR dial-out goroutine, started by takeover) wrote `legs[1]` under
+  `call.mu`, while `call.release` (BYE handler goroutine) iterated `hom.legs`
+  after dropping `call.mu`; `haHomedState` and `homedCall.leg` read it with no
+  lock either. Seen in `TestIVRHuntAnswerAtMemberTimeout` under `-race`.
+- Fix: `homedCall` carries a leaf mutex; all access goes through `leg`,
+  `pair` and `setCallee`. Regression test: `homed_race_test.go`.
