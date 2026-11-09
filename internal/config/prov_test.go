@@ -301,3 +301,29 @@ func selfSigned(t *testing.T) (certPEM, keyPEM []byte) {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
 		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: kd})
 }
+
+// TestLoadProvSIPTLS fails if SIP over TLS is on without being asked for,
+// the model list does not default to Grandstream WP phones, "none" does not
+// empty it, or a malformed TLS registrar or model entry is accepted.
+func TestLoadProvSIPTLS(t *testing.T) {
+	c, err := LoadControl(provOn(nil))
+	if err != nil || c.Prov.SIPTLSServer != "" || len(c.Prov.SIPTLSModels) != 1 || c.Prov.SIPTLSModels[0] != "grandstream:WP" {
+		t.Fatalf("defaults = %q %q, %v", c.Prov.SIPTLSServer, c.Prov.SIPTLSModels, err)
+	}
+	c, err = LoadControl(provOn(map[string]string{
+		"HELLO_PROV_SIP_TLS_SERVER": "192.168.10.101:30509", "HELLO_PROV_SIP_TLS_MODELS": "grandstream:WP8, yealink",
+	}))
+	if err != nil || c.Prov.SIPTLSServer != "192.168.10.101:30509" || len(c.Prov.SIPTLSModels) != 2 || c.Prov.SIPTLSModels[1] != "yealink" {
+		t.Fatalf("tls = %q %q, %v", c.Prov.SIPTLSServer, c.Prov.SIPTLSModels, err)
+	}
+	c, err = LoadControl(provOn(map[string]string{"HELLO_PROV_SIP_TLS_MODELS": "none"}))
+	if err != nil || len(c.Prov.SIPTLSModels) != 0 {
+		t.Fatalf("none = %q, %v", c.Prov.SIPTLSModels, err)
+	}
+	for _, bad := range []string{"sip.hello.test", "0.0.0.0:5061", ":5061", "h:0", "h:70000"} {
+		wantProvErr(t, provOn(map[string]string{"HELLO_PROV_SIP_TLS_SERVER": bad}), "HELLO_PROV_SIP_TLS_SERVER", bad)
+	}
+	for _, bad := range []string{"Grandstream", "grand/stream", "yealink:"} {
+		wantProvErr(t, provOn(map[string]string{"HELLO_PROV_SIP_TLS_MODELS": bad}), "HELLO_PROV_SIP_TLS_MODELS", bad)
+	}
+}
