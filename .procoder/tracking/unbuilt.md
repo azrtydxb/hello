@@ -19,7 +19,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 18  | vCard phonebook slot (S-31), partial                                          | todo                   |
 | 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)    | wip (parity-firmware)  |
 | 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                      | todo                   |
-| 21  | Multiple lines and account sharing (S-10, S-11)                               | todo                   |
+| 21  | Multiple lines and account sharing (S-10, S-11)                               | wip (#270)             |
 | 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial      | todo                   |
 | 23  | SIP over TLS and sips (S-14)                                                  | done (#202)            |
 | 24  | SRTP SDES (S-15)                                                              | todo (after 23)        |
