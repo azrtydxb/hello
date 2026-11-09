@@ -41,7 +41,8 @@ func TestSettingOverridesAPI(t *testing.T) {
 		{"key": "static.network.qos.signaltos", "value": "12"},
 		{"key": "features.pin", "value": "hunter2-pin", "secret": true},
 	}}))
-	if len(got) != 2 || got[1]["value"] != "********" || got[1]["secret"] != true {
+	// By key: features.pin (the secret) before static.network.qos.signaltos.
+	if len(got) != 2 || got[0]["key"] != "features.pin" || got[0]["value"] != "********" || got[0]["secret"] != true {
 		t.Fatalf("phone overrides = %v", got)
 	}
 
