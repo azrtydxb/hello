@@ -22,7 +22,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 21  | Multiple lines and account sharing (S-10, S-11)                               | todo                   |
 | 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial      | todo                   |
 | 23  | SIP over TLS and sips (S-14)                                                  | done (#202)            |
-| 24  | SRTP SDES (S-15)                                                              | wip (#PR)              |
+| 24  | SRTP SDES (S-15)                                                              | wip (#266)             |
 | 25  | DTLS-SRTP and ICE-lite (S-16)                                                 | todo (after 24)        |
 | 26  | PRACK/100rel, anonymous outbound (Privacy), partial                           | todo                   |
 | 27  | Provisioning hardening (S-22, S-32), TR-069 off etc. (explicitly in spec)     | todo                   |
