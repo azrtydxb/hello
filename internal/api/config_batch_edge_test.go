@@ -30,6 +30,8 @@ var edgeTargets = map[string]string{
 	"external": "+97142000001", "sip_uri": "sip:agent@ai.example",
 	// The dial-by-name directory names no stored object: its target is empty.
 	"directory": "",
+	// A fax destination is created with the fixtures.
+	"fax": "dest-fax",
 }
 
 func newEdgeFixtures(t *testing.T) *edgeFixtures {
@@ -55,6 +57,7 @@ func newEdgeFixtures(t *testing.T) *edgeFixtures {
 	for _, n := range []string{"dest-queue", "subj-queue"} {
 		create(n, "/api/v1/queues", map[string]any{"name": n})
 	}
+	create("dest-fax", "/api/v1/fax-destinations", map[string]any{"name": "dest-fax", "extension": "101"})
 	create("schedule", "/api/v1/schedules", map[string]any{"name": "office"})
 	f.schedule = f.id["schedule"]
 	for _, n := range []string{"dest-tc", "subj-tc"} {

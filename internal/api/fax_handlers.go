@@ -298,9 +298,11 @@ const maxFaxJSONPDF = 700 << 10
 // readFaxUpload reads the multipart form of POST /faxes: file (the PDF), to
 // and callerId.
 func readFaxUpload(w http.ResponseWriter, r *http.Request) (pdf []byte, to, callerID string, ok bool) {
-	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-		// The form an agent uses: its requests are at most 1 MiB, so up to
-		// 700 KiB of PDF.
+	ct := r.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "multipart/") {
+		// Anything that is not multipart is the JSON form an agent uses (the
+		// other routes ignore the content type too): its requests are at most
+		// 1 MiB, so up to 700 KiB of PDF.
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		var in struct {
 			To        string `json:"to"`
@@ -327,10 +329,6 @@ func readFaxUpload(w http.ResponseWriter, r *http.Request) (pdf []byte, to, call
 		return in.PDFBase64, strings.TrimSpace(in.To), strings.TrimSpace(in.CallerID), true
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxFaxForm)
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
-		badRequest(w, "upload as multipart form data with a file part, to and optionally callerId, or as JSON with to, callerId and pdfBase64")
-		return
-	}
 	mr, err := r.MultipartReader()
 	if err != nil {
 		badRequest(w, "invalid multipart body")

@@ -349,8 +349,9 @@ func TestFaxQueueAndRetention(t *testing.T) {
 	_ = objs.Put(ctx, "fax/2026/x.pdf", []byte("x"))
 	old, _ := fs.BeginReceive(ctx, fax.Receive{PeerNumber: "+4155"})
 	_ = fs.Finish(ctx, old, fax.Finish{Status: fax.StatusReceived, ObjectKey: "fax/2026/x.pdf"})
-	live, _ := fs.BeginReceive(ctx, fax.Receive{PeerNumber: "+4166"}) // still receiving
-	for _, i := range []int64{old, live, id} {
+	// A fax still being received stays recent, and so is never purged.
+	live, _ := fs.BeginReceive(ctx, fax.Receive{PeerNumber: "+4166"})
+	for _, i := range []int64{old, id} {
 		if _, err := e.db.ExecContext(ctx, `UPDATE faxes SET created_at = now() - interval '100 days' WHERE id = $1`, i); err != nil {
 			t.Fatal(err)
 		}
