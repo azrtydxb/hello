@@ -423,6 +423,24 @@ func (c *call) logCodec(why, leg, mode, app string, a media.AudioSDP) {
 	c.addTrace(text)
 }
 
+// legCodecNames is the codec each leg of the call last settled on, as
+// "name/clock rate" for the CDR ("PCMU/8000"); empty for a leg whose codec was
+// never logged (a call that was not answered, or the far leg of media Hello
+// ends itself). It reads what logCodec recorded, so the CDR and the
+// "call codec" log line never disagree.
+func (c *call) legCodecNames() (caller, callee string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	name := func(leg string) string {
+		key := c.codecSeen[leg] // "name/clock/pt"
+		if i := strings.LastIndexByte(key, '/'); i > 0 {
+			return key[:i]
+		}
+		return ""
+	}
+	return name(legCaller), name(legCallee)
+}
+
 // logDirectCodec logs the codec of an SDP answer that passes between the
 // two phones untouched (a direct call): both legs speak it.
 func (c *call) logDirectCodec(why string, answer []byte) {

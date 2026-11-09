@@ -873,6 +873,18 @@ another group) is lifted: the ring state machine can open a new ring stage.
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
 
+## Negotiated codec per leg in the CDR (2026-10-26)
+
+`cdrs` gets `caller_codec` and `callee_codec` (migration 00055, nullable text,
+`name/clock rate` such as `PCMU/8000`, `G722/8000`, `opus/48000`), fed by the
+same `logCodec` bookkeeping as the `call codec` log line, so the two never
+disagree. Choices: the value is the last codec the leg settled on (a re-INVITE
+that switches codec replaces it); payload type and ptime stay in the log only;
+a leg that never had a codec (unanswered call, the far side of media Hello ends
+itself, rows from before the migration) is NULL, shown as a dash. The list and
+detail API return `callerCodec`/`calleeCodec` (null when absent), the CSV
+export appends `caller_codec` and `callee_codec`, and Call history has a Codec
+column ("a" when both legs agree, "a → b" when they differ).
 ## Session timers on moved dialogs and trunk legs (S-9, follow-up 9b)
 
 - Parked call: the call keeps one dialog, its party's (`link.selfSide`). Its
