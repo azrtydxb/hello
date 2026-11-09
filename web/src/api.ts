@@ -386,7 +386,8 @@ export interface InboundRouteFields {
     | "voicemail"
     | "announcement"
     | "paging"
-    | "conference";
+    | "conference"
+    | "directory";
   destination: string;
   enabled: boolean;
   /** Music on hold class of the calls this route delivers; null = the default. */
@@ -1148,6 +1149,7 @@ export type FailureKind =
   | "ivr"
   | "queue"
   | "time_condition"
+  | "directory"
   | "extension"
   | "ring_group";
 
@@ -1159,6 +1161,7 @@ export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   ivr: "An IVR menu",
   queue: "A call queue",
   time_condition: "A time condition",
+  directory: "The dial-by-name directory",
   extension: "An extension",
   ring_group: "Another ring group",
 };
@@ -1427,9 +1430,14 @@ export const IVR_DESTINATION_KINDS = [
   "external",
   "queue",
   "time_condition",
+  "directory",
 ] as const;
 
 export type IvrDestinationKind = (typeof IVR_DESTINATION_KINDS)[number];
+
+/** Destination kinds that name nothing: the target stays empty. */
+export const hasNoTarget = (kind: string): boolean =>
+  kind === "hangup" || kind === "directory";
 
 export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   hangup: "Hang up",
@@ -1442,6 +1450,7 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   external: "External number",
   queue: "Call queue",
   time_condition: "Time condition",
+  directory: "Dial-by-name directory",
 };
 
 /**
@@ -1474,6 +1483,8 @@ export interface IvrMenuFields {
   interDigitTimeout: number;
   maxRetries: number;
   allowDirectDial: boolean;
+  /** Language of the menu's spoken prompts (en, nl); "" inherits the deployment language. */
+  promptLanguage: string;
   timeout: IvrDestination;
   invalid: IvrDestination;
   options: IvrOption[];
@@ -1782,6 +1793,7 @@ export const FEATURE_CODE_ACTIONS = [
   "pickup_directed",
   "time_condition",
   "tc_override",
+  "directory",
 ] as const;
 
 /** One of FEATURE_CODE_ACTIONS: what dialling a feature code performs. */
@@ -1812,6 +1824,7 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   pickup_directed: "Pick up an extension's call",
   time_condition: "Route to a time condition",
   tc_override: "Day/night toggle (code plus toggle number)",
+  directory: "Dial-by-name directory",
 };
 
 /** GET /api/v1/feature-codes. */

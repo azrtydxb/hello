@@ -48,6 +48,8 @@ const destText = (d: TcDestination): string => {
   switch (d.kind) {
     case "hangup":
       return IVR_DESTINATION_LABEL.hangup;
+    case "directory":
+      return IVR_DESTINATION_LABEL.directory;
     case "announcement":
       return `Announcement ${d.target}, then ${
         d.thenVoicemail ? `voicemail ${d.thenVoicemail}` : "hang up"
