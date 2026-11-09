@@ -227,6 +227,8 @@ type Snapshot struct {
 	// ringTags are the ring tags and rules (migration 00050); nil means the
 	// built-in tags and no rules.
 	ringTags *ringtag.Table
+	// followMe are the follow-me profiles by extension number (migration 00052).
+	followMe map[string]FollowMe
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState
 }
@@ -638,9 +640,13 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	fm, err := loadFollowMe(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	return New(rev, domain, devices).WithExtensions(bare...).WithQueues(queues).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithRingTags(rtags), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithRingTags(rtags).WithFollowMe(fm), nil
 }
 
 // loadMOHClasses reads the music on hold classes with their playlists

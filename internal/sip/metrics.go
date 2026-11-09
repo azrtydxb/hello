@@ -101,6 +101,10 @@ type Metrics struct {
 	// CallbackTotal counts queue callback outcomes: requested, coalesced,
 	// full, dialled, connected, no_answer, busy, failed, abandoned, no_agent.
 	CallbackTotal *prometheus.CounterVec // result
+	// FollowMeLegs counts follow-me legs by target kind (external, extension,
+	// ring_group, own) and result (answered, declined, busy, no_answer,
+	// failed, skipped, cancelled).
+	FollowMeLegs *prometheus.CounterVec // kind, result
 	// TimeConditionTotal counts time condition decisions: open, closed,
 	// holiday, forced_open, forced_closed, loop, missing and toggled.
 	TimeConditionTotal *prometheus.CounterVec // result
@@ -146,6 +150,8 @@ const (
 	// ForwardGroupFailover is a ring group handing the call to an extension
 	// or another group when nobody answered.
 	ForwardGroupFailover = "group_failover"
+	// ForwardFollowMe is a call that rang an extension's follow-me profile.
+	ForwardFollowMe = "follow_me"
 )
 
 // Trunk attempt results for hello_trunk_calls_total.
@@ -282,6 +288,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.CallbackTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_callback_total", Help: "Queue callback outcomes (requested, coalesced, full, dialled, connected, no_answer, busy, failed, abandoned, no_agent).",
 	}, []string{"result"})
+	m.FollowMeLegs = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_follow_me_legs_total", Help: "Follow-me legs by target kind (own, extension, ring_group, external) and result (answered, declined, busy, no_answer, failed, skipped, cancelled).",
+	}, []string{"kind", "result"})
 	m.TimeConditionTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_time_condition_total", Help: "Time condition decisions (open, closed, holiday, forced_open, forced_closed, loop, missing, toggled).",
 	}, []string{"result"})
@@ -304,7 +313,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags,
 		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.DirectoryTotal, m.TimeConditionTotal,
-		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal,
+		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal, m.FollowMeLegs,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	m.Conf = newConfMetrics(reg)
 	m.Session = newSessionMetrics(reg)

@@ -280,6 +280,13 @@ type call struct {
 	ringedExts  []string
 	answeredExt string
 	evSubjects  []string
+
+	// Follow-me (followme.go): the CDR records of the legs rung, the
+	// "press 1" check in progress and the lock that lets one leg at a time
+	// be asked. fmRecs and fmScr are guarded by mu.
+	fmRecs     []*fmRec
+	fmScr      *fmScreening
+	fmScreenMu sync.Mutex
 }
 
 // callStages is the forwarding/DND context of the extension a call is
@@ -339,6 +346,16 @@ type leg struct {
 	// ident presents other identities than the call's: a callback is placed
 	// by the queue, to the caller's own number (queue_callback.go).
 	ident *legIdent
+	// screen, when set, runs on an answered leg before it may claim the call
+	// (a follow-me external target asked to press 1). It returns "" to accept
+	// or the leg's result (declined, cancelled, failed). fmSlot is the trunk
+	// slot member the leg took (guarded by c.mu) and fmResult the result a
+	// screening gave.
+	screen   func(*leg) string
+	fmSlot   string
+	fmResult string
+	// fmRec is the follow-me record of this leg, nil for any other leg.
+	fmRec *fmRec
 }
 
 // legIdent overrides the user parts of a fork's From and To.
@@ -1332,6 +1349,7 @@ func (c *call) record(status int, side, reason, result string) {
 	c.mu.Lock()
 	r.QueueLegs = append([]cdr.QueueLeg(nil), c.qLegs...)
 	c.mu.Unlock()
+	r.FollowMeLegs = c.fmCDRLegs()
 	r.Events = c.endEvents(result, reason, end, answer, r.DurationMs, r.BillableMs)
 	c.s.m.Calls.WithLabelValues(result).Inc()
 	if c.groupName != "" {
@@ -1488,6 +1506,21 @@ func (l *leg) drive(report func(legEvent)) {
 	}
 	err = dcs.WaitAnswer(l.ctx, opts)
 	if res := dcs.InviteResponse; err == nil || (res != nil && res.IsSuccess()) {
+		if l.screen != nil {
+			if res := l.screen(l); res != "" {
+				// Not accepted (or no longer wanted): hung up before any bridge.
+				l.c.mu.Lock()
+				l.fmResult = res
+				l.c.mu.Unlock()
+				l.bye()
+				code := sip.StatusGlobalDecline
+				if res == fmCancelled {
+					code = sip.StatusRequestTerminated
+				}
+				report(legEvent{leg: l, kind: evFailed, code: code, reason: res})
+				return
+			}
+		}
 		if l.c.claim(l) {
 			report(legEvent{leg: l, kind: evAnswered})
 			return
@@ -1503,6 +1536,13 @@ func (l *leg) drive(report func(legEvent)) {
 		code, reason = de.Res.StatusCode, de.Res.Reason
 	case errors.Is(err, sip.ErrTransactionTimeout):
 		code = sip.StatusRequestTimeout
+	}
+	if l.fmRec != nil {
+		l.c.mu.Lock()
+		if l.fmResult == "" {
+			l.fmResult = fmLegResult(code, reason)
+		}
+		l.c.mu.Unlock()
 	}
 	report(legEvent{leg: l, kind: evFailed, code: code, reason: reason})
 }

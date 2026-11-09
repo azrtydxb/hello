@@ -209,12 +209,31 @@ export interface PageLegResult {
   result: "answered" | "busy" | "dnd" | "no_answer" | "no_registration";
 }
 
+/** One follow-me leg of a call (cdr_legs, role follow_me). */
+export interface FollowMeLegResult {
+  kind: "own" | "extension" | "ring_group" | "external";
+  /** The extension that rang, or the external number dialled. */
+  extension: string;
+  /** The trunk an external leg left on; "" otherwise. */
+  trunk: string;
+  result:
+    | "answered"
+    | "declined"
+    | "busy"
+    | "no_answer"
+    | "failed"
+    | "skipped"
+    | "cancelled";
+}
+
 /** GET /api/v1/cdrs/{id}: the CDR plus its routing trace. */
 export interface CdrDetail extends Cdr {
   /** call, page or intercom. */
   kind?: "call" | "page" | "intercom" | "conference";
   /** A page's outcome per member, in the order they were paged. */
   pageLegs?: PageLegResult[];
+  /** What each follow-me leg did, in the order they rang. */
+  followMeLegs?: FollowMeLegResult[];
   trace: TraceStep[];
   /** For failed calls, the reason of the last trace step. */
   explanation?: string;
@@ -1433,6 +1452,8 @@ export const IVR_DESTINATION_KINDS = [
   "queue",
   "time_condition",
   "directory",
+  "follow_me_on",
+  "follow_me_off",
 ] as const;
 
 export type IvrDestinationKind = (typeof IVR_DESTINATION_KINDS)[number];
@@ -1453,6 +1474,8 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   queue: "Call queue",
   time_condition: "Time condition",
   directory: "Dial-by-name directory",
+  follow_me_on: "Follow-me on",
+  follow_me_off: "Follow-me off",
 };
 
 /**

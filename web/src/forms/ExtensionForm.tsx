@@ -11,6 +11,7 @@ import {
   type Id,
 } from "../api";
 import { bindingsOf, type LiveDirectory } from "../api/directory";
+import { getFollowMe, putFollowMe } from "../api/followme";
 import {
   Alert,
   Button,
@@ -24,6 +25,7 @@ import {
 import { mapFieldErrors } from "../forms";
 import "../pages/directory/directory.css";
 import { Can } from "../role";
+import { FollowMeEditor } from "../pages/followme/FollowMeEditor";
 import { MOHSelect } from "../pages/media/MohSelect";
 
 export const NUMBER_HINT = "2 to 10 digits.";
@@ -477,6 +479,13 @@ export function ExtensionDrawer({
               onChange={set("noAnswerRings")}
             />
           </div>
+
+          <FollowMeEditor
+            id={ext.id}
+            ownNumber={ext.number}
+            load={getFollowMe}
+            save={putFollowMe}
+          />
 
           <section
             className="dir-section dir-section--tight"

@@ -1350,3 +1350,71 @@ Implementation notes (template route, no migration):
 - Start: run waves 0-6 in order, three or four builder agents in parallel plus the merge captain (recommended)
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
+
+## Follow-me (pbx-gaps B1: S-5, S-6) (2026-11-09)
+
+- **Feature codes are `*76` (on) and `*77` (off), not `*74` and `*75`.** Those
+  are the default park and park-retrieve codes (migration 00032); the dial-space
+  guard refuses a code that equals or extends another, so the spec's codes could
+  never be seeded. The actions are `follow_me_on` and `follow_me_off`, so an
+  installation can move them; migration 00052 seeds them on existing installs
+  when free, `DefaultFeatureCodes` on fresh ones. The spec text is corrected.
+  A code dialled by an extension with no profile that has a target answers 404
+  and changes nothing.
+- **Migration 00052** (highest on main was 00050): `follow_me`,
+  `follow_me_targets`, the two feature-code actions, and `cdr_legs`. No branch
+  has `cdr_legs` yet (A4 landed as `cdrs.codec` only), so 00052 creates it as the
+  spec's S-22 shape (`CREATE TABLE IF NOT EXISTS`) plus two additive columns,
+  `result` and `target_kind`. Follow-me writes the role `follow_me`; the codec
+  columns stay NULL for it. Down removes the follow-me rows and the two columns,
+  and leaves the table. The migrate test counts are 39/36/37.
+- **Where it runs.** In `ringExtension` (`internal/sip/callflow.go`) after
+  forward-always and before the DND, busy, unreachable and no-answer handling,
+  and in `ivrRingExtension`, the same step for an IVR option that dials an
+  extension. The ring is its own loop (`followMeRun`) because the generic
+  setup loop cannot start legs on a schedule, but it reuses the legs, the
+  event channel, the trunk slot and outbound decision of a forwarded external
+  number, the ring group members, and `exhausted` for the no-answer forward and
+  voicemail, so an unanswered follow-me ends exactly where a plain ring ends. It
+  is not applied to ring group members or to a group or queue failing over to
+  an extension (they ring phones directly), reported in docs/follow-me.md.
+- **Strategies.** Simultaneous rings own phones and all targets at once.
+  Sequential keeps the own phones ringing and starts the targets in order; a
+  target's `delay_seconds` is how long it rings before the next starts, the last
+  one rings to the timeout, 0 on a non-last target means until it fails. In an
+  IVR dial-out the ring primitive cannot stop one leg, so earlier targets keep
+  ringing there (documented).
+- **DND.** `dnd_blocks` (default on) skips follow-me and the ordinary DND
+  handling runs. With it off, DND only silences the own phones.
+- **Targets.** An extension target rings that extension's phones directly (its
+  DND skips it; its own forwarding does not apply), a ring group target rings
+  the eligible members at once, and the first usable trunk of an external
+  target's route carries it. A number that routes to one of our own extensions is
+  treated as that extension. Loops: the extension itself or one in the forward
+  chain is skipped. A leg that goes through a carrier and comes back is a new call
+  and is not detectable; documented as the carrier's hop limit.
+- **Press 1.** The answered external leg is held before it may claim the call
+  (`leg.screen`, run by `fmScreen`): the relay's callee leg is aimed at it, both
+  directions are muted, the prompt `followme.accept` (new key, English and
+  Dutch) is played with the call's Speaker (a beep without one), and the digit
+  `1` (RFC 2833 on the relay, or INFO) connects it; 10 s after the prompt without
+  the digit drops it. One leg is asked at a time. A call with no SDP offer has no
+  media anchor, so its external targets are skipped with a trace line. The Dutch
+  wording needs a native-speaker review before merge (S-21).
+- **CDR.** `cdrs` is unchanged; each leg is a `cdr_legs` row (role `follow_me`,
+  `target_kind`, extension or number, trunk, result). `GET /api/v1/cdrs/{id}`
+  gains `followMeLegs`. The insert statement gains one CTE and one argument. When
+  an external leg wins the call's trunk, route and direction are that leg's.
+- **API.** GET is read-scope/viewer (the route table test ties the read scope to
+  the viewer role; the spec said operator), PUT is write/operator, and the same
+  pair under `/me/extensions/{id}` for a user. A save names the fields it changes;
+  `targets` replaces the list; enabling needs a target; the store re-checks
+  self-target and existence, and refuses deleting or renumbering an extension or
+  group a profile names (409).
+- **HA.** The profile is in the snapshot every node loads, a change goes through
+  `configChange` (revision bump and NOTIFY), and an answered follow-me call is
+  replicated like any answered call, including one an external target answered.
+  A ringing call and a leg being asked to press 1 are not replicated, as for every
+  ringing call.
+- **Tests that need real hardware or a carrier** stay on the lab list (item 4 of
+  the spec): a mobile on a real carrier with press 1.

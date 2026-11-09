@@ -44,6 +44,10 @@ const (
 	// call-waiting flag (migration 00026, spec S-18).
 	ActionCallWaitingOn  = "call_waiting_on"
 	ActionCallWaitingOff = "call_waiting_off"
+	// ActionFollowMeOn and ActionFollowMeOff turn the dialling extension's
+	// follow-me profile on or off (migration 00052, pbx-gaps D4).
+	ActionFollowMeOn  = "follow_me_on"
+	ActionFollowMeOff = "follow_me_off"
 )
 
 // handleParkFeatureInvite serves the park, retrieve and pickup codes dialled
@@ -74,6 +78,8 @@ type ExtUpdate struct {
 	ForwardBusy     *string
 	ForwardNoAnswer *string
 	CallWaiting     *bool
+	// FollowMe turns the extension's follow-me profile on or off.
+	FollowMe *bool
 	// NoAnswerRings is the no-answer ring count a phone's feature key set
 	// (as-feature-event ringCount); 0 means the system default.
 	NoAnswerRings *int
@@ -193,6 +199,20 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 		c.announcementDestination(arg)
 		return true
 	}
+	if fc.Action == ActionFollowMeOn || fc.Action == ActionFollowMeOff {
+		// A code dialled before the profile has a target changes nothing: the
+		// phone hears a refusal rather than a confirmation (pbx-gaps S-5).
+		snap := s.deps.Snapshots.Current()
+		var fm snapshot.FollowMe
+		if snap != nil {
+			fm, _ = snap.FollowMe(c.callerNum)
+		}
+		if len(fm.Targets) == 0 {
+			s.respond(tx, c.inv, sip.StatusNotFound, "No Follow-me Profile")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "extension "+c.callerNum+" has no follow-me profile with a target", ResultNotFound)
+			return true
+		}
+	}
 	upd, ok := featureUpdate(fc, arg, c.callerNum)
 	if !ok {
 		s.respond(tx, c.inv, sip.StatusBadRequest, "Bad Extension")
@@ -238,6 +258,12 @@ func featureUpdate(fc snapshot.FeatureCode, arg, ext string) (ExtUpdate, bool) {
 	case ActionCallWaitingOff:
 		off := false
 		upd.CallWaiting = &off
+	case ActionFollowMeOn:
+		on := true
+		upd.FollowMe = &on
+	case ActionFollowMeOff:
+		off := false
+		upd.FollowMe = &off
 	case ActionForwardAlways:
 		if fc.Argument == "clear" {
 			empty := ""
@@ -288,6 +314,8 @@ func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 	if h := req.ContentType(); h != nil && isDTMFInfo(h.Value()) {
 		if d, ok := dtmfDigit(req.Body()); ok {
 			switch {
+			case ref.leg != nil && ref.c.fmDigit(ref.leg, d):
+				// A follow-me target's answer to "press 1".
 			case ref.leg == nil && ref.c.confDigit(d):
 				// A conference participant's key press is a room control.
 			case ref.leg == nil && ref.c.confFwdActive():

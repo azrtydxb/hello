@@ -1096,33 +1096,54 @@ func (c *call) ivrRingExtension(ctx context.Context, snap *snapshot.Snapshot, ex
 		}
 		return ivrResult{kind: ivrFailed, why: "extension " + ext + " is " + reason}
 	}
-	if e.DND {
+	// Follow-me rings at the same step as for a direct call: after
+	// forward-always, before the no-answer forward and voicemail below.
+	var (
+		forks   []ivrFork
+		ringFor = c.s.cfg.RingTimeout
+		fmRung  bool
+	)
+	if fm, ok := snap.FollowMe(ext); ok && fm.Active() {
+		if apply, why := c.fmApplies(e, fm); !apply {
+			if why != "" {
+				c.addTrace("Follow-me of extension " + ext + " skipped: " + why)
+			}
+		} else if forks, ringFor = c.ivrFollowMeForks(snap, ext, e, fm, visited[:len(visited)-1]); len(forks) > 0 {
+			fmRung = true
+		}
+	}
+	if !fmRung && e.DND {
 		c.addTrace(fmt.Sprintf("Extension %s is DND", ext))
 		if c.voicemailConfigured(e) {
 			return voicemail("dnd")
 		}
 		return ivrResult{kind: ivrFailed, why: "extension " + ext + " is DND"}
 	}
-	targets, err := c.extensionBindings(snap, ext)
-	if err != nil {
-		return ivrResult{kind: ivrFailed, why: "live state unavailable"}
-	}
-	if len(targets) == 0 {
-		switch {
-		case e.ForwardNoAnswer != "":
-			return c.ivrFollow(ctx, snap, ext, e.ForwardNoAnswer, visited)
-		case c.voicemailConfigured(e):
-			return voicemail("unreachable")
+	if !fmRung {
+		targets, err := c.extensionBindings(snap, ext)
+		if err != nil {
+			return ivrResult{kind: ivrFailed, why: "live state unavailable"}
 		}
-		return ivrResult{kind: ivrFailed, why: "no registered device for extension " + ext}
-	}
-	forks := make([]ivrFork, len(targets))
-	for i, b := range targets {
-		b := b
-		forks[i] = ivrFork{mk: func(stage int) *leg { return c.addLeg(&leg{binding: b, stage: stage}) }}
+		if len(targets) == 0 {
+			switch {
+			case e.ForwardNoAnswer != "":
+				return c.ivrFollow(ctx, snap, ext, e.ForwardNoAnswer, visited)
+			case c.voicemailConfigured(e):
+				return voicemail("unreachable")
+			}
+			return ivrResult{kind: ivrFailed, why: "no registered device for extension " + ext}
+		}
+		forks = make([]ivrFork, len(targets))
+		for i, b := range targets {
+			b := b
+			forks[i] = ivrFork{mk: func(stage int) *leg { return c.addLeg(&leg{binding: b, stage: stage}) }}
+		}
 	}
 	c.addTrace("IVR: ringing extension " + ext)
-	w, busyAll := c.ivrRing(ctx, forks, false, c.s.cfg.RingTimeout)
+	w, busyAll := c.ivrRing(ctx, forks, false, ringFor)
+	if fmRung {
+		c.fmIvrDone(w)
+	}
 	if ctx.Err() != nil {
 		return ivrResult{kind: ivrFinished}
 	}
