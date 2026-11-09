@@ -55,6 +55,9 @@ func TestLocationsAPI(t *testing.T) {
 			t.Errorf("%s: status %d, want 400", name, r.code)
 		}
 	}
+	if got := c.must(http.StatusOK, "GET", hqPath, nil).json(t); got["id"] != hq["id"] || got["street"] != "Damrak" {
+		t.Fatalf("GET site = %v", got)
+	}
 	c.must(http.StatusNotFound, "GET", "/api/v1/locations/999999", nil)
 	c.must(http.StatusNotFound, "GET", "/api/v1/locations/abc", nil)
 
