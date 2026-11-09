@@ -250,6 +250,7 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	relay.SetCodecs(legCallee, offered.Codecs, offered.DTMFPayloadType)
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
+	c.startVideo(offer)
 	c.mu.Lock()
 	c.anchored = true
 	c.anchorReason = reason
@@ -342,7 +343,7 @@ func (c *call) anchoredAnswerAs(app string, offer, calleeAnswer media.AudioSDP) 
 		app = "hello"
 	}
 	c.applyNegotiated(ans, "answer", app)
-	return ans.Build(c.anchorHost, r.LegPort(legCaller), "sendrecv")
+	return c.withVideo(ans.Build(c.anchorHost, r.LegPort(legCaller), "sendrecv"), legCaller)
 }
 
 // applyNegotiated records the codecs the call settled on: the relay's two
@@ -493,7 +494,7 @@ func (c *call) anchoredOfferB(offer media.AudioSDP, allow []string) []byte {
 	if r == nil {
 		return nil
 	}
-	return filteredOffer(offer, allow).Build(c.anchorHost, r.LegPort(legCallee), "sendrecv")
+	return c.withVideo(filteredOffer(offer, allow).Build(c.anchorHost, r.LegPort(legCallee), "sendrecv"), legCallee)
 }
 
 // filteredOffer is offer restricted to allow, or to every supported codec
@@ -571,6 +572,7 @@ func (c *call) closeMedia() {
 	c.anchored = false
 	c.mu.Unlock()
 	c.confLeave()
+	c.closeVideo()
 	if rec != nil {
 		if r, by := rec.stop(); r != nil {
 			c.storeRecording(r, by)
@@ -921,13 +923,14 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	off = c.midCallOffer(off)
 	ansDir := mirrorDirection(dir)
 	ans := off.Build(c.anchorHost, c.legPortFor(fromCaller), ansDir)
+	ans = c.withVideo(ans, sideOf(fromCaller))
 	res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", ans)
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.HeaderClone(&s.contact))
 	s.send(tx, res)
 	// The peer gets our SDP in the same direction (a held side hears
 	// silence because the held side stopped sending).
-	peer := off.Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir)
+	peer := c.withVideo(off.Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir), sideOf(!fromCaller))
 	c.mu.Lock()
 	w := c.winner
 	c.mu.Unlock()
@@ -1178,4 +1181,12 @@ func handOverLeg(relay *media.Relay, leg string, target *net.UDPAddr, source str
 		relay.ResetSources(leg)
 	}
 	relay.SetTarget(leg, target)
+}
+
+// sideOf names the relay leg of the caller's side (true) or the callee's.
+func sideOf(caller bool) string {
+	if caller {
+		return legCaller
+	}
+	return legCallee
 }

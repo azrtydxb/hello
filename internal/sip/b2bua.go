@@ -109,6 +109,9 @@ type call struct {
 	// the one dialled after the code).
 	vmTarget string
 	held     bool
+	// video is the door station's video through the anchor (S-49), nil for a
+	// call without one; guarded by mu.
+	video *callVideo
 
 	// Music on hold (S-33), guarded by mu: moh plays to the held party,
 	// ringMOH to a caller in place of ringback; the route and group carry
@@ -903,6 +906,7 @@ func (c *call) answer(w *leg) {
 				allowSignalSource(c.relay, legCallee, bres.Source())
 				calleeAns = ans
 			}
+			c.noteVideoAnswer(bres.Body(), bres.Source())
 		}
 		off, _ := media.ParseAudioSDP(c.inv.Body())
 		body = c.anchoredAnswerA(off, calleeAns)

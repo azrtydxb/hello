@@ -257,9 +257,9 @@ func NewVideoRelay(minPort, maxPort int) (*VideoRelay, error) {
 func (v *VideoRelay) addLeg(i int, name string, minPort, maxPort int) error {
 	start := minPort + minPort%2
 	for p := start; p+1 <= maxPort; p += 2 {
-		v.Relay.mu.Lock()
-		taken := v.Relay.used[p] || v.Relay.used[p+1]
-		v.Relay.mu.Unlock()
+		v.mu.Lock()
+		taken := v.used[p] || v.used[p+1]
+		v.mu.Unlock()
 		if taken {
 			continue
 		}
@@ -267,13 +267,13 @@ func (v *VideoRelay) addLeg(i int, name string, minPort, maxPort int) error {
 		if err != nil {
 			continue
 		}
-		if _, err := v.Relay.addLegAt(name, p); err != nil {
+		if _, err := v.addLegAt(name, p); err != nil {
 			_ = rc.Close()
 			continue
 		}
-		v.Relay.mu.Lock()
-		v.Relay.used[p+1] = true
-		v.Relay.mu.Unlock()
+		v.mu.Lock()
+		v.used[p+1] = true
+		v.mu.Unlock()
 		v.rtcp[i] = &rtcpSide{conn: rc}
 		return nil
 	}
@@ -311,14 +311,14 @@ func (v *VideoRelay) Start() {
 // bridge forwards RTCP read on one side to the other. A datagram is accepted
 // only from a source the matching RTP leg accepts.
 func (v *VideoRelay) bridge(name string, from, to *rtcpSide) {
-	leg := v.Relay.findLeg(name)
+	leg := v.findLeg(name)
 	buf := make([]byte, 1500)
 	for {
 		_ = from.conn.SetReadDeadline(time.Now().Add(time.Second))
 		n, src, err := from.conn.ReadFromUDP(buf)
 		if err != nil {
 			select {
-			case <-v.Relay.ctx.Done():
+			case <-v.ctx.Done():
 				return
 			default:
 			}
