@@ -327,3 +327,24 @@ func TestLoadProvSIPTLS(t *testing.T) {
 		wantProvErr(t, provOn(map[string]string{"HELLO_PROV_SIP_TLS_MODELS": bad}), "HELLO_PROV_SIP_TLS_MODELS", bad)
 	}
 }
+
+// TestLoadProvBackupAndSRV fails if the backup registrars or the SRV name are
+// on by default, are not read, or a malformed one is accepted (S-20).
+func TestLoadProvBackupAndSRV(t *testing.T) {
+	c, err := LoadControl(provOn(nil))
+	if err != nil || len(c.Prov.SIPBackupServers) != 0 || c.Prov.SIPSRV != "" {
+		t.Fatalf("defaults = %q %q, %v", c.Prov.SIPBackupServers, c.Prov.SIPSRV, err)
+	}
+	c, err = LoadControl(provOn(map[string]string{
+		"HELLO_PROV_SIP_BACKUP_SERVERS": "192.0.2.21:5060, sip2.hello.test:5060", "HELLO_PROV_SIP_SRV": "sip.hello.test",
+	}))
+	if err != nil || len(c.Prov.SIPBackupServers) != 2 || c.Prov.SIPBackupServers[1] != "sip2.hello.test:5060" || c.Prov.SIPSRV != "sip.hello.test" {
+		t.Fatalf("set = %q %q, %v", c.Prov.SIPBackupServers, c.Prov.SIPSRV, err)
+	}
+	for _, bad := range []string{"sip2.hello.test", "0.0.0.0:5060", "h:0", "h:70000", "a:5060,b:5060,c:5060"} {
+		wantProvErr(t, provOn(map[string]string{"HELLO_PROV_SIP_BACKUP_SERVERS": bad}), "HELLO_PROV_SIP_BACKUP_SERVERS", bad)
+	}
+	for _, bad := range []string{"sip.hello.test:5060", "192.0.2.1", "a b", "https://x"} {
+		wantProvErr(t, provOn(map[string]string{"HELLO_PROV_SIP_SRV": bad}), "HELLO_PROV_SIP_SRV", bad)
+	}
+}

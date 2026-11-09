@@ -1398,3 +1398,31 @@ Implementation notes (template route, no migration):
   Entries on Download" (default Yes already; P333 is written as before). The
   firmware gate "1.0.3.24 and later" is not checked: the page simply does not
   exist on older firmware.
+
+### Item 29: backup and secondary servers (S-20), partial
+
+- Sources for the P-values. Grandstream publishes its configuration templates
+  only inside an archive I could not download; the Pvalue-annotated copies of
+  them in the FusionPBX provisioning templates
+  (github.com/fusionpbx/fusionpbx, resources/templates/provision/grandstream:
+  `grp2614/{$mac}.xml` has "Pvalue P..." comments for 892 settings, `wp810/{$mac}.xml`
+  is the WP810/822/825 P-value template, `wp8x6` the 1.0.1.44 template with the same
+  setting names) confirm: P103 DNS Mode (0 A Record, 1 SRV, 2 NAPTR/SRV,
+  3 Use Configured IP), P26040 DNS SRV failover mode, P29095 Register Before DNS
+  SRV Failover (0/1), P60056 Failback Expiration (m) (GRP261x, default 60),
+  P48 Outbound Proxy and P2333 Backup Outbound Proxy (`host:port`). Third-party
+  copies of vendor templates, so every one stays **verify** on a phone.
+- Yealink `account.N.sip_server.2.address/port/transport_type/expires` and Poly
+  `reg.N.server.2.address/port/transport/expires` are confirmed the same way
+  (the T7x and VVX templates in the same repository) and are the same key
+  families the Hello templates already use for server 1.
+- Left out: Snom and Fanvil backup keys (snom `user_outbound` has an `idx` for
+  the line, not a second registrar; no Fanvil key found), SRV mode for Yealink
+  and Poly (their SRV setting is DNS-NAPTR, which is not plain SRV), the WP822's
+  RN-only keys beyond P29095 and P60056, a second backup (Grandstream has one
+  backup proxy slot; P2308 to P2310 hold at most 15-character IPs), and a chart
+  that publishes DNS (Hello cannot manage DNS: the record set is documented).
+- The backup list is an explicit setting, not read from an HA node list: on main
+  hello-control has no list of the SIP nodes phones can use (the Kamailio pair
+  PRs are not merged). The default stays A-record mode; `P103 = 0` is written to
+  every Grandstream file so leaving SRV mode reverts.

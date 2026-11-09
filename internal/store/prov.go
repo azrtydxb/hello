@@ -42,6 +42,11 @@ type ProvSettings struct {
 	// register with SIPTLSServer over TLS (S-14).
 	SIPTLSServer string
 	SIPTLSModels []string
+	// SIPBackupServers (HELLO_PROV_SIP_BACKUP_SERVERS) are backup registrars
+	// and SIPSRV (HELLO_PROV_SIP_SRV) the DNS name Grandstream phones
+	// resolve by SRV; see config.Prov (S-20).
+	SIPBackupServers []string
+	SIPSRV           string
 	// Domain is HELLO_SIP_DOMAIN.
 	Domain string
 	Expiry time.Duration
@@ -65,13 +70,23 @@ type ProvSettings struct {
 // TLS address for a model HELLO_PROV_SIP_TLS_MODELS selects while
 // HELLO_PROV_SIP_TLS_SERVER is set, the UDP address otherwise.
 func (p ProvSettings) server(v prov.Vendor, model string) prov.Server {
-	srv := prov.Server{Transport: "udp", Expiry: int(p.Expiry / time.Second)}
+	srv := prov.Server{Transport: "udp", DNSMode: prov.DNSA, Expiry: int(p.Expiry / time.Second)}
 	if p.SIPTLSServer != "" && prov.TLSModelMatch(p.SIPTLSModels, v, model) {
 		srv.Host, srv.Port = splitHostPort(p.SIPTLSServer)
 		srv.Transport = "tls"
 		return srv
 	}
 	srv.Host, srv.Port = splitHostPort(p.SIPServer)
+	if len(p.SIPBackupServers) > 0 {
+		h, port := splitHostPort(p.SIPBackupServers[0])
+		srv.Backup = &prov.Backup{Host: h, Port: port}
+	}
+	if p.SIPSRV != "" && v == prov.Grandstream {
+		// SRV mode: the phone resolves the SIP servers from the name's SRV
+		// records, so it needs the name and no port; the backup proxy is
+		// then the SRV set's job.
+		srv.DNSMode, srv.Host, srv.Port, srv.Backup = prov.DNSSRV, p.SIPSRV, 0, nil
+	}
 	return srv
 }
 

@@ -5,11 +5,23 @@
   <config version="1">
     <P271>1</P271>
     <P270>{{xml .Line.AccountLabel}}</P270>
-    <P47>{{xml .Server.Host}}:{{.Server.Port}}</P47>
+    <P47>{{xml .Server.Host}}{{if .Server.Port}}:{{.Server.Port}}{{end}}</P47>
     <P35>{{xml .Line.Username}}</P35>
     <P36>{{xml .Line.AuthName}}</P36>
     <P34>{{xml .Line.Password}}</P34>
     <P3>{{xml .Line.DisplayName}}</P3>
+{{- /* DNS mode and backup server (phone-feature-parity S-20). P103 = Account 1 DNS Mode: 0 A Record, 1 SRV, 2 NAPTR/SRV, 3 Use Configured IP (Grandstream's GRP261x and WP810/822/825 config templates; the WP8x6 template has the same setting, "DNS Mode"). Written always, so a phone taken back out of SRV mode returns to A records. In SRV mode (Server.DNSMode "srv", HELLO_PROV_SIP_SRV) P47 is the name whose _sip._udp SRV records list the servers (no port), P29095 = 1 registers with the next server before failing calls over to it and P60056 = 60 is the failback timer in minutes (the template default; GRP261x "Failback Expiration(m)"). Otherwise, with a backup server (HELLO_PROV_SIP_BACKUP_SERVERS) P48 = Outbound Proxy repeats the primary and P2333 = Backup Outbound Proxy is the backup, each host:port; the phone uses the backup when the primary fails. With none, P48 and P2333 are left as they are. Keys per the Grandstream GRP261x and WP810/822/825 templates; not confirmed on a phone (verify, lab item "failover"). */}}
+{{- if eq .Server.DNSMode "srv"}}
+    <P103>1</P103>
+    <P29095>1</P29095>
+    <P60056>60</P60056>
+{{- else}}
+    <P103>0</P103>
+{{- with .Server.Backup}}
+    <P48>{{xml $.Server.Host}}:{{$.Server.Port}}</P48>
+    <P2333>{{xml .Host}}:{{.Port}}</P2333>
+{{- end}}
+{{- end}}
 {{- /* SIP transport (phone-feature-parity S-14): P130 = SIP Transport, 0 UDP, 1 TCP, 2 TLS (wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83). Server.Transport is "tls" only for a model HELLO_PROV_SIP_TLS_MODELS lists while HELLO_PROV_SIP_TLS_SERVER is set, so a model that fails its TLS lab run is switched back by removing it there. With TLS: P2329 = 1 writes the sips scheme when the transport is TLS, and P22293/P22294 are the minimum and maximum TLS version of the WP822 release notes (12 = TLS 1.2, 99 = no upper limit). The keys of P2329, P22293 and P22294 are taken from the vendor notes, not confirmed on a phone (verify, lab item 10). The Hello CA the server certificate chains to is installed through P8433 (CA URL above). */}}
 {{- if eq .Server.Transport "tls"}}
     <P130>2</P130>

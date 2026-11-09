@@ -200,6 +200,18 @@ type Prov struct {
 	// prefixes ("grandstream:WP8") provisioned for TLS once SIPTLSServer is
 	// set. Taking a model out switches it back to UDP at its next resync.
 	SIPTLSModels []string
+	// SIPBackupServers (HELLO_PROV_SIP_BACKUP_SERVERS, comma separated
+	// host:port, at most 2) are the backup registrars rendered configs name
+	// for the phones that can take one: Yealink and Poly (second server) and
+	// Grandstream (backup outbound proxy). The first is used; the list is
+	// the HA node list of a deployment that does not publish SRV records
+	// (phone-feature-parity S-20). Empty provisions none.
+	SIPBackupServers []string
+	// SIPSRV (HELLO_PROV_SIP_SRV, a DNS name) switches Grandstream phones to
+	// DNS SRV mode: they register with this name and resolve the SIP
+	// servers from its _sip._udp SRV records. Empty keeps A-record mode,
+	// the default until the failover lab test passes.
+	SIPSRV string
 	// DSCPSIP and DSCPRTP (HELLO_DSCP_SIP, HELLO_DSCP_RTP; defaults 26 and
 	// 46) are the QoS values rendered configs carry, the same ones hello-sip
 	// marks its sockets with (spec phone-feature-parity S-21).
@@ -603,6 +615,8 @@ func (r *reader) prov() Prov {
 		SIPServer:          r.optional("HELLO_PROV_SIP_SERVER", r.getenv("HELLO_SIP_ADVERTISED_ADDR")),
 		SIPTLSServer:       r.getenv("HELLO_PROV_SIP_TLS_SERVER"),
 		SIPTLSModels:       r.tlsModels("HELLO_PROV_SIP_TLS_MODELS", "grandstream:WP"),
+		SIPBackupServers:   r.hostPorts("HELLO_PROV_SIP_BACKUP_SERVERS", 2),
+		SIPSRV:             r.getenv("HELLO_PROV_SIP_SRV"),
 		TrustedProxies:     r.prefixes("HELLO_PROV_TRUSTED_PROXIES"),
 		TokenGrace:         r.days("HELLO_PROV_TOKEN_GRACE", 7*24*time.Hour),
 		DSCPSIP:            r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP),
@@ -640,6 +654,11 @@ func (r *reader) prov() Prov {
 		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must be an address phones can reach, not unspecified"))
 	} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must end in a port number"))
+	}
+	if p.SIPSRV != "" {
+		if _, _, err := net.SplitHostPort(p.SIPSRV); err == nil || net.ParseIP(p.SIPSRV) != nil || strings.ContainsAny(p.SIPSRV, " /:@") {
+			r.fail("HELLO_PROV_SIP_SRV", errors.New("must be a DNS name without a port"))
+		}
 	}
 	if p.SIPTLSServer != "" {
 		if host, port, err := net.SplitHostPort(p.SIPTLSServer); err != nil {
@@ -1039,6 +1058,36 @@ func (r *reader) hostPort(key, v string) {
 	if _, err := splitHost(v); err != nil {
 		r.fail(key, err)
 	}
+}
+
+// hostPorts reads a comma separated list of host:port addresses phones can
+// reach, at most max of them.
+func (r *reader) hostPorts(key string, max int) []string {
+	v := r.getenv(key)
+	if v == "" {
+		return nil
+	}
+	var out []string
+	for _, a := range strings.Split(v, ",") {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		host, port, err := net.SplitHostPort(a)
+		switch n, perr := strconv.Atoi(port); {
+		case err != nil:
+			r.fail(key, err)
+		case unspecified(host):
+			r.fail(key, errors.New("must be addresses phones can reach, not unspecified"))
+		case perr != nil || n < 1 || n > 65535:
+			r.fail(key, errors.New("each address must end in a port number"))
+		}
+		out = append(out, a)
+	}
+	if len(out) > max {
+		r.fail(key, fmt.Errorf("at most %d addresses", max))
+	}
+	return out
 }
 
 // port reads a UDP port number setting (1-65535).

@@ -115,6 +115,16 @@ spec:
               value: {{ $prov.publicUrl | quote }}
             - name: HELLO_PROV_SIP_SERVER
               value: {{ default (printf "%s:%v" (required "kamailio.publicHost is required" .Values.kamailio.publicHost) .Values.kamailio.publicPort) $prov.sipServer | quote }}
+            {{- with $prov.sipBackupServers }}
+            # Backup registrars for the phones that take one (S-20).
+            - name: HELLO_PROV_SIP_BACKUP_SERVERS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $prov.sipSrv }}
+            # Grandstream phones resolve the SIP servers by SRV from this name (S-20).
+            - name: HELLO_PROV_SIP_SRV
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.kamailio.tls.enabled }}
             # Phones of the models in sipTlsModels register over TLS (S-14).
             - name: HELLO_PROV_SIP_TLS_SERVER
