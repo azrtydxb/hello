@@ -621,8 +621,11 @@ on the phone, and the Grandstream template does not enable "Allow SIP Reset".
 Grandstream phones challenge the `NOTIFY` with digest when `P4428 = 1`
 (NOTIFY authentication), which the template writes; Hello answers the
 challenge with the device's stored digest hash, preferring SHA-256, only in
-the device's own realm (a challenge in any other realm is not answered and the
-push reports `auth_failed`). The template also writes `P95030 = 0`, so a plain
+the device's own realm. A phone usually challenges in a realm of its own (a
+Grandstream uses its SIP server, `host:port`), which the stored hash cannot
+answer; hello-sip then opens the device's sealed password and hashes it for
+the realm the phone named. Without a password a challenge in another realm is
+not answered and the push reports `auth_failed`. The template also writes `P95030 = 0`, so a plain
 check-sync re-provisions without a reboot (WP8x6, firmware 1.0.3.20 and
 later).
 
