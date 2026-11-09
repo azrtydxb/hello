@@ -200,6 +200,9 @@ type Prov struct {
 	// prefixes ("grandstream:WP8") provisioned for TLS once SIPTLSServer is
 	// set. Taking a model out switches it back to UDP at its next resync.
 	SIPTLSModels []string
+	// SIPTCPModels (HELLO_PROV_SIP_TCP_MODELS, same format, default none)
+	// are provisioned to register over TCP with SIPServer (S-13).
+	SIPTCPModels []string
 	// DSCPSIP and DSCPRTP (HELLO_DSCP_SIP, HELLO_DSCP_RTP; defaults 26 and
 	// 46) are the QoS values rendered configs carry, the same ones hello-sip
 	// marks its sockets with (spec phone-feature-parity S-21).
@@ -603,6 +606,7 @@ func (r *reader) prov() Prov {
 		SIPServer:          r.optional("HELLO_PROV_SIP_SERVER", r.getenv("HELLO_SIP_ADVERTISED_ADDR")),
 		SIPTLSServer:       r.getenv("HELLO_PROV_SIP_TLS_SERVER"),
 		SIPTLSModels:       r.tlsModels("HELLO_PROV_SIP_TLS_MODELS", "grandstream:WP"),
+		SIPTCPModels:       r.tlsModels("HELLO_PROV_SIP_TCP_MODELS", ""),
 		TrustedProxies:     r.prefixes("HELLO_PROV_TRUSTED_PROXIES"),
 		TokenGrace:         r.days("HELLO_PROV_TOKEN_GRACE", 7*24*time.Hour),
 		DSCPSIP:            r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP),

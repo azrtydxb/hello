@@ -189,7 +189,8 @@ type Line struct {
 type Server struct {
 	Host string
 	Port int
-	// Transport is "udp" (the default) or "tls": TLS for a phone whose
+	// Transport is "udp" (the default), "tcp" (a model listed in
+	// HELLO_PROV_SIP_TCP_MODELS, S-13) or "tls": TLS for a phone whose
 	// vendor has a transport key and whose model HELLO_PROV_SIP_TLS_MODELS
 	// lists, registering with HELLO_PROV_SIP_TLS_SERVER (S-14).
 	Transport string

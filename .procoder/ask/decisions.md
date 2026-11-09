@@ -1350,3 +1350,20 @@ Implementation notes (template route, no migration):
 - Start: run waves 0-6 in order, three or four builder agents in parallel plus the merge captain (recommended)
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
+
+## SIP over TCP is provisioned per model, on the UDP address (2026-11-09)
+
+Phone-feature-parity S-13 (delivery item 22). hello-sip already records the
+phone leg's transport (`X-Hello-Transport`, set by Kamailio) on the binding, and
+Kamailio already shares port 5060 between UDP and TCP, reuses the phone's
+connection for requests towards it (`phones_tcp` socket, alias with the
+protocol) and closes idle connections after an hour. What was missing was
+provisioning. `HELLO_PROV_SIP_TCP_MODELS` (same format as the TLS list, default
+none, so nothing changes until a model is listed) puts the listed models on
+transport TCP with `HELLO_PROV_SIP_SERVER`: Grandstream `P130 = 1`, Yealink
+`transport_type = 1`, Poly `TCPOnly`, Fanvil `SIP1 Transport = 1`; Snom has no
+confirmed key and stays UDP. A model in both lists uses TLS while the TLS server
+is set, and falls back to TCP when it is not. The setting is per model, not per
+device: a device that needs another transport has its model taken out of the
+list (per-device overrides belong to S-12). Helm: `control.prov.sipTcpModels`.
+Keys are from vendor notes, unconfirmed on hardware.

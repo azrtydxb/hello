@@ -24,6 +24,11 @@ func TestProvServerTransport(t *testing.T) {
 		port  int
 		tr    string
 	}{
+		{"tcp selected", ProvSettings{SIPServer: base.SIPServer, SIPTCPModels: []string{"grandstream:WP"}, Expiry: time.Hour}, prov.Grandstream, "WP826", "192.0.2.1", 30508, "tcp"},
+		{"tcp model not selected", ProvSettings{SIPServer: base.SIPServer, SIPTCPModels: []string{"grandstream:WP"}, Expiry: time.Hour}, prov.Grandstream, "GRP2614", "192.0.2.1", 30508, "udp"},
+		{"tcp vendor without a key", ProvSettings{SIPServer: base.SIPServer, SIPTCPModels: []string{"snom"}, Expiry: time.Hour}, prov.Snom, "D785", "192.0.2.1", 30508, "udp"},
+		{"tls wins over tcp", func() ProvSettings { p := tls; p.SIPTCPModels = []string{"grandstream"}; return p }(), prov.Grandstream, "WP826", "192.0.2.1", 30509, "tls"},
+		{"tcp when tls server unset", ProvSettings{SIPServer: base.SIPServer, SIPTLSModels: []string{"grandstream"}, SIPTCPModels: []string{"grandstream"}, Expiry: time.Hour}, prov.Grandstream, "WP826", "192.0.2.1", 30508, "tcp"},
 		{"off", base, prov.Grandstream, "WP826", "192.0.2.1", 30508, "udp"},
 		{"selected", tls, prov.Grandstream, "WP826", "192.0.2.1", 30509, "tls"},
 		{"model not selected", tls, prov.Grandstream, "GRP2614", "192.0.2.1", 30508, "udp"},

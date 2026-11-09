@@ -10,12 +10,14 @@
     <P36>{{xml .Line.AuthName}}</P36>
     <P34>{{xml .Line.Password}}</P34>
     <P3>{{xml .Line.DisplayName}}</P3>
-{{- /* SIP transport (phone-feature-parity S-14): P130 = SIP Transport, 0 UDP, 1 TCP, 2 TLS (wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83). Server.Transport is "tls" only for a model HELLO_PROV_SIP_TLS_MODELS lists while HELLO_PROV_SIP_TLS_SERVER is set, so a model that fails its TLS lab run is switched back by removing it there. With TLS: P2329 = 1 writes the sips scheme when the transport is TLS, and P22293/P22294 are the minimum and maximum TLS version of the WP822 release notes (12 = TLS 1.2, 99 = no upper limit). The keys of P2329, P22293 and P22294 are taken from the vendor notes, not confirmed on a phone (verify, lab item 10). The Hello CA the server certificate chains to is installed through P8433 (CA URL above). */}}
+{{- /* SIP transport (phone-feature-parity S-14): P130 = SIP Transport, 0 UDP, 1 TCP, 2 TLS (wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83). Server.Transport is "tcp" for a model HELLO_PROV_SIP_TCP_MODELS lists (P130 = 1, no TLS-only keys; S-13). Server.Transport is "tls" only for a model HELLO_PROV_SIP_TLS_MODELS lists while HELLO_PROV_SIP_TLS_SERVER is set, so a model that fails its TLS lab run is switched back by removing it there. With TLS: P2329 = 1 writes the sips scheme when the transport is TLS, and P22293/P22294 are the minimum and maximum TLS version of the WP822 release notes (12 = TLS 1.2, 99 = no upper limit). The keys of P2329, P22293 and P22294 are taken from the vendor notes, not confirmed on a phone (verify, lab item 10). The Hello CA the server certificate chains to is installed through P8433 (CA URL above). */}}
 {{- if eq .Server.Transport "tls"}}
     <P130>2</P130>
     <P2329>1</P2329>
     <P22293>12</P22293>
     <P22294>99</P22294>
+{{- else if eq .Server.Transport "tcp"}}
+    <P130>1</P130>
 {{- else}}
     <P130>0</P130>
 {{- end}}
