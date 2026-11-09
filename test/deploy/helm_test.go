@@ -290,17 +290,60 @@ func strOf(l []any) []string {
 // kwDeployment returns the named kw Deployment as a generic document.
 func kwObject(t *testing.T, kind, name string) object {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "kuvryn-sync", "kw", "resources.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, o := range decodeAll(t, string(raw)) {
+	return kwObjectIn(t, false, kind, name)
+}
+
+// kwVIPObject is kwObject in the manifests as they are once the Kamailio VIP
+// go-live patch (deploy/kuvryn-sync/kamailio-vip) has been applied.
+func kwVIPObject(t *testing.T, kind, name string) object {
+	t.Helper()
+	return kwObjectIn(t, true, kind, name)
+}
+
+func kwObjectIn(t *testing.T, vip bool, kind, name string) object {
+	t.Helper()
+	for _, o := range decodeAll(t, kwRaw(t, vip)) {
 		if str(o["kind"]) == kind && str(dig(o, "metadata", "name")) == name {
 			return o
 		}
 	}
-	t.Fatalf("%s/%s not in the kw manifests", kind, name)
+	t.Fatalf("%s/%s not in the kw manifests (vip=%v)", kind, name, vip)
 	return nil
+}
+
+// kwRaw is deploy/kuvryn-sync/kw/resources.yaml; with vip it is the file after
+// deploy/kuvryn-sync/kamailio-vip/go-live.patch, applied in a temporary
+// directory (the patch must always apply cleanly: it is the user-triggered
+// step that moves phones to the VIP).
+func kwRaw(t *testing.T, vip bool) string {
+	t.Helper()
+	root := repoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "deploy", "kuvryn-sync", "kw", "resources.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch := filepath.Join(root, "deploy", "kuvryn-sync", "kamailio-vip", "go-live.patch")
+	if _, err := os.Stat(patch); !vip || err != nil {
+		// No patch left: the go-live commit applied it and removed the file.
+		return string(raw)
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "deploy", "kuvryn-sync", "kw"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "deploy", "kuvryn-sync", "kw", "resources.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "apply", patch)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("deploy/kuvryn-sync/kamailio-vip/go-live.patch no longer applies to kw/resources.yaml (regenerate it, see its README): %v\n%s", err, out)
+	}
+	patched, err := os.ReadFile(filepath.Join(dir, "deploy", "kuvryn-sync", "kw", "resources.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(patched)
 }
 
 // kwOnlyEnv lists kw env vars the chart deliberately does not render by
@@ -320,7 +363,7 @@ var kwOnlyEnv = map[string]string{
 // kwKamailioChartLag lists Kamailio env vars whose kw form (a field
 // reference) the chart does not render yet, each with the kamailio-ha phase
 // that closes the gap. The list must be empty once the chart option for two
-// instances lands (phase 4).
+// instances and the VIP lands (phase 4).
 var kwKamailioChartLag = map[string]string{
 	"KAMAILIO_PUBLIC_HOST": "phase 1: kw's two instances advertise their own node address (status.podIP); the chart option follows in phase 4",
 }

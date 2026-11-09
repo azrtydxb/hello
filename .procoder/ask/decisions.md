@@ -1408,6 +1408,29 @@ Implementation notes (template route, no migration):
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
 
+## Kamailio HA: the VIP ships off, go-live is a separate step (2026-11-09)
+
+The user's deploy constraint: the PRs of kamailio-ha get merged ready, but the
+change that re-points phones to the VIP must not go live until the user asks.
+Sync deploys `deploy/kuvryn-sync/kw/resources.yaml` as soon as it is on main,
+so the VIP stage cannot sit in that file.
+
+- `kw/resources.yaml` keeps the state of PR 1/4 (a pair on their own node
+  addresses; phones stay on `192.168.10.101:30508`). The config with
+  `EDGE_VIP`/`LEGACY_IP` support ships in the ConfigMap (inert: neither is set),
+  which rolls the Kamailio pair once (new config checksum).
+- Everything that turns the VIP on is `deploy/kuvryn-sync/kamailio-vip/go-live.patch`
+  (pod env, the kube-vip container, its ServiceAccount, Role and RoleBinding,
+  and the control plane's advertised proxy host). `test/deploy` and the
+  `test/kindha` failover lab apply it to a copy, so the patch is always
+  proven and always applies; `TestKwKamailioVIPIsOff` guards the off state.
+- Alternatives: a values flag cannot work for kw (plain manifests, no
+  templating); keeping the PRs unmerged blocks the chart and docs for other
+  clusters. The chart option (4/4) defaults to off.
+- Merge conflict note: #201 was squash-merged, so the stacked branches
+  re-added its files; resolved by taking the stack's version of the VIP and
+  legacy-socket code and main's TLS socket code (the VIP branch of the
+  listens also gets a TLS listener on `EDGE_VIP`).
 ## TestConferenceTwoNodes flake: root cause (2026-11-09)
 
 - Two causes, one in the test and one in production code. Both reproduced on a
