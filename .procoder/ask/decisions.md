@@ -929,6 +929,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
   route is gone, it was never linked outside the nav) with a new Ring map tab; the tone library tab arrives with S-43.
 - Tests that touch real configs assert on lines inline; no golden file of a
   rendered phone configuration is added.
+
 ## Queue callback (pbx-gaps wave B, B4)
 
 - **Merged gaps-languages.** PR #208 (voicemail box languages, `voiceprompt.Resolve`) was not on main, so origin/gaps-languages is merged into this branch. The queue's language is `Resolve(queue.prompt_language, deployment language)`; `queues.prompt_language` is NULL for inherit, no CHECK (validated by the API), migration 00049.
@@ -1427,3 +1428,43 @@ Implementation notes (template route, no migration):
   port is taken. All RTP is IPv4-only (SDP is `IN IP4` only), so relay and
   anchor sockets are now `udp4` like the rest; the port-in-use check is then
   the same on every kernel.
+## Opus "inLen >= S->Fs_in_kHz" flake: root cause and fix (2026-11-09)
+
+- Symptom: `TestOpusSessionLoopback` failed on most runs (104 of 200 here, less
+  on CI) with the SILK resampler assertion; the same assertion hit a voicemail
+  call in production. PR 243's rebuild-after-panic only recovers; it did not
+  remove the cause.
+- Root cause: the transpiled libopus passes addresses of its Go stack locals
+  as uintptr. `silk_decode_frame` writes the frame length through one; if the
+  stack moves during the call the write goes to the old copy, the caller reads
+  0, and `silk_resampler` aborts. The pin in `withOpusStack` was meant to
+  prevent the move, but `var pin [512<<10]byte` is over the compiler's 128 KB
+  limit for stack variables, so it was moved to the heap (`go build -gcflags=-m`
+  says "moved to heap: pin"). It pinned nothing and allocated 512 KB per call.
+  Survival depended on the caller's stack at that moment (a fresh goroutine, or
+  a receive loop a GC had shrunk while parked in a read).
+- Ruled out: shared decoder state across goroutines (each decoder has its own
+  TLS and mutex; sessions use one goroutine per decoder), frame sizes (320
+  samples, packets replay clean on a big stack), test timing.
+- Fix: all library calls run on a few dedicated worker goroutines that build a
+  512 KB stack once from 64 KB frames (under the 128 KB limit) and hold it, so
+  nothing grows or shrinks it. A call that still moves the stack is returned as
+  a failure, which feeds the existing decoder rebuild. The test expectation was
+  right and is unchanged.
+- Under `-race` the Opus build is off (opus_race.go), so the loopback test
+  skips there; the -race count proves nothing about the codec.
+## IVR homed-callee data race (ivrHomeCallee vs release)
+
+- Root cause: `homedCall.legs` had no lock of its own. `ivrHomeCallee`
+  (IVR dial-out goroutine, started by takeover) wrote `legs[1]` under
+  `call.mu`, while `call.release` (BYE handler goroutine) iterated `hom.legs`
+  after dropping `call.mu`; `haHomedState` and `homedCall.leg` read it with no
+  lock either. Seen in `TestIVRHuntAnswerAtMemberTimeout` under `-race`.
+- Fix: `homedCall` carries a leaf mutex; all access goes through `leg`,
+  `pair` and `setCallee`. Regression test: `homed_race_test.go`.
+
+## Grandstream key choices from the official templates (2026-11-09)
+
+- Firmware-upgrade confirmation prompt off (P8375=0, P84988=1) for unattended upgrades, or leave it
+- Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
+- Account sharing group password: shared default `AccountSharing`, or a per-group secret

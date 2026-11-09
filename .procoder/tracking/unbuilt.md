@@ -8,8 +8,8 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | --- | ----------------------------------------------------------------------------- | ---------------------- |
 | 9   | Session timers, CRLF keep-alive, dead-media teardown, roaming relearn (S-9)   | done (#203)            |
 | 9b  | Session timers on parked/picked-up/transferred dialogs and trunk legs         | wip (#228)             |
-| 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                          | wip (#204)             |
-| 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | wip (#226)             |
+| 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                          | done (#204)            |
+| 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | done (#226)            |
 | 12  | Tone library (S-43)                                                           | todo (after 11)        |
 | 13  | Door station extension kind, Door group (S-45, S-46)                          | wip (#225)             |
 | 14  | Door-open DTMF `*50` (S-47)                                                   | todo (after 13)        |
@@ -121,7 +121,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | Backup and restore                            | wip (#219, A2)                 |
 | Follow-me                                     | todo (spec done #199)          |
 | Blocklist, anonymous reject, country limits   | wip (#210, A1)                 |
-| Queue callback                                | wip (#237, B4)                 |
+| Queue callback                                | done (#237)                    |
 | 2FA                                           | done (#209)                    |
 | Dial-by-name                                  | done (#229, B3)                |
 | Voicemail groups                              | wip (#220, A6)                 |
@@ -135,7 +135,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                                                                                      | Status                |
 | --------------------------------------------------------------------------------------------------------- | --------------------- |
-| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-0fd53d6)    |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-67b5995)    |
 | MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
 | Transfer-to-voicemail phone key                                                                           | done (#200)           |
@@ -149,6 +149,9 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | Integration flakes: queue HA BYE, takeover voicemail, queue timeout, conference two nodes, MinIO bucket   | done (#221)           |
 | Remove MOH test queue 8888                                                                                | todo (when user done) |
 | Call heartbeat leak, trunk slot race, Opus decoder rebuild (fix-trunk-slot-leak)                          | done (#243)           |
+| Phone resync/reboot: answer digest challenges in the phone realm                                          | done (#257)           |
+| Data race on homed calls (ivrHomeCallee)                                                                  | done (#267)           |
+| Opus codec stack pin (decoder failures, TestOpusSessionLoopback)                                          | done (#269)           |
 | HT813 FXO disconnect supervision                                                                          | done (#244)           |
 | Onboarding sends the adopted extension id as a number                                                     | done (#256)           |
 
