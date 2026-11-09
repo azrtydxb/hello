@@ -74,17 +74,18 @@ const E164 = /^\+[1-9][0-9]{6,14}$/;
  * the fax destinations that routes and IVR keys name. A received fax is
  * downloaded as a PDF; an operator sends and deletes.
  */
-export function Faxes() {
+export function Faxes({ mine = false }: { mine?: boolean }) {
   const [direction, setDirection] = useState<FaxDirection | "">("");
   const [status, setStatus] = useState<FaxStatus | "">("");
   const loadFaxes = useCallback(
-    (signal: AbortSignal) => listFaxes({ direction, status }, signal),
-    [direction, status],
+    (signal: AbortSignal) => listFaxes({ direction, status }, signal, mine),
+    [direction, status, mine],
   );
   const faxes = usePolling(loadFaxes, LIVE_REFRESH_MS);
   const loadDests = useCallback(
-    (signal: AbortSignal) => listFaxDestinations(signal),
-    [],
+    (signal: AbortSignal) =>
+      mine ? Promise.resolve([]) : listFaxDestinations(signal),
+    [mine],
   );
   const dests = usePolling(loadDests, 30000);
   const toast = useToast();
@@ -108,9 +109,13 @@ export function Faxes() {
   return (
     <section aria-labelledby="page-title">
       <PageHeader
-        eyebrow="Media"
-        title="Faxes"
-        description="Faxes received at a fax destination and faxes sent from a PDF, with the result of each call. A fax that failed after some pages keeps them as partial. Faxes are kept for 90 days."
+        eyebrow={mine ? "My phone" : "Media"}
+        title={mine ? "My faxes" : "Faxes"}
+        description={
+          mine
+            ? "Faxes received at a fax destination your extension owns, with the result of each call. A fax that failed after some pages keeps them as partial."
+            : "Faxes received at a fax destination and faxes sent from a PDF, with the result of each call. A fax that failed after some pages keeps them as partial. Faxes are kept for 90 days."
+        }
       />
       <div className="cf-stack">
         <div className="cf-row">
@@ -185,7 +190,9 @@ export function Faxes() {
                     <Badge tone={STATUS_TONE[f.status]}>
                       {STATUS_LABEL[f.status]}
                     </Badge>
-                    {f.resultText && f.status !== "received" && f.status !== "sent" ? (
+                    {f.resultText &&
+                    f.status !== "received" &&
+                    f.status !== "sent" ? (
                       <span className="cf-hint"> {f.resultText}</span>
                     ) : null}
                     {f.status === "queued" && f.nextAttemptAt
@@ -195,18 +202,18 @@ export function Faxes() {
                   <td>{MODE_LABEL[f.mode] ?? f.mode}</td>
                   <td>{MAIL_LABEL[f.mailStatus] ?? f.mailStatus}</td>
                   <td>
-                    <Can>
+                    <Can min={mine ? "user" : "operator"}>
                       {f.hasPdf && (
                         <a
                           className="az-btn az-btn--ghost az-btn--sm"
-                          href={faxPdfPath(f.id)}
+                          href={faxPdfPath(f.id, mine)}
                           download
                           aria-label={`Download fax ${f.id}`}
                         >
                           Download
                         </a>
                       )}
-                      {f.status !== "receiving" && (
+                      {!mine && f.status !== "receiving" && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -225,24 +232,26 @@ export function Faxes() {
           </table>
         )}
 
-        <Can>
-          <SendForm onSent={() => faxes.reload()} />
-        </Can>
+        {!mine && (
+          <Can>
+            <SendForm onSent={() => faxes.reload()} />
+          </Can>
+        )}
 
-        <h2 className="az-h2">Fax destinations</h2>
-        {dests.status === "error" && (
+        {!mine && <h2 className="az-h2">Fax destinations</h2>}
+        {!mine && dests.status === "error" && (
           <Alert tone="bad" title="Could not load the fax destinations">
             {dests.message}
           </Alert>
         )}
-        {dests.status !== "loading" && destItems.length === 0 && (
+        {!mine && dests.status !== "loading" && destItems.length === 0 && (
           <EmptyState
             icon="inbox"
             title="No fax destinations"
             description="A destination names the extension that owns the faxes arriving there and, optionally, an email address."
           />
         )}
-        {destItems.length > 0 && (
+        {!mine && destItems.length > 0 && (
           <table className="az-table" aria-label="Fax destinations">
             <thead>
               <tr>
@@ -289,13 +298,20 @@ export function Faxes() {
             </tbody>
           </table>
         )}
-        <Can min="admin">
-          <DestinationForm onCreated={() => dests.reload()} />
-        </Can>
+        {!mine && (
+          <Can min="admin">
+            <DestinationForm onCreated={() => dests.reload()} />
+          </Can>
+        )}
       </div>
       {toast.node}
     </section>
   );
+}
+
+/** The faxes of the signed-in user's own extensions (the "My phone" role). */
+export function MyFaxes() {
+  return <Faxes mine />;
 }
 
 function SendForm({ onSent }: { onSent: () => void }) {
@@ -307,7 +323,8 @@ function SendForm({ onSent }: { onSent: () => void }) {
     null,
   );
   const errors: Record<string, string> = {};
-  if (to !== "" && !E164.test(to)) errors.to = "Use E.164, such as +41441234567.";
+  if (to !== "" && !E164.test(to))
+    errors.to = "Use E.164, such as +41441234567.";
   if (file && file.size > MAX_FAX_BYTES) errors.file = "The PDF is over 10 MB.";
 
   async function submit(e: FormEvent) {
@@ -329,7 +346,11 @@ function SendForm({ onSent }: { onSent: () => void }) {
   }
 
   return (
-    <form className="cf-form" onSubmit={(e) => void submit(e)} aria-label="Send a fax">
+    <form
+      className="cf-form"
+      onSubmit={(e) => void submit(e)}
+      aria-label="Send a fax"
+    >
       <h2 className="az-h2">Send a fax</h2>
       <div className="cf-row">
         <Input
@@ -356,11 +377,18 @@ function SendForm({ onSent }: { onSent: () => void }) {
         />
       </div>
       {message && (
-        <Alert tone={message.ok ? "good" : "bad"} title={message.ok ? "Queued" : "Could not send the fax"}>
+        <Alert
+          tone={message.ok ? "good" : "bad"}
+          title={message.ok ? "Queued" : "Could not send the fax"}
+        >
           {message.text}
         </Alert>
       )}
-      <Button type="submit" icon="send" disabled={busy || !file || !E164.test(to)}>
+      <Button
+        type="submit"
+        icon="send"
+        disabled={busy || !file || !E164.test(to)}
+      >
         Send fax
       </Button>
     </form>
@@ -377,7 +405,11 @@ function DestinationForm({ onCreated }: { onCreated: () => void }) {
     e.preventDefault();
     setError(null);
     try {
-      await createFaxDestination({ name: name.trim(), extension: extension.trim(), email: email.trim() });
+      await createFaxDestination({
+        name: name.trim(),
+        extension: extension.trim(),
+        email: email.trim(),
+      });
       setName("");
       setExtension("");
       setEmail("");
@@ -388,10 +420,19 @@ function DestinationForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <form className="cf-form" onSubmit={(e) => void submit(e)} aria-label="Add a fax destination">
+    <form
+      className="cf-form"
+      onSubmit={(e) => void submit(e)}
+      aria-label="Add a fax destination"
+    >
       <h3 className="az-h3">Add a fax destination</h3>
       <div className="cf-row">
-        <Input label="Name" value={name} mono onChange={(e) => setName(e.target.value)} />
+        <Input
+          label="Name"
+          value={name}
+          mono
+          onChange={(e) => setName(e.target.value)}
+        />
         <Input
           label="Owner extension"
           value={extension}
@@ -410,7 +451,11 @@ function DestinationForm({ onCreated }: { onCreated: () => void }) {
           {error}
         </Alert>
       )}
-      <Button type="submit" icon="plus" disabled={name.trim() === "" || extension.trim() === ""}>
+      <Button
+        type="submit"
+        icon="plus"
+        disabled={name.trim() === "" || extension.trim() === ""}
+      >
         Add destination
       </Button>
     </form>

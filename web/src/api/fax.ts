@@ -49,16 +49,22 @@ export interface FaxFilter {
   status?: FaxStatus | "";
 }
 
-export const listFaxes = (filter: FaxFilter, signal?: AbortSignal) => {
+export const listFaxes = (
+  filter: FaxFilter,
+  signal?: AbortSignal,
+  mine = false,
+) => {
   const q = new URLSearchParams();
   if (filter.direction) q.set("direction", filter.direction);
   if (filter.status) q.set("status", filter.status);
   const qs = q.toString();
-  return list<Fax>(`/api/v1/faxes${qs ? `?${qs}` : ""}`, signal);
+  const base = mine ? "/api/v1/me/faxes" : "/api/v1/faxes";
+  return list<Fax>(`${base}${qs ? `?${qs}` : ""}`, signal);
 };
 
 /** The PDF route; a plain link downloads it with the session cookie. */
-export const faxPdfPath = (faxId: Id) => `/api/v1/faxes/${seg(faxId)}/pdf`;
+export const faxPdfPath = (faxId: Id, mine = false) =>
+  `${mine ? "/api/v1/me/faxes" : "/api/v1/faxes"}/${seg(faxId)}/pdf`;
 
 export const deleteFax = (faxId: Id) =>
   request<void>("DELETE", `/api/v1/faxes/${seg(faxId)}`);

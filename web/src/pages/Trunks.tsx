@@ -983,7 +983,9 @@ function TrunkDrawer({
               { value: "t38", label: "T.38 when the carrier offers it" },
               { value: "off", label: "Off (refuse fax calls)" },
             ]}
-            onChange={(e) => set("faxMode", e.target.value as TrunkDraft["faxMode"])}
+            onChange={(e) =>
+              set("faxMode", e.target.value as TrunkDraft["faxMode"])
+            }
           />
         </fieldset>
 

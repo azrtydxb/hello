@@ -62,6 +62,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "user",
       },
       {
+        label: "Faxes",
+        path: "/me/faxes",
+        phase: 5,
+        icon: "printer",
+        minRole: "user",
+      },
+      {
         label: "Messages",
         path: "/me/messages",
         phase: 5,

@@ -72,11 +72,11 @@ fax is retried: three attempts, five minutes apart. Cancelling a fax being sent
 
 A trunk's `faxMode` (trunk form, or `updateTrunk`):
 
-| Mode          | Behaviour                                                                                           |
-| ------------- | --------------------------------------------------------------------------------------------------- |
-| `passthrough` | The default. G.711 only. CNG never moves the call to T.38.                                          |
+| Mode          | Behaviour                                                                                             |
+| ------------- | ----------------------------------------------------------------------------------------------------- |
+| `passthrough` | The default. G.711 only. CNG never moves the call to T.38.                                            |
 | `t38`         | Accept `m=image udptl t38` offers; move an answered fax to T.38 when CNG is heard or the engine asks. |
-| `off`         | Fax calls on the trunk are refused with 488.                                                        |
+| `off`         | Fax calls on the trunk are refused with 488.                                                          |
 
 On a `t38` trunk Hello answers with `T38FaxVersion 0`, `T38MaxBitRate 14400`,
 `T38FaxRateManagement transferredTCF` and `T38FaxUdpEC t38UDPRedundancy`. UDPTL
@@ -91,16 +91,16 @@ see "Lab checks" below.
 
 ## Configuration
 
-| Variable                    | Where                       | Meaning                                                                      |
-| --------------------------- | --------------------------- | ---------------------------------------------------------------------------- |
-| `HELLO_FAX_ENABLED`         | hello-control, hello-sip    | `true` turns fax on (default false).                                         |
-| `HELLO_FAX_ADDR`            | hello-control, hello-sip    | `host:port` of the hello-fax control API.                                    |
-| `HELLO_FAX_TOKEN`           | all three                   | Optional bearer token between the services.                                  |
-| `HELLO_FAX_RETENTION_DAYS`  | hello-control               | Days a fax is kept, 1 to 3650 (default 90).                                  |
-| `HELLO_FAX_LISTEN`          | hello-fax                   | Control API listen address (default `:8083`).                                |
-| `HELLO_FAX_RTP_PORT_MIN/MAX`| hello-fax                   | UDP range for sessions (default 40000-40999).                                |
-| `HELLO_FAX_MEDIA_HOST`      | hello-fax                   | The address hello-sip sends media to; the pod IP in the chart.               |
-| `HELLO_FAX_PDFTOPPM`        | hello-fax                   | Path of `pdftoppm` (default: from `PATH`).                                   |
+| Variable                     | Where                    | Meaning                                                        |
+| ---------------------------- | ------------------------ | -------------------------------------------------------------- |
+| `HELLO_FAX_ENABLED`          | hello-control, hello-sip | `true` turns fax on (default false).                           |
+| `HELLO_FAX_ADDR`             | hello-control, hello-sip | `host:port` of the hello-fax control API.                      |
+| `HELLO_FAX_TOKEN`            | all three                | Optional bearer token between the services.                    |
+| `HELLO_FAX_RETENTION_DAYS`   | hello-control            | Days a fax is kept, 1 to 3650 (default 90).                    |
+| `HELLO_FAX_LISTEN`           | hello-fax                | Control API listen address (default `:8083`).                  |
+| `HELLO_FAX_RTP_PORT_MIN/MAX` | hello-fax                | UDP range for sessions (default 40000-40999).                  |
+| `HELLO_FAX_MEDIA_HOST`       | hello-fax                | The address hello-sip sends media to; the pod IP in the chart. |
+| `HELLO_FAX_PDFTOPPM`         | hello-fax                | Path of `pdftoppm` (default: from `PATH`).                     |
 
 In the Helm chart, `fax.enabled: true` deploys hello-fax (a ClusterIP Service
 for the control API, no Ingress; media goes to pod addresses inside the
@@ -120,7 +120,7 @@ Metric: `hello_fax_total{direction,result}` (hello-sip). Results: `received`,
 ## Troubleshooting
 
 - A fax call is refused with 488: the call's trace says why (`fax is off on
-  trunk`, `the fax engine is unavailable`, `a fax call needs G.711`, or the
+trunk`, `the fax engine is unavailable`, `a fax call needs G.711`, or the
   T.38 offer is not one Hello serves).
 - `sendFax` answers 503: `HELLO_FAX_ENABLED` is off, or hello-fax cannot be
   reached from hello-control.

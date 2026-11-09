@@ -90,7 +90,7 @@ import { Conferences } from "./pages/Conferences";
 import { Ivr } from "./pages/Ivr";
 import { Queues } from "./pages/Queues";
 import { QueueCallbacks } from "./pages/QueueCallbacks";
-import { Faxes } from "./pages/Faxes";
+import { Faxes, MyFaxes } from "./pages/Faxes";
 import { Wallboard } from "./pages/Wallboard";
 import { TimeConditions } from "./pages/TimeConditions";
 import { ParkPickup } from "./pages/ParkPickup";
@@ -115,6 +115,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/me/voicemail": MyVoicemail,
   "/me/forwarding": MyForwarding,
   "/me/history": MyHistory,
+  "/me/faxes": MyFaxes,
   "/me/profile": MyProfile,
   "/settings/email": EmailSettings,
   "/registrations": Registrations,
