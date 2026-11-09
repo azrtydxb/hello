@@ -866,10 +866,10 @@ func (c *call) parkVoicemail(ctx context.Context, pk *parkState, relay *media.Re
 		partyLeg = legCaller
 	}
 	var sec *media.Secure
-	savp, secure := relay.SecureProfile(partyLeg)
+	_, secure := relay.SecureProfile(partyLeg)
 	if ss, isSec := sess.(media.SecureSession); isSec && secure {
 		sec = ss.Secure()
-		keyed, err := sec.ReSDP(answer, savp)
+		keyed, err := sec.ReSDPMode(answer, relay.SecureMode(partyLeg))
 		if err != nil {
 			_ = sess.Close()
 			end("The parked party's encryption could not be kept: the parked call is ended")
@@ -905,7 +905,7 @@ func (c *call) parkVoicemail(ctx context.Context, pk *parkState, relay *media.Re
 		if a, err := media.ParseAudioSDP(ansBody); err == nil {
 			sec.LearnSDP(a)
 		}
-		if _, on := sec.Suite(); !on {
+		if _, on := sec.Profile(); !on {
 			_ = sess.Close()
 			end("The parked party did not keep SRTP for the voicemail media: the parked call is ended")
 			return

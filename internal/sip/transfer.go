@@ -886,6 +886,7 @@ func (c *call) adoptRelay(from *call, relay *media.Relay) {
 	from.mu.Unlock()
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
+	c.watchSecure(relay)
 	c.mu.Lock()
 	c.srtpGauge += gauge
 	c.srtpA = c.srtpA || callerSRTP

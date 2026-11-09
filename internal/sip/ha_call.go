@@ -111,7 +111,7 @@ type haLegSnap struct {
 	remoteTarget, endpoint      string
 	source, sdp                 string
 	remoteSDP                   string // the endpoint's own SDP (its a=crypto lines removed)
-	srtp                        string // "", "savp" or "avp": the leg is encrypted (livestate.DialogLeg.SRTP)
+	srtp                        string // "", "savp", "avp" or "dtls": the leg is encrypted (livestate.DialogLeg.SRTP)
 }
 
 // haRefresh rebuilds the replicated-dialog snapshot from the live dialogs.

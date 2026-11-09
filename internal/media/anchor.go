@@ -110,8 +110,13 @@ func (a *Anchor) AnswerSecure(offer []byte, p SecurePolicy) ([]byte, Session, er
 		frame:  2 * off.Codec.FrameSamples(),
 	}
 	s.silent = make([]byte, s.frame)
+	// The socket carries STUN and DTLS as well as RTP when the caller
+	// negotiates ICE or DTLS-SRTP.
+	s.sec.Bind(conn.LocalAddr(), func(b []byte, to *net.UDPAddr) { _, _ = conn.WriteToUDP(b, to) },
+		func(from *net.UDPAddr, _ bool) { s.lockRemote(from) })
 	ansSDP, err := s.sec.AnswerSDP(parsed, off, p)
 	if err != nil {
+		s.sec.Close()
 		_ = conn.Close() // nothing received yet; the close error is irrelevant
 		enc.Close()
 		dec.Close()
@@ -222,6 +227,7 @@ const (
 func (s *anchorSession) Close() error {
 	s.closeOnce.Do(func() {
 		s.cancel()
+		s.sec.Close()
 		// A close error on teardown (already closed, ECONNRESET) changes
 		// nothing for the caller; Close keeps its error-free signature.
 		_ = s.conn.Close()
@@ -252,6 +258,14 @@ func (s *anchorSession) Play(ctx context.Context, audio []byte) error {
 	}
 	s.playMu.Lock()
 	defer s.playMu.Unlock()
+	// A DTLS-SRTP caller has no keys until its handshake ends; the first
+	// frames wait for it instead of being lost.
+	if err := s.sec.WaitReady(ctx); err != nil {
+		if s.ctx.Err() != nil {
+			return errSessionClosed
+		}
+		return err
+	}
 	ticker := time.NewTicker(frameDur)
 	defer ticker.Stop()
 	for off := 0; off < len(audio); off += s.frame {
@@ -333,7 +347,7 @@ func (s *anchorSession) loop() {
 		}
 		// An encrypted session drops what fails authentication before it
 		// is latched, decoded or counted; RTCP on the RTP port is consumed.
-		data, ok, _ := s.sec.Unprotect(buf[:n])
+		data, ok, _ := s.sec.UnprotectFrom(buf[:n], from)
 		if !ok {
 			continue
 		}

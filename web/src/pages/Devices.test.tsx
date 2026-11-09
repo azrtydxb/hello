@@ -283,6 +283,61 @@ describe("Devices", () => {
     expect(cells[3]).toHaveTextContent("—");
   });
 
+  it("shows a device's key exchange and ICE setting and sends a change", async () => {
+    const calls = api(
+      [
+        {
+          ...DEVICE,
+          srtp: "optional",
+          srtpKeyExchange: "sdes",
+          mediaIce: false,
+        },
+      ],
+      {
+        // Consumed in order: the key exchange change, then the ICE switch.
+        "PATCH /api/v1/devices/3": [
+          json({
+            ...DEVICE,
+            srtp: "optional",
+            srtpKeyExchange: "dtls",
+            mediaIce: false,
+          }),
+          json({
+            ...DEVICE,
+            srtp: "optional",
+            srtpKeyExchange: "dtls",
+            mediaIce: true,
+          }),
+        ],
+      },
+    );
+    renderApp("/devices");
+
+    const kex = await screen.findByLabelText("Key exchange: desk-phone");
+    expect(kex).toHaveValue("sdes");
+    fireEvent.change(kex, { target: { value: "dtls" } });
+    expect(
+      await screen.findByText("desk-phone: key exchange DTLS-SRTP."),
+    ).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/devices/3",
+      body: { srtpKeyExchange: "dtls" },
+    });
+    await waitFor(() => expect(kex).toHaveValue("dtls"));
+
+    const ice = screen.getByLabelText("ICE: desk-phone");
+    expect(ice).not.toBeChecked();
+    fireEvent.click(ice);
+    expect(await screen.findByText("desk-phone: ICE on.")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/devices/3",
+      body: { mediaIce: true },
+    });
+    await waitFor(() => expect(ice).toBeChecked());
+  });
+
   it("shows a device's media-encryption policy and sends a change", async () => {
     const calls = api([{ ...DEVICE, srtp: "optional" }], {
       "PATCH /api/v1/devices/3": () => json({ ...DEVICE, srtp: "required" }),

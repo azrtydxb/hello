@@ -49,15 +49,81 @@ type AudioSDP struct {
 	Crypto        []Crypto
 	CryptoSkipped int
 
+	// Proto is the m= transport as the sender wrote it: RTP/AVP, RTP/SAVP,
+	// UDP/TLS/RTP/SAVP or UDP/TLS/RTP/SAVPF (S-16). The last two are
+	// DTLS-SRTP and count as SRTPOnly.
+	Proto string
+	// DTLS holds the sender's a=fingerprint and a=setup (RFC 8122, RFC
+	// 4145), ICE its credentials and candidates (RFC 8839), RTCPMux its
+	// a=rtcp-mux (RFC 5761). Like Crypto, none of them is written by Build:
+	// Build writes only what WithDTLS, WithICE and WithRTCPMux set.
+	DTLS    *DTLSInfo
+	ICE     *ICEInfo
+	RTCPMux bool
+
 	// local is what Build writes for crypto: the profile and the a=crypto
-	// lines of the Hello side (WithCrypto).
+	// lines of the Hello side (WithCrypto), or the DTLS and ICE attributes.
 	localSRTP   bool
 	localCrypto []Crypto
+	localDTLS   *DTLSInfo
+	localProto  string
+	localICE    *ICEInfo
+	localMux    bool
 }
 
-// OffersCrypto reports whether the sender offered at least one usable SDES
-// key.
-func (a AudioSDP) OffersCrypto() bool { return len(a.Crypto) > 0 }
+// DTLSInfo is the DTLS-SRTP part of an SDP: the certificate fingerprints and
+// the DTLS role the sender takes.
+type DTLSInfo struct {
+	Fingerprints []Fingerprint
+	Setup        string // active, passive, actpass or "" when absent
+}
+
+// protoDTLS reports a DTLS-SRTP transport profile (RFC 5764).
+func protoDTLS(proto string) bool {
+	return proto == "UDP/TLS/RTP/SAVP" || proto == "UDP/TLS/RTP/SAVPF"
+}
+
+// OffersDTLS reports whether the sender offers DTLS-SRTP: a DTLS transport
+// profile with at least one usable fingerprint.
+func (a AudioSDP) OffersDTLS() bool {
+	return protoDTLS(a.Proto) && a.DTLS != nil && len(a.DTLS.Fingerprints) > 0
+}
+
+// OffersSDES reports whether the sender offered at least one usable SDES key.
+func (a AudioSDP) OffersSDES() bool { return len(a.Crypto) > 0 }
+
+// WithDTLS returns the SDP with Hello's DTLS-SRTP attributes for its Build:
+// the m= line is proto (UDP/TLS/RTP/SAVP, or SAVPF when answering an SAVPF
+// offer), followed by Hello's a=fingerprint and a=setup. SDES keys are
+// dropped: one stream does one key exchange.
+func (a AudioSDP) WithDTLS(proto string, local DTLSInfo) AudioSDP {
+	a.localSRTP, a.localCrypto = false, nil
+	if !protoDTLS(proto) {
+		proto = "UDP/TLS/RTP/SAVP"
+	}
+	a.localProto = proto
+	a.localDTLS = &local
+	return a
+}
+
+// WithICE returns the SDP with Hello's ICE-lite attributes for its Build:
+// a=ice-lite, the credentials and the one host candidate (the address and
+// port Build is given).
+func (a AudioSDP) WithICE(ufrag, pwd string) AudioSDP {
+	a.localICE = &ICEInfo{Ufrag: ufrag, Pwd: pwd, Lite: true}
+	return a
+}
+
+// WithRTCPMux returns the SDP with a=rtcp-mux for its Build: RTP and RTCP
+// share the media port (RFC 5761).
+func (a AudioSDP) WithRTCPMux() AudioSDP {
+	a.localMux = true
+	return a
+}
+
+// OffersCrypto reports whether the sender offered a key exchange Hello can
+// act on: at least one usable SDES key, or DTLS-SRTP.
+func (a AudioSDP) OffersCrypto() bool { return len(a.Crypto) > 0 || a.OffersDTLS() }
 
 // WithCrypto returns the SDP with Hello's keys for its Build: the m= line is
 // RTP/SAVP when srtpOnly, RTP/AVP (SRTP optional) otherwise, followed by one
@@ -73,6 +139,8 @@ func (a AudioSDP) WithCrypto(srtpOnly bool, keys ...Crypto) AudioSDP {
 func (a AudioSDP) PlainOffer() AudioSDP {
 	a.SRTPOnly, a.Crypto, a.CryptoSkipped = false, nil, 0
 	a.localSRTP, a.localCrypto = false, nil
+	a.Proto, a.DTLS, a.ICE, a.RTCPMux = "", nil, nil, false
+	a.localDTLS, a.localProto, a.localICE, a.localMux = nil, "", nil, false
 	return a
 }
 
@@ -93,6 +161,9 @@ func ParseAudioSDP(offer []byte) (AudioSDP, error) {
 		maps        = map[uint8]Codec{}
 		fmtps       = map[uint8]string{}
 		eventOrder  []uint8
+		// Session-level ICE and DTLS attributes apply to the media section
+		// unless it repeats them (RFC 8839, RFC 8122).
+		sess, med secAttrs
 	)
 	for _, line := range strings.Split(string(offer), "\n") {
 		line = strings.TrimRight(line, "\r")
@@ -108,10 +179,11 @@ func ParseAudioSDP(offer []byte) (AudioSDP, error) {
 		case 'm':
 			fields := strings.Fields(line[2:])
 			// m=<media> <port> <transport> <fmt>...
-			if len(fields) < 4 || fields[0] != "audio" || (fields[2] != "RTP/AVP" && fields[2] != "RTP/SAVP") {
+			if len(fields) < 4 || fields[0] != "audio" || !knownProto(fields[2]) {
 				continue
 			}
-			out.SRTPOnly = fields[2] == "RTP/SAVP"
+			out.Proto = fields[2]
+			out.SRTPOnly = fields[2] != "RTP/AVP"
 			port, err := strconv.Atoi(fields[1])
 			if err != nil {
 				return out, fmt.Errorf("media: SDP m=audio port %q is not a number", fields[1])
@@ -143,6 +215,12 @@ func ParseAudioSDP(offer []byte) (AudioSDP, error) {
 			}
 		case 'a':
 			if !inAudio {
+				if !haveAudio {
+					sess.parse(line[2:])
+				}
+				continue
+			}
+			if med.parse(line[2:]) {
 				continue
 			}
 			if rest, ok := strings.CutPrefix(line[2:], "fmtp:"); ok {
@@ -242,8 +320,87 @@ func ParseAudioSDP(offer []byte) (AudioSDP, error) {
 		return out, errors.New("media: SDP offer lists no supported audio codec (G.722, Opus, PCMU or PCMA)")
 	}
 	out.Address = addr
+	out.DTLS, out.ICE, out.RTCPMux = med.merge(sess)
 	out.finish()
 	return out, nil
+}
+
+// knownProto reports the m= transports Hello parses.
+func knownProto(p string) bool {
+	switch p {
+	case "RTP/AVP", "RTP/SAVP", "UDP/TLS/RTP/SAVP", "UDP/TLS/RTP/SAVPF":
+		return true
+	}
+	return false
+}
+
+// secAttrs are the ICE and DTLS attributes of one SDP level.
+type secAttrs struct {
+	fps     []Fingerprint
+	setup   string
+	ufrag   string
+	pwd     string
+	lite    bool
+	cands   []ICECandidate
+	rtcpMux bool
+}
+
+// parse takes one attribute (without "a=") and reports whether it was one of
+// these.
+func (t *secAttrs) parse(attr string) bool {
+	name, val, _ := strings.Cut(attr, ":")
+	val = strings.TrimSpace(val)
+	switch name {
+	case "fingerprint":
+		if f, err := ParseFingerprint(val); err == nil {
+			t.fps = append(t.fps, f)
+		}
+	case "setup":
+		t.setup = strings.ToLower(val)
+	case "ice-ufrag":
+		t.ufrag = val
+	case "ice-pwd":
+		t.pwd = val
+	case "ice-lite":
+		t.lite = true
+	case "candidate":
+		if c, ok := ParseICECandidate(val); ok {
+			t.cands = append(t.cands, c)
+		}
+	case "rtcp-mux":
+		t.rtcpMux = true
+	default:
+		return false
+	}
+	return true
+}
+
+// merge combines the media level with the session level, the media level
+// winning.
+func (t secAttrs) merge(sess secAttrs) (*DTLSInfo, *ICEInfo, bool) {
+	var d *DTLSInfo
+	fps, setup := t.fps, t.setup
+	if len(fps) == 0 {
+		fps = sess.fps
+	}
+	if setup == "" {
+		setup = sess.setup
+	}
+	if len(fps) > 0 || setup != "" {
+		d = &DTLSInfo{Fingerprints: fps, Setup: setup}
+	}
+	var ice *ICEInfo
+	ufrag, pwd := t.ufrag, t.pwd
+	if ufrag == "" {
+		ufrag = sess.ufrag
+	}
+	if pwd == "" {
+		pwd = sess.pwd
+	}
+	if ufrag != "" || pwd != "" || len(t.cands) > 0 {
+		ice = &ICEInfo{Ufrag: ufrag, Pwd: pwd, Lite: t.lite || sess.lite, Candidates: t.cands}
+	}
+	return d, ice, t.rtcpMux
 }
 
 // hasSupported reports a codec Hello can use in Codecs.
@@ -431,15 +588,28 @@ func AnswerFor(callerOffer, calleeAnswer AudioSDP) AudioSDP {
 // ("sendrecv" when empty or unknown). Lines use CRLF and the session is
 // valid forever (t=0 0), the shape every SIP endpoint accepts.
 func (a AudioSDP) Build(ip string, port int, dir string) []byte {
-	return buildSDP(ip, port, a.Codecs, a.Events, dir, a.localSRTP, a.localCrypto)
+	return buildSDP(ip, port, a.Codecs, a.Events, dir, localSec{
+		srtpOnly: a.localSRTP, keys: a.localCrypto, proto: a.localProto,
+		dtls: a.localDTLS, ice: a.localICE, mux: a.localMux})
 }
 
 // BuildSDP writes an SDP body for codecs followed by events.
 func BuildSDP(ip string, port int, codecs, events []Codec, dir string) []byte {
-	return buildSDP(ip, port, codecs, events, dir, false, nil)
+	return buildSDP(ip, port, codecs, events, dir, localSec{})
 }
 
-func buildSDP(ip string, port int, codecs, events []Codec, dir string, srtpOnly bool, keys []Crypto) []byte {
+// localSec is what an SDP Hello writes says about security: SDES keys or
+// DTLS-SRTP attributes, ICE-lite and rtcp-mux.
+type localSec struct {
+	srtpOnly bool
+	keys     []Crypto
+	proto    string // overrides the m= transport (DTLS)
+	dtls     *DTLSInfo
+	ice      *ICEInfo
+	mux      bool
+}
+
+func buildSDP(ip string, port int, codecs, events []Codec, dir string, sec localSec) []byte {
 	switch dir {
 	case "sendonly", "recvonly", "inactive":
 	default:
@@ -461,8 +631,14 @@ func buildSDP(ip string, port int, codecs, events []Codec, dir string, srtpOnly 
 	b.WriteString("s=-\r\n")
 	fmt.Fprintf(&b, "c=IN IP4 %s\r\n", ip)
 	b.WriteString("t=0 0\r\n")
+	if sec.ice != nil {
+		b.WriteString("a=ice-lite\r\n")
+	}
 	profile := "RTP/AVP"
-	if srtpOnly {
+	switch {
+	case sec.proto != "":
+		profile = sec.proto
+	case sec.srtpOnly:
 		profile = "RTP/SAVP"
 	}
 	fmt.Fprintf(&b, "m=audio %d %s", port, profile)
@@ -476,7 +652,20 @@ func buildSDP(ip string, port int, codecs, events []Codec, dir string, srtpOnly 
 			fmt.Fprintf(&b, "a=fmtp:%d %s\r\n", c.PT, c.Fmtp)
 		}
 	}
-	for _, k := range keys {
+	if sec.ice != nil {
+		fmt.Fprintf(&b, "a=ice-ufrag:%s\r\na=ice-pwd:%s\r\n", sec.ice.Ufrag, sec.ice.Pwd)
+		fmt.Fprintf(&b, "a=candidate:1 1 udp %d %s %d typ host\r\n", hostPriority, ip, port)
+	}
+	if sec.dtls != nil {
+		for _, f := range sec.dtls.Fingerprints {
+			fmt.Fprintf(&b, "a=fingerprint:%s\r\n", f)
+		}
+		fmt.Fprintf(&b, "a=setup:%s\r\n", sec.dtls.Setup)
+	}
+	if sec.mux {
+		b.WriteString("a=rtcp-mux\r\n")
+	}
+	for _, k := range sec.keys {
 		fmt.Fprintf(&b, "a=%s\r\n", k.Attribute())
 	}
 	fmt.Fprintf(&b, "a=%s\r\n", dir)
@@ -530,17 +719,20 @@ func SDPDirection(body []byte) string {
 	return "sendrecv"
 }
 
-// StripCrypto removes the a=crypto lines of an SDP body. Replicated dialog
-// state carries the far end's SDP so a surviving node can rebuild media; the
-// keys in it are secrets that are never stored, so the lines are dropped (a
-// taker negotiates fresh keys).
+// StripCrypto removes the a=crypto lines of an SDP body, and the far end's
+// ICE password. Replicated dialog state carries the far end's SDP so a
+// surviving node can rebuild media; the keys in it are secrets that are never
+// stored, so the lines are dropped (a taker negotiates fresh keys), and so is
+// the ICE password, which authenticates connectivity checks. A fingerprint is
+// public and stays.
 func StripCrypto(sdp string) string {
-	if !strings.Contains(sdp, "a=crypto:") {
+	if !strings.Contains(sdp, "a=crypto:") && !strings.Contains(sdp, "a=ice-pwd:") {
 		return sdp
 	}
 	var b strings.Builder
 	for _, line := range strings.SplitAfter(sdp, "\n") {
-		if strings.HasPrefix(strings.TrimLeft(line, " "), "a=crypto:") {
+		t := strings.TrimLeft(line, " ")
+		if strings.HasPrefix(t, "a=crypto:") || strings.HasPrefix(t, "a=ice-pwd:") {
 			continue
 		}
 		b.WriteString(line)

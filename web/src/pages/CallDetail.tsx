@@ -193,6 +193,24 @@ function srtpText(srtp: CallRecord["srtp"]): string {
   }
 }
 
+/** How the call's SRTP keys were agreed, and whether ICE-lite ran. */
+function keyExText(cdr: CallRecord): string {
+  const kex = (() => {
+    switch (cdr.srtpKeyEx) {
+      case "sdes":
+        return "SDES (keys in the SDP)";
+      case "dtls":
+        return "DTLS-SRTP";
+      case "mixed":
+        return "SDES on one leg, DTLS-SRTP on the other";
+      default:
+        return "";
+    }
+  })();
+  if (kex === "" && !cdr.ice) return "—";
+  return [kex, cdr.ice ? "ICE-lite" : ""].filter(Boolean).join(" · ");
+}
+
 /** Loss percent and jitter of an anchored call, or "not measured". */
 function qualityText(cdr: CallRecord): string {
   const { rtpPackets: packets, rtpLost: lost, rtpJitterMs: jitter } = cdr;
@@ -234,6 +252,7 @@ function Detail({ cdr }: { cdr: CallRecord }) {
     { label: "SIP node", value: cdr.sipNode || "—", mono: true },
     { label: "Media", value: cdr.mediaMode || "—" },
     { label: "Media encryption", value: srtpText(cdr.srtp) },
+    { label: "Key exchange", value: keyExText(cdr) },
     { label: "Call quality", value: qualityText(cdr) },
     { label: "SIP Call-ID", value: cdr.sipCallId || "—", mono: true },
     { label: "Correlation ID", value: cdr.correlationId || "—", mono: true },

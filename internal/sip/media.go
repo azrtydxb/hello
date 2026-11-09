@@ -537,6 +537,7 @@ func (c *call) isAnchored() bool {
 // S-5.1). The callback runs on the relay's stats ticker and at Close, never
 // on the RTP path.
 func (c *call) observeRelay(relay *media.Relay) {
+	c.watchSecure(relay)
 	m := c.s.deps.Media
 	relay.Observe(func(st media.RelayStats) {
 		if m != nil {

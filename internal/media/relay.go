@@ -84,6 +84,9 @@ type Relay struct {
 	// onDTMF and onPacket are the tap hooks (nil disables).
 	onDTMF   func(leg string, digit byte)
 	onPacket func(leg string, pkt *RTPPacket)
+	// secureFail is told of a failed DTLS-SRTP handshake (OnSecureFail).
+	secureFail func(leg, reason string)
+	secureUp   func(leg string)
 
 	started bool
 	// lastRx is when a datagram from a leg's accepted peer last arrived
@@ -240,6 +243,10 @@ func (r *Relay) AddLeg(name string) (int, error) {
 	l.remoteMu.Lock()
 	l.remote = nil
 	l.remoteMu.Unlock()
+	l.secure.Bind(conn.LocalAddr(), func(b []byte, to *net.UDPAddr) { _, _ = conn.WriteToUDP(b, to) },
+		func(from *net.UDPAddr, nominated bool) { l.iceVerified(from, nominated) })
+	l.secure.OnFail(func(reason string) { r.secureFailed(l.name, reason) })
+	l.secure.OnReady(func() { r.secureUpCall(l.name) })
 	r.legs = append(r.legs, l)
 	r.used[port] = true
 	return port, nil
@@ -264,6 +271,66 @@ func (r *Relay) SetTarget(name string, addr *net.UDPAddr) {
 		l.sdpIP = append(net.IP(nil), addr.IP...)
 	}
 	l.remoteMu.Unlock()
+	l.secure.SetPeer(addr)
+}
+
+// iceVerified is called for every authenticated ICE check on the leg: the
+// check proves the peer controls the ICE credentials of this call's SDP
+// exchange, so its address is a source the leg accepts, and the nominated
+// (or first) pair is where media goes.
+func (l *relayLeg) iceVerified(from *net.UDPAddr, selected bool) {
+	l.remoteMu.Lock()
+	defer l.remoteMu.Unlock()
+	known := false
+	for _, v := range l.extraIPs {
+		if v.Equal(from.IP) {
+			known = true
+			break
+		}
+	}
+	if !known {
+		l.extraIPs = append(l.extraIPs, append(net.IP(nil), from.IP...))
+	}
+	if selected {
+		l.pinnedIP = append(net.IP(nil), from.IP...)
+		l.remote = from
+	}
+}
+
+// OnSecureFail registers what runs when a leg's DTLS-SRTP handshake fails
+// (leg is the leg's name, reason a word: timeout, fingerprint, failed). The
+// leg then carries no media, so the call is ended.
+func (r *Relay) OnSecureFail(fn func(leg, reason string)) {
+	r.mu.Lock()
+	r.secureFail = fn
+	r.mu.Unlock()
+}
+
+// OnSecureUp registers what runs when a leg's DTLS-SRTP handshake finishes
+// and the leg is encrypted.
+func (r *Relay) OnSecureUp(fn func(leg string)) {
+	r.mu.Lock()
+	r.secureUp = fn
+	r.mu.Unlock()
+}
+
+func (r *Relay) secureUpCall(leg string) {
+	r.mu.Lock()
+	fn := r.secureUp
+	r.mu.Unlock()
+	if fn != nil {
+		fn(leg)
+	}
+}
+
+func (r *Relay) secureFailed(leg, reason string) {
+	r.mu.Lock()
+	fn := r.secureFail
+	closed := r.closed
+	r.mu.Unlock()
+	if fn != nil && !closed {
+		fn(leg, reason)
+	}
 }
 
 // AllowSource vouches for ip as a source of the leg's media: the address
@@ -517,6 +584,12 @@ func (r *Relay) recv(l *relayLeg) {
 		if err != nil {
 			return // socket closed by Close
 		}
+		if isSTUN(buf[:n]) {
+			// An ICE check is authenticated by the call's ICE credentials,
+			// not by the source policy: it is what vouches for its source.
+			l.secure.UnprotectFrom(buf[:n], from)
+			continue
+		}
 		if !l.sourceOK(from) {
 			l.rejected.Add(1)
 			continue // not the leg's peer: never counted, tapped or relayed
@@ -524,8 +597,9 @@ func (r *Relay) recv(l *relayLeg) {
 		data := buf[:n]
 		// An SRTP leg: nothing that fails authentication is latched,
 		// counted, tapped or relayed. RTCP on the RTP port (rtcp-mux) is
-		// checked and consumed; Hello sends no RTCP of its own.
-		plain, ok, failed := l.secure.Unprotect(data)
+		// checked and consumed; Hello sends no RTCP of its own. DTLS
+		// records of a DTLS-SRTP leg go to its handshake.
+		plain, ok, failed := l.secure.UnprotectFrom(data, from)
 		if failed {
 			l.authFail.Add(1)
 		}
@@ -827,6 +901,7 @@ func (r *Relay) Close() {
 	r.mu.Unlock()
 	r.cancel()
 	for _, l := range legs {
+		l.secure.Close() // a DTLS handshake still running ends with the call
 		_ = l.conn.Close()
 	}
 	r.wg.Wait()

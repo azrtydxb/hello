@@ -83,6 +83,11 @@ type Record struct {
 	// SRTP says which legs of the call carried SRTP (migration 00052):
 	// none (the default), caller, callee or both.
 	SRTP string
+	// SRTPKeyEx is how the encrypted legs agreed their keys (migration
+	// 00053): none (the default), sdes, dtls or mixed; ICE says a leg ran
+	// ICE-lite.
+	SRTPKeyEx string
+	ICE       bool
 	// PageLegs is a page's outcome per member (migration 00014), one row
 	// each; empty for any other call.
 	PageLegs []PageLeg
@@ -101,6 +106,14 @@ const (
 	SRTPCaller = "caller"
 	SRTPCallee = "callee"
 	SRTPBoth   = "both"
+)
+
+// The SRTPKeyEx column's values.
+const (
+	KeyExNone  = "none"
+	KeyExSDES  = "sdes"
+	KeyExDTLS  = "dtls"
+	KeyExMixed = "mixed"
 )
 
 // Queue leg events.
@@ -208,9 +221,9 @@ const insert = `WITH c AS (INSERT INTO cdrs (correlation_id, sip_call_id, source
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason,
     direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
-    rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, srtp)
+    rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, srtp, srtp_keyex, ice)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $30)
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $30, $31, $32)
 ON CONFLICT (correlation_id) DO NOTHING RETURNING id),
 p AS (INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
 SELECT c.id, l.ord, l.leg->>'extension', l.leg->>'device', l.leg->>'result'
@@ -295,6 +308,10 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	if srtp == "" {
 		srtp = SRTPNone
 	}
+	keyex := r.SRTPKeyEx
+	if keyex == "" {
+		keyex = KeyExNone
+	}
 	trace := r.Trace
 	if trace == nil {
 		trace = routing.Trace{}
@@ -323,7 +340,7 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 		r.StartTime, nullTime(r.RingTime), nullTime(r.AnswerTime), r.EndTime, r.DurationMs, r.BillableMs,
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
-		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, r.RingTag, r.RingRule, string(lj), string(qj), srtp)
+		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, r.RingTag, r.RingRule, string(lj), string(qj), srtp, keyex, r.ICE)
 	if err != nil {
 		return err
 	}

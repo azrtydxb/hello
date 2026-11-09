@@ -38,6 +38,10 @@ type Device struct {
 	// SRTP is the device's media-encryption policy (secmedia): "off",
 	// "optional" or "required"; empty (a test fixture) is optional.
 	SRTP string
+	// SRTPKeyEx is how the device's SRTP keys are agreed when Hello offers
+	// ("sdes" or "dtls", S-16) and MediaICE whether Hello offers it ICE-lite.
+	SRTPKeyEx string
+	MediaICE  bool
 }
 
 // LogValue keeps the HA1 values out of logs.
@@ -528,7 +532,7 @@ type Querier interface {
 // ride along in the same row, so one query keeps devices and features on one
 // revision.
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
-       d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, coalesce(d.srtp, 'optional'), e.number, e.name,
+       d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, coalesce(d.srtp, 'optional'), coalesce(d.srtp_keyex, 'sdes'), coalesce(d.media_ice, false), e.number, e.name,
        e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id,
        e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, e.directory_hidden
 FROM extensions e
@@ -558,12 +562,13 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 			d                              Device
 			id                             *int64
 			user, realm, ha1MD5, ha1SHA256 *string
-			srtpPolicy                     string
+			srtpPolicy, srtpKeyEx          string
+			mediaICE                       bool
 			e                              Extension
 			boxID                          *int64
 			callWaiting                    bool
 		)
-		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &srtpPolicy, &d.Extension, &d.ExtensionName,
+		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &srtpPolicy, &srtpKeyEx, &mediaICE, &d.Extension, &d.ExtensionName,
 			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID,
 			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden); err != nil {
 			rows.Close()
@@ -582,7 +587,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 			bare = append(bare, d.Extension)
 		} else {
 			d.ID, d.Username, d.Realm, d.HA1MD5, d.HA1SHA256 = *id, *user, *realm, *ha1MD5, *ha1SHA256
-			d.SRTP = srtpPolicy
+			d.SRTP, d.SRTPKeyEx, d.MediaICE = srtpPolicy, srtpKeyEx, mediaICE
 			devices = append(devices, d)
 		}
 		if !seen[e.Number] {

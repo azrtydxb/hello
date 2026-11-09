@@ -236,11 +236,11 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 30 {
-		t.Fatalf("insert takes %d arguments, want 30", len(db.args))
+	if len(db.args) != 32 {
+		t.Fatalf("insert takes %d arguments, want 32", len(db.args))
 	}
-	if db.args[29] != SRTPNone {
-		t.Fatalf("srtp = %v, want the default %q", db.args[29], SRTPNone)
+	if db.args[29] != SRTPNone || db.args[30] != KeyExNone || db.args[31] != false {
+		t.Fatalf("srtp, key exchange, ice = %v, %v, %v, want the defaults %q, %q, false", db.args[29], db.args[30], db.args[31], SRTPNone, KeyExNone)
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {

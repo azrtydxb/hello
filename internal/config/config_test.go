@@ -398,6 +398,25 @@ func TestLoadMediaAnchorHost(t *testing.T) {
 	}
 }
 
+// TestLoadMediaDTLSICE fails if DTLS-SRTP and ICE-lite are not on by default
+// or HELLO_MEDIA_DTLS and HELLO_MEDIA_ICE do not switch them off.
+func TestLoadMediaDTLSICE(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.MediaDTLS || !c.MediaICE {
+		t.Fatalf("defaults dtls %v ice %v, want both on", c.MediaDTLS, c.MediaICE)
+	}
+	c, err = LoadSIP(env(map[string]string{"HELLO_MEDIA_DTLS": "false", "HELLO_MEDIA_ICE": "false"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MediaDTLS || c.MediaICE {
+		t.Fatalf("dtls %v ice %v, want both off", c.MediaDTLS, c.MediaICE)
+	}
+}
+
 // TestLoadAIDefaults fails if OAuth and MCP are on without HELLO_PUBLIC_URL
 // or a default lifetime or switch differs from the spec's.
 func TestLoadAIDefaults(t *testing.T) {

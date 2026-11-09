@@ -1549,3 +1549,117 @@ Follow-up to "SRTP SDES on the anchor". Choices:
 - **Not changed.** An in-dialog re-INVITE that rekeys a voicemail or conference
   caller is answered with the call's existing key (a phone that rekeys on its
   own re-INVITE is followed on relay legs only). AES-256 is still not offered.
+
+## DTLS-SRTP and ICE-lite on the anchor (phone-feature-parity item 25, S-16) (2026-11-09)
+
+Spec: `phone-feature-parity.md` S-16, with `clients-webrtc-mobile-video.md` S-4
+(same code, delivered once). Stacked on the SRTP gaps PR (#274). Choices:
+
+- **Modules.** `pion/dtls/v3` v3.1.5 (the handshake, over a packet conn fed from
+  the leg's receive loop) and `pion/stun/v3` v3.1.6 (STUN parsing, integrity,
+  fingerprint) join `pion/srtp/v3`; `pion/transport/v4` moves to v4.0.2 as they
+  require. The spec names `pion/ice` too. It is not used here: ICE-lite is a
+  fixed answer (host candidate out, authenticated binding requests answered),
+  and `pion/ice`'s agent gathers, runs its own sockets and wants to own the
+  UDP port, which fights the relay's per-leg sockets. The WebRTC phase decides
+  about `pion/ice` and its UDP mux when it needs one shared port; nothing here
+  blocks it.
+- **One per-leg crypto layer.** The DTLS handshake fills the same `legKeys` SDES
+  fills (`Secure`), so the relay, recording, announcements, voicemail, the
+  conference mixer and the page caller keep one `Protect`/`Unprotect`. A
+  leg's socket now carries STUN, DTLS and RTP, told apart by the first byte
+  (RFC 7983); `Secure.UnprotectFrom` is the one place that does it. A DTLS leg
+  with no keys yet carries nothing in either direction: it can never fall back
+  to plain RTP.
+- **What to offer and accept when.**
+  - Answering mirrors the offer: `UDP/TLS/RTP/SAVP(F)` with a fingerprint gets
+    DTLS-SRTP, `RTP/AVP` or `RTP/SAVP` with `a=crypto` gets SDES (S-15). A
+    fingerprint on an `RTP/AVP` line is ignored, not read as an offer.
+  - Offering follows the device: new `devices.srtp_keyex` (`sdes` default,
+    `dtls`). `off` offers nothing; `optional` and `required` offer the chosen
+    exchange (`required` = SAVP-only semantics as before). A DTLS transport
+    cannot carry a plain fallback inside the same offer, so a device set to
+    `dtls` is for phones that do DTLS-SRTP; there is no dual SDES+DTLS offer
+    (no vendor documentation says phones accept one).
+  - **TLS only, as SDES.** DTLS carries no key in the SDP, but the fingerprint
+    is the only thing that authenticates the peer certificate, so it is trusted
+    only when it arrived over protected signalling (the decision recorded under
+    S-14: SRTP and DTLS-SRTP are offered only where `bindingOnTLS` or the
+    caller's `clientTransport` is TLS). The same `off`/`optional`/`required`
+    policy gates it. A DTLS-only offer on a UDP leg, with policy `off`, without a
+    usable fingerprint, or on a node with `HELLO_MEDIA_DTLS=false` is refused
+    with 488.
+  - A required callee that answers without DTLS ends the call (488), as for
+    SDES. A trunk never carries DTLS (trunk legs are UDP).
+- **Roles.** Hello answers `active` (client) to `actpass` and `passive`, and
+  `passive` to `active`, as RFC 5763 section 5 says (SHOULD be active); when it
+  offers it sends `actpass` and takes the role the answer leaves. A client waits
+  until the peer address is known and, with ICE, authenticated.
+- **Fingerprints.** `sha-1`, `sha-256`, `sha-384`, `sha-512` accepted for the
+  peer (matching any listed one; sha-1 is only compared against a certificate
+  the peer must already hold, a second-preimage problem, and some phone stacks
+  only send it); md5/md2 refused. Hello's own is sha-256. Extended master secret
+  required. SRTP profiles offered: AEAD_AES_128_GCM, AES128_CM_HMAC_SHA1_80,
+  AES128_CM_HMAC_SHA1_32. GCM is a DTLS-only suite: SDES still offers the two
+  CM suites and refuses a GCM `a=crypto` line.
+- **Certificate.** One self-signed ECDSA P-256 certificate per hello-sip process,
+  made on first use and replaced for new sessions after 30 days (valid 90),
+  never stored or shared (a restart or takeover gives a new fingerprint; the
+  taker's re-INVITE carries it). A session keeps the certificate it started
+  with. The peer sees only the fingerprint.
+- **Failure.** A handshake that times out (8 s), presents a certificate that
+  does not match, or fails is counted, traced and ends the call (BYE to both
+  legs, or an abort during setup). There is nothing to fall back to: the offer
+  or answer was DTLS only. (The spec's "otherwise falls back to RTP" is read as
+  the negotiation: an answer without DTLS from an `optional` device is plain
+  RTP, as with SDES.) Voicemail greetings and announcements wait for the
+  handshake instead of losing their first frames.
+- **ICE-lite.** Answers an offer's ICE credentials with `a=ice-lite`, its own
+  ufrag and pwd per leg, one host candidate (the relay address, component 1) and
+  `a=rtcp-mux`; always controlled (487 to a peer that is also controlled);
+  binding requests are answered only with the right USERNAME and
+  MESSAGE-INTEGRITY, everything else is dropped silently (no oracle). A valid
+  check vouches for its source address (the leg then accepts media from it) and
+  the first or nominated pair becomes where media goes. Remote `a=candidate`
+  lines are parsed and kept, never checked. ICE does not need TLS (it carries
+  no secret) and does not encrypt. Answering ICE has no per-device switch: a
+  phone that sends ICE credentials expects an answer, and `HELLO_MEDIA_ICE=false`
+  turns it off node-wide. The device's `media_ice` only decides whether Hello
+  offers ICE-lite and what provisioning writes. The far end's ICE password is not
+  replicated for HA.
+- **rtcp-mux** is answered on DTLS and ICE legs only (RTCP on the media port is
+  consumed). Plain legs are unchanged: no mux claimed, nothing to drop.
+- **Hosts.** The relay legs, the voicemail/IVR session, the conference
+  participant and the page caller leg all bind their socket to their `Secure`.
+  Page members are offered SDES, never DTLS (a member socket only sends). A
+  retrieve or pickup that crosses nodes with a DTLS leg is refused with 488 (the
+  shared-store command carries neither the retriever's policy nor its
+  transport), like a required SDES one. The replicated leg mode gains `dtls`.
+- **Provisioning (vendor docs, Grandstream WP8x6 config templates).** `P60078`
+  SRTP Key Exchange of account 1 (`0` SDES, `1` DTLS; WP826, WP836, WP856),
+  written with `P183` for a TLS phone; `P95002` Media NAT Traversal of account 1
+  (`1` Auto, the documented default, `4` ICE; WP826 and WP836, the WP856
+  template does not list it), written for a phone of those models whatever its
+  transport. No other vendor's key is confirmed, so none is written.
+- **Migration 00053** (highest on #266 is 00052): `devices.srtp_keyex`,
+  `devices.media_ice`, `cdrs.srtp_keyex` (`none`, `sdes`, `dtls`, `mixed`),
+  `cdrs.ice`.
+- **Metrics.** `hello_dtls_handshakes_total{result}`,
+  `hello_dtls_handshake_seconds`, `hello_ice_checks_total{result}`;
+  `hello_srtp_negotiations_total` gains `dtls` and `dtls_failed`.
+- **What the WebRTC phase gets.** The ICE-lite agent, the DTLS handshake over a
+  demultiplexed socket, the node certificate and fingerprint, the GCM profile,
+  `a=rtcp-mux` and the SDP parsing of `fingerprint`, `setup`, `ice-*`,
+  `candidate` and SAVPF. Still to build there: the multi-section SDP model,
+  BUNDLE, `a=mid`, the shared WebRTC UDP port with a ufrag demultiplexer, the
+  public candidate address, trickle/`end-of-candidates` and the Kamailio
+  WebSocket and TURN pieces. No port or chart change is needed for phones.
+- **Needs hardware (lab item 10, WP822/WP836).** That `P60078 = 1` makes the
+  phone offer `UDP/TLS/RTP/SAVP` with a fingerprint and `a=setup:actpass`, which
+  fingerprint hash and SRTP profile it uses, that it handshakes as client against
+  Hello's `active` answer and as server against Hello's offer, what its answer
+  to Hello's offer says in `a=setup`, and what "enabled but not forced"
+  (`P183 = 1`) does together with DTLS; that `P95002 = 4` makes it send ICE
+  credentials and candidates, accept the lite answer and send its checks to the
+  relay address (Trickle ICE `P95003` on and off); that hold, resume and a
+  re-INVITE keep the session; and that a WP822 ignores the keys it does not have.
