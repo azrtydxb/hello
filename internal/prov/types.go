@@ -120,6 +120,20 @@ type RenderData struct {
 	// Emergency is the comma-separated emergency numbers of Hello's
 	// emergency-flagged outbound routes (digits only), empty when none.
 	Emergency string
+	// DoorStations are the door stations that can call the phone's
+	// extension (at most MaxDoorStations), for the Grandstream WP door
+	// system entries (spec phone-feature-parity S-49).
+	DoorStations []DoorStation
+}
+
+// MaxDoorStations is how many door system entries a WP takes (10).
+const MaxDoorStations = 10
+
+// DoorStation is a door station as a phone lists it: the number it calls
+// from and the name the phone shows.
+type DoorStation struct {
+	Number string
+	Name   string
 }
 
 // Phone is the phone itself, as templates and resolution see it.

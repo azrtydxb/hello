@@ -76,6 +76,11 @@ type Store interface {
 	UpdateExtension(ctx context.Context, actor string, id int64, c store.ExtensionChange, check store.Check) (store.Extension, error)
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
 
+	GetDoorCamera(ctx context.Context, id int64) (store.DoorCamera, error)
+	SetDoorCamera(ctx context.Context, actor string, id int64, in store.DoorCameraInput) (store.DoorCamera, error)
+	DeleteDoorCamera(ctx context.Context, actor string, id int64) error
+	DoorCameraForView(ctx context.Context, id int64) (store.DoorCameraAccess, bool, error)
+
 	GetVoicemailBox(ctx context.Context, extensionID int64) (store.VoicemailBox, error)
 	ListVoicemailBoxes(ctx context.Context) ([]store.VoicemailBoxSummary, error)
 	UpdateVoicemailBox(ctx context.Context, actor string, extensionID int64, c store.VoicemailBoxChange, check store.Check) (store.VoicemailBox, error)
@@ -276,6 +281,9 @@ type Config struct {
 	Events EventService
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
+	// CameraHTTP fetches door station camera pictures; it should be built on
+	// the SSRF-guarded safehttp transport. nil answers 503.
+	CameraHTTP *http.Client
 	// Objects is the voicemail audio store; nil makes the audio routes and
 	// greeting uploads answer 503 instead of touching MinIO.
 	Objects Objects

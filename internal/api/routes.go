@@ -192,6 +192,11 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/feature-codes", auth.ScopeRead, auth.RoleViewer, false, s.listFeatureCodes},
 		{"PUT", "/api/v1/feature-codes", auth.ScopeWrite, auth.RoleOperator, false, s.putFeatureCodes},
 
+		{"GET", "/api/v1/extensions/{id}/camera", auth.ScopeRead, auth.RoleViewer, false, s.getDoorCamera},
+		{"PUT", "/api/v1/extensions/{id}/camera", auth.ScopeAdmin, auth.RoleAdmin, false, s.putDoorCamera},
+		{"DELETE", "/api/v1/extensions/{id}/camera", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteDoorCamera},
+		{"GET", "/api/v1/extensions/{id}/camera/view", auth.ScopeRead, auth.RoleViewer, false, s.viewDoorCamera},
+
 		{"GET", "/api/v1/presence", auth.ScopeRead, auth.RoleViewer, false, s.presence},
 
 		{"GET", "/api/v1/registrations", auth.ScopeRead, auth.RoleViewer, false, s.registrations},

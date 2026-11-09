@@ -12,3 +12,7 @@ func ConferencePINAAD(roomID int64, which string) string {
 // TOTPAAD is the additional data a user's TOTP secret is sealed under, so a
 // secret copied to another user's row does not open.
 func TOTPAAD(userID int64) string { return fmt.Sprintf("user:%d:totp", userID) }
+
+// DoorCameraAAD is the additional data a door station camera's password is
+// sealed under, so a value copied to another extension's row does not open.
+func DoorCameraAAD(extensionID int64) string { return fmt.Sprintf("door-camera:%d", extensionID) }

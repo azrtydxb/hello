@@ -242,6 +242,134 @@ describe("Extensions", () => {
     });
   });
 
+  it("sets a door station's camera, keeps the password write-only and shows the picture", async () => {
+    const door = {
+      ...EXT,
+      id: 9,
+      number: "900",
+      name: "Front door",
+      kind: "door",
+      voicemailEnabled: false,
+      doorTargets: { extensions: [], ringGroups: [] },
+    };
+    const none = {
+      configured: false,
+      kind: "",
+      url: "",
+      username: "",
+      passwordSet: false,
+    };
+    const set = {
+      configured: true,
+      kind: "snapshot",
+      url: "http://192.168.10.40/snap.jpg",
+      username: "hello",
+      passwordSet: true,
+    };
+    const calls = api([EXT, door], {
+      "GET /api/v1/ring-groups": () => json({ items: [] }),
+      "GET /api/v1/extensions/9/camera": () => json(none),
+      "PUT /api/v1/extensions/9/camera": () => json(set),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer("900");
+    const address = await within(drawer).findByLabelText("Address");
+    expect(
+      within(drawer).queryByRole("button", { name: "Show picture" }),
+    ).toBeNull();
+
+    fireEvent.change(address, { target: { value: "rtsp://192.168.10.40/s1" } });
+    fireEvent.click(
+      within(drawer).getByRole("button", { name: "Save camera" }),
+    );
+    expect(
+      await within(drawer).findByText(
+        "An absolute http:// or https:// address.",
+      ),
+    ).toBeVisible();
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
+
+    fireEvent.change(address, { target: { value: set.url } });
+    fireEvent.change(within(drawer).getByLabelText("User name"), {
+      target: { value: "hello" },
+    });
+    const password = within(drawer).getByLabelText("Password");
+    expect(password).toHaveAttribute("type", "password");
+    fireEvent.change(password, { target: { value: "cam-s3cret-pw" } });
+    fireEvent.click(
+      within(drawer).getByRole("button", { name: "Save camera" }),
+    );
+    expect(await within(drawer).findByText("Camera saved.")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PUT",
+      url: "/api/v1/extensions/9/camera",
+      body: {
+        kind: "snapshot",
+        url: set.url,
+        username: "hello",
+        password: "cam-s3cret-pw",
+      },
+    });
+    // The password is gone from the field and the page.
+    expect(within(drawer).getByLabelText("Password")).toHaveValue("");
+    expect(document.body.textContent).not.toContain("cam-s3cret-pw");
+    expect(within(drawer).getByText(/A password is set/)).toBeVisible();
+
+    fireEvent.click(
+      within(drawer).getByRole("button", { name: "Show picture" }),
+    );
+    const img = within(drawer).getByRole("img", { name: "Door camera" });
+    expect(img.getAttribute("src")).toMatch(
+      /^\/api\/v1\/extensions\/9\/camera\/view\?t=\d+$/,
+    );
+    fireEvent.error(img);
+    expect(
+      await within(drawer).findByText(/The camera gave no picture/),
+    ).toBeVisible();
+  });
+
+  it("lets an operator look at the picture but not change the camera", async () => {
+    const door = {
+      ...EXT,
+      id: 9,
+      number: "900",
+      name: "Front door",
+      kind: "door",
+      doorTargets: { extensions: [], ringGroups: [] },
+    };
+    mockApi({
+      "GET /api/v1/auth/me": () => json({ username: "ops", role: "operator" }),
+      "GET /api/v1/extensions": () => json({ items: [door] }),
+      "GET /api/v1/devices": () => json({ items: [] }),
+      "GET /api/v1/ring-groups": () => json({ items: [] }),
+      "GET /api/v1/extensions/9/camera": () =>
+        json({
+          configured: true,
+          kind: "mjpeg",
+          url: "http://192.168.10.40/v.mjpg",
+          username: "u",
+          passwordSet: true,
+        }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer("900");
+    fireEvent.click(
+      await within(drawer).findByRole("button", { name: "Show picture" }),
+    );
+    expect(
+      within(drawer)
+        .getByRole("img", { name: "Door camera" })
+        .getAttribute("src"),
+    ).toBe("/api/v1/extensions/9/camera/view");
+    expect(within(drawer).queryByLabelText("Address")).toBeNull();
+    expect(
+      within(drawer).queryByRole("button", { name: "Save camera" }),
+    ).toBeNull();
+    expect(
+      within(drawer).queryByRole("button", { name: "Remove camera" }),
+    ).toBeNull();
+  });
+
   it("keeps an extension created before the list finished loading", async () => {
     // The header's "New extension" is usable while the list is still
     // loading; a list response that predates the create must not drop it.

@@ -118,6 +118,7 @@ naming the key, if one is missing or malformed.
 | `HELLO_SIP_RING_TIMEOUT`                          | sip     | `30s`                                                                                                                         |
 | `HELLO_SIP_MAX_CALL_DURATION`                     | sip     | `4h`; a call with no BYE (phone gone) is cleared after this                                                                   |
 | `HELLO_PAGE_MAX_SECONDS`                          | sip     | `120`; a server page ends after this many seconds                                                                             |
+| `HELLO_DOOR_CAMERA_ALLOW`                         | control | empty; private CIDRs a door camera picture may be fetched from; public addresses need none                                    |
 | `HELLO_PAGE_CONCURRENT`                           | sip     | `5`; pages one node runs at once, beyond that the caller hears busy                                                           |
 | `HELLO_PAGE_FANOUT`                               | sip     | `200`; legs of one page, beyond that the caller hears busy                                                                    |
 | `HELLO_PAGE_MULTICAST_IFACE`                      | sip     | empty (the system route); the interface a paging group's multicast packets leave on, which must be on the phones' LAN         |

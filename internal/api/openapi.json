@@ -15237,6 +15237,218 @@
           "exclude": "mints a credential-like ticket for a stream; not for an AI agent"
         }
       }
+    },
+    "/api/v1/extensions/{id}/camera": {
+      "get": {
+        "operationId": "getDoorCamera",
+        "summary": "Show a door station's camera",
+        "description": "Shows where a door station's camera picture comes from. The password is never returned. An ordinary user extension answers 409.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Camera settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorCamera"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console"
+        }
+      },
+      "put": {
+        "operationId": "updateDoorCamera",
+        "summary": "Set a door station's camera",
+        "description": "Sets the address of a door station's camera, an MJPEG stream or a snapshot, with its credentials. hello-control fetches the picture itself, and only from addresses it may reach (public ones and the networks in HELLO_DOOR_CAMERA_ALLOW). An ordinary user extension answers 409.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DoorCameraUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Camera settings after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorCamera"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console"
+        }
+      },
+      "delete": {
+        "operationId": "deleteDoorCamera",
+        "summary": "Remove a door station's camera",
+        "description": "Removes the camera and its stored password.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console"
+        }
+      }
+    },
+    "/api/v1/extensions/{id}/camera/view": {
+      "get": {
+        "operationId": "viewDoorCamera",
+        "summary": "Show a door station's camera picture",
+        "description": "Fetches the door station's picture from its camera and passes it on: image/jpeg for a snapshot camera, multipart/x-mixed-replace for an MJPEG stream (ended after ten minutes; at most eight pictures at a time per node). 404 when the station has no camera, 502 when the camera cannot be reached or does not answer with a picture (its address may be outside HELLO_DOOR_CAMERA_ALLOW), 429 when too many pictures are shown.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The picture",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "multipart/x-mixed-replace": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "description": "Too many pictures are being shown; see Retry-After",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console"
+        }
+      }
     }
   },
   "components": {
@@ -26289,6 +26501,60 @@
           "expiresAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "DoorCamera": {
+        "type": "object",
+        "required": ["configured", "kind", "url", "username", "passwordSet"],
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "Whether the station has a camera"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["mjpeg", "snapshot", ""],
+            "description": "mjpeg: a multipart/x-mixed-replace stream; snapshot: one JPEG per request"
+          },
+          "url": {
+            "type": "string",
+            "description": "The camera address, without credentials"
+          },
+          "username": {
+            "type": "string"
+          },
+          "passwordSet": {
+            "type": "boolean",
+            "description": "Whether a password is stored. The password itself is never returned."
+          }
+        }
+      },
+      "DoorCameraUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "url"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["mjpeg", "snapshot"],
+            "description": "mjpeg: a multipart/x-mixed-replace stream; snapshot: one JPEG per request"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "An absolute http:// or https:// address without credentials. rtsp:// cannot be shown in a browser."
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The camera's user name for HTTP basic authentication"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 256,
+            "x-hello-secret": true,
+            "description": "The camera's password, stored sealed and never returned. Absent keeps the stored one, an empty string clears it."
           }
         }
       }

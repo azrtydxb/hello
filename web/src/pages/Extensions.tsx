@@ -45,6 +45,7 @@ import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import "./directory/directory.css";
 import { Can } from "../role";
 import { MOHSelect } from "./media/MohSelect";
+import { DoorCameraField } from "./directory/DoorCameraField";
 import { DoorTargetsField } from "./directory/DoorTargetsField";
 
 const NUMBER_HINT = "2 to 10 digits.";
@@ -714,6 +715,7 @@ function ExtensionDrawer({
               onChange={setTargets}
             />
           )}
+          {door && ext.kind === "door" && <DoorCameraField id={ext.id} />}
 
           <div
             className="dir-section"

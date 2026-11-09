@@ -871,3 +871,57 @@ another group) is lifted: the ring state machine can open a new ring stage.
   builds it under the call lock, covers answered, homed and parked calls), and
   `haNewCall` restores them, so a taken-over door call keeps the trunk ban and CDR
   kind door (`TestDoorCallerSurvivesTakeover`).
+
+## Door video preview (2026-11-10) — phone-feature-parity item 17 (S-49)
+
+- Three parts, all optional like the spec says: video in the call, a camera
+  picture in the console, and the Grandstream WP door-system entries.
+- Migration `00062_door_cameras` (00061 is the webhook PR, 00054 item 14, 00053
+  #225): `door_cameras` keyed by the station, kind mjpeg or snapshot, URL, user
+  name, password sealed with AAD `door-camera:<extension id>`.
+- **Video in the call.** Only when a door station is a party and the caller's
+  SDP offers H.264 over plain RTP/AVP(F). The anchor adds a `VideoRelay`: a
+  second RTP `Relay` on an even/odd port pair per leg plus an RTCP bridge on the
+  odd ports, so a phone's PLI/FIR reaches the door. RTCP is accepted only from
+  the sources the RTP leg accepts. Each SDP gets one video m-line on Hello's
+  ports with the H.264 payload types, fmtp and feedback lines of the other side,
+  and an explicit `a=rtcp`; the callee gets the caller's section, the caller
+  the callee's. A callee with no video gets none and the door's offer is
+  answered with port 0 (RFC 3264). A call with no door station is untouched
+  (video beyond S-49 is out of scope, as the spec says). Re-INVITEs on an
+  anchored call keep the section on both sides; hold does not touch the video
+  direction. Not carried: takeover (HA), transfer, re-anchor, SRTP, VP8. A phone
+  that sends RTCP on the RTP port (rtcp-mux) is not supported; the section does
+  not offer it.
+- **Camera in the console.** Hello fetches the picture itself and the browser
+  gets it from `GET /extensions/{id}/camera/view` (viewer), so neither the
+  browser nor a user needs a route to the camera or its credentials. Settings
+  are admin (`PUT`, `DELETE`); `GET` (viewer) never returns the password. MJPEG
+  is passed through (10 minutes at most, eight pictures at once per node, `429`
+  above), a snapshot is fetched per request (10 s, 4 MiB). The console polls a
+  snapshot every 2 s. `rtsp://` is refused with a field error: a browser cannot
+  show it and transcoding H.264 to MJPEG is out of scope. Basic authentication
+  only (no digest). No redirects are followed.
+- SSRF: the client is `safehttp.NewTransport`, so loopback, link-local and
+  metadata addresses are never reachable and private networks only when listed
+  in the new `HELLO_DOOR_CAMERA_ALLOW` (hello-control, CIDRs, validated by
+  `safehttp.ParseAllow`; the error names the key and not the value). Empty by
+  default: a camera on a LAN needs its network listed. kw's values are not set
+  here (deploy/kuvryn-sync is out of scope); the parent task must add the camera
+  network there.
+- The phone's own copy of the stream is the first part (SDP video); no camera
+  URL is provisioned to phones, and there is no phone-side RTSP.
+- **WP door systems.** The WP8x6 (`wp8x6_config_1.0.3.39`, Settings/External
+  Service/Door System) and WP810/820/822/825 (`wp810_822_825_config_1.0.11.83`,
+  Settings/External Service) take ten entries of five P-values from P32000: type
+  (0 GDS), account (0), system identification (name), system number (the
+  station's number), access password. Hello writes the first four per station
+  that can call the phone's extension (target, listed group, or a Door group it
+  belongs to). It never writes the access password: the sealed door-open code
+  stays on the server and `*50` (item 14) opens the door. The WP856 uses
+  P32001 for another meaning and gets none; other vendors get none. The key
+  meaning is from the official templates; what a WP does with an entry that has
+  no access password is a bench check.
+- Open-door softkeys (item 14's "Open door" key) are not provisioned: the
+  WP8x6 key P-values for DialDTMF/GDS Opendoor are listed in the templates but
+  need a key-placement design and a WP to try; left for the bench.

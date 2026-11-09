@@ -103,6 +103,15 @@
     <P2336>{{xml .Line.ParkRetrieveCode}}</P2336>
 {{- end}}
 {{- end}}
+{{- /* Door systems (S-49): the WP8x6 (wp8x6_config 1.0.3.39, Settings/External Service/Door System) and the WP810/820/822/825 (wp810_822_825_config 1.0.11.83, Settings/External Service) list up to ten door systems, five P-values each from P32000 in steps of five: service type 0 (GDS), the account (0 is the first), the system identification (the name the phone shows), the system number (the station's number, which the phone matches against the caller) and the access password. The password is left empty: Hello sends the sealed door-open code itself when the user dials *50, so the code never reaches a phone's configuration. The WP856 and WP820-only templates use P32001 differently and get none. */}}
+{{- if or (eq .Phone.Family "8x6") (eq .Phone.Family "8xx")}}
+{{- range $i, $d := .DoorStations}}
+    <P{{add 32000 (mul $i 5)}}>0</P{{add 32000 (mul $i 5)}}>
+    <P{{add 32001 (mul $i 5)}}>0</P{{add 32001 (mul $i 5)}}>
+    <P{{add 32002 (mul $i 5)}}>{{xml (or $d.Name $d.Number)}}</P{{add 32002 (mul $i 5)}}>
+    <P{{add 32003 (mul $i 5)}}>{{xml $d.Number}}</P{{add 32003 (mul $i 5)}}>
+{{- end}}
+{{- end}}
 {{- /* BLF keys (CALL-43): the P323 block is defined by none of the WP templates (WP8x6, WP856, WP8xx), so it is written only to a Grandstream phone that is not a WP (Phone.Family empty). prov.SupportsBLF refuses BLF keys on a WP in the API. */}}
 {{- if not .Phone.Family}}
 {{- range $i, $k := .BLF}}

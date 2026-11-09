@@ -22,6 +22,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/phonebook"
+	"github.com/azrtydxb/hello/internal/safehttp"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/jackc/pgx/v5"
@@ -41,7 +42,11 @@ type Common struct {
 // Control is hello-control's configuration.
 type Control struct {
 	Common
-	DatabaseURL string
+	// DoorCameraAllow are the private networks the door camera proxy may
+	// reach (HELLO_DOOR_CAMERA_ALLOW, CIDRs); public addresses need no entry
+	// and loopback and link-local ones are never reachable.
+	DoorCameraAllow []netip.Prefix
+	DatabaseURL     string
 	// Database is DatabaseURL parsed, so a malformed DSN fails at startup.
 	Database *pgx.ConnConfig
 	// ValkeyAddr is read for the live registrations/calls API.
@@ -392,6 +397,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
 	}
 	c.Database = r.database(c.DatabaseURL)
+	c.DoorCameraAllow = r.cameraAllow()
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
 	c.SecretKey = r.secretKey()
 	r.minio(&c.MinioEndpoint, &c.MinioAccessKey, &c.MinioSecretKey, &c.MinioSecure)
@@ -411,6 +417,21 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	c.AI = r.ai()
 	c.AIAgent = r.aiAgent()
 	return c, r.err()
+}
+
+// cameraAllow reads HELLO_DOOR_CAMERA_ALLOW. The error names the key and
+// never echoes the value.
+func (r *reader) cameraAllow() []netip.Prefix {
+	v := r.getenv("HELLO_DOOR_CAMERA_ALLOW")
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	p, err := safehttp.ParseAllow(v)
+	if err != nil {
+		r.fail("HELLO_DOOR_CAMERA_ALLOW", errors.New("must list private CIDR prefixes such as 192.168.10.0/24 (not loopback or link-local)"))
+		return nil
+	}
+	return p
 }
 
 // ai reads HELLO_PUBLIC_URL, HELLO_OAUTH_* and HELLO_MCP_ALLOWED_ORIGINS.
