@@ -93,8 +93,12 @@ type call struct {
 	route     string
 	rewritten string
 	trunkName string
-	trace     routing.Trace
-	slots     []heldSlot // trunk call slots held, released when the attempt ends
+	// inTrunk is the trunk an inbound trunk call came from (nil for a call
+	// from a phone); its session-timers setting decides the caller dialog's
+	// timer.
+	inTrunk *routing.Trunk
+	trace   routing.Trace
+	slots   []heldSlot // trunk call slots held, released when the attempt ends
 
 	// Phase 4 call-flow state. stages carries the forwarding/DND context of
 	// the extension being rung (nil for a plain call); mediaMode is the CDR's
@@ -235,6 +239,14 @@ type call struct {
 	// ses is the RFC 4028 session timers and the dead-media watch
 	// (sessiontimer.go).
 	ses sessionState
+
+	// rawCaller marks a caller dialog Hello answered through the raw
+	// transaction (answerSelf: a retriever or a picker), where sipgo has no
+	// confirmed dialog to send a session refresh on. linkHeld is the hold of
+	// a linked call's pair as the party and its peer signalled it (guarded
+	// by mu); the dead-media watch leaves a held pair alone.
+	rawCaller bool
+	linkHeld  bool
 
 	// IVR state (ivr.go). ivr is the menu session, ivrCancel stops its
 	// flow with the call, ivrAnswered is when the menu answered (billing
@@ -1926,6 +1938,9 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		// A page is one-way by construction: no hold, no renegotiation.
 		s.respond(tx, req, sip.StatusNotAcceptableHere, "Not Acceptable Here")
 		return
+	}
+	if ref.leg == nil && c.soloInDialog(req, tx) {
+		return // a refresh or a roam on an application's dialog: answered here
 	}
 	c.mu.Lock()
 	w, connected := c.winner, c.connected

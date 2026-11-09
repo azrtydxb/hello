@@ -1150,7 +1150,10 @@ func (c *call) byeCallerRaw() {
 		Params: sip.HeaderParams{{K: "tag", V: tagParam(inv.From())}}})
 	callID := sip.CallIDHeader(inv.CallID().Value())
 	req.AppendHeader(&callID)
-	req.AppendHeader(&sip.CSeqHeader{SeqNo: inv.CSeq().SeqNo + 1, MethodName: sip.BYE})
+	// One past anything sent on the dialog before (a session refresh).
+	seq := c.s.nextCSeq(callID.Value(), inv.CSeq().SeqNo)
+	c.s.noteSentCSeq(callID.Value(), seq)
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: seq, MethodName: sip.BYE})
 	req.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
 	req.AppendHeader(sip.HeaderClone(&c.s.contact))
 	req.SetTransport("UDP")
