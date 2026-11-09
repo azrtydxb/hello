@@ -95,6 +95,7 @@ type trunkBody struct {
 	Destinations    *[]routing.Destination `json:"destinations"`
 	InternalDialing *dialingBody           `json:"internalDialing"`
 	Messaging       *bool                  `json:"messaging"`
+	Geolocation     *bool                  `json:"geolocation"`
 	Codecs          *[]string              `json:"codecs"`
 }
 
@@ -149,6 +150,7 @@ func (b trunkBody) applyTo(in *store.TrunkInput) {
 	setIf(&in.Enabled, b.Enabled)
 	setIf(&in.Destinations, b.Destinations)
 	setIf(&in.Messaging, b.Messaging)
+	setIf(&in.Geolocation, b.Geolocation)
 	if b.Codecs != nil {
 		// Canonical spelling; validateTrunk refuses what does not normalise.
 		if canon, why := routing.NormalizeCodecs(*b.Codecs); why == "" {

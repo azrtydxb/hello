@@ -540,6 +540,11 @@ func maskSecrets(d *prov.RenderData) {
 		}
 		d.Book = &b
 	}
+	if d.E911 != nil {
+		e := *d.E911
+		e.Server = tokenInPathRe.ReplaceAllString(e.Server, "/p/"+mask+"/")
+		d.E911 = &e
+	}
 	if d.Firmware != nil {
 		fw := *d.Firmware
 		fw.URL = tokenInPathRe.ReplaceAllString(fw.URL, "/p/"+mask+"/")

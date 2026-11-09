@@ -55,6 +55,7 @@ type Metrics struct {
 	Forwarded             *prometheus.CounterVec // kind
 	GroupCalls            *prometheus.CounterVec // group, strategy, result
 	RingTags              *prometheus.CounterVec // tag: calls that rang an internal device with the tag (S-39)
+	Emergency             *prometheus.CounterVec // kind (emergency, callback, alarm, notify), result: emergency and alarm handling (S-28, S-29)
 	PresenceSubscriptions prometheus.Gauge
 	// MWINotify counts message-summary NOTIFYs by kind and result (S-1).
 	MWINotify  *prometheus.CounterVec // kind, result
@@ -228,6 +229,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.RingTags = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_ring_tag_total", Help: "Calls that rang an internal device, by ring tag.",
 	}, []string{"tag"})
+	m.Emergency = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_emergency_total", Help: "Emergency calls, emergency callbacks, alarm calls and emergency notifications by kind and result.",
+	}, []string{"kind", "result"})
 	m.PresenceSubscriptions = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hello_presence_subscriptions", Help: "Live dialog (BLF) subscriptions served by this node.",
 	})
@@ -302,7 +306,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	})
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
-		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags,
+		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags, m.Emergency,
 		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.DirectoryTotal, m.TimeConditionTotal,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)

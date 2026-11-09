@@ -1,6 +1,6 @@
 ---
 name: hello-phones
-description: Manage desk phones on a Kuvryn Hello PBX through its MCP server - auto-provisioning (phones, bulk import, onboarding queue, templates, DHCP and vendor redirect), phone groups with address books, multicast paging and push-to-talk, firmware pins, resync, and company and named phonebooks with CSV-style import. Use when someone asks to add or move many phones, to adopt phones that just appeared on the network, to give a department its own directory, to push a configuration change to handsets, or to find out why a phone did not pick up its settings.
+description: Manage desk phones on a Kuvryn Hello PBX through its MCP server - locations, E911 and the alarm call, auto-provisioning (phones, bulk import, onboarding queue, templates, DHCP and vendor redirect), phone groups with address books, multicast paging and push-to-talk, firmware pins, resync, and company and named phonebooks with CSV-style import. Use when someone asks to add or move many phones, to adopt phones that just appeared on the network, to give a department its own directory, to push a configuration change to handsets, or to find out why a phone did not pick up its settings.
 license: Apache-2.0
 metadata:
   hello-version: "v1"
@@ -189,6 +189,42 @@ The ring map turns a ring tag into a tone on each vendor's phones.
 - `putRingMapGroup` (`/ring-map/groups/{id}`) replaces one phone group's
   overrides; an empty list removes them. An override wins over the global choice
   for that group's phones.
+
+## Locations, E911 and the alarm call
+
+A location says where phones are: a site (the civic address and an optional
+position), a floor of a site, a room of a floor. It is assigned to a phone
+group, an extension or a single phone; the most specific wins (the phone's own,
+then its extension's, then its phone group's).
+
+- `listLocations`, `getLocation` (`/locations`) show the places.
+  `createLocation` adds a site, a floor (parent: a site) or a room (parent: a
+  floor or a site); `putLocation` replaces one (fields left out are cleared, the
+  kind cannot change); `deleteLocation` refuses a location with places inside it
+  or one that something is assigned to (409 names what).
+- `listLocationAssignments` (`/location-assignments`) lists every phone group,
+  extension and phone with its location. `putLocationAssignment`
+  (`/location-assignments/{kind}/{id}`, kind group, extension or phone) assigns
+  one, or unassigns it with a null `locationId`.
+- `getPhoneLocation` (`/phones/{id}/location`) shows what a phone resolves to and
+  which assignment decided; use it to explain what an emergency call would carry.
+- `getPhoneGroupEmergency` and `putPhoneGroupEmergency`
+  (`/phone-groups/{id}/emergency`, admin) set the E911 switch and the alarm
+  destination. With `e911Enabled` the WP8x6 phones of the group ask Hello's HELD
+  server for their location. With an `alarmTarget` (an extension or ring group
+  number) a WP8x6 dials `*55` for its alarm, and `*55` from any phone of the
+  group rings the destination through do-not-disturb with the ring tag `alarm`;
+  the call is a CDR of kind `alarm`. Without a destination `*55` is answered 404.
+- `getEmergencySettings` and `putEmergencySettings` (`/emergency`, admin) set the
+  ring group paged, one way, with a spoken notice naming the extension on every
+  emergency call. A call back to that extension within 30 minutes rings with the
+  tag `emergency-callback` through do-not-disturb.
+- A trunk sends the caller's location with an emergency call only when its
+  `geolocation` flag is on (`updateTrunk`; see `hello-routing`). Turn it on only
+  for a carrier that accepts a Geolocation header and a PIDF-LO body.
+
+A change to the E911 switch or the alarm destination reaches the phones through
+the automatic resync.
 
 ## References
 

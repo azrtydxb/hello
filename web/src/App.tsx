@@ -94,6 +94,7 @@ import { Wallboard } from "./pages/Wallboard";
 import { TimeConditions } from "./pages/TimeConditions";
 import { ParkPickup } from "./pages/ParkPickup";
 import { RingGroups } from "./pages/RingGroups";
+import { Locations } from "./pages/Locations";
 import { RingTags } from "./pages/RingTags";
 import { System } from "./pages/System";
 import { Trunks } from "./pages/Trunks";
@@ -126,6 +127,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/voicemail": Voicemail,
   "/ring-groups": RingGroups,
   "/ringing": RingTags,
+  "/locations": Locations,
   "/paging": Paging,
   "/conferences": Conferences,
   "/ivr": Ivr,

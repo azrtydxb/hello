@@ -125,6 +125,26 @@
     <P25675>{{xml .Emergency}}</P25675>
 {{- end}}
 {{- end}}
+{{- /* E911 and HELD (S-28) and the *55 alarm (S-29) on the WP8x6 only, keys from wp8x6_config_1.0.3.39 "External Service/E911 Service" and "Emergency Call": P8565 enable, P8566 HELD over HTTPS, P8567 sync minutes, P8568 location server, P8597 E911 numbers, P8725 Geolocation header in RFC 6442 form, P26059 P-Emergency-Info; P22269 emergency call, P22270 its number, P22601 call way simultaneous, P22602 auto answer. The alarm keys are written only with an alarm destination. */}}
+{{- if eq .Phone.Family "8x6"}}
+{{- if .E911}}
+    <P8565>1</P8565>
+    <P8566>1</P8566>
+    <P8567>{{.E911.IntervalMinutes}}</P8567>
+    <P8568>{{xml .E911.Server}}</P8568>
+{{- if .E911.Numbers}}
+    <P8597>{{xml .E911.Numbers}}</P8597>
+{{- end}}
+    <P8725>1</P8725>
+    <P26059>1</P26059>
+{{- end}}
+{{- if .AlarmNumber}}
+    <P22269>1</P22269>
+    <P22270>{{xml .AlarmNumber}}</P22270>
+    <P22601>1</P22601>
+    <P22602>1</P22602>
+{{- end}}
+{{- end}}
 {{- if or (eq .Phone.Family "8x6") (eq .Phone.Family "856")}}
 {{- if .Line.ParkCode}}
     <P60069>{{xml .Line.ParkCode}}</P60069>

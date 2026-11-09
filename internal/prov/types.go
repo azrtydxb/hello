@@ -127,6 +127,25 @@ type RenderData struct {
 	// Emergency is the comma-separated emergency numbers of Hello's
 	// emergency-flagged outbound routes (digits only), empty when none.
 	Emergency string
+	// E911 is the phone's E911 and HELD provisioning (phone-feature-parity
+	// S-28); nil unless the phone's group has E911 on and the phone is a
+	// WP8x6. AlarmNumber is the number a WP8x6 dials for its alarm (*55), set
+	// only when the phone's group has an alarm destination (S-29).
+	E911        *E911Info
+	AlarmNumber string
+}
+
+// E911Info is what a WP8x6 needs to ask Hello for its location (RFC 5985).
+type E911Info struct {
+	// Server is the location server address without a scheme:
+	// host[:port]/p/<token>/held. It carries the phone's token, so previews
+	// mask it like Prov.URL. The phone reaches it over HTTPS (P8566 = 1).
+	Server string
+	// IntervalMinutes is how often the phone asks again (30 to 1440).
+	IntervalMinutes int
+	// Numbers are the emergency numbers the E911 service watches for,
+	// separated by ";" as the phone takes them.
+	Numbers string
 }
 
 // Phone is the phone itself, as templates and resolution see it.
@@ -465,4 +484,27 @@ func AccountLabel(number, name string) string {
 		return name
 	}
 	return number + " (" + name + ")"
+}
+
+// E911SyncMinutes is how often a WP8x6 asks Hello for its location again; the
+// phone accepts 0 (never) or 30 to 1440.
+const E911SyncMinutes = 60
+
+// AlarmNumber is the number a WP8x6 dials for its alarm; Hello answers it
+// (spec S-29).
+const AlarmNumber = "*55"
+
+// NewE911 builds a phone's E911 data from its provisioning URL (the phone's
+// own URL with its token, ending in "/") and its emergency numbers (comma
+// separated, as P8385 takes them). nil when the URL is not an https one.
+func NewE911(provURL, numbers string) *E911Info {
+	rest, ok := strings.CutPrefix(provURL, "https://")
+	if !ok || rest == "" {
+		return nil
+	}
+	return &E911Info{
+		Server:          strings.TrimSuffix(rest, "/") + "/held",
+		IntervalMinutes: E911SyncMinutes,
+		Numbers:         strings.ReplaceAll(numbers, ",", ";"),
+	}
 }

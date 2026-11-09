@@ -35,6 +35,7 @@ const (
 	KindIntercom   = "intercom"
 	KindConference = "conference"
 	KindCallback   = "callback" // a call Hello placed to a queue caller who asked for a callback (migration 00049)
+	KindAlarm      = "alarm"    // a *55 alarm call (migration 00052)
 )
 
 // Termination sides.

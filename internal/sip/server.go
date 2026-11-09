@@ -217,6 +217,9 @@ type Deps struct {
 	// Events receives call events (ringing, answered, ended, missed,
 	// recording ready) for the event stream; nil emits none.
 	Events EventSink
+	// Emergency is the shared record of extensions that placed an emergency
+	// call lately (Valkey); nil keeps it on this node alone.
+	Emergency EmergencyMarks
 }
 
 // Server is one SIP node.
@@ -238,6 +241,8 @@ type Server struct {
 	// for the ringing legs of a picked-up call.
 	uacElsewhere *sipgo.DialogUA
 	bg           sync.WaitGroup
+	// emMarks is the node-local record of emergency calls (emergency.go).
+	emMarks emergencyMarks
 	// bgMu guards bgClosed: once shutdown waits for bg, a late call event
 	// (a call ending as the node stops) must not start more work on it.
 	bgMu     sync.Mutex

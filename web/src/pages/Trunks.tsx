@@ -91,6 +91,8 @@ interface TrunkDraft {
   destinations: DestinationDraft[];
   /** SMS over SIP (SIP MESSAGE) through this trunk. */
   messaging: boolean;
+  /** Emergency calls carry the caller's location (Geolocation, PIDF-LO). */
+  geolocation: boolean;
   /** What the trunk may dial in the extension namespace. */
   dialingMode: DialingMode;
   /** The patterns, one per line; used only in mode "patterns". */
@@ -148,6 +150,7 @@ const NEW_TRUNK: TrunkDraft = {
   enabled: true,
   destinations: [NEW_DESTINATION],
   messaging: false,
+  geolocation: false,
   dialingMode: "off",
   dialingPatterns: "",
   dialingConfirm: false,
@@ -175,6 +178,7 @@ function toDraft(t: Trunk): TrunkDraft {
       weight: String(d.weight),
     })),
     messaging: t.messaging === true,
+    geolocation: t.geolocation === true,
     dialingMode:
       dialing?.mode === "patterns" || dialing?.mode === "all"
         ? dialing.mode
@@ -266,6 +270,7 @@ function toInput(d: TrunkDraft): TrunkInput {
     })),
     internalDialing: toDialingInput(d),
     messaging: d.messaging,
+    geolocation: d.geolocation,
     codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
   };
 }
@@ -307,6 +312,7 @@ function knownKeys(d: TrunkDraft): string[] {
     "internalDialing.patterns",
     "internalDialing.confirm",
     "messaging",
+    "geolocation",
     ...d.destinations.flatMap((_, i) => [
       `destinations[${i}]`,
       ...["host", "port", "priority", "weight"].map(
@@ -559,6 +565,10 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          {
+            label: "Emergency location",
+            value: t.geolocation ? "Sent" : "Off",
+          },
           { label: "Password", value: password },
         ]
       : [
@@ -579,6 +589,10 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          {
+            label: "Emergency location",
+            value: t.geolocation ? "Sent" : "Off",
+          },
           { label: "Password", value: password },
         ];
 
@@ -953,6 +967,13 @@ function TrunkDrawer({
             labelPosition="end"
             checked={draft.messaging}
             onChange={(e) => set("messaging", e.target.checked)}
+          />
+          <Switch
+            label="Send the caller's location with emergency calls"
+            hint="An emergency call through this trunk carries a Geolocation header and a PIDF-LO body (RFC 6442): the phone's own location, else the one assigned under Locations. Turn it on only for a carrier that accepts them. The request is larger than a usual SIP datagram. Off by default."
+            labelPosition="end"
+            checked={draft.geolocation}
+            onChange={(e) => set("geolocation", e.target.checked)}
           />
         </fieldset>
 

@@ -39,8 +39,9 @@ two tags the same slot only when they should ring the same on those phones.
 On every INVITE Hello sends to an internal phone it chooses one tag. The first
 match wins, in this order:
 
-1. **The call's own kind**: a page or intercom call is `page`, an alarm call is
-   `alarm`, a door call is `doorbell`, a callback within 30 minutes of an
+1. **The call's own kind**: a page or intercom call is `page`, an alarm call
+   (`*55`, see [locations.md](locations.md)) is `alarm`, a door call is
+   `doorbell`, a callback from a trunk within 30 minutes of the extension's
    emergency call is `emergency-callback`.
 2. **Your rules**, in the order shown (at most 100).
 3. **The ring group's tag**, when the call came through a ring group: the group's

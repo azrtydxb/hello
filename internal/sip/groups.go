@@ -156,7 +156,7 @@ func (c *call) ringGroup(req *sip.Request, tx sip.ServerTransaction, snap *snaps
 		}
 		ms = append(ms, groupMember{ext: m.Extension, weight: m.Weight, delay: m.Delay, dnd: e.DND, lastEnd: s.lastEndOf(m.Extension)})
 	}
-	ordered := orderGroup(g.Strategy, ms, g.IgnoreDND, s.rotation(g.ID), groupSeed(g.Name, c.id))
+	ordered := orderGroup(g.Strategy, ms, g.IgnoreDND || c.dndIgnored(), s.rotation(g.ID), groupSeed(g.Name, c.id))
 	c.addTrace(fmt.Sprintf("Group %s (%s): members %v", g.Name, g.Strategy, extsOf(ordered)))
 	if len(ordered) == 0 {
 		s.m.Forwarded.WithLabelValues("group_dnd").Inc()

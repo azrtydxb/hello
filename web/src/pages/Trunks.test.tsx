@@ -21,6 +21,7 @@ const TRUNK = {
   destinations: [{ host: "10.0.0.5", port: 5060, priority: 0, weight: 1 }],
   internalDialing: { mode: "off", patterns: [] },
   messaging: false,
+  geolocation: false,
   codecs: ["PCMU", "PCMA"],
   createdAt: "2026-10-01T10:00:00Z",
   updatedAt: "2026-10-01T10:00:00Z",
@@ -144,6 +145,35 @@ describe("Trunks", () => {
     ).toBeVisible();
     expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
       messaging: true,
+    });
+  });
+
+  it("turns the emergency location on for a trunk, off by default", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [TRUNK] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+      "PATCH /api/v1/trunks/4": () => json({ ...TRUNK, geolocation: true }),
+    });
+    renderApp("/trunks");
+    const primary = await card(/carrier-primary/);
+    expect(within(primary).getByText("Emergency location")).toBeVisible();
+    fireEvent.click(
+      within(primary).getByRole("button", {
+        name: "Edit trunk carrier-primary",
+      }),
+    );
+    const geo = screen.getByRole("switch", {
+      name: /Send the caller's location with emergency calls/,
+    });
+    expect(geo).not.toBeChecked();
+    fireEvent.click(geo);
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(
+      await screen.findByText("Trunk carrier-primary saved."),
+    ).toBeVisible();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      geolocation: true,
     });
   });
 

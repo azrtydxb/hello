@@ -86,7 +86,8 @@ func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *s
 		c.forward(req, tx, snap, e.ForwardAlways, c.stages.visited)
 		return
 	}
-	if e.DND {
+	c.noteEmergencyCallback(ext)
+	if e.DND && !c.dndIgnored() {
 		if c.voicemailConfigured(e) {
 			c.addTrace(fmt.Sprintf("Extension %s is DND: to voicemail", ext))
 			s.m.Forwarded.WithLabelValues(ForwardDND).Inc()
