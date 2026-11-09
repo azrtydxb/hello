@@ -1500,3 +1500,19 @@ Implementation notes (template route, no migration):
   request URI and the dialled number in To (`b2bua.go`), so which line of a
   multi-line phone rings depends on the phone telling its accounts apart by the
   contact user it registered. To confirm on hardware.
+
+## IVR homed-callee data race (ivrHomeCallee vs release)
+
+- Root cause: `homedCall.legs` had no lock of its own. `ivrHomeCallee`
+  (IVR dial-out goroutine, started by takeover) wrote `legs[1]` under
+  `call.mu`, while `call.release` (BYE handler goroutine) iterated `hom.legs`
+  after dropping `call.mu`; `haHomedState` and `homedCall.leg` read it with no
+  lock either. Seen in `TestIVRHuntAnswerAtMemberTimeout` under `-race`.
+- Fix: `homedCall` carries a leaf mutex; all access goes through `leg`,
+  `pair` and `setCallee`. Regression test: `homed_race_test.go`.
+
+## Grandstream key choices from the official templates (2026-11-09)
+
+- Firmware-upgrade confirmation prompt off (P8375=0, P84988=1) for unattended upgrades, or leave it
+- Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
+- Account sharing group password: shared default `AccountSharing`, or a per-group secret
