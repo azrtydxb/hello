@@ -193,6 +193,7 @@ type Snapshot struct {
 	// Skipped lists usernames whose realm did not match the SIP domain.
 	Skipped []string
 
+	blf    map[string][]string // device username -> BLF key extension numbers (S-35)
 	byUser map[string]Device
 	byExt  map[string][]Device
 	// known holds extension numbers that exist but have no enabled device,
@@ -638,9 +639,13 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	blf, err := loadBLFLists(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	return New(rev, domain, devices).WithExtensions(bare...).WithQueues(queues).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithRingTags(rtags), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithRingTags(rtags).WithBLFLists(blf), nil
 }
 
 // loadMOHClasses reads the music on hold classes with their playlists

@@ -1350,3 +1350,13 @@ Implementation notes (template route, no migration):
 - Start: run waves 0-6 in order, three or four builder agents in parallel plus the merge captain (recommended)
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
+
+## Presence extensions (item 34, S-35)
+
+- Resource list URI: `sip:blf-<device username>@<domain>`. Its members are the BLF keys of the phone bound to that device (`phones.blf`), loaded into the snapshot (`WithBLFLists`); only that device may subscribe (`403` otherwise), and the phone must send `Supported: eventlist` (`421` with `Require: eventlist`). Editing a phone's BLF keys now bumps the configuration revision so the list reaches hello-sip. No migration.
+- Datagram limit: sipgo refuses UDP packets over 1300 bytes, so a list is one full-state NOTIFY plus partial ones (RFC 4662 `fullState="false"`), and a change sends only the changed resource. At about 600 body bytes a resource, that is one resource per NOTIFY. TCP/TLS toward Kamailio (#258) would allow bigger chunks; the budget constant stays until then.
+- PUBLISH event state lives in Valkey (`hello:pubpres:<ext>:<etag>`, the publication's lifetime as TTL), so both hello-sip nodes serve, refresh and remove it. Nodes learn of the other node's PUBLISH and REGISTER by a 5 s poll of the shared state (`presencePollInterval`), plus an immediate NOTIFY for changes handled locally. Kamailio needs no change: PUBLISH and SUBSCRIBE already go to any Hello node.
+- Several publications per extension are allowed (a desk phone and a softphone); the extension is "open" if any is open, the newest note wins. With none, it is "open" while a device is registered.
+- No vendor provisioning keys were added. The sandbox had no vendor documentation naming the Yealink, Snom, Fanvil or Poly list/PUBLISH keys, and the rule is to write vendor keys only from vendor docs. The spec keeps P188 and "SUBSCRIBE for Registration" off for the WP templates, which is guarded by a test. Templates can name the list as `.Line.BLFListURI`.
+- The spec lists no UI or REST fields for S-35, so none were added.
+- PUBLISH for events other than presence answers `489`; `vq-rtcpxr` (S-36, item 35) is not served here.

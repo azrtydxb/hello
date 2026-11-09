@@ -716,7 +716,7 @@ Templates see only these values:
 | Value       | Fields                                                                                                                                                               |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                                                                                                 |
-| `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`                                                                                |
+| `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`, `BLFListURI` (the phone's BLF keys as one RFC 4662 list, empty without BLF keys)       |
 | `.Server`   | `Host`, `Port`, `Transport` (`udp` or `tls`), `Expiry` (seconds)                                                                                                             |
 | `.BLF`      | a list of `Number`, `Label`, `URI`, placed on the model's keys: `Slot`, `Module`, `Page`, `Section`, `PageStart`, `Pickup`                                           |
 | `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `CACertBase64`, `ResyncSeconds`                                                                                          |

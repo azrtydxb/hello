@@ -183,6 +183,12 @@ type Line struct {
 	// directed-pickup feature codes (phone-feature-parity S-50), empty when
 	// none is configured; the directed one is dialled with the extension after it.
 	PickupGroupCode, PickupDirectedCode string
+	// BLFListURI is the resource-list URI (RFC 4662) a phone that
+	// subscribes to its BLF keys as one list uses: sip:blf-<username>@<domain>.
+	// Render fills it when the phone has BLF keys; it is empty otherwise.
+	// No built-in template writes it: a vendor key for it is added only once
+	// the vendor's documentation names it (phone-feature-parity S-35).
+	BLFListURI string
 }
 
 // Server is the registrar the phone registers with.
