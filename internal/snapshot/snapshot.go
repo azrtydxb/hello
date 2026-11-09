@@ -76,6 +76,9 @@ type Extension struct {
 	Door           bool
 	DoorExtensions []string
 	DoorGroups     []string
+	// DirectoryHidden keeps the extension out of the dial-by-name directory
+	// (migration 00011, the same flag the phone books honour).
+	DirectoryHidden bool
 }
 
 // RingGroup is a ring or hunt group (contract 2). Strategy is one of
@@ -206,7 +209,9 @@ type Snapshot struct {
 	// exts is the per-extension feature state; groups maps a dialled group
 	// name to its members; codes maps a dialled feature code; anns maps an
 	// announcement name to its MinIO object.
-	exts   map[string]Extension
+	exts map[string]Extension
+	// dir is the dial-by-name index over exts (pbx-gaps S-13).
+	dir    []dirItem
 	groups map[string]groupEntry
 	codes  map[string]FeatureCode
 	pages  map[string]PagingGroup
@@ -265,6 +270,7 @@ func (s *Snapshot) WithExtensionData(exts []Extension) *Snapshot {
 		s.exts[e.Number] = e
 		s.known[e.Number] = true
 	}
+	s.dir = buildDirectory(s.exts)
 	return s
 }
 
@@ -535,7 +541,7 @@ type Querier interface {
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
        d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name,
        e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id,
-       e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, (e.kind = 'door')
+       e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, e.directory_hidden, (e.kind = 'door')
 FROM extensions e
 LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled
 LEFT JOIN voicemail_boxes v ON v.extension_id = e.id
@@ -569,7 +575,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 		)
 		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &d.Extension, &d.ExtensionName,
 			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID,
-			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.Door); err != nil {
+			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden, &e.Door); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan: %w", err)
 		}

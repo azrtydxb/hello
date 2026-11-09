@@ -38,6 +38,8 @@ const (
 	ActionQueueLogout  = "queue_logout"
 	ActionQueuePause   = "queue_pause"
 	ActionQueueUnpause = "queue_unpause"
+	// ActionDirectory runs the dial-by-name directory (pbx-gaps S-13).
+	ActionDirectory = "directory"
 	// ActionCallWaitingOn and ActionCallWaitingOff toggle the extension's
 	// call-waiting flag (migration 00026, spec S-18).
 	ActionCallWaitingOn  = "call_waiting_on"
@@ -152,6 +154,14 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 		return true
 	case ActionTCOverride:
 		c.handleTCOverride(tx, fc, arg)
+		return true
+	case ActionDirectory:
+		snap := s.deps.Snapshots.Current()
+		if snap == nil {
+			s.unavailable(tx, c.inv)
+			return true
+		}
+		c.startDirectory(tx, snap)
 		return true
 	case ActionIVR:
 		name := fc.Argument

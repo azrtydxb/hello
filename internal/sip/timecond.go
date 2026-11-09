@@ -192,6 +192,8 @@ func (c *call) applyTCDest(tx sip.ServerTransaction, snap *snapshot.Snapshot, d 
 		c.startIVR(tx, snap, m)
 	case timecond.KindExternal:
 		c.forward(c.inv, tx, snap, d.Target, nil)
+	case timecond.KindDirectory:
+		c.startDirectory(tx, snap)
 	case timecond.KindQueue:
 		q, ok := snap.Queue(d.Target)
 		if !ok {

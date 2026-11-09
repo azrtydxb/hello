@@ -218,7 +218,7 @@ func (c *call) extensionBindings(snap *snapshot.Snapshot, ext string) ([]livesta
 			return nil, err
 		}
 		for _, b := range bs {
-			if c.isCallerContact(b) {
+			if c.isCallerContact(b) || (c.secure && !bindingOnTLS(b)) {
 				continue
 			}
 			out = append(out, b)

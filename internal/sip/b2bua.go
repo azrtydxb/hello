@@ -34,9 +34,13 @@ type call struct {
 	callerName   string
 	callerDevice string
 	dialled      string
-	start        time.Time
-	inv          *sip.Request
-	dss          *sipgo.DialogServerSession
+	// secure marks a sips: call: it forks only onto bindings registered over
+	// TLS and never leaves for a trunk or an external URI (phone-feature-
+	// parity S-14).
+	secure bool
+	start  time.Time
+	inv    *sip.Request
+	dss    *sipgo.DialogServerSession
 
 	events    chan legEvent
 	setupDone chan struct{} // closed when setup stops reading events
@@ -228,6 +232,10 @@ type call struct {
 	// dialog (set by transferBlindVia for the rethreaded call).
 	transferNotify func(fragment string, final bool)
 
+	// ses is the RFC 4028 session timers and the dead-media watch
+	// (sessiontimer.go).
+	ses sessionState
+
 	// IVR state (ivr.go). ivr is the menu session, ivrCancel stops its
 	// flow with the call, ivrAnswered is when the menu answered (billing
 	// starts there), vmExt names the voicemail box a menu hands the call to
@@ -253,6 +261,14 @@ type call struct {
 	// qWaiting is true while the caller waits in a queue, since qEnteredAt.
 	qWaiting   bool
 	qEnteredAt time.Time
+	// Queue callback (queue_callback.go), guarded by mu. cbID is the request
+	// this call serves (0 for an ordinary call), cbQueue its queue, cbDone is
+	// set once the request's outcome was recorded, and cbOffer is the SDP
+	// offer the caller was rung with, kept until the caller's dialog is homed.
+	cbID    int64
+	cbQueue string
+	cbDone  bool
+	cbOffer []byte
 	// Time conditions (timecond.go): tcVisited lists the conditions the call
 	// passed, so a loop through ring group failover or an IVR menu is caught;
 	// vmPre is an announcement played before the voicemail greeting. Guarded
@@ -323,7 +339,13 @@ type leg struct {
 	// pl is set on a page member leg (Phase E): it carries the page's
 	// per-member state and offer.
 	pl *pageLeg
+	// ident presents other identities than the call's: a callback is placed
+	// by the queue, to the caller's own number (queue_callback.go).
+	ident *legIdent
 }
+
+// legIdent overrides the user parts of a fork's From and To.
+type legIdent struct{ fromNum, fromName, toNum string }
 
 func (l *leg) session() *sipgo.DialogClientSession {
 	l.mu.Lock()
@@ -359,9 +381,18 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		s.respond(tx, req, sip.StatusLoopDetected, "Loop Detected")
 		return
 	}
+	if s.sessionTooSmall(req, tx) {
+		return
+	}
 	snap := s.deps.Snapshots.Current() // one snapshot for the whole request
 	if snap == nil {
 		s.unavailable(tx, req)
+		return
+	}
+	// A sips: request is secure end to end (RFC 3261 26.2.2): its caller must
+	// be on TLS, and every leg it forks onto must be too (see c.secure).
+	if isSIPS(req) && s.clientTransport(req) != transportTLS {
+		s.refuseSecure(req, tx, secureCallerNotTLS, "sips: caller is not on TLS")
 		return
 	}
 	if node, ok := s.confForwardFrom(req); ok {
@@ -481,6 +512,7 @@ func (s *Server) newCall(req *sip.Request) *call {
 	return &call{
 		s: s, id: newID(), callID: req.CallID().Value(),
 		dialled: req.Recipient.User, start: time.Now(), inv: req, direction: cdr.DirectionInternal,
+		secure:   isSIPS(req),
 		canceled: make(chan struct{}), stopHB: make(chan struct{}), setupDone: make(chan struct{}),
 		aborted: make(chan struct{}), haStop: make(chan struct{}),
 		pickupCh: make(chan *pickupReq, 1),
@@ -509,6 +541,12 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 	c.trace = append(c.trace, dec.Trace...)
 	c.route, c.rewritten = dec.Route, dec.Number
 	c.noteMOHRoute(dec)
+	if c.secure && (dec.Kind == routing.KindOutbound || (dec.Kind == routing.KindInbound && dec.SIPURI != "")) {
+		// Trunks and external URIs are reached over UDP: no TLS path.
+		s.refuseSecure(req, tx, secureNoTLSRoute, "sips: the route leaves over a non-TLS hop")
+		c.record(sip.StatusTemporarilyUnavailable, cdr.SideSystem, "sips: no TLS route", ResultUnavailable)
+		return
+	}
 	switch {
 	case dec.Kind == routing.KindOutbound:
 		if c.direction == cdr.DirectionInternal {
@@ -587,10 +625,11 @@ func (c *call) ringURI(req *sip.Request, tx sip.ServerTransaction, dec routing.D
 		return
 	}
 	if u.IsEncrypted() {
-		// sips: requires TLS end to end; Hello sends SIP over UDP only.
-		c.addTrace(fmt.Sprintf("SIP URI destination %s uses sips:, which needs TLS; Hello only sends UDP", raw))
-		c.s.respond(tx, req, sip.StatusServiceUnavailable, "Service Unavailable")
-		c.record(sip.StatusServiceUnavailable, cdr.SideSystem, "sips: destinations are not supported", ResultFailed)
+		// sips: requires TLS on every hop; Hello reaches an external SIP URI
+		// over UDP only, so there is no TLS path to it.
+		c.addTrace(fmt.Sprintf("SIP URI destination %s uses sips:, which needs TLS; Hello has no TLS path to an external destination", raw))
+		c.s.refuseSecure(req, tx, secureNoTLSRoute, "sips: destination has no TLS path")
+		c.record(sip.StatusTemporarilyUnavailable, cdr.SideSystem, "sips: destinations are not supported", ResultUnavailable)
 		return
 	}
 	if !c.begin(req, tx) {
@@ -914,6 +953,9 @@ func (c *call) answer(w *leg) {
 		res.AppendHeader(sip.HeaderClone(ct))
 	}
 	res.AppendHeader(sip.NewHeader("Allow", allow))
+	for _, h := range c.sessionAnswer(w, bres, body) {
+		res.AppendHeader(h)
+	}
 	// Counted when sent; WriteResponse blocks until the caller ACKs (or
 	// 64*T1).
 	c.s.m.response(sip.StatusOK)
@@ -921,13 +963,14 @@ func (c *call) answer(w *leg) {
 	if err == nil {
 		c.mu.Lock()
 		if !c.ended {
-			// debt: a fixed cap stands in for RFC 4028 session timers, which
-			// would clear a call within minutes of a phone vanishing without
-			// BYE. Revisit when calls must be cleared that fast, or when a
-			// 4h call is a real use case.
+			// MaxCallDuration is the backstop; the session timers (RFC 4028)
+			// and the dead-media watch clear a call whose far end vanished
+			// within an interval.
 			c.maxTimer = time.AfterFunc(c.s.cfg.MaxCallDuration, c.expire)
 		}
 		c.mu.Unlock()
+		c.sessionArm()
+		c.startMediaWatch()
 		// Replication starts with the dialog confirmed: the snapshot is
 		// taken here and after every in-dialog transaction, and the
 		// heartbeat's write cadence is the owner's liveness.
@@ -1172,6 +1215,15 @@ func (c *call) end(status int, side, reason, result string) {
 			c.maxTimer.Stop()
 		}
 		c.mu.Unlock()
+		c.sessionStop()
+		// Stop the heartbeat and everything keyed to it (the voicemail
+		// recorder's context). Phase 7 replaced this close with haStop's and
+		// nothing stopped the heartbeat again: every ended call left a
+		// goroutine refreshing its slots forever and a voicemail recorder
+		// running on after the caller was gone.
+		if c.stopHB != nil {
+			close(c.stopHB)
+		}
 		c.endMOH()
 		c.closeMedia()
 		c.stopIVR()
@@ -1212,6 +1264,7 @@ func (c *call) end(status int, side, reason, result string) {
 			return
 		}
 		c.queueAbandoned()
+		c.cbFinish("abandoned", "") // a callback call that ends before an agent was connected
 		go c.queueEnded()
 		c.unpublish()
 		c.record(status, side, reason, result)
@@ -1242,7 +1295,7 @@ func (c *call) release() {
 	}
 	if hom != nil {
 		// A taken-over call's callee dialog is bound outside c.legs.
-		for _, l := range hom.legs {
+		for _, l := range hom.pair() {
 			if l != nil {
 				c.s.unbind(l.callID, c)
 			}
@@ -1527,11 +1580,14 @@ func (l *leg) invite() (*sip.Request, error) {
 	req.AppendHeader(&maxFwd)
 	req.AppendHeader(sip.HeaderClone(&s.contact))
 	req.AppendHeader(sip.NewHeader("Allow", allow))
+	l.addSessionHeaders(req)
 	if body := c.offerSDP(); len(body) > 0 {
 		if c.inv != nil {
 			if ct := c.inv.ContentType(); ct != nil {
 				req.AppendHeader(sip.HeaderClone(ct))
 			}
+		} else {
+			req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 		}
 		req.SetBody(body)
 	}
@@ -1544,6 +1600,14 @@ func (l *leg) invite() (*sip.Request, error) {
 				req.RemoveHeader("Content-Type")
 				req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 			}
+		}
+	}
+	if id := l.ident; id != nil {
+		if id.fromNum != "" {
+			from.Address.User, from.DisplayName = id.fromNum, id.fromName
+		}
+		if id.toNum != "" && l.trunk == nil && l.uri == nil {
+			to.Address.User = id.toNum
 		}
 	}
 	l.addPagingHeaders(req)
@@ -1879,6 +1943,17 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 	if c.confInDialog(req, tx) {
 		return // a conference participant: answered from its own media socket
 	}
+	// A refresh from the phone (RFC 4028) restarts its dialog's session
+	// timer; a bodiless UPDATE that only refreshes is answered here, and the
+	// 2xx of any other carries the negotiated Session-Expires.
+	idx := sessCallee
+	if ref.leg == nil {
+		idx = sessCaller
+	}
+	var done bool
+	if tx, done = c.sessionIn(idx, req, tx); done {
+		return
+	}
 	if hom := c.homed(); hom != nil {
 		// A taken-over call terminates media in dialog from the replicated
 		// relay: hold direction mirrored, the peer re-INVITEd the same way.
@@ -1911,6 +1986,7 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 			out.AppendHeader(sip.HeaderClone(ct))
 		}
 		out.SetBody(body)
+		c.noteSDP(1-idx, body) // the other dialog's last SDP, for a refresh
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()

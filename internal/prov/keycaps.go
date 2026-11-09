@@ -242,6 +242,58 @@ func PlaceBLF(v Vendor, model string, keys []BLFKey, pickup string) []BLFKey {
 	return out
 }
 
+// vmKeyLabel is what the transfer-to-voicemail key shows on the phone.
+const vmKeyLabel = "To voicemail"
+
+// SupportsVMKey reports whether Hello can provision a transfer-to-voicemail
+// key for the model: a phone that has programmable keys (or, on Poly,
+// softkeys) Hello writes. Yealink, Snom and Fanvil only on a model in the
+// capability table (an unknown model might have no key to spare and Hello
+// cannot tell, as it cannot with BLF); Poly on
+// every model (a softkey). Grandstream has none: a WP has no key block in its
+// templates, and the P323 block of the other models is unverified and its
+// numbers (three to a key) run into the phonebook keys P330 to P333 past two
+// BLF keys, so no key is added there. Whether the model has a key left after the BLF
+// keys is PlaceVMKey's question.
+func SupportsVMKey(v Vendor, model string) bool {
+	switch v {
+	case Yealink, Snom, Fanvil:
+		_, bounded := blfSlots(v, model)
+		return bounded
+	case Poly:
+		return true
+	}
+	return false
+}
+
+// PlaceVMKey returns the transfer-to-voicemail key of a phone whose own
+// extension is ext, or nil when there is none: no voicemail code or extension,
+// a model without support (SupportsVMKey), or (Yealink, Snom, Fanvil) no key
+// left. The key takes the key after the nBLF BLF keys that PlaceBLF placed,
+// so it never displaces a BLF; a phone whose keys the BLF keys fill gets
+// none. domain is the SIP domain, for the vendors whose key takes a URI.
+func PlaceVMKey(v Vendor, model string, nBLF int, code, ext, domain string) *VMKey {
+	if code == "" || ext == "" || !SupportsVMKey(v, model) {
+		return nil
+	}
+	k := &VMKey{Number: code + ext, Label: vmKeyLabel}
+	k.URI = "sip:" + k.Number + "@" + domain
+	switch v {
+	case Yealink, Snom, Fanvil:
+		slots, _ := blfSlots(v, model)
+		if nBLF >= len(slots) {
+			return nil
+		}
+		s := slots[nBLF]
+		k.Slot, k.Module, k.Page = s.slot, s.module, s.page
+		if v == Fanvil {
+			k.Section = fanvilSection
+			k.PageStart = nBLF == 0 || slots[nBLF-1].page != s.page
+		}
+	}
+	return k
+}
+
 // FeatureCodes are the star codes a phone's own DND and forward keys dial
 // (Snom, Fanvil): the PBX's feature_codes by action, empty where the PBX has
 // none. Forward codes are dialled followed by the target number.
