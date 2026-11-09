@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"slices"
 	"sort"
 	"strings"
@@ -28,7 +29,36 @@ type secureSetup struct {
 
 func newSecureRelay(t *testing.T) *secureSetup {
 	t.Helper()
-	r, pa, pb := testRelay(t)
+	return newSecureRelayWith(t, nil)
+}
+
+// newSecureRelayWith is newSecureRelay with a hook that runs before the relay
+// starts (taps are registered before Start in production, too).
+func newSecureRelayWith(t *testing.T, before func(*Relay)) *secureSetup {
+	t.Helper()
+	r, err := NewRelay(testRelayMin, testRelayMax)
+	if err != nil {
+		t.Fatal(err)
+	}
+	portA, err := r.AddLeg("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	portB, err := r.AddLeg("b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.SetPayloadTypes("a", 0, 101)
+	r.SetPayloadTypes("b", 0, 101)
+	pa := startPeer(t, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: portA})
+	pb := startPeer(t, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: portB})
+	pa.only, pb.only = portA, portB
+	r.SetTarget("a", pa.addr())
+	r.SetTarget("b", pb.addr())
+	if before != nil {
+		before(r)
+	}
+	t.Cleanup(r.Close)
 	callerKey, err := NewCrypto(1, SuiteAES128SHA1_80)
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +88,7 @@ func newSecureRelay(t *testing.T) *secureSetup {
 	if err != nil {
 		t.Fatal(err)
 	}
+	r.Start()
 	return &secureSetup{r: r, phoneA: pa, phoneB: pb, srtpA: sa, srtpB: sb, localA: localA, localB: offered[0]}
 }
 
@@ -154,15 +185,16 @@ func TestSRTPAnchor(t *testing.T) {
 	})
 
 	t.Run("the recording tap and DTMF see clear audio", func(t *testing.T) {
-		s := newSecureRelay(t)
 		got := make(chan []byte, 1)
-		s.r.OnPacket(func(leg string, pkt *RTPPacket) {
-			if leg == "a" {
-				select {
-				case got <- append([]byte(nil), pkt.Payload...):
-				default:
+		s := newSecureRelayWith(t, func(r *Relay) {
+			r.OnPacket(func(leg string, pkt *RTPPacket) {
+				if leg == "a" {
+					select {
+					case got <- append([]byte(nil), pkt.Payload...):
+					default:
+					}
 				}
-			}
+			})
 		})
 		payload := bytes.Repeat([]byte{9}, 160)
 		sendSRTP(t, s.phoneA, s.srtpA, 0, payload)
