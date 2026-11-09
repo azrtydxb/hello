@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/azrtydxb/hello/internal/auth"
 )
 
 func overrideItems(t *testing.T, r response) []map[string]any {
@@ -82,6 +84,13 @@ func TestSettingOverridesAPI(t *testing.T) {
 	// A phone refuses another vendor's key.
 	c.must(http.StatusBadRequest, "PUT", ppath, map[string]any{"overrides": []map[string]any{{"key": "P71", "value": "1"}}})
 	c.must(http.StatusNotFound, "GET", "/api/v1/phones/999999/settings", nil)
+	c.must(http.StatusNotFound, "GET", "/api/v1/phone-groups/999999/settings", nil)
+	// Only an administrator changes them; an operator reads and is refused.
+	op, _ := p.asRole("overrides-operator", auth.RoleOperator)
+	op.must(http.StatusOK, "GET", ppath, nil)
+	op.must(http.StatusOK, "GET", gpath, nil)
+	op.must(http.StatusForbidden, "PUT", ppath, map[string]any{"overrides": []any{}})
+	op.must(http.StatusForbidden, "PUT", gpath, map[string]any{"overrides": []any{}})
 	c.must(http.StatusNotFound, "PUT", "/api/v1/phone-groups/999999/settings", map[string]any{"overrides": []any{}})
 	c.must(http.StatusBadRequest, "PUT", ppath, map[string]any{})
 
