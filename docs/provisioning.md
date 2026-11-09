@@ -1342,12 +1342,13 @@ do not log the call as missed.
 Hello tags every call to an internal phone (internal, external, ring group,
 page, door, alarm and your own tags) and sends the tag in an `Alert-Info` header
 of the form `<http://127.0.0.1/Bellcore-drN>;info=hello-<tag>`. Which tag a call
-gets, the rules and the header are in [ring-tags.md](ring-tags.md). The
-provisioned templates do not yet map a tag to a tone: until the ring map ships,
-set the phone's distinctive-ring rule by hand (match `hello-<tag>` in the
-Alert-Info text, or `Bellcore-drN` where the phone maps only the five Bellcore
-rings). Page and intercom calls keep the auto-answer `Alert-Info` described
-under paging and intercom above.
+gets, the rules and the header are in [ring-tags.md](ring-tags.md). The built-in
+templates map each tag to a tone through the ring map (Ringing page, tab Ring
+map): the vendor's distinctive-ring rules and the line's own ring tone are
+written into every phone's configuration, with an optional override per phone
+group, and a change is pushed to the affected phones by the automatic resync.
+Page and intercom calls keep the auto-answer `Alert-Info` described under
+paging and intercom above.
 
 ## Security model and its limits
 

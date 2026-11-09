@@ -722,9 +722,11 @@ func TestConferenceTwoNodes(t *testing.T) {
 	delete(f.owners, livestate.ConfOwnerKey("800")) // the dead owner's lease lapses
 	f.mu.Unlock()
 	eventually(t, "room re-homed on B", func() bool { return pbxB.srv.conf.get("800") != nil })
-	if v := pbxB.metric(t, "hello_conference_owner_total", map[string]string{"event": "rehomed"}); v != 1 {
-		t.Fatalf("rehomed = %v, want 1", v)
-	}
+	// The room is visible (conf.get) a few statements before the rehome is
+	// counted, so the counter is waited for, not read once.
+	eventually(t, "the rehome is counted", func() bool {
+		return pbxB.metric(t, "hello_conference_owner_total", map[string]string{"event": "rehomed"}) == 1
+	})
 	// A second caller on B joins the same room, now owned by B.
 	pc := newPhone(t, pbxB, "c1", "pc")
 	pc.register(t)
