@@ -10,3 +10,6 @@
 | `listPhoneFetches` is empty           | The phone never reached Hello: DHCP option 66 or 43, the vendor redirect, or the network. `getProvSettings` has the values.          |
 | 403                                   | Phone groups, new phonebooks and redirect accounts need `admin`.                                                                     |
 | 503 on provisioning tools             | Provisioning is not enabled on this deployment.                                                                                      |
+| 409 on `setSCEPCA`                    | A device CA exists; `replace` replaces it and phones enrol again.                                                                    |
+| 409 on `deleteDot1XProfile`           | A phone group names the profile; change the group first.                                                                             |
+| A phone does not enrol                | SCEP is off for its group, no CA exists, `getSCEP` says the server is off, or the model has no SCEP keys (only WP8x6 and GRP260x).   |

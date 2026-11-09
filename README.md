@@ -118,9 +118,9 @@ naming the key, if one is missing or malformed.
 | `HELLO_SIP_REGISTER_MIN_EXPIRES` / `_MAX_EXPIRES` | sip     | `60s` / `1h`                                                                                                                  |
 | `HELLO_SIP_RING_TIMEOUT`                          | sip     | `30s`                                                                                                                         |
 | `HELLO_SIP_MAX_CALL_DURATION`                     | sip     | `4h`; a call with no BYE (phone gone) is cleared after this                                                                   |
-| `HELLO_SIP_SESSION_EXPIRES_SECONDS`               | sip     | `1800`; RFC 4028 Session-Expires Hello requests and applies on legs to phones; `0` turns session timers off                  |
+| `HELLO_SIP_SESSION_EXPIRES_SECONDS`               | sip     | `1800`; RFC 4028 Session-Expires Hello requests and applies on legs to phones; `0` turns session timers off                   |
 | `HELLO_SIP_SESSION_MIN_SE_SECONDS`                | sip     | `90`; the smallest interval accepted from a peer (`422` with Min-SE below it); must not exceed the setting above              |
-| `HELLO_MEDIA_DEAD_SECONDS`                        | sip     | `60`; an anchored call with no RTP in either direction for this long is ended unless held; `0` turns it off                  |
+| `HELLO_MEDIA_DEAD_SECONDS`                        | sip     | `60`; an anchored call with no RTP in either direction for this long is ended unless held; `0` turns it off                   |
 | `HELLO_PAGE_MAX_SECONDS`                          | sip     | `120`; a server page ends after this many seconds                                                                             |
 | `HELLO_PAGE_CONCURRENT`                           | sip     | `5`; pages one node runs at once, beyond that the caller hears busy                                                           |
 | `HELLO_PAGE_FANOUT`                               | sip     | `200`; legs of one page, beyond that the caller hears busy                                                                    |
@@ -143,6 +143,7 @@ naming the key, if one is missing or malformed.
 | `HELLO_PROV_BOOK_REFRESH`                         | control | `15m`; how often phones with a refresh setting re-fetch their address book (at least `1m`)                                    |
 | `HELLO_PROV_PUSH_RATE`                            | sip     | `20`; check-sync pushes (resync, reboot) claimed per minute across the cluster                                                |
 | `HELLO_PROV_AUTO_RESYNC`                          | control | `false`; push a resync to a phone 30 s after a change to what its configuration renders from                                  |
+| `HELLO_SCEP`                                      | control | `true`; SCEP server and device CA for phones (still off per phone group until switched on), docs/scep.md                      |
 | `HELLO_DIAL_INTL_PREFIX` / `_COUNTRY_CODE`        | control | `00` / unset; digits standing for `+`, and the country code a leading `0` belongs to (lookup keys)                            |
 | `HELLO_PROV_TIMEZONE` / `_NTP`                    | control | `UTC` / `pool.ntp.org`                                                                                                        |
 | `HELLO_VOICEMAIL_LANGUAGE`                        | both    | `en`; deployment language of the spoken voicemail prompts (`en`, `nl`); a box can set its own, docs/voicemail.md              |

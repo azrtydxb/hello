@@ -29,18 +29,19 @@ func checkList(t *testing.T, sql, table, column string) []string {
 	return out
 }
 
-// latestKindList is the prov_fetches.kind list the newest migration that
-// redefines it accepts (00012 added "phonebook").
-func latestKindList(t *testing.T) []string {
+// latestList is the prov_fetches list of column (kind or result) as the
+// newest migration that redefines it accepts: 00012 added the "phonebook"
+// kind, 00052 the "scep" kind and the scep_issued and scep_refused results.
+func latestList(t *testing.T, column string) []string {
 	t.Helper()
-	b, err := os.ReadFile("../../migrations/00012_prov_fetch_phonebook.sql")
+	b, err := os.ReadFile("../../migrations/00052_scep_dot1x.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	up, _, _ := strings.Cut(string(b), "-- +goose Down")
-	m := regexp.MustCompile(`CHECK \(kind IN \(([^)]*)\)`).FindStringSubmatch(up)
+	m := regexp.MustCompile(`(?s)prov_fetches_` + column + `_check\s+CHECK \(` + column + ` IN \(([^)]*)\)`).FindStringSubmatch(up)
 	if m == nil {
-		t.Fatal("00012 has no kind IN list")
+		t.Fatalf("00052 has no %s IN list", column)
 	}
 	var out []string
 	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
@@ -83,8 +84,8 @@ func TestContractMatchesMigration(t *testing.T) {
 		{"prov_fetches", "result", strs(Results)},
 	} {
 		got := checkList(t, sql, tc.table, tc.column)
-		if tc.table == "prov_fetches" && tc.column == "kind" {
-			got = latestKindList(t) // widened by a later migration
+		if tc.table == "prov_fetches" {
+			got = latestList(t, tc.column) // widened by later migrations
 		}
 		if !slices.Equal(got, tc.want) {
 			t.Errorf("%s.%s CHECK = %v, Go contract = %v", tc.table, tc.column, got, tc.want)

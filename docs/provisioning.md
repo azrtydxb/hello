@@ -386,7 +386,7 @@ PBX has the voicemail feature code and the extension has voicemail switched on.
 | Vendor  | Key                                                                                                                                           |
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Yealink | `linekey.N.type = 3` (Transfer), `.value = *97<ext>`, `.label = To voicemail`; `expansion_module.M.key.K.*` the same on an EXP50 key (verify) |
-| Snom    | `<fkey idx="N" context="active">transfer sip:*97<ext>@<domain></fkey>` (verify)                                                              |
+| Snom    | `<fkey idx="N" context="active">transfer sip:*97<ext>@<domain></fkey>` (verify)                                                               |
 | Fanvil  | a memory key, `FkeyN Type :1`, `Value :*97<ext>@1/f` (the BLF keys' `/b` suffix replaced by speed dial) (verify)                              |
 | Poly    | an enhanced feature key macro `$FTransfer$$Cpause2$*97<ext>$Tinvite$` (`efk.efklist.1.*`) on `softkey.1`, active-call context (verify)        |
 
@@ -717,7 +717,7 @@ Templates see only these values:
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                                                                                                 |
 | `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`                                                                                |
-| `.Server`   | `Host`, `Port`, `Transport` (`udp` or `tls`), `Expiry` (seconds)                                                                                                             |
+| `.Server`   | `Host`, `Port`, `Transport` (`udp` or `tls`), `Expiry` (seconds)                                                                                                     |
 | `.BLF`      | a list of `Number`, `Label`, `URI`, placed on the model's keys: `Slot`, `Module`, `Page`, `Section`, `PageStart`, `Pickup`                                           |
 | `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `CACertBase64`, `ResyncSeconds`                                                                                          |
 | `.Codes`    | the PBX's star codes: `DNDOn`, `DNDOff`, `ForwardOn`, `ForwardOff`, `ForwardBusyOn`/`Off`, `ForwardNoAnswerOn`/`Off`, `PickupDirected` (empty when the PBX has none) |
@@ -1188,10 +1188,10 @@ pings. The built-in Grandstream template writes the phone's own keep-alive for
 the WP families; the call-side half (session timers, dead-media teardown,
 roaming) is in [phones.md](phones.md#roaming-keep-alive-and-dead-calls).
 
-| Family          | Setting written                                                    | Status                                                                                                  |
-| --------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| WP816/826/836   | `P2397 = 1` (SIP OPTIONS keep-alive)                               | key from the WP8x6 template; the interval (30 s) and max-tries keys are left at the default (verify)    |
-| WP810/820/822/825 | `P84989 = 0` (RFC 5626 keep-alive off)                           | from the WP822 release notes; verify on a phone's exported XML                                          |
+| Family            | Setting written                        | Status                                                                                               |
+| ----------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| WP816/826/836     | `P2397 = 1` (SIP OPTIONS keep-alive)   | key from the WP8x6 template; the interval (30 s) and max-tries keys are left at the default (verify) |
+| WP810/820/822/825 | `P84989 = 0` (RFC 5626 keep-alive off) | from the WP822 release notes; verify on a phone's exported XML                                       |
 
 The WP856 template has neither key and gets none. Other vendors' keep-alive
 keys are not written yet (verify per vendor).
@@ -1315,6 +1315,15 @@ written into every phone's configuration, with an optional override per phone
 group, and a change is pushed to the affected phones by the automatic resync.
 Page and intercom calls keep the auto-answer `Alert-Info` described under
 paging and intercom above.
+
+## Certificates (SCEP) and 802.1X
+
+Hello runs a SCEP server on this listener (`/p/<token>/scep`) that issues each
+phone of a group with SCEP on its own certificate from the Hello device CA,
+and writes reusable 802.1X profiles (EAP-TLS, PEAP, EAP-MD5) to the phones'
+wired port; Wi-Fi profiles reference the same profiles. The device CA and its
+CRL are public at `/p/scep-ca.crt` and `/p/scep-ca.crl`. Setup, keys, limits
+and the hardware checks are in [scep.md](scep.md).
 
 ## Security model and its limits
 

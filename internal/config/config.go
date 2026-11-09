@@ -246,6 +246,12 @@ type Prov struct {
 	// hello-control push a check-sync to a phone, debounced 30s, after a
 	// change to what its configuration renders from.
 	AutoResync bool
+	// SCEP (HELLO_SCEP, default true) serves the SCEP endpoint
+	// /p/<token>/scep and the device CA and CRL; false turns them off
+	// everywhere (404) and stops rendering SCEP settings. SCEP is still off
+	// per phone group until an administrator switches it on there
+	// (phone-feature-parity S-25).
+	SCEP bool
 	// Redirect holds vendor redirect credentials set by the deployment.
 	Redirect ProvRedirect
 }
@@ -567,6 +573,14 @@ func (r *reader) boolean(key string) bool {
 	return false
 }
 
+// booleanDefault reads "true" or "false"; empty is def.
+func (r *reader) booleanDefault(key string, def bool) bool {
+	if r.getenv(key) == "" {
+		return def
+	}
+	return r.boolean(key)
+}
+
 // ntpRe is the shape of an NTP server name or address.
 var ntpRe = regexp.MustCompile(`^[A-Za-z0-9.:-]{1,253}$`)
 
@@ -620,6 +634,7 @@ func (r *reader) prov() Prov {
 		TLSKey:             r.getenv("HELLO_PROV_TLS_KEY"),
 		BootCIDRs:          r.prefixes("HELLO_PROV_BOOT_CIDRS"),
 		AutoResync:         r.boolean("HELLO_PROV_AUTO_RESYNC"),
+		SCEP:               r.booleanDefault("HELLO_SCEP", true),
 	}
 	minExp := r.duration("HELLO_SIP_REGISTER_MIN_EXPIRES", 60*time.Second)
 	p.RegisterExpiry = r.duration("HELLO_SIP_REGISTER_MAX_EXPIRES", time.Hour)

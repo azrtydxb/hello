@@ -13,6 +13,7 @@ import {
   type Fetch,
   type Phone,
 } from "../api/prov";
+import { rotateSCEPChallenge } from "../api/scep";
 import {
   Alert,
   Badge,
@@ -62,7 +63,14 @@ type PhoneState =
   | { status: "error"; message: string }
   | { status: "ready"; phone: Phone };
 
-type Pending = "rotate" | "rearm" | "delete" | "rotate-admin" | "reboot" | null;
+type Pending =
+  | "rotate"
+  | "rearm"
+  | "delete"
+  | "rotate-admin"
+  | "rotate-scep"
+  | "reboot"
+  | null;
 type Tab = "fetches" | "preview";
 
 const FETCH_PAGE = 50;
@@ -366,6 +374,15 @@ export function PhoneDetail() {
                     Rotate admin password
                   </Button>
                 </Can>
+                <Can min="admin">
+                  <Button
+                    variant="secondary"
+                    icon="shield-check"
+                    onClick={() => setPending("rotate-scep")}
+                  >
+                    New SCEP challenge
+                  </Button>
+                </Can>
               </div>
             </div>
 
@@ -452,6 +469,25 @@ export function PhoneDetail() {
             setPending(null);
             toast.show(
               "Admin password rotated; the phone picks it up on its next fetch.",
+            );
+          }}
+          onClose={() => setPending(null)}
+        />
+      )}
+
+      {phone && pending === "rotate-scep" && (
+        <ConfirmDialog
+          title={`Discard the SCEP challenge of ${phoneName(phone)}?`}
+          description="The phone's one-time SCEP challenge password is discarded, used or not; its next configuration carries a new one. Its certificate keeps working."
+          confirmLabel="Discard challenge"
+          confirmIcon="shield-check"
+          confirmVariant="primary"
+          errorTitle="Could not discard the SCEP challenge"
+          onConfirm={async () => {
+            await rotateSCEPChallenge(phone.id);
+            setPending(null);
+            toast.show(
+              "SCEP challenge discarded; the phone gets a new one on its next fetch.",
             );
           }}
           onClose={() => setPending(null)}

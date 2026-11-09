@@ -155,6 +155,33 @@ describe("Phone detail", () => {
     );
   });
 
+  it("discards the SCEP challenge after asking", async () => {
+    const calls = api(phone(), {
+      "POST /api/v1/phones/5/scep-challenge": noContent,
+    });
+    renderApp("/phones/5");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New SCEP challenge" }),
+    );
+    const confirm = screen.getByRole("dialog", {
+      name: "Discard the SCEP challenge of Front desk?",
+    });
+    fireEvent.click(
+      within(confirm).getByRole("button", { name: "Discard challenge" }),
+    );
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.method === "POST" && c.url === "/api/v1/phones/5/scep-challenge",
+        ),
+      ).toBe(true),
+    );
+    expect(
+      await screen.findByText(/SCEP challenge discarded/),
+    ).toBeInTheDocument();
+  });
+
   it("queues a resync and shows the result the phone gave", async () => {
     const push = (status: string) => ({
       id: 9,

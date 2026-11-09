@@ -59,6 +59,9 @@ type ProvSettings struct {
 	// Deployment lists the vendors whose redirect credentials the
 	// deployment sets (they count as configured whatever is stored).
 	Deployment map[prov.Vendor]bool
+	// SCEP is HELLO_SCEP: the SCEP server is on, so phones of a group with
+	// SCEP on get the SCEP settings (phone-feature-parity S-25).
+	SCEP bool
 }
 
 // server is the registrar a phone of vendor and model registers with: the

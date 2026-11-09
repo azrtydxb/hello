@@ -41,7 +41,7 @@ func provSettings(cfg config.Control, deployment map[prov.Vendor]redirect.Creden
 		SIPServer: cfg.Prov.SIPServer, SIPTLSServer: cfg.Prov.SIPTLSServer, SIPTLSModels: cfg.Prov.SIPTLSModels, Domain: cfg.SIPDomain, Expiry: cfg.Prov.RegisterExpiry,
 		Resync: cfg.Prov.Resync, BookRefresh: cfg.Prov.BookRefresh, Timezone: cfg.Prov.Timezone, NTP: cfg.Prov.NTP, TokenGrace: cfg.Prov.TokenGrace,
 		CACertFile: cfg.Prov.CACert, DSCPSIP: cfg.Prov.DSCPSIP, DSCPRTP: cfg.Prov.DSCPRTP,
-		Deployment: map[prov.Vendor]bool{},
+		Deployment: map[prov.Vendor]bool{}, SCEP: cfg.Prov.SCEP,
 	}
 	if cfg.Prov.PublicURL != nil {
 		p.PublicURL = cfg.Prov.PublicURL.String()
@@ -115,11 +115,15 @@ func startProv(ctx context.Context, cfg config.Control, st *store.Store, objs *a
 	// what is queued) until shutdown.
 	audit := prov.NewAudit(st, metrics, plog)
 	go audit.Run(ctx)
-	handler := prov.NewHandler(st, limiter, objs, prov.Options{
+	opts := prov.Options{
 		PublicURL: cfg.Prov.PublicURL, TrustedProxies: cfg.Prov.TrustedProxies, BootCIDRs: cfg.Prov.BootCIDRs,
 		CACertFile: cfg.Prov.CACert, Resync: cfg.Prov.Resync, Audit: audit, Metrics: metrics, Log: plog,
 		BookCache: provbook.NewCache(vk.Client, plog), Onboarding: st,
-	})
+	}
+	if cfg.Prov.SCEP {
+		opts.SCEP = st
+	}
+	handler := prov.NewHandler(st, limiter, objs, opts)
 	srv := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,

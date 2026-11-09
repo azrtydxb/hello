@@ -62,6 +62,7 @@ import { Phonebooks } from "./pages/Phonebooks";
 import { Onboarding } from "./pages/Onboarding";
 import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
+import { PhoneSecurity } from "./pages/PhoneSecurity";
 import { ProvSettings } from "./pages/ProvSettings";
 import { ProvTemplates } from "./pages/ProvTemplates";
 import { Placeholder } from "./pages/Placeholder";
@@ -341,6 +342,7 @@ export function App() {
             <Route path="/phones/groups" element={<PhoneGroups />} />
             <Route path="/phones/templates" element={<ProvTemplates />} />
             <Route path="/phones/firmware" element={<ProvFirmware />} />
+            <Route path="/phones/security" element={<PhoneSecurity />} />
             <Route path="/phones/settings" element={<ProvSettings />} />
             <Route path="/phones/:id" element={<PhoneDetail />} />
             <Route path="*" element={<NotFound />} />
