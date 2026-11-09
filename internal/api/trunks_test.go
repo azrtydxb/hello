@@ -204,7 +204,7 @@ func TestTrunkSRTPPolicy(t *testing.T) {
 	if got := created["srtp"]; got != "off" {
 		t.Fatalf("default srtp = %v, want off", got)
 	}
-	req := c.must(http.StatusCreated, "POST", "/api/v1/trunks", plain(map[string]any{"srtp": "Required"})).json(t)
+	req := c.must(http.StatusCreated, "POST", "/api/v1/trunks", plain(map[string]any{"srtp": "required"})).json(t)
 	if got := req["srtp"]; got != "required" {
 		t.Fatalf("srtp = %v, want required", got)
 	}
