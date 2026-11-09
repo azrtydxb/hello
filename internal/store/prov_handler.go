@@ -236,6 +236,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Codes, err = s.featureCodes(ctx); err != nil {
 		return d, prov.Template{}, err
 	}
+	if d.Ring, err = s.ringInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
+		return d, prov.Template{}, err
+	}
 	d.Server = s.prov.server(d.Phone.Vendor, d.Phone.Model)
 	d.Prov = s.prov.info(token, d.Phone.MAC)
 	d.Time = prov.NewTimeInfo(s.prov.Timezone, s.prov.NTP, time.Now())

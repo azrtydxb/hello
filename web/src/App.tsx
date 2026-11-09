@@ -125,7 +125,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/diagnostics": Diagnostics,
   "/voicemail": Voicemail,
   "/ring-groups": RingGroups,
-  "/ring-tags": RingTags,
+  "/ringing": RingTags,
   "/paging": Paging,
   "/conferences": Conferences,
   "/ivr": Ivr,
