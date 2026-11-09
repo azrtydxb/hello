@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -20,6 +21,10 @@ import (
 // maxToneUpload bounds the request: the file's 512 KiB, plus the name field and framing.
 const maxToneUpload = prov.MaxToneBytes + 64<<10
 
+// maxToneJSON bounds a JSON upload: base64 of a 512 KiB tone is about 700 KiB,
+// and an agent's request is at most 1 MiB.
+const maxToneJSON = 1 << 20
+
 func (s *server) listRingtones(w http.ResponseWriter, r *http.Request) {
 	ts, err := s.Store.ListRingtones(r.Context())
 	if err != nil {
@@ -33,46 +38,62 @@ func (s *server) listRingtones(w http.ResponseWriter, r *http.Request) {
 // WAV file part named "file". The bytes decide: PCM, 8 or 16 kHz, mono,
 // 16-bit, at most 30 s and 512 KiB, else 400. A taken name is 409.
 func (s *server) createRingtone(w http.ResponseWriter, r *http.Request) {
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
-		badRequest(w, "upload as multipart form data with name and file parts")
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxToneUpload)
-	mr, err := r.MultipartReader()
-	if err != nil {
-		badRequest(w, "invalid multipart body")
-		return
-	}
 	var (
 		name string
 		data []byte
 	)
-	for {
-		part, err := mr.NextPart()
-		if errors.Is(err, io.EOF) {
-			break
+	switch ct := r.Header.Get("Content-Type"); {
+	case strings.HasPrefix(ct, "application/json"):
+		// An agent through MCP sends the same fields as JSON; the audio is base64.
+		r.Body = http.MaxBytesReader(w, r.Body, maxToneJSON)
+		var in struct {
+			Name        string `json:"name"`
+			AudioBase64 []byte `json:"audioBase64"`
 		}
-		if err != nil {
-			badRequest(w, "invalid multipart body, or the request is larger than 512 KiB")
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&in); err != nil {
+			badRequest(w, "invalid JSON body, or the body is larger than 1 MiB")
 			return
 		}
-		switch part.FormName() {
-		case "name":
-			b, err := io.ReadAll(io.LimitReader(part, 65))
-			if err != nil {
-				badRequest(w, "invalid name field")
-				return
-			}
-			name = strings.TrimSpace(string(b))
-		case "file":
-			b, err := io.ReadAll(io.LimitReader(part, prov.MaxToneBytes+1))
-			if err != nil {
-				badRequest(w, "could not read file")
-				return
-			}
-			data = b
+		name, data = strings.TrimSpace(in.Name), in.AudioBase64
+	case strings.HasPrefix(ct, "multipart/"):
+		r.Body = http.MaxBytesReader(w, r.Body, maxToneUpload)
+		mr, err := r.MultipartReader()
+		if err != nil {
+			badRequest(w, "invalid multipart body")
+			return
 		}
-		_ = part.Close()
+		for {
+			part, err := mr.NextPart()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				badRequest(w, "invalid multipart body, or the request is larger than 512 KiB")
+				return
+			}
+			switch part.FormName() {
+			case "name":
+				b, err := io.ReadAll(io.LimitReader(part, 65))
+				if err != nil {
+					badRequest(w, "invalid name field")
+					return
+				}
+				name = strings.TrimSpace(string(b))
+			case "file":
+				b, err := io.ReadAll(io.LimitReader(part, prov.MaxToneBytes+1))
+				if err != nil {
+					badRequest(w, "could not read file")
+					return
+				}
+				data = b
+			}
+			_ = part.Close()
+		}
+	default:
+		badRequest(w, "upload as multipart form data with name and file parts, or JSON with name and audioBase64")
+		return
 	}
 	var f fieldErrs
 	if !prov.ValidToneName(name) {

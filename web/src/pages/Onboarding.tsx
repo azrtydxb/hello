@@ -333,7 +333,7 @@ function AdoptDialog({
     setFormError(null);
     try {
       await adoptCandidate(candidate.mac, {
-        extensionId,
+        extensionId: Number(extensionId),
         label: label.trim() || undefined,
         model: needsModel ? model.trim() : undefined,
       });

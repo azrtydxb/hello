@@ -332,6 +332,9 @@ func (c *call) groupFail(snap *snapshot.Snapshot, g snapshot.RingGroup) {
 			return
 		}
 		c.hangupGroup(sip.StatusTemporarilyUnavailable, "failure queue unavailable")
+	case "directory":
+		c.addTrace(fmt.Sprintf("Group %s: dial-by-name directory", g.Name))
+		c.startDirectory(nil, snap)
 	case "time_condition":
 		c.addTrace(fmt.Sprintf("Group %s: time condition %q", g.Name, g.FailureTarget))
 		c.routeTimeCondition(nil, snap, g.FailureTarget)

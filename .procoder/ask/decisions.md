@@ -621,6 +621,46 @@ Feature and paging codes start with `*` and cannot equal a plain number;
 they keep the `dialGuard` prefix rules. Time conditions have no number of
 their own.
 
+## MCP completeness: JSON bodies, skills, drift guards (branch mcp-skills-complete)
+
+- Body-format gaps are closed by adding an `application/json` form to the
+  existing operations (the pattern of `updateExtensionVoicemail`), not by new
+  routes: one handler, one validation path, no route or role table change.
+  - `createAnnouncement` / `replaceAnnouncement`: `{name, audioBase64}` /
+    `{audioBase64}`. Cap 700 KiB of decoded audio, because an MCP request is at
+    most 1 MiB (spec S-13) and base64 adds a third. Same `checkAnnouncementAudio`
+    as multipart. Multipart (64 MiB) stays for the console.
+  - `importPhones`: `{rows: [{mac, vendor, model, extension, label?, blf?}]}`
+    is turned into the CSV records `checkImport` validates; `text/csv` stays.
+  - `importPhonebook`: `{rows: [{first_name, ...}]}` is rendered as CSV and read
+    by `phonebook.ParseCSV`, so every CSV rule applies; multipart stays.
+- Firmware upload stays excluded: images are tens of MB, far over the 1 MiB
+  MCP request, so base64 is not sane. Category `payload-too-large`, only
+  `uploadFirmware` may use it (test).
+- `importMyContacts` stays excluded under `private-data` (its old reason was
+  the body format, which is not accepted; the real reason is that a user's own
+  address book is private).
+- Every `x-hello-mcp.exclude` now has a structured `category`, one of
+  `apispec.ExcludeCategories` (credentials, private-data, self-service,
+  human-in-the-loop, disruptive-device, paid-credits, binary-download,
+  payload-too-large, session, spec-document). `apispec.Load` rejects a missing
+  or unknown category; `TestMCPExclusionCategories` rejects reasons that blame a
+  multipart/CSV/binary request body.
+- Guards against future gaps:
+  1. Route coverage: `TestRoutesMatchOpenAPI` (existing, kept) fails on a route
+     without an operation and on scope/role drift.
+  2. Exclusion reasons: `TestMCPExclusionCategories` + the loader check above.
+  3. Skill coverage: `TestSkillsTeachEveryTool` fails when an included tool is
+     named by no skill, or an API area (first path segment) has no taught tool;
+     `untaught` / `untaughtAreas` are explicit, reasoned allowlists (empty).
+- The skill name check now only treats a camelCase inline identifier as a tool
+  name when it starts like an operationId (list, get, create...), so body fields
+  such as `extensionId` can be written in code.
+- Skills added: hello-ivr-and-hours, hello-call-handling, hello-phones,
+  hello-flow-graph; hello-troubleshoot extended (cluster drain, AI findings,
+  TTS settings, version, concurrency); hello-setup gets revertVoicemailGreeting.
+- No migration needed.
+
 ## Flow canvas P2: the read-only canvas (2026-10-26)
 
 Built per `.procoder/specs/flow-canvas.md` (P2). Choices the spec left open:
@@ -938,3 +978,564 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - API: `GET|POST /api/v1/ringtones`, `DELETE /api/v1/ringtones/{id}`; operator
   to write, viewer to read; upload is multipart and excluded from MCP like the
   other uploads; list and delete are MCP tools. UI: a Tones tab on Ringing.
+## Queue callback (pbx-gaps wave B, B4)
+
+- **Merged gaps-languages.** PR #208 (voicemail box languages, `voiceprompt.Resolve`) was not on main, so origin/gaps-languages is merged into this branch. The queue's language is `Resolve(queue.prompt_language, deployment language)`; `queues.prompt_language` is NULL for inherit, no CHECK (validated by the API), migration 00049.
+- **The callback call is a queued caller, not a new call type.** The customer's answered dialog is turned into the only dialog of a call built like one a survivor rebuilds after a takeover (homed solo call, phase `queue`). It then runs `queueResume`/`queueRun` with `EnteredMs = position_key`, so ordering, music, offering, bridging (`ivrConnect`) and failover all reuse the queue code, and the caller is rung before any agent by construction. `originateFor` was not used: it needs an inbound caller dialog.
+- **HA.** The replicated queue detail gains `:cb<id>`. A takeover re-homes the customer and the survivor renews (adopts) the lease. A node lost before the customer answers leaves the row `dialling`; the 60 s lease lapses and any node claims it again (counts as an attempt; a lapsed third attempt becomes `failed`/`node_lost`).
+- **Ordering.** A sweep claims the head request only when no waiting caller with an earlier place is unserved and free agents exceed live claims. Waiting callers are held back from an agent while a request with an earlier place is due or being served (`Due`, one query per node per sweep, cached; PostgreSQL errors clear it, so calls are never held for a store that is down). A caller who entered later may still take the last free agent during the seconds the customer's phone rings; accepted.
+- **Source of the origination.** Outbound routing needs a source extension: the agent the strategy would ring first. The caller is presented as the queue (number, else name). Trunk candidates are tried in route order exactly as `setupOutbound` does (slot per trunk, destinations not known down, failover on the route's failover codes or a silent attempt, no failover once a trunk rang and nobody answered or on a code outside the list); each trunk attempt is its own leg stage so a given-up leg's late events are ignored.
+- **Dialable number.** `^\+?[0-9]{2,20}$` after dropping spaces, dashes and brackets; used as the caller presented it (no national/E.164 normalisation, which needs P-10/`HELLO_DIAL_*` work not on main).
+- **Caller name.** The row carries the name the call already has. The shared-book lookup (phonebooks-ptt P-10) is not on main; when it lands the same field carries it, and a personal book never names a queue caller.
+- **Callback in the wait.** The wait and maximum wait of a called-back caller count from when it answered; its place is the original one. Voicemail breakout is off for it. No agent within the maximum wait is a failed attempt (`no_agent`), retried.
+- **Offer threshold.** 0 offers at once. With nobody staffed the time waited stands in for the estimate. The default-key offer text is pre-generated; other keys are synthesized on first use.
+- **CDR.** No `disposition` column exists; `callback_failed` is a queue leg with the attempt's result, and the call's kind is `callback`. Every attempt that dialled has its own CDR. `callback_requested` is on the original call's CDR, whose exit result is `callback` (no abandon).
+- **Cancelling** a request that is dialling stops it: the node holding the call checks the row every 2 s (the lease renewal doubles as the check; a renewal that finds the row no longer dialling means cancelled). While the customer's phone rings the leg is cancelled; a customer already on the line is hung up. The CDR gets `callback_failed` with result `cancelled`, the row stays cancelled and no attempt is counted or retried.
+- **Agent reservation (chosen: lease, plus the existing hold).** When the sweep claims a request it takes the agent lease of the first agent of the strategy's plan that is not leased to another caller (none: no dial), for ring time plus 30 s, and gives it back as soon as the customer answers, so the queue can offer it. That blocks a later waiting caller on any node at once, whereas the earlier `Due` hold map is refreshed every sweep (3 s) and only orders callers against due requests. Skipping ahead was rejected: the order is already by place, and the problem is the window, which a lease closes.
+
+## SIP over TLS terminates at the edge (2026-10-26)
+
+Phone-feature-parity S-14 (delivery PR 23) says "hello-sip listens on TLS 5061".
+Hello's phones already reach Kamailio, not hello-sip, so Kamailio (tls module)
+terminates TLS and the hello-sip nodes keep UDP inside the edge network.
+Kamailio reports the phone leg's transport in `X-Hello-Transport` (udp, tcp, tls;
+trusted proxies only), the registrar stores it on the binding, and the `sips:`
+rule uses it: a `sips:` request needs a TLS caller and rings only TLS bindings,
+and is refused with 480 otherwise, also for trunks and external SIP URIs. TLS is
+off until `KAMAILIO_TLS_PORT` is set, so an image without `tls.so` still starts.
+Provisioning points the models in `HELLO_PROV_SIP_TLS_MODELS` (default
+`grandstream:WP`) at `HELLO_PROV_SIP_TLS_SERVER`; Snom has no confirmed transport
+key and stays on UDP. The `HELLO_SIP_TLS` and `HELLO_SIP_TLS_CERT` settings of the
+spec's config list are not used: the certificate belongs to Kamailio. Later PRs
+(SRTP, DTLS-SRTP) offer crypto only on legs where `bindingOnTLS` or the caller's
+`clientTransport` is TLS.
+
+## Transfer-to-voicemail phone key (2026-10-26)
+
+Yealink, Snom, Fanvil and Poly templates provision a key that transfers the
+active call to `*97<own extension>` (`internal/prov/keycaps.go`, `PlaceVMKey`).
+Choices:
+
+- The target is the phone's own extension. A key cannot ask for a number, and
+  "send this caller to my voicemail" is the common use; a colleague's box is
+  still reachable by dialling `*97<ext>` after a transfer.
+- The key goes on the first key left after the BLF keys, never ahead of one.
+  A phone whose keys the BLF keys fill gets none (no BLF is dropped for it).
+- Written only when the PBX defines the voicemail feature code and the
+  extension has voicemail enabled (`Line.NoVoicemail`, from
+  `extensions.voicemail_enabled`).
+- Gated like BLF: Yealink, Snom and Fanvil only on a model in the capability
+  table; Poly on every model (a softkey); no Grandstream, since a WP has no key
+  block in its template and the P323 block of the other models is unverified
+  and overlaps the phonebook keys.
+- Every key type is unverified on a phone and marked "(verify)" in the templates
+  (Yealink type 3, Snom `transfer`, Fanvil memory key `/f`, Poly efk macro).
+  The provclient Fanvil parser now counts only `/b` memory keys as BLF.
+
+message. `conference` was left for a follow-up (see below).
+
+## Routes form: conference destination (2026-10-26)
+
+The inbound route drawer also offers `conference` ("Conference room"). The target
+is chosen from the rooms list (`GET /api/v1/conferences`) and stored as the room
+number, labelled "number · name"; a stored number the list no longer has stays
+selectable as "(not found)". An empty target is refused with "Choose a conference
+room." This closes the gap noted for flow canvas P1.
+
+## Flow canvas P3: the batch backend (2026-10-26)
+
+Built per `.procoder/specs/flow-canvas.md` (P3). Choices the spec left open:
+
+- **Store shape.** The spec's `store.WithBatch(ctx, tx)` is `Store.RunBatch(ctx,
+dryRun, fn)`: it opens the transaction, takes the configuration lock, reads
+  the revision and the baseline routing configuration, and calls `fn` with a
+  context that carries the batch. Every store write and read made under that
+  context uses the batch's transaction (`Store.q(ctx)` replaces `s.db` in the
+  configuration files, `Store.tx`, `configChangeID` and `provChange` join the
+  batch), so an operation sees the ones before it. `configChangeID` then skips
+  the lock, the per-operation check and the revision bump and records which
+  check functions the batch used; `RunBatch` runs them once at the end against
+  the baseline, bumps the revision once and notifies once. The audit via is
+  `batch:<uuid>`; the outer origin goes on the `config_batches` row.
+- **The batch table** is `00046_config_batches.sql` (`ops`, `results`,
+  `reverts`, 90 days, pruned on insert). `ops` holds the operations as they ran
+  with credential values withheld; `results` holds, per operation, the object
+  before and after as its GET returns it, the diff and, for a delete, the
+  node's canvas positions.
+- **Which operations.** An explicit table (`internal/configbatch/ops.go`), not
+  "everything with write scope": the object writes of the canvas. Refused with
+  `400 op_not_batchable`: operations whose response carries a secret
+  (`createDevice`, `createPhone`, so devices and phones are updated and deleted
+  in a batch but not created), credential scopes (`secrets`, `session`),
+  multipart, and anything that touches MinIO, a speech provider, a phone or
+  Valkey state (announcements, greetings, firmware, queue agent login,
+  conference control, calendar import, the time condition override toggle).
+  Admin-scoped object writes (paging groups, conferences, multicast channels)
+  are allowed: the inner operation still needs its own scope and role.
+  Decision 2 lets credential operations into the AI path once their secret is
+  stripped; that belongs to P6 and is not done here.
+- **Announcements are not batchable** (audio is in MinIO, generation calls a
+  provider). A batch can point at an existing announcement (an IVR greeting)
+  but not create one; the canvas links to the Announcements page.
+- **`baseRevision` is required.** `expect` is the node `version` of the graph
+  (hash of the stored object) and is checked only when the revision moved; an
+  operation without `expect`, or aimed at an object the batch creates, never
+  conflicts. Revert uses its own stricter check (below).
+- **Errors.** The first failing operation stops the batch (later operations
+  depend on earlier ones), so `errors` has the failing operation's fields, not
+  one entry per operation. A refused operation is `403` with the inner code
+  (`forbidden_role`, `insufficient_scope`) and its index in the message. Any
+  other non-success of an operation (400, 404, 409) is `422 validation_failed`
+  with `errors: [{opIndex, node, path, message}]`. The final routing check names
+  the operation that changed the item the error is about, or `-1`.
+- **Placeholders** take any field of the referenced response (checked against
+  the operation's response schema before anything runs). A string that is
+  exactly one placeholder keeps the value's type.
+- **Nested replay.** `replay.Request.Inherit` lets the batch replay its
+  operations inside an MCP replay (the batch route is itself called as an MCP
+  tool); the outer replay marker, and so the OAuth client, is kept.
+- **Layout in a batch.** `canvasId` plus `layout` places new nodes (the node id
+  may hold a placeholder); every applied batch prunes layout of nodes that no
+  longer exist on every canvas. A layout write moves `layout_version` and is
+  audited as `flow_canvas layout`, and is not a configuration change.
+- **Warnings** in the answer are the flow warnings the batch introduces (after
+  minus before), not all of them.
+- **Revert.** The inverse is built from `before`: a PATCH restores only the
+  keys its body set (a key absent in `before` is sent as null); a PUT or create
+  sends the writable fields of the GET (pruned to the request schema, which also
+  drops read-only fields); credentials a batch set are never stored, so they are
+  listed in `skipped`. A deleted object is made again with a new id and later
+  operations of the same revert use it. The staleness check compares, for the
+  last operation that touched each object, the writable fields of its recorded
+  `after` with the object now (fields outside the request schema, such as
+  timestamps and live state, are ignored). A batch reverts once (`409
+conflict`), and a batch that deleted a device or phone (which a batch cannot
+  create) is `422`.
+- **TestEdgeRoundTrip** exercises every connection the catalogue offers from a
+  stored "call goes to" field (inbound route, ring group, IVR keys, timeout and
+  invalid, queue exits, time condition branches), reading the target kinds from
+  the catalogue so a new connection fails until it has a fixture, plus the
+  member ports (`TestEdgeRoundTripMembers`). The `internalDid` target is not
+  exercised (its target is the route's own DID; the golden graph covers it).
+  Resource edges that are plain id lists (outbound trunks, hold music, schedule
+  calendars, device and phone binding, prompts) are drawn from the same
+  `Owner` field table and covered by the golden graph; their batch operations
+  are the ordinary updates.
+- **Metrics:** `hello_config_batches_total{result}` and
+  `hello_config_batch_ops`. The graph build and trace metrics belong to their
+  phases.
+
+## Flow canvas P4: the editing UI (2026-10-27)
+
+- **The draft is a list of batch operations, not a copy of the graph.** Each
+  staged gesture becomes `DraftOp`s (`web/src/pages/flow/draft.ts`): the
+  operation, its `expect` version and the versions of every node it read.
+  Edits to the same object merge into one operation (key `upd|<node>`), so two
+  changes to one ring group, or a rename and a referrer update that touch the
+  same IVR, are one `PUT` and cannot overwrite each other. All feature-code
+  edits share the key `list|putFeatureCodes` (one `PUT` of the whole table).
+  An edit of a node that only exists in the draft is folded into its create
+  operation, and deleting such a node forgets it and its edits.
+- **The canvas draws the draft.** `project(graph, draft)` returns the graph as
+  it will be once applied (new nodes, deleted nodes, rewired edges, renamed
+  labels); the canvas, the panel and the pickers all read that, so what the
+  user sees is what the dry run checks.
+- **The catalogue decides, objects.ts only says how.** Whether an output may
+  connect to an input is `canConnect` over the catalogue's target lists
+  (the UI never hard-codes compatibility, spec constraint). `objects.ts` holds
+  only how an allowed connection is written into the owner's body (an adapter
+  per output port) and which settings the panel edits. A connection with no
+  adapter (outbound trunk order, hold music, prompts, device binding, schedule
+  calendars) is drawn but its handle is not connectable and the panel says to
+  use the object's own page. This is scoped to the "call goes to" fields,
+  forwards, group and queue members, inbound trunk, feature-code targets and
+  the IVR keys, which is what spec S-10 to S-12 name.
+- **PATCH sends only what changed; PUT sends the whole object.** The base of a
+  PUT (IVR, queue, time condition, feature codes) is the GET answer pruned to
+  the request's writable keys; PATCH objects (extension, ring group, inbound
+  route) send only the changed fields, so the id and timestamps never reach an
+  `additionalProperties: false` body.
+- **Names, not ids, in destinations.** Destinations store the target's name,
+  number or code, so a rename stages the renamed object plus an update of
+  every referrer (found from the graph's edges, written through the same
+  adapters) in one gesture. A referrer that cannot store the new name refuses
+  the rename with the reason. A forward to a ring group whose name is not
+  numeric is refused with the reason (spec edge case).
+- **Delete lists referrers and clears them first.** `referrersOf` walks the
+  edges that point at the node and are owned by another object; the confirm
+  dialog lists them; the delete stages the referrer updates, then the delete.
+  A referrer that cannot be cleared (an inbound route always needs a
+  destination) blocks the delete and is named.
+- **Gestures stand or fall together on a rebase.** Every op carries the ids of
+  the gestures that staged it. On a revision change `rebase` drops an op whose
+  touched node changed or vanished, and every op that shares a gesture with a
+  dropped one (a rename without its referrers would leave them dangling). The
+  dropped changes are listed in a warning; nothing conflicting is kept. History
+  is cleared by a rebase, since old steps would bring back what was dropped.
+- **Live validation is the server's dry run.** 500 ms after the last change the
+  whole draft is sent with `dryRun: true`; `422` problems are drawn on their
+  node (the `node` of the problem, else the op index), a `409 config_stale`
+  reloads the graph (which rebases), and Apply is enabled only once the check
+  answers for the current draft. "Checking" is derived (the check records the
+  draft it was for), not stored.
+- **Apply always goes through the review dialog** with the dry run's
+  field-level diff and warnings; the only apply call is the dialog's confirm.
+  On `409 config_stale` at apply nothing was applied: the dialog closes, the
+  graph reloads, the draft is rebased and the dropped changes are reported.
+- **Layout of new nodes.** A new node has the id `<kind>:~<ref>` in the draft
+  and a position in the layout reducer, but the layout PUT skips it. At apply
+  its position goes in the batch's `layout` as `<kind>:${ref.id}`, so the
+  server places it once the id exists. A discard or a rebase forgets it.
+- **The draft is kept in `localStorage`** under
+  `hello.flow.draft.<canvasId>.<user>` as `{baseRevision, ops, history}` and
+  rebased when the canvas opens on a newer revision. Positions of draft nodes
+  are not kept; they come back in "Not on this canvas".
+- **Undo and redo restore the exact op list** (a snapshot per gesture, 60
+  deep) and are bound to Ctrl/Cmd+Z outside text fields. A new gesture ends
+  the redo line.
+- **Accessibility.** Every connection can be made in the panel (a select of the
+  catalogue's targets per output, a key field for IVR keys, a typed external
+  number or SIP URI) and removed with a Disconnect button; the pointer drag
+  and the Delete key on a selected edge are shortcuts to the same operations.
+  Objects are not deleted with the key: they have a confirmation.
+- **Forms are shared (spec S-15).** The create/edit drawers of ring groups,
+  IVR menus, queues, time conditions, conferences, inbound and outbound routes,
+  extensions and the text prompt editor moved from `web/src/pages/*.tsx` to
+  `web/src/forms/*Form.tsx` unchanged (their page tests pass unmodified). Each
+  drawer that the canvas uses got one optional prop, `commit(body)`: when set
+  the drawer hands its validated body to the caller instead of calling the
+  API. The canvas panel's "Edit all settings" opens the same drawer
+  (`FormHost`) with the object's GET (plus what the draft already changes) and
+  stages the result with `stageBody`.
+- **`stageBody`** keeps only the fields that differ from the object as it
+  stands, runs the rename cascade when the name changed, and recomputes the
+  edges the new values draw (`wanted.ts` reads the stored fields the way the
+  graph builder does, per owner-field group; groups it does not cover are left
+  alone) so the projected graph is right without a round trip.
+- **Every connection with a stored form is wirable.** Adapters were added for
+  outbound trunk order (`trunks`, ordered ids), hold music (`mohClassId` on
+  extension, ring group, inbound route and queue), prompts (IVR
+  `greetingId`/`invalidPromptId`/`timeoutPromptId`, queue prompt ids,
+  conference entry/exit announcement names, hold music `announcementIds`),
+  device to extension (`extensionId`), phone to device (`deviceId`), calendars
+  to schedules (`calendarIds`), schedule to time condition (`scheduleId`),
+  paging group multicast channel and paging members/callers. All use existing
+  batchable operations, so no backend change was needed. Required fields
+  (an IVR greeting, a device's extension, a time condition's schedule) can be
+  re-pointed but not cleared; the panel says why. None of these truly cannot
+  be stored.
+- **Draft node positions** are persisted with the draft
+  (`{baseRevision, ops, history, positions}`) and restored into the layout
+  reducer on load, for nodes whose create operation survived the rebase.
+- **Generate prompt** (tts-prompts is on main, PR #139): the panel's
+  announcement section and a toolbar button open the Announcements page's
+  prompt editor (`PromptHost`). Generation calls the speech provider and
+  stores audio, which a batch cannot roll back, so it runs immediately and is
+  not staged; the canvas then reloads and places the announcement.
+- **Still out of scope.** Creating devices, phones and trunks with credentials
+  (spec). The extension drawer is shared but not wired to `commit` (its
+  voicemail, device and live panes act on the server at once); the panel edits
+  an extension's name and DND and its forwards and hold music as connections.
+
+## DSCP marking, parity item 28 (S-21) (2026-10-27)
+
+Built to the spec: SIP socket DSCP 26, relay/anchor/fanout/party RTP sockets
+DSCP 46, `HELLO_DSCP_SIP` / `HELLO_DSCP_RTP` (0 to 63, validated), Grandstream
+P1558 / P1559 from the same two values.
+
+- RTP DSCP is a process-wide setting (`media.SetRTPDSCP`, default 46) read at
+  every bind, not a parameter of each constructor: one value per process, and
+  the six bind sites keep their signatures.
+- hello-control reads the same two env vars so phones are provisioned with the
+  values hello-sip marks with; set both services alike.
+- A refused mark (platform, sandbox) is logged once and never fails SIP or a
+  call.
+- Originated SIP and the mark. Verified by test: sipgo copies the client's
+  forced local address (the listening socket) into a request only when no
+  request options are passed. The six call sites in `edge.go` and
+  `takeover.go` that pass `ClientRequestAddVia` got an ephemeral socket of
+  sipgo's own (v1.6.0 has no socket-control hook or dialer Control), which
+  nothing can mark and which was not on the SIP port. They now use
+  `Server.addViaFromListener` / `fromListener`, which set the request's local
+  address to the listener, so all originated SIP leaves from the marked
+  socket (`TestDSCPOutboundOnMarkedSocket`). A forked sipgo was rejected as
+  too heavy for this.
+- Other vendors, from the vendors' administrator guides (nothing in this repo
+  documents them): Yealink `static.network.qos.signaltos` / `audiotos`, Poly
+  `qos.ip.callControl.dscp` / `qos.ip.rtp.dscp`, written like Grandstream,
+  unverified on hardware. Snom and Fanvil: no documented DSCP provisioning key
+  could be confirmed (snom uses TOS-byte settings whose exact names are not
+  in this repo; Fanvil's are device-specific), so none is written rather than
+  guessed. Revisit with the vendor guides. Site overrides go through S-12.
+- No migration, no API or UI change; TCP/TLS SIP is not served by hello-sip.
+
+## Flow canvas P5: traceFlow and trace mode (2026-10-27)
+
+- **Where the walk lives.** `flow.Trace(Input, TraceStart, TraceOptions)` builds
+  the graph and walks its edges, so the trace can only name a node and port the
+  canvas draws. The API handler decides the call (`routing.Decide`, as
+  `routingTest` does) and turns the decision into the start: the trunk step,
+  the matched inbound route step, then `Follow` (an output port) or `Enter` (an
+  input port); an outbound hop is appended as `Tail`. `internal/flow` does not
+  import `routing`.
+- **Step contract.** `{node, port, text, at?, branches?}`. `port` is the
+  output port the call leaves the node through; the canvas highlights the graph
+  edge from `(node, port)` to the next step's node. A last step's `port` is the
+  input it ends at (`voicemail`). Steps on the same node (an extension rings,
+  then its voicemail) draw no edge.
+- **Which inbound route matched** is read from the first `Route "x" matched`
+  line of the routing trace, because an `external` destination overwrites
+  `Decision.Route` with the outbound route's name.
+- **Numbers answered before routing.** From an extension, hello-sip answers a
+  paging code, a conference room, an IVR number, a queue number and a ring
+  group name before it asks routing (`b2bua.go`). The trace repeats that order,
+  then falls through to `routing.Decide`. Park retrieval, feature codes and
+  `Replaces` pickup are not traced.
+- **Extensions.** `forwardAlways`; do not disturb goes to voicemail when the box
+  is on, else the call is declined (as `failoverExtension` does); otherwise it
+  rings and then the no-answer forward or voicemail. Whether the extension is
+  busy or has a registered device is live state and is not read: the ring step
+  carries two branches instead, like IVR keys. "If busy" takes the busy
+  forward, else the voicemail, else the caller hears busy; "If not registered"
+  takes the voicemail, else the call is answered temporarily unavailable (the
+  rules of `callflow.go` and `failoverExtension`).
+- **Feature codes and park slots** dialled from an extension are traced after
+  the queue number check and before ring group names, the order of `b2bua.go`.
+  The longest matching code wins; what follows it is the argument. Codes that
+  name a target (IVR, announcement, time condition) go to it, from the feature
+  code node when the code row stores the name (the graph edge), else from the
+  caller. Voicemail (`*97` own box, `*97<ext>` leave a message), intercom,
+  queue login/logout/pause, time condition override, park retrieve, pickup and
+  the settings codes (forward, DND, call waiting) end in one step that says
+  what they do to the caller's own extension; park and the transfer codes
+  dialled as a call are rejected (403).
+- **Live state** (park slots, queue agents) is read by the handler (`s.Parked`,
+  `s.Queues`, 2 s timeout) and given to the walk as `flow.Live`. Park retrieve
+  and a dialled slot say whether the slot holds a call and who parked it. A
+  queue lists each agent (static agents are available unless paused; dynamic
+  ones need a login to this queue) and takes the `timeout` exit when someone is
+  staffed, else `noAgents`. What cannot be read (reader not wired, error, or
+  timeout) is shown as "unknown (live state unavailable)", and the queue then
+  has two branches, "If an agent is available" and "If no agent is available".
+  The agent codes also say whether the caller's extension is logged in or paused.
+  Whether an agent's phone is busy, in DND or registered is not judged for a
+  queue (the SIP node does), only the shared login and pause state.
+- **Ring groups and queues** follow the failure path (`noAnswer`; for a queue
+  `timeout`, or `noAgents` when it has none): a member or agent who answers ends
+  the call, so the trace shows what happens when nobody does. The step text
+  says so.
+- **IVR.** The first key of `digits` picks the option (`port key:<d>`); the rest
+  go on to the next menu. A key that is not an option takes `invalid`. With no
+  keys left, the menu step carries a branch per key and for `timeout`
+  (`invalid` is not listed). "To depth 6" is six nested menus expanded; deeper
+  ones are not expanded and the step says so. A loop (same node, port and
+  remaining keys twice on one path) ends the path with a step that says so; a
+  path is cut at 64 steps.
+- **Time conditions** use `timecond.Resolve` on the conditions built the way the
+  store builds them for the evaluate endpoint, at `at`, override included.
+  Each condition in a chain is one step with the branch as its port (a holiday
+  with no holiday destination takes `closed`, the edge the graph draws). A
+  forced branch says so and who set it and when; the override has no expiry in
+  the data, so the "until" wording of the spec is not shown. An announcement
+  followed by a "then voicemail" box adds a voicemail step.
+- **Endpoint.** `GET /api/v1/flow/trace`, `traceFlow`, read/viewer (unlike
+  `testRouting`, which is write/operator: it reads the configuration only and
+  places no call). Answers `{configRevision, at, from, number, outcome, route,
+reason, steps, routingTrace}`. A rejected call (no route matched, outside an
+  inbound schedule) is `200` with `outcome: reject` and a final step on the
+  trunk. Trunk usability uses the same live-state rule as `routingTest`. The
+  metric is `hello_flow_trace_total`, registered with the batch metrics.
+- **Canvas.** Trace mode is a button in the canvas toolbar (viewers too) that
+  swaps the node panel for a trace panel: source, number, caller ID, time
+  (`datetime-local`, empty is now), a keypad, and the result list. Highlighting
+  is done by two pure functions (`traceHighlight.ts`) that mark the view
+  after `buildView`, so the page keeps one extra line of state and the P4
+  editing code is untouched. Traced objects that are not on the canvas are
+  counted in a note, not drawn.
+- **Not in this change** (their phases): `traceFlow` in `assistantTools` and the
+  skill (P6).
+
+## HT813 FXO disconnect supervision: where to apply it
+
+Implementation notes (template route, no migration):
+
+- Source for every key: Grandstream ht813_config_1.0.19.6.txt (config-template-10212026.zip), section "FXO Termination Settings" in the FXO PORT block. The FXS-side P892/P856/P205 (loop-current/polarity on the FXS port) are a different feature and are not written.
+- P893 = 1: Enable Current Disconnect (loop-current drop).
+- P764 = 100: Current Disconnect Threshold, 50-800 ms, Grandstream default 100 ms; kept at the default.
+- P28101 = 1: Enable Polarity Reversal (template default 0).
+- P712 = 1: Enable PSTN Disconnect Tone Detection.
+- P841 = f1=400@-32,c=375/375; : PSTN Disconnect Tone, UAE busy tone 400 Hz, 375 ms on/off. Format and -32 dB level from the template's example (f1=480@-32,f2=620@-32,c=500/500;).
+- Unconfirmed, left out: a silence-timeout backstop (the HT813 template has no such key; P3630 is only the PSTN ring timeout for unanswered calls, P4421/P28761 are hard call-duration limits) and the UAE congestion/disconnect tone (no Grandstream source; a single P841 tone only).
+- Applied through Phone.FXO (model HT813), not a new WP family, so the generic Grandstream key set is unchanged. TR-069 untouched.
+
+## 2026-10-29 FXO line busy after a voicemail call (fix-trunk-slot-leak)
+
+- **Finding.** The trunk slot is a Valkey sorted set with a 30 s TTL per
+  member that the call heartbeat refreshes, so a slot cannot leak
+  persistently on its own; production's cluster-wide `hello_trunk_active_calls`
+  is 0. "full" answers the caller 503, not 486: the 486s are the HT813
+  itself ("rejected"). No migration and no startup sweep are needed.
+- **Real defects fixed.** (1) `end()` stopped closing `stopHB` when Phase 7
+  swapped it for `haStop`, so every ended call leaked its heartbeat goroutine
+  and the voicemail recorder never saw the hangup. (2) A refresh racing the
+  release re-added the freed slot (counts until its TTL); now released again.
+  (3) An Opus decoder that hit the library assertion stayed broken for the
+  whole call; it is rebuilt after a panic or 5 refused packets in a row. The
+  music encoder was also created outside the stack pin.
+
+## Dial-by-name directory (pbx-gaps B3, S-13) (2026-10-27)
+
+- A new destination kind `directory` with an empty target, accepted by every
+  output that stores a call destination: inbound routes, ring group fallback,
+  IVR keys / timeout / invalid, time condition branches, queue exits (decision
+  3), plus the feature-code action `directory`. Migration 00048 (renumbered by
+  the merge captain) widens the CHECK lists additively with
+  `pg_temp.hello_check_values`; down removes or hangs up the rows of the kind.
+- Default feature code is `*42`, not `*411` (D11). `*411` extends the default
+  directed-pickup code `*41`, and the dial-space guard refuses a code that is
+  a prefix of or prefixed by another, so it could never be seeded. The action
+  is configurable, so an installation that frees `*41` can use `*411`.
+  Reported to the coordinator: the same clash exists for follow-me `*74`/`*75`
+  against park.
+- The index is built into the snapshot (`Snapshot.DirectorySearch`), with
+  `directory_hidden` carried in the snapshot's extension row. Matching is by
+  keypad spelling of the first or last word of the extension name (the
+  extensions book has one name field); accents fold; digits 0 and 1 carry no
+  letters. More than 7 keys are refused with an extra prompt key
+  `directory.toolong` (the spec lists six keys; "asks for fewer" needs its own
+  sentence).
+- Connection uses the IVR's own dial path (`ivrDial`), not a REFER: the caller
+  is a one-legged B2BUA call on the relay, so putting the extension in front
+  of the relay gives the "blind transfer" result, keeps the CDR as one call and
+  applies the extension's own forwarding and voicemail.
+- The one connected name is the voicemail box's recording (`name_object`)
+  when present, read with one box lookup at hand-over time as the voicemail
+  application does; otherwise spoken with the Speaker (the text-to-speech
+  cache over go-ai-sdk). `directory.connecting` is "Connecting you to" with no
+  name placeholder so the recording and the spoken name both follow it.
+- A call that reaches the directory without a menu (route, time condition,
+  group fallback, `*42`) uses phase `directory` for HA: a taker restarts it
+  from its first prompt. Inside a menu the menu's phase is kept.
+- Canvas: one pseudo-terminal node `directory:names` that every output kind
+  and the feature code draw an edge to.
+- S-20 for menus: `ivr_menus.prompt_language` (NULL inherits), resolved with
+  `voiceprompt.Resolve` as voicemail boxes are; API `promptLanguage`, console
+  select on the IVR form. Merged `origin/gaps-languages` (PR 208) for
+  `voiceprompt.Resolve`; the PR depends on it.
+
+## Phone resync/reboot rejected (fix-phone-resync, 2026-11-09)
+
+- Root cause: a Grandstream challenges the check-sync NOTIFY in realm
+  "<SIP server host:port>" (kw: 192.168.10.101:30508), not the SIP domain.
+  `answerChallenge` only accepts the device realm (the stored HA1 is bound to
+  it), so every challenged push became `auth_failed` ("needs one manual
+  reboot"). hello-sip-1 logged "challenge realm ... is not the device's realm".
+  Not the Kamailio pair: NOTIFY is routed by the binding's Path, and the
+  device registered through the replica that holds the flow.
+- Fix: when the queue can open the device's sealed password
+  (`DeviceSecrets`, `Store.DeviceSecret`), hash it for the realm the phone
+  named and answer. The password is never logged. Phones need no change.
+- Rejected: P4428=1 (no NOTIFY auth) would let anyone on the path reboot a
+  phone and needs a phone reboot to load.
+
+## Queue callback merged onto main (merge captain, PR 237) (2026-11-09)
+
+- Main moved the queue drawer to `web/src/forms/QueueForm.tsx` (flow canvas
+  P4), so the callback fields and the prompt-language select were ported into
+  that file. The Callbacks link in the queue card stays in `Queues.tsx`.
+- `migrations/00047_prompt_language.sql` was identical on main, so the
+  duplicate in this branch adds nothing. The queue callback migration is
+  `00049_queue_callback.sql`; the migrate counts (34/35/37) cover 00026 to 00049.
+- Merged the counter and log of the answered queue leg from main and the
+  callback finish from this branch in `internal/sip/queue.go`; both run once.
+- Metric lists in `internal/sip/metrics.go` keep both sides' collectors.
+
+## Completion plan 2026-11-09: how to run it
+
+- Start: run waves 0-6 in order, three or four builder agents in parallel plus the merge captain (recommended)
+- Start with wave 0 and 1 only, then review
+- Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
+
+## Kamailio HA: the VIP ships off, go-live is a separate step (2026-11-09)
+
+The user's deploy constraint: the PRs of kamailio-ha get merged ready, but the
+change that re-points phones to the VIP must not go live until the user asks.
+Sync deploys `deploy/kuvryn-sync/kw/resources.yaml` as soon as it is on main,
+so the VIP stage cannot sit in that file.
+
+- `kw/resources.yaml` keeps the state of PR 1/4 (a pair on their own node
+  addresses; phones stay on `192.168.10.101:30508`). The config with
+  `EDGE_VIP`/`LEGACY_IP` support ships in the ConfigMap (inert: neither is set),
+  which rolls the Kamailio pair once (new config checksum).
+- Everything that turns the VIP on is `deploy/kuvryn-sync/kamailio-vip/go-live.patch`
+  (pod env, the kube-vip container, its ServiceAccount, Role and RoleBinding,
+  and the control plane's advertised proxy host). `test/deploy` and the
+  `test/kindha` failover lab apply it to a copy, so the patch is always
+  proven and always applies; `TestKwKamailioVIPIsOff` guards the off state.
+- Alternatives: a values flag cannot work for kw (plain manifests, no
+  templating); keeping the PRs unmerged blocks the chart and docs for other
+  clusters. The chart option (4/4) defaults to off.
+- Merge conflict note: #201 was squash-merged, so the stacked branches
+  re-added its files; resolved by taking the stack's version of the VIP and
+  legacy-socket code and main's TLS socket code (the VIP branch of the
+  listens also gets a TLS listener on `EDGE_VIP`).
+## TestConferenceTwoNodes flake: root cause (2026-11-09)
+
+- Two causes, one in the test and one in production code. Both reproduced on a
+  Mac (16 parallel test processes, or 12 busy loops).
+- "rehomed = 0, want 1" (also seen in CI, run 40695787431): the test read the
+  counter as soon as `conf.get("800")` was non-nil. `confRehome` makes the room
+  visible in `confReserve` and counts `rehomed` several statements later, after
+  `NewParty`, so a goroutine switch in between shows 0. The test now waits for
+  the counter. The production order stays: the event is counted only once the
+  rehome has succeeded.
+- "forwarded participant hears no audio" (peak 0): the relay and anchor sockets
+  were bound with network `udp` (dual-stack `[::]`), the conference party and
+  fanout sockets with `udp4`. On BSD kernels a dual-stack bind succeeds on a
+  port an IPv4 socket already holds, and IPv4 datagrams then go to the IPv4
+  socket. A relay leg could share a port with a party socket (a previous run's,
+  or another test process's), and the phone's media never reached the relay
+  (relay saw 0 packets, 0 rejected). Linux refuses that bind, so the next free
+  port is taken. All RTP is IPv4-only (SDP is `IN IP4` only), so relay and
+  anchor sockets are now `udp4` like the rest; the port-in-use check is then
+  the same on every kernel.
+## Opus "inLen >= S->Fs_in_kHz" flake: root cause and fix (2026-11-09)
+
+- Symptom: `TestOpusSessionLoopback` failed on most runs (104 of 200 here, less
+  on CI) with the SILK resampler assertion; the same assertion hit a voicemail
+  call in production. PR 243's rebuild-after-panic only recovers; it did not
+  remove the cause.
+- Root cause: the transpiled libopus passes addresses of its Go stack locals
+  as uintptr. `silk_decode_frame` writes the frame length through one; if the
+  stack moves during the call the write goes to the old copy, the caller reads
+  0, and `silk_resampler` aborts. The pin in `withOpusStack` was meant to
+  prevent the move, but `var pin [512<<10]byte` is over the compiler's 128 KB
+  limit for stack variables, so it was moved to the heap (`go build -gcflags=-m`
+  says "moved to heap: pin"). It pinned nothing and allocated 512 KB per call.
+  Survival depended on the caller's stack at that moment (a fresh goroutine, or
+  a receive loop a GC had shrunk while parked in a read).
+- Ruled out: shared decoder state across goroutines (each decoder has its own
+  TLS and mutex; sessions use one goroutine per decoder), frame sizes (320
+  samples, packets replay clean on a big stack), test timing.
+- Fix: all library calls run on a few dedicated worker goroutines that build a
+  512 KB stack once from 64 KB frames (under the 128 KB limit) and hold it, so
+  nothing grows or shrinks it. A call that still moves the stack is returned as
+  a failure, which feeds the existing decoder rebuild. The test expectation was
+  right and is unchanged.
+- Under `-race` the Opus build is off (opus_race.go), so the loopback test
+  skips there; the -race count proves nothing about the codec.
+## IVR homed-callee data race (ivrHomeCallee vs release)
+
+- Root cause: `homedCall.legs` had no lock of its own. `ivrHomeCallee`
+  (IVR dial-out goroutine, started by takeover) wrote `legs[1]` under
+  `call.mu`, while `call.release` (BYE handler goroutine) iterated `hom.legs`
+  after dropping `call.mu`; `haHomedState` and `homedCall.leg` read it with no
+  lock either. Seen in `TestIVRHuntAnswerAtMemberTimeout` under `-race`.
+- Fix: `homedCall` carries a leaf mutex; all access goes through `leg`,
+  `pair` and `setCallee`. Regression test: `homed_race_test.go`.
+
+## Grandstream key choices from the official templates (2026-11-09)
+
+- Firmware-upgrade confirmation prompt off (P8375=0, P84988=1) for unattended upgrades, or leave it
+- Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
+- Account sharing group password: shared default `AccountSharing`, or a per-group secret
