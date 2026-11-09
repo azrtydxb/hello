@@ -1432,3 +1432,12 @@ Implementation notes (template route, no migration):
   right and is unchanged.
 - Under `-race` the Opus build is off (opus_race.go), so the loopback test
   skips there; the -race count proves nothing about the codec.
+## IVR homed-callee data race (ivrHomeCallee vs release)
+
+- Root cause: `homedCall.legs` had no lock of its own. `ivrHomeCallee`
+  (IVR dial-out goroutine, started by takeover) wrote `legs[1]` under
+  `call.mu`, while `call.release` (BYE handler goroutine) iterated `hom.legs`
+  after dropping `call.mu`; `haHomedState` and `homedCall.leg` read it with no
+  lock either. Seen in `TestIVRHuntAnswerAtMemberTimeout` under `-race`.
+- Fix: `homedCall` carries a leaf mutex; all access goes through `leg`,
+  `pair` and `setCallee`. Regression test: `homed_race_test.go`.
