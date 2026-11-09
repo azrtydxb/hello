@@ -50,3 +50,21 @@ func TestUserAddRole(t *testing.T) {
 		t.Error("empty password accepted")
 	}
 }
+
+type fakeResetter struct{ got string }
+
+func (f *fakeResetter) ResetTOTPByName(_ context.Context, actor, username string) error {
+	f.got = actor + ":" + username
+	return nil
+}
+
+func TestUser2FAReset(t *testing.T) {
+	f := &fakeResetter{}
+	var out strings.Builder
+	if err := user2FAReset(context.Background(), f, "sam", &out); err != nil || f.got != "cli:sam" {
+		t.Fatalf("got %q, %v", f.got, err)
+	}
+	if err := user2FAReset(context.Background(), f, " ", &out); err == nil {
+		t.Fatal("an empty name was accepted")
+	}
+}

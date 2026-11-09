@@ -80,7 +80,7 @@
         "ringTimeout": 20,
         "strategy": "ring-all"
       },
-      "version": "cb07725d25fb927f"
+      "version": "53cae47fa4a49b6a"
     },
     {
       "id": "trunk:1",

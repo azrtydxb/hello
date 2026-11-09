@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import { lazy, Suspense, type ComponentType } from "react";
 import {
   Navigate,
   NavLink,
@@ -17,6 +17,7 @@ import {
   Sidebar,
   SidebarNav,
   SidebarNavGroup,
+  Spinner,
   ThemeProvider,
   ThemeToggle,
   Topbar,
@@ -35,6 +36,7 @@ import {
   IntegrationsApiAccess,
   IntegrationsOverview,
 } from "./pages/Integrations";
+import { IntegrationEvents } from "./pages/IntegrationEvents";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
 import { AIProposalDetail } from "./pages/AIProposalDetail";
@@ -63,6 +65,7 @@ import { ProvFirmware } from "./pages/ProvFirmware";
 import { ProvSettings } from "./pages/ProvSettings";
 import { ProvTemplates } from "./pages/ProvTemplates";
 import { Placeholder } from "./pages/Placeholder";
+import { FlowCanvases } from "./pages/FlowCanvases";
 import { Users } from "./pages/Users";
 import { EmailSettings } from "./pages/EmailSettings";
 import { MyForwarding } from "./pages/myphone/MyForwarding";
@@ -86,10 +89,12 @@ import { Paging } from "./pages/Paging";
 import { Conferences } from "./pages/Conferences";
 import { Ivr } from "./pages/Ivr";
 import { Queues } from "./pages/Queues";
+import { QueueCallbacks } from "./pages/QueueCallbacks";
 import { Wallboard } from "./pages/Wallboard";
 import { TimeConditions } from "./pages/TimeConditions";
 import { ParkPickup } from "./pages/ParkPickup";
 import { RingGroups } from "./pages/RingGroups";
+import { RingTags } from "./pages/RingTags";
 import { System } from "./pages/System";
 import { Trunks } from "./pages/Trunks";
 import { Voicemail } from "./pages/Voicemail";
@@ -97,6 +102,7 @@ import { useControlPlane } from "./useControlPlane";
 
 /** Pages that have content; any other nav item renders a placeholder. */
 const PAGES: Readonly<Record<string, ComponentType>> = {
+  "/flow": FlowCanvases,
   "/extensions": Extensions,
   "/devices": Devices,
   "/phones": Phones,
@@ -119,6 +125,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/diagnostics": Diagnostics,
   "/voicemail": Voicemail,
   "/ring-groups": RingGroups,
+  "/ring-tags": RingTags,
   "/paging": Paging,
   "/conferences": Conferences,
   "/ivr": Ivr,
@@ -140,7 +147,11 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/users": Users,
   "/integrations": IntegrationsOverview,
   "/integrations/api-access": IntegrationsApiAccess,
+  "/integrations/events": IntegrationEvents,
 };
+
+/** The canvas pulls in the graph library, so it loads on first use. */
+const FlowCanvasPage = lazy(() => import("./pages/flow/FlowCanvasPage"));
 
 /** A load that never answers, for what a self-service user may not read. */
 const idleStatus = () => new Promise<never>(() => undefined);
@@ -314,7 +325,16 @@ export function App() {
               path="/dial-plans"
               element={<Navigate to="/routes" replace />}
             />
+            <Route
+              path="/flow/:canvasId"
+              element={
+                <Suspense fallback={<Spinner label="Loading the canvas…" />}>
+                  <FlowCanvasPage />
+                </Suspense>
+              }
+            />
             <Route path="/history/:id" element={<CallDetail />} />
+            <Route path="/queues/:id/callbacks" element={<QueueCallbacks />} />
             <Route path="/ai/assistant/:id" element={<AIAssistant />} />
             <Route path="/ai/proposals/:id" element={<AIProposalDetail />} />
             {/* Phones sections; static paths outrank /phones/:id. */}

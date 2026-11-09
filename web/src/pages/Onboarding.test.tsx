@@ -162,7 +162,7 @@ describe("Onboarding page", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const post = calls.find((c) => c.method === "POST");
     expect(post?.url).toBe("/api/v1/onboarding/candidates/000b82000001/adopt");
-    expect(post?.body).toEqual({ extensionId: "7", label: "Warehouse" });
+    expect(post?.body).toEqual({ extensionId: 7, label: "Warehouse" });
     expect(
       await screen.findByText(/adopted\. The phone picks up/),
     ).toBeInTheDocument();
@@ -202,7 +202,7 @@ describe("Onboarding page", () => {
       await within(dialog).findByText("must be 1-64 characters"),
     ).toBeInTheDocument();
     const post = calls.find((c) => c.method === "POST");
-    expect(post?.body).toEqual({ extensionId: "8", model: "X1" });
+    expect(post?.body).toEqual({ extensionId: 8, model: "X1" });
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 

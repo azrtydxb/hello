@@ -1,6 +1,6 @@
 # kamailio-ha
 
-Status: draft
+Status: approved (Option A, VIP 192.168.10.109, 2026-10-26)
 
 Source: the user's instruction of 2026-10-25, after the 09:04 deploy that took the one Kamailio down for about 30 s and dropped an active call (takeover re-INVITEs and the BYE route through it). `docs/ha.md` ("The two named limitations" and "Production guidance") prescribes at least two Kamailio behind a VIP or DNS SRV; kw runs one. This spec is design only: no implementation, no manifest change.
 

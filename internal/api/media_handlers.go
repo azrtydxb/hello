@@ -7,6 +7,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,10 @@ import (
 const (
 	maxAnnouncementBytes  = 64 << 20
 	maxAnnouncementUpload = maxAnnouncementBytes + (1 << 20)
+	// The JSON form is bounded by the 1 MiB of an MCP request: 700 KiB of
+	// audio is 934 KiB in base64, leaving room for the name and the frame.
+	maxAnnouncementJSON      = 1 << 20
+	maxAnnouncementJSONAudio = 700 << 10
 )
 
 // Recordings.
@@ -130,17 +135,11 @@ func (s *server) listAnnouncements(w http.ResponseWriter, r *http.Request) {
 // field and a WAV file part named "file" (at most 64 MiB). The
 // bytes decide: a client-declared audio content type is not trusted.
 func (s *server) createAnnouncement(w http.ResponseWriter, r *http.Request) {
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
-		badRequest(w, "upload as multipart form data with name and file parts")
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxAnnouncementUpload)
 	var (
 		name string
 		data []byte
 	)
-	if err := readAnnouncementUpload(r, &name, &data); err != nil {
-		badRequest(w, err.Error())
+	if !readAnnouncementBody(w, r, &name, &data, "upload as multipart form data or JSON with name and the audio") {
 		return
 	}
 	var f fieldErrs
@@ -198,17 +197,11 @@ func (s *server) replaceAnnouncement(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
-		badRequest(w, "upload as multipart form data with a file part")
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxAnnouncementUpload)
 	var (
 		name string
 		data []byte
 	)
-	if err := readAnnouncementUpload(r, &name, &data); err != nil {
-		badRequest(w, err.Error())
+	if !readAnnouncementBody(w, r, &name, &data, "upload as multipart form data with a file part, or JSON with audioBase64") {
 		return
 	}
 	a, err := s.Store.GetAnnouncement(r.Context(), id)
@@ -305,6 +298,52 @@ func (s *server) deleteAnnouncement(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// readAnnouncementBody reads the name and the WAV bytes of an announcement
+// upload in either form: multipart (the console, up to 64 MiB) or JSON
+// {name, audioBase64} (an agent through MCP, whose requests are at most
+// 1 MiB, so up to maxAnnouncementJSONAudio of audio). Both feed the same
+// validation. It answers the failure itself and reports whether to go on;
+// notMultipart is the 400 text for any other content type.
+func readAnnouncementBody(w http.ResponseWriter, r *http.Request, name *string, data *[]byte, notMultipart string) bool {
+	ct := r.Header.Get("Content-Type")
+	switch {
+	case strings.HasPrefix(ct, "application/json"):
+		r.Body = http.MaxBytesReader(w, r.Body, maxAnnouncementJSON)
+		var in struct {
+			Name        string `json:"name"`
+			AudioBase64 []byte `json:"audioBase64"`
+		}
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&in); err != nil {
+			var tooBig *http.MaxBytesError
+			if errors.As(err, &tooBig) {
+				badRequest(w, "the JSON body is larger than 1 MiB; upload longer audio in the console")
+			} else {
+				badRequest(w, "invalid JSON body: "+jsonProblem(err))
+			}
+			return false
+		}
+		if len(in.AudioBase64) > maxAnnouncementJSONAudio {
+			var f fieldErrs
+			f.add("audioBase64", "at most 700 KiB of audio fits a JSON request; upload longer audio in the console")
+			writeFields(w, f)
+			return false
+		}
+		*name, *data = strings.TrimSpace(in.Name), in.AudioBase64
+		return true
+	case strings.HasPrefix(ct, "multipart/"):
+		r.Body = http.MaxBytesReader(w, r.Body, maxAnnouncementUpload)
+		if err := readAnnouncementUpload(r, name, data); err != nil {
+			badRequest(w, err.Error())
+			return false
+		}
+		return true
+	}
+	badRequest(w, notMultipart)
+	return false
 }
 
 // readAnnouncementUpload walks a multipart body and fills in the name and

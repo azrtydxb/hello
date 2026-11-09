@@ -42,6 +42,8 @@ function setup(extra: Parameters<typeof mockApi>[0] = {}) {
     ...ME,
     "GET /api/v1/extensions": () => json({ items: [EXT100, EXT200] }),
     "GET /api/v1/ring-groups": () => json({ items: [] }),
+    "GET /api/v1/announcements": () =>
+      json({ items: [{ id: 1, name: "closed" }] }),
     ...extra,
   });
 }
@@ -110,6 +112,7 @@ describe("RingGroups", () => {
         failureTarget: "+97142000100",
         mohClassId: null,
         mohRingback: false,
+        ringTag: "",
         members: [
           {
             extensionId: 1,
@@ -120,6 +123,102 @@ describe("RingGroups", () => {
         ],
       },
     });
+  });
+
+  it.each([
+    {
+      kind: "extension",
+      label: "Extension",
+      choose: "200",
+      card: "Extension 200",
+    },
+    {
+      kind: "ring_group",
+      label: "Ring group",
+      choose: "Sales",
+      card: "Ring group Sales",
+    },
+    {
+      kind: "announcement",
+      label: "Announcement",
+      choose: "closed",
+      card: "Announcement closed",
+    },
+  ])(
+    "offers $kind as the failure destination and sends the chosen target",
+    async ({ kind, label, choose, card }) => {
+      const calls = setup({
+        "GET /api/v1/ring-groups": () => json({ items: [GROUP] }),
+        "POST /api/v1/ring-groups": () =>
+          json(
+            {
+              ...GROUP,
+              id: 6,
+              name: "Support",
+              failureKind: kind,
+              failureTarget: choose,
+            },
+            201,
+          ),
+      });
+      renderApp("/ring-groups");
+      await screen.findByRole("listitem", { name: "Sales" });
+      const [create] = await screen.findAllByRole("button", {
+        name: "New ring group",
+      });
+      await waitFor(() => expect(create).toBeEnabled());
+      fireEvent.click(create!);
+      fireEvent.change(screen.getByLabelText("Name"), {
+        target: { value: "Support" },
+      });
+      fireEvent.change(screen.getByLabelText("When no one answers"), {
+        target: { value: kind },
+      });
+      const pick = await screen.findByLabelText("Add member");
+      await waitFor(() => expect(pick).toBeEnabled());
+      fireEvent.change(pick, { target: { value: "ext:1" } });
+      fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
+      // An empty target is refused before anything is sent.
+      fireEvent.click(screen.getByRole("button", { name: "Create group" }));
+      expect(await screen.findByText(/^Choose the /)).toBeVisible();
+      expect(calls.some((c) => c.method === "POST")).toBe(false);
+
+      await waitFor(() =>
+        expect(
+          within(screen.getByLabelText(label)).getAllByRole("option").length,
+        ).toBeGreaterThan(1),
+      );
+      fireEvent.change(screen.getByLabelText(label), {
+        target: { value: choose },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Create group" }));
+      expect(
+        await screen.findByText("Ring group Support created."),
+      ).toBeVisible();
+      expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
+        failureKind: kind,
+        failureTarget: choose,
+      });
+      expect(
+        within(screen.getByRole("listitem", { name: "Support" })).getByText(
+          card,
+        ),
+      ).toBeVisible();
+    },
+  );
+
+  it("does not offer a group as its own fallback", async () => {
+    setup({ "GET /api/v1/ring-groups": () => json({ items: [GROUP] }) });
+    renderApp("/ring-groups");
+    const card = await screen.findByRole("listitem", { name: "Sales" });
+    fireEvent.click(within(card).getByRole("button", { name: /Edit/ }));
+    fireEvent.change(screen.getByLabelText("When no one answers"), {
+      target: { value: "ring_group" },
+    });
+    const sel = screen.getByLabelText("Ring group");
+    expect(
+      within(sel).queryByRole("option", { name: "Sales" }),
+    ).not.toBeInTheDocument();
   });
 
   it("persists a changed strategy on edit", async () => {

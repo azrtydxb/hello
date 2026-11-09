@@ -18,7 +18,10 @@ import {
   isCustomGreeting,
   listVoicemailBoxes,
   previewDefaultGreeting,
+  PROMPT_LANGUAGE_LABELS,
+  promptLanguageLabel,
   revertGreeting,
+  setBoxLanguage,
   type GreetingSlot,
   type VoicemailBoxDetail,
   type VoicemailBoxSummary,
@@ -485,6 +488,8 @@ function BoxSettings({
 }) {
   const [email, setEmail] = useState(detail.email);
   const [password, setPassword] = useState("");
+  // "" is "Default": the box inherits the deployment language.
+  const [language, setLanguage] = useState(detail.promptLanguage ?? "");
   const [greeting, setGreeting] = useState<File | null>(null);
   const [busyFile, setBusyFile] = useState<File | null>(null);
   const [unreachable, setUnreachable] = useState<File | null>(null);
@@ -510,6 +515,10 @@ function BoxSettings({
     if (found.email || found.password) return;
     setBusy(true);
     try {
+      // The language has its own route: the box PUT may be multipart.
+      if (language !== (detail.promptLanguage ?? "")) {
+        await setBoxLanguage(box.id, language);
+      }
       // The PUT answers with the box as GET sends it (the detail shape).
       const saved = (await updateVoicemailBox(box.extensionId, {
         email: address,
@@ -519,7 +528,7 @@ function BoxSettings({
         ...(unreachable ? { unreachable } : {}),
         ...(nameFile ? { name: nameFile } : {}),
       })) as unknown as VoicemailBoxDetail;
-      onSaved({ ...detail, ...saved });
+      onSaved({ ...detail, ...saved, promptLanguage: language });
     } catch (err: unknown) {
       const mapped = mapFieldErrors(fieldErrors(err), [
         "email",
@@ -592,6 +601,21 @@ function BoxSettings({
               : "No PIN is set."
           }
           onChange={(e) => setPassword(e.target.value)}
+        />
+        <Select
+          id={`${formId}-language`}
+          label="Prompt language"
+          hint="The language of the spoken prompts for this box: the default greeting and the retrieval menus. Default follows the system language, English unless set."
+          value={language}
+          disabled={busy}
+          onChange={(e) => setLanguage(e.target.value)}
+          options={[
+            { value: "", label: "Default" },
+            ...Object.keys(PROMPT_LANGUAGE_LABELS).map((code) => ({
+              value: code,
+              label: promptLanguageLabel(code),
+            })),
+          ]}
         />
         <GreetingSource
           id={`${formId}-greeting`}
