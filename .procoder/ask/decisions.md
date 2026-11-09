@@ -1493,3 +1493,13 @@ Implementation notes (template route, no migration):
 - **Not done**: a HELD location URI, LLDP or NAI based lookup, E911 keys for other
   vendors, the door target list bypass (waits for S-45), an UI picker on the
   Phones page (the Assignments tab does it).
+
+## IVR homed-callee data race (ivrHomeCallee vs release)
+
+- Root cause: `homedCall.legs` had no lock of its own. `ivrHomeCallee`
+  (IVR dial-out goroutine, started by takeover) wrote `legs[1]` under
+  `call.mu`, while `call.release` (BYE handler goroutine) iterated `hom.legs`
+  after dropping `call.mu`; `haHomedState` and `homedCall.leg` read it with no
+  lock either. Seen in `TestIVRHuntAnswerAtMemberTimeout` under `-race`.
+- Fix: `homedCall` carries a leaf mutex; all access goes through `leg`,
+  `pair` and `setCallee`. Regression test: `homed_race_test.go`.

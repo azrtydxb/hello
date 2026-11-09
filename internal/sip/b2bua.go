@@ -1309,7 +1309,7 @@ func (c *call) release() {
 	}
 	if hom != nil {
 		// A taken-over call's callee dialog is bound outside c.legs.
-		for _, l := range hom.legs {
+		for _, l := range hom.pair() {
 			if l != nil {
 				c.s.unbind(l.callID, c)
 			}
