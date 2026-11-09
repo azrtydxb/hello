@@ -386,7 +386,7 @@ PBX has the voicemail feature code and the extension has voicemail switched on.
 | Vendor  | Key                                                                                                                                           |
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Yealink | `linekey.N.type = 3` (Transfer), `.value = *97<ext>`, `.label = To voicemail`; `expansion_module.M.key.K.*` the same on an EXP50 key (verify) |
-| Snom    | `<fkey idx="N" context="active">transfer sip:*97<ext>@<domain></fkey>` (verify)                                                              |
+| Snom    | `<fkey idx="N" context="active">transfer sip:*97<ext>@<domain></fkey>` (verify)                                                               |
 | Fanvil  | a memory key, `FkeyN Type :1`, `Value :*97<ext>@1/f` (the BLF keys' `/b` suffix replaced by speed dial) (verify)                              |
 | Poly    | an enhanced feature key macro `$FTransfer$$Cpause2$*97<ext>$Tinvite$` (`efk.efklist.1.*`) on `softkey.1`, active-call context (verify)        |
 
@@ -412,13 +412,13 @@ that both do G.722 talk wideband and anything else falls back to G.711 (see
 account Hello provisions); another account of a multi-account model takes
 the same keys with its own number:
 
-| Vendor      | Keys                                                                                                                                                                                                                |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.N.codec.opus.enable` and `.priority = 1` (models without Opus: `g722` at 1), then `g722`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0`                |
-| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 123 (Opus, models that have it), 9 (G.722), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...) |
-| Snom        | `codec_priority_list idx="N"` = `opus,g722,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                              |
-| Fanvil      | `SIPN Voice Codec Map` = `opus,G722,G711U,G711A`                                                                                                                                                                    |
-| Poly        | `voice.codecPref.Opus="1"`, `.G722="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                    |
+| Vendor      | Keys                                                                                                                                                                                                                                    |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.N.codec.opus.enable` and `.priority = 1` (models without Opus: `g722` at 1), then `g722`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0` |
+| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 123 (Opus, models that have it), 9 (G.722), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...)                     |
+| Snom        | `codec_priority_list idx="N"` = `opus,g722,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                                                  |
+| Fanvil      | `SIPN Voice Codec Map` = `opus,G722,G711U,G711A`                                                                                                                                                                                        |
+| Poly        | `voice.codecPref.Opus="1"`, `.G722="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                                        |
 
 Opus is listed only for models known to support it (`internal/prov/codecs.go`);
 an unknown model gets G.722, PCMU and PCMA. The keys are from the vendors'
@@ -700,12 +700,15 @@ Metrics: `hello_sip_rtcpxr_reports_total{result}`, and histograms
 over the call-end reports.
 
 `HELLO_PROV_RTCPXR=true` (default off) makes hello-control provision the
-reporting on the phones whose vendor documents it: the Grandstream
-WP810/WP822/WP825 get P26093 (collector name, the SIP server host), P60087 = 1
-(address selection Auto, the registered SIP server), P26094 empty and P26095
-(the SIP server port), all from the 1.0.11.57 release notes, for account 1.
-The WP8x6 and WP856 release notes name no such keys, and the other vendors are
-not provisioned: set their collector on the phone to the SIP server.
+reporting on the phones whose vendor documents it. Account 1 of the Grandstream
+WP8x6 (`wp8x6_config_1.0.3.39`) and WP810/WP822/WP825
+(`wp810_822_825_config_1.0.11.83`) gets P26093 (collector name, the SIP server
+host), P60087 = 1 (address selection Auto, the registered SIP server), P26094
+empty, P26095 (the SIP server port) and P8489 = 1 (VQ RTCP-XR Session Report,
+the call-end report Hello stores). The WP856 (`wp856_config_1.0.3.16`) has no
+Auto selection and no session report key, so it gets P26093 and P26094 (both the
+SIP server host) and P26095. The WP820 template has no RTCP-XR key, and the other
+vendors are not provisioned: set their collector on the phone to the SIP server.
 
 ## Redirect services
 
@@ -744,7 +747,7 @@ Templates see only these values:
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                                                                                                 |
 | `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`                                                                                |
-| `.Server`   | `Host`, `Port`, `Transport` (`udp` or `tls`), `Expiry` (seconds)                                                                                                             |
+| `.Server`   | `Host`, `Port`, `Transport` (`udp` or `tls`), `Expiry` (seconds)                                                                                                     |
 | `.BLF`      | a list of `Number`, `Label`, `URI`, placed on the model's keys: `Slot`, `Module`, `Page`, `Section`, `PageStart`, `Pickup`                                           |
 | `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `CACertBase64`, `ResyncSeconds`                                                                                          |
 | `.Codes`    | the PBX's star codes: `DNDOn`, `DNDOff`, `ForwardOn`, `ForwardOff`, `ForwardBusyOn`/`Off`, `ForwardNoAnswerOn`/`Off`, `PickupDirected` (empty when the PBX has none) |
@@ -1215,10 +1218,10 @@ pings. The built-in Grandstream template writes the phone's own keep-alive for
 the WP families; the call-side half (session timers, dead-media teardown,
 roaming) is in [phones.md](phones.md#roaming-keep-alive-and-dead-calls).
 
-| Family          | Setting written                                                    | Status                                                                                                  |
-| --------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| WP816/826/836   | `P2397 = 1` (SIP OPTIONS keep-alive)                               | key from the WP8x6 template; the interval (30 s) and max-tries keys are left at the default (verify)    |
-| WP810/820/822/825 | `P84989 = 0` (RFC 5626 keep-alive off)                           | from the WP822 release notes; verify on a phone's exported XML                                          |
+| Family            | Setting written                        | Status                                                                                               |
+| ----------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| WP816/826/836     | `P2397 = 1` (SIP OPTIONS keep-alive)   | key from the WP8x6 template; the interval (30 s) and max-tries keys are left at the default (verify) |
+| WP810/820/822/825 | `P84989 = 0` (RFC 5626 keep-alive off) | from the WP822 release notes; verify on a phone's exported XML                                       |
 
 The WP856 template has neither key and gets none. Other vendors' keep-alive
 keys are not written yet (verify per vendor).

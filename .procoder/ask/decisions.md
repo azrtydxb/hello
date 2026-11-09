@@ -1369,15 +1369,28 @@ Implementation notes (template route, no migration):
   100, no dialog id, no metrics, over 4 KiB) is answered 400 and stored not at
   all. Wrong content type 415, other Event 489 (item 34 adds presence),
   store down 503. The sender must authenticate as a device.
-- Vendor keys, confirmed in the WP810/WP822/WP825 release notes (1.0.11.57
-  "VQ RTCP-XR", still in the 1.0.11.78 notes): P26093 name, P60087 address
-  selection (0 Manual, 1 Auto = the registered SIP server), P26094 address,
-  P26095 port, account 1 (account 2: P26193, P60187, P26194, P26195, left to
-  the multi-line item). Template writes P60087=1, name = SIP server host,
-  empty address, port = SIP server port, only for the 8xx family and only when
-  `HELLO_PROV_RTCPXR=true` (default off, spec "off by default"). The WP8x6 and
-  WP856 release notes name no such keys, so they get none; Yealink, Poly,
-  Snom and Fanvil are not provisioned (no confirmed keys read).
+- Vendor keys, checked against Grandstream's own configuration templates
+  (config-template-10212026.zip; 2026-11-09 review). Account 1:
+  P26093 collector name, P26094 collector address and P26095 collector port
+  (default 5060) are in `wp8x6_config_1.0.3.39`,
+  `wp810_822_825_config_1.0.11.83` and `wp856_config_1.0.3.16` (confirmed;
+  account 2 is P26193, P26194, P26195 in the same three). P60087 collector
+  address selection (0 Manual, 1 Auto) is in `wp8x6_config_1.0.3.39` and
+  `wp810_822_825_config_1.0.11.83` only (confirmed; account 2 is P60187).
+  P8489 "VQ RTCP-XR Session Report" (0 Disabled, 1 Enabled, default 0) is in
+  the same two and is newly found: without it the phone sends no call-end
+  report, so the collector would stay empty. `wp820_config_1.0.7.90` has no
+  RTCP-XR key. The earlier reading that the WP8x6 and WP856 name no such keys
+  (from release notes) was wrong: corrected, they now get the keys.
+  Template (only when `HELLO_PROV_RTCPXR=true`, default off, spec "off by
+  default"): WP8x6 and WP810/822/825 get P26093 = SIP server host, P60087 = 1,
+  empty P26094, P26095 = SIP server port, P8489 = 1; the WP856 has no Auto
+  selection and no session report key, so it gets P26093 and P26094 = SIP
+  server host and P26095, and nothing else; the WP820 and non-WP Grandstream
+  phones get none. P8490 (interval report) stays at its default off, because
+  the collector keeps the call-end report. Yealink, Poly, Snom and Fanvil are
+  not provisioned (no confirmed keys read). Behaviour is not yet seen on a
+  phone (verify: Auto with an empty address; the WP856 with the address set).
 - No MCP tool added; nothing to teach in skills/. The CDR REST read gains
   `rtcpxr`, and the call detail page shows it beside the relay figures.
 - Merge note: `handlePublish` in `internal/sip/rtcpxr.go` owns the PUBLISH

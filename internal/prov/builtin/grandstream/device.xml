@@ -39,11 +39,16 @@
 {{- /* QoS marking (phone-feature-parity S-21): P1558 = Layer 3 QoS for SIP (DSCP), P1559 = Layer 3 QoS for audio (DSCP) [R8x6 TPL]; the same values hello-sip marks its own sockets with (HELLO_DSCP_SIP 26, HELLO_DSCP_RTP 46). UNVERIFIED on hardware. */}}
     <P1558>{{.Prov.DSCPSIP}}</P1558>
     <P1559>{{.Prov.DSCPRTP}}</P1559>
-{{- /* RTCP-XR voice-quality reports (phone-feature-parity S-36), WP810/WP822/WP825 only and only when HELLO_PROV_RTCPXR is on (off, the phone keeps its default, an empty collector = no reports). Keys from the WP810/WP822/WP825 release notes (1.0.11.57 "VQ RTCP-XR", "New P Values"): P26093 = VQ RTCP-XR Collector Name (hostname), P60087 = Collector Address Selection (0 Manual, 1 Auto = the registered SIP server when no address is configured), P26094 = Collector Address (IP; left empty so Auto picks the SIP server), P26095 = Collector Port (1 to 65535, default 5060). Account 1 only; account 2 is P26193, P60187, P26194, P26195. The WP8x6 and WP856 release notes name no such keys, so they get none. The phone's PUBLISH goes to the SIP server, which is Hello's collector. Keys confirmed from the vendor release notes, behaviour not yet on a phone (verify: that the phone reports with Auto and an empty address). */}}
-{{- if and .Prov.RTCPXR (eq .Phone.Family "8xx")}}
+{{- /* RTCP-XR voice-quality reports (phone-feature-parity S-36), only when HELLO_PROV_RTCPXR is on (off, the phone keeps its default, an empty collector = no reports). Keys, account 1, from Grandstream's own configuration templates: P26093 VQ RTCP-XR Collector Name, P26094 Collector Address, P26095 Collector Port (default 5060) in wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83 and wp856_config_1.0.3.16; P60087 Collector Address Selection (0 Manual, 1 Auto; Auto uses the registered SIP server when no address is set) in wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83 only; P8489 VQ RTCP-XR Session Report (0 Disabled, 1 Enabled, default 0; the call-end report Hello stores) in the same two. The WP856 template has no Address Selection and no Session Report key, so the WP856 gets the collector address spelled out (the SIP server host) and no P8489; the WP820 template has no RTCP-XR key at all and gets none. P8490 Interval Report stays at its default (off): the collector keeps the call-end report. Account 2 is P26193, P60187, P26194, P26195 (same templates). The phone's PUBLISH goes to the SIP server, which is Hello's collector. Behaviour not yet seen on a phone (verify: that the phone reports with Auto and an empty address, and that the WP856 reports with the address set). */}}
+{{- if and .Prov.RTCPXR (or (eq .Phone.WP "WP8x6") (eq .Phone.WP "WP8xx") (eq .Phone.WP "WP856"))}}
     <P26093>{{xml .Server.Host}}</P26093>
+{{- if eq .Phone.WP "WP856"}}
+    <P26094>{{xml .Server.Host}}</P26094>
+{{- else}}
     <P60087>1</P60087>
     <P26094></P26094>
+    <P8489>1</P8489>
+{{- end}}
     <P26095>{{.Server.Port}}</P26095>
 {{- end}}
 {{- /* MWI (spec S-1): P99 = Subscribe for MWI [R8x6 TPL, R8x6 section 5; WP822 same key]; P33 = voicemail access number, defaulting to Hello's voicemail feature code. */}}
