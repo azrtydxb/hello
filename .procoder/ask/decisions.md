@@ -1408,6 +1408,26 @@ Implementation notes (template route, no migration):
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
 
+## TestConferenceTwoNodes flake: root cause (2026-11-09)
+
+- Two causes, one in the test and one in production code. Both reproduced on a
+  Mac (16 parallel test processes, or 12 busy loops).
+- "rehomed = 0, want 1" (also seen in CI, run 40695787431): the test read the
+  counter as soon as `conf.get("800")` was non-nil. `confRehome` makes the room
+  visible in `confReserve` and counts `rehomed` several statements later, after
+  `NewParty`, so a goroutine switch in between shows 0. The test now waits for
+  the counter. The production order stays: the event is counted only once the
+  rehome has succeeded.
+- "forwarded participant hears no audio" (peak 0): the relay and anchor sockets
+  were bound with network `udp` (dual-stack `[::]`), the conference party and
+  fanout sockets with `udp4`. On BSD kernels a dual-stack bind succeeds on a
+  port an IPv4 socket already holds, and IPv4 datagrams then go to the IPv4
+  socket. A relay leg could share a port with a party socket (a previous run's,
+  or another test process's), and the phone's media never reached the relay
+  (relay saw 0 packets, 0 rejected). Linux refuses that bind, so the next free
+  port is taken. All RTP is IPv4-only (SDP is `IN IP4` only), so relay and
+  anchor sockets are now `udp4` like the rest; the port-in-use check is then
+  the same on every kernel.
 ## Opus "inLen >= S->Fs_in_kHz" flake: root cause and fix (2026-11-09)
 
 - Symptom: `TestOpusSessionLoopback` failed on most runs (104 of 200 here, less
