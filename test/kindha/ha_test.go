@@ -391,8 +391,14 @@ func (l *lab) wantHop(t *testing.T, what, got, wantHost string, wantPort int) {
 // through the node address still served for phones not yet moved, then the
 // loss of the active instance (gracefully and by freezing its node), then a
 // rolling restart of both.
-func TestKamailioHA(t *testing.T) {
-	env := loadLab(t)
+func TestKamailioHA(t *testing.T) { runHA(t, "kw") }
+
+// TestKamailioHAChart is the same proof for the Helm chart's pair: the chart
+// rendered with values-ha.yaml and the lab's VIP, node, NIC and API server.
+func TestKamailioHAChart(t *testing.T) { runHA(t, "chart") }
+
+func runHA(t *testing.T, source string) {
+	env := loadLab(t, source)
 	l := &lab{labEnv: env}
 	t.Cleanup(func() {
 		if t.Failed() {
@@ -409,6 +415,7 @@ func TestKamailioHA(t *testing.T) {
 	})
 
 	// The Hello node exists before Kamailio does, so its first probes are answered.
+	l.reset(t)
 	l.hello = newHello(t, l.runnerIP, l.stubPort)
 	l.apply(t)
 	l.waitPodsReady(t, 2, 3*time.Minute)
@@ -740,8 +747,8 @@ func (l *lab) rolling(t *testing.T) {
 		}
 	}()
 
-	l.kubectl(t, "-n", l.namespace, "rollout", "restart", "deployment/kamailio")
-	l.rolloutStatus(t, "kamailio", 12*time.Minute)
+	l.kubectl(t, "-n", l.namespace, "rollout", "restart", "deployment/"+l.deployment)
+	l.rolloutStatus(t, l.deployment, 12*time.Minute)
 	l.waitPodsReady(t, 2, 2*time.Minute)
 	l.waitVIP(t, 30*time.Second)
 	close(stop)
