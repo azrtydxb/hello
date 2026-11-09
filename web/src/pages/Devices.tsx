@@ -6,9 +6,11 @@ import {
   listDevices,
   listExtensions,
   SIP_USERNAME_PATTERN,
+  SRTP_POLICIES,
   updateDevice,
   type Device,
   type Extension,
+  type SrtpPolicy,
 } from "../api";
 import {
   bindingsOf,
@@ -58,9 +60,17 @@ type Pending = { kind: "rotate" | "delete"; device: Device } | null;
 
 /** Drop the secret from a create/rotate response before keeping the device. */
 function withoutSecret(issued: IssuedDevice): Device {
-  const { id, extensionId, sipUsername, enabled, createdAt, updatedAt } =
+  const { id, extensionId, sipUsername, enabled, srtp, createdAt, updatedAt } =
     issued;
-  return { id, extensionId, sipUsername, enabled, createdAt, updatedAt };
+  return {
+    id,
+    extensionId,
+    sipUsername,
+    enabled,
+    srtp,
+    createdAt,
+    updatedAt,
+  };
 }
 
 const plural = (n: number, one: string, many: string) =>
@@ -111,6 +121,18 @@ export function Devices() {
   const extensions = list.status === "ready" ? list.extensions : [];
   const extensionOf = (d: Device) =>
     extensions.find((e) => String(e.id) === String(d.extensionId));
+
+  async function onSrtp(device: Device, srtp: SrtpPolicy) {
+    setActionError(null);
+    try {
+      replaceDevice(await updateDevice(device.id, { srtp }));
+      toast.show(`${device.sipUsername}: media encryption ${srtp}.`);
+    } catch (err) {
+      setActionError(
+        `Could not update ${device.sipUsername}: ${errorMessage(err)}`,
+      );
+    }
+  }
 
   async function onToggle(device: Device, enabled: boolean) {
     setActionError(null);
@@ -189,6 +211,25 @@ export function Devices() {
             "—"}
         </span>
       ),
+    },
+    {
+      key: "srtp",
+      label: "Media encryption",
+      render: (d) => {
+        const policy = d.srtp ?? "optional";
+        const label =
+          SRTP_POLICIES.find((p) => p.value === policy)?.label ?? policy;
+        return (
+          <Can fallback={label}>
+            <Select
+              aria-label={`Media encryption: ${d.sipUsername}`}
+              value={policy}
+              options={SRTP_POLICIES}
+              onChange={(e) => void onSrtp(d, e.target.value as SrtpPolicy)}
+            />
+          </Can>
+        );
+      },
     },
     {
       key: "enabled",

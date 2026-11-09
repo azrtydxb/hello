@@ -6,10 +6,12 @@ import {
   fieldErrors,
   listTrunks,
   listTrunkStatus,
+  SRTP_POLICIES,
   updateTrunk,
   type FieldError,
   type InternalDialing,
   type InternalDialingInput,
+  type SrtpPolicy,
   type Trunk,
   type TrunkInput,
   type TrunkStatus,
@@ -99,6 +101,8 @@ interface TrunkDraft {
   dialingConfirm: boolean;
   /** The codecs offered to the trunk, as codecs[]. */
   codecs: string[];
+  /** Media-encryption policy, as srtp. */
+  srtp: SrtpPolicy;
 }
 
 /** The codecs a trunk may be offered, in the order they are stored. */
@@ -152,6 +156,7 @@ const NEW_TRUNK: TrunkDraft = {
   dialingPatterns: "",
   dialingConfirm: false,
   codecs: DEFAULT_TRUNK_CODECS,
+  srtp: "off",
 };
 
 function toDraft(t: Trunk): TrunkDraft {
@@ -182,6 +187,7 @@ function toDraft(t: Trunk): TrunkDraft {
     dialingPatterns: (dialing?.patterns ?? []).join("\n"),
     dialingConfirm: false,
     codecs: t.codecs?.length ? t.codecs : DEFAULT_TRUNK_CODECS,
+    srtp: t.srtp ?? "off",
   };
 }
 
@@ -267,6 +273,7 @@ function toInput(d: TrunkDraft): TrunkInput {
     internalDialing: toDialingInput(d),
     messaging: d.messaging,
     codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
+    srtp: d.srtp,
   };
 }
 
@@ -303,6 +310,7 @@ function knownKeys(d: TrunkDraft): string[] {
     "destinations",
     "internalDialing",
     "codecs",
+    "srtp",
     "internalDialing.mode",
     "internalDialing.patterns",
     "internalDialing.confirm",
@@ -559,6 +567,7 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          { label: "Media encryption", value: t.srtp ?? "off" },
           { label: "Password", value: password },
         ]
       : [
@@ -579,6 +588,7 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          { label: "Media encryption", value: t.srtp ?? "off" },
           { label: "Password", value: password },
         ];
 
@@ -954,6 +964,24 @@ function TrunkDrawer({
             checked={draft.messaging}
             onChange={(e) => set("messaging", e.target.checked)}
           />
+        </fieldset>
+
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">Media encryption</legend>
+          <Select
+            id={fid("srtp")}
+            label="SRTP"
+            value={draft.srtp}
+            error={errors.srtp}
+            options={SRTP_POLICIES}
+            onChange={(e) => set("srtp", e.target.value as SrtpPolicy)}
+          />
+          <p className="cf-form__note">
+            SRTP keys travel in the call setup, so Hello offers them only on a
+            leg whose signalling is TLS. Trunk legs are UDP today: Optional
+            behaves as Off, and Required refuses calls over this trunk. Off
+            keeps plain RTP.
+          </p>
         </fieldset>
 
         <fieldset className="cf-form__section">

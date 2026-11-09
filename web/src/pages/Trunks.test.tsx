@@ -177,6 +177,32 @@ describe("Trunks", () => {
     });
   });
 
+  it("defaults a trunk's media encryption to off and sends the policy chosen", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [] }),
+      "GET /api/v1/trunks/status": () => json({ items: [] }),
+      "POST /api/v1/trunks": () => json(TRUNK, 201),
+    });
+    renderApp("/trunks");
+
+    expect(await screen.findByText("No trunks yet")).toBeVisible();
+    fireEvent.click(screen.getAllByRole("button", { name: "New trunk" })[0]!);
+    const drawer = screen.getByRole("dialog", { name: "New trunk" });
+    const srtp = within(drawer).getByLabelText("SRTP");
+    expect(srtp).toHaveValue("off");
+    field("Name", "carrier-srtp");
+    field("Username", "acct1001");
+    field("Password (optional)", PASSWORD);
+    field("Host 1", "10.0.0.5");
+    fireEvent.change(srtp, { target: { value: "required" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create trunk" }));
+    await screen.findByText("Trunk carrier-primary created.");
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
+      srtp: "required",
+    });
+  });
+
   it("refuses a trunk with no codec ticked", async () => {
     mockApi({
       ...ME,

@@ -42,6 +42,12 @@ type DialogLeg struct {
 	// of the negotiation): a taker of a call Hello answered itself binds
 	// fresh media for the endpoint's codecs and address from it.
 	RemoteSDP string `json:"remoteSdp,omitempty"`
+	// SRTP is the leg's media profile when it was encrypted with SRTP (SDES):
+	// "savp" or "avp" (RTP/AVP with crypto lines), empty for plain RTP. No
+	// key is replicated (remoteSdp has its a=crypto lines removed): a taker
+	// offers fresh keys on the same profile, and a leg that does not answer
+	// with crypto fails rather than carrying on in the clear.
+	SRTP string `json:"srtp,omitempty"`
 }
 
 // DialogState is a call's full recovery state.

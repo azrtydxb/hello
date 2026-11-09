@@ -102,3 +102,49 @@ func TestTLSModelMatch(t *testing.T) {
 		t.Error("an empty list selected a model")
 	}
 }
+
+// TestGrandstreamSRTPMode fails if the Grandstream SRTP Mode (P183) does not
+// follow the device policy on a TLS phone, or is written for a phone on UDP
+// (where Hello offers no crypto and the phone keeps its own setting), or if
+// another vendor's template writes an SRTP key (none is confirmed from vendor
+// documentation).
+func TestGrandstreamSRTPMode(t *testing.T) {
+	for _, tc := range []struct{ policy, want string }{
+		{"off", "<P183>0</P183>"}, {"optional", "<P183>1</P183>"}, {"required", "<P183>2</P183>"},
+	} {
+		d := renderSample(false)
+		d.Phone.Vendor, d.Phone.Model = Grandstream, "WP826"
+		d.Server.Transport, d.Server.SRTP = "tls", tc.policy
+		out, err := Render(context.Background(), builtinFor(t, Grandstream), "cfg805ec0aabbcc.xml", d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(out), tc.want) {
+			t.Errorf("policy %s: rendered config lacks %s", tc.policy, tc.want)
+		}
+	}
+	d := renderSample(false)
+	d.Phone.Vendor, d.Phone.Model = Grandstream, "WP826"
+	out, err := Render(context.Background(), builtinFor(t, Grandstream), "cfg805ec0aabbcc.xml", d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "<P183>") {
+		t.Error("P183 is written for a phone on UDP")
+	}
+	for _, v := range []Vendor{Yealink, Poly, Fanvil} {
+		d := renderSample(false)
+		d.Phone.Vendor = v
+		d.Server.Transport, d.Server.SRTP = "tls", "required"
+		files := map[Vendor]string{Yealink: "805ec0aabbcc.cfg", Poly: "805ec0aabbcc-hello.cfg", Fanvil: "805ec0aabbcc.cfg"}
+		models := map[Vendor]string{Yealink: "T54W", Poly: "VVX 450", Fanvil: "X5U"}
+		d.Phone.Model = models[v]
+		out, err := Render(context.Background(), builtinFor(t, v), files[v], d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s := strings.ToLower(string(out)); strings.Contains(s, "srtp") {
+			t.Errorf("%s template writes an SRTP key that is not confirmed from vendor documentation", v)
+		}
+	}
+}

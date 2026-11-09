@@ -157,7 +157,7 @@ func (s *server) cdrExport(w http.ResponseWriter, r *http.Request) {
 	cw := csv.NewWriter(w)
 	_ = cw.Write([]string{"id", "start_time", "answer_time", "end_time", "direction", "source", "original_destination",
 		"rewritten_destination", "route", "trunk", "final_status", "failure_reason", "termination_side", "duration_ms",
-		"billable_ms", "sip_node", "media_mode", "sip_call_id", "correlation_id"})
+		"billable_ms", "sip_node", "media_mode", "srtp", "sip_call_id", "correlation_id"})
 	ts := func(t *time.Time) string {
 		if t == nil {
 			return ""
@@ -169,7 +169,7 @@ func (s *server) cdrExport(w http.ResponseWriter, r *http.Request) {
 		row := []string{strconv.FormatInt(c.ID, 10), ts(&start), ts(c.AnswerTime), ts(&end), c.Direction, c.Source,
 			c.OriginalDestination, c.RewrittenDestination, c.Route, c.Trunk, strconv.Itoa(c.FinalStatus), c.FailureReason,
 			c.TerminationSide, strconv.FormatInt(c.DurationMs, 10), strconv.FormatInt(c.BillableMs, 10), c.SIPNode,
-			c.MediaMode, c.SIPCallID, c.CorrelationID}
+			c.MediaMode, c.SRTP, c.SIPCallID, c.CorrelationID}
 		for i := range row {
 			row[i] = csvSafe(row[i])
 		}

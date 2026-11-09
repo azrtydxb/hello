@@ -283,6 +283,26 @@ describe("Devices", () => {
     expect(cells[3]).toHaveTextContent("—");
   });
 
+  it("shows a device's media-encryption policy and sends a change", async () => {
+    const calls = api([{ ...DEVICE, srtp: "optional" }], {
+      "PATCH /api/v1/devices/3": () => json({ ...DEVICE, srtp: "required" }),
+    });
+    renderApp("/devices");
+
+    const select = await screen.findByLabelText("Media encryption: desk-phone");
+    expect(select).toHaveValue("optional");
+    fireEvent.change(select, { target: { value: "required" } });
+    expect(
+      await screen.findByText("desk-phone: media encryption required."),
+    ).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/devices/3",
+      body: { srtp: "required" },
+    });
+    await waitFor(() => expect(select).toHaveValue("required"));
+  });
+
   it("disables and deletes a device after confirming", async () => {
     const calls = api([DEVICE]);
     renderApp("/devices");

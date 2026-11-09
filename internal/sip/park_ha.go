@@ -78,7 +78,7 @@ func (c *call) haParkState() (livestate.DialogState, bool) {
 			CallID: l.callID, LocalTag: l.localTag, RemoteTag: l.remoteTag,
 			LocalCSeq: l.localCSeq, RemoteCSeq: l.remoteCSeq,
 			RouteSet: l.routes, Contact: contact,
-			RemoteTarget: l.remoteTarget, SDP: relaySDPDir(host, relay, lk.relayLeg, off, "sendrecv"), RemoteSDP: l.remoteSDP,
+			RemoteTarget: l.remoteTarget, SDP: relaySDPDir(host, relay, lk.relayLeg, off, "sendrecv"), RemoteSDP: l.remoteSDP, SRTP: haSRTP(relay, lk.relayLeg),
 			Endpoint: l.endpoint, Source: l.source,
 			LocalIdentity: l.localID, RemoteIdentity: l.remoteID,
 		}
@@ -171,7 +171,7 @@ func (s *Server) takeOverPark(st livestate.DialogState, from string) {
 	if m := s.deps.Media; m != nil {
 		m.NoteStart()
 	}
-	body := []byte(relaySDPDir(host, relay, partyLeg, off, "sendrecv"))
+	body := []byte(haLegSDP(host, relay, partyLeg, off, "sendrecv", party.srtp))
 	s.log.Info("takeover re-INVITE", "call_id", st.CallID, "leg", partyLeg, "to", party.destination(s), "app", haPhasePark)
 	res, ok := s.haReinvite(party, body)
 	if !ok {
@@ -184,7 +184,16 @@ func (s *Server) takeOverPark(st livestate.DialogState, from string) {
 		s.m.ZombieCalls.Inc()
 		return
 	}
-	haAim(relay, partyLeg, res.Body())
+	if !haAimSecure(relay, partyLeg, res.Body(), party.srtp) {
+		s.log.Warn("takeover leg failed", "call_id", st.CallID, "leg", partyLeg, "reason", "srtp not renegotiated")
+		c.addTrace("Takeover from " + from + " failed: the parked party did not renegotiate SRTP")
+		c.mu.Lock()
+		c.park = nil
+		c.mu.Unlock()
+		c.end(sip.StatusServiceUnavailable, cdr.SideSystem, "takeover failed: the parked party did not renegotiate SRTP", ResultFailed)
+		s.m.ZombieCalls.Inc()
+		return
+	}
 	party.mu.Lock()
 	party.sdp = string(body)
 	party.mu.Unlock()

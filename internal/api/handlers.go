@@ -14,6 +14,7 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/oauth"
+	"github.com/azrtydxb/hello/internal/secmedia"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -547,21 +548,31 @@ func (s *server) updateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Enabled     *bool  `json:"enabled"`
-		ExtensionID *int64 `json:"extensionId"`
+		Enabled     *bool   `json:"enabled"`
+		ExtensionID *int64  `json:"extensionId"`
+		SRTP        *string `json:"srtp"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.Enabled == nil && in.ExtensionID == nil {
-		badRequest(w, "enabled or extensionId is required")
+	if in.Enabled == nil && in.ExtensionID == nil && in.SRTP == nil {
+		badRequest(w, "enabled, extensionId or srtp is required")
 		return
+	}
+	if in.SRTP != nil && !secmedia.Valid(*in.SRTP) {
+		badRequest(w, "srtp must be off, optional or required")
+		return
+	}
+	if in.SRTP != nil {
+		p, _ := secmedia.Parse(*in.SRTP)
+		v := string(p)
+		in.SRTP = &v
 	}
 	if in.ExtensionID != nil && *in.ExtensionID <= 0 {
 		badRequest(w, "extensionId must be positive")
 		return
 	}
-	d, err := s.Store.UpdateDevice(r.Context(), actor(r).String(), id, in.Enabled, in.ExtensionID)
+	d, err := s.Store.UpdateDevice(r.Context(), actor(r).String(), id, in.Enabled, in.ExtensionID, in.SRTP)
 	if err != nil {
 		s.storeError(w, "device", err)
 		return

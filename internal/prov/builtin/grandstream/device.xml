@@ -19,6 +19,10 @@
 {{- else}}
     <P130>0</P130>
 {{- end}}
+{{- /* SRTP (phone-feature-parity S-15): P183 = SRTP Mode of account 1: 0 disabled, 1 enabled but not forced (the phone offers a=crypto on an RTP/AVP line and falls back to RTP), 2 enabled and forced. Written only for a phone on TLS (Server.SRTP is empty on UDP, where Hello offers no crypto and the phone keeps its own setting), from the device's SRTP policy: off 0, optional 1, required 2. The key P183 is from the WP8x6 gap analysis (R8x6 section 2); the values 0, 1 and 2 are Grandstream's SRTP Mode choices from its provisioning guide, not confirmed on a phone (verify, lab item 10). Other vendors write no SRTP key until their key is confirmed from vendor documentation. */}}
+{{- if .Server.SRTP}}
+    <P183>{{if eq .Server.SRTP "required"}}2{{else if eq .Server.SRTP "optional"}}1{{else}}0{{end}}</P183>
+{{- end}}
 {{- /* HD voice: Preferred Vocoder choices 1 to 6 of account 1 (P57, P58, P59, P60, P61, P62; Grandstream config templates, "Preferred Vocoder"): 0 PCMU, 8 PCMA, 9 G.722, 123 Opus (the models that have it; payload type P2385 stays at its default 123). Order Opus (the models that have it), G.722, PCMU, PCMA; the choices after the last codec repeat it, which the phone ignores, so no other codec is offered. Another account of a multi-account model has its own choice keys (account 2 P451 to P456, account 3 P551 to P556, and so on in steps of 100); Hello provisions account 1. Unverified on hardware (verify). */}}
 {{- if .Codecs.Opus}}
     <P57>123</P57>

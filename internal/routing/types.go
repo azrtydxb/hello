@@ -84,6 +84,11 @@ type Trunk struct {
 	// caller's order (names: PCMU, PCMA, G722, opus). Empty means the
 	// default, PCMU and PCMA: most carriers accept G.711 only.
 	Codecs []string
+	// SRTP is the trunk's media-encryption policy: "off" (the default),
+	// "optional" or "required" (internal/secmedia). Crypto is offered only on
+	// a leg whose signalling is TLS, which no trunk leg is yet, so "required"
+	// today refuses calls over the trunk and the other two are plain RTP.
+	SRTP string
 }
 
 // OutboundRoute matches calls from extensions to external numbers.

@@ -193,7 +193,12 @@ type Server struct {
 	// vendor has a transport key and whose model HELLO_PROV_SIP_TLS_MODELS
 	// lists, registering with HELLO_PROV_SIP_TLS_SERVER (S-14).
 	Transport string
-	Expiry    int // registration expiry, seconds
+	// SRTP is the phone's media-encryption policy ("off", "optional" or
+	// "required") on a TLS phone; empty on a phone that registers over UDP,
+	// where Hello offers no crypto and the templates leave the phone's SRTP
+	// setting alone (phone-feature-parity S-15).
+	SRTP   string
+	Expiry int // registration expiry, seconds
 }
 
 // BLFKey is one busy-lamp-field key. Render places the keys of a Yealink,

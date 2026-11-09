@@ -224,8 +224,8 @@ func (a *argsDB) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandT
 	return pgconn.NewCommandTag("INSERT 0 1"), nil
 }
 
-// TestCallQualityCDR fails if the three quality columns are not the last
-// insert arguments, carry anything but the record's values, or are non-NULL
+// TestCallQualityCDR fails if the three quality columns are not at their
+// positions in the insert arguments (the SRTP column rides last), carry anything but the record's values, or are non-NULL
 // for a record without quality (directly-media or unanswered call).
 func TestCallQualityCDR(t *testing.T) {
 	db := &argsDB{}
@@ -236,8 +236,11 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 29 {
-		t.Fatalf("insert takes %d arguments, want 29", len(db.args))
+	if len(db.args) != 30 {
+		t.Fatalf("insert takes %d arguments, want 30", len(db.args))
+	}
+	if db.args[29] != SRTPNone {
+		t.Fatalf("srtp = %v, want the default %q", db.args[29], SRTPNone)
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {

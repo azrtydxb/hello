@@ -118,11 +118,28 @@ export interface Extension {
 }
 
 /** A device: SIP credentials belonging to one extension. */
+/**
+ * Media-encryption policy of a device or trunk (secmedia.Policy): off is
+ * plain RTP, optional offers SDES SRTP on a TLS leg and uses it when the far
+ * end answers with it, required allows SRTP only (a call that cannot be
+ * encrypted is refused with 488). Crypto is never offered on a leg that is not
+ * TLS.
+ */
+export type SrtpPolicy = "off" | "optional" | "required";
+
+export const SRTP_POLICIES: { value: SrtpPolicy; label: string }[] = [
+  { value: "off", label: "Off (plain RTP)" },
+  { value: "optional", label: "Optional" },
+  { value: "required", label: "Required" },
+];
+
 export interface Device {
   id: Id;
   extensionId: Id;
   sipUsername: string;
   enabled: boolean;
+  /** Media-encryption policy; optional for a device that predates it. */
+  srtp?: SrtpPolicy;
   createdAt: string;
   updatedAt: string;
 }
@@ -181,6 +198,8 @@ export interface Cdr {
   billableMs: number;
   sipNode: string;
   mediaMode: string;
+  /** Which legs carried SRTP: none, caller, callee or both. */
+  srtp?: "none" | "caller" | "callee" | "both";
   finalStatus: number;
   terminationSide: string;
   failureReason: string;
@@ -293,6 +312,11 @@ export interface TrunkFields {
    * accept G.711 only.
    */
   codecs: string[];
+  /**
+   * Media-encryption policy (default "off"). Trunk legs are not TLS today, so
+   * "optional" behaves as "off" and "required" refuses calls over the trunk.
+   */
+  srtp?: SrtpPolicy;
 }
 
 /** A trunk as returned: the password is never returned, only hasPassword. */
@@ -798,7 +822,7 @@ export const createDevice = (input: {
 
 export const updateDevice = (
   deviceId: Id,
-  patch: { enabled?: boolean; extensionId?: Id },
+  patch: { enabled?: boolean; extensionId?: Id; srtp?: SrtpPolicy },
 ) =>
   request<Device>("PATCH", `/api/v1/devices/${id(deviceId)}`, { body: patch });
 

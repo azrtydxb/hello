@@ -8,6 +8,11 @@
 | misconfigured      | Hello cannot even try (missing username, realm or destination).                                                 | Fix the trunk configuration.                                                |
 | disabled           | The trunk is switched off.                                                                                      | Enable it if it should carry calls.                                         |
 
+A trunk with `srtp` set to `required` cannot carry calls today: trunk legs are
+UDP, and Hello offers SRTP only on TLS legs. The call fails with 488 and the
+CDR trace says "SRTP is required but the leg is not on TLS"; set the policy to
+`off` with `updateTrunk`.
+
 IP-mode trunks have no registration; only destination health applies.
 
 Destination health comes from OPTIONS pings: down means no answer or an

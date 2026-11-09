@@ -1038,6 +1038,11 @@ func (c *call) ivrConnect(w *leg, ext string) ivrResult {
 	}
 	if relay := c.anchorRelay(); relay != nil && bres != nil && len(bres.Body()) > 0 {
 		if ans, err := media.ParseAudioSDP(bres.Body()); err == nil {
+			if !c.learnCalleeCrypto(w, ans) {
+				w.bye()
+				c.addTrace("IVR: the destination did not answer with the SRTP its policy requires")
+				return ivrResult{kind: ivrFailed}
+			}
 			relay.SetTarget(legCallee, udpAddr(ans.Address, ans.Port))
 			// The caller keeps the codec the application answered with; the
 			// destination answered the offer it was given.
@@ -1407,7 +1412,8 @@ func (c *call) ivrHomeCallee(hom *homedCall, w *leg) bool {
 		RouteSet:      reversed(headerValues(res, "Record-Route")),
 		LocalIdentity: uriString(*req.From().Address.Clone()), RemoteIdentity: uriString(*req.To().Address.Clone()),
 		RemoteTarget: uriString(w.target()), Endpoint: w.binding.AOR, Source: res.Source(),
-		SDP: relaySDPDir(host, relay, legCallee, off, "sendrecv"), RemoteSDP: string(res.Body()),
+		SDP: relaySDPDir(host, relay, legCallee, off, "sendrecv"), RemoteSDP: media.StripCrypto(string(res.Body())),
+		SRTP: haSRTP(relay, legCallee),
 	}, false)
 	if l == nil {
 		return false

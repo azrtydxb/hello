@@ -199,19 +199,21 @@ func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64, che
 // Device is a SIP endpoint of an extension. Its secret is never stored; only
 // the digest HA1 values are, and they are never returned.
 type Device struct {
-	ID          int64     `json:"id"`
-	ExtensionID int64     `json:"extensionId"`
-	SIPUsername string    `json:"sipUsername"`
-	Enabled     bool      `json:"enabled"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          int64  `json:"id"`
+	ExtensionID int64  `json:"extensionId"`
+	SIPUsername string `json:"sipUsername"`
+	Enabled     bool   `json:"enabled"`
+	// SRTP is the media-encryption policy: off, optional or required.
+	SRTP      string    `json:"srtp"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-const deviceCols = `id, extension_id, sip_username, enabled, created_at, updated_at`
+const deviceCols = `id, extension_id, sip_username, enabled, srtp, created_at, updated_at`
 
 func scanDevice(r interface{ Scan(...any) error }) (Device, error) {
 	var d Device
-	err := r.Scan(&d.ID, &d.ExtensionID, &d.SIPUsername, &d.Enabled, &d.CreatedAt, &d.UpdatedAt)
+	err := r.Scan(&d.ID, &d.ExtensionID, &d.SIPUsername, &d.Enabled, &d.SRTP, &d.CreatedAt, &d.UpdatedAt)
 	return d, err
 }
 
@@ -264,14 +266,16 @@ func (s *Store) CreateDevice(ctx context.Context, actor string, in NewDevice) (D
 	return d, err
 }
 
-// UpdateDevice changes the fields that are not nil.
-func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64) (Device, error) {
+// UpdateDevice changes the fields that are not nil. srtp is a media-
+// encryption policy (secmedia); the caller has validated it.
+func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, srtp *string) (Device, error) {
 	var d Device
 	err := s.configChange(ctx, actor, "update", "device", nil, func(tx *sql.Tx) (int64, error) {
 		var err error
 		d, err = scanDevice(tx.QueryRowContext(ctx, `
-			UPDATE devices SET enabled = COALESCE($2, enabled), extension_id = COALESCE($3, extension_id), updated_at = now()
-			WHERE id = $1 RETURNING `+deviceCols, id, enabled, extensionID))
+			UPDATE devices SET enabled = COALESCE($2, enabled), extension_id = COALESCE($3, extension_id),
+			       srtp = COALESCE($4, srtp), updated_at = now()
+			WHERE id = $1 RETURNING `+deviceCols, id, enabled, extensionID, srtp))
 		return id, err
 	})
 	return d, err

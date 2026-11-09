@@ -38,6 +38,42 @@ type AudioSDP struct {
 	// Ptime is the a=ptime packetisation time in milliseconds, 0 when the
 	// SDP does not say.
 	Ptime int
+
+	// SRTPOnly is true when the m= line is RTP/SAVP: the sender speaks SRTP
+	// only. Crypto holds the sender's usable a=crypto lines (RFC 4568), in
+	// order; CryptoSkipped counts lines it sent that Hello cannot honour
+	// (unknown suite, MKI, unsupported session parameters). An RTP/AVP
+	// offer with crypto lines offers SRTP optionally. Neither is ever
+	// written by Build: Build writes only what WithCrypto set.
+	SRTPOnly      bool
+	Crypto        []Crypto
+	CryptoSkipped int
+
+	// local is what Build writes for crypto: the profile and the a=crypto
+	// lines of the Hello side (WithCrypto).
+	localSRTP   bool
+	localCrypto []Crypto
+}
+
+// OffersCrypto reports whether the sender offered at least one usable SDES
+// key.
+func (a AudioSDP) OffersCrypto() bool { return len(a.Crypto) > 0 }
+
+// WithCrypto returns the SDP with Hello's keys for its Build: the m= line is
+// RTP/SAVP when srtpOnly, RTP/AVP (SRTP optional) otherwise, followed by one
+// a=crypto line per key. No keys leaves the SDP plain RTP/AVP.
+func (a AudioSDP) WithCrypto(srtpOnly bool, keys ...Crypto) AudioSDP {
+	a.localSRTP = srtpOnly && len(keys) > 0
+	a.localCrypto = append([]Crypto(nil), keys...)
+	return a
+}
+
+// PlainOffer is the SDP with its SRTP stripped: what a leg that cannot do
+// SRTP (a UDP leg) is offered or answered.
+func (a AudioSDP) PlainOffer() AudioSDP {
+	a.SRTPOnly, a.Crypto, a.CryptoSkipped = false, nil, 0
+	a.localSRTP, a.localCrypto = false, nil
+	return a
 }
 
 // ParseAudioSDP extracts the connection address, the audio port and the
@@ -72,9 +108,10 @@ func ParseAudioSDP(offer []byte) (AudioSDP, error) {
 		case 'm':
 			fields := strings.Fields(line[2:])
 			// m=<media> <port> <transport> <fmt>...
-			if len(fields) < 4 || fields[0] != "audio" || fields[2] != "RTP/AVP" {
+			if len(fields) < 4 || fields[0] != "audio" || (fields[2] != "RTP/AVP" && fields[2] != "RTP/SAVP") {
 				continue
 			}
+			out.SRTPOnly = fields[2] == "RTP/SAVP"
 			port, err := strconv.Atoi(fields[1])
 			if err != nil {
 				return out, fmt.Errorf("media: SDP m=audio port %q is not a number", fields[1])
@@ -114,6 +151,14 @@ func ParseAudioSDP(offer []byte) (AudioSDP, error) {
 					if _, seen := fmtps[uint8(n)]; !seen {
 						fmtps[uint8(n)] = strings.TrimSpace(params)
 					}
+				}
+				continue
+			}
+			if rest, ok := strings.CutPrefix(line[2:], "crypto:"); ok {
+				if c, err := ParseCrypto(rest); err == nil {
+					out.Crypto = append(out.Crypto, c)
+				} else {
+					out.CryptoSkipped++
 				}
 				continue
 			}
@@ -386,11 +431,15 @@ func AnswerFor(callerOffer, calleeAnswer AudioSDP) AudioSDP {
 // ("sendrecv" when empty or unknown). Lines use CRLF and the session is
 // valid forever (t=0 0), the shape every SIP endpoint accepts.
 func (a AudioSDP) Build(ip string, port int, dir string) []byte {
-	return BuildSDP(ip, port, a.Codecs, a.Events, dir)
+	return buildSDP(ip, port, a.Codecs, a.Events, dir, a.localSRTP, a.localCrypto)
 }
 
 // BuildSDP writes an SDP body for codecs followed by events.
 func BuildSDP(ip string, port int, codecs, events []Codec, dir string) []byte {
+	return buildSDP(ip, port, codecs, events, dir, false, nil)
+}
+
+func buildSDP(ip string, port int, codecs, events []Codec, dir string, srtpOnly bool, keys []Crypto) []byte {
 	switch dir {
 	case "sendonly", "recvonly", "inactive":
 	default:
@@ -412,7 +461,11 @@ func BuildSDP(ip string, port int, codecs, events []Codec, dir string) []byte {
 	b.WriteString("s=-\r\n")
 	fmt.Fprintf(&b, "c=IN IP4 %s\r\n", ip)
 	b.WriteString("t=0 0\r\n")
-	fmt.Fprintf(&b, "m=audio %d RTP/AVP", port)
+	profile := "RTP/AVP"
+	if srtpOnly {
+		profile = "RTP/SAVP"
+	}
+	fmt.Fprintf(&b, "m=audio %d %s", port, profile)
 	for _, c := range all {
 		fmt.Fprintf(&b, " %d", c.PT)
 	}
@@ -422,6 +475,9 @@ func BuildSDP(ip string, port int, codecs, events []Codec, dir string) []byte {
 		if c.Fmtp != "" {
 			fmt.Fprintf(&b, "a=fmtp:%d %s\r\n", c.PT, c.Fmtp)
 		}
+	}
+	for _, k := range keys {
+		fmt.Fprintf(&b, "a=%s\r\n", k.Attribute())
 	}
 	fmt.Fprintf(&b, "a=%s\r\n", dir)
 	b.WriteString("a=ptime:20\r\n")
@@ -472,4 +528,22 @@ func SDPDirection(body []byte) string {
 		}
 	}
 	return "sendrecv"
+}
+
+// StripCrypto removes the a=crypto lines of an SDP body. Replicated dialog
+// state carries the far end's SDP so a surviving node can rebuild media; the
+// keys in it are secrets that are never stored, so the lines are dropped (a
+// taker negotiates fresh keys).
+func StripCrypto(sdp string) string {
+	if !strings.Contains(sdp, "a=crypto:") {
+		return sdp
+	}
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(sdp, "\n") {
+		if strings.HasPrefix(strings.TrimLeft(line, " "), "a=crypto:") {
+			continue
+		}
+		b.WriteString(line)
+	}
+	return b.String()
 }

@@ -840,7 +840,8 @@ func (c *call) callbackHome(snap *snapshot.Snapshot, q snapshot.Queue, cb queue.
 		RouteSet:      reversed(headerValues(res, "Record-Route")),
 		LocalIdentity: uriString(*req.From().Address.Clone()), RemoteIdentity: uriString(*req.To().Address.Clone()),
 		RemoteTarget: uriString(w.target()), Endpoint: w.binding.AOR, Source: res.Source(),
-		SDP: relaySDPDir(host, relay, legCaller, neg, "sendrecv"), RemoteSDP: string(res.Body()),
+		SDP: relaySDPDir(host, relay, legCaller, neg, "sendrecv"), RemoteSDP: media.StripCrypto(string(res.Body())),
+		SRTP: haSRTP(relay, legCaller),
 	}, false)
 	if a == nil {
 		return false
