@@ -1351,10 +1351,12 @@ func (c *call) offerSDP() []byte {
 	if cbOffer != nil {
 		return cbOffer // a callback's own offer to the caller it rings (queue_callback.go)
 	}
-	if hom := c.homed(); hom != nil && hom.legs[0] != nil {
-		hom.legs[0].mu.Lock()
-		defer hom.legs[0].mu.Unlock()
-		return []byte(hom.legs[0].remoteSDP)
+	if hom := c.homed(); hom != nil {
+		if l := hom.leg(false); l != nil {
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			return []byte(l.remoteSDP)
+		}
 	}
 	return nil
 }
@@ -1364,12 +1366,13 @@ func (c *call) offerSDP() []byte {
 // device name, so the caller's replicated contact stands in for it.
 func (c *call) isCallerContact(b livestate.Binding) bool {
 	hom := c.homed()
-	if hom == nil || hom.legs[0] == nil {
+	if hom == nil || hom.leg(false) == nil {
 		return false
 	}
-	hom.legs[0].mu.Lock()
-	target := trimAngle(hom.legs[0].remoteTarget)
-	hom.legs[0].mu.Unlock()
+	l := hom.leg(false)
+	l.mu.Lock()
+	target := trimAngle(l.remoteTarget)
+	l.mu.Unlock()
 	return target != "" && trimAngle(b.ContactURI) == target
 }
 
@@ -1412,8 +1415,6 @@ func (c *call) ivrHomeCallee(hom *homedCall, w *leg) bool {
 	if l == nil {
 		return false
 	}
-	c.mu.Lock()
-	hom.legs[1] = l
-	c.mu.Unlock()
+	hom.setCallee(l)
 	return true
 }

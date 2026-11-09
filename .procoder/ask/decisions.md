@@ -873,6 +873,63 @@ another group) is lifted: the ring state machine can open a new ring stage.
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
 
+## Ring map provisioning, phone-feature-parity S-42 and S-44 (2026-10-27)
+
+- Storage: `ring_map` (migration 00051) holds explicit choices only, keyed by
+  (group or global, tag, vendor), tone being a vendor ringer id. A tag and
+  vendor with no row use the vendor's default for the tag's current Bellcore
+  slot, so the map needs no seeding and a new custom tag works at once. The
+  tag foreign key is RESTRICT; the delete handler names the map in its 409
+  (spec edge case: refused until unassigned). A group's rows go with the group.
+- The map is read only by provisioning, so a change does not bump the
+  configuration revision (hello-sip does not use it). It rides in
+  `RenderData.Ring`, which the existing sync hash covers, so the automatic
+  resync (S-5) pushes a changed map with no new trigger.
+- Group over global over default is merged in the store (`ringInfo`); the
+  template only sees the result (`prov.NewRingInfo`, pure and unit tested).
+- Tones offered per vendor are the vendor built-ins of S-42 only: Yealink Ring
+  1 to 8 and Bellcore 1 to 5, Poly ringer1 to 24, Grandstream system/1/2/3, Snom
+  Ringer1 to 10, Fanvil Type 1 to 9. Silent only on Poly and Snom (the other
+  vendors' lists have none we can cite). Custom tones (S-43 tone library) are
+  a separate item and not offered; the Grandstream custom tones 1 to 3 are
+  whatever the phone holds. Grandstream defaults are all `system`, because a
+  custom tone may not exist on the phone.
+- Defaults per Bellcore slot: Yealink Ring N, Fanvil Type N, Snom RingerN, Poly
+  ringer(N+1) (ringer2 is Poly's own default for slot 1).
+- Poly matches on the text `hello-<tag>` (as the existing auto-answer rule
+  does), not the URL the spec table names: all tags of one slot share the same
+  URL, so a URL match could not tell them apart. Poly rule 1 stays the
+  auto-answer rule; ours start at 2 with classes custom1..custom23.
+- Tag names that start another tag's (`door`, `doorbell`) would let the
+  shorter text shadow the longer on a substring match; rules are written
+  longest text first (stable on priority).
+- Slot limits: Yealink 10, Fanvil 10, Grandstream WP8xx 10, Poly 23, Snom 3
+  classes, WP8x6 5 Bellcore slots. Past a limit the first tags in priority
+  order (built-ins in canonical order, then custom by name) are written. On a
+  WP8x6 the first tag of a Bellcore slot decides that slot's tone; the page
+  warns about shared slots.
+- Snom has three named classes: only internal, external and ringgroup are
+  written (the tags SIP sends `alert-*` for); other tags have no Snom rule.
+- The line's own ring tone follows the internal tag (spec S-37 for the
+  Grandstream P104; the same for the other vendors' "default line tone" row).
+  Yealink's `ring_type` takes `RingN.wav`; Bellcore ringers have no known file
+  name there, so the line key is left unset for them.
+- No Grandstream WP856 or GRP/GXP keys: the spec names none ("verify key"), so
+  those models get no ring map rather than a guessed key. For the WP8x6 P95026
+  is written as five comma-separated tones (slot 1 to 5) and for the WP8xx the
+  rules as P1488 + 2(n-1) (match text) and the next P-value (tone): the spec
+  names the keys but not the field layout, so both layouts, and the Fanvil rule
+  keys (`SIP1 Alert Info Text/Ring n`) and the Yealink Bellcore value (8 + n)
+  are marked verify in the templates and in docs/ring-tags.md.
+- API: `GET /api/v1/ring-map` (vendor lists, defaults, choices),
+  `PUT /api/v1/ring-map` (replace global), `PUT /api/v1/ring-map/groups/{id}`
+  (replace one group; empty list removes). Whole-list replace, like the rules.
+  Operator for writes, viewer reads. Three MCP tools follow from the spec.
+- UI: the page is now called Ringing (`/ringing`; the old `/ring-tags`
+  route is gone, it was never linked outside the nav) with a new Ring map tab; the tone library tab arrives with S-43.
+- Tests that touch real configs assert on lines inline; no golden file of a
+  rendered phone configuration is added.
+
 ## Queue callback (pbx-gaps wave B, B4)
 
 - **Merged gaps-languages.** PR #208 (voicemail box languages, `voiceprompt.Resolve`) was not on main, so origin/gaps-languages is merged into this branch. The queue's language is `Resolve(queue.prompt_language, deployment language)`; `queues.prompt_language` is NULL for inherit, no CHECK (validated by the API), migration 00049.
@@ -1374,3 +1431,63 @@ so the VIP stage cannot sit in that file.
   re-added its files; resolved by taking the stack's version of the VIP and
   legacy-socket code and main's TLS socket code (the VIP branch of the
   listens also gets a TLS listener on `EDGE_VIP`).
+## TestConferenceTwoNodes flake: root cause (2026-11-09)
+
+- Two causes, one in the test and one in production code. Both reproduced on a
+  Mac (16 parallel test processes, or 12 busy loops).
+- "rehomed = 0, want 1" (also seen in CI, run 40695787431): the test read the
+  counter as soon as `conf.get("800")` was non-nil. `confRehome` makes the room
+  visible in `confReserve` and counts `rehomed` several statements later, after
+  `NewParty`, so a goroutine switch in between shows 0. The test now waits for
+  the counter. The production order stays: the event is counted only once the
+  rehome has succeeded.
+- "forwarded participant hears no audio" (peak 0): the relay and anchor sockets
+  were bound with network `udp` (dual-stack `[::]`), the conference party and
+  fanout sockets with `udp4`. On BSD kernels a dual-stack bind succeeds on a
+  port an IPv4 socket already holds, and IPv4 datagrams then go to the IPv4
+  socket. A relay leg could share a port with a party socket (a previous run's,
+  or another test process's), and the phone's media never reached the relay
+  (relay saw 0 packets, 0 rejected). Linux refuses that bind, so the next free
+  port is taken. All RTP is IPv4-only (SDP is `IN IP4` only), so relay and
+  anchor sockets are now `udp4` like the rest; the port-in-use check is then
+  the same on every kernel.
+## Opus "inLen >= S->Fs_in_kHz" flake: root cause and fix (2026-11-09)
+
+- Symptom: `TestOpusSessionLoopback` failed on most runs (104 of 200 here, less
+  on CI) with the SILK resampler assertion; the same assertion hit a voicemail
+  call in production. PR 243's rebuild-after-panic only recovers; it did not
+  remove the cause.
+- Root cause: the transpiled libopus passes addresses of its Go stack locals
+  as uintptr. `silk_decode_frame` writes the frame length through one; if the
+  stack moves during the call the write goes to the old copy, the caller reads
+  0, and `silk_resampler` aborts. The pin in `withOpusStack` was meant to
+  prevent the move, but `var pin [512<<10]byte` is over the compiler's 128 KB
+  limit for stack variables, so it was moved to the heap (`go build -gcflags=-m`
+  says "moved to heap: pin"). It pinned nothing and allocated 512 KB per call.
+  Survival depended on the caller's stack at that moment (a fresh goroutine, or
+  a receive loop a GC had shrunk while parked in a read).
+- Ruled out: shared decoder state across goroutines (each decoder has its own
+  TLS and mutex; sessions use one goroutine per decoder), frame sizes (320
+  samples, packets replay clean on a big stack), test timing.
+- Fix: all library calls run on a few dedicated worker goroutines that build a
+  512 KB stack once from 64 KB frames (under the 128 KB limit) and hold it, so
+  nothing grows or shrinks it. A call that still moves the stack is returned as
+  a failure, which feeds the existing decoder rebuild. The test expectation was
+  right and is unchanged.
+- Under `-race` the Opus build is off (opus_race.go), so the loopback test
+  skips there; the -race count proves nothing about the codec.
+## IVR homed-callee data race (ivrHomeCallee vs release)
+
+- Root cause: `homedCall.legs` had no lock of its own. `ivrHomeCallee`
+  (IVR dial-out goroutine, started by takeover) wrote `legs[1]` under
+  `call.mu`, while `call.release` (BYE handler goroutine) iterated `hom.legs`
+  after dropping `call.mu`; `haHomedState` and `homedCall.leg` read it with no
+  lock either. Seen in `TestIVRHuntAnswerAtMemberTimeout` under `-race`.
+- Fix: `homedCall` carries a leaf mutex; all access goes through `leg`,
+  `pair` and `setCallee`. Regression test: `homed_race_test.go`.
+
+## Grandstream key choices from the official templates (2026-11-09)
+
+- Firmware-upgrade confirmation prompt off (P8375=0, P84988=1) for unattended upgrades, or leave it
+- Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
+- Account sharing group password: shared default `AccountSharing`, or a per-group secret
