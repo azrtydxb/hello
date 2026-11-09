@@ -19,11 +19,13 @@ import {
   IconButton,
   Input,
   PageHeader,
+  Select,
   Spinner,
   Table,
   type TableColumn,
   useToast,
 } from "../../design/azrty/components";
+import { promptLanguageLabel } from "../../api/media";
 import { formatDuration, formatTime } from "../../format";
 import { mapFieldErrors } from "../../forms";
 import { NowPlaying, usePlayback } from "../media/MediaParts";
@@ -239,6 +241,8 @@ function Settings({
   onSaved: (b: SelfVoicemailBox) => void;
 }) {
   const [pin, setPin] = useState("");
+  // "" is "Default": the box inherits the deployment language.
+  const [language, setLanguage] = useState(box.promptLanguage ?? "");
   const [greeting, setGreeting] = useState<Blob | null>(null);
   const [unreachable, setUnreachable] = useState<Blob | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -248,8 +252,11 @@ function Settings({
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (busy) return;
-    if (pin === "" && !greeting && !unreachable) {
-      setFormError("Enter a new PIN or choose a greeting first.");
+    const languageChanged = language !== (box.promptLanguage ?? "");
+    if (pin === "" && !greeting && !unreachable && !languageChanged) {
+      setFormError(
+        "Enter a new PIN, choose a language or choose a greeting first.",
+      );
       return;
     }
     setBusy(true);
@@ -258,6 +265,7 @@ function Settings({
     try {
       const saved = await updateMyVoicemail(extensionId, {
         pin: pin || undefined,
+        promptLanguage: languageChanged ? language : undefined,
         greeting: greeting ?? undefined,
         unreachable: unreachable ?? undefined,
       });
@@ -266,7 +274,10 @@ function Settings({
       setUnreachable(null);
       onSaved(saved);
     } catch (err) {
-      const { byKey, unmatched } = mapFieldErrors(fieldErrors(err), ["pin"]);
+      const { byKey, unmatched } = mapFieldErrors(fieldErrors(err), [
+        "pin",
+        "promptLanguage",
+      ]);
       setErrors(byKey);
       if (unmatched.length > 0 || Object.keys(byKey).length === 0)
         setFormError(errorMessage(err));
@@ -297,6 +308,20 @@ function Settings({
         value={pin}
         error={errors.pin}
         onChange={(e) => setPin(e.target.value)}
+      />
+      <Select
+        label="Voicemail language"
+        hint="The language of the spoken prompts when you leave or listen to messages. Default follows the system language."
+        value={language}
+        error={errors.promptLanguage}
+        onChange={(e) => setLanguage(e.target.value)}
+        options={[
+          { value: "", label: "Default" },
+          ...(box.languages ?? []).map((code) => ({
+            value: code,
+            label: promptLanguageLabel(code),
+          })),
+        ]}
       />
       <fieldset className="pf-stack">
         <legend className="az-field__label">Greeting</legend>

@@ -87,7 +87,7 @@ func phoneBookRefs(ctx context.Context, q querier, phoneID int64) ([]bookRef, er
 
 // DeliveredBooks implements prov.Store.
 func (s *Store) DeliveredBooks(ctx context.Context, phoneID int64) ([]provbook.Book, error) {
-	refs, err := phoneBookRefs(ctx, s.db, phoneID)
+	refs, err := phoneBookRefs(ctx, s.q(ctx), phoneID)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (s *Store) DeliveredBooks(ctx context.Context, phoneID int64) ([]provbook.B
 // when an extension is added, removed, renamed or hidden. It is read before
 // the books, so a render cached under it is never older than its key.
 func (s *Store) DeliveredVersion(ctx context.Context, phoneID int64) (prov.BooksVersion, error) {
-	refs, err := phoneBookRefs(ctx, s.db, phoneID)
+	refs, err := phoneBookRefs(ctx, s.q(ctx), phoneID)
 	if err != nil {
 		return prov.BooksVersion{}, err
 	}
@@ -127,7 +127,7 @@ func (s *Store) DeliveredVersion(ctx context.Context, phoneID int64) (prov.Books
 		case phonebook.KindExtensions:
 			var count, hidden int
 			var latest time.Time
-			if err := s.db.QueryRowContext(ctx, `SELECT count(*), count(*) FILTER (WHERE directory_hidden),
+			if err := s.q(ctx).QueryRowContext(ctx, `SELECT count(*), count(*) FILTER (WHERE directory_hidden),
 				COALESCE(max(updated_at), 'epoch'::timestamptz) FROM extensions`).Scan(&count, &hidden, &latest); err != nil {
 				return prov.BooksVersion{}, err
 			}
@@ -144,7 +144,7 @@ func (s *Store) DeliveredVersion(ctx context.Context, phoneID int64) (prov.Books
 // bookInfo is RenderData.Book for a phone: nil when it has no books or
 // provisioning has no public URL.
 func (s *Store) bookInfo(ctx context.Context, phoneID int64, token string) (*prov.BookInfo, error) {
-	refs, err := phoneBookRefs(ctx, s.db, phoneID)
+	refs, err := phoneBookRefs(ctx, s.q(ctx), phoneID)
 	if err != nil {
 		return nil, err
 	}
