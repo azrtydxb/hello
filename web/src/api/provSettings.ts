@@ -50,3 +50,19 @@ export const putSettingOverrides = (
  * Yealink dotted key (features.text_message.enable).
  */
 export const OVERRIDE_KEY = /^(P[0-9]{1,6}|[a-z][a-z0-9_]*(\.[a-z0-9_]+)+)$/;
+
+/** How a phone's address book fits its model (GET /phones/{id}/directory). */
+export interface PhoneDirectory {
+  supported: boolean;
+  delivered: number;
+  /** What the model takes; 0 is no limit. */
+  capacity: number;
+  /** Contacts cut from the end of the delivery order. */
+  dropped: number;
+  vcard: boolean;
+}
+
+export const getPhoneDirectory = (id: Id, signal?: AbortSignal) =>
+  request<PhoneDirectory>("GET", `/api/v1/phones/${seg(id)}/directory`, {
+    signal,
+  });

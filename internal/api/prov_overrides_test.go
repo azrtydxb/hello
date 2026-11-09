@@ -102,3 +102,26 @@ func TestSettingOverridesAPI(t *testing.T) {
 		t.Errorf("%s phone overrides left", n)
 	}
 }
+
+// TestPhoneDirectoryFit fails if the directory view of a phone misreports
+// its model's capacity or the vCard slot.
+func TestPhoneDirectoryFit(t *testing.T) {
+	p := newProvEnv(t, ProvConfig{})
+	c := p.c
+	yl := p.phone("80:5E:C0:AA:BB:31", nil)
+	r := c.must(http.StatusOK, "GET", "/api/v1/phones/"+fmt.Sprint(yl["id"])+"/directory", nil).json(t)
+	if r["supported"] != true || r["capacity"] != float64(0) || r["dropped"] != float64(0) || r["vcard"] != false {
+		t.Errorf("yealink: %v", r)
+	}
+	ph := p.phone("80:5E:C0:AA:BB:32", map[string]any{"vendor": "grandstream", "model": "WP822"})
+	r = c.must(http.StatusOK, "GET", "/api/v1/phones/"+fmt.Sprint(ph["id"])+"/directory", nil).json(t)
+	if r["capacity"] != float64(500) || r["vcard"] != false {
+		t.Errorf("wp822: %v", r)
+	}
+	ph = p.phone("80:5E:C0:AA:BB:33", map[string]any{"vendor": "grandstream", "model": "WP836"})
+	r = c.must(http.StatusOK, "GET", "/api/v1/phones/"+fmt.Sprint(ph["id"])+"/directory", nil).json(t)
+	if r["capacity"] != float64(1000) || r["vcard"] != true {
+		t.Errorf("wp836: %v", r)
+	}
+	c.must(http.StatusNotFound, "GET", "/api/v1/phones/999999/directory", nil)
+}

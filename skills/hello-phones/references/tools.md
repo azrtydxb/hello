@@ -4,6 +4,7 @@
 | ------------------------------- | ----- | -------------------------------------------------------- |
 | `listPhones`                    | read  | Provisioned phones by MAC.                               |
 | `getPhone`                      | read  | One phone.                                               |
+| `getPhoneDirectory`             | read  | How the phone's address book fits its model.             |
 | `createPhone`                   | write | Add a phone bound to an extension.                       |
 | `importPhones`                  | write | Check or create many phones from JSON rows, all or none. |
 | `updatePhone`                   | write | Change the sent fields of a phone.                       |

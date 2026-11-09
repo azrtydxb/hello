@@ -1378,3 +1378,23 @@ Implementation notes (template route, no migration):
   Hello can cite is 0 (PTT/Paging), which the template already writes; the
   alarm value is unknown. Administrators reach any of these keys through the
   overrides. Speed dials replacing BLF on WP stay unbuilt for the same reason.
+
+### Item 18: vCard phonebook slot (S-31), partial
+
+- Already on main: the model caps (WP822 500, WP8x6 1000) in `FormatForModel`,
+  truncation of the tail of the delivery order, and P330 = 3, P331 without a
+  scheme, P332 clamped to 5 to 720 (`BookRefreshFor`), P333 = 1.
+- Built: `pb/0.vcf` (vCard 3.0, RFC 2426, folded at 75 octets) for the WP816,
+  WP826 and WP836; `GET /api/v1/phones/{id}/directory` (delivered, capacity,
+  dropped) and the warning on the phone page.
+- Source for the vCard slot: the WP816/WP826/WP836 Administration Guide
+  (documentation.grandstream.com/knowledge-base/wp8x6-administration-guide/,
+  Phonebook: "Download vCard Phonebook", "Upload vCard Phonebook"). It names a
+  web page upload only, so the slot is unused by the template (spec: "unused by
+  default"). The vCard version the phone exports is not documented; 3.0 is the
+  widest-read form and is **verify** on a phone.
+- Left out: "Import Group Method" (P-value unknown; the guide only gives the
+  setting and its default, Replace) and any change to "Remove Manually-edited
+  Entries on Download" (default Yes already; P333 is written as before). The
+  firmware gate "1.0.3.24 and later" is not checked: the page simply does not
+  exist on older firmware.
