@@ -139,6 +139,23 @@ A group delivers address books and multicast settings to its phones.
 switches; the named books stay), `deletePhoneGroup` (phones fall back to no
 group).
 
+### Extra vendor settings (overrides)
+
+Keys the built-in templates do not write can be set per group or per phone.
+The order is the template, then the group, then the phone (the phone wins).
+
+- `listPhoneGroupSettings` and `putPhoneGroupSettings` (replaces all), and
+  `listPhoneSettings` and `putPhoneSettings` for one phone. Body:
+  `{ "overrides": [ { "key": "P71", "value": "100" } ] }`; an empty list
+  clears them.
+- A key is a Grandstream P-value (`P71`) or a Yealink dotted key
+  (`features.text_message.enable`); other vendors are refused. Keys Hello owns
+  (account, provisioning URL, CA, admin password) get a 400.
+- Mark a password-like value `"secret": true`: it is sealed and reads back as
+  `********`; send the mask, or no value, to keep it.
+- Only use a key you can confirm in the vendor's documentation; Hello does not
+  check that a phone knows it. Then `resyncPhone` or `resyncPhoneGroup`.
+
 ## Phonebooks
 
 Books: the computed extensions book (read-only), the company book and up to

@@ -120,6 +120,11 @@ type RenderData struct {
 	// Codecs is the HD voice codec plan: Opus first where the model has
 	// it, then G.722, PCMU and PCMA (see CodecInfo).
 	Codecs CodecInfo
+	// Overrides are the setting overrides of the phone's group and of the
+	// phone, resolved (see ResolveOverrides); Render applies them to the
+	// phone's own file after the template. Secret values are masked in
+	// previews.
+	Overrides []Override
 	// Emergency is the comma-separated emergency numbers of Hello's
 	// emergency-flagged outbound routes (digits only), empty when none.
 	Emergency string

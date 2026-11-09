@@ -1350,3 +1350,31 @@ Implementation notes (template route, no migration):
 - Start: run waves 0-6 in order, three or four builder agents in parallel plus the merge captain (recommended)
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
+
+## Provisioning parity items 15, 18, 29, 27 and the left-out vendor keys (2026-11-09)
+
+### Item 15: setting overrides (S-12)
+
+- Table `prov_setting_overrides` (migration 00066: numbered above the 00051 to
+  00065 the open PRs use, so the PRs do not collide). One table for both scopes
+  (`group_id` or `phone_id`), secret values sealed with the scope, owner and key
+  as additional data.
+- Applied to the finished per-phone file (`ApplyOverrides`), not through the
+  template language, so an administrator's copy of a built-in gets them too.
+  Only two formats are edited: Grandstream `<Pn>` elements and Yealink
+  `key = value` lines. Poly (attributes under arbitrary element names), Snom
+  (`idx`/`perm` attributes) and Fanvil (section-scoped `KEY :value`) are
+  refused, because inserting a new key there would be a guess. They can be added
+  once their insertion rules are confirmed on a phone.
+- Deny list: the account, provisioning URL (carries the token), CA and admin
+  password keys, from what the built-in templates write for them
+  (`internal/prov/builtin/grandstream/device.xml`, `yealink/device.cfg`).
+- Left out, and why: the first-class side-key (PTT, paging, alarm) and speed
+  dial fields, and the niche keys P23001/P23003, P71/P8388, P2916/P2917,
+  P82281, P82269, P25438. The spec cites them to the WP822 release notes and the
+  WP8x6 template, which are not in the repo; the Grandstream 1.0.3.39 and
+  1.0.11.83 release notes (firmware.grandstream.com) carry no P-values and the
+  configuration template archive could not be fetched. The only value for P82317
+  Hello can cite is 0 (PTT/Paging), which the template already writes; the
+  alarm value is unknown. Administrators reach any of these keys through the
+  overrides. Speed dials replacing BLF on WP stay unbuilt for the same reason.

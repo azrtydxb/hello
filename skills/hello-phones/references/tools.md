@@ -44,6 +44,10 @@
 | `setPhoneGroupBooks`            | admin | Set the ordered named books.                             |
 | `setPhoneGroupMulticast`        | admin | Set the multicast paging channels.                       |
 | `setPhoneGroupPTT`              | admin | Set push-to-talk and group paging.                       |
+| `listPhoneGroupSettings`        | read  | A group's setting overrides, secrets masked.             |
+| `putPhoneGroupSettings`         | admin | Replace a group's setting overrides.                     |
+| `listPhoneSettings`             | read  | A phone's setting overrides, secrets masked.             |
+| `putPhoneSettings`              | admin | Replace a phone's setting overrides.                     |
 | `listPhonebooks`                | read  | Address books with entry counts.                         |
 | `getPhonebook`                  | read  | One book.                                                |
 | `createPhonebook`               | admin | Create a named book.                                     |

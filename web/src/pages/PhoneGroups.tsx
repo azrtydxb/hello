@@ -49,6 +49,7 @@ import {
   PttEditor,
   type PathErrors,
 } from "./phonebooks/GroupPaging";
+import { SettingOverrides } from "./phones/SettingOverrides";
 import "./phones/phones.css";
 import "./phonebooks/phonebooks.css";
 
@@ -645,6 +646,14 @@ function GroupModal({
           errors={pttErrors}
           onChange={setPtt}
         />
+
+        {group && (
+          <SettingOverrides
+            scope="phone-groups"
+            id={group.id}
+            title="Setting overrides"
+          />
+        )}
 
         {group && (
           <div className="prov-stack">

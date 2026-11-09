@@ -386,7 +386,7 @@ PBX has the voicemail feature code and the extension has voicemail switched on.
 | Vendor  | Key                                                                                                                                           |
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Yealink | `linekey.N.type = 3` (Transfer), `.value = *97<ext>`, `.label = To voicemail`; `expansion_module.M.key.K.*` the same on an EXP50 key (verify) |
-| Snom    | `<fkey idx="N" context="active">transfer sip:*97<ext>@<domain></fkey>` (verify)                                                              |
+| Snom    | `<fkey idx="N" context="active">transfer sip:*97<ext>@<domain></fkey>` (verify)                                                               |
 | Fanvil  | a memory key, `FkeyN Type :1`, `Value :*97<ext>@1/f` (the BLF keys' `/b` suffix replaced by speed dial) (verify)                              |
 | Poly    | an enhanced feature key macro `$FTransfer$$Cpause2$*97<ext>$Tinvite$` (`efk.efklist.1.*`) on `softkey.1`, active-call context (verify)        |
 
@@ -412,13 +412,13 @@ that both do G.722 talk wideband and anything else falls back to G.711 (see
 account Hello provisions); another account of a multi-account model takes
 the same keys with its own number:
 
-| Vendor      | Keys                                                                                                                                                                                                                |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.N.codec.opus.enable` and `.priority = 1` (models without Opus: `g722` at 1), then `g722`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0`                |
-| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 123 (Opus, models that have it), 9 (G.722), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...) |
-| Snom        | `codec_priority_list idx="N"` = `opus,g722,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                              |
-| Fanvil      | `SIPN Voice Codec Map` = `opus,G722,G711U,G711A`                                                                                                                                                                    |
-| Poly        | `voice.codecPref.Opus="1"`, `.G722="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                    |
+| Vendor      | Keys                                                                                                                                                                                                                                    |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.N.codec.opus.enable` and `.priority = 1` (models without Opus: `g722` at 1), then `g722`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0` |
+| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 123 (Opus, models that have it), 9 (G.722), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...)                     |
+| Snom        | `codec_priority_list idx="N"` = `opus,g722,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                                                  |
+| Fanvil      | `SIPN Voice Codec Map` = `opus,G722,G711U,G711A`                                                                                                                                                                                        |
+| Poly        | `voice.codecPref.Opus="1"`, `.G722="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                                        |
 
 Opus is listed only for models known to support it (`internal/prov/codecs.go`);
 an unknown model gets G.722, PCMU and PCMA. The keys are from the vendors'
@@ -717,7 +717,7 @@ Templates see only these values:
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                                                                                                 |
 | `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`                                                                                |
-| `.Server`   | `Host`, `Port`, `Transport` (`udp` or `tls`), `Expiry` (seconds)                                                                                                             |
+| `.Server`   | `Host`, `Port`, `Transport` (`udp` or `tls`), `Expiry` (seconds)                                                                                                     |
 | `.BLF`      | a list of `Number`, `Label`, `URI`, placed on the model's keys: `Slot`, `Module`, `Page`, `Section`, `PageStart`, `Pickup`                                           |
 | `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `CACertBase64`, `ResyncSeconds`                                                                                          |
 | `.Codes`    | the PBX's star codes: `DNDOn`, `DNDOff`, `ForwardOn`, `ForwardOff`, `ForwardBusyOn`/`Off`, `ForwardNoAnswerOn`/`Off`, `PickupDirected` (empty when the PBX has none) |
@@ -1188,10 +1188,10 @@ pings. The built-in Grandstream template writes the phone's own keep-alive for
 the WP families; the call-side half (session timers, dead-media teardown,
 roaming) is in [phones.md](phones.md#roaming-keep-alive-and-dead-calls).
 
-| Family          | Setting written                                                    | Status                                                                                                  |
-| --------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| WP816/826/836   | `P2397 = 1` (SIP OPTIONS keep-alive)                               | key from the WP8x6 template; the interval (30 s) and max-tries keys are left at the default (verify)    |
-| WP810/820/822/825 | `P84989 = 0` (RFC 5626 keep-alive off)                           | from the WP822 release notes; verify on a phone's exported XML                                          |
+| Family            | Setting written                        | Status                                                                                               |
+| ----------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| WP816/826/836     | `P2397 = 1` (SIP OPTIONS keep-alive)   | key from the WP8x6 template; the interval (30 s) and max-tries keys are left at the default (verify) |
+| WP810/820/822/825 | `P84989 = 0` (RFC 5626 keep-alive off) | from the WP822 release notes; verify on a phone's exported XML                                       |
 
 The WP856 template has neither key and gets none. Other vendors' keep-alive
 keys are not written yet (verify per vendor).
@@ -1314,6 +1314,40 @@ set the phone's distinctive-ring rule by hand (match `hello-<tag>` in the
 Alert-Info text, or `Bellcore-drN` where the phone maps only the five Bellcore
 rings). Page and intercom calls keep the auto-answer `Alert-Info` described
 under paging and intercom above.
+
+## Setting overrides (extra vendor keys)
+
+The built-in templates write the keys Hello needs. A key they do not write
+(a hotline number, a wallpaper, a power-save timer) can be set per phone group
+and per phone under **Phone groups** (edit a group) and **Phones** (the phone's
+page), or with `putPhoneGroupSettings` and `putPhoneSettings`.
+
+- **Order.** The template's value, then the group's, then the phone's: a key
+  the group sets replaces the template's, and a key the phone sets replaces the
+  group's. A key the template does not write is added.
+- **Formats.** A Grandstream P-value (`P71`) or a Yealink dotted key
+  (`features.text_message.enable`). Hello edits only these two formats, so a
+  Poly, Snom, Fanvil or generic phone takes no override (the API refuses a key
+  for them; a group may hold keys for both formats, and a phone applies those of
+  its own vendor). The override reaches the phone's own file only.
+- **Keys Hello owns** are refused with a 400: Grandstream `P2` (admin password),
+  `P3`, `P34`, `P35`, `P36`, `P47`, `P270`, `P271` (account), `P212`, `P237`
+  (provisioning URL with the token) and `P8433` (CA); Yealink `account.N`
+  identity and registrar keys, `static.auto_provision.server.*`,
+  `static.trusted_certificates.*` and `static.security.user_password`.
+- **Secrets.** Mark a value secret and it is sealed in the database (bound to the
+  phone or group and the key), reads back as `********` and is masked in the
+  preview. Send the mask, or no value, to keep the stored value.
+- **A resync applies a change.** Hello checks the key's format, not whether the
+  phone knows it: use only a key from the vendor's documentation or
+  configuration template.
+
+The spec names some one-off Grandstream WP keys for this (speed dials,
+hotline and off-hook auto dial, wallpaper, VoWLAN target delay, power save, band
+selection). Hello does not provision them itself: their numbers and value ranges
+are not in a Grandstream document Hello could be checked against, so an
+administrator who needs one reads it from Grandstream's configuration template
+for the model and enters it here.
 
 ## Security model and its limits
 
