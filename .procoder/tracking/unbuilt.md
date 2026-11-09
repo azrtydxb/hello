@@ -82,8 +82,8 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | --- | ------------------------------------------- | ---------------------------- |
 | 1   | Media foundation (pion)                     | blocked (parity 23-25)       |
 | 2   | WSS on Kamailio                             | blocked (parity 23)          |
-| 3   | Web devices and credentials                 | todo                         |
-| 4   | coturn, ICE servers                         | todo                         |
+| 3   | Web devices and credentials                 | wip (#282)                   |
+| 4   | coturn, ICE servers                         | wip (#282)                   |
 | 5   | Web softphone, audio                        | blocked (1-4)                |
 | 6   | Web video                                   | blocked (5)                  |
 | 6b  | Video recording                             | blocked (6)                  |
