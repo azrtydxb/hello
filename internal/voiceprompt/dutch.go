@@ -86,4 +86,11 @@ var dutch = map[Key]string{
 	QueueCallbackWelcome: "Dit is het terugbelverzoek dat u had aangevraagd. Een ogenblik, wij verbinden u door met een medewerker.",
 	WordStar:             "ster",
 	WordPound:            "hekje",
+	DirectoryEnter:       "Toets de eerste drie letters van de naam in op het toetsenbord, gevolgd door het hekje.",
+	DirectoryConnecting:  "U wordt doorverbonden met",
+	DirectoryOne:         "Voor {name}, druk op {digit}.",
+	DirectoryChoose:      "Er zijn meerdere namen gevonden.",
+	DirectoryMore:        "Dat levert te veel namen op. Toets meer letters in.",
+	DirectoryNone:        "Sorry, er is geen naam gevonden bij deze letters.",
+	DirectoryTooLong:     "Dat zijn te veel letters. Toets minder letters in.",
 }

@@ -74,6 +74,11 @@ func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *s
 	}
 	c.mu.Lock()
 	c.stages = &callStages{visited: append(append([]string{}, visited...), ext), ext: ext, feats: e}
+	if len(visited) > 0 {
+		// Reached through a forward: its voicemail (DND, busy, unreachable)
+		// is this extension's box, not the originally dialled one.
+		c.vmExt = ext
+	}
 	c.mu.Unlock()
 	if e.ForwardAlways != "" {
 		c.addTrace(fmt.Sprintf("Extension %s forwards always to %s", ext, e.ForwardAlways))
@@ -123,6 +128,13 @@ func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *s
 		// (contact-vs-source of the binding), record_default, a pending
 		// announcement or voicemail hand-off, or the force switch.
 		c.considerAnchor(snap, bindingEndpoint(targets[0], ext))
+	}
+	if len(targets) == 0 && c.secure {
+		// A sips: call has no fallback to a non-TLS path: no forward, no
+		// voicemail, a plain refusal.
+		s.refuseSecure(req, tx, secureNoTLSBinding, "sips: no device of the extension is registered over TLS")
+		c.record(sip.StatusTemporarilyUnavailable, cdr.SideSystem, "sips: no TLS registration", ResultUnavailable)
+		return
 	}
 	if len(targets) == 0 {
 		// Nothing registered: the no-answer target applies at once, else
@@ -181,6 +193,9 @@ func (c *call) bindingsFor(snap *snapshot.Snapshot, ext string) ([]livestate.Bin
 		cancel()
 		if err != nil {
 			return nil, err
+		}
+		if c.secure {
+			bs = secureTargets(bs)
 		}
 		targets = append(targets, bs...)
 	}
@@ -300,9 +315,10 @@ func (c *call) exhausted(busyAll bool) exhaustion {
 		if busyAll {
 			reason = "busy"
 		}
-		if st.source == ForwardGroupFailover {
-			// The call was dialled as a group number: the box is the
-			// extension the group failed over to.
+		if st.source != "" {
+			// A forward or group failover stage rang this extension: the
+			// box is the one of the extension that last rang, not the one
+			// that was dialled.
 			c.mu.Lock()
 			c.vmExt = st.ext
 			c.mu.Unlock()

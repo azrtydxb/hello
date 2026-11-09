@@ -280,7 +280,7 @@ func (s *server) createQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if q.PromptLanguage != "" {
-		s.prewarmLanguages() // the queue's language needs its prompts spoken ahead
+		s.kickPrewarm() // the queue's language needs its prompts spoken ahead
 	}
 	writeJSON(w, http.StatusCreated, q)
 }
@@ -310,7 +310,7 @@ func (s *server) putQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if q.PromptLanguage != "" {
-		s.prewarmLanguages()
+		s.kickPrewarm()
 	}
 	writeJSON(w, http.StatusOK, q)
 }

@@ -34,6 +34,9 @@ const (
 	ActionQueueLogout  = "queue_logout"
 	ActionQueuePause   = "queue_pause"
 	ActionQueueUnpause = "queue_unpause"
+	// ActionDirectory is the feature-code action of the dial-by-name
+	// directory (migration 00048).
+	ActionDirectory = "directory"
 )
 
 // QueueMember is one agent of a queue. Number and Name are for display.
@@ -202,12 +205,12 @@ func listQueues(ctx context.Context, q querier, where string, args ...any) ([]Qu
 
 // ListQueues returns every queue.
 func (s *Store) ListQueues(ctx context.Context) ([]Queue, error) {
-	return listQueues(ctx, s.db, "")
+	return listQueues(ctx, s.q(ctx), "")
 }
 
 // GetQueue returns one queue.
 func (s *Store) GetQueue(ctx context.Context, id int64) (Queue, error) {
-	qs, err := listQueues(ctx, s.db, ` WHERE q.id = $1`, id)
+	qs, err := listQueues(ctx, s.q(ctx), ` WHERE q.id = $1`, id)
 	if err != nil {
 		return Queue{}, err
 	}
@@ -221,7 +224,7 @@ func (s *Store) GetQueue(ctx context.Context, id int64) (Queue, error) {
 // settings that name one.
 func (s *Store) QueueNameExists(ctx context.Context, name string) (bool, error) {
 	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM queues WHERE name = $1`, name).Scan(&n); err != nil {
+	if err := s.q(ctx).QueryRowContext(ctx, `SELECT count(*) FROM queues WHERE name = $1`, name).Scan(&n); err != nil {
 		return false, err
 	}
 	return n > 0, nil

@@ -37,10 +37,17 @@ type ProvSettings struct {
 	PublicURL string
 	// SIPServer is the host:port rendered configs register with.
 	SIPServer string
+	// SIPTLSServer and SIPTLSModels are HELLO_PROV_SIP_TLS_SERVER and
+	// HELLO_PROV_SIP_TLS_MODELS: the phones prov.TLSModelMatch selects
+	// register with SIPTLSServer over TLS (S-14).
+	SIPTLSServer string
+	SIPTLSModels []string
 	// Domain is HELLO_SIP_DOMAIN.
 	Domain string
 	Expiry time.Duration
 	Resync time.Duration
+	// DSCPSIP and DSCPRTP are the QoS values written to phones (S-21).
+	DSCPSIP, DSCPRTP int
 	// BookRefresh is HELLO_PROV_BOOK_REFRESH; zero means 15 minutes.
 	BookRefresh time.Duration
 	Timezone    string
@@ -52,6 +59,20 @@ type ProvSettings struct {
 	// Deployment lists the vendors whose redirect credentials the
 	// deployment sets (they count as configured whatever is stored).
 	Deployment map[prov.Vendor]bool
+}
+
+// server is the registrar a phone of vendor and model registers with: the
+// TLS address for a model HELLO_PROV_SIP_TLS_MODELS selects while
+// HELLO_PROV_SIP_TLS_SERVER is set, the UDP address otherwise.
+func (p ProvSettings) server(v prov.Vendor, model string) prov.Server {
+	srv := prov.Server{Transport: "udp", Expiry: int(p.Expiry / time.Second)}
+	if p.SIPTLSServer != "" && prov.TLSModelMatch(p.SIPTLSModels, v, model) {
+		srv.Host, srv.Port = splitHostPort(p.SIPTLSServer)
+		srv.Transport = "tls"
+		return srv
+	}
+	srv.Host, srv.Port = splitHostPort(p.SIPServer)
+	return srv
 }
 
 // WithProv sets the provisioning settings and returns s.
@@ -89,7 +110,7 @@ func (p ProvSettings) plainBase() string {
 // info is the ProvInfo of a phone whose current token is token.
 func (p ProvSettings) info(token, mac string) prov.ProvInfo {
 	return prov.ProvInfo{URL: p.phoneBase(token), CAURL: p.CAURL(), ResyncSeconds: p.resyncSeconds(mac),
-		CACertPEM: prov.CACertPEM(p.CACertFile)}
+		CACertPEM: prov.CACertPEM(p.CACertFile), DSCPSIP: p.DSCPSIP, DSCPRTP: p.DSCPRTP}
 }
 
 // CAURL is the plain-HTTP URL of Hello's provisioning CA.
@@ -207,7 +228,7 @@ func nullInt(n sql.NullInt64) *int64 {
 
 // ListPhones returns every phone ordered by MAC.
 func (s *Store) ListPhones(ctx context.Context) ([]Phone, error) {
-	return listPhones(ctx, s.db, ` ORDER BY p.mac`)
+	return listPhones(ctx, s.q(ctx), ` ORDER BY p.mac`)
 }
 
 func listPhones(ctx context.Context, q querier, suffix string, args ...any) ([]Phone, error) {
@@ -229,7 +250,7 @@ func listPhones(ctx context.Context, q querier, suffix string, args ...any) ([]P
 
 // GetPhone returns one phone.
 func (s *Store) GetPhone(ctx context.Context, id int64) (Phone, error) {
-	p, err := scanPhone(s.db.QueryRowContext(ctx, phoneSelect+` WHERE p.id = $1`, id))
+	p, err := scanPhone(s.q(ctx).QueryRowContext(ctx, phoneSelect+` WHERE p.id = $1`, id))
 	return p, mapErr(err)
 }
 
@@ -310,6 +331,10 @@ func (s *Store) provChange(ctx context.Context, actor, action, resource string, 
 			return err
 		}
 		if !bump {
+			return nil
+		}
+		if b := s.batchOf(ctx); b != nil {
+			b.dirty = true
 			return nil
 		}
 		return bumpRevision(ctx, tx)
@@ -838,7 +863,7 @@ func (s *Store) RotateAdminPassword(ctx context.Context, actor string, id int64)
 
 // ExistingMACs returns the phone id of each listed MAC that is taken.
 func (s *Store) ExistingMACs(ctx context.Context, macs []string) (map[string]int64, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT mac, id FROM phones WHERE mac = ANY($1)`, macs)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT mac, id FROM phones WHERE mac = ANY($1)`, macs)
 	if err != nil {
 		return nil, err
 	}
@@ -873,7 +898,7 @@ type Fetch struct {
 // before the fetch id before (0: from the newest); next is the cursor of
 // the following page, "" at the end.
 func (s *Store) ListPhoneFetches(ctx context.Context, phoneID, before int64, limit int) ([]Fetch, string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.q(ctx).QueryContext(ctx, `
 		SELECT id, at, COALESCE(host(ip), ''), user_agent, path_redacted, kind, result, status, bytes
 		FROM prov_fetches WHERE phone_id = $1 AND ($2::bigint = 0 OR id < $2::bigint)
 		ORDER BY id DESC LIMIT $3`, phoneID, before, limit+1)
@@ -906,7 +931,7 @@ func (s *Store) ListPhoneFetches(ctx context.Context, phoneID, before int64, lim
 
 // PruneFetches deletes fetch audit rows older than before.
 func (s *Store) PruneFetches(ctx context.Context, before time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM prov_fetches WHERE at < $1`, before)
+	res, err := s.q(ctx).ExecContext(ctx, `DELETE FROM prov_fetches WHERE at < $1`, before)
 	if err != nil {
 		return 0, err
 	}
@@ -917,7 +942,7 @@ func (s *Store) PruneFetches(ctx context.Context, before time.Time) (int64, erro
 // hello_prov_phones gauge (spec S-17): never fetched, fetched since
 // staleBefore, and stale (the last fetch is older than staleBefore).
 func (s *Store) PhoneFetchStates(ctx context.Context, staleBefore time.Time) (neverFetched, fetched, stale int, err error) {
-	err = s.db.QueryRowContext(ctx, `SELECT
+	err = s.q(ctx).QueryRowContext(ctx, `SELECT
 		count(*) FILTER (WHERE last_fetch_at IS NULL),
 		count(*) FILTER (WHERE last_fetch_at >= $1),
 		count(*) FILTER (WHERE last_fetch_at < $1)

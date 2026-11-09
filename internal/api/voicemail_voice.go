@@ -68,6 +68,22 @@ func (s *server) prewarmLanguages() {
 	go s.prewarmVoicemail() //nolint:gosec // G118: it must outlive the request that triggered it
 }
 
+// kickPrewarm asks the background worker to pre-generate the prompts for a
+// language a queue or box just set. It never blocks: a pending kick covers it.
+func (s *server) kickPrewarm() {
+	select {
+	case s.prewarmKick <- struct{}{}:
+	default:
+	}
+}
+
+// runPrewarmKicks runs prewarmLanguages for each kick, for the life of the process.
+func (s *server) runPrewarmKicks() {
+	for range s.prewarmKick {
+		s.prewarmLanguages()
+	}
+}
+
 // promptLanguagesInUse is every language a call can need: the deployment
 // language (when one is configured) and each language a box or a queue set for itself.
 // Each is a language with a complete table, once, sorted.
