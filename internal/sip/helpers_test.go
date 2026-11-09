@@ -534,6 +534,7 @@ type phone struct {
 	messages   chan *sip.Request
 	subscribes chan *sip.Request
 	notifies   chan *sip.Request
+	pracks     chan *sip.Request // PRACKs the phone received (S-17)
 }
 
 func newPhone(t *testing.T, pbx *testPBX, user, pass string) *phone {
@@ -596,6 +597,7 @@ func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketCo
 		acks: make(chan *sip.Request, 16), byes: make(chan *sip.Request, 16), rings: make(chan int, 16),
 		infos: make(chan *sip.Request, 16), messages: make(chan *sip.Request, 16),
 		subscribes: make(chan *sip.Request, 16), notifies: make(chan *sip.Request, 16),
+		pracks: make(chan *sip.Request, 16),
 		callee: answerAfter(nil),
 	}
 	p.dua = &sipgo.DialogUA{Client: cli, ContactHDR: p.contact, RewriteContact: true}
@@ -616,6 +618,10 @@ func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketCo
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 	})
 	srv.OnNotify(p.onNotify)
+	srv.OnRequest(sip.PRACK, func(req *sip.Request, tx sip.ServerTransaction) {
+		push(p.pracks, req)
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+	})
 	go func() { _ = srv.ServeUDP(conn) }()
 	t.Cleanup(func() {
 		p.done.Store(true)

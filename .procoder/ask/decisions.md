@@ -1350,3 +1350,27 @@ Implementation notes (template route, no migration):
 - Start: run waves 0-6 in order, three or four builder agents in parallel plus the merge captain (recommended)
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
+
+## Item 26: PRACK/100rel and anonymous outbound (2026-11-09)
+
+- 100rel is negotiated hop by hop, not relayed: Hello offers `Supported: 100rel`
+  on every INVITE it originates and PRACKs any reliable 18x from a phone or
+  trunk. Toward the caller it sends reliable provisionals only when the INVITE
+  says `Require: 100rel`; `Supported` alone gets plain responses, as phones keep
+  100rel off (P272 = 0). The 2xx waits up to 64*T1 for the PRACK. A PRACK that
+  never arrives is traced and the call is answered anyway rather than failed.
+- Anonymous outbound is trunk-leg only. It triggers on the trunk policy
+  `always`, the extension flag, or a device request (Privacy id/user/header, or
+  From `anonymous`; `Privacy: none` cancels). The leg gets an anonymous From,
+  the trunk's asserted identity in PAI or PPI (trunk setting, default PAI) and
+  `Privacy: id` merged with the device's values. A device's own PAI/PPI is
+  never forwarded.
+- The spec has no feature code for per-call anonymity, so none was added: a
+  per-call request is the device's Privacy header or anonymous From.
+- No provisioning key is written for the WP822 "Send Anonymous" setting: no
+  vendor document in the repo confirms its key. It stays an S-12 per-phone
+  override until the lab export confirms it.
+- Migration 00051: `extensions.anonymous_outbound`, `trunks.anonymous_policy`,
+  `trunks.asserted_identity`, `trunks.identity_header`. Replaces and call
+  waiting of the same delivery-plan item are not in this PR.
+

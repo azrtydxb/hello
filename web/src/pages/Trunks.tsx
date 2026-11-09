@@ -91,6 +91,12 @@ interface TrunkDraft {
   destinations: DestinationDraft[];
   /** SMS over SIP (SIP MESSAGE) through this trunk. */
   messaging: boolean;
+  /** Anonymous calls: carry the device's request, or always. */
+  anonymousPolicy: "honour" | "always";
+  /** The number asserted for an anonymous call. */
+  assertedIdentity: string;
+  /** The header carrying it. */
+  identityHeader: "pai" | "ppi";
   /** What the trunk may dial in the extension namespace. */
   dialingMode: DialingMode;
   /** The patterns, one per line; used only in mode "patterns". */
@@ -148,6 +154,9 @@ const NEW_TRUNK: TrunkDraft = {
   enabled: true,
   destinations: [NEW_DESTINATION],
   messaging: false,
+  anonymousPolicy: "honour",
+  assertedIdentity: "",
+  identityHeader: "pai",
   dialingMode: "off",
   dialingPatterns: "",
   dialingConfirm: false,
@@ -175,6 +184,9 @@ function toDraft(t: Trunk): TrunkDraft {
       weight: String(d.weight),
     })),
     messaging: t.messaging === true,
+    anonymousPolicy: t.anonymousPolicy === "always" ? "always" : "honour",
+    assertedIdentity: t.assertedIdentity ?? "",
+    identityHeader: t.identityHeader === "ppi" ? "ppi" : "pai",
     dialingMode:
       dialing?.mode === "patterns" || dialing?.mode === "all"
         ? dialing.mode
@@ -266,6 +278,9 @@ function toInput(d: TrunkDraft): TrunkInput {
     })),
     internalDialing: toDialingInput(d),
     messaging: d.messaging,
+    anonymousPolicy: d.anonymousPolicy,
+    assertedIdentity: d.assertedIdentity.trim(),
+    identityHeader: d.identityHeader,
     codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
   };
 }
@@ -307,6 +322,9 @@ function knownKeys(d: TrunkDraft): string[] {
     "internalDialing.patterns",
     "internalDialing.confirm",
     "messaging",
+    "anonymousPolicy",
+    "assertedIdentity",
+    "identityHeader",
     ...d.destinations.flatMap((_, i) => [
       `destinations[${i}]`,
       ...["host", "port", "priority", "weight"].map(
@@ -559,6 +577,10 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          {
+            label: "Anonymous calls",
+            value: t.anonymousPolicy === "always" ? "Always" : "On request",
+          },
           { label: "Password", value: password },
         ]
       : [
@@ -579,6 +601,10 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          {
+            label: "Anonymous calls",
+            value: t.anonymousPolicy === "always" ? "Always" : "On request",
+          },
           { label: "Password", value: password },
         ];
 
@@ -953,6 +979,55 @@ function TrunkDrawer({
             labelPosition="end"
             checked={draft.messaging}
             onChange={(e) => set("messaging", e.target.checked)}
+          />
+        </fieldset>
+
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">Anonymous calls</legend>
+          <p className="cf-form__note">
+            An anonymous call carries Privacy: id and an anonymous From; the
+            carrier learns the caller from the asserted identity.
+          </p>
+          <Select
+            id={fid("anonymousPolicy")}
+            label="Anonymous calls"
+            value={draft.anonymousPolicy}
+            error={errors.anonymousPolicy}
+            options={[
+              { value: "honour", label: "When the phone or extension asks" },
+              { value: "always", label: "Every call through this trunk" },
+            ]}
+            onChange={(e) =>
+              set(
+                "anonymousPolicy",
+                e.target.value as TrunkDraft["anonymousPolicy"],
+              )
+            }
+          />
+          <Input
+            id={fid("assertedIdentity")}
+            label="Asserted identity"
+            mono
+            value={draft.assertedIdentity}
+            error={errors.assertedIdentity}
+            hint="The number sent in the identity header of an anonymous call. Empty uses the caller ID."
+            onChange={(e) => set("assertedIdentity", e.target.value)}
+          />
+          <Select
+            id={fid("identityHeader")}
+            label="Identity header"
+            value={draft.identityHeader}
+            error={errors.identityHeader}
+            options={[
+              { value: "pai", label: "P-Asserted-Identity" },
+              { value: "ppi", label: "P-Preferred-Identity" },
+            ]}
+            onChange={(e) =>
+              set(
+                "identityHeader",
+                e.target.value as TrunkDraft["identityHeader"],
+              )
+            }
           />
         </fieldset>
 

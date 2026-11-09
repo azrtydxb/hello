@@ -142,6 +142,7 @@ func (c *call) answerPickup(req *pickupReq) {
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.NewHeader("Allow", allow))
 	s.m.response(sip.StatusOK)
+	c.settleReliable(true)
 	if err := c.dss.WriteResponse(res); err != nil {
 		s.log.Info("caller did not acknowledge the picked-up call", "correlation_id", c.id, "error", err)
 		c.linkedHangup(cdr.SideSystem, "no ACK from caller")

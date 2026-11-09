@@ -233,6 +233,7 @@ export function ExtensionDrawer({
   const [record, setRecord] = useState(ext.recordDefault ?? false);
   const [intercom, setIntercom] = useState(ext.allowIntercom !== false);
   const [callWaiting, setCallWaiting] = useState(ext.callWaiting !== false);
+  const [anonymous, setAnonymous] = useState(ext.anonymousOutbound === true);
   const [mohClass, setMohClass] = useState<Id | null>(ext.mohClassId ?? null);
   const [errors, setErrors] = useState<Errors>({});
   const [serverError, setServerError] = useState<string | null>(null);
@@ -272,6 +273,9 @@ export function ExtensionDrawer({
     }
     if (callWaiting !== (ext.callWaiting !== false)) {
       patch.callWaiting = callWaiting;
+    }
+    if (anonymous !== (ext.anonymousOutbound === true)) {
+      patch.anonymousOutbound = anonymous;
     }
     if (String(mohClass ?? "") !== String(ext.mohClassId ?? "")) {
       patch.mohClassId = mohClass;
@@ -412,6 +416,13 @@ export function ExtensionDrawer({
               labelPosition="end"
               checked={callWaiting}
               onChange={(e) => setCallWaiting(e.target.checked)}
+            />
+            <Switch
+              label="Anonymous outbound"
+              hint="Every call this extension places through a trunk hides its number: Privacy: id, an anonymous From and the trunk's asserted identity. Off: only when the phone asks for it or the trunk is set to always"
+              labelPosition="end"
+              checked={anonymous}
+              onChange={(e) => setAnonymous(e.target.checked)}
             />
             <MOHSelect
               id="ext-moh"

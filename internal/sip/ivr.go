@@ -197,6 +197,7 @@ func (c *call) soloAnswer(phase, detail, what string) bool {
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.NewHeader("Allow", allow))
 	s.m.response(sip.StatusOK)
+	c.settleReliable(true)
 	if err := c.dss.WriteResponse(res); err != nil {
 		if c.dss.LoadState() == sip.DialogStateEnded {
 			// The caller's BYE overtook its ACK: handleBye has accepted it

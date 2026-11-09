@@ -34,6 +34,8 @@ type call struct {
 	callerName   string
 	callerDevice string
 	dialled      string
+	// rel is the reliable provisional response toward the caller (S-17).
+	rel relState
 	// secure marks a sips: call: it forks only onto bindings registered over
 	// TLS and never leaves for a trunk or an external URI (phone-feature-
 	// parity S-14).
@@ -331,8 +333,9 @@ type leg struct {
 	number    string
 	callerID  string
 	uri       *sip.Uri
-	abandoned bool // guarded by c.mu: failed over, may no longer win
-	stage     int  // the forwarding stage this fork belongs to; setup ignores older stages' events
+	abandoned bool   // guarded by c.mu: failed over, may no longer win
+	lastRSeq  uint32 // guarded by mu: the last RSeq acknowledged with a PRACK
+	stage     int    // the forwarding stage this fork belongs to; setup ignores older stages' events
 	// pl is set on a page member leg (Phase E): it carries the page's
 	// per-member state and offer.
 	pl *pageLeg
@@ -868,6 +871,14 @@ func (c *call) respondA(code int, reason string) {
 		return
 	}
 	c.s.m.response(code)
+	if code >= 200 {
+		c.settleReliable(false)
+	} else if code > 100 {
+		if err := c.respondProv(code, reason, nil); err != nil {
+			c.s.log.Debug("respond to caller failed", "code", code, "error", err)
+		}
+		return
+	}
 	if err := c.dss.Respond(code, reason, nil); err != nil {
 		c.s.log.Debug("respond to caller failed", "code", code, "error", err)
 	}
@@ -951,6 +962,7 @@ func (c *call) answer(w *leg) {
 	// Counted when sent; WriteResponse blocks until the caller ACKs (or
 	// 64*T1).
 	c.s.m.response(sip.StatusOK)
+	c.settleReliable(true) // the 2xx follows the PRACK of a reliable 18x
 	err := c.dss.WriteResponse(res)
 	if err == nil {
 		c.mu.Lock()
@@ -1473,6 +1485,7 @@ func (l *leg) drive(report func(legEvent)) {
 	opts := sipgo.AnswerOptions{OnResponse: func(r *sip.Response) error {
 		switch {
 		case r.StatusCode > 100 && r.StatusCode < 200:
+			l.acknowledgeProvisional(dcs, r)
 			select {
 			case l.c.events <- legEvent{leg: l, kind: evRinging}:
 			default:
@@ -1573,6 +1586,7 @@ func (l *leg) invite() (*sip.Request, error) {
 	req.AppendHeader(sip.HeaderClone(&s.contact))
 	req.AppendHeader(sip.NewHeader("Allow", allow))
 	l.addSessionHeaders(req)
+	l.addPrackHeaders(req)
 	if body := c.offerSDP(); len(body) > 0 {
 		if c.inv != nil {
 			if ct := c.inv.ContentType(); ct != nil {
@@ -1602,6 +1616,7 @@ func (l *leg) invite() (*sip.Request, error) {
 			to.Address.User = id.toNum
 		}
 	}
+	l.applyAnonymous(req, from)
 	l.addPagingHeaders(req)
 	l.addRingTag(req)
 	for _, h := range c.confForwardHeaders(l.callID) {

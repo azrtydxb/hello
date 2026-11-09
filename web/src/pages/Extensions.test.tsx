@@ -445,6 +445,30 @@ describe("Extensions", () => {
     });
   });
 
+  it("turns anonymous outbound on, off by default", async () => {
+    const calls = api([EXT], {
+      "GET /api/v1/devices": () => json({ items: [DEVICE] }),
+      "GET /api/v1/registrations": () => json({ items: [] }),
+      "GET /api/v1/presence": () => json({ items: [] }),
+      "PATCH /api/v1/extensions/1": () =>
+        json({ ...EXT, anonymousOutbound: true }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer();
+    const sw = within(drawer).getByRole("switch", {
+      name: /Anonymous outbound/,
+    });
+    expect(sw).not.toBeChecked();
+    fireEvent.click(sw);
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Extension 100 saved.")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/extensions/1",
+      body: { anonymousOutbound: true },
+    });
+  });
+
   it("shows call waiting off when the extension has it off", async () => {
     api([{ ...EXT, callWaiting: false }], {
       "GET /api/v1/devices": () => json({ items: [DEVICE] }),

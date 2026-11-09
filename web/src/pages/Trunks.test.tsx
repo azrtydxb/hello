@@ -21,6 +21,9 @@ const TRUNK = {
   destinations: [{ host: "10.0.0.5", port: 5060, priority: 0, weight: 1 }],
   internalDialing: { mode: "off", patterns: [] },
   messaging: false,
+  anonymousPolicy: "honour",
+  assertedIdentity: "",
+  identityHeader: "pai",
   codecs: ["PCMU", "PCMA"],
   createdAt: "2026-10-01T10:00:00Z",
   updatedAt: "2026-10-01T10:00:00Z",
@@ -144,6 +147,41 @@ describe("Trunks", () => {
     ).toBeVisible();
     expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
       messaging: true,
+    });
+  });
+
+  it("sets the anonymous call policy, asserted identity and identity header", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [TRUNK] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+      "PATCH /api/v1/trunks/4": () => json(TRUNK),
+    });
+    renderApp("/trunks");
+    const primary = await card(/carrier-primary/);
+    expect(within(primary).getByText("Anonymous calls")).toBeVisible();
+    fireEvent.click(
+      within(primary).getByRole("button", {
+        name: "Edit trunk carrier-primary",
+      }),
+    );
+    fireEvent.change(screen.getByLabelText("Anonymous calls"), {
+      target: { value: "always" },
+    });
+    fireEvent.change(screen.getByLabelText("Asserted identity"), {
+      target: { value: "+97142000999" },
+    });
+    fireEvent.change(screen.getByLabelText("Identity header"), {
+      target: { value: "ppi" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(
+      await screen.findByText("Trunk carrier-primary saved."),
+    ).toBeVisible();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      anonymousPolicy: "always",
+      assertedIdentity: "+97142000999",
+      identityHeader: "ppi",
     });
   });
 

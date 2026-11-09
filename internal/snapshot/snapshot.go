@@ -64,6 +64,9 @@ type Extension struct {
 	// rung. The inverted sense keeps the zero value (and every extension
 	// built without the flag) on the default, call waiting on.
 	NoCallWaiting bool
+	// AnonymousOutbound makes the extension's trunk calls anonymous
+	// (migration 00051, spec S-19).
+	AnonymousOutbound bool
 	// MOHClassID is the music on hold class callers hear while this
 	// extension holds them (migration 00021); 0 uses the global default.
 	MOHClassID int64
@@ -527,7 +530,7 @@ type Querier interface {
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
        d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name,
        e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id,
-       e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, e.directory_hidden
+       e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, e.directory_hidden, e.anonymous_outbound
 FROM extensions e
 LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled
 LEFT JOIN voicemail_boxes v ON v.extension_id = e.id
@@ -561,7 +564,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 		)
 		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &d.Extension, &d.ExtensionName,
 			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID,
-			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden); err != nil {
+			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden, &e.AnonymousOutbound); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan: %w", err)
 		}

@@ -107,6 +107,12 @@ export interface Extension {
    * setting is switched off at the next resync.
    */
   callWaiting?: boolean;
+  /**
+   * Anonymous outbound; false by default. On: every trunk call from the
+   * extension carries Privacy: id, an anonymous From and the trunk's asserted
+   * identity.
+   */
+  anonymousOutbound?: boolean;
   /** Rings before the no-answer forward (the phone's ring count); 0 = the system default. */
   noAnswerRings?: number;
   /** The extension's voicemail box, when it has one. */
@@ -287,6 +293,15 @@ export interface TrunkFields {
   internalDialing: InternalDialing;
   /** SMS over SIP: text messages may be sent and received through it. */
   messaging: boolean;
+  /**
+   * Anonymous calls: "honour" carries a device's privacy request (default),
+   * "always" makes every call through the trunk anonymous.
+   */
+  anonymousPolicy: "honour" | "always";
+  /** The number asserted for an anonymous call; empty uses the caller ID. */
+  assertedIdentity: string;
+  /** Header carrying it: P-Asserted-Identity (pai) or P-Preferred-Identity (ppi). */
+  identityHeader: "pai" | "ppi";
   /**
    * The audio codecs offered to the trunk (store.Trunk.codecs): any of
    * "PCMU", "PCMA", "G722", "opus". Default ["PCMU", "PCMA"]: most carriers
@@ -773,6 +788,7 @@ export const updateExtension = (
     directoryHidden?: boolean;
     allowIntercom?: boolean;
     callWaiting?: boolean;
+    anonymousOutbound?: boolean;
     /** null clears the pick (the global default plays). */
     mohClassId?: Id | null;
     noAnswerRings?: number;
