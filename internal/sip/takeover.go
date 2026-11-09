@@ -79,15 +79,35 @@ func haLegFrom(d livestate.DialogLeg, uas bool) *haLeg {
 type homedCall struct {
 	takenFrom string
 	takenAt   time.Time
-	legs      [2]*haLeg
+	// mu guards legs: an IVR dial-out homes the callee leg after the call
+	// is published, while hang-up and replication read the pair. It is a
+	// leaf lock, taken inside call.mu where both are held.
+	mu   sync.Mutex
+	legs [2]*haLeg
 }
 
 // leg is the caller's (false) or callee's (true) homed leg.
 func (h *homedCall) leg(callee bool) *haLeg {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if callee {
 		return h.legs[1]
 	}
 	return h.legs[0]
+}
+
+// pair is a consistent snapshot of the caller and callee legs.
+func (h *homedCall) pair() [2]*haLeg {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.legs
+}
+
+// setCallee homes the callee leg.
+func (h *homedCall) setCallee(l *haLeg) {
+	h.mu.Lock()
+	h.legs[1] = l
+	h.mu.Unlock()
 }
 
 // useCSeq spends the leg's next CSeq value.
