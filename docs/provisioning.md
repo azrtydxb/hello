@@ -9,9 +9,10 @@ per-setting path stays in [phones.md](phones.md).
 
 Values below are kw's: provisioning is published at
 `https://prov.hello.kw.watteel.lab` (`HELLO_PROV_PUBLIC_URL`), and phones
-register with Kamailio at its virtual IP, `192.168.10.109:30508`
-(`HELLO_PROV_SIP_SERVER`); phones provisioned before the VIP still use the
-node address `192.168.10.101:30508` until they re-fetch, see
+register with Kamailio at `192.168.10.101:30508` (`HELLO_PROV_SIP_SERVER`).
+The virtual IP `192.168.10.109:30508` replaces it when the VIP go-live
+(`deploy/kuvryn-sync/kamailio-vip`) is applied; phones provisioned before it
+keep using the node address until they re-fetch, see
 [Moving phones to a new Kamailio address](#moving-phones-to-a-new-kamailio-address).
 The console's
 **Phones → Settings** shows the same values for any deployment, computed by
@@ -687,7 +688,7 @@ phone seen for the first time is only recorded. Automatic pushes show as
 ## Moving phones to a new Kamailio address
 
 The proxy address a phone registers with (`HELLO_PROV_SIP_SERVER`) is part of
-the configuration Hello renders, so moving phones to another one (kw moved
+the configuration Hello renders, so moving phones to another one (kw moves
 from the node address `192.168.10.101:30508` to the virtual IP
 `192.168.10.109:30508`, [docs/ha.md](ha.md)) is a re-provision
 and needs no visit to a phone:
