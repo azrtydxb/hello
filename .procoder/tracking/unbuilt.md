@@ -10,7 +10,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 9b  | Session timers on parked/picked-up/transferred dialogs and trunk legs         | wip (#228)             |
 | 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                          | done (#204)            |
 | 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | done (#226)            |
-| 12  | Tone library (S-43)                                                           | todo (after 11)        |
+| 12  | Tone library (S-43)                                                           | wip (#238)             |
 | 13  | Door station extension kind, Door group (S-45, S-46)                          | wip (#225)             |
 | 14  | Door-open DTMF `*50` (S-47)                                                   | todo (after 13)        |
 | 15  | Setting overrides and WP extras (S-12)                                        | todo                   |

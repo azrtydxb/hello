@@ -21,6 +21,10 @@
 {{- with .Ring.Default}}
     <ring_sound idx="1" perm="R">{{xml .}}</ring_sound>
 {{- end}}
+{{- /* Custom tone (phone-feature-parity S-43): custom_melody_url is the one custom melody the phone downloads, from Hello under the phone's token; a class whose sound is Custom plays it (Snom Service Hub, custom_melody_url). Unverified on hardware (verify). */}}
+{{- with .Ring.Custom}}
+    <custom_melody_url perm="R">{{xml $.Prov.URL}}ring/{{.}}.wav</custom_melody_url>
+{{- end}}
 {{- /* MWI (spec S-1): user_mailbox names the mailbox the phone ties MWI to and dials for voicemail (Snom Service Hub, user_mailbox, D-series); Snom documents no separate subscribe flag. Unverified on hardware (lab item 1). */}}
     <user_mailbox idx="1" perm="R">{{xml (or .Line.VoicemailCode "*97")}}</user_mailbox>
 {{- /* Call waiting (phone-feature-parity S-18): call_waiting per line is on (waiting tone), visual (no tone) or off; Hello writes on or off from the extension's flag. Key and values as in Snom's own settings reference and the Tancredi snom template. Unverified on hardware (verify, lab item 26). */}}

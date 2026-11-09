@@ -190,6 +190,18 @@ The ring map turns a ring tag into a tone on each vendor's phones.
   overrides; an empty list removes them. An override wins over the global choice
   for that group's phones.
 
+## Custom tones
+
+The tone library holds WAV files a ring map choice can play as `custom:<name>`
+(Yealink and Snom phones; other vendors keep their built-in ringer).
+
+- `listRingtones` shows each tone and how many ring map choices use it.
+- `createRingtone` (`/ringtones`) adds one: `{ "name": "bell-2", "audioBase64":
+  "..." }` with PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB. A
+  taken name is a 409.
+- `deleteRingtone` (`/ringtones/{id}`) removes a tone; a tone a ring map choice
+  still uses is refused.
+
 ## References
 
 - [Tools](references/tools.md) - every tool with its scope.

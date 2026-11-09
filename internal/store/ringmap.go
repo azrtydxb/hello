@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/ringtag"
@@ -41,7 +42,10 @@ type RingMap struct {
 // GetRingMap returns the explicit choices; tags and vendors without one use
 // the vendor's default for the tag's Bellcore slot.
 func (s *Store) GetRingMap(ctx context.Context) (RingMap, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT group_id, tag, vendor, tone FROM ring_map ORDER BY COALESCE(group_id, 0), tag, vendor`)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT m.group_id, m.tag, m.vendor, CASE WHEN m.custom_tone_id IS NULL THEN m.tone ELSE $1 || t.name END
+		FROM ring_map m LEFT JOIN ringtones t ON t.id = m.custom_tone_id
+		ORDER BY COALESCE(m.group_id, 0), m.tag, m.vendor`, prov.CustomPrefix)
 	if err != nil {
 		return RingMap{}, err
 	}
@@ -104,6 +108,27 @@ func (s *Store) ReplaceRingMap(ctx context.Context, actor string, groupID *int64
 		if err := rows.Err(); err != nil {
 			return rid, false, err
 		}
+		customs := map[string]int64{}
+		crows, err := tx.QueryContext(ctx, `SELECT name, id FROM ringtones`)
+		if err != nil {
+			return rid, false, err
+		}
+		for crows.Next() {
+			var (
+				n  string
+				id int64
+			)
+			if err := crows.Scan(&n, &id); err != nil {
+				_ = crows.Close()
+				return rid, false, err
+			}
+			customs[n] = id
+		}
+		_ = crows.Close()
+		if err := crows.Err(); err != nil {
+			return rid, false, err
+		}
+		toneIDs := make([]sql.NullInt64, len(in))
 		seen := map[[2]string]bool{}
 		for i, e := range in {
 			p := fmt.Sprintf("entries[%d]", i)
@@ -112,19 +137,34 @@ func (s *Store) ReplaceRingMap(ctx context.Context, actor string, groupID *int64
 				return rid, false, fieldError(p+".tag", "no such ring tag")
 			case !slices.Contains(prov.RingVendors, prov.Vendor(e.Vendor)):
 				return rid, false, fieldError(p+".vendor", "must be yealink, poly, grandstream, snom or fanvil")
-			case !prov.ValidRingTone(prov.Vendor(e.Vendor), e.Tone):
-				return rid, false, fieldError(p+".tone", "not a ringer of "+e.Vendor)
 			case seen[[2]string{e.Tag, e.Vendor}]:
 				return rid, false, fieldError(p, "tag and vendor appear twice")
+			case prov.ValidRingTone(prov.Vendor(e.Vendor), e.Tone):
+			case strings.HasPrefix(e.Tone, prov.CustomPrefix):
+				name, _ := prov.CustomToneName(e.Tone)
+				switch id, ok := customs[name]; {
+				case !prov.CustomRingSupported(prov.Vendor(e.Vendor)):
+					return rid, false, fieldError(p+".tone", "custom tones are not provisioned to "+e.Vendor+" phones")
+				case !ok:
+					return rid, false, fieldError(p+".tone", "no such tone in the library")
+				default:
+					toneIDs[i] = sql.NullInt64{Int64: id, Valid: true}
+				}
+			default:
+				return rid, false, fieldError(p+".tone", "not a ringer of "+e.Vendor)
 			}
 			seen[[2]string{e.Tag, e.Vendor}] = true
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM ring_map WHERE COALESCE(group_id, 0) = COALESCE($1::bigint, 0)`, gid); err != nil {
 			return rid, false, err
 		}
-		for _, e := range in {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO ring_map (group_id, tag, vendor, tone) VALUES ($1, $2, $3, $4)`,
-				gid, e.Tag, e.Vendor, e.Tone); err != nil {
+		for i, e := range in {
+			tone := e.Tone
+			if toneIDs[i].Valid {
+				tone = "custom"
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO ring_map (group_id, tag, vendor, tone, custom_tone_id) VALUES ($1, $2, $3, $4, $5)`,
+				gid, e.Tag, e.Vendor, tone, toneIDs[i]); err != nil {
 				return rid, false, err
 			}
 		}
@@ -193,9 +233,10 @@ func (s *Store) ringInfo(ctx context.Context, phoneID int64, v prov.Vendor, mode
 	// Global rows first, then the group's, so the group's overwrite.
 	tones := map[string]string{}
 	mrows, err := s.db.QueryContext(ctx, `
-		SELECT tag, tone FROM ring_map
-		WHERE vendor = $2 AND (group_id IS NULL OR group_id = (SELECT group_id FROM phones WHERE id = $1))
-		ORDER BY group_id IS NOT NULL`, phoneID, string(v))
+		SELECT m.tag, CASE WHEN m.custom_tone_id IS NULL THEN m.tone ELSE $3 || t.name END
+		FROM ring_map m LEFT JOIN ringtones t ON t.id = m.custom_tone_id
+		WHERE m.vendor = $2 AND (m.group_id IS NULL OR m.group_id = (SELECT group_id FROM phones WHERE id = $1))
+		ORDER BY m.group_id IS NOT NULL`, phoneID, string(v), prov.CustomPrefix)
 	if err != nil {
 		return prov.RingInfo{}, err
 	}
@@ -210,5 +251,14 @@ func (s *Store) ringInfo(ctx context.Context, phoneID int64, v prov.Vendor, mode
 	if err := mrows.Err(); err != nil {
 		return prov.RingInfo{}, err
 	}
-	return prov.NewRingInfo(v, model, tags, tones), nil
+	if err := mrows.Close(); err != nil {
+		return prov.RingInfo{}, err
+	}
+	customs := map[string]bool{}
+	for _, id := range tones {
+		if name, ok := prov.CustomToneName(id); ok {
+			customs[name] = true // a choice reaches the library only through its join, so it exists
+		}
+	}
+	return prov.NewRingInfoCustom(v, model, tags, tones, customs), nil
 }
