@@ -13,7 +13,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 13  | Door station extension kind, Door group (S-45, S-46)                          | wip (#225)                  |
 | 14  | Door-open DTMF `*50` (S-47)                                                   | todo (after 13)             |
 | 15  | Setting overrides and WP extras (S-12)                                        | todo                        |
-| 16  | Doorbell webhook (S-48)                                                       | todo (after 13)             |
+| 16  | Doorbell webhook (S-48)                                                       | wip (#284)                  |
 | 17  | Door video preview (S-49)                                                     | todo (code), hw (test)      |
 | 18  | vCard phonebook slot (S-31), partial                                          | todo                        |
 | 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)    | todo                        |
