@@ -239,6 +239,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Codes, err = s.featureCodes(ctx); err != nil {
 		return d, prov.Template{}, err
 	}
+	if d.Ring, err = s.ringInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
+		return d, prov.Template{}, err
+	}
 	d.Server = s.prov.server(d.Phone.Vendor, d.Phone.Model)
 	if d.Server.Transport == "tls" {
 		d.Server.SRTP = string(secmedia.Normalize(srtpPolicy, secmedia.Optional))

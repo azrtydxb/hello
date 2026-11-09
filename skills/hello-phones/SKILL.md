@@ -177,6 +177,19 @@ built-in tags come with the server; custom tags are yours to add.
   would get. Use it to explain a ring before changing a rule.
 - A ring group can name its own tag (`ringTag`); the rules can still override it.
 
+## Ring map
+
+The ring map turns a ring tag into a tone on each vendor's phones.
+
+- `getRingMap` (`/ring-map`) shows the vendors' ringer lists, the default tone
+  of every tag and vendor, the global choices and each phone group's overrides.
+- `putRingMap` (`/ring-map`) replaces the global choices as a whole. The tone
+  must be in that vendor's ringer list (silent only where the vendor has it).
+  The change reaches the phones through the automatic resync.
+- `putRingMapGroup` (`/ring-map/groups/{id}`) replaces one phone group's
+  overrides; an empty list removes them. An override wins over the global choice
+  for that group's phones.
+
 ## References
 
 - [Tools](references/tools.md) - every tool with its scope.
