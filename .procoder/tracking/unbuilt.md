@@ -42,7 +42,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P1  | Call events: stream, integration_events, SSE   | done (#205) |
 | P2  | Webhooks: signing, retries, DLQ                | wip (#222)  |
 | P3  | Click-to-call: originate API, /dial, tel:      | wip (#234)  |
-| P4  | Recording links and lookup API                 | wip (#PR)   |
+| P4  | Recording links and lookup API                 | wip (#281)  |
 | P5  | Browser extension (MV3), fixed signing key     | todo        |
 | P6  | HubSpot and internal/crm framework             | todo        |
 | P7  | Zapier                                         | todo        |
