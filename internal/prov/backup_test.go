@@ -49,32 +49,47 @@ func TestSRVAndBackupProvisioning(t *testing.T) {
 		t.Error("poly without a backup has a second server")
 	}
 
-	for _, model := range []string{"WP836", "WP822", "WP856", "GRP2614"} {
+	// Keys per model, from wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83,
+	// wp820_config_1.0.7.90 and wp856_config_1.0.3.16: every template has P48,
+	// P2333, P103, P29095 and P26040; P2312 (Secondary SIP Server) all but the
+	// WP820; P60056 (Failback Timer) all but the WP810/822/825.
+	for _, c := range []struct {
+		model     string
+		secondary bool // P2312 in the template
+		failback  bool // P60056 in the template
+	}{{"WP836", true, true}, {"WP822", true, false}, {"WP856", true, true}, {"WP820", false, true}, {"GRP2614", true, true}} {
+		model := c.model
 		gs := renderDevice(t, Grandstream, backupData(Grandstream, model, withBackup))
 		for _, want := range []string{"<P47>192.0.2.10:5060</P47>", "<P103>0</P103>", "<P48>192.0.2.10:5060</P48>", "<P2333>192.0.2.21:5062</P2333>"} {
 			if !strings.Contains(gs, want) {
 				t.Errorf("%s lacks %s", model, want)
 			}
 		}
-		for _, not := range []string{"<P29095>", "<P60056>"} {
+		if got := strings.Contains(gs, "<P2312>192.0.2.21:5062</P2312>"); got != c.secondary {
+			t.Errorf("%s: P2312 written = %v, want %v", model, got, c.secondary)
+		}
+		for _, not := range []string{"<P29095>", "<P60056>", "<P26040>"} {
 			if strings.Contains(gs, not) {
 				t.Errorf("%s in A-record mode writes %s", model, not)
 			}
 		}
 		plain := renderDevice(t, Grandstream, backupData(Grandstream, model, udpServer))
-		if strings.Contains(plain, "<P2333>") || strings.Contains(plain, "<P48>") {
-			t.Errorf("%s without a backup writes an outbound proxy", model)
+		if strings.Contains(plain, "<P2333>") || strings.Contains(plain, "<P48>") || strings.Contains(plain, "<P2312>") {
+			t.Errorf("%s without a backup writes a second server or an outbound proxy", model)
 		}
 
 		srv := Server{Host: "sip.hello.example.com", Port: 0, Transport: "udp", DNSMode: DNSSRV, Expiry: 3600}
 		gs = renderDevice(t, Grandstream, backupData(Grandstream, model, srv))
-		for _, want := range []string{"<P47>sip.hello.example.com</P47>", "<P103>1</P103>", "<P29095>1</P29095>", "<P60056>60</P60056>"} {
+		for _, want := range []string{"<P47>sip.hello.example.com</P47>", "<P103>1</P103>", "<P29095>1</P29095>", "<P26040>3</P26040>"} {
 			if !strings.Contains(gs, want) {
 				t.Errorf("%s SRV lacks %s", model, want)
 			}
 		}
-		if strings.Contains(gs, "sip.hello.example.com:") || strings.Contains(gs, "<P2333>") || strings.Contains(gs, "<P48>") {
-			t.Errorf("%s SRV mode writes a port or an outbound proxy", model)
+		if got := strings.Contains(gs, "<P60056>60</P60056>"); got != c.failback {
+			t.Errorf("%s SRV: P60056 written = %v, want %v", model, got, c.failback)
+		}
+		if strings.Contains(gs, "sip.hello.example.com:") || strings.Contains(gs, "<P2333>") || strings.Contains(gs, "<P48>") || strings.Contains(gs, "<P2312>") {
+			t.Errorf("%s SRV mode writes a port, a second server or an outbound proxy", model)
 		}
 	}
 }

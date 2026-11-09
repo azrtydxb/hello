@@ -977,10 +977,11 @@ vCard 3.0 file at `/p/<token>/pb/0.vcf` for the WP816, WP826 and WP836, with
 the same cap. No template setting points a phone at it: the WP8x6
 Administration Guide gives the phone web page "Upload vCard Phonebook" and no
 provisioning key that fetches one. Download the file from the phone's
-provisioning URL and upload it there. The guide's defaults (Remove
-Manually-edited Entries on Download: Yes; Import Group Method: Replace) are
-left as they are: its P-values are not in any Grandstream document Hello was
-checked against, so Hello does not write them.
+provisioning URL and upload it there. What a phonebook download does to the
+entries already on the phone is written from Grandstream's own templates: Remove
+Manually-edited Entries on Download `P333 = 1` (WP8x6, WP810/822/825), Import
+Group Method `P8462 = 0`, Replace (WP8x6 only), and `P1435 = 1`, Clear The Old
+List (WP820 and WP856, which have neither of the first two).
 
 Grandstream WP810 and WP822 firmware (1.0.11.x) treats `P331` as a
 directory and appends `/phonebook.xml`, requesting
@@ -1378,8 +1379,11 @@ page), or with `putPhoneGroupSettings` and `putPhoneSettings`.
   for them; a group may hold keys for both formats, and a phone applies those of
   its own vendor). The override reaches the phone's own file only.
 - **Keys Hello owns** are refused with a 400: Grandstream `P2` (admin password),
-  `P3`, `P34`, `P35`, `P36`, `P47`, `P270`, `P271` (account), `P212`, `P237`
-  (provisioning URL with the token) and `P8433` (CA); Yealink `account.N`
+  `P3`, `P34`, `P35`, `P36`, `P47`, `P270`, `P271` (account 1), the active,
+  server, user, authentication ID, password, name and label keys of accounts 2
+  to 6 (`P401` to `P417`, `P501` to `P517`, `P601` to `P617`, `P1701` to `P1717`,
+  `P1801` to `P1817`), `P212`, `P237` (provisioning URL with the token) and
+  `P8433` (CA); Yealink `account.N`
   identity and registrar keys, `static.auto_provision.server.*`,
   `static.trusted_certificates.*` and `static.security.user_password`.
 - **Secrets.** Mark a value secret and it is sealed in the database (bound to the
@@ -1389,12 +1393,26 @@ page), or with `putPhoneGroupSettings` and `putPhoneSettings`.
   phone knows it: use only a key from the vendor's documentation or
   configuration template.
 
-The spec names some one-off Grandstream WP keys for this (speed dials,
-hotline and off-hook auto dial, wallpaper, VoWLAN target delay, power save, band
-selection). Hello does not provision them itself: their numbers and value ranges
-are not in a Grandstream document Hello could be checked against, so an
-administrator who needs one reads it from Grandstream's configuration template
-for the model and enters it here.
+The spec names some one-off Grandstream WP keys for this. Hello does not give
+them a field of their own; these are the numbers and values in Grandstream's own
+configuration templates (`wp8x6_config_1.0.3.39`,
+`wp810_822_825_config_1.0.11.83`, `wp820_config_1.0.7.90`,
+`wp856_config_1.0.3.16`), and which models have them:
+
+| Setting                          | Key                                                                          | Values                                                                                                                   | Models                       |
+| -------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------- |
+| Speed dial key 0 account, number | `P23001`, `P23003`                                                           | account 0 or 1; number up to 64 characters, matching the dial plan                                                       | WP810/822/825                |
+| Speed dial keys 2 to 9           | `P23011`/`P23013`, then every five (`P23016`/`P23018` ... `P23046`/`P23048`) | as key 0                                                                                                                 | WP810/822/825                |
+| Multi-function button            | `P22258`, `P23051`, `P23053`                                                 | 0 PTT/Paging, 1 Mute, 2 SAFE/Panic, 3 Speed dial, 4 Disable; account; number                                             | WP820                        |
+| Off-hook auto dial, delay (s)    | `P71`, `P8388`                                                               | string; 0 to 30 (WP810/822/825) or 0 to 60 (WP820)                                                                       | WP810/820/822/825            |
+| Wallpaper                        | `P2916`, `P2917`                                                             | 0 Default, 1 Download, 2 Uploaded; server path                                                                           | WP810/820/822/825            |
+| VoWLAN target delay              | `P82281`                                                                     | 0 Low, 1 Medium, 2 High                                                                                                  | WP816/826/836, WP810/822/825 |
+| Wi-Fi power saving               | `P82269`                                                                     | WP8x6: 0 Generic, 1 Disabled, 2 U-APSD. WP810/822/825: 0 Optimum, 1 Relaxed Fast-PS, 2 Disable During Calling, 3 Disable | WP816/826/836, WP810/822/825 |
+| Wi-Fi band                       | `P25438`                                                                     | 0 5G and 2.4G, 1 2.4G, 2 5G (WP820: `P25420` 2.4G and `P25421` 5G, each 0 or 1)                                          | WP816/826/836 (WP820)        |
+| Side key                         | `P82317`                                                                     | WP8x6: 0 PTT/Paging, 2 Alarm, 4 None. WP856: 0 PTT, 1 Mute, 3 Speed Dial, 4 Disable, 5 Scan, 6 Open the app              | WP816/826/836, WP856         |
+
+The WP856's `P23001`/`P23003` are the account and user ID of an expansion key,
+not the handset speed dial. Check the model's template before you set a key.
 
 ## SRV records and backup servers
 
@@ -1408,23 +1426,25 @@ Wi-Fi handset), so leave both off until it has.
 registrars, at most two; the first is written to the phones that take one. List
 the other HA nodes here.
 
-| Vendor      | Keys written                                                                                                                                               |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.1.sip_server.2.address`, `.port`, `.transport_type = 0`, `.expires`                                                                               |
-| Poly        | `reg.1.server.2.address`, `.port`, `.transport = "UDPOnly"`, `.expires`                                                                                    |
-| Grandstream | `P48` Outbound Proxy (the primary, `host:port`) and `P2333` Backup Outbound Proxy (the backup); the phone uses the backup when the primary does not answer |
+| Vendor      | Keys written                                                                                                                                                                                                                                  |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.1.sip_server.2.address`, `.port`, `.transport_type = 0`, `.expires`                                                                                                                                                                  |
+| Poly        | `reg.1.server.2.address`, `.port`, `.transport = "UDPOnly"`, `.expires`                                                                                                                                                                       |
+| Grandstream | `P48` Outbound Proxy (the primary, `host:port`), `P2333` Backup Outbound Proxy (the backup) and, on the WP8x6, WP810/822/825 and WP856, `P2312` Secondary SIP Server (the backup); the phone uses the backup when the primary does not answer |
 
 Snom and Fanvil get none: no key for a second registrar is in a vendor
 document Hello was checked against. A phone that registers over TLS gets none
 (the TLS registrar has no backup setting). Taking the setting away later does
-not clear `P2333` on a Grandstream phone: put `P2333` with an empty value in the
-phone group's setting overrides, then resync.
+not clear `P2333` or `P2312` on a Grandstream phone: put them with an empty value
+in the phone group's setting overrides, then resync.
 
 **DNS SRV (Grandstream).** `HELLO_PROV_SIP_SRV` (chart value
 `control.provisioning.sipSrv`) is a DNS name. Grandstream phones are then
 written `P103 = 1` (DNS Mode: SRV), register with that name (`P47`, no port),
-`P29095 = 1` (register with the next server before failing calls over to it)
-and `P60056 = 60` (failback timer, minutes). Every Grandstream file carries
+`P29095 = 1` (register with the next server before failing calls over to it),
+`P26040 = 3` (failback follows the failback timer) and `P60056 = 60` (failback
+timer, minutes; the WP810/822/825 template has no such key, so those phones keep
+their default of 60). Every Grandstream file carries
 `P103 = 0` otherwise, so a phone taken out of SRV mode goes back to A records.
 Other vendors keep the A-record address: their SRV settings (DNS-NAPTR) are not
 plain SRV.
@@ -1452,38 +1472,52 @@ templates (the WP8x6 template has the same settings under the same names); see
 ## Provisioning hardening (Grandstream WP, Yealink TR-069)
 
 Every Grandstream WP model (WP810 to WP856) is written these settings, so a
-handset cannot be reconfigured or reached around Hello:
+handset cannot be reconfigured or reached around Hello. The keys, values and
+which models define them are from Grandstream's own configuration templates
+(`wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`,
+`wp820_config_1.0.7.90`, `wp856_config_1.0.3.16`); a key is written only to the
+models whose template has it.
 
-| Setting                                 | Key      | Value                                   |
-| --------------------------------------- | -------- | --------------------------------------- |
-| TR-069 enabled                          | `P1409`  | `0`                                     |
-| TR-069 ACS URL                          | `P4503`  | empty                                   |
-| Disable SSH                             | `P276`   | `1`                                     |
-| User web access                         | `P8469`  | `0` (the admin login stays)             |
-| Configuration via the keypad menu       | `P1357`  | `1` (basic settings only)               |
-| Disable direct IP calls                 | `P1310`  | `1`                                     |
-| Accept incoming SIP from the proxy only | `P2347`  | `1` (the auto-answer restriction, S-32) |
-| Allow SIP reset                         | `P26015` | `0`                                     |
+| Setting                                 | Key      | Value                                   | Models               |
+| --------------------------------------- | -------- | --------------------------------------- | -------------------- |
+| TR-069 enabled                          | `P1409`  | `0`                                     | all                  |
+| TR-069 ACS URL                          | `P4503`  | empty                                   | all                  |
+| Disable SSH                             | `P276`   | `1` (off; the templates ask both ways)  | all                  |
+| User web access                         | `P8469`  | `0` (the admin login stays)             | all                  |
+| Configuration via the keypad menu       | `P1357`  | `1` (basic settings only)               | not the WP856        |
+| Disable direct IP calls                 | `P1310`  | `1`                                     | WP8x6, WP810/822/825 |
+| Accept incoming SIP from the proxy only | `P2347`  | `1` (the auto-answer restriction, S-32) | all (per account)    |
+| Allow SIP reset                         | `P26015` | `0`                                     | all                  |
+| Firmware upgrade confirmation prompt    | `P8375`  | `0` (no prompt)                         | WP8x6                |
+| Disable firmware upgrade confirmation   | `P84988` | `1` (no prompt)                         | WP810/822/825        |
 
 Yealink phones are written `static.managementserver.enable = 0` (TR-069 off).
 TR-069 is turned off on purpose: it is a way for a phone to be given a different
 server. A site that needs it sets it back with the setting overrides of the phone
 group.
 
-**What is not written, and why.** `P2346` (Authenticate Incoming INVITE):
-Hello does not yet answer a phone's digest challenge on an INVITE it originates,
-so switching it on would fail every call to the phone. `P60082` (Trusted
-Domain Name List), `P84988` (firmware upgrade confirmation), `P1` and `P240`
-(config file authentication) and the AES-encrypted config password `P1359`: no
-Grandstream document available to Hello confirms the format or the key for the
-WP models. SSH, TR-069 and similar keys for Poly, Snom and Fanvil are not
-written either, for the same reason.
+**What is not written, and why.**
+
+- `P2346` (Authenticate Incoming INVITE, 0 No, 1 Yes): Hello does not yet answer
+  a phone's digest challenge on an INVITE it originates, so switching it on would
+  fail every call to the phone.
+- `P60082` (Trusted Domain Name List, up to 256 characters; WP8x6 and
+  WP810/822/825) is used with `P2311` (Check Domain Certificates, RFC 5922). The
+  templates do not give the list format, and a wrong list would fail TLS
+  registration.
+- `P240` (Authenticate Conf File) and `P1359` (XML Config File Password): the
+  phone would authenticate the files it fetches, and Hello serves plain files
+  over HTTPS with a token. `P1` is in no WP template.
+- SSH, TR-069 and similar keys for Poly, Snom and Fanvil are not written either:
+  no key is confirmed.
 
 **Check on a phone.** `P2347 = 1` makes the phone drop SIP that does not come
 from its server address. If incoming calls stop arriving, set `P2347 = 0` in the
 group's setting overrides and report it. The keys are from Grandstream's
-GRP261x and WP810/822/825 configuration templates and are not confirmed on a
-WP836, WP856 or WP822.
+configuration templates and are not confirmed on a WP836, WP856 or WP822. On a
+Wi-Fi handset check that the keypad menu at `P1357 = 1` still allows the Wi-Fi
+setup; the WP810/822/825 template also has `P1357 = 4` (basic and network
+settings) and the WP820 `3`.
 
 ## Security model and its limits
 

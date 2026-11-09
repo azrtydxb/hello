@@ -148,7 +148,7 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 		d.Phone.Family = GrandstreamFamily(d.Phone.Model)
 		if d.Book != nil {
 			b := *d.Book
-			b.RefreshMinutes = BookRefreshFor(d.Phone.Family, b.RefreshMinutes)
+			b.RefreshMinutes = BookRefreshForPhone(d.Phone.Family, d.Phone.WP, b.RefreshMinutes)
 			d.Book = &b
 		}
 	}
