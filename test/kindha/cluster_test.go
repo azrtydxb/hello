@@ -15,7 +15,8 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// The kind lab: the real kw manifests (deploy/kuvryn-sync/kw/resources.yaml)
+// The kind lab: the real kw manifests (deploy/kuvryn-sync/kw/resources.yaml
+// plus the VIP go-live patch)
 // applied to a kind cluster with only what a laptop-sized lab must change
 // patched in (images, node names, the VIP, the NIC, the API server's address
 // and the dispatcher's destination), so what runs is what kw runs.
@@ -231,9 +232,29 @@ func (l *labEnv) waitVIP(t *testing.T, d time.Duration, skip ...string) string {
 func kwResources(t *testing.T) []map[string]any {
 	t.Helper()
 	_, file, _, _ := runtime.Caller(0)
-	raw, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "deploy", "kuvryn-sync", "kw", "resources.yaml"))
+	root := filepath.Join(filepath.Dir(file), "..", "..")
+	raw, err := os.ReadFile(filepath.Join(root, "deploy", "kuvryn-sync", "kw", "resources.yaml"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	// kw runs without the VIP until the user's go-live; the lab proves the
+	// manifests as they are after it (deploy/kuvryn-sync/kamailio-vip).
+	if patch := filepath.Join(root, "deploy", "kuvryn-sync", "kamailio-vip", "go-live.patch"); fileExists(patch) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "deploy", "kuvryn-sync", "kw"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "deploy", "kuvryn-sync", "kw", "resources.yaml"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		apply := exec.Command("git", "apply", patch)
+		apply.Dir = dir
+		if out, err := apply.CombinedOutput(); err != nil {
+			t.Fatalf("the VIP go-live patch does not apply: %v\n%s", err, out)
+		}
+		if raw, err = os.ReadFile(filepath.Join(dir, "deploy", "kuvryn-sync", "kw", "resources.yaml")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	var out []map[string]any
@@ -248,6 +269,8 @@ func kwResources(t *testing.T) []map[string]any {
 	}
 	return out
 }
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }
 func asList(v any) []any         { l, _ := v.([]any); return l }

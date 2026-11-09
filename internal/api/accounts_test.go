@@ -55,6 +55,7 @@ func (f *acctFake) SessionActor(_ context.Context, h []byte) (auth.Actor, error)
 		if a.UserID > 0 {
 			if u, ok := f.users[a.UserID]; ok {
 				a.Role, a.MustChangePassword = u.Role, u.MustChangePassword
+				a.MustEnrollMFA = u.TOTPRequired && !u.TOTPEnabled
 				if !u.Enabled {
 					return auth.Actor{}, auth.ErrNoCredentials
 				}
@@ -115,7 +116,7 @@ func (f *acctFake) UserForLogin(_ context.Context, name string) (store.Login, er
 	defer f.mu.Unlock()
 	for id, u := range f.users {
 		if u.Username == name {
-			return store.Login{ID: id, Hash: f.hashes[id], Enabled: u.Enabled, Role: u.Role}, nil
+			return store.Login{ID: id, Hash: f.hashes[id], Enabled: u.Enabled, Role: u.Role, TOTPEnabled: u.TOTPEnabled}, nil
 		}
 	}
 	return store.Login{}, store.ErrNotFound
@@ -338,8 +339,16 @@ func (f *acctFake) UpdateVoicemailBox(_ context.Context, _ string, ext int64, c 
 	if c.Greeting != nil {
 		b.GreetingObject = *c.Greeting
 	}
+	if c.PromptLanguage != nil {
+		b.PromptLanguage = *c.PromptLanguage
+	}
 	f.boxes[ext] = b
 	return b, nil
+}
+
+// GetTTSSettings reports no key, so a language change pre-generates nothing.
+func (f *acctFake) GetTTSSettings(context.Context) (store.TTSSettings, error) {
+	return store.TTSSettings{}, nil
 }
 
 func (f *acctFake) ListVoicemailMessages(_ context.Context, box int64, _ bool) ([]store.VoicemailMessage, error) {
@@ -782,6 +791,24 @@ func TestSelfServiceActions(t *testing.T) {
 			if rec := acctCall(h, "alice", "PUT", ext+"/voicemail", body); rec.Code != 400 {
 				t.Errorf("%v = %d, want 400", body, rec.Code)
 			}
+		}
+		// The box language (pbx-gaps S-20): the owner may set it, and clear it.
+		lang := wantJSON(t, acctCall(h, "alice", "PUT", ext+"/voicemail", map[string]any{"promptLanguage": " NL "}), 200, "language")
+		if lang["promptLanguage"] != "nl" {
+			t.Fatalf("language = %v", lang)
+		}
+		if langs, _ := lang["languages"].([]any); len(langs) != 2 {
+			t.Fatalf("languages = %v, want en and nl", lang["languages"])
+		}
+		if rec := acctCall(h, "alice", "PUT", ext+"/voicemail", map[string]any{"promptLanguage": "klingon"}); rec.Code != 400 {
+			t.Errorf("an unknown language = %d, want 400", rec.Code)
+		}
+		if got := wantJSON(t, acctCall(h, "alice", "GET", ext+"/voicemail", nil), 200, "box"); got["promptLanguage"] != "nl" || got["hasPin"] != true {
+			t.Fatalf("the language change cost the PIN or was not kept: %v", got)
+		}
+		lang = wantJSON(t, acctCall(h, "alice", "PUT", ext+"/voicemail", map[string]any{"promptLanguage": ""}), 200, "clear")
+		if lang["promptLanguage"] != "" {
+			t.Fatalf("a cleared language = %v", lang)
 		}
 		put := func(parts map[string][]byte) *httptest.ResponseRecorder {
 			var buf bytes.Buffer

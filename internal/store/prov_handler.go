@@ -189,10 +189,10 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT p.mac, p.vendor, p.model, p.label, p.token_enc, p.admin_password_enc, p.template_id, p.blf,
-		       d.id, d.sip_username, d.secret_enc, e.name, e.number, COALESCE(e.call_waiting, TRUE)
+		       d.id, d.sip_username, d.secret_enc, e.name, e.number, COALESCE(e.call_waiting, TRUE), NOT COALESCE(e.voicemail_enabled, TRUE)
 		FROM phones p LEFT JOIN devices d ON d.id = p.device_id LEFT JOIN extensions e ON e.id = d.extension_id
 		WHERE p.id = $1`, phoneID).Scan(&d.Phone.MAC, &d.Phone.Vendor, &d.Phone.Model, &d.Phone.Label, &tokenEnc, &adminEnc,
-		&tplID, &blfJSON, &devID, nullStr(&d.Line.Username), &secEnc, nullStr(&d.Line.DisplayName), nullStr(&d.Line.Label), &d.Line.CallWaiting)
+		&tplID, &blfJSON, &devID, nullStr(&d.Line.Username), &secEnc, nullStr(&d.Line.DisplayName), nullStr(&d.Line.Label), &d.Line.CallWaiting, &d.Line.NoVoicemail)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, prov.Template{}, prov.ErrNotFound
 	}
@@ -236,8 +236,7 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Codes, err = s.featureCodes(ctx); err != nil {
 		return d, prov.Template{}, err
 	}
-	host, port := splitHostPort(s.prov.SIPServer)
-	d.Server = prov.Server{Host: host, Port: port, Transport: "udp", Expiry: int(s.prov.Expiry / time.Second)}
+	d.Server = s.prov.server(d.Phone.Vendor, d.Phone.Model)
 	d.Prov = s.prov.info(token, d.Phone.MAC)
 	d.Time = prov.NewTimeInfo(s.prov.Timezone, s.prov.NTP, time.Now())
 	if d.Book, err = s.bookInfo(ctx, phoneID, token); err != nil {

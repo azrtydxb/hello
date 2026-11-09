@@ -19,6 +19,7 @@ import {
 import { Alert, Button, Spinner } from "./design/azrty/components";
 import type { Role } from "./role";
 import { ForcedPasswordChange } from "./pages/ChangePassword";
+import { ForcedTwoFactor } from "./pages/TwoFactor";
 
 /** The session as the UI knows it. */
 export type AuthState =
@@ -33,6 +34,8 @@ export type AuthState =
       me: Me;
       /** The user has to choose a new password before anything else. */
       mustChangePassword: boolean;
+      /** Two-factor authentication is required of the user and not set up. */
+      mustEnrollMfa: boolean;
     };
 
 /** The auth state for a GET /auth/me answer (null: signed out). */
@@ -44,6 +47,7 @@ function fromMe(me: Me | null): AuthState {
         role: me.role ?? "viewer",
         me,
         mustChangePassword: me.mustChangePassword === true,
+        mustEnrollMfa: me.mustEnrollMfa === true,
       }
     : { status: "signedOut" };
 }
@@ -152,5 +156,6 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     );
   }
   if (state.mustChangePassword) return <ForcedPasswordChange />;
+  if (state.mustEnrollMfa) return <ForcedTwoFactor />;
   return <>{children}</>;
 }

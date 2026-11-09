@@ -10,8 +10,12 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/auth"
@@ -73,6 +77,9 @@ type Store interface {
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
 
 	GetVoicemailBox(ctx context.Context, extensionID int64) (store.VoicemailBox, error)
+	GetVoicemailBoxByID(ctx context.Context, boxID int64) (store.VoicemailBox, error)
+	VoicemailPromptLanguages(ctx context.Context) ([]string, error)
+	QueuePromptLanguages(ctx context.Context) ([]string, error)
 	ListVoicemailBoxes(ctx context.Context) ([]store.VoicemailBoxSummary, error)
 	UpdateVoicemailBox(ctx context.Context, actor string, extensionID int64, c store.VoicemailBoxChange, check store.Check) (store.VoicemailBox, error)
 	ListVoicemailMessages(ctx context.Context, boxID int64, unheardOnly bool) ([]store.VoicemailMessage, error)
@@ -108,6 +115,13 @@ type Store interface {
 	UpdateCalendar(ctx context.Context, actor string, id int64, in store.CalendarInput, check store.Check) (store.Calendar, error)
 	ImportCalendarEntries(ctx context.Context, actor string, id int64, entries []timecond.Entry, replace bool, check store.Check) (store.Calendar, error)
 	DeleteCalendar(ctx context.Context, actor string, id int64, check store.Check) error
+	ListRingTags(ctx context.Context) ([]store.RingTag, error)
+	GetRingTag(ctx context.Context, name string) (store.RingTag, error)
+	CreateRingTag(ctx context.Context, actor string, in store.RingTagInput) (store.RingTag, error)
+	UpdateRingTag(ctx context.Context, actor, name string, in store.RingTagInput) (store.RingTag, error)
+	DeleteRingTag(ctx context.Context, actor, name string) error
+	ListRingRules(ctx context.Context) ([]store.RingRule, error)
+	ReplaceRingRules(ctx context.Context, actor string, in []store.RingRuleInput) ([]store.RingRule, error)
 	ListTimeConditions(ctx context.Context) ([]store.TimeCondition, error)
 	GetTimeCondition(ctx context.Context, id int64) (store.TimeCondition, error)
 	CreateTimeCondition(ctx context.Context, actor string, in store.TimeConditionInput, check store.Check) (store.TimeCondition, error)
@@ -115,6 +129,12 @@ type Store interface {
 	DeleteTimeCondition(ctx context.Context, actor string, id int64, check store.Check) error
 	SetTimeConditionOverride(ctx context.Context, actor string, id int64, mode string) (store.TimeCondition, error)
 	EvaluateTimeCondition(ctx context.Context, id int64, at time.Time, ignoreOverride bool) (store.TimeConditionEvaluation, error)
+	ListFlowCanvases(ctx context.Context) ([]store.FlowCanvas, error)
+	GetFlowCanvas(ctx context.Context, id int64) (store.FlowCanvas, []store.FlowCanvasNode, error)
+	CreateFlowCanvas(ctx context.Context, actor, name, description string) (store.FlowCanvas, error)
+	UpdateFlowCanvas(ctx context.Context, actor string, id int64, c store.FlowCanvasChange) (store.FlowCanvas, error)
+	DeleteFlowCanvas(ctx context.Context, actor string, id int64) error
+	PutFlowLayout(ctx context.Context, actor string, id int64, w store.FlowLayoutWrite) (store.FlowCanvas, []store.FlowCanvasNode, error)
 	ListParkLots(ctx context.Context) ([]store.ParkLot, error)
 	GetParkLot(ctx context.Context, id int64) (store.ParkLot, error)
 	CreateParkLot(ctx context.Context, actor string, in store.ParkLotInput, check store.Check) (store.ParkLot, error)
@@ -229,6 +249,9 @@ type Config struct {
 	// Queues is the call queues shared state (waiting callers, agent login
 	// and pause) in Valkey; nil answers 503 on the live queue routes.
 	Queues QueueLive
+	// Callbacks is the queue callback requests (PostgreSQL); nil answers 503
+	// on the callback routes.
+	Callbacks queue.CallbackStore
 	// SIPDomain is the realm device HA1 values are computed for.
 	SIPDomain  string
 	SessionTTL time.Duration
@@ -248,8 +271,15 @@ type Config struct {
 	PageTestWait time.Duration
 	// Conferences is the conference room persistence and ConferenceLive the
 	// rooms' live state and control queue (spec S-34); nil answers 503.
-	Conferences    ConferenceStore
+	Conferences ConferenceStore
+	// TwoFactor is the TOTP persistence and TwoFALogins its login counter;
+	// nil TwoFactor answers 503 and refuses the login of a 2FA user.
+	TwoFactor      TwoFactorStore
+	TwoFALogins    *prometheus.CounterVec
 	ConferenceLive ConferenceLive
+	// Events is the call-event pipeline (stream, history, tickets); nil
+	// answers 503 on the event routes.
+	Events EventService
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
 	// Objects is the voicemail audio store; nil makes the audio routes and
@@ -295,6 +325,10 @@ type Config struct {
 	// Proposals serves the AI proposal routes (spec ai-agent); nil answers
 	// 503 ai_disabled.
 	Proposals ProposalService
+	// Batches serves the configuration batch routes (spec flow-canvas S-13,
+	// S-14); nil answers 503. BatchMetrics counts them; nil counts nothing.
+	Batches      BatchService
+	BatchMetrics *BatchMetrics
 	// TTS generates prompt audio through OpenRouter; nil means the real
 	// client. Generation only happens on an operator's explicit request.
 	TTS Synthesizer
@@ -315,6 +349,14 @@ type Config struct {
 	// are set by Handler.
 	speech    *ttscache.Cache
 	prewarmMu *sync.Mutex
+	// prewarmKick asks the background worker to pre-generate the prompts of a
+	// language a queue just set. Batchable handlers kick it rather than call
+	// the pre-generation, which uses the speech cache and must not run inside a
+	// batch. Set by Handler.
+	prewarmKick chan struct{}
+	// self is the finished handler (middleware and test wrapper included),
+	// set by Handler: a batch replays its operations through it.
+	self *atomic.Pointer[http.Handler]
 }
 
 type server struct{ Config }
@@ -332,7 +374,10 @@ func Handler(c Config) http.Handler {
 		c.TTS = &tts.Client{}
 	}
 	c.speech, c.prewarmMu = newSpeechCache(c), &sync.Mutex{}
+	c.prewarmKick = make(chan struct{}, 1)
+	c.self = new(atomic.Pointer[http.Handler])
 	s := &server{c}
+	go s.runPrewarmKicks()
 	opts := auth.Options{Cookies: true}
 	if c.AI != nil {
 		opts.Resource, _ = c.AI.Resources()
@@ -343,26 +388,41 @@ func Handler(c Config) http.Handler {
 	for _, rt := range s.routes() {
 		h := s.aiGuard(rt.Pattern, rt.H)
 		if !rt.Public {
-			h = authed(auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, h)))
+			guarded := auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, h))
+			h = authed(guarded)
+			if rt.Pattern == "/api/v1/events/stream" {
+				// A client that cannot send an Authorization header
+				// redeems a single-use ticket instead.
+				h = s.withEventTicket(h, guarded)
+			}
 		}
 		mux.Handle(rt.Method+" "+rt.Pattern, h)
 	}
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.
-	return wrapForTest(http.NewCrossOriginProtection().Handler(mux))
+	h := wrapForTest(http.NewCrossOriginProtection().Handler(mux))
+	c.self.Store(&h)
+	return h
 }
 
 // passwordGate refuses every route but the few a user needs to choose their
-// new password while an admin-set one is still in force.
+// new password while an admin-set one is still in force, and, while 2FA is
+// required of them and not enrolled, to enrol it (spec pbx-gaps S-12).
 func passwordGate(pattern string, next http.Handler) http.Handler {
 	switch pattern {
 	case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password":
 		return next
 	}
+	enrol := strings.HasPrefix(pattern, "/api/v1/me/2fa")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if actor(r).MustChangePassword {
+		a := actor(r)
+		if a.MustChangePassword {
 			writeError(w, http.StatusForbidden, "password_change_required", "choose a new password first")
+			return
+		}
+		if a.MustEnrollMFA && !enrol {
+			writeError(w, http.StatusForbidden, "two_factor_enrolment_required", "set up two-factor authentication first")
 			return
 		}
 		next.ServeHTTP(w, r)

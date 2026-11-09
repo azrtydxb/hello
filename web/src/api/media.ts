@@ -25,6 +25,8 @@ export interface VoicemailBoxSummary {
   name: string;
   unheard: number;
   total: number;
+  /** The box's own prompt language; "" when it inherits. */
+  promptLanguage?: string;
 }
 
 /** GET /api/v1/voicemail/boxes, ordered by extension number. */
@@ -60,7 +62,45 @@ export interface VoicemailBoxDetail {
    * its own is then spoken in the AI voice ("Default (AI voice)").
    */
   aiVoice?: boolean;
+  /** The box's own prompt language ("en", "nl"); "" when it inherits. */
+  promptLanguage?: string;
 }
+
+/** The languages a box can speak, by code, in the words the console shows. */
+export const PROMPT_LANGUAGE_LABELS: Record<string, string> = {
+  en: "English",
+  nl: "Dutch (Nederlands)",
+};
+
+/** The label of a language code; an unknown code shows as itself. */
+export const promptLanguageLabel = (code: string): string =>
+  PROMPT_LANGUAGE_LABELS[code] ?? code;
+
+/** GET and PUT /api/v1/voicemail/boxes/{id}/language. */
+export interface VoicemailBoxLanguage {
+  /** The box's own setting; "" inherits the deployment language. */
+  promptLanguage: string;
+  /** What callers hear for this box now. */
+  effective: string;
+  /** The languages a box can be set to. */
+  languages: string[];
+}
+
+/** GET /api/v1/voicemail/boxes/{id}/language, {id} being the box id. */
+export const getBoxLanguage = (boxId: Id, signal?: AbortSignal) =>
+  request<VoicemailBoxLanguage>(
+    "GET",
+    `/api/v1/voicemail/boxes/${seg(boxId)}/language`,
+    { signal },
+  );
+
+/** PUT /api/v1/voicemail/boxes/{id}/language; "" clears it (inherit). */
+export const setBoxLanguage = (boxId: Id, promptLanguage: string) =>
+  request<VoicemailBoxLanguage>(
+    "PUT",
+    `/api/v1/voicemail/boxes/${seg(boxId)}/language`,
+    { body: { promptLanguage } },
+  );
 
 /** The audio slots of a box. */
 export type GreetingSlot = "greeting" | "busy" | "unreachable" | "name";

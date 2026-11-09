@@ -43,12 +43,17 @@ type User struct {
 	// ExtensionIDs are all the extensions the user manages.
 	ExtensionIDs   []int64             `json:"extensionIds"`
 	VoicemailEmail VoicemailEmailPrefs `json:"voicemailEmail"`
-	CreatedAt      time.Time           `json:"createdAt"`
+	// TOTPEnabled is whether the user has active 2FA; TOTPRequired is the
+	// admin's per-user demand for it (spec pbx-gaps S-12). Neither holds a
+	// secret.
+	TOTPEnabled  bool      `json:"totpEnabled"`
+	TOTPRequired bool      `json:"totpRequired"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 const userCols = `id, username, display_name, email, auth_method, role, enabled, must_change_password, extension_id,
 	coalesce((SELECT json_agg(extension_id ORDER BY position, extension_id) FROM user_extensions WHERE user_id = users.id), '[]'::json)::text,
-	vm_email_notify, vm_email_attach, vm_email_after, created_at`
+	vm_email_notify, vm_email_attach, vm_email_after, totp_enabled_at IS NOT NULL, totp_required, created_at`
 
 func scanUser(r interface{ Scan(...any) error }) (User, error) {
 	var (
@@ -56,7 +61,7 @@ func scanUser(r interface{ Scan(...any) error }) (User, error) {
 		exts string
 	)
 	err := r.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.AuthMethod, &u.Role, &u.Enabled, &u.MustChangePassword,
-		&u.ExtensionID, &exts, &u.VoicemailEmail.Notify, &u.VoicemailEmail.Attach, &u.VoicemailEmail.After, &u.CreatedAt)
+		&u.ExtensionID, &exts, &u.VoicemailEmail.Notify, &u.VoicemailEmail.Attach, &u.VoicemailEmail.After, &u.TOTPEnabled, &u.TOTPRequired, &u.CreatedAt)
 	if err != nil {
 		return u, err
 	}
@@ -167,6 +172,10 @@ type AccountChange struct {
 	PasswordHash *string
 	MustChange   bool
 	Voicemail    *VoicemailEmailPrefs
+	// TOTPRequired demands 2FA of the user (spec pbx-gaps S-12). Requiring it
+	// of an admin needs SetterID to have active 2FA (ErrTwoFactorRequired).
+	TOTPRequired *bool
+	SetterID     int64
 }
 
 // UpdateAccount changes a user. Demoting or disabling the last enabled admin
@@ -204,11 +213,17 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 				must_change_password = CASE WHEN $6::text IS NULL THEN must_change_password ELSE $7 END,
 				vm_email_notify = COALESCE($8, vm_email_notify),
 				vm_email_attach = COALESCE($9, vm_email_attach),
-				vm_email_after = COALESCE($10, vm_email_after)
+				vm_email_after = COALESCE($10, vm_email_after),
+				totp_required = COALESCE($11, totp_required)
 			WHERE id = $1`,
 			id, c.DisplayName, c.Email, string(role), enabled, c.PasswordHash, c.MustChange,
-			prefNotify(c.Voicemail), prefAttach(c.Voicemail), prefAfter(c.Voicemail)); err != nil {
+			prefNotify(c.Voicemail), prefAttach(c.Voicemail), prefAfter(c.Voicemail), c.TOTPRequired); err != nil {
 			return err
+		}
+		if c.TOTPRequired != nil && *c.TOTPRequired && role == auth.RoleAdmin {
+			if err := requireActive2FA(ctx, tx, c.SetterID); err != nil {
+				return err
+			}
 		}
 		if c.ExtensionIDs != nil {
 			if err := setUserExtensions(ctx, tx, id, *c.ExtensionIDs); err != nil {
@@ -231,6 +246,11 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 			action = "enable"
 		case c.Role != nil && cur.Role != role:
 			action = "set-role:" + string(role)
+		case c.TOTPRequired != nil && cur.TOTPRequired != *c.TOTPRequired:
+			action = "require-2fa"
+			if !*c.TOTPRequired {
+				action = "unrequire-2fa"
+			}
 		}
 		// A change of extensions alone is audited as the link event only.
 		onlyLink := action == "update" && c.ExtensionIDs != nil && c.DisplayName == nil && c.Email == nil && c.Voicemail == nil
@@ -382,6 +402,8 @@ type Login struct {
 	Hash    string
 	Enabled bool
 	Role    auth.Role
+	// TOTPEnabled is whether the login needs a second factor.
+	TOTPEnabled bool
 }
 
 // UserForLogin returns the user named username with its password hash; the
@@ -389,8 +411,8 @@ type Login struct {
 func (s *Store) UserForLogin(ctx context.Context, username string) (Login, error) {
 	var l Login
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, password_hash, enabled, role FROM users WHERE username = $1 AND auth_method = 'local'`, username).
-		Scan(&l.ID, &l.Hash, &l.Enabled, &l.Role)
+		`SELECT id, password_hash, enabled, role, totp_enabled_at IS NOT NULL FROM users WHERE username = $1 AND auth_method = 'local'`, username).
+		Scan(&l.ID, &l.Hash, &l.Enabled, &l.Role, &l.TOTPEnabled)
 	return l, mapErr(err)
 }
 

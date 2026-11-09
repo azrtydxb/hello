@@ -74,6 +74,11 @@ func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *s
 	}
 	c.mu.Lock()
 	c.stages = &callStages{visited: append(append([]string{}, visited...), ext), ext: ext, feats: e}
+	if len(visited) > 0 {
+		// Reached through a forward: its voicemail (DND, busy, unreachable)
+		// is this extension's box, not the originally dialled one.
+		c.vmExt = ext
+	}
 	c.mu.Unlock()
 	if e.ForwardAlways != "" {
 		c.addTrace(fmt.Sprintf("Extension %s forwards always to %s", ext, e.ForwardAlways))
@@ -124,6 +129,13 @@ func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *s
 		// announcement or voicemail hand-off, or the force switch.
 		c.considerAnchor(snap, bindingEndpoint(targets[0], ext))
 	}
+	if len(targets) == 0 && c.secure {
+		// A sips: call has no fallback to a non-TLS path: no forward, no
+		// voicemail, a plain refusal.
+		s.refuseSecure(req, tx, secureNoTLSBinding, "sips: no device of the extension is registered over TLS")
+		c.record(sip.StatusTemporarilyUnavailable, cdr.SideSystem, "sips: no TLS registration", ResultUnavailable)
+		return
+	}
 	if len(targets) == 0 {
 		// Nothing registered: the no-answer target applies at once, else
 		// voicemail with the unreachable greeting, else 480.
@@ -156,6 +168,20 @@ func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *s
 // except the calling device (Phase 1 ring-all rule). A live-state failure
 // answers 503 and records; it returns nil then.
 func (c *call) bindingsForDevices(tx sip.ServerTransaction, req *sip.Request, snap *snapshot.Snapshot, ext string) []livestate.Binding {
+	targets, err := c.bindingsFor(snap, ext)
+	if err != nil {
+		if tx != nil {
+			c.s.stateDown(tx, req, "bindings", err)
+		}
+		c.record(sip.StatusServiceUnavailable, cdr.SideSystem, "live state unavailable", ResultFailed)
+		return nil
+	}
+	return targets
+}
+
+// bindingsFor is the live bindings of an extension's devices, except the
+// calling device; the error is the live-state failure.
+func (c *call) bindingsFor(snap *snapshot.Snapshot, ext string) ([]livestate.Binding, error) {
 	s := c.s
 	var targets []livestate.Binding
 	for _, d := range snap.DevicesForExtension(ext) {
@@ -166,15 +192,14 @@ func (c *call) bindingsForDevices(tx sip.ServerTransaction, req *sip.Request, sn
 		bs, err := s.deps.State.Bindings(ctx, s.aor(d.Username))
 		cancel()
 		if err != nil {
-			if tx != nil {
-				s.stateDown(tx, req, "bindings", err)
-			}
-			c.record(sip.StatusServiceUnavailable, cdr.SideSystem, "live state unavailable", ResultFailed)
-			return nil
+			return nil, err
+		}
+		if c.secure {
+			bs = secureTargets(bs)
 		}
 		targets = append(targets, bs...)
 	}
-	return targets
+	return targets, nil
 }
 
 // forkBindings adds a leg per binding and starts it; c.begin must have run.
@@ -289,6 +314,14 @@ func (c *call) exhausted(busyAll bool) exhaustion {
 		reason := "no-answer"
 		if busyAll {
 			reason = "busy"
+		}
+		if st.source != "" {
+			// A forward or group failover stage rang this extension: the
+			// box is the one of the extension that last rang, not the one
+			// that was dialled.
+			c.mu.Lock()
+			c.vmExt = st.ext
+			c.mu.Unlock()
 		}
 		c.addTrace(fmt.Sprintf("Extension %s: to voicemail after %s", st.ext, reason))
 		s.m.Forwarded.WithLabelValues(reason).Inc()

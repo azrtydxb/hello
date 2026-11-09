@@ -482,6 +482,13 @@ healthy instance. Either serves any phone and any in-dialog request that
 carries a `Route`: Kamailio keeps nothing Hello needs (registrations are in
 Valkey, the dispatcher view is rebuilt by probes within seconds).
 
+**Status on kw.** The pair runs on master-11 and master-12 and the config for
+the VIP ships, but the VIP itself is off: phones still register at
+`192.168.10.101:30508` and no kube-vip runs. Turning it on (and so moving
+phones) is a separate, deliberate step, `deploy/kuvryn-sync/kamailio-vip`,
+which has its own procedure and undo. The text below describes the VIP form,
+which `test/kindha` proves.
+
 **How it fits together.**
 
 - **The VIP** (`KAMAILIO_EDGE_VIP`, kw `192.168.10.109`) is held by one

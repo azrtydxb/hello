@@ -177,7 +177,8 @@ Record-Route, so they must be the address and port phones really use
   on the shared address; keep `externalTrafficPolicy: Local` and check that
   your load balancer preserves the client address.
 - A UDP load balancer must support mixed UDP and TCP on one port or you
-  serve UDP only.
+  serve UDP only. SIP over TLS adds TCP 5061 (`kamailio.tls`, see
+  [docs/tls.md](tls.md)).
 - Media does not follow: hello-sip still needs a routable address.
   `sip.hostNetwork: false` with `sip.mediaAnchorHost: podIP` works only when
   the pod network is routable from the phones (native routing, BGP), and a
@@ -413,14 +414,14 @@ Helm: a `helm upgrade` or a manual `kubectl apply` beside Sync fights the
 field manager. The chart keeps kw's decisions and changes how they are
 expressed:
 
-| Concern           | kw (raw manifests)                                                              | Chart                                                          |
-| ----------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| hello-sip nodes   | Deployments `hello-sip-1`, `hello-sip-2`, one headless Service each, `Recreate` | One StatefulSet, one headless Service, ordered `RollingUpdate` |
-| Staggered rollout | Rollout gate: a stopping node takes a Valkey token and waits for a READY peer   | Inherent: the next pod is not replaced until the last is ready |
-| Node identity     | Pod name of a Deployment; advertised Service name                               | Stable pod name; advertised pod DNS name                       |
-| Kamailio          | Two instances on master-11/12, VIP 192.168.10.109 (kube-vip), ports 30508/9071  | `replicas`, `vip` option, `nodeSelector`, ports are values     |
-| Secrets           | Five Sync-managed SOPS Secrets                                                  | One existing Secret by reference                               |
-| State services    | PostgreSQL, MinIO, two Valkeys, three Sentinels as Deployments                  | Optional bundled single instances, or external                 |
+| Concern           | kw (raw manifests)                                                                               | Chart                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| hello-sip nodes   | Deployments `hello-sip-1`, `hello-sip-2`, one headless Service each, `Recreate`                  | One StatefulSet, one headless Service, ordered `RollingUpdate` |
+| Staggered rollout | Rollout gate: a stopping node takes a Valkey token and waits for a READY peer                    | Inherent: the next pod is not replaced until the last is ready |
+| Node identity     | Pod name of a Deployment; advertised Service name                                                | Stable pod name; advertised pod DNS name                       |
+| Kamailio          | Two instances on master-11/12; VIP 192.168.10.109 (kube-vip) after the go-live, ports 30508/9071 | `replicas`, `vip` option, `nodeSelector`, ports are values     |
+| Secrets           | Five Sync-managed SOPS Secrets                                                                   | One existing Secret by reference                               |
+| State services    | PostgreSQL, MinIO, two Valkeys, three Sentinels as Deployments                                   | Optional bundled single instances, or external                 |
 
 `test/deploy` renders the chart and compares it with the kw manifests: every
 environment variable kw sets on hello-sip, hello-control and Kamailio must

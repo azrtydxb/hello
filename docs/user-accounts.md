@@ -45,6 +45,76 @@ delete their own account (`409 last_admin`, `self_disable`, `self_delete`).
 OIDC sign-in does not exist in Hello yet; `authMethod` is `local` for every
 user, so a later method can be added without changing the table.
 
+## Two-factor authentication (TOTP)
+
+A user can ask for a 6-digit code from an authenticator app (any RFC 6238
+app: 30-second steps, SHA-1) on top of the password. It is the user's own
+choice, and an administrator can require it. It covers interactive sign-in
+only: API tokens, OAuth grants and service accounts are not asked for a code.
+Users whose only login is a later single sign-on have no local second factor;
+their identity provider enforces it.
+
+**Turning it on.** In **My phone → Profile → Two-factor authentication**,
+choose **Set up**. The page draws a QR code in the browser (no image service
+is contacted) and shows the secret as text. Type the code the app shows to
+confirm. Hello then shows ten recovery codes once. Each works one time if the
+device is lost. `POST /api/v1/me/2fa/setup` and `.../enable` do the same over
+the API, from a browser session only.
+
+**Signing in.** With 2FA on, the password alone starts no session.
+`POST /api/v1/auth/login` answers `202` with `{"mfa":"required","mfaToken":...}`,
+and `POST /api/v1/auth/login/2fa` takes that token and a code or a recovery
+code, then sets the session cookie. The token is random, stored as a hash,
+valid 5 minutes and usable once.
+
+- A code at or before the last accepted 30-second step is refused, so a
+  code cannot be replayed. One step of clock drift either way is accepted.
+- Five wrong codes end the challenge, and ten wrong codes for one user in ten
+  minutes refuse every challenge of that user. An unknown challenge, a wrong
+  code, a replayed code and a reached limit all answer the same `401`, and the
+  answer never says the clock is the cause.
+- The TOTP secret is stored sealed under `HELLO_SECRET_KEY`. Recovery codes
+  are stored as SHA-256 hashes (they carry 80 random bits). Neither appears in
+  logs, audit rows or metrics. The audit trail records the events (enrol,
+  disable, recovery code used, reset) with user ids only.
+- The profile page warns when fewer than 3 recovery codes are left and can
+  replace them (this needs a valid code). If the database is unavailable, a
+  2FA login fails closed.
+
+**Turning it off.** The user can turn it off with the password and a code,
+unless it is required of them.
+
+### Requiring it
+
+- Per user: **Users → Edit → Require two-factor authentication**
+  (`totpRequired` on `PATCH /api/v1/users/{id}`).
+- Per role: **Users → Two-factor policy**, or `PUT /api/v1/auth/2fa-policy`
+  with `require2faRoles`. The default is empty.
+
+A required user who has not enrolled can sign in with the password but then
+reaches only the enrolment page (`403 two_factor_enrolment_required` on every
+other call) until it is done.
+
+**Lockout guard.** Requiring 2FA of admins (the `admin` role in the policy, or
+`totpRequired` on an admin) is refused with `409 two_factor_required` unless
+the administrator making the change has 2FA on, so a policy change cannot
+lock every admin out.
+
+### Reset and break-glass
+
+An administrator resets a user's 2FA with **Users → Reset 2FA** or
+`DELETE /api/v1/users/{id}/2fa`. It removes the secret and recovery codes and
+ends the user's sessions, and is audited. The API refuses to reset the only
+enabled admin who has 2FA (`409 last_enrolled_admin`). The break-glass form
+needs shell access to the control plane and has no such guard:
+
+```
+hello-control user 2fa-reset <username>
+```
+
+The metric `hello_2fa_logins_total{result}` counts second-step outcomes
+(`challenge`, `ok`, `recovery`, `refused`).
+
 ## Linking extensions
 
 In the user dialog, tick the extensions the user manages. An extension belongs

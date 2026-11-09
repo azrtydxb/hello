@@ -290,17 +290,60 @@ func strOf(l []any) []string {
 // kwDeployment returns the named kw Deployment as a generic document.
 func kwObject(t *testing.T, kind, name string) object {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "kuvryn-sync", "kw", "resources.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, o := range decodeAll(t, string(raw)) {
+	return kwObjectIn(t, false, kind, name)
+}
+
+// kwVIPObject is kwObject in the manifests as they are once the Kamailio VIP
+// go-live patch (deploy/kuvryn-sync/kamailio-vip) has been applied.
+func kwVIPObject(t *testing.T, kind, name string) object {
+	t.Helper()
+	return kwObjectIn(t, true, kind, name)
+}
+
+func kwObjectIn(t *testing.T, vip bool, kind, name string) object {
+	t.Helper()
+	for _, o := range decodeAll(t, kwRaw(t, vip)) {
 		if str(o["kind"]) == kind && str(dig(o, "metadata", "name")) == name {
 			return o
 		}
 	}
-	t.Fatalf("%s/%s not in the kw manifests", kind, name)
+	t.Fatalf("%s/%s not in the kw manifests (vip=%v)", kind, name, vip)
 	return nil
+}
+
+// kwRaw is deploy/kuvryn-sync/kw/resources.yaml; with vip it is the file after
+// deploy/kuvryn-sync/kamailio-vip/go-live.patch, applied in a temporary
+// directory (the patch must always apply cleanly: it is the user-triggered
+// step that moves phones to the VIP).
+func kwRaw(t *testing.T, vip bool) string {
+	t.Helper()
+	root := repoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "deploy", "kuvryn-sync", "kw", "resources.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch := filepath.Join(root, "deploy", "kuvryn-sync", "kamailio-vip", "go-live.patch")
+	if _, err := os.Stat(patch); !vip || err != nil {
+		// No patch left: the go-live commit applied it and removed the file.
+		return string(raw)
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "deploy", "kuvryn-sync", "kw"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "deploy", "kuvryn-sync", "kw", "resources.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "apply", patch)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("deploy/kuvryn-sync/kamailio-vip/go-live.patch no longer applies to kw/resources.yaml (regenerate it, see its README): %v\n%s", err, out)
+	}
+	patched, err := os.ReadFile(filepath.Join(dir, "deploy", "kuvryn-sync", "kw", "resources.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(patched)
 }
 
 // kwOnlyEnv lists kw env vars the chart deliberately does not render by
@@ -335,6 +378,8 @@ func TestChartEnvParityWithKw(t *testing.T) {
 		"--set", "kamailio.vip.legacy=true",
 		"--set", "kamailio.vip.apiServerAddress=127.0.0.1",
 	)
+	// The chart option renders the VIP form, so it is compared with kw as it
+	// is after the VIP go-live patch.
 	pairs := []struct {
 		name        string
 		kw          object
@@ -343,11 +388,11 @@ func TestChartEnvParityWithKw(t *testing.T) {
 		init        bool
 		chartInit   bool
 	}{
-		{"hello-sip", kwObject(t, "Deployment", "hello-sip-1"), findObj(t, objs, "StatefulSet", "hello-sip"), "hello-sip", false, false},
-		{"hello-control", kwObject(t, "Deployment", "hello-control"), findObj(t, objs, "Deployment", "hello-control"), "hello-control", false, false},
-		{"hello-control migrate", kwObject(t, "Deployment", "hello-control"), findObj(t, objs, "Deployment", "hello-control"), "migrate", true, true},
-		{"kamailio", kwObject(t, "Deployment", "kamailio"), findObj(t, objs, "Deployment", "hello-kamailio"), "kamailio", false, false},
-		{"hello-ui", kwObject(t, "Deployment", "hello-ui"), findObj(t, objs, "Deployment", "hello-ui"), "hello-ui", false, false},
+		{"hello-sip", kwVIPObject(t, "Deployment", "hello-sip-1"), findObj(t, objs, "StatefulSet", "hello-sip"), "hello-sip", false, false},
+		{"hello-control", kwVIPObject(t, "Deployment", "hello-control"), findObj(t, objs, "Deployment", "hello-control"), "hello-control", false, false},
+		{"hello-control migrate", kwVIPObject(t, "Deployment", "hello-control"), findObj(t, objs, "Deployment", "hello-control"), "migrate", true, true},
+		{"kamailio", kwVIPObject(t, "Deployment", "kamailio"), findObj(t, objs, "Deployment", "hello-kamailio"), "kamailio", false, false},
+		{"hello-ui", kwVIPObject(t, "Deployment", "hello-ui"), findObj(t, objs, "Deployment", "hello-ui"), "hello-ui", false, false},
 	}
 	// Env vars the chart sets differently on purpose: the node identity of a
 	// StatefulSet pod replaces kw's per-node Deployments and preStop stagger.

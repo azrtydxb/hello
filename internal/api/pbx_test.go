@@ -12,11 +12,13 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/azrtydxb/hello/internal/store"
 	"github.com/valkey-io/valkey-go"
 )
 
@@ -144,6 +146,7 @@ func startMinio(t *testing.T) *MinioObjects {
 		// service container): wait for it and create the bucket, exactly as
 		// the throwaway-container path below does.
 		ensureSharedBuckets(t, o)
+		lastMinio.Store(o)
 		return o
 	}
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -189,6 +192,7 @@ func startMinio(t *testing.T) *MinioObjects {
 		t.Fatal(err)
 	}
 	waitBucket(t, o)
+	lastMinio.Store(o)
 	return o
 }
 
@@ -218,8 +222,28 @@ func waitBucket(t *testing.T, o *MinioObjects) {
 // isSlowDown reports whether err is the store throttling or briefly refusing
 // writes (S3 SlowDown: "please reduce your request rate").
 func isSlowDown(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "reduce your request rate")
+	// An overloaded MinIO also answers the retry of a throttled upload before
+	// it has read the body, which the client reports as a short body.
+	return err != nil && (strings.Contains(err.Error(), "reduce your request rate") ||
+		strings.Contains(err.Error(), "did not provide the number of bytes specified"))
 }
+
+// isNoBucket reports whether err is a write to a bucket the store does not
+// (yet) hold.
+func isNoBucket(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "bucket does not exist")
+}
+
+// isShortBody reports whether the store saw fewer body bytes than the
+// Content-Length (S3 IncompleteBody): an overloaded MinIO that timed out
+// reading the upload. Fixture bodies are rebuilt per attempt, so it is
+// safe to resend.
+func isShortBody(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "did not provide the number of bytes specified")
+}
+
+// lastMinio is the store the fixtures last started, for re-ensuring buckets.
+var lastMinio atomic.Pointer[MinioObjects]
 
 // retrySlowDown runs a test fixture write against the shared CI MinIO. The
 // client already retries SlowDown for about ten seconds; the service
@@ -234,8 +258,18 @@ func retrySlowDown(t *testing.T, op func() error) {
 		if err == nil {
 			return
 		}
-		if !isSlowDown(err) || time.Now().After(deadline) {
+		missing := isNoBucket(err)
+		short := isShortBody(err)
+		if (!isSlowDown(err) && !missing && !short) || time.Now().After(deadline) {
 			t.Fatal(err)
+		}
+		if missing {
+			// The buckets were ensured once per process, but a MinIO whose
+			// drive was unwritable at that moment can answer the check and
+			// still not hold the bucket when the write lands: ensure again.
+			if o := lastMinio.Load(); o != nil {
+				waitBucket(t, o)
+			}
 		}
 		time.Sleep(time.Second)
 	}
@@ -808,5 +842,39 @@ func TestExtensionCallFeatures(t *testing.T) {
 	got = c.must(http.StatusOK, "GET", path, nil).json(t)
 	if got["dnd"] != true || got["voicemailEnabled"] != false || got["forwardBusy"] != "" {
 		t.Fatalf("get = %v", got)
+	}
+}
+
+// TestValidateRingGroupFailover fails if a ring group's fallback to an
+// extension or another ring group is refused when well formed, accepted when
+// not, or allowed to name the group itself.
+func TestValidateRingGroupFailover(t *testing.T) {
+	base := func(kind, target string) *store.RingGroupInput {
+		return &store.RingGroupInput{
+			Name: "sales", Strategy: "ring-all", RingTimeout: 30, FailureKind: kind, FailureTarget: target,
+			Members: []store.RingGroupMember{{ExtensionID: 1, Position: 1, Weight: 1}},
+		}
+	}
+	for _, tc := range []struct {
+		name         string
+		kind, target string
+		bad          bool
+	}{
+		{"extension", "extension", "300", false},
+		{"extension not a number", "extension", "desk", true},
+		{"extension empty", "extension", "", true},
+		{"group", "ring_group", "support", false},
+		{"group itself", "ring_group", "sales", true},
+		{"group bad name", "ring_group", "a b", true},
+		{"group empty", "ring_group", "", true},
+		{"directory", "directory", "", false},
+		{"directory with a target", "directory", "x", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := validateRingGroup(base(tc.kind, tc.target))
+			if (len(f) > 0) != tc.bad {
+				t.Fatalf("errors = %v, want bad=%v", f, tc.bad)
+			}
+		})
 	}
 }
