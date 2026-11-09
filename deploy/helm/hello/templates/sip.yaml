@@ -109,6 +109,10 @@ spec:
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_SIP_NONCE_SECRET" "key" "nonceSecret") | nindent 12 }}
             - name: HELLO_SIP_RING_TIMEOUT
               value: {{ $sip.ringTimeout | quote }}
+            # Web devices' derived credentials (docs/webrtc.md).
+            {{- include "hello.clientKeyEnv" . | nindent 12 }}
+            - name: HELLO_SIP_MAX_CONTACTS
+              value: {{ $sip.maxContacts | quote }}
             - name: HELLO_SIP_TRUSTED_PROXIES
               value: {{ $sip.trustedProxies | quote }}
             - name: HELLO_SIP_ADVERTISED_ADDR

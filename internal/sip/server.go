@@ -38,11 +38,17 @@ type Config struct {
 	Domain         string // digest realm and AOR host
 	AdvertisedAddr string // host:port written into Via and Contact
 	NonceSecret    []byte
-	MinExpires     time.Duration
-	MaxExpires     time.Duration
-	RingTimeout    time.Duration
-	AuthFailLimit  int
-	StateTimeout   time.Duration
+	// ClientAuthKey and ClientAuthKeyPrevious derive the digest secret of a
+	// web device; empty turns derived credentials off. MaxContacts caps the
+	// bindings of one AOR (10 when zero).
+	ClientAuthKey         string
+	ClientAuthKeyPrevious string
+	MaxContacts           int
+	MinExpires            time.Duration
+	MaxExpires            time.Duration
+	RingTimeout           time.Duration
+	AuthFailLimit         int
+	StateTimeout          time.Duration
 	// CallHeartbeat and CallTTL govern the live call record (10s / 30s).
 	CallHeartbeat time.Duration
 	CallTTL       time.Duration
@@ -774,7 +780,15 @@ func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 		s.authFailed(tx, req, ip, "unknown or disabled device", false)
 		return snapshot.Device{}, false
 	}
-	verdict, check := s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256)
+	var (
+		verdict Verdict
+		check   string
+	)
+	if dev.AuthMode == snapshot.AuthDerived {
+		verdict, check = s.digest.VerifyDerived(creds, req.Method.String(), req.Recipient, ip, dev.Username, s.clientKeys())
+	} else {
+		verdict, check = s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256)
+	}
 	switch verdict {
 	case OK:
 		return s.checkReplay(req, tx, creds.Username, creds.Nonce, creds.Cnonce, creds.Nc, dev)
@@ -821,6 +835,18 @@ func (s *Server) checkReplay(req *sip.Request, tx sip.ServerTransaction, user, n
 		return snapshot.Device{}, false
 	}
 	return dev, true
+}
+
+// clientKeys are the keys a derived credential may have been made under,
+// the current one first.
+func (s *Server) clientKeys() [][]byte {
+	var keys [][]byte
+	for _, k := range []string{s.cfg.ClientAuthKey, s.cfg.ClientAuthKeyPrevious} {
+		if k != "" {
+			keys = append(keys, []byte(k))
+		}
+	}
+	return keys
 }
 
 func (s *Server) challenge(tx sip.ServerTransaction, req *sip.Request, stale bool) {

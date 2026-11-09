@@ -46,6 +46,8 @@ type acctFake struct {
 	touched []string // mutations that reached the store, "op id"
 	audit   []string
 	nextID  int64
+	// clients are the web devices (accounts_clients_test.go).
+	clients []clientRow
 }
 
 func (f *acctFake) SessionActor(_ context.Context, h []byte) (auth.Actor, error) {
@@ -155,6 +157,12 @@ func (f *acctFake) UpdateProfile(_ context.Context, _ string, id int64, c store.
 	}
 	if c.Voicemail != nil {
 		u.VoicemailEmail = *c.Voicemail
+	}
+	if c.RingWeb != nil {
+		u.RingWeb = *c.RingWeb
+	}
+	if c.RingMobile != nil {
+		u.RingMobile = *c.RingMobile
 	}
 	f.mu.Unlock()
 	return f.GetUser(context.Background(), id)
@@ -488,7 +496,7 @@ func newAcctFake(t *testing.T) (*acctFake, http.Handler, *audioFake, *bytes.Buff
 		{ID: 2, Source: "102", Destination: "+3298", Direction: "outbound", Kind: "call", Trunk: "secret-trunk", StartTime: time.Now()},
 	}
 	add := func(id int64, name string, role auth.Role, exts ...int64) {
-		f.users[id] = &store.User{ID: id, Username: name, AuthMethod: "local", Role: role, Enabled: true,
+		f.users[id] = &store.User{ID: id, Username: name, AuthMethod: "local", Role: role, Enabled: true, RingWeb: true, RingMobile: true,
 			VoicemailEmail: store.VoicemailEmailPrefs{Notify: true, Attach: true, After: "none"}}
 		f.hashes[id] = hash
 		f.links[id] = exts
@@ -511,6 +519,7 @@ func newAcctFake(t *testing.T) (*acctFake, http.Handler, *audioFake, *bytes.Buff
 	objs := &audioFake{}
 	logs := &bytes.Buffer{}
 	h := Handler(Config{Store: f, Objects: objs, Log: slog.New(slog.NewTextHandler(logs, nil)), SessionTTL: time.Hour,
+		SIPDomain: testDomain, Clients: f, ClientAuth: testClientAuth(),
 		SMTPDeliver: func(context.Context, mailer.Settings, string, []byte) error { return nil }})
 	return f, h, objs, logs
 }

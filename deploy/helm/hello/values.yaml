@@ -34,7 +34,10 @@ secrets:
   #   minioAccessKey / minioSecretKey
   # and, when postgresql.enabled: postgresUser, postgresPassword.
   # Optional keys (control reads them with optional: true): provider,
-  # base-url, model, api-key (the AI agent).
+  # base-url, model, api-key (the AI agent); clientAuthKey and
+  # clientAuthKeyPrevious (web device credentials, at least 32 bytes, on
+  # control and sip); turnSecret (coturn's static-auth-secret, at least 16
+  # bytes; required when coturn.enabled).
   existingSecret: ""
   # Vendor redirect-service credentials for phone provisioning, a Secret
   # with the keys documented in docs/provisioning.md. Empty: unconfigured.
@@ -128,6 +131,8 @@ sip:
   # refresh plus a probe interval. Lower it only with a cluster DNS TTL to match.
   minReadySeconds: 45
   recordingNotice: true
+  # Bindings one AOR may hold (HELLO_SIP_MAX_CONTACTS).
+  maxContacts: 10
   # required | preferred | none. required: one node per Kubernetes node,
   # which hostNetwork needs (the ports would collide).
   antiAffinity: required
@@ -185,6 +190,67 @@ kamailio:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  podAnnotations: {}
+
+# Browser softphone (docs/webrtc.md). The credentials are derived from keys in
+# the credentials Secret (clientAuthKey, optionally clientAuthKeyPrevious while
+# a key is being replaced); without clientAuthKey web devices are off.
+clients:
+  # Web devices one user may have (HELLO_CLIENT_MAX_DEVICES).
+  maxDevices: 5
+  # Where the softphone registers (HELLO_WSS_URL): the edge's WSS address.
+  wssUrl: ""
+
+# coturn: STUN and TURN for WebRTC media (docs/webrtc.md). One Deployment per
+# server address; the shared secret (turnSecret in the credentials Secret) is
+# the TURN REST API static-auth-secret, and hello-control derives the
+# short-lived credentials the softphone gets from it.
+coturn:
+  enabled: false
+  image:
+    name: coturn
+    tag: ""
+  # hostNetwork binds the TURN and relay ports on the node address, so
+  # relayed media leaves from the address clients are told (externalIP of the
+  # server, which must be that node's address). Pin each server to its node
+  # with servers[].nodeSelector. Without it each server gets a Service that
+  # owns externalIP and lists every relay port.
+  hostNetwork: true
+  # The realm (default global.sipDomain).
+  realm: ""
+  port: 3478
+  tlsPort: 5349
+  # Relay ports; 800 allocations by default. Without hostNetwork at most 200
+  # ports (a Service lists each one).
+  relayPortMin: 49152
+  relayPortMax: 49999
+  # One entry per address clients reach TURN at (REQUIRED):
+  #   - name: 1                   a DNS label; the Deployment is <release>-coturn-<name>
+  #     externalIP: 192.168.10.x  the server's IPv4 address
+  #     nodeSelector: {}          pins it to its node (hostNetwork)
+  servers: []
+  # The hello-sip media addresses clients may relay to (REQUIRED): single
+  # IPv4 addresses or a-b ranges. Every private, loopback and link-local range
+  # is denied except these.
+  allowedPeers: []
+  userQuota: 12
+  totalQuota: 1200
+  # TURN over TLS: a kubernetes.io/tls Secret (cert-manager) whose names
+  # include the server addresses.
+  tls:
+    enabled: false
+    secretName: ""
+  # The Prometheus exporter (port 9641); needs a coturn built with it.
+  metrics:
+    enabled: false
+  service:
+    type: LoadBalancer
+    annotations: {}
+  resources:
+    requests: { cpu: 50m, memory: 32Mi }
+    limits: { memory: 256Mi }
+  nodeSelector: {}
+  tolerations: []
   podAnnotations: {}
 
 ui:

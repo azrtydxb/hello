@@ -71,6 +71,7 @@ import { EmailSettings } from "./pages/EmailSettings";
 import { MyForwarding } from "./pages/myphone/MyForwarding";
 import { MyHistory } from "./pages/myphone/MyHistory";
 import { MyPhoneHome } from "./pages/myphone/MyPhoneHome";
+import { MyDevices } from "./pages/myphone/MyDevices";
 import { MyProfile } from "./pages/myphone/MyProfile";
 import { MyVoicemail } from "./pages/myphone/MyVoicemail";
 import { Can } from "./role";
@@ -114,6 +115,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/me/voicemail": MyVoicemail,
   "/me/forwarding": MyForwarding,
   "/me/history": MyHistory,
+  "/me/devices": MyDevices,
   "/me/profile": MyProfile,
   "/settings/email": EmailSettings,
   "/registrations": Registrations,

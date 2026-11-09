@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/ringtag"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/secret"
@@ -35,7 +36,21 @@ type Device struct {
 	HA1SHA256     string
 	Extension     string // extension number
 	ExtensionName string
+	// Kind is desk (or empty), web or mobile. A client device has an owner
+	// (UserID) and derived credentials (AuthMode "derived"): it has no stored
+	// HA1, and its Username is the stable base w<id> that the expiring name
+	// it registers with (w<id>.<expiry>) resolves to.
+	Kind     string
+	AuthMode string
+	UserID   int64
+	// RingOff is set when the owner's preference excludes this kind of
+	// client from forked calls (users.ring_web, users.ring_mobile).
+	RingOff bool
 }
+
+// AuthDerived is Device.AuthMode of a device whose digest secret is derived
+// from the client auth key.
+const AuthDerived = "derived"
 
 // LogValue keeps the HA1 values out of logs.
 func (d Device) LogValue() slog.Value {
@@ -475,9 +490,21 @@ func (s *Snapshot) FeatureCode(code string) (FeatureCode, bool) {
 }
 
 // DeviceByUsername returns the enabled device with that SIP username.
+//
+// A derived device (a web client) is found by the expiring name it
+// registers with, w<id>.<expiryUnix>, as well as by its base name. The
+// expiry is not checked here: the digest check does that, with the
+// credentials in hand.
 func (s *Snapshot) DeviceByUsername(username string) (Device, bool) {
-	d, ok := s.byUser[username]
-	return d, ok
+	if d, ok := s.byUser[username]; ok {
+		return d, true
+	}
+	if base, _, ok := auth.SplitDerived(username); ok {
+		if d, ok := s.byUser[base]; ok && d.AuthMode == AuthDerived {
+			return d, true
+		}
+	}
+	return Device{}, false
 }
 
 // DevicesForExtension returns the enabled devices of an extension number.
@@ -526,10 +553,13 @@ type Querier interface {
 // revision.
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
        d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name,
+       d.kind, d.auth_mode, d.user_id,
+       (d.kind = 'web' AND NOT u.ring_web) OR (d.kind = 'mobile' AND NOT u.ring_mobile),
        e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id,
        e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, e.directory_hidden
 FROM extensions e
 LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled
+LEFT JOIN users u ON u.id = d.user_id
 LEFT JOIN voicemail_boxes v ON v.extension_id = e.id
 ORDER BY d.id`
 
@@ -555,11 +585,15 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 			d                              Device
 			id                             *int64
 			user, realm, ha1MD5, ha1SHA256 *string
+			kind, authMode                 *string
+			userID                         *int64
+			ringOff                        *bool
 			e                              Extension
 			boxID                          *int64
 			callWaiting                    bool
 		)
 		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &d.Extension, &d.ExtensionName,
+			&kind, &authMode, &userID, &ringOff,
 			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID,
 			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden); err != nil {
 			rows.Close()
@@ -577,7 +611,24 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 		if id == nil { // extension with no enabled device
 			bare = append(bare, d.Extension)
 		} else {
-			d.ID, d.Username, d.Realm, d.HA1MD5, d.HA1SHA256 = *id, *user, *realm, *ha1MD5, *ha1SHA256
+			d.ID, d.Username, d.Realm = *id, *user, *realm
+			// A derived device has no stored HA1 (NULL).
+			if ha1MD5 != nil {
+				d.HA1MD5 = *ha1MD5
+			}
+			if ha1SHA256 != nil {
+				d.HA1SHA256 = *ha1SHA256
+			}
+			if kind != nil {
+				d.Kind = *kind
+			}
+			if authMode != nil {
+				d.AuthMode = *authMode
+			}
+			if userID != nil {
+				d.UserID = *userID
+			}
+			d.RingOff = ringOff != nil && *ringOff
 			devices = append(devices, d)
 		}
 		if !seen[e.Number] {

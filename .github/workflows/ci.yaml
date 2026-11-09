@@ -893,6 +893,15 @@ jobs:
               target: "",
               cache: kamailio,
             }
+          # coturn for the browser softphone (docs/webrtc.md), built from
+          # Debian trixie for the same reason.
+          - {
+              name: coturn,
+              context: docker/coturn,
+              file: docker/coturn/Dockerfile,
+              target: "",
+              cache: coturn,
+            }
     steps:
       - uses: actions/checkout@v7
       # A native arm64 runner (the kw nodes' arch), so the Dockerfiles build as
@@ -928,8 +937,14 @@ jobs:
           NAME: ${{ matrix.image.name }}
         run: |
           tags="${REGISTRY}/azrtydxb/${NAME}:sha-${GITHUB_SHA}"
-          if [ "$NAME" = kamailio ]; then
-            kc="kc-$(git rev-parse HEAD:docker/kamailio | cut -c1-16)"
+          # coturn is the same: ct-<git tree hash of docker/coturn>.
+          prefix=""
+          case "$NAME" in
+            kamailio) prefix=kc ;;
+            coturn) prefix=ct ;;
+          esac
+          if [ -n "$prefix" ]; then
+            kc="${prefix}-$(git rev-parse "HEAD:docker/${NAME}" | cut -c1-16)"
             if docker buildx imagetools inspect "${REGISTRY}/azrtydxb/${NAME}:${kc}" >/dev/null 2>&1; then
               echo "${kc} already published; not retagging"
             else

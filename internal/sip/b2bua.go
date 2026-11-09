@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
@@ -826,13 +827,17 @@ func (c *call) abandon(l *leg) bool {
 }
 
 func (c *call) cancelForks(except *leg) {
+	if except != nil {
+		// A fork answered: the others were completed elsewhere (RFC 3326), so
+		// a phone or softphone shows "answered elsewhere", not a missed call.
+		c.cancelForksElsewhereExcept(except)
+		return
+	}
 	c.mu.Lock()
 	legs := c.legs
 	c.mu.Unlock()
 	for _, l := range legs {
-		if l != except {
-			l.cancel()
-		}
+		l.cancel()
 	}
 }
 
@@ -876,6 +881,13 @@ func (c *call) respondA(code int, reason string) {
 // answer connects the caller to the winning fork.
 func (c *call) answer(w *leg) {
 	c.cancelForks(w)
+	// A softphone that answered is named in the routing trace (S-17), so the
+	// call detail says which kind of client took it.
+	if snap := c.s.deps.Snapshots.Current(); snap != nil {
+		if d, ok := snap.DeviceByUsername(w.binding.Device); ok && (d.Kind == auth.KindWeb || d.Kind == auth.KindMobile) {
+			c.addTrace(fmt.Sprintf("Answered by %s device %s", d.Kind, d.Username))
+		}
+	}
 	c.stopRingMOH() // the destination answered: the waiting music ends before the bridge
 	dcs := w.session()
 	bres := dcs.InviteResponse

@@ -69,6 +69,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "user",
       },
       {
+        label: "Web devices",
+        path: "/me/devices",
+        phase: 5,
+        icon: "monitor-smartphone",
+        minRole: "user",
+      },
+      {
         label: "Profile",
         path: "/me/profile",
         phase: 5,

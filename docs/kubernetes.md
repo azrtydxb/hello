@@ -182,6 +182,15 @@ identical across nodes; it is one value for the StatefulSet.
   `10.0.0.0/8` to your CIDRs; trusting more than Kamailio's addresses lets
   anyone in that range spoof a phone's address.
 
+## Browser softphone and coturn
+
+Web devices need `clientAuthKey` in the credentials Secret (and
+`clientAuthKeyPrevious` while it is replaced); TURN for WebRTC media is the
+optional `coturn` block: one single-replica Deployment per address, with
+`hostNetwork` and a `Recreate` rollout like Kamailio, and the shared secret
+(`turnSecret`) from the Secret. See [docs/webrtc.md](webrtc.md) for the
+ports, peers and values.
+
 ## Placement and disruption
 
 - **hello-sip** carries a required `podAntiAffinity` on

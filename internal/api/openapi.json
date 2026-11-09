@@ -1124,6 +1124,273 @@
         }
       }
     },
+    "/api/v1/me/devices": {
+      "get": {
+        "operationId": "listMyDevices",
+        "summary": "List my web devices",
+        "description": "Lists the signed-in user's own web softphone devices (label, platform, extension, last seen and whether a registration is live now). Only the caller's devices are reachable: no route takes a user id. Needs a browser session.",
+        "tags": [
+          "me"
+        ],
+        "responses": {
+          "200": {
+            "description": "The devices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MyDevice"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "SIP credentials and TURN credentials are minted for the signed-in user's browser only, never for an agent",
+          "category": "credentials"
+        }
+      },
+      "post": {
+        "operationId": "createMyDevice",
+        "summary": "Enrol a web device",
+        "description": "Creates a web softphone device on one of the caller's own extensions (the first one when extensionId is omitted) and returns the SIP credentials for it, once, with the ICE servers. The credentials are derived, expire (12 hours) and are refreshed through the credentials route. A user may have at most HELLO_CLIENT_MAX_DEVICES devices (409 device_limit). 503 while HELLO_CLIENT_AUTH_KEY is not set. Needs a browser session.",
+        "tags": [
+          "me"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MyDeviceCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The device and its credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyDeviceEnrolment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "SIP credentials and TURN credentials are minted for the signed-in user's browser only, never for an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/me/devices/{id}": {
+      "delete": {
+        "operationId": "deleteMyDevice",
+        "summary": "Revoke a web device",
+        "description": "Revokes one of the caller's own web devices: it is disabled, its registrations are dropped and its credentials are refused from then on. A device of another user is 404. Needs a browser session.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "SIP credentials and TURN credentials are minted for the signed-in user's browser only, never for an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/me/devices/{id}/credentials": {
+      "post": {
+        "operationId": "refreshMyDeviceCredentials",
+        "summary": "Refresh a web device's credentials",
+        "description": "Derives new SIP credentials for one of the caller's own web devices, valid for 12 hours. The previous ones keep working until they expire. A revoked device, or one of another user, is 404. Needs a browser session.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The new credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceCredentials"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "SIP credentials and TURN credentials are minted for the signed-in user's browser only, never for an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/me/ice-servers": {
+      "get": {
+        "operationId": "getMyIceServers",
+        "summary": "STUN and TURN servers for a call",
+        "description": "Returns the STUN and TURN servers a softphone passes to RTCPeerConnection, with a TURN credential that expires (the TURN REST API scheme: the username is the expiry and the credential an HMAC of it under the secret coturn shares). The optional deviceId names one of the caller's devices; another user's is 404. Rate limited. 503 while no STUN or TURN server is configured. Needs a browser session.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "One of the caller's own web devices; it is named in the TURN username so the TURN server's logs tell clients apart."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The ICE servers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IceServers"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "SIP credentials and TURN credentials are minted for the signed-in user's browser only, never for an agent",
+          "category": "credentials"
+        }
+      }
+    },
     "/api/v1/me/profile": {
       "patch": {
         "operationId": "updateMyProfile",
@@ -2020,8 +2287,19 @@
       "get": {
         "operationId": "listDevices",
         "summary": "Every device, ordered by SIP username",
-        "description": "Lists every device (SIP account), ordered by SIP username; secrets are never included.",
+        "description": "Lists every device (SIP account), ordered by SIP username; secrets are never included. The kind filter lists only desk phones, or only the web or mobile clients users enrolled.",
         "tags": ["devices"],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["desk", "web", "mobile"]
+            },
+            "description": "Only devices of this kind; every kind when omitted."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Devices",
@@ -2041,6 +2319,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -2182,6 +2463,16 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "409": {
+            "description": "The device is a web client, which stays on its owner's extension (derived_device)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -2255,6 +2546,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The device is a web client, which has no stored secret to rotate (derived_device)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -19936,7 +20237,9 @@
                   "rate_limited",
                   "too_large",
                   "messaging_disabled",
-                  "no_messaging_trunk"
+                  "no_messaging_trunk",
+                  "device_limit",
+                  "derived_device"
                 ]
               },
               "message": {
@@ -20160,6 +20463,14 @@
           "emailDelivery": {
             "type": "boolean",
             "description": "Whether the system can send email at all."
+          },
+          "ringWeb": {
+            "type": "boolean",
+            "description": "Whether the user's web softphones ring for calls to their extension."
+          },
+          "ringMobile": {
+            "type": "boolean",
+            "description": "Whether the user's mobile apps ring for calls to their extension."
           },
           "mustEnrollMfa": {
             "type": "boolean",
@@ -20463,6 +20774,14 @@
           },
           "voicemailEmail": {
             "$ref": "#/components/schemas/VoicemailEmailPrefsUpdate"
+          },
+          "ringWeb": {
+            "type": "boolean",
+            "description": "Whether the user's web softphones ring for calls to their extension."
+          },
+          "ringMobile": {
+            "type": "boolean",
+            "description": "Whether the user's mobile apps ring for calls to their extension."
           }
         },
         "description": "At least one field."
@@ -21339,6 +21658,252 @@
           }
         }
       },
+      "DeviceCredentials": {
+        "type": "object",
+        "required": [
+          "deviceId",
+          "sipUsername",
+          "sipPassword",
+          "realm",
+          "wssUrl",
+          "expiresAt"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The device these credentials are for."
+          },
+          "sipUsername": {
+            "type": "string",
+            "description": "The SIP username to register with: the device's name plus the expiry time (w<id>.<unix>)."
+          },
+          "sipPassword": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The SIP digest password, derived from the username; shown only in this response."
+          },
+          "realm": {
+            "type": "string",
+            "description": "The SIP domain (digest realm)."
+          },
+          "wssUrl": {
+            "type": "string",
+            "description": "The WebSocket address to register at; empty until the edge serves WSS."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the credentials stop working; refresh before then."
+          }
+        }
+      },
+      "MyDevice": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "platform",
+          "appVersion",
+          "extensionId",
+          "extensionNumber",
+          "sipUsername",
+          "lastSeenAt",
+          "createdAt",
+          "registered"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "web",
+              "mobile"
+            ],
+            "description": "The kind of client."
+          },
+          "label": {
+            "type": "string",
+            "description": "The name the user gave the device."
+          },
+          "platform": {
+            "type": "string",
+            "description": "The browser or platform, as reported at enrolment."
+          },
+          "appVersion": {
+            "type": "string",
+            "description": "The softphone version, as reported at enrolment."
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "extensionNumber": {
+            "type": "string"
+          },
+          "sipUsername": {
+            "type": "string",
+            "description": "The device's stable name (w<id>), not the expiring one it registers with."
+          },
+          "lastSeenAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the device last enrolled or refreshed its credentials."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "registered": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the device has a live registration now; null when the live state is unavailable."
+          }
+        }
+      },
+      "MyDeviceCreate": {
+        "type": "object",
+        "required": [
+          "label"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "A name for the device, such as the browser and computer."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "web"
+            ],
+            "description": "Only web devices exist for now; the default."
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "One of the caller's own extensions; the first one when omitted."
+          },
+          "platform": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "The browser or platform."
+          },
+          "appVersion": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "The softphone version."
+          }
+        }
+      },
+      "MyDeviceEnrolment": {
+        "type": "object",
+        "required": [
+          "deviceId",
+          "sipUsername",
+          "sipPassword",
+          "realm",
+          "wssUrl",
+          "expiresAt",
+          "device",
+          "ice"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The device these credentials are for."
+          },
+          "sipUsername": {
+            "type": "string",
+            "description": "The SIP username to register with: the device's name plus the expiry time (w<id>.<unix>)."
+          },
+          "sipPassword": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The SIP digest password, derived from the username; shown only in this response."
+          },
+          "realm": {
+            "type": "string",
+            "description": "The SIP domain (digest realm)."
+          },
+          "wssUrl": {
+            "type": "string",
+            "description": "The WebSocket address to register at; empty until the edge serves WSS."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the credentials stop working; refresh before then."
+          },
+          "device": {
+            "$ref": "#/components/schemas/MyDevice"
+          },
+          "ice": {
+            "$ref": "#/components/schemas/IceServers"
+          }
+        }
+      },
+      "IceServer": {
+        "type": "object",
+        "required": [
+          "urls"
+        ],
+        "properties": {
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "stun:, turn: or turns: URIs."
+          },
+          "username": {
+            "type": "string",
+            "description": "The TURN username: the expiry time and the device."
+          },
+          "credential": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The TURN credential for the username; expires with it."
+          }
+        }
+      },
+      "IceServers": {
+        "type": "object",
+        "required": [
+          "iceServers",
+          "expiresAt",
+          "ttlSeconds"
+        ],
+        "properties": {
+          "iceServers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IceServer"
+            },
+            "description": "The list for RTCPeerConnection's iceServers."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the TURN credential stops working."
+          },
+          "ttlSeconds": {
+            "type": "integer",
+            "description": "The credential's lifetime; refetch once half of it has passed."
+          }
+        }
+      },
       "Device": {
         "type": "object",
         "required": [
@@ -21373,6 +21938,51 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "desk",
+              "web",
+              "mobile"
+            ],
+            "description": "desk is a phone with a stored digest secret; web and mobile are a user's softphones with derived credentials."
+          },
+          "authMode": {
+            "type": "string",
+            "enum": [
+              "digest",
+              "derived"
+            ],
+            "description": "How the device authenticates: a stored digest secret, or credentials derived from HELLO_CLIENT_AUTH_KEY."
+          },
+          "userId": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The owner of a web or mobile device; null for a desk phone."
+          },
+          "label": {
+            "type": "string",
+            "description": "The name the owner gave a web or mobile device."
+          },
+          "platform": {
+            "type": "string",
+            "description": "The browser or platform of a web or mobile device."
+          },
+          "appVersion": {
+            "type": "string",
+            "description": "The softphone version of a web or mobile device."
+          },
+          "lastSeenAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a web or mobile device last enrolled or refreshed its credentials."
           }
         }
       },
@@ -21412,6 +22022,51 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "desk",
+              "web",
+              "mobile"
+            ],
+            "description": "desk is a phone with a stored digest secret; web and mobile are a user's softphones with derived credentials."
+          },
+          "authMode": {
+            "type": "string",
+            "enum": [
+              "digest",
+              "derived"
+            ],
+            "description": "How the device authenticates: a stored digest secret, or credentials derived from HELLO_CLIENT_AUTH_KEY."
+          },
+          "userId": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The owner of a web or mobile device; null for a desk phone."
+          },
+          "label": {
+            "type": "string",
+            "description": "The name the owner gave a web or mobile device."
+          },
+          "platform": {
+            "type": "string",
+            "description": "The browser or platform of a web or mobile device."
+          },
+          "appVersion": {
+            "type": "string",
+            "description": "The softphone version of a web or mobile device."
+          },
+          "lastSeenAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a web or mobile device last enrolled or refreshed its credentials."
           },
           "secret": {
             "type": "string",

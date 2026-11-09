@@ -156,7 +156,7 @@ func (s *server) flowInput(ctx context.Context, devices bool) (flow.Input, error
 		return in, err
 	}
 	if devices {
-		if in.Devices, err = st.ListDevices(ctx); err != nil {
+		if in.Devices, err = st.ListDevices(ctx, ""); err != nil {
 			return in, err
 		}
 		if s.ProvStore != nil {
