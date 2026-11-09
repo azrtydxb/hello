@@ -92,6 +92,7 @@ func TestSettingOverridesAPI(t *testing.T) {
 	op.must(http.StatusOK, "GET", gpath, nil)
 	op.must(http.StatusForbidden, "PUT", ppath, map[string]any{"overrides": []any{}})
 	op.must(http.StatusForbidden, "PUT", gpath, map[string]any{"overrides": []any{}})
+	c.must(http.StatusNotFound, "PUT", "/api/v1/phones/999999/settings", map[string]any{"overrides": []any{}})
 	c.must(http.StatusNotFound, "PUT", "/api/v1/phone-groups/999999/settings", map[string]any{"overrides": []any{}})
 	c.must(http.StatusBadRequest, "PUT", ppath, map[string]any{})
 
