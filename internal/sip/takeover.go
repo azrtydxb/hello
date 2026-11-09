@@ -565,16 +565,18 @@ type haOfflineNode struct {
 // haOfflineSee remembers a node's OFFLINE state and when its takeovers
 // should be over; haOfflineCount marks it reaped; haOfflineForget clears it
 // when the node is back.
-func (s *Server) haOfflineSee(id string, active int) *haOfflineNode {
+// It returns a copy: haOfflineCount sets counted under haOfflineMu, so a
+// pointer read after the lock is released races with it.
+func (s *Server) haOfflineSee(id string, active int) haOfflineNode {
 	s.haOfflineMu.Lock()
 	defer s.haOfflineMu.Unlock()
 	if e, ok := s.haOffline[id]; ok {
-		return e
+		return *e
 	}
 	active = max(active, s.haLastActive[id])
 	e := &haOfflineNode{active: active, deadline: time.Now().Add(haReapDelay)}
 	s.haOffline[id] = e
-	return e
+	return *e
 }
 
 func (s *Server) haOfflineCount(id string) {
