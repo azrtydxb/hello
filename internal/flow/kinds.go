@@ -160,4 +160,6 @@ var NotDestinationEnums = map[string]string{
 
 // NotDestinationConstraints is NotDestinationEnums for database CHECK
 // constraints, keyed by constraint name.
-var NotDestinationConstraints = map[string]string{}
+var NotDestinationConstraints = map[string]string{
+	"follow_me_targets_kind_check": "a follow-me target is an extra ring of the extension, not a destination the call is sent to",
+}
