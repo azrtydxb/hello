@@ -69,6 +69,22 @@ server {
         proxy_send_timeout 3600s;
     }
 
+    # Recording links (docs/integrations.md, "Recording links"): GET
+    # /r/<token>.wav is public, the token is the credential, and hello-control
+    # sets the no-store and no-referrer headers. Range requests pass through.
+    location /r/ {
+        set $hello_control ${HELLO_CONTROL_UPSTREAM};
+        proxy_pass $hello_control;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $hello_forwarded_proto;
+        proxy_buffering off;
+        gzip off;
+        proxy_read_timeout 300s;
+    }
+
     location /api/ {
         set $hello_control ${HELLO_CONTROL_UPSTREAM};
         proxy_pass $hello_control;

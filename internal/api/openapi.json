@@ -15865,6 +15865,328 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/recordings/{id}/links": {
+      "post": {
+        "operationId": "createRecordingLink",
+        "summary": "Create a recording link",
+        "description": "Creates a link, https://<host>/r/<token>.wav, that plays one recording without a Hello session until it expires, is revoked, runs out of uses or the recording is deleted. The URL is shown once; only its hash is stored. The link is public: anyone who has it can play the recording. A user, or a token or service account with an extensionScope, may only link recordings of calls involving its own extensions (403 otherwise). Every link created is audited.",
+        "tags": ["media"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordingLinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingLinkCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "recordings",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "mints a public credential-like URL to call audio; not for an AI agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/recording-links/{id}": {
+      "delete": {
+        "operationId": "revokeRecordingLink",
+        "summary": "Revoke a recording link",
+        "description": "Revokes a recording link at once. Revoking a revoked link succeeds. The caller must have created the link or be allowed to link that recording.",
+        "tags": ["media"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "recordings",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "links are minted outside MCP, so they are revoked there too",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/lookup/calls": {
+      "get": {
+        "operationId": "lookupCalls",
+        "summary": "Find calls",
+        "description": "Finds calls by number, extension, time or call id, newest first, with the id of each call's recording when it has one. A user, or a token or service account with an extensionScope, sees only calls involving its own extensions and gets 403 for another extension; the viewer, operator and admin roles and unrestricted service accounts see all.",
+        "tags": ["history"],
+        "parameters": [
+          {
+            "name": "number",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "description": "A phone number to match against a call's source, destination or dialled number. Spaces, dashes and brackets are ignored; a number of 8 or more digits also matches by its last 8 digits, so +32 11 111 222 and 011 111 222 meet."
+          },
+          {
+            "name": "extension",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only calls this extension was part of."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Calls that started at or after this time (RFC 3339)."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Calls that started before this time (RFC 3339)."
+          },
+          {
+            "name": "callId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "description": "A call id (the CDR correlationId, as call events carry it) or a SIP Call-ID."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Page cursor: results with a lower id."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size, 1-200."
+          },
+          {
+            "name": "recorded",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            },
+            "description": "true keeps only calls that have a recording."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Calls, newest first, with the cursor for the next page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallMatchPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "calls",
+        "x-hello-role": "user",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/lookup/recordings": {
+      "get": {
+        "operationId": "lookupRecordings",
+        "summary": "Find recordings",
+        "description": "Finds call recordings by the number, extension, time or call id of their call, newest first. A user, or a token or service account with an extensionScope, sees only calls involving its own extensions and gets 403 for another extension; the viewer, operator and admin roles and unrestricted service accounts see all.",
+        "tags": ["media"],
+        "parameters": [
+          {
+            "name": "number",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "description": "A phone number to match against a call's source, destination or dialled number. Spaces, dashes and brackets are ignored; a number of 8 or more digits also matches by its last 8 digits, so +32 11 111 222 and 011 111 222 meet."
+          },
+          {
+            "name": "extension",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only calls this extension was part of."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Calls that started at or after this time (RFC 3339)."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Calls that started before this time (RFC 3339)."
+          },
+          {
+            "name": "callId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "description": "A call id (the CDR correlationId, as call events carry it) or a SIP Call-ID."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Page cursor: results with a lower id."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size, 1-200."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recordings, newest first, with the cursor for the next page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "recordings",
+        "x-hello-role": "user",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/events": {
       "get": {
         "operationId": "listEvents",
@@ -17485,9 +17807,19 @@
         "type": "object",
         "required": ["promptLanguage", "effective", "languages"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."},
-          "effective": {"type": "string", "description": "The language callers hear for this box now."},
-          "languages": {"type": "array", "items": {"type": "string"}, "description": "The languages a box can be set to."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."
+          },
+          "effective": {
+            "type": "string",
+            "description": "The language callers hear for this box now."
+          },
+          "languages": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The languages a box can be set to."
+          }
         }
       },
       "VoicemailBoxLanguageUpdate": {
@@ -17495,12 +17827,23 @@
         "additionalProperties": false,
         "required": ["promptLanguage"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."
+          }
         }
       },
       "VoicemailBoxSummary": {
         "type": "object",
-        "required": ["id", "extensionId", "number", "name", "unheard", "total", "promptLanguage"],
+        "required": [
+          "id",
+          "extensionId",
+          "number",
+          "name",
+          "unheard",
+          "total",
+          "promptLanguage"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -18865,9 +19208,15 @@
         "required": ["node", "text"],
         "properties": {
           "node": { "type": "string", "description": "A graph node id." },
-          "port": { "type": "string", "description": "The output port of the node the call leaves through; for a last step, the port it ends at." },
+          "port": {
+            "type": "string",
+            "description": "The output port of the node the call leaves through; for a last step, the port it ends at."
+          },
           "text": { "type": "string" },
-          "at": { "type": "string", "description": "On a time condition step, the instant that was evaluated." },
+          "at": {
+            "type": "string",
+            "description": "On a time condition step, the instant that was evaluated."
+          },
           "branches": {
             "type": "array",
             "description": "The choices of an IVR menu traced without a key.",
@@ -18881,22 +19230,45 @@
         "properties": {
           "port": { "type": "string" },
           "label": { "type": "string" },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } }
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          }
         }
       },
       "FlowTrace": {
         "type": "object",
-        "required": ["configRevision", "at", "from", "number", "outcome", "steps", "routingTrace"],
+        "required": [
+          "configRevision",
+          "at",
+          "from",
+          "number",
+          "outcome",
+          "steps",
+          "routingTrace"
+        ],
         "properties": {
           "configRevision": { "type": "integer", "format": "int64" },
           "at": { "type": "string" },
           "from": { "type": "string" },
           "number": { "type": "string" },
-          "outcome": { "type": "string", "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing." },
+          "outcome": {
+            "type": "string",
+            "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing."
+          },
           "route": { "type": "string" },
-          "reason": { "type": "string", "description": "Why the call was rejected." },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } },
-          "routingTrace": { "type": "array", "items": { "$ref": "#/components/schemas/TraceStep" } }
+          "reason": {
+            "type": "string",
+            "description": "Why the call was rejected."
+          },
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          },
+          "routingTrace": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TraceStep" }
+          }
         }
       },
       "FlowRevision": {
@@ -20585,7 +20957,7 @@
           },
           "languages": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": { "type": "string" },
             "description": "The languages the box can be set to."
           }
         }
@@ -21705,6 +22077,11 @@
           "ringRule": {
             "type": "string",
             "description": "What chose the tag: kind:<kind>, rule:<position> [name], group, trunk or default."
+          },
+          "recordingId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The call's recording, when it has one; returned by GET /cdrs/{id} only. Use it with POST /recordings/{id}/links."
           }
         },
         "description": "Null times are omitted."
@@ -27343,23 +27720,73 @@
       },
       "QueueCallback": {
         "type": "object",
-        "required": ["id", "queueId", "number", "callerName", "status", "attempts", "positionKey", "nextAttemptAt", "claimedBy", "agent", "result", "createdAt", "expiresAt"],
+        "required": [
+          "id",
+          "queueId",
+          "number",
+          "callerName",
+          "status",
+          "attempts",
+          "positionKey",
+          "nextAttemptAt",
+          "claimedBy",
+          "agent",
+          "result",
+          "createdAt",
+          "expiresAt"
+        ],
         "properties": {
-          "id": {"type": "integer", "format": "int64"},
-          "queueId": {"type": "integer", "format": "int64"},
-          "number": {"type": "string", "description": "The number to call back."},
-          "callerName": {"type": "string", "description": "From the shared name sources (phonebooks); empty when none."},
-          "status": {"type": "string", "enum": ["waiting", "dialling", "connected", "failed", "cancelled", "expired"]},
-          "attempts": {"type": "integer", "description": "Attempts made, at most 3."},
-          "positionKey": {"type": "integer", "format": "int64", "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."},
-          "nextAttemptAt": {"type": "string", "format": "date-time"},
-          "claimedBy": {"type": "string", "description": "The node working on it while dialling."},
-          "leaseUntil": {"type": "string", "format": "date-time", "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."},
-          "agent": {"type": "string", "description": "The agent it was connected to."},
-          "result": {"type": "string", "description": "The last attempt's outcome or the way the request ended."},
-          "createdAt": {"type": "string", "format": "date-time"},
-          "expiresAt": {"type": "string", "format": "date-time"},
-          "finishedAt": {"type": "string", "format": "date-time"}
+          "id": { "type": "integer", "format": "int64" },
+          "queueId": { "type": "integer", "format": "int64" },
+          "number": {
+            "type": "string",
+            "description": "The number to call back."
+          },
+          "callerName": {
+            "type": "string",
+            "description": "From the shared name sources (phonebooks); empty when none."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "dialling",
+              "connected",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Attempts made, at most 3."
+          },
+          "positionKey": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."
+          },
+          "nextAttemptAt": { "type": "string", "format": "date-time" },
+          "claimedBy": {
+            "type": "string",
+            "description": "The node working on it while dialling."
+          },
+          "leaseUntil": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."
+          },
+          "agent": {
+            "type": "string",
+            "description": "The agent it was connected to."
+          },
+          "result": {
+            "type": "string",
+            "description": "The last attempt's outcome or the way the request ended."
+          },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "finishedAt": { "type": "string", "format": "date-time" }
         }
       },
       "QueueCallbackList": {
@@ -27763,6 +28190,143 @@
             }
           }
         ]
+      },
+      "RecordingLinkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ttlHours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8760,
+            "description": "Hours the link works (default 720, 30 days)."
+          },
+          "maxUses": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "Requests the link serves, 0 for unlimited (default). A player's Range requests each count."
+          }
+        }
+      },
+      "RecordingLinkCreated": {
+        "type": "object",
+        "required": ["id", "recordingId", "url", "expiresAt", "maxUses"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Pass to DELETE /recording-links/{id} to revoke."
+          },
+          "recordingId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "url": {
+            "type": "string",
+            "description": "The public link. Shown once.",
+            "x-hello-secret": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "maxUses": {
+            "type": "integer"
+          }
+        }
+      },
+      "CallMatch": {
+        "type": "object",
+        "required": [
+          "id",
+          "callId",
+          "sipCallId",
+          "direction",
+          "kind",
+          "source",
+          "destination",
+          "originalDestination",
+          "startTime",
+          "endTime",
+          "durationMs",
+          "billableMs",
+          "finalStatus"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The CDR id (GET /cdrs/{id})."
+          },
+          "callId": {
+            "type": "string",
+            "description": "The call id call events carry (the CDR correlationId)."
+          },
+          "sipCallId": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["internal", "inbound", "outbound"]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "originalDestination": {
+            "type": "string"
+          },
+          "startTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "answerTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "billableMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "finalStatus": {
+            "type": "integer"
+          },
+          "recordingId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The call's recording, when it has one; use it with POST /recordings/{id}/links."
+          }
+        }
+      },
+      "CallMatchPage": {
+        "type": "object",
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CallMatch"
+            }
+          },
+          "next": {
+            "type": "string",
+            "description": "Cursor for the next (older) page; empty at the end."
+          }
+        }
       },
       "EventPage": {
         "type": "object",

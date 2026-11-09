@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -43,6 +44,8 @@ type CDR struct {
 	// (migration 00050); empty when no internal device rang.
 	RingTag  string `json:"ringTag"`
 	RingRule string `json:"ringRule"`
+	// RecordingID is the call's recording; set by GetCDR when it has one.
+	RecordingID *int64 `json:"recordingId,omitempty"`
 	// PageLegs is a page's outcome per member (migration 00014); set by
 	// GetCDR for a page only.
 	PageLegs []PageLeg `json:"pageLegs,omitempty"`
@@ -193,6 +196,13 @@ func (s *Store) GetCDR(ctx context.Context, id int64) (CDR, routing.Trace, error
 	trace := routing.Trace{}
 	if err := json.Unmarshal(raw, &trace); err != nil {
 		return c, nil, fmt.Errorf("store: decode trace of cdr %d: %w", id, err)
+	}
+	var rec int64
+	switch err := s.db.QueryRowContext(ctx, `SELECT id FROM recordings WHERE correlation_id = $1`, c.CorrelationID).Scan(&rec); {
+	case err == nil:
+		c.RecordingID = &rec
+	case !errors.Is(err, sql.ErrNoRows):
+		return c, trace, fmt.Errorf("store: recording of cdr %d: %w", id, err)
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT event, queue, extension, wait_ms, result, at
 		FROM cdr_queue_legs WHERE cdr_id = $1 ORDER BY position`, id)

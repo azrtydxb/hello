@@ -192,6 +192,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		TwoFALogins:     api.NewTwoFactorMetrics(metrics.Registry),
 		Batches:         st,
 		BatchMetrics:    api.NewBatchMetrics(metrics.Registry),
+		LinkMetrics:     api.NewLinkMetrics(metrics.Registry, func() float64 { return activeRecordingLinks(ctx, st) }),
 		ConferenceLive:  vk,
 		Messages:        st,
 		Dialing:         cfg.Dial,
@@ -465,4 +466,17 @@ func connectValkey(ctx context.Context, c vkconn.Config, vk *api.LazyValkey, log
 		log.Warn("valkey unreachable at startup; live and cluster views unavailable until it is", "error", err)
 	}
 	vk.Set(cl)
+}
+
+// activeRecordingLinks is the hello_recording_links_active reading: the
+// links that can still be used, or 0 when the database does not answer in
+// time.
+func activeRecordingLinks(ctx context.Context, st *store.Store) float64 {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	n, err := st.CountActiveRecordingLinks(ctx)
+	if err != nil {
+		return 0
+	}
+	return float64(n)
 }
