@@ -233,9 +233,6 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Emergency, err = s.emergencyNumbers(ctx); err != nil {
 		return d, prov.Template{}, err
 	}
-	if d.E911, d.AlarmNumber, err = s.emergencyInfo(ctx, phoneID, d); err != nil {
-		return d, prov.Template{}, err
-	}
 	if d.Codes, err = s.featureCodes(ctx); err != nil {
 		return d, prov.Template{}, err
 	}
@@ -244,6 +241,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	}
 	d.Server = s.prov.server(d.Phone.Vendor, d.Phone.Model)
 	d.Prov = s.prov.info(token, d.Phone.MAC)
+	if d.E911, d.AlarmNumber, err = s.emergencyInfo(ctx, phoneID, d); err != nil {
+		return d, prov.Template{}, err
+	}
 	d.Time = prov.NewTimeInfo(s.prov.Timezone, s.prov.NTP, time.Now())
 	if d.Book, err = s.bookInfo(ctx, phoneID, token); err != nil {
 		return d, prov.Template{}, err

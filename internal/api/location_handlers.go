@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
@@ -114,9 +115,29 @@ func (s *server) listLocationAssignments(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, items(v))
 }
 
+// requiredID is a JSON number or null that must be present: UnmarshalJSON runs
+// only when the key is, so a body without it is told apart from a null.
+type requiredID struct {
+	set bool
+	v   *int64
+}
+
+func (r *requiredID) UnmarshalJSON(b []byte) error {
+	r.set = true
+	if string(b) == "null" {
+		return nil
+	}
+	var n int64
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	r.v = &n
+	return nil
+}
+
 type assignmentBody struct {
 	// LocationID is the location to assign, or null to unassign.
-	LocationID *int64 `json:"locationId"`
+	LocationID requiredID `json:"locationId"`
 }
 
 // putLocationAssignment assigns a phone group, extension or phone to a
@@ -135,7 +156,13 @@ func (s *server) putLocationAssignment(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &b) {
 		return
 	}
-	if err := s.Store.SetLocationAssignment(r.Context(), actor(r).String(), kind, id, b.LocationID); err != nil {
+	if !b.LocationID.set {
+		var f fieldErrs
+		f.add("locationId", "is required: a location id, or null to unassign")
+		writeFields(w, f)
+		return
+	}
+	if err := s.Store.SetLocationAssignment(r.Context(), actor(r).String(), kind, id, b.LocationID.v); err != nil {
 		s.configError(w, kind, err)
 		return
 	}
@@ -172,8 +199,8 @@ func (s *server) getPhoneLocation(w http.ResponseWriter, r *http.Request) {
 // phoneEmergencyBody is the E911 switch and alarm destination of a phone
 // group; an update replaces both.
 type phoneEmergencyBody struct {
-	E911Enabled bool   `json:"e911Enabled"`
-	AlarmTarget string `json:"alarmTarget"`
+	E911Enabled *bool   `json:"e911Enabled"`
+	AlarmTarget *string `json:"alarmTarget"`
 }
 
 func (s *server) getPhoneGroupEmergency(w http.ResponseWriter, r *http.Request) {
@@ -201,13 +228,21 @@ func (s *server) putPhoneGroupEmergency(w http.ResponseWriter, r *http.Request) 
 	if !decode(w, r, &b) {
 		return
 	}
-	if b.AlarmTarget != "" && !dialTargetRe.MatchString(b.AlarmTarget) {
-		var f fieldErrs
+	var f fieldErrs
+	if b.E911Enabled == nil {
+		f.add("e911Enabled", "is required")
+	}
+	switch {
+	case b.AlarmTarget == nil:
+		f.add("alarmTarget", "is required: an extension or ring group number, or empty")
+	case *b.AlarmTarget != "" && !dialTargetRe.MatchString(*b.AlarmTarget):
 		f.add("alarmTarget", "must be an extension or ring group number, or empty")
+	}
+	if len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
-	v, err := s.Store.SetPhoneGroupEmergency(r.Context(), actor(r).String(), id, store.PhoneEmergency{E911Enabled: b.E911Enabled, AlarmTarget: b.AlarmTarget})
+	v, err := s.Store.SetPhoneGroupEmergency(r.Context(), actor(r).String(), id, store.PhoneEmergency{E911Enabled: *b.E911Enabled, AlarmTarget: *b.AlarmTarget})
 	if err != nil {
 		s.configError(w, "phone group", err)
 		return
@@ -216,7 +251,7 @@ func (s *server) putPhoneGroupEmergency(w http.ResponseWriter, r *http.Request) 
 }
 
 type emergencySettingsBody struct {
-	NotifyGroup string `json:"notifyGroup"`
+	NotifyGroup *string `json:"notifyGroup"`
 }
 
 func (s *server) getEmergencySettings(w http.ResponseWriter, r *http.Request) {
@@ -233,13 +268,13 @@ func (s *server) putEmergencySettings(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &b) {
 		return
 	}
-	if b.NotifyGroup != "" && !dialTargetRe.MatchString(b.NotifyGroup) {
+	if b.NotifyGroup == nil || (*b.NotifyGroup != "" && !dialTargetRe.MatchString(*b.NotifyGroup)) {
 		var f fieldErrs
-		f.add("notifyGroup", "must be a ring group number, or empty")
+		f.add("notifyGroup", "is required: a ring group number, or empty")
 		writeFields(w, f)
 		return
 	}
-	v, err := s.Store.PutEmergencySettings(r.Context(), actor(r).String(), store.EmergencySettings{NotifyGroup: b.NotifyGroup})
+	v, err := s.Store.PutEmergencySettings(r.Context(), actor(r).String(), store.EmergencySettings{NotifyGroup: *b.NotifyGroup})
 	if err != nil {
 		s.configError(w, "emergency settings", err)
 		return
