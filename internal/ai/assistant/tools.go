@@ -42,6 +42,10 @@ var assistantTools = []string{
 	"listVoicemailBoxes", "listVoicemailMessages",
 	"listAIFindings", "getAIFinding",
 	"listAIProposals", "getAIProposal",
+	// The call flow (spec flow-canvas S-17): the graph, its node kinds,
+	// the canvases and a traced call, for "what happens when ..." and
+	// "why did this call go there".
+	"getFlowGraph", "getFlowCatalogue", "listFlowCanvases", "traceFlow",
 }
 
 // MaxResultBytes caps one tool result's indented JSON (spec S-6).
@@ -165,9 +169,12 @@ type toolset struct {
 // newToolset returns the read tools for one message, replayed as ident.
 func (a *Assistant) newToolset(ident auth.Agent, abort context.CancelCauseFunc) (*toolset, []aisdk.Tool) {
 	ts := &toolset{api: a.cfg.API, ident: ident, dataBlock: a.cfg.DataBlock, metric: a.toolCalls, hook: a.cfg.ToolCalls, abort: abort}
-	tools := make([]aisdk.Tool, len(a.tools))
-	for i, d := range a.tools {
-		tools[i] = &readTool{def: d, ts: ts}
+	tools := make([]aisdk.Tool, 0, len(a.tools)+1)
+	for _, d := range a.tools {
+		tools = append(tools, &readTool{def: d, ts: ts})
+	}
+	if a.describe != nil {
+		tools = append(tools, &describeTool{ops: a.describe, ts: ts})
 	}
 	return ts, tools
 }

@@ -191,6 +191,14 @@ func ReplayFrom(ctx context.Context) (Replay, bool) {
 type Agent struct {
 	UserID int64
 	TaskID string
+	// Preview marks the dry run of a proposed configuration batch (spec
+	// flow-canvas S-19): the agent then also holds the write and admin
+	// scopes, with the user's own role, but only for POST
+	// /api/v1/config/batch with dryRun and for the operations replayed
+	// inside that dry-run batch (the API refuses every other write). It
+	// lets the validator check a batch exactly as the applier would run
+	// it, with nothing committed.
+	Preview bool
 }
 
 type agentKey struct{}

@@ -3464,6 +3464,16 @@
               "type": "string",
               "enum": ["devices"]
             }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "description": "`all` (default) or `summary`: every node's `summary` is empty and edges carry no `data`, a compact read that keeps an AI tool result of a small PBX under 16 KiB.",
+            "schema": {
+              "type": "string",
+              "enum": ["all", "summary"]
+            }
           }
         ],
         "responses": {
@@ -17485,9 +17495,19 @@
         "type": "object",
         "required": ["promptLanguage", "effective", "languages"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."},
-          "effective": {"type": "string", "description": "The language callers hear for this box now."},
-          "languages": {"type": "array", "items": {"type": "string"}, "description": "The languages a box can be set to."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."
+          },
+          "effective": {
+            "type": "string",
+            "description": "The language callers hear for this box now."
+          },
+          "languages": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The languages a box can be set to."
+          }
         }
       },
       "VoicemailBoxLanguageUpdate": {
@@ -17495,12 +17515,23 @@
         "additionalProperties": false,
         "required": ["promptLanguage"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."
+          }
         }
       },
       "VoicemailBoxSummary": {
         "type": "object",
-        "required": ["id", "extensionId", "number", "name", "unheard", "total", "promptLanguage"],
+        "required": [
+          "id",
+          "extensionId",
+          "number",
+          "name",
+          "unheard",
+          "total",
+          "promptLanguage"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -18865,9 +18896,15 @@
         "required": ["node", "text"],
         "properties": {
           "node": { "type": "string", "description": "A graph node id." },
-          "port": { "type": "string", "description": "The output port of the node the call leaves through; for a last step, the port it ends at." },
+          "port": {
+            "type": "string",
+            "description": "The output port of the node the call leaves through; for a last step, the port it ends at."
+          },
           "text": { "type": "string" },
-          "at": { "type": "string", "description": "On a time condition step, the instant that was evaluated." },
+          "at": {
+            "type": "string",
+            "description": "On a time condition step, the instant that was evaluated."
+          },
           "branches": {
             "type": "array",
             "description": "The choices of an IVR menu traced without a key.",
@@ -18881,22 +18918,45 @@
         "properties": {
           "port": { "type": "string" },
           "label": { "type": "string" },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } }
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          }
         }
       },
       "FlowTrace": {
         "type": "object",
-        "required": ["configRevision", "at", "from", "number", "outcome", "steps", "routingTrace"],
+        "required": [
+          "configRevision",
+          "at",
+          "from",
+          "number",
+          "outcome",
+          "steps",
+          "routingTrace"
+        ],
         "properties": {
           "configRevision": { "type": "integer", "format": "int64" },
           "at": { "type": "string" },
           "from": { "type": "string" },
           "number": { "type": "string" },
-          "outcome": { "type": "string", "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing." },
+          "outcome": {
+            "type": "string",
+            "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing."
+          },
           "route": { "type": "string" },
-          "reason": { "type": "string", "description": "Why the call was rejected." },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } },
-          "routingTrace": { "type": "array", "items": { "$ref": "#/components/schemas/TraceStep" } }
+          "reason": {
+            "type": "string",
+            "description": "Why the call was rejected."
+          },
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          },
+          "routingTrace": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TraceStep" }
+          }
         }
       },
       "FlowRevision": {
@@ -19550,6 +19610,57 @@
               "type": "string"
             },
             "description": "What a revert could not put back."
+          },
+          "flowDiff": {
+            "$ref": "#/components/schemas/FlowGraphDiff"
+          }
+        }
+      },
+      "FlowGraphDiff": {
+        "type": "object",
+        "description": "Only on a dry run: what the batch would do to the drawn flow graph, so a client can show it as an overlay before it applies.",
+        "required": [
+          "added",
+          "changed",
+          "removed",
+          "edgesAdded",
+          "edgesRemoved"
+        ],
+        "properties": {
+          "added": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowNode"
+            },
+            "description": "Nodes the batch creates, as they would be drawn."
+          },
+          "changed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowNode"
+            },
+            "description": "Nodes whose object the batch changes, as they would be after it."
+          },
+          "removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the nodes the batch deletes."
+          },
+          "edgesAdded": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowEdge"
+            },
+            "description": "Connections the batch makes; an edge whose details change is listed here and in edgesRemoved."
+          },
+          "edgesRemoved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the connections the batch drops."
           }
         }
       },
@@ -20585,7 +20696,7 @@
           },
           "languages": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": { "type": "string" },
             "description": "The languages the box can be set to."
           }
         }
@@ -24416,6 +24527,33 @@
             "type": "boolean",
             "description": "Whether the action deletes a resource; the console marks it and asks for confirmation."
           },
+          "preview": {
+            "type": "object",
+            "description": "For applyConfigBatch: what the batch's dry run answered when the proposal was made, so the console can show it on the call-flow canvas.",
+            "required": ["baseRevision", "results", "warnings", "flowDiff"],
+            "properties": {
+              "baseRevision": {
+                "type": "integer",
+                "format": "int64",
+                "description": "The configuration revision the batch is based on."
+              },
+              "results": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ConfigBatchResult"
+                }
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FlowWarning"
+                }
+              },
+              "flowDiff": {
+                "$ref": "#/components/schemas/FlowGraphDiff"
+              }
+            }
+          },
           "references": {
             "type": "array",
             "description": "For a delete, what it takes with it or leaves dangling: members of a ring group, the inbound routes sending calls to it, a route's trunks and destination.",
@@ -24755,6 +24893,57 @@
             "type": "string",
             "format": "date-time",
             "description": "When it was written."
+          },
+          "context": {
+            "$ref": "#/components/schemas/AIMessageContext"
+          }
+        }
+      },
+      "AIMessageContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "What the console showed when the question was asked from a call-flow canvas. The model receives it as data with the question and reads the graph and traces the call with its own tools.",
+        "properties": {
+          "canvasId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "The canvas the question was asked from."
+          },
+          "nodes": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string"
+            },
+            "description": "The flow node ids selected on it, such as `ivr:3`."
+          },
+          "trace": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["from", "number"],
+            "description": "A call traced on the canvas, with the parameters of traceFlow.",
+            "properties": {
+              "from": {
+                "type": "string",
+                "description": "An extension number or `trunk:<id>`."
+              },
+              "number": {
+                "type": "string",
+                "description": "The dialled number."
+              },
+              "callerId": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "digits": {
+                "type": "string",
+                "description": "Keys pressed in IVR menus, at most 32 of 0-9, * and #."
+              }
+            }
           }
         }
       },
@@ -24818,6 +25007,9 @@
             "minLength": 1,
             "maxLength": 4000,
             "description": "The question, at most 4000 characters."
+          },
+          "context": {
+            "$ref": "#/components/schemas/AIMessageContext"
           }
         },
         "additionalProperties": false
@@ -27343,23 +27535,73 @@
       },
       "QueueCallback": {
         "type": "object",
-        "required": ["id", "queueId", "number", "callerName", "status", "attempts", "positionKey", "nextAttemptAt", "claimedBy", "agent", "result", "createdAt", "expiresAt"],
+        "required": [
+          "id",
+          "queueId",
+          "number",
+          "callerName",
+          "status",
+          "attempts",
+          "positionKey",
+          "nextAttemptAt",
+          "claimedBy",
+          "agent",
+          "result",
+          "createdAt",
+          "expiresAt"
+        ],
         "properties": {
-          "id": {"type": "integer", "format": "int64"},
-          "queueId": {"type": "integer", "format": "int64"},
-          "number": {"type": "string", "description": "The number to call back."},
-          "callerName": {"type": "string", "description": "From the shared name sources (phonebooks); empty when none."},
-          "status": {"type": "string", "enum": ["waiting", "dialling", "connected", "failed", "cancelled", "expired"]},
-          "attempts": {"type": "integer", "description": "Attempts made, at most 3."},
-          "positionKey": {"type": "integer", "format": "int64", "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."},
-          "nextAttemptAt": {"type": "string", "format": "date-time"},
-          "claimedBy": {"type": "string", "description": "The node working on it while dialling."},
-          "leaseUntil": {"type": "string", "format": "date-time", "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."},
-          "agent": {"type": "string", "description": "The agent it was connected to."},
-          "result": {"type": "string", "description": "The last attempt's outcome or the way the request ended."},
-          "createdAt": {"type": "string", "format": "date-time"},
-          "expiresAt": {"type": "string", "format": "date-time"},
-          "finishedAt": {"type": "string", "format": "date-time"}
+          "id": { "type": "integer", "format": "int64" },
+          "queueId": { "type": "integer", "format": "int64" },
+          "number": {
+            "type": "string",
+            "description": "The number to call back."
+          },
+          "callerName": {
+            "type": "string",
+            "description": "From the shared name sources (phonebooks); empty when none."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "dialling",
+              "connected",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Attempts made, at most 3."
+          },
+          "positionKey": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."
+          },
+          "nextAttemptAt": { "type": "string", "format": "date-time" },
+          "claimedBy": {
+            "type": "string",
+            "description": "The node working on it while dialling."
+          },
+          "leaseUntil": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."
+          },
+          "agent": {
+            "type": "string",
+            "description": "The agent it was connected to."
+          },
+          "result": {
+            "type": "string",
+            "description": "The last attempt's outcome or the way the request ended."
+          },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "finishedAt": { "type": "string", "format": "date-time" }
         }
       },
       "QueueCallbackList": {

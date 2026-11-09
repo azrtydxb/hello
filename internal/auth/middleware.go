@@ -129,6 +129,11 @@ func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.H
 				// as the user it works for, with their current role.
 				a, err = l.UserActor(r.Context(), ag.UserID)
 				a.Kind, a.Scopes, a.Via = KindAgent, Scopes{ScopeRead}, ViaAssistant
+				if ag.Preview {
+					// A batch preview: the API admits its writes only
+					// inside a dry-run batch (api's previewGuard).
+					a.Scopes = Scopes{ScopeRead, ScopeWrite, ScopeAdmin}
+				}
 			case h != "":
 				tok, ok := strings.CutPrefix(h, "Bearer ")
 				if !ok || tok == "" {

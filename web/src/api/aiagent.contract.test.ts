@@ -103,6 +103,7 @@ const WEB = {
     current: 0,
     destructive: 0,
     references: 0,
+    preview: 0,
   } satisfies Record<keyof ProposalAction, 0>,
   AIProposalFailure: {
     index: 0,
@@ -155,6 +156,7 @@ const WEB = {
     proposalId: 0,
     taskId: 0,
     createdAt: 0,
+    context: 0,
   } satisfies Record<keyof AIMessage, 0>,
   AITask: {
     id: 0,

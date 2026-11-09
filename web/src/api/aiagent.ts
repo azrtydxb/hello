@@ -1,6 +1,7 @@
 // Client for the in-product AI agent (spec ai-agent): status, findings,
 // proposals, assistant sessions and tasks. Shapes follow internal/api/openapi.json.
 import { list, request } from "../api";
+import type { BatchResult, BatchWarning, FlowGraphDiff } from "./configBatch";
 
 export interface AIAgentRun {
   startedAt: string;
@@ -111,6 +112,37 @@ export interface ProposalAction {
   destructive?: boolean;
   /** For a delete: what refers to the deleted resource. */
   references?: ProposalReference[];
+  /** For applyConfigBatch: the dry run when the proposal was made. */
+  preview?: BatchPreview;
+}
+
+/** The operation of a proposal action that carries a configuration batch. */
+export const BATCH_OP = "applyConfigBatch";
+
+export interface BatchPreview {
+  baseRevision: number;
+  results: BatchResult[];
+  warnings: BatchWarning[];
+  flowDiff: FlowGraphDiff;
+}
+
+/** The batch action of a proposal, or undefined. */
+export const batchActionOf = (
+  p: AIProposal | null | undefined,
+): ProposalAction | undefined =>
+  p?.actions.find((a) => a.operationId === BATCH_OP);
+
+/** What a question asked from a call-flow canvas carries (flow-canvas S-19). */
+export interface AIMessageContext {
+  canvasId?: number;
+  nodes?: string[];
+  trace?: {
+    from: string;
+    number: string;
+    callerId?: string;
+    at?: string;
+    digits?: string;
+  };
 }
 
 export interface ProposalFailure {
@@ -179,6 +211,7 @@ export interface AIMessage {
   proposalId: string | null;
   taskId: string | null;
   createdAt: string;
+  context?: AIMessageContext;
 }
 
 export type TaskState = "queued" | "running" | "succeeded" | "failed";
@@ -260,17 +293,23 @@ export const dismissProposal = (
 
 export const listSessions = (signal?: AbortSignal) =>
   list<AISession>(`${B}/sessions`, signal);
-export const createSession = () =>
-  request<AISession>("POST", `${B}/sessions`, { body: {} });
+export const createSession = (title?: string) =>
+  request<AISession>("POST", `${B}/sessions`, {
+    body: title ? { title } : {},
+  });
 export const getSession = (id: string, signal?: AbortSignal) =>
   request<AISessionDetail>("GET", `${B}/sessions/${id}`, { signal });
 export const deleteSession = (id: string) =>
   request<void>("DELETE", `${B}/sessions/${id}`);
-export const postMessage = (id: string, content: string) =>
+export const postMessage = (
+  id: string,
+  content: string,
+  context?: AIMessageContext,
+) =>
   request<{ taskId: string; messageId: number }>(
     "POST",
     `${B}/sessions/${id}/messages`,
-    { body: { content } },
+    { body: context ? { content, context } : { content } },
   );
 export const getTask = (id: string, signal?: AbortSignal) =>
   request<AITask>("GET", `${B}/tasks/${id}`, { signal });

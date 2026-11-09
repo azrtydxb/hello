@@ -62,6 +62,9 @@ type Action struct {
 	// what disappears with it. Both are filled by Validate.
 	Destructive bool        `json:"destructive,omitempty"`
 	References  []Reference `json:"references,omitempty"`
+	// Preview is, for a batch (BatchOp), the dry run's answer when the
+	// proposal was made: results, warnings and the change to the graph.
+	Preview *Preview `json:"preview,omitempty"`
 }
 
 // Reference is one resource connected to the target of a delete.

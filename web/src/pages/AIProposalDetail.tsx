@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 import { errorMessage } from "../api";
 import {
   applyProposal,
+  BATCH_OP,
   DISMISS_REASONS,
   dismissProposal,
   getProposal,
@@ -10,6 +11,7 @@ import {
   type DismissReason,
 } from "../api/aiagent";
 import { AIGate } from "../components/ai/AIGate";
+import { BatchPreview } from "../components/ai/BatchPreview";
 import { JsonDiff } from "../components/ai/JsonDiff";
 import { PlainText } from "../components/ai/PlainText";
 import { ProposalStatusBadge } from "../components/ai/ProposalCard";
@@ -162,12 +164,16 @@ function Detail({ id }: { id: string }) {
                 </Badge>
               )}
             </div>
-            <JsonDiff
-              before={a.before}
-              after={isDelete(a) ? undefined : a.after}
-              current={a.current}
-              hasCurrent={"current" in a}
-            />
+            {a.operationId === BATCH_OP ? (
+              <BatchPreview proposalId={p.id} action={a} />
+            ) : (
+              <JsonDiff
+                before={a.before}
+                after={isDelete(a) ? undefined : a.after}
+                current={a.current}
+                hasCurrent={"current" in a}
+              />
+            )}
             {isDelete(a) && a.references && a.references.length > 0 && (
               <div>
                 <p className="aix-muted">Also affected by this delete:</p>

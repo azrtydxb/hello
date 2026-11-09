@@ -1433,6 +1433,7 @@ Implementation notes (template route, no migration):
   right and is unchanged.
 - Under `-race` the Opus build is off (opus_race.go), so the loopback test
   skips there; the -race count proves nothing about the codec.
+
 ## IVR homed-callee data race (ivrHomeCallee vs release)
 
 - Root cause: `homedCall.legs` had no lock of its own. `ivrHomeCallee`
@@ -1448,3 +1449,67 @@ Implementation notes (template route, no migration):
 - Firmware-upgrade confirmation prompt off (P8375=0, P84988=1) for unattended upgrades, or leave it
 - Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
 - Account sharing group password: shared default `AccountSharing`, or a per-group secret
+
+## Flow canvas P6: AI on the canvas (2026-11-09)
+
+Built per `.procoder/specs/flow-canvas.md` (P6, S-17, S-19, S-20). Choices the
+spec left open, and one deviation:
+
+- **The assistant proposes, it never applies (deviation from decision 2).**
+  Decision 2 lets the in-product assistant apply batches directly. This
+  change gives it no write tool: a change is a proposal whose batch the
+  operator previews on the canvas and applies or discards, as the P6 task
+  asked ("never applied silently"). Write-scoped MCP clients keep
+  `applyConfigBatch` as before. Giving the assistant a direct write tool is a
+  separate, later decision for the user.
+- **A batch proposal is one action.** `applyConfigBatch` joins
+  `proposal.Allowlist`; a proposal that carries it has no other action, so the
+  whole change is one transaction. The inner allowlist is the batch's own
+  table (`configbatch.Ops`, every object type the canvas draws); `createDevice`,
+  `createPhone`, credential, multipart and external-effect operations stay
+  out. At most 50 inner operations.
+- **Credentials stay out of proposals.** Decision 2 allows the AI to set
+  secrets with redacted reads; a proposal's body is stored and shown to
+  people and to the model, so an inner operation that sets a password, PIN or
+  secret is refused, as for every other proposal (S-12).
+- **The dry run runs as the user, rolled back.** The validator dry-runs the
+  batch through the API as the user's agent identity with a new `Preview`
+  flag (`auth.Agent.Preview`): it then holds write scopes with the user's own
+  role, but the API admits its writes only on `POST /api/v1/config/batch`
+  with `dryRun` and inside a dry-run store batch (`previewGuard`,
+  `Batch.DryRun`). A viewer's or an operator's admin-only batch is refused
+  there and the model is told the user cannot make the change.
+- **Hello fills the staleness tokens.** The model does not send
+  `baseRevision` or `expect`: the validator reads the graph (devices
+  included) and sets `baseRevision` to its revision and each update or
+  delete's `expect` to the node's version. A configuration that moves under
+  the proposal makes the batch's own check answer 409, which makes the
+  proposal `stale`; changes to other objects do not.
+- **The preview is stored.** The dry run's results (redacted), warnings and a
+  new `flowDiff` (added, changed, removed nodes, edges added and removed,
+  `flow.Diff`) are kept on the action as `preview`, so the overlay and the
+  proposal page need no write scope and viewers see them. Every dry-run batch
+  answer now carries `flowDiff` (documented in `openapi.json` and
+  `docs/config-batch.md`).
+- **Overlay placement.** Created nodes have dry-run ids (sequences do not roll
+  back), so the canvas draws them as ghosts placed next to a connected node
+  (not draggable) and, after apply, places the real nodes at the ghost
+  positions by matching kind and label (`placementsAfterApply`).
+- **Canvas context.** A question carries a `context` with `canvasId`,
+  `nodes` and `trace`, stored in `ai_messages.context` (migration `00052`) so the task and
+  the history see it, and given to the model as data (`canvas`), never as
+  instructions. The panel sends the canvas, the selected node and the traced
+  call.
+- **`describeOperation`.** One assistant tool that is not an API read: it
+  answers the request schema of an operation a proposal may carry, from the
+  embedded document, so the model writes valid batch bodies. It is not an MCP
+  tool and reads no PBX data.
+- **`getFlowGraph` `fields=summary`** (S-17) empties node summaries and drops
+  edge `data`, keeping ids, labels, versions, ports and owners.
+- **Roles.** Asking needs operator (the chat already did); viewers see the
+  panel's proposal list and the overlay, without Apply. Discard is
+  `dismissAIProposal` with reason `not_needed`. With the agent off the panel
+  shows the same reason as every AI page.
+- **Import cycle.** `configbatch` used `proposal.Change`; the JSON diff moved
+  to `internal/jsondiff` (proposal keeps aliases) so `proposal` can use
+  `configbatch`.
