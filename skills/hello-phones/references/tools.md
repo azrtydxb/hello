@@ -55,3 +55,11 @@
 | `updatePhonebookEntry`          | write | Replace an entry.                                        |
 | `deletePhonebookEntry`          | write | Delete an entry.                                         |
 | `importPhonebook`               | write | Check or import JSON rows, all or nothing.               |
+| `listRingTags`                  | read  | Built-in and custom ring tags.                           |
+| `getRingTag`                    | read  | One ring tag.                                            |
+| `createRingTag`                 | write | Create a custom ring tag.                                |
+| `putRingTag`                    | write | Change a ring tag.                                       |
+| `deleteRingTag`                 | write | Delete a custom ring tag.                                |
+| `listRingRules`                 | read  | The ring tag rules in order.                             |
+| `putRingRules`                  | write | Replace the ring tag rules.                              |
+| `evaluateRingRules`             | read  | Which ring tag a call would get.                         |

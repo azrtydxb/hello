@@ -112,6 +112,7 @@ describe("RingGroups", () => {
         failureTarget: "+97142000100",
         mohClassId: null,
         mohRingback: false,
+        ringTag: "",
         members: [
           {
             extensionId: 1,

@@ -164,6 +164,19 @@ Books: the computed extensions book (read-only), the company book and up to
 - Deliver a named book by adding it to a group with `setPhoneGroupBooks`,
   then resync.
 
+## Ring tags
+
+A ring tag names a ring tone (Alert-Info) that a phone plays for a call. The
+built-in tags come with the server; custom tags are yours to add.
+
+- `listRingTags`, `getRingTag`; `createRingTag` and `putRingTag` (path `name`)
+  make a custom tag; `deleteRingTag` removes a custom one only.
+- `listRingRules` and `putRingRules` (replaces all rules) decide which tag a
+  call gets: by kind, by rule order, or the default.
+- `evaluateRingRules` (`/ring-rules/evaluate`) answers which tag a given call
+  would get. Use it to explain a ring before changing a rule.
+- A ring group can name its own tag (`ringTag`); the rules can still override it.
+
 ## References
 
 - [Tools](references/tools.md) - every tool with its scope.
