@@ -39,7 +39,7 @@
         "number": "101",
         "voicemail": true
       },
-      "version": "d49b70d62eb16a78"
+      "version": "e05cd87a3ebdabf9"
     },
     {
       "id": "extension:11",
@@ -52,7 +52,7 @@
         "number": "102",
         "voicemail": false
       },
-      "version": "ed3ff65d5c66505d"
+      "version": "f52b3ee41ae9ee5a"
     },
     {
       "id": "inboundRoute:1",
@@ -105,7 +105,7 @@
         "ringTimeout": 0,
         "strategy": "ring-all"
       },
-      "version": "6dde2cc83f4a30c1"
+      "version": "82f350bd68a3ac48"
     },
     {
       "id": "trunk:1",
