@@ -128,6 +128,9 @@ type Config struct {
 	HATakeoverPoll    time.Duration
 	HATakeoverJitter  time.Duration
 
+	// CallbackInterval is how often this node sweeps the queues' callback
+	// requests; zero means every 3 s.
+	CallbackInterval time.Duration
 	// PromptLanguage is the language of the spoken voicemail prompts ("en",
 	// "nl"; empty is English) and Timezone the IANA zone message times are
 	// spoken in (empty is UTC).
@@ -196,6 +199,9 @@ type Deps struct {
 	// Queues is the call queues' shared state (Valkey); nil disables call
 	// queues (a call to a queue is refused with 503).
 	Queues queue.Store
+	// Callbacks is the queue callback requests (PostgreSQL); nil turns the
+	// callback offer off.
+	Callbacks queue.CallbackStore
 	// Messages is the SIP MESSAGE queue (PostgreSQL); nil answers every
 	// MESSAGE 503.
 	Messages MessageQueue
@@ -276,6 +282,10 @@ type Server struct {
 	// this node sent per dialog Call-ID, so replicated CSeqs continue past
 	// it; entries go with the dialog's binding.
 	haSent sync.Map
+	// cbHold is the lowest place of a due callback request, per queue id
+	// (map[int64]int64, replaced by each sweep): a waiting call that entered
+	// later does not take an agent ahead of it (queue_callback.go).
+	cbHold atomic.Value
 	// haGone holds the dialog Call-IDs of calls this node yielded to a
 	// taker (the value is the taker): their in-dialog requests get 503 so
 	// the edge retries them on a survivor.
@@ -511,6 +521,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.subExpireLoop(rctx) })
 	s.bg.Go(func() { s.mwiPollLoop(rctx) })
 	s.bg.Go(func() { s.queueLoop(rctx) })
+	s.bg.Go(func() { s.callbackLoop(rctx) })
 	if s.deps.MailboxEvents != nil {
 		s.bg.Go(func() { s.deps.MailboxEvents.Watch(rctx, s.mailboxChanged) })
 	}
@@ -766,13 +777,17 @@ func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 		s.authFailed(tx, req, ip, "unknown or disabled device", false)
 		return snapshot.Device{}, false
 	}
-	switch s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256) {
+	verdict, check := s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256)
+	switch verdict {
 	case OK:
 		return s.checkReplay(req, tx, creds.Username, creds.Nonce, creds.Cnonce, creds.Nc, dev)
 	case Stale:
 		s.challenge(tx, req, true)
 	default:
-		s.authFailed(tx, req, ip, "bad credentials", true)
+		// Never log the response, HA1, nonce or cnonce.
+		s.authFailed(tx, req, ip, "bad credentials", true,
+			"check", check, "digest_uri", creds.URI, "request_uri", req.Recipient.String(),
+			"realm", creds.Realm, "algorithm", creds.Algorithm, "qop", creds.QOP, "username", creds.Username)
 	}
 	return snapshot.Device{}, false
 }
@@ -820,12 +835,13 @@ func (s *Server) challenge(tx sip.ServerTransaction, req *sip.Request, stale boo
 }
 
 // authFailed counts a failure for ip and answers 401 (rechallenge) or 403.
+// attrs are extra key/value pairs for the log line; they must not hold secrets.
 //
 // The 401/403 decision uses the count after this failure, so concurrent bad
 // attempts that all passed the precheck cannot all be rechallenged: within
 // one window at most AuthFailLimit failed attempts from an IP get a 401,
 // every later one 403.
-func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why string, rechallenge bool) {
+func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why string, rechallenge bool, attrs ...any) {
 	ctx, cancel := s.stateCtx()
 	n, err := s.deps.Throttle.RecordFailure(ctx, ip)
 	cancel()
@@ -834,7 +850,8 @@ func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why 
 		s.unavailable(tx, req)
 		return
 	}
-	s.log.Info("SIP authentication failed", "method", req.Method.String(), "source", s.clientSource(req), "reason", why)
+	attrs = append([]any{"method", req.Method.String(), "source", s.clientSource(req), "reason", why}, attrs...)
+	s.log.Info("SIP authentication failed", attrs...)
 	if rechallenge && n <= int64(s.cfg.AuthFailLimit) {
 		s.challenge(tx, req, false)
 		return
@@ -909,10 +926,15 @@ func (s *Server) recountRegistrations(ctx context.Context) {
 		return
 	}
 	n := 0
+	byTransport := map[string]int{"udp": 0, "tcp": 0, "tls": 0}
 	for _, b := range bs {
 		if b.ReceivedNode == s.cfg.NodeID {
 			n++
+			byTransport[normTransport(b.Transport)]++
 		}
+	}
+	for t, c := range byTransport {
+		s.m.RegistrationsByTransport.WithLabelValues(t).Set(float64(c))
 	}
 	s.m.Registrations.Set(float64(n))
 	s.registrations.Store(int64(n))

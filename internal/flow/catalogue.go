@@ -60,6 +60,7 @@ const (
 	KindExternal      = "external"
 	KindSIPURI        = "sipUri"
 	KindInternalDID   = "internalDid"
+	KindDirectory     = "directory"
 	KindMissing       = "missing"
 )
 
@@ -160,6 +161,7 @@ var (
 	tExternal  = tg(KindExternal, "call")
 	tSIPURI    = tg(KindSIPURI, "call")
 	tDID       = tg(KindInternalDID, "call")
+	tDirectory = tg(KindDirectory, "call")
 )
 
 // buildCatalogue assembles the table. It is a function (not a variable) so
@@ -168,7 +170,7 @@ func buildCatalogue() Catalogue {
 	// Inbound routes store every kind. An "extension" route may also name a
 	// numeric ring group (the older way); a "ring_group" route names it
 	// directly.
-	inboundDest := []Target{tExt, tVoicemail, tGroup, tIVR, tQueue, tAnn, tPaging, tConf, tTC, tExternal, tSIPURI, tDID}
+	inboundDest := []Target{tExt, tVoicemail, tGroup, tIVR, tQueue, tAnn, tPaging, tConf, tTC, tExternal, tSIPURI, tDID, tDirectory}
 	// Extension forwards store a number: an extension, a numeric ring group
 	// or an external number.
 	forward := []Target{tExt, tGroup.note("Ring group names must be numeric to be dialled from a forward"), tExternal}
@@ -176,11 +178,11 @@ func buildCatalogue() Catalogue {
 	// queue|time_condition|extension|ring_group. An extension or another
 	// group gets a new ring stage. A call whose group already rang cannot be
 	// handed to a paging group or a conference room.
-	groupNoAnswer := []Target{tExt, tVoicemail, tGroup, tIVR, tQueue, tAnn, tTC, tExternal}
+	groupNoAnswer := []Target{tExt, tVoicemail, tGroup, tIVR, tQueue, tAnn, tTC, tExternal, tDirectory}
 	// IVR keys and exits, time condition branches and queue exits store the
 	// same set: hangup, extension, ring group, voicemail, announcement,
 	// paging, IVR, queue, time condition and external number.
-	exit := []Target{tExt, tVoicemail, tGroup, tIVR, tQueue, tAnn, tPaging, tTC, tExternal}
+	exit := []Target{tExt, tVoicemail, tGroup, tIVR, tQueue, tAnn, tPaging, tTC, tExternal, tDirectory}
 
 	c := Catalogue{
 		PortTypes: []PortStyle{
@@ -289,7 +291,7 @@ func buildCatalogue() Catalogue {
 				in("members", PortMember, true, "Members"),
 			}},
 			{Kind: KindFeatureCode, Label: "Feature code", Ports: []Port{
-				out("target", PortCall, false, "Target", "argument", tAnn, tIVR, tTC),
+				out("target", PortCall, false, "Target", "argument", tAnn, tIVR, tTC, tDirectory),
 			}},
 			{Kind: KindTimeCond, Label: "Time condition", Ports: []Port{
 				in("call", PortCall, true, "Call"),
@@ -314,6 +316,7 @@ func buildCatalogue() Catalogue {
 			{Kind: KindExternal, Label: "External number", Terminal: true, Ports: []Port{in("call", PortCall, true, "Call")}},
 			{Kind: KindSIPURI, Label: "SIP URI", Terminal: true, Ports: []Port{in("call", PortCall, true, "Call")}},
 			{Kind: KindInternalDID, Label: "DID as extension", Terminal: true, Ports: []Port{in("call", PortCall, true, "Call")}},
+			{Kind: KindDirectory, Label: "Dial-by-name directory", Terminal: true, Ports: []Port{in("call", PortCall, true, "Call")}},
 			{Kind: KindMissing, Label: "Missing target", Terminal: true, Ports: []Port{in("call", PortCall, true, "Call")}},
 		},
 	}

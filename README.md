@@ -20,9 +20,10 @@ voicemail greetings from text, [docs/voicemail.md](docs/voicemail.md) for the sp
 [docs/ai-agent.md](docs/ai-agent.md) for the in-product AI agent (assistant,
 findings and proposals). For the IVR / auto-attendant see
 [docs/ivr.md](docs/ivr.md), and for call queues [docs/queues.md](docs/queues.md). For time and date routing (schedules, holiday calendars, time conditions, the day/night toggle) see
-[docs/time-conditions.md](docs/time-conditions.md). For the call events that integrations read (live stream, history, scopes) see [docs/integrations.md](docs/integrations.md). To run Hello on Kubernetes (Helm chart, SIP
+[docs/time-conditions.md](docs/time-conditions.md). For the call events that integrations read (live stream, history, scopes) see [docs/integrations.md](docs/integrations.md). For ring tags and distinctive ringing (which tag a call rings with, and the `Alert-Info` header phones map to a tone) see [docs/ring-tags.md](docs/ring-tags.md). To run Hello on Kubernetes (Helm chart, SIP
 networking, highly available state, rolling upgrades) see
-[docs/kubernetes.md](docs/kubernetes.md).
+[docs/kubernetes.md](docs/kubernetes.md). For SIP over TLS and `sips:` see
+[docs/tls.md](docs/tls.md).
 
 ## Layout
 
@@ -145,7 +146,7 @@ naming the key, if one is missing or malformed.
 | `HELLO_PROV_AUTO_RESYNC`                          | control | `false`; push a resync to a phone 30 s after a change to what its configuration renders from                                  |
 | `HELLO_DIAL_INTL_PREFIX` / `_COUNTRY_CODE`        | control | `00` / unset; digits standing for `+`, and the country code a leading `0` belongs to (lookup keys)                            |
 | `HELLO_PROV_TIMEZONE` / `_NTP`                    | control | `UTC` / `pool.ntp.org`                                                                                                        |
-| `HELLO_VOICEMAIL_LANGUAGE`                        | both    | `en`; language of the spoken voicemail prompts (`en`, `nl`), docs/voicemail.md                                                |
+| `HELLO_VOICEMAIL_LANGUAGE`                        | both    | `en`; deployment language of the spoken voicemail prompts (`en`, `nl`); a box can set its own, docs/voicemail.md              |
 | `HELLO_TIMEZONE`                                  | sip     | `HELLO_PROV_TIMEZONE`, else `UTC`; the zone message times are spoken in                                                       |
 | `HELLO_PROV_AUDIT_RETENTION`                      | control | `90d`; how long the fetch audit is kept                                                                                       |
 | `HELLO_PROV_RATE_*`                               | control | `IP_PER_MIN` `60`, `DENIED_PER_10MIN` `10`, `PHONE_PER_HOUR` `30`                                                             |

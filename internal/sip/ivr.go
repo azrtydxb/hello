@@ -350,6 +350,8 @@ func (c *call) ivrLeave(ctx context.Context, snap *snapshot.Snapshot, m snapshot
 		return c.ivrTimeCondition(ctx, snap, m, ex)
 	case snapshot.IVRMenuKind:
 		return d.Target, false
+	case snapshot.IVRDirectory:
+		return c.ivrDirectoryExit(ctx, snap, m)
 	case snapshot.IVRAnnouncement:
 		c.ivrAnnounce(ctx, snap, d.Target)
 		c.ivrHangup()
@@ -651,7 +653,12 @@ func (c *call) ivrPrompt(ctx context.Context, snap *snapshot.Snapshot, name stri
 // ivrPlay plays one announcement to the caller. With barge-in a key press
 // stops it and is returned. alive is false once the call has ended.
 func (c *call) ivrPlay(ctx context.Context, snap *snapshot.Snapshot, name string, barge bool) (digit byte, hit, alive bool) {
-	a := c.ivrPrompt(ctx, snap, name)
+	return c.ivrPlayAudio(ctx, c.ivrPrompt(ctx, snap, name), name, barge)
+}
+
+// ivrPlayAudio plays decoded audio like ivrPlay; label names it in logs.
+func (c *call) ivrPlayAudio(ctx context.Context, a ivrAudio, label string, barge bool) (digit byte, hit, alive bool) {
+	name := label
 	if len(a.pcm) == 0 {
 		return 0, false, ctx.Err() == nil
 	}
@@ -1345,10 +1352,18 @@ func (c *call) offerSDP() []byte {
 	if c.inv != nil {
 		return c.inv.Body()
 	}
-	if hom := c.homed(); hom != nil && hom.legs[0] != nil {
-		hom.legs[0].mu.Lock()
-		defer hom.legs[0].mu.Unlock()
-		return []byte(hom.legs[0].remoteSDP)
+	c.mu.Lock()
+	cbOffer := c.cbOffer
+	c.mu.Unlock()
+	if cbOffer != nil {
+		return cbOffer // a callback's own offer to the caller it rings (queue_callback.go)
+	}
+	if hom := c.homed(); hom != nil {
+		if l := hom.leg(false); l != nil {
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			return []byte(l.remoteSDP)
+		}
 	}
 	return nil
 }
@@ -1358,12 +1373,13 @@ func (c *call) offerSDP() []byte {
 // device name, so the caller's replicated contact stands in for it.
 func (c *call) isCallerContact(b livestate.Binding) bool {
 	hom := c.homed()
-	if hom == nil || hom.legs[0] == nil {
+	if hom == nil || hom.leg(false) == nil {
 		return false
 	}
-	hom.legs[0].mu.Lock()
-	target := trimAngle(hom.legs[0].remoteTarget)
-	hom.legs[0].mu.Unlock()
+	l := hom.leg(false)
+	l.mu.Lock()
+	target := trimAngle(l.remoteTarget)
+	l.mu.Unlock()
 	return target != "" && trimAngle(b.ContactURI) == target
 }
 
@@ -1406,8 +1422,6 @@ func (c *call) ivrHomeCallee(hom *homedCall, w *leg) bool {
 	if l == nil {
 		return false
 	}
-	c.mu.Lock()
-	hom.legs[1] = l
-	c.mu.Unlock()
+	hom.setCallee(l)
 	return true
 }

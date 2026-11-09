@@ -71,7 +71,8 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	udp, err := (&net.ListenConfig{}).ListenPacket(ctx, "udp", cfg.SIPBindAddr)
+	media.SetRTPDSCP(cfg.DSCPRTP)
+	udp, err := sip.ListenUDP(ctx, cfg.SIPBindAddr, cfg.DSCPSIP, log)
 	if err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("sip listen: %w", err)
@@ -185,7 +186,7 @@ func run(args []string) error {
 		Voicemails:    voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings, TimeConditions: timeConditions{st: controlStore},
 		Speech:     newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
-		HAState: live, Membership: members, PageTests: live, Queues: queue.NewValkey(vk), Park: live,
+		HAState: live, Membership: members, PageTests: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Park: live,
 		Conferences: live, ConferenceAudit: controlStore,
 	})
 	if err != nil {

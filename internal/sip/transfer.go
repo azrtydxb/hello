@@ -197,6 +197,7 @@ func (c *call) originateFor(target string, snap *snapshot.Snapshot) (*call, []*l
 	c2.dialled = target
 	c2.callerNum, c2.callerName, c2.callerDevice = c.callerNum, c.callerName, c.callerDevice
 	c2.direction, c2.dss = c.direction, c.dss
+	c2.doorCaller, c2.kind = c.doorCaller, c.kind
 	c2.callerDialogUp, c2.haShared = true, true
 	c2.events = make(chan legEvent, 16)
 	c2.setupDone = make(chan struct{})

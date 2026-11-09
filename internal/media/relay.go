@@ -213,11 +213,12 @@ func (r *Relay) AddLeg(name string) (int, error) {
 		if r.used[p] {
 			continue
 		}
-		c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: p})
+		c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: p})
 		if err != nil {
 			lastErr = err
 			continue
 		}
+		markRTP(c)
 		conn, port = c, p
 		break
 	}

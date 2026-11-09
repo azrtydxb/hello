@@ -22,7 +22,7 @@ type Binding struct {
 	Device       string    `json:"device"`     // device SIP username
 	ContactURI   string    `json:"contactUri"` // as sent in Contact
 	Source       string    `json:"source"`     // ip:port the REGISTER came from
-	Transport    string    `json:"transport"`  // udp
+	Transport    string    `json:"transport"`  // udp, tcp or tls: the phone leg of the REGISTER
 	UserAgent    string    `json:"userAgent"`
 	Path         []string  `json:"path,omitempty"`
 	ReceivedNode string    `json:"receivedNode"` // node ID that handled the REGISTER
