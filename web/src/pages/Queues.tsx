@@ -27,6 +27,7 @@ import {
   Button,
   ConfirmDialog,
   EmptyState,
+  LinkButton,
   PageHeader,
   Spinner,
   useToast,
@@ -275,6 +276,17 @@ function QueueCard({
         <strong>{destinationText(q.noAgents)}</strong>
       </div>
       <div className="cf-card__foot">
+        {q.callbackEnabled && (
+          <LinkButton
+            to={`/queues/${String(q.id)}/callbacks`}
+            variant="ghost"
+            size="sm"
+            icon="phone-call"
+            aria-label={`Callbacks of queue ${q.name}`}
+          >
+            Callbacks
+          </LinkButton>
+        )}
         <Button
           variant="secondary"
           size="sm"

@@ -128,6 +128,8 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/queues/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getQueue},
 		{"PUT", "/api/v1/queues/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.putQueue},
 		{"DELETE", "/api/v1/queues/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteQueue},
+		{"GET", "/api/v1/queues/{id}/callbacks", auth.ScopeRead, auth.RoleViewer, false, s.listQueueCallbacks},
+		{"DELETE", "/api/v1/queues/{id}/callbacks/{callbackId}", auth.ScopeWrite, auth.RoleOperator, false, s.cancelQueueCallback},
 		{"GET", "/api/v1/queue-agents", auth.ScopeRead, auth.RoleViewer, false, s.listQueueAgents},
 		{"PUT", "/api/v1/queue-agents/{extension}", auth.ScopeWrite, auth.RoleOperator, false, s.setQueueAgent},
 		{"GET", "/api/v1/schedules", auth.ScopeRead, auth.RoleViewer, false, s.listSchedules},

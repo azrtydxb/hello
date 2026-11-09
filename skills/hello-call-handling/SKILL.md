@@ -68,6 +68,14 @@ argument `extension`) takes `{ "loggedIn": true }`, `{ "paused": true,
 "reason": "lunch" }` or `{ "queues": ["support"] }`; absent fields keep their
 value, and logging out clears a pause. Always say whose state you changed.
 
+### Callbacks
+
+A queue with `callbackEnabled` offers a callback to callers whose estimated
+wait exceeds `callbackOfferAfterSeconds`. `listQueueCallbacks` (path `id`)
+lists the open requests of the queue, with their position and attempts.
+`cancelQueueCallback` (path `id`, `callbackId`) cancels one request the caller
+no longer wants. Say which caller you cancelled for.
+
 ## Conferences
 
 `createConference` (admin): `{ "name": "weekly", "number": "8100", "userPin":

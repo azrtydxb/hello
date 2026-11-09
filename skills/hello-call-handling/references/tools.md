@@ -10,6 +10,8 @@
 | `listQueueStatus`           | read  | Live waiting callers and agent states.                             |
 | `listQueueAgents`           | read  | Agents with login and pause state.                                 |
 | `setQueueAgent`             | write | Log an agent in or out, pause or resume.                           |
+| `listQueueCallbacks`        | read  | Open callback requests of a queue.                                 |
+| `cancelQueueCallback`       | write | Cancel one callback request.                                       |
 | `listConferences`           | read  | Rooms with live state; PINs never returned.                        |
 | `getConference`             | read  | One room with who is in it.                                        |
 | `createConference`          | admin | Create a room.                                                     |
