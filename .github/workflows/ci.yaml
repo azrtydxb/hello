@@ -861,11 +861,11 @@ jobs:
     # Full tier: on a pull request only when the change touches the edge (the
     # first step decides); always on main, the nightly cron and dispatch.
     # Starts after the unit jobs finish (whatever their result): a kind control
-    # plane is etcd on the runner's disk, and on the shared 4-core runners it
+    # plane is etcd on the runner's disk, and on a 4-core runner it
     # times out requests (load average 10) while go, chart and web are running.
     needs: [go, chart, web, kamailio-config]
     if: ${{ !cancelled() }}
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 50
     env:
       KIND_VERSION: v0.30.0
@@ -908,10 +908,6 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           buildkitd-config-inline: |
-            [registry."192.168.10.131"]
-              insecure = true
-            [registry."192.168.10.131:5000"]
-              insecure = true
             [registry."docker.io"]
               mirrors = ["ant.azrty.com"]
       - id: ant-cache-ha
