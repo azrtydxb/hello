@@ -10,14 +10,20 @@
     <P36>{{xml .Line.AuthName}}</P36>
     <P34>{{xml .Line.Password}}</P34>
     <P3>{{xml .Line.DisplayName}}</P3>
-{{- /* DNS mode and backup server (phone-feature-parity S-20). P103 = Account 1 DNS Mode: 0 A Record, 1 SRV, 2 NAPTR/SRV, 3 Use Configured IP (Grandstream's GRP261x and WP810/822/825 config templates; the WP8x6 template has the same setting, "DNS Mode"). Written always, so a phone taken back out of SRV mode returns to A records. In SRV mode (Server.DNSMode "srv", HELLO_PROV_SIP_SRV) P47 is the name whose _sip._udp SRV records list the servers (no port), P29095 = 1 registers with the next server before failing calls over to it and P60056 = 60 is the failback timer in minutes (the template default; GRP261x "Failback Expiration(m)"). Otherwise, with a backup server (HELLO_PROV_SIP_BACKUP_SERVERS) P48 = Outbound Proxy repeats the primary and P2333 = Backup Outbound Proxy is the backup, each host:port; the phone uses the backup when the primary fails. With none, P48 and P2333 are left as they are. Keys per the Grandstream GRP261x and WP810/822/825 templates; not confirmed on a phone (verify, lab item "failover"). */}}
+{{- /* DNS mode and backup server (phone-feature-parity S-20), account 1, keys per Grandstream's own configuration templates (config-template-10212026.zip; 2026-11-09 review). P103 = DNS Mode: 0 A Record, 1 SRV, 2 NAPTR/SRV (3 Use Configured IP takes IPv4 addresses of at most 15 characters in P2308 to P2310, no port, so it cannot carry a backup) in wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83, wp820_config_1.0.7.90 and wp856_config_1.0.3.16. Written always, so a phone taken back out of SRV mode returns to A records. In SRV mode (Server.DNSMode "srv", HELLO_PROV_SIP_SRV) P47 is the name whose _sip._udp SRV records list the servers (no port); P29095 = 1 (Register Before DNS SRV Fail-over, 0 No, 1 Yes) registers with the next server before failing calls over to it; P26040 = 3 (DNS SRV Failover Mode: 0 Default, 1 saved one until DNS TTL, 2 saved one until no response, 3 failback follows the failback expiration timer, in all four templates) makes the phone return to the first server when the timer ends; P60056 = 60 is that Failback Timer in minutes (wp8x6, wp820 and wp856 templates; the WP810/822/825 template lists the Failback Timer under P60055, the retry count's own key, which is a mistake in that template, so P60056 is not written to it and it keeps its default, 60). Otherwise, with a backup server (HELLO_PROV_SIP_BACKUP_SERVERS) three keys name it, each host:port: P2312 = Secondary SIP Server (WP8x6, WP810/822/825 and WP856 templates; the WP820 has none), and P48 = Outbound Proxy repeating the primary with P2333 = Backup Outbound Proxy ("Secondary Outbound Proxy" in the WP8x6, WP820 and WP856 templates), which every template has; the phone uses the backup when the primary fails. With none, P48, P2312 and P2333 are left as they are. Not confirmed on a phone (verify, lab item "failover"). */}}
 {{- if eq .Server.DNSMode "srv"}}
     <P103>1</P103>
     <P29095>1</P29095>
+    <P26040>3</P26040>
+{{- if ne .Phone.WP "WP8xx"}}
     <P60056>60</P60056>
+{{- end}}
 {{- else}}
     <P103>0</P103>
 {{- with .Server.Backup}}
+{{- if or (eq $.Phone.WP "WP8x6") (eq $.Phone.WP "WP8xx") (eq $.Phone.WP "WP856") (eq $.Phone.WP "")}}
+    <P2312>{{xml .Host}}:{{.Port}}</P2312>
+{{- end}}
     <P48>{{xml $.Server.Host}}:{{$.Server.Port}}</P48>
     <P2333>{{xml .Host}}:{{.Port}}</P2333>
 {{- end}}
@@ -275,12 +281,19 @@
     <P2347>1</P2347>
     <P26015>0</P26015>
 {{- end}}
+{{- /* Phonebook download (phone-feature-parity S-31), keys per Grandstream's own templates (2026-11-09 review). P330 = Enable Phonebook XML Download, 3 = HTTPS in every WP template (the WP856 numbers 1 TFTP, 2 HTTP, 3 HTTPS and the WP8x6 1 HTTP, 2 TFTP, 3 HTTPS); P331 = server path (host/path, no scheme); P332 = download interval in minutes (WP8x6 and WP810/822/825: 0 or 5 to 720; WP820 and WP856: only 0, 5, 30, 60, 120, 240, 360, 480, 720, see BookRefreshForPhone). What the download does to entries already in the phone: P333 = Remove Manually-edited Entries on Download (0 No, 1 Yes, default 1) is in wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83 and written 1, as Hello's directory is the source of truth; P8462 = Import Group Method (0 Replace, 1 Append, default 0) is in the WP8x6 template only and written 0, so a group in the downloaded XML replaces the phone's; the WP820 and WP856 templates have neither, but "Clear The Old List" P1435 (0 No, 1 Clear all, 2 Keep Local Contacts, default 0), which is written 1 for the same effect. P1436 (Replace Duplicate Items) stays at its default. */}}
 {{- with .Book}}
     <P330>3</P330>
     <P331>{{xml .HostPath}}</P331>
     <P332>{{.RefreshMinutes}}</P332>
-{{- if ne $.Phone.Family "856"}}
+{{- if and (ne $.Phone.Family "856") (ne $.Phone.WP "WP820")}}
     <P333>1</P333>
+{{- end}}
+{{- if eq $.Phone.WP "WP8x6"}}
+    <P8462>0</P8462>
+{{- end}}
+{{- if or (eq $.Phone.WP "WP820") (eq $.Phone.WP "WP856")}}
+    <P1435>1</P1435>
 {{- end}}
 {{- end}}
 {{- /* HT813 FXO disconnect supervision. Without it a PSTN caller who hangs up first leaves the FXO off-hook and it answers 486 to every later call. Keys and meanings from Grandstream's ht813_config_1.0.19.6 template (config-template-10212026.zip), section "FXO PORT Settings" / "FXO Termination Settings" (not the FXS-side P892/P856 loop-current keys): P893 Enable Current Disconnect, P764 Current Disconnect Threshold (50-800 ms, default 100), P28101 Enable Polarity Reversal, P712 Enable PSTN Disconnect Tone Detection, P841 PSTN Disconnect Tone (f1=<Hz>@<dB>,c=<on>/<off> ms; UAE busy tone 400 Hz, 375 ms on / 375 ms off, level -32 dB as in Grandstream's example). The template has no silence-timeout key, so none is written. TR-069 is not touched on the HT813. */}}
