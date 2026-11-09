@@ -415,6 +415,11 @@ data:
     modparam("xhttp_prom", "prom_gauge", "name=dispatcher_destination_active; label=uri")
     modparam("xhttp_prom", "prom_counter", "name=dispatcher_transitions_total; label=uri:state")
     modparam("xhttp_prom", "prom_counter", "name=pike_blocked_total")
+    # Requests per receiving socket (phones, phones_tcp, hello, phones_legacy,
+    # phones_legacy_tcp, hello_legacy): once the legacy sockets (LEGACY_IP) see no
+    # traffic for longer than a registration lasts, every phone has moved to the
+    # VIP and the legacy address can be retired.
+    modparam("xhttp_prom", "prom_counter", "name=edge_requests_total; label=socket")
 
     # rtimer: refresh the dispatcher set gauges every 5s.
     modparam("rtimer", "timer", "name=dsmetrics;interval=5;mode=1;")
@@ -431,6 +436,7 @@ data:
     	}
 
     	route(EDGE_SIDE);
+    	prom_counter_inc("edge_requests_total", "1", "$Rn");
 
     	if ($Rn == "hello" || $Rn == "hello_legacy") {
     		# Received on the Hello-facing socket (5070). On kw that socket is on
@@ -1040,7 +1046,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: fc5ab2cd727df8dfa3a306113219a510725c983ef6b11b6c4cb45d7974ddf9b3
+        hello.watteel.com/kamailio-config-sha256: 4f9c03d844b862a1c43a8c404ef4f00094e64852c21908a09372ca51b7de25d0
     spec:
       # Phones must reach Kamailio with no NAT in between: through a NodePort
       # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's
@@ -1946,7 +1952,8 @@ spec:
               value: https://prov.hello.kw.watteel.lab
             - name: HELLO_PROV_SIP_SERVER
               # Where provisioned phones register: Kamailio on master-11's
-              # address, as KAMAILIO_PUBLIC_HOST/PORT advertise it.
+              # address, as KAMAILIO_PUBLIC_HOST/PORT advertise it. The VIP
+              # go-live (deploy/kuvryn-sync/kamailio-vip) points it at the VIP.
               value: 192.168.10.101:30508
             - name: HELLO_PROV_TRUSTED_PROXIES
               # kw's pod CIDR: ingress-nginx's X-Forwarded-Proto/-For are

@@ -213,6 +213,26 @@ func TestKwKamailioVIP(t *testing.T) {
 	kwVIPObject(t, "ServiceAccount", "kamailio-vip")
 }
 
+// TestKwProvisioningServesTheVIP fails (after the VIP go-live patch) if the address provisioned phones are
+// told to register with is not the address Kamailio advertises. Phones move
+// to it at their next fetch (check-sync); the node address stays served
+// (KAMAILIO_LEGACY_IP) until the last one has.
+func TestKwProvisioningServesTheVIP(t *testing.T) {
+	kam := envOf(containerNamed(t, kwVIPObject(t, "Deployment", "kamailio"), false, "kamailio"))
+	want := net.JoinHostPort(str(kam["KAMAILIO_PUBLIC_HOST"]["value"]), str(kam["KAMAILIO_PUBLIC_PORT"]["value"]))
+	control := envOf(containerNamed(t, kwVIPObject(t, "Deployment", "hello-control"), false, "hello-control"))
+	if got := str(control["HELLO_PROV_SIP_SERVER"]["value"]); got != want {
+		t.Errorf("HELLO_PROV_SIP_SERVER = %q, want %q (what Kamailio advertises)", got, want)
+	}
+	if want != net.JoinHostPort(kwVIP, "30508") {
+		t.Errorf("Kamailio advertises %s, want the VIP %s:30508", want, kwVIP)
+	}
+	// Phones that have not moved yet still reach their node.
+	if kam["KAMAILIO_LEGACY_IP"] == nil {
+		t.Error("KAMAILIO_LEGACY_IP is gone: phones provisioned with the node address are unreachable. Retire it only after kamailio_edge_requests_total{socket=~\".*legacy.*\"} has been quiet (docs/provisioning.md)")
+	}
+}
+
 // TestKamailioHARBAC fails if the kw manifests need a grant the deployer
 // does not have. Sync applies them as the kuvryn-sync-deployer
 // ServiceAccount; a missing rule fails the release, not a test, so this is
@@ -323,6 +343,10 @@ func TestKwKamailioVIPIsOff(t *testing.T) {
 		if str(dig(c, "name")) == "vip" {
 			t.Error("kw/resources.yaml runs the vip container: the VIP is on without the user's go-live")
 		}
+	}
+	control := envOf(containerNamed(t, kwObject(t, "Deployment", "hello-control"), false, "hello-control"))
+	if got := str(control["HELLO_PROV_SIP_SERVER"]["value"]); got != "192.168.10.101:30508" {
+		t.Errorf("HELLO_PROV_SIP_SERVER = %q while the VIP is off, want 192.168.10.101:30508: provisioning would move phones", got)
 	}
 	for _, kind := range []string{"ServiceAccount", "Role", "RoleBinding"} {
 		for _, o := range decodeAll(t, kwRaw(t, false)) {

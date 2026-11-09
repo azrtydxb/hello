@@ -1,7 +1,7 @@
 diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resources.yaml
 --- a/deploy/kuvryn-sync/kw/resources.yaml
 +++ b/deploy/kuvryn-sync/kw/resources.yaml
-@@ -1049,6 +1049,15 @@ spec:
+@@ -1055,6 +1055,15 @@ spec:
        hostNetwork: true
        # Keep cluster DNS (the dispatcher's hello-sip-N Service names).
        dnsPolicy: ClusterFirstWithHostNet
@@ -17,7 +17,7 @@ diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resour
        affinity:
          # Only the two nodes phones may reach Kamailio on: master-11
          # (192.168.10.101, the address every phone is provisioned with) and
-@@ -1145,17 +1154,24 @@ spec:
+@@ -1151,17 +1160,24 @@ spec:
            env:
              - name: KAMAILIO_LISTEN_IP
                # The pod IP, i.e. its node's address (hostNetwork): the
@@ -49,7 +49,7 @@ diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resour
                valueFrom:
                  fieldRef:
                    fieldPath: status.podIP
-@@ -1219,6 +1235,92 @@ spec:
+@@ -1225,6 +1241,92 @@ spec:
                memory: 32Mi
              limits:
                memory: 128Mi
@@ -142,7 +142,7 @@ diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resour
        volumes:
          - name: config
            configMap:
-@@ -1226,6 +1328,25 @@ spec:
+@@ -1232,6 +1334,25 @@ spec:
              defaultMode: 420
          - name: run
            emptyDir: {}
@@ -168,7 +168,7 @@ diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resour
          - name: tls
            secret:
              secretName: hello-sip-tls
-@@ -1284,9 +1405,9 @@ metadata:
+@@ -1290,9 +1411,9 @@ metadata:
      app.kubernetes.io/component: edge
      app.kubernetes.io/managed-by: kuvryn-sync
  spec:
@@ -181,7 +181,7 @@ diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resour
    type: ClusterIP
    selector:
      app.kubernetes.io/name: hello
-@@ -1321,6 +1442,55 @@ spec:
+@@ -1327,6 +1448,55 @@ spec:
        app.kubernetes.io/instance: hello
        app.kubernetes.io/component: edge
  ---
@@ -237,3 +237,21 @@ diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resour
  apiVersion: apps/v1
  kind: Deployment
  metadata:
+@@ -1951,10 +2121,13 @@ spec:
+             - name: HELLO_PROV_PUBLIC_URL
+               value: https://prov.hello.kw.watteel.lab
+             - name: HELLO_PROV_SIP_SERVER
+-              # Where provisioned phones register: Kamailio on master-11's
+-              # address, as KAMAILIO_PUBLIC_HOST/PORT advertise it. The VIP
+-              # go-live (deploy/kuvryn-sync/kamailio-vip) points it at the VIP.
+-              value: 192.168.10.101:30508
++              # Where provisioned phones register: Kamailio's VIP, as
++              # KAMAILIO_PUBLIC_HOST/PORT advertise it. A phone moves to it
++              # at its next fetch (Resync on the Phones page, or its
++              # periodic re-check); until then it keeps working through
++              # 192.168.10.101, which Kamailio still serves
++              # (KAMAILIO_LEGACY_IP). docs/ha.md, "Moving phones to the VIP".
++              value: 192.168.10.109:30508
+             - name: HELLO_PROV_TRUSTED_PROXIES
+               # kw's pod CIDR: ingress-nginx's X-Forwarded-Proto/-For are
+               # believed from there only (HTTPS check, per-IP limits).
