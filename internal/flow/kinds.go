@@ -140,6 +140,7 @@ var NonFlowResources = map[string]string{
 	"phonebooks":                    "directory data shown on phones, not call routing",
 	"ring-tags":                     "names the tone a phone plays, sent to it as Alert-Info; the tag a call gets does not change where it goes",
 	"phonebooks/{id}/entries":       "directory data shown on phones, not call routing",
+	"door/webhooks":                 "signed triggers from non-SIP doorbells; they start a ring or a chime, not a route a caller takes",
 	"me/contacts":                   "a user's personal contacts, not call routing",
 	"ai/sessions":                   "assistant conversations, not call routing",
 	"flow/canvases":                 "named views of the canvas that store only node positions, not call routing",

@@ -44,6 +44,7 @@ import { AIProposals } from "./pages/AIProposals";
 import { AIStatus } from "./pages/AIStatus";
 import { CallDetail } from "./pages/CallDetail";
 import { Cluster } from "./pages/Cluster";
+import { Door } from "./pages/Door";
 import { Calls } from "./pages/Calls";
 import { Consent } from "./pages/Consent";
 import { Dashboard } from "./pages/Dashboard";
@@ -125,6 +126,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/voicemail": Voicemail,
   "/ring-groups": RingGroups,
   "/ring-tags": RingTags,
+  "/door": Door,
   "/paging": Paging,
   "/conferences": Conferences,
   "/ivr": Ivr,

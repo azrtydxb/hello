@@ -871,3 +871,62 @@ another group) is lifted: the ring state machine can open a new ring stage.
   builds it under the call lock, covers answered, homed and parked calls), and
   `haNewCall` restores them, so a taken-over door call keeps the trunk ban and CDR
   kind door (`TestDoorCallerSurvivesTakeover`).
+
+## Doorbell webhook (2026-11-09) — phone-feature-parity item 16 (S-48)
+
+- Independent of #222 (outbound event webhooks: signing, retries, dead
+  letters). S-48 is the inverse: an inbound, signed trigger. Nothing is shared
+  with `internal/webhook`; the routes live under `/api/v1/door/webhooks` and the
+  table is `door_webhooks`, so the two cannot collide.
+- Migration `00061_door_webhooks`. #225 owns 00053 and the item-14 PR 00054; the
+  next free numbers of the open PRs are 00061 and 00062 (00055 to 00060 and 00063
+  to 00066 are taken), so 00061 is this one and 00062 is item 17. Columns: name,
+  sealed secret (AAD `door-webhook:<id>`), action, ring group (null: every Door
+  group), paging group, announcement (set null when it is deleted: the built-in
+  chime), rate limit, enabled, last triggered. Check constraints keep a ring
+  action from naming a paging group and a chime from missing one.
+- Management is admin (scope admin; read for list and get, viewer). Not the
+  `secrets` scope, which spec S-5 and `TestRoutesTable` pin to a fixed list.
+  Create and rotate return the secret once; no other response has it. All
+  management routes are excluded from MCP (a signing secret is a console
+  matter), so no tool needs teaching in `skills/`.
+- Trigger route: the only new public route (added to the public lists of
+  `TestRoutesTable` and `TestVersionAndOpenAPI`). Order of checks: both headers
+  present, timestamp an integer within 300 s, body at most 1 KiB (`413`), then
+  the signature, computed for an unknown id against a random per-process decoy
+  secret so an unknown, a disabled and a wrong-secret request cost the same and
+  give the same `401`. Only after the signature: body must be a JSON object
+  (`400`), Valkey present (`503`), rate limit (`429` with `Retry-After`), duplicate
+  window, enqueue. A disabled webhook is `401`, not `403`, for the same reason.
+- Rate limit: a fixed one-minute window per webhook in Valkey, counted by a Lua
+  script that sets the expiry in the same step as the first count (a crash
+  between INCR and EXPIRE cannot lock a webhook out); default 11, 1 to 600 per
+  webhook. It counts every signed request, coalesced ones included.
+- Coalescing: a `SET NX PX` of 10 s per webhook. A second signed trigger inside
+  it answers `202 {"status":"coalesced"}` and queues nothing. Chosen over
+  de-duplicating on the label because a doorbell button has no idempotency key.
+- Origination reuses the paging-group test path instead of a synthetic `call`:
+  hello-control queues a `DoorTrigger` (Valkey list, 60 s TTL), any READY
+  hello-sip node takes it and sends INVITEs to the registered contacts of the
+  members (like `testPage`), with a sendonly offer from a media fan-out. The
+  ring carries the doorbell Alert-Info from the ring tag table and the webhook's
+  name as caller name (From `door-webhook@<domain>`); the first answer wins and
+  the rest are CANCELled; the winner hears the chime (announcement, or a built-in
+  two-note chime), is hung up, and the call also ends after 30 s.
+- Group strategy is not honoured by the webhook: every member rings at once (the
+  strategies belong to calls that have a caller to hold). A member in DND (the
+  group's ignore-DND aside), in a call, or a door station is skipped and the
+  trace says so; the longest ring timeout of the groups bounds the ringing.
+- `chime_page` uses the page auto-answer headers and PAI of a server page and
+  plays to every member that answers.
+- CDR: kind door, source the webhook name, destination the group (or code),
+  ring tag doorbell for a ring, status 200 when somebody answered, 480 when
+  nobody could be reached. Audit rows are `webhook:<name>` `trigger` or
+  `coalesce`, without the body or label. The label (cut to 64 printable
+  characters) appears only in the call trace.
+- Console: a Door page under Call flow (list, create, edit, new secret, delete;
+  viewers see no write control), the secret in a notice that goes away for good
+  when dismissed.
+- Not done: the trigger is acknowledged when queued, not when someone answered,
+  so the doorbell cannot tell. Trigger results could be polled later if a
+  doorbell needs it.

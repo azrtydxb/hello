@@ -178,6 +178,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Valkey:          vk,
 		PageTests:       vk,
 		Parked:          vk,
+		DoorTriggers:    vk,
 		Objects:         objs,
 		Diagnostics:     vk,
 		AuthFailLimit:   cfg.AuthFailLimit,

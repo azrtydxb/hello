@@ -178,6 +178,9 @@ type Deps struct {
 	// PageTests is the queue of paging-group test requests from the admin
 	// API; nil disables them.
 	PageTests PageTests
+	// DoorTriggers is the queue of doorbell webhook triggers (spec S-48);
+	// nil leaves the webhook unanswered.
+	DoorTriggers DoorTriggers
 	// Queues is the call queues' shared state (Valkey); nil disables call
 	// queues (a call to a queue is refused with 503).
 	Queues queue.Store
@@ -504,6 +507,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	}
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })
+	}
+	if s.deps.DoorTriggers != nil {
+		s.bg.Go(func() { s.doorTriggerLoop(rctx) })
 	}
 	if s.deps.Messages != nil {
 		s.bg.Go(func() { s.messageLoop(rctx) })

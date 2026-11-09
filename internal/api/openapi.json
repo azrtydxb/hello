@@ -15237,6 +15237,339 @@
           "exclude": "mints a credential-like ticket for a stream; not for an AI agent"
         }
       }
+    },
+    "/api/v1/door/webhooks": {
+      "get": {
+        "operationId": "listDoorWebhooks",
+        "summary": "List doorbell webhooks",
+        "description": "Lists the doorbell webhooks. Secrets are never listed.",
+        "tags": ["door"],
+        "responses": {
+          "200": {
+            "description": "Webhooks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorWebhookList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "door webhooks carry signing secrets; managed in the console"
+        }
+      },
+      "post": {
+        "operationId": "createDoorWebhook",
+        "summary": "Create a doorbell webhook; the secret is returned only in this response",
+        "description": "Creates a webhook for a non-SIP doorbell. The signing secret is returned only in this response. A ring_door webhook rings the Door group with the doorbell tone, a chime_page webhook plays the chime to a paging group.",
+        "tags": ["door"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DoorWebhookWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created webhook with its secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorWebhookCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door webhooks carry signing secrets; managed in the console"
+        }
+      }
+    },
+    "/api/v1/door/webhooks/{id}": {
+      "get": {
+        "operationId": "getDoorWebhook",
+        "summary": "One doorbell webhook",
+        "description": "Returns one webhook; never its secret.",
+        "tags": ["door"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorWebhook"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "door webhooks carry signing secrets; managed in the console"
+        }
+      },
+      "put": {
+        "operationId": "updateDoorWebhook",
+        "summary": "Replace a doorbell webhook",
+        "description": "Replaces the webhook's settings; its secret stays.",
+        "tags": ["door"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DoorWebhookWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated webhook",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorWebhook"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door webhooks carry signing secrets; managed in the console"
+        }
+      },
+      "delete": {
+        "operationId": "deleteDoorWebhook",
+        "summary": "Delete a doorbell webhook",
+        "description": "Deletes the webhook; its URL stops working at once.",
+        "tags": ["door"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door webhooks carry signing secrets; managed in the console"
+        }
+      }
+    },
+    "/api/v1/door/webhooks/{id}/rotate-secret": {
+      "post": {
+        "operationId": "rotateDoorWebhookSecret",
+        "summary": "Replace a webhook's secret; the new secret is returned only in this response",
+        "description": "Replaces the signing secret. The old secret stops working at once and the doorbell must be reconfigured with the new one.",
+        "tags": ["door"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook with its new secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorWebhookCreated"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door webhooks carry signing secrets; managed in the console"
+        }
+      }
+    },
+    "/api/v1/door/webhooks/{id}/trigger": {
+      "post": {
+        "operationId": "triggerDoorWebhook",
+        "summary": "Trigger a doorbell webhook (signed, no session)",
+        "description": "Called by a non-SIP doorbell. Needs X-Hello-Timestamp (Unix seconds, within 300 s of now) and X-Hello-Signature, the hex HMAC-SHA256 of the timestamp, a dot and the raw body under the webhook's secret. The optional JSON body is at most 1 KiB. A missing, stale or wrong signature, an unknown id and a disabled webhook all answer the same 401. Above the webhook's rate limit the answer is 429 with Retry-After. A second trigger within 10 seconds is folded into the ring in progress. The ring_door action rings the Door group with the doorbell tag and plays the chime to whoever answers; chime_page plays it to the paging group.",
+        "tags": ["door"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DoorTriggerBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Queued, or folded into a ring already in progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorTriggerResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "413": {
+            "description": "The body is over 1 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Over the webhook's rate limit; see Retry-After",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "security": [],
+        "x-hello-mcp": {
+          "exclude": "called by the doorbell itself, signed with the webhook secret"
+        }
+      }
     }
   },
   "components": {
@@ -26289,6 +26622,171 @@
           "expiresAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "DoorWebhook": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "action",
+          "rateLimit",
+          "enabled",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "description": "The caller name the phones show on a ring"
+          },
+          "action": {
+            "type": "string",
+            "enum": ["ring_door", "chime_page"]
+          },
+          "ringGroupId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The Door ring group to ring; absent rings every Door group"
+          },
+          "ringGroup": {
+            "type": "string"
+          },
+          "pagingGroupId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The paging group a chime page plays to"
+          },
+          "pagingGroup": {
+            "type": "string"
+          },
+          "announcementId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The chime; absent plays the built-in chime"
+          },
+          "announcement": {
+            "type": "string"
+          },
+          "rateLimit": {
+            "type": "integer",
+            "description": "Triggers accepted per minute"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "lastTriggeredAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DoorWebhookList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DoorWebhook"
+            }
+          }
+        }
+      },
+      "DoorWebhookWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "1-64 of A-Z a-z 0-9 . _ - and space"
+          },
+          "action": {
+            "type": "string",
+            "enum": ["ring_door", "chime_page"],
+            "description": "ring_door rings the Door group; chime_page plays the chime to a paging group"
+          },
+          "ringGroupId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "ring_door only: a Door group; null rings every Door group"
+          },
+          "pagingGroupId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "chime_page only, and required for it"
+          },
+          "announcementId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The chime announcement; null plays the built-in chime"
+          },
+          "rateLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 600,
+            "default": 11,
+            "description": "Triggers accepted per minute"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "A disabled webhook answers its triggers with the same 401 as an unknown one"
+          }
+        },
+        "required": ["name", "action"],
+        "description": "Create and replace body: name and action are required."
+      },
+      "DoorWebhookCreated": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DoorWebhook"
+          },
+          {
+            "type": "object",
+            "required": ["secret"],
+            "properties": {
+              "secret": {
+                "type": "string",
+                "description": "The signing secret, shown only in this response. Sign hex HMAC-SHA256(secret, timestamp + \".\" + body).",
+                "x-hello-secret": true
+              }
+            }
+          }
+        ]
+      },
+      "DoorTriggerBody": {
+        "type": "object",
+        "description": "Optional. Any other field is ignored.",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Shown in the call trace, cut to 64 printable characters"
+          }
+        }
+      },
+      "DoorTriggerResult": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["queued", "coalesced"],
+            "description": "coalesced: a trigger of this webhook within the last 10 seconds is already ringing"
           }
         }
       }

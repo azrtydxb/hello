@@ -35,6 +35,8 @@ var publicOps = map[string]int{
 	"GET /api/v1/openapi.json":    http.StatusOK,
 	"POST /api/v1/auth/login":     http.StatusBadRequest,
 	"POST /api/v1/auth/login/2fa": http.StatusBadRequest,
+	// No signature: the trigger answers 401 before it looks the webhook up.
+	"POST /api/v1/door/webhooks/{id}/trigger": http.StatusUnauthorized,
 }
 
 // documentedOps lists "METHOD /path" for every operation in openapi.json.

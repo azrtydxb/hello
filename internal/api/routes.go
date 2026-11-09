@@ -192,6 +192,14 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/feature-codes", auth.ScopeRead, auth.RoleViewer, false, s.listFeatureCodes},
 		{"PUT", "/api/v1/feature-codes", auth.ScopeWrite, auth.RoleOperator, false, s.putFeatureCodes},
 
+		{"GET", "/api/v1/door/webhooks", auth.ScopeRead, auth.RoleViewer, false, s.listDoorWebhooks},
+		{"POST", "/api/v1/door/webhooks", auth.ScopeAdmin, auth.RoleAdmin, false, s.createDoorWebhook},
+		{"GET", "/api/v1/door/webhooks/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getDoorWebhook},
+		{"PUT", "/api/v1/door/webhooks/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putDoorWebhook},
+		{"DELETE", "/api/v1/door/webhooks/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteDoorWebhook},
+		{"POST", "/api/v1/door/webhooks/{id}/rotate-secret", auth.ScopeAdmin, auth.RoleAdmin, false, s.rotateDoorWebhookSecret},
+		{"POST", "/api/v1/door/webhooks/{id}/trigger", "", "", true, s.triggerDoorWebhook},
+
 		{"GET", "/api/v1/presence", auth.ScopeRead, auth.RoleViewer, false, s.presence},
 
 		{"GET", "/api/v1/registrations", auth.ScopeRead, auth.RoleViewer, false, s.registrations},

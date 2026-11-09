@@ -317,6 +317,33 @@ func (l *LazyValkey) ParkList(ctx context.Context) ([]livestate.ParkedCall, erro
 	return c.live.ParkList(ctx)
 }
 
+// DoorHookRate implements DoorTriggers.
+func (l *LazyValkey) DoorHookRate(ctx context.Context, id int64, window time.Duration) (int64, time.Duration, error) {
+	c, err := l.get()
+	if err != nil {
+		return 0, 0, err
+	}
+	return c.live.DoorHookRate(ctx, id, window)
+}
+
+// DoorHookClaim implements DoorTriggers.
+func (l *LazyValkey) DoorHookClaim(ctx context.Context, id int64, window time.Duration) (bool, error) {
+	c, err := l.get()
+	if err != nil {
+		return false, err
+	}
+	return c.live.DoorHookClaim(ctx, id, window)
+}
+
+// EnqueueDoorTrigger implements DoorTriggers.
+func (l *LazyValkey) EnqueueDoorTrigger(ctx context.Context, t livestate.DoorTrigger) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.live.EnqueueDoorTrigger(ctx, t)
+}
+
 // EnqueuePageTest implements PageTester.
 func (l *LazyValkey) EnqueuePageTest(ctx context.Context, r livestate.PageTestRequest) error {
 	c, err := l.get()
