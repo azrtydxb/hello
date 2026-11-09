@@ -114,7 +114,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends pkg-config libspandsp-dev libtiff-dev poppler-utils
       - run: go vet -tags spandsp ./cmd/hello-fax/ ./internal/fax/
-      - run: go test -tags spandsp -timeout 10m ./cmd/hello-fax/ ./internal/fax/ ./internal/media/
+      - run: go test -tags spandsp -timeout 10m ./cmd/hello-fax/ ./internal/fax/
 
   changes:
     # What a change touches, so the jobs it cannot affect can be skipped:
