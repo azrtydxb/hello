@@ -155,6 +155,45 @@ describe("CallDetail", () => {
     expect(await screen.findByText("not measured")).toBeVisible();
   });
 
+  it("shows what the phones reported next to the relay's figures", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/90": () =>
+        json({
+          ...BASE,
+          id: 90,
+          finalStatus: 200,
+          mediaMode: "anchored",
+          rtpPackets: 990,
+          rtpLost: 10,
+          rtpJitterMs: 12.34,
+          rtcpxr: [
+            {
+              device: "dev200",
+              extension: "200",
+              final: true,
+              mosLq: 4.1,
+              mosCq: null,
+              jitterMs: 6,
+              lossPct: 0.5,
+              discardPct: null,
+              roundTripMs: null,
+              reportedAt: "2026-11-09T10:00:00Z",
+            },
+          ],
+          trace: [],
+        }),
+    });
+    renderApp("/history/90");
+    expect(
+      await screen.findByText("1.00% loss · 12.3 ms jitter"),
+    ).toBeVisible();
+    expect(screen.getByText("Phone report (call end)")).toBeVisible();
+    expect(
+      screen.getByText("200: MOS 4.1 · 0.50% loss · 6.0 ms jitter"),
+    ).toBeVisible();
+  });
+
   it("explains why a call could not load", async () => {
     mockApi({
       ...ME,

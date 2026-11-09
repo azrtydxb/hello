@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -236,8 +237,8 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 29 {
-		t.Fatalf("insert takes %d arguments, want 29", len(db.args))
+	if len(db.args) != 30 {
+		t.Fatalf("insert takes %d arguments, want 30", len(db.args))
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
@@ -266,5 +267,22 @@ func TestCallQualityCDR(t *testing.T) {
 	gp, gl, gj := db.args[21].(*int64), db.args[22].(*int64), db.args[23].(*float64)
 	if *gp != 1000 || *gl != 12 || *gj != 37.5 {
 		t.Fatalf("quality = %d, %d, %v", *gp, *gl, *gj)
+	}
+}
+
+// TestPeerCallIDStored fails if the callee leg's Call-ID is not the last
+// insert argument: an RTCP-XR report from the callee's phone finds the CDR by it.
+func TestPeerCallIDStored(t *testing.T) {
+	db := &argsDB{}
+	w := NewWriter(db, newCounter(), discard)
+	now := time.Now()
+	if err := w.write(context.Background(), Record{CorrelationID: "p", StartTime: now, EndTime: now, PeerCallID: "leg-b@hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := db.args[len(db.args)-1]; got != "leg-b@hello" {
+		t.Fatalf("peer call id argument = %#v", got)
+	}
+	if !strings.Contains(insert, "peer_call_id") || !strings.Contains(insert, "$30") {
+		t.Fatal("insert does not write peer_call_id")
 	}
 }

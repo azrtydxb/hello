@@ -262,6 +262,8 @@ type ProvInfo struct {
 	// SIP and RTP packets with (HELLO_DSCP_SIP, HELLO_DSCP_RTP; spec S-21).
 	DSCPSIP int
 	DSCPRTP int
+	// RTCPXR turns on the phone's RTCP-XR reports to the SIP server (S-36).
+	RTCPXR bool
 }
 
 // BookInfo is where a phone fetches its address book (spec P-4). The URLs

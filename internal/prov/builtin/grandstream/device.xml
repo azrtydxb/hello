@@ -39,6 +39,13 @@
 {{- /* QoS marking (phone-feature-parity S-21): P1558 = Layer 3 QoS for SIP (DSCP), P1559 = Layer 3 QoS for audio (DSCP) [R8x6 TPL]; the same values hello-sip marks its own sockets with (HELLO_DSCP_SIP 26, HELLO_DSCP_RTP 46). UNVERIFIED on hardware. */}}
     <P1558>{{.Prov.DSCPSIP}}</P1558>
     <P1559>{{.Prov.DSCPRTP}}</P1559>
+{{- /* RTCP-XR voice-quality reports (phone-feature-parity S-36), WP810/WP822/WP825 only and only when HELLO_PROV_RTCPXR is on (off, the phone keeps its default, an empty collector = no reports). Keys from the WP810/WP822/WP825 release notes (1.0.11.57 "VQ RTCP-XR", "New P Values"): P26093 = VQ RTCP-XR Collector Name (hostname), P60087 = Collector Address Selection (0 Manual, 1 Auto = the registered SIP server when no address is configured), P26094 = Collector Address (IP; left empty so Auto picks the SIP server), P26095 = Collector Port (1 to 65535, default 5060). Account 1 only; account 2 is P26193, P60187, P26194, P26195. The WP8x6 and WP856 release notes name no such keys, so they get none. The phone's PUBLISH goes to the SIP server, which is Hello's collector. Keys confirmed from the vendor release notes, behaviour not yet on a phone (verify: that the phone reports with Auto and an empty address). */}}
+{{- if and .Prov.RTCPXR (eq .Phone.Family "8xx")}}
+    <P26093>{{xml .Server.Host}}</P26093>
+    <P60087>1</P60087>
+    <P26094></P26094>
+    <P26095>{{.Server.Port}}</P26095>
+{{- end}}
 {{- /* MWI (spec S-1): P99 = Subscribe for MWI [R8x6 TPL, R8x6 section 5; WP822 same key]; P33 = voicemail access number, defaulting to Hello's voicemail feature code. */}}
     <P99>1</P99>
     <P33>{{xml (or .Line.VoicemailCode "*97")}}</P33>

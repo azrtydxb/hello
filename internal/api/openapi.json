@@ -21570,9 +21570,33 @@
           "ringRule": {
             "type": "string",
             "description": "What chose the tag: kind:<kind>, rule:<position> [name], group, trunk or default."
+          },
+          "rtcpxr": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RTCPXRQuality"
+            },
+            "description": "Voice quality the phones on the call reported with RTCP-XR (SIP PUBLISH, RFC 6035); set by the single-CDR read, omitted when no phone reported."
           }
         },
         "description": "Null times are omitted."
+      },
+      "RTCPXRQuality": {
+        "type": "object",
+        "required": ["device", "extension", "final", "mosLq", "mosCq", "jitterMs", "lossPct", "discardPct", "roundTripMs", "reportedAt"],
+        "properties": {
+          "device": { "type": "string", "description": "The reporting device's SIP user name." },
+          "extension": { "type": "string" },
+          "final": { "type": "boolean", "description": "True for the call-end report, false for an interval report." },
+          "mosLq": { "type": ["number", "null"], "description": "Listening-quality MOS (0 to 5) the phone estimated." },
+          "mosCq": { "type": ["number", "null"], "description": "Conversational-quality MOS (0 to 5)." },
+          "jitterMs": { "type": ["number", "null"], "description": "Inter-arrival jitter the phone measured, ms." },
+          "lossPct": { "type": ["number", "null"], "description": "Network packet loss rate, percent." },
+          "discardPct": { "type": ["number", "null"], "description": "Jitter buffer discard rate, percent." },
+          "roundTripMs": { "type": ["number", "null"], "description": "Round-trip delay, ms." },
+          "reportedAt": { "type": "string", "format": "date-time" }
+        },
+        "description": "What one phone reported about its side of a call."
       },
       "CDRPage": {
         "type": "object",

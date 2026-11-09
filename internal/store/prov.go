@@ -48,6 +48,8 @@ type ProvSettings struct {
 	Resync time.Duration
 	// DSCPSIP and DSCPRTP are the QoS values written to phones (S-21).
 	DSCPSIP, DSCPRTP int
+	// RTCPXR provisions the quality-report collector (HELLO_PROV_RTCPXR, S-36).
+	RTCPXR bool
 	// BookRefresh is HELLO_PROV_BOOK_REFRESH; zero means 15 minutes.
 	BookRefresh time.Duration
 	Timezone    string
@@ -110,7 +112,7 @@ func (p ProvSettings) plainBase() string {
 // info is the ProvInfo of a phone whose current token is token.
 func (p ProvSettings) info(token, mac string) prov.ProvInfo {
 	return prov.ProvInfo{URL: p.phoneBase(token), CAURL: p.CAURL(), ResyncSeconds: p.resyncSeconds(mac),
-		CACertPEM: prov.CACertPEM(p.CACertFile), DSCPSIP: p.DSCPSIP, DSCPRTP: p.DSCPRTP}
+		CACertPEM: prov.CACertPEM(p.CACertFile), DSCPSIP: p.DSCPSIP, DSCPRTP: p.DSCPRTP, RTCPXR: p.RTCPXR}
 }
 
 // CAURL is the plain-HTTP URL of Hello's provisioning CA.

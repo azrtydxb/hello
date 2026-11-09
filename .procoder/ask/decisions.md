@@ -1350,3 +1350,36 @@ Implementation notes (template route, no migration):
 - Start: run waves 0-6 in order, three or four builder agents in parallel plus the merge captain (recommended)
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
+
+## RTCP-XR collector (parity-rtcpxr, item 35, S-36) (2026-11-09)
+
+- Reports live in their own table `cdr_rtcpxr` (migration 00051), not in
+  columns on `cdrs` as the spec's Data says. A phone sends its call-end
+  report within moments of the BYE, usually before the CDR is written, and
+  the report names the phone's own leg of a B2BUA call, which is not always
+  the CDR's `sip_call_id`. The CDR therefore also stores the answering callee
+  leg's Call-ID (`cdrs.peer_call_id`) and `GetCDR` joins on either. A report
+  with no CDR yet (or ever) costs nothing.
+- One row per (dialog Call-ID, device): a later report replaces the earlier,
+  an interval report never replaces the call-end one. Kept 90 days, pruned on
+  every 1000th write. A device is held to 60 reports a minute in memory per
+  node. Remote metrics (what the far end reported) are ignored; the phone's
+  own receive-side view is the figure.
+- A malformed or out-of-range report (MOS outside 0 to 5, loss outside 0 to
+  100, no dialog id, no metrics, over 4 KiB) is answered 400 and stored not at
+  all. Wrong content type 415, other Event 489 (item 34 adds presence),
+  store down 503. The sender must authenticate as a device.
+- Vendor keys, confirmed in the WP810/WP822/WP825 release notes (1.0.11.57
+  "VQ RTCP-XR", still in the 1.0.11.78 notes): P26093 name, P60087 address
+  selection (0 Manual, 1 Auto = the registered SIP server), P26094 address,
+  P26095 port, account 1 (account 2: P26193, P60187, P26194, P26195, left to
+  the multi-line item). Template writes P60087=1, name = SIP server host,
+  empty address, port = SIP server port, only for the 8xx family and only when
+  `HELLO_PROV_RTCPXR=true` (default off, spec "off by default"). The WP8x6 and
+  WP856 release notes name no such keys, so they get none; Yealink, Poly,
+  Snom and Fanvil are not provisioned (no confirmed keys read).
+- No MCP tool added; nothing to teach in skills/. The CDR REST read gains
+  `rtcpxr`, and the call detail page shows it beside the relay figures.
+- Merge note: `handlePublish` in `internal/sip/rtcpxr.go` owns the PUBLISH
+  route and answers 489 for other events; item 34 (presence PUBLISH) should
+  dispatch its event from there.

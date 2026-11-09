@@ -202,6 +202,9 @@ type Deps struct {
 	// Messages is the SIP MESSAGE queue (PostgreSQL); nil answers every
 	// MESSAGE 503.
 	Messages MessageQueue
+	// QualityReports stores the voice-quality reports phones publish
+	// (Event: vq-rtcpxr); nil answers them 503.
+	QualityReports QualityReports
 	// Conferences is the shared conference state (room ownership, live state,
 	// control commands); nil keeps every room on this node alone.
 	Conferences Conferences
@@ -221,19 +224,21 @@ type Deps struct {
 
 // Server is one SIP node.
 type Server struct {
-	cfg     Config
-	deps    Deps
-	log     *slog.Logger
-	m       *Metrics
-	digest  *Digest
-	contact sip.ContactHeader
-	advHost string
-	advPort int
-	recount chan struct{}
-	ua      *sipgo.UserAgent
-	client  *sipgo.Client
-	uas     *sipgo.DialogUA // A legs: callers
-	uac     *sipgo.DialogUA // B legs: forks
+	cfg  Config
+	deps Deps
+	log  *slog.Logger
+	m    *Metrics
+	// rtcpxrRate bounds the quality reports per device (S-36).
+	rtcpxrRate reportWindow
+	digest     *Digest
+	contact    sip.ContactHeader
+	advHost    string
+	advPort    int
+	recount    chan struct{}
+	ua         *sipgo.UserAgent
+	client     *sipgo.Client
+	uas        *sipgo.DialogUA // A legs: callers
+	uac        *sipgo.DialogUA // B legs: forks
 	// uacElsewhere is uac with "Call completed elsewhere" on its CANCELs,
 	// for the ringing legs of a picked-up call.
 	uacElsewhere *sipgo.DialogUA
@@ -509,6 +514,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.handle(srv, sip.SUBSCRIBE, s.handleSubscribe)
 	s.handle(srv, sip.INFO, s.handleInfo)
 	s.handle(srv, sip.MESSAGE, s.handleMessage)
+	s.handle(srv, sip.PUBLISH, s.handlePublish)
 	srv.OnNoRoute(s.wrap(s.handleNotAllowed))
 
 	rctx, stop := context.WithCancel(ctx)
@@ -615,7 +621,7 @@ func waitListening(ctx context.Context, ua *sipgo.UserAgent, addr string) bool {
 	}
 }
 
-const allow = "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, UPDATE, REFER, SUBSCRIBE, INFO, MESSAGE"
+const allow = "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, UPDATE, REFER, SUBSCRIBE, INFO, MESSAGE, PUBLISH"
 
 func (s *Server) handle(srv *sipgo.Server, m sip.RequestMethod, h sipgo.RequestHandler) {
 	srv.OnRequest(m, s.wrap(h))

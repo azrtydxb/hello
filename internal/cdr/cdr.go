@@ -80,6 +80,10 @@ type Record struct {
 	// what chose it (migration 00050); empty for a call that rang no
 	// internal device.
 	RingTag, RingRule string
+	// PeerCallID is the Call-ID of the answering callee leg (migration
+	// 00051), so an RTCP-XR report from the callee's phone finds the record;
+	// empty when no leg answered.
+	PeerCallID string
 	// PageLegs is a page's outcome per member (migration 00014), one row
 	// each; empty for any other call.
 	PageLegs []PageLeg
@@ -197,9 +201,9 @@ const insert = `WITH c AS (INSERT INTO cdrs (correlation_id, sip_call_id, source
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason,
     direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
-    rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule)
+    rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, peer_call_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $30)
 ON CONFLICT (correlation_id) DO NOTHING RETURNING id),
 p AS (INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
 SELECT c.id, l.ord, l.leg->>'extension', l.leg->>'device', l.leg->>'result'
@@ -308,7 +312,7 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 		r.StartTime, nullTime(r.RingTime), nullTime(r.AnswerTime), r.EndTime, r.DurationMs, r.BillableMs,
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
-		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, r.RingTag, r.RingRule, string(lj), string(qj))
+		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, r.RingTag, r.RingRule, string(lj), string(qj), r.PeerCallID)
 	if err != nil {
 		return err
 	}

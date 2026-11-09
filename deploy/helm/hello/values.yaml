@@ -61,6 +61,9 @@ control:
     # (default grandstream:WP; "none" keeps every phone on UDP).
     sipTlsServer: ""
     sipTlsModels: ""
+    # Provision Grandstream WP810/WP822/WP825 to publish RTCP-XR voice-quality
+    # reports to the SIP server (HELLO_PROV_RTCPXR, docs/provisioning.md).
+    rtcpxr: false
     # Proxies whose X-Forwarded-* is believed (the ingress controller's pods).
     trustedProxies: ""
     # Secret holding ca.crt (cert-manager writes it next to the certificate);

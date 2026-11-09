@@ -1322,6 +1322,9 @@ func (c *call) record(status int, side, reason, result string) {
 		Route: c.route, Trunk: c.trunkName, Trace: trace, Kind: c.kind,
 		RingTag: c.ringTag, RingRule: c.ringWhy,
 	}
+	if c.winner != nil {
+		r.PeerCallID = c.winner.callID
+	}
 	c.mu.Unlock()
 	if !answer.IsZero() {
 		r.BillableMs = end.Sub(answer).Milliseconds()

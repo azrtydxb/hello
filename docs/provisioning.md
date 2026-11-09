@@ -680,6 +680,33 @@ burst of edits pushes once; pushes still go out at `HELLO_PROV_PUSH_RATE`. A
 phone seen for the first time is only recorded. Automatic pushes show as
 "(automatic)" and are audited as `auto_resync` by `system`.
 
+## Phone voice-quality reports (RTCP-XR)
+
+Hello-sip collects the per-call voice quality that phones report with SIP
+`PUBLISH`, `Event: vq-rtcpxr` (RFC 6035, `application/vq-rtcpxr`). The sender
+must authenticate as a device, like any request from a phone. A report names
+the phone's dialog by Call-ID; the phone's figures (MOS-LQ, MOS-CQ,
+inter-arrival jitter, network loss, discard rate, round-trip delay, from the
+`LocalMetrics` block only) are stored once per dialog and device (a later
+report replaces an earlier one, an interval report never replaces the call-end
+one) and kept 90 days. They are joined to the call's CDR by its caller-leg or
+callee-leg Call-ID, so the call detail in the console shows them beside the
+relay's own loss and jitter (`rtcpxr` in `GET /api/v1/cdrs/{id}`). A malformed
+or out-of-range report is answered 400 and stored not at all; a device is held
+to 60 reports a minute.
+
+Metrics: `hello_sip_rtcpxr_reports_total{result}`, and histograms
+`hello_rtcpxr_mos_lq`, `hello_rtcpxr_loss_percent`, `hello_rtcpxr_jitter_ms`
+over the call-end reports.
+
+`HELLO_PROV_RTCPXR=true` (default off) makes hello-control provision the
+reporting on the phones whose vendor documents it: the Grandstream
+WP810/WP822/WP825 get P26093 (collector name, the SIP server host), P60087 = 1
+(address selection Auto, the registered SIP server), P26094 empty and P26095
+(the SIP server port), all from the 1.0.11.57 release notes, for account 1.
+The WP8x6 and WP856 release notes name no such keys, and the other vendors are
+not provisioned: set their collector on the phone to the SIP server.
+
 ## Redirect services
 
 A vendor redirect service sends a factory-new phone to Hello from anywhere

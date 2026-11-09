@@ -124,6 +124,10 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             {{- end }}
+            {{- if $prov.rtcpxr }}
+            - name: HELLO_PROV_RTCPXR
+              value: "true"
+            {{- end }}
             {{- with $prov.trustedProxies }}
             - name: HELLO_PROV_TRUSTED_PROXIES
               value: {{ . | quote }}
