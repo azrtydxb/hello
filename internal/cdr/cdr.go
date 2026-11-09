@@ -80,7 +80,7 @@ type Record struct {
 	// what chose it (migration 00050); empty for a call that rang no
 	// internal device.
 	RingTag, RingRule string
-	// SRTP says which legs of the call carried SRTP (migration 00051):
+	// SRTP says which legs of the call carried SRTP (migration 00052):
 	// none (the default), caller, callee or both.
 	SRTP string
 	// PageLegs is a page's outcome per member (migration 00014), one row

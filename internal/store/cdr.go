@@ -44,7 +44,7 @@ type CDR struct {
 	RingTag  string `json:"ringTag"`
 	RingRule string `json:"ringRule"`
 	// SRTP is which legs carried SRTP: none, caller, callee or both
-	// (migration 00051).
+	// (migration 00052).
 	SRTP string `json:"srtp"`
 	// PageLegs is a page's outcome per member (migration 00014); set by
 	// GetCDR for a page only.
