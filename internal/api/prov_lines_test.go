@@ -233,3 +233,89 @@ func TestAccountSharing(t *testing.T) {
 		t.Fatal("switching account sharing off left it on in the configuration")
 	}
 }
+
+// TestAccountSharingSecret fails if a phone group is created without its own
+// sealed account sharing password, if the password is the shared default
+// "AccountSharing", is returned by any response or preview, does not reach a
+// WP8x6's configuration as P22523, does not change on regeneration, is not
+// made for a group that predates it, or if regeneration of a missing group
+// is not a 404.
+func TestAccountSharingSecret(t *testing.T) {
+	p := newProvEnv(t, ProvConfig{})
+	c := p.c
+	ctx := context.Background()
+	mk := func(name string) int64 {
+		g, err := p.st.CreatePhoneGroup(ctx, "test", store.GroupInput{Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return g.ID
+	}
+	sealed := func(id int64) []byte {
+		var b []byte
+		if err := p.db.QueryRowContext(ctx, `SELECT account_sharing_secret_enc FROM phone_groups WHERE id = $1`, id).Scan(&b); err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	open := func(id int64) string {
+		b := sealed(id)
+		if b == nil {
+			t.Fatalf("group %d has no sealed account sharing secret", id)
+		}
+		pw, err := p.box.Open(b, prov.SharingSecretAAD(id))
+		if err != nil {
+			t.Fatalf("group %d: %v", id, err)
+		}
+		return pw
+	}
+	a, b := mk("North"), mk("South")
+	pwA, pwB := open(a), open(b)
+	if pwA == "" || pwA == "AccountSharing" || pwA == pwB {
+		t.Fatalf("groups must have their own generated secrets, got the same or the default")
+	}
+	if bytes.Contains(sealed(a), []byte(pwA)) {
+		t.Fatal("the secret is stored in the clear")
+	}
+
+	ph := p.phone("0015651234ba", map[string]any{"vendor": "grandstream", "model": "WP836", "groupId": a})
+	pid := fmt.Sprint(ph["id"])
+	preview := func() string {
+		return string(c.must(http.StatusOK, "GET", "/api/v1/phones/"+pid+"/preview?file=cfg0015651234ba.xml", nil).body)
+	}
+	path := fmt.Sprintf("/api/v1/phone-groups/%d/account-sharing", a)
+	on := c.must(http.StatusOK, "PUT", path, map[string]any{"enabled": true})
+	if strings.Contains(string(on.body), pwA) || strings.Contains(strings.ToLower(string(on.body)), "secret") {
+		t.Fatal("the group response shows the account sharing secret")
+	}
+	if pv := preview(); !strings.Contains(pv, "<P22523>********</P22523>") || strings.Contains(pv, pwA) {
+		t.Fatal("the preview must carry P22523 with the secret masked")
+	}
+	if g := c.must(http.StatusOK, "GET", fmt.Sprintf("/api/v1/phone-groups/%d", a), nil); strings.Contains(string(g.body), pwA) {
+		t.Fatal("the group shows the account sharing secret")
+	}
+
+	c.must(http.StatusNotFound, "POST", "/api/v1/phone-groups/999999/account-sharing/regenerate", nil)
+	re := c.must(http.StatusOK, "POST", path+"/regenerate", nil)
+	if strings.Contains(string(re.body), pwA) || strings.Contains(strings.ToLower(string(re.body)), "secret") {
+		t.Fatal("the regenerate response shows a secret")
+	}
+	newA := open(a)
+	if newA == pwA || newA == "AccountSharing" {
+		t.Fatal("regeneration kept the old secret")
+	}
+	if open(b) != pwB {
+		t.Fatal("regenerating one group changed another")
+	}
+
+	// A group that predates the secret is given one when a phone renders.
+	if _, err := p.db.ExecContext(ctx, `UPDATE phone_groups SET account_sharing_secret_enc = NULL WHERE id = $1`, a); err != nil {
+		t.Fatal(err)
+	}
+	if pv := preview(); !strings.Contains(pv, "<P22523>") {
+		t.Fatal("a group without a secret renders no P22523")
+	}
+	if open(a) == "" {
+		t.Fatal("no secret was made for the older group")
+	}
+}

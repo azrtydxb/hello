@@ -13945,7 +13945,7 @@
       "put": {
         "operationId": "setPhoneGroupAccountSharing",
         "summary": "Switch account sharing on or off for a phone group",
-        "description": "Account sharing lets several Grandstream WP8x6 handsets share one line: P22521 (Enable Account Sharing) is written 1 to the group's WP8x6 phones and P22522 (Role in Account Sharing) 0 for the host or 1 for a guest by their sharingRole (PATCH /phones/{id}, host by default). A WP8x6 in a group without it is written P22521 = 0; other models get neither key. It is the alternative to binding several devices to one extension (several phones each with a line on the extension, a shared line appearance). Admin only.",
+        "description": "Account sharing lets several Grandstream WP8x6 handsets share one line: P22521 (Enable Account Sharing) is written 1 to the group's WP8x6 phones and P22522 (Role in Account Sharing) 0 for the host or 1 for a guest by their sharingRole (PATCH /phones/{id}, host by default). A WP8x6 in a group without it is written P22521 = 0; other models get neither key. Hello generates a password for each group (P22523, Group Password), stored sealed and never shown; regeneratePhoneGroupSharingSecret replaces it. It is the alternative to binding several devices to one extension (several phones each with a line on the extension, a shared line appearance). Admin only.",
         "tags": ["phone-groups"],
         "parameters": [
           {
@@ -13982,6 +13982,49 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/account-sharing/regenerate": {
+      "post": {
+        "operationId": "regeneratePhoneGroupSharingSecret",
+        "summary": "Regenerate a phone group's account sharing password",
+        "description": "Hello generates a secret for each phone group when it is created and writes it as the account sharing Group Password (P22523) of the group's WP8x6 phones, so handsets of different groups on one network do not join each other's shared line. This replaces it with a new one. The phones take it at their next fetch or resync (resync the group); until every handset has it, handsets with the new and the old password do not see each other's shared line. The secret is stored sealed and is never returned. Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The group (the secret is not part of it)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroup"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"

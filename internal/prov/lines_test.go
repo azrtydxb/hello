@@ -221,6 +221,36 @@ func TestAccountSharing(t *testing.T) {
 	}
 }
 
+// TestAccountSharingPassword fails if P22523 (Group Password, default
+// AccountSharing in wp8x6_config_1.0.3.39) is left at the shared default, is
+// written without a group secret, is XML-unsafe, or is written to a model
+// other than the WP8x6.
+func TestAccountSharingPassword(t *testing.T) {
+	render := func(model string, sh *SharingInfo) string {
+		d := renderSample(false)
+		d.Phone.Vendor, d.Phone.Model = Grandstream, model
+		d.Sharing = sh
+		return renderFor(t, Grandstream, "cfg"+d.Phone.MAC+".xml", d)
+	}
+	withPW := func(model, pw string) *SharingInfo {
+		sh := NewSharing(Grandstream, model, true, SharingHost)
+		if sh != nil {
+			sh.Password = pw
+		}
+		return sh
+	}
+	out := render("WP836", withPW("WP836", "k3y<&>Zq9"))
+	wantLines(t, "secret", out, "<P22523>k3y&lt;&amp;&gt;Zq9</P22523>")
+	wantNoLines(t, "secret", out, "AccountSharing")
+	// No secret, no key: the phone is never given the shared default.
+	none := render("WP836", withPW("WP836", ""))
+	wantNoLines(t, "empty", none, "P22523", "AccountSharing")
+	for _, model := range []string{"WP822", "WP856", "WP820"} {
+		wantNoLines(t, model, render(model, withPW(model, "x")), "P22523")
+	}
+	wantNoLines(t, "off", render("WP836", nil), "P22523")
+}
+
 // TestPlaceBLFLines fails if BLF keys land on the keys the lines use.
 func TestPlaceBLFLines(t *testing.T) {
 	keys := []BLFKey{{Number: "1"}, {Number: "2"}}

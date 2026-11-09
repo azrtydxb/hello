@@ -423,6 +423,12 @@ func PhoneTokenAAD(phoneID int64) string { return "phone-token:" + strconv.Forma
 // PhoneAdminAAD is the context of a phone's sealed admin password.
 func PhoneAdminAAD(phoneID int64) string { return "phone-admin:" + strconv.FormatInt(phoneID, 10) }
 
+// SharingSecretAAD is the context of a phone group's sealed account sharing
+// password (P22523).
+func SharingSecretAAD(groupID int64) string {
+	return "account-sharing:" + strconv.FormatInt(groupID, 10)
+}
+
 // RedirectAAD is the context of a vendor's sealed redirect credentials.
 func RedirectAAD(v Vendor) string { return "redirect:" + string(v) }
 

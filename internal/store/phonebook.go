@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/phonebook"
+	"github.com/azrtydxb/hello/internal/prov"
 )
 
 // bookCols selects a book with its entry count; the extensions book counts
@@ -619,10 +620,44 @@ func (s *Store) SetPhoneGroupAccountSharing(ctx context.Context, actor string, i
 		if err := requireRow(res); err != nil {
 			return err
 		}
+		if enabled {
+			if err := s.ensureSharingSecret(ctx, tx, id); err != nil {
+				return err
+			}
+		}
 		if out, err = getPhoneGroup(ctx, tx, id); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "set-account-sharing", "phone_group", strconv.FormatInt(id, 10))
+	})
+	return out, err
+}
+
+// RegeneratePhoneGroupSharingSecret replaces the group's account sharing
+// password with a new generated one. The group's WP8x6 phones take it at
+// their next fetch or resync; until then they no longer find the shared line
+// of phones that already have it. The secret is never returned.
+func (s *Store) RegeneratePhoneGroupSharingSecret(ctx context.Context, actor string, id int64) (phonebook.Group, error) {
+	var out phonebook.Group
+	if s.box == nil {
+		return out, prov.ErrSealed
+	}
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		sealed, err := s.box.Seal(newAdminPassword(), prov.SharingSecretAAD(id))
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET account_sharing_secret_enc = $2, updated_at = now() WHERE id = $1`, id, sealed)
+		if err != nil {
+			return err
+		}
+		if err := requireRow(res); err != nil {
+			return err
+		}
+		if out, err = getPhoneGroup(ctx, tx, id); err != nil {
+			return err
+		}
+		return insertAudit(ctx, tx, actor, "regenerate-account-sharing-secret", "phone_group", strconv.FormatInt(id, 10))
 	})
 	return out, err
 }
@@ -769,6 +804,9 @@ func (s *Store) CreatePhoneGroup(ctx context.Context, actor string, in GroupInpu
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO ptt_channels (group_id, channel, label, transmit, subscribe)
 			VALUES ($1, 1, 'Channel 1', TRUE, TRUE)`, id); err != nil {
+			return err
+		}
+		if err := s.ensureSharingSecret(ctx, tx, id); err != nil {
 			return err
 		}
 		var err error

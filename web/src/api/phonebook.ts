@@ -425,6 +425,16 @@ export const setGroupMulticast = (
     body: options ? { channels, options } : { channels },
   });
 
+/**
+ * POST /api/v1/phone-groups/{id}/account-sharing/regenerate: replaces the
+ * group's account sharing password. The password is never returned.
+ */
+export const regenerateGroupSharingSecret = (groupId: Id) =>
+  request<Group>(
+    "POST",
+    `/api/v1/phone-groups/${seg(groupId)}/account-sharing/regenerate`,
+  );
+
 /** PUT /api/v1/phone-groups/{id}/account-sharing: switches WP8x6 account sharing on or off. */
 export const setGroupAccountSharing = (groupId: Id, enabled: boolean) =>
   request<Group>(

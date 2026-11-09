@@ -1371,11 +1371,18 @@ group's dialog (**Account sharing**), then set each phone's role on its page
 `P22522` (Role in Account Sharing: 0 host device, 1 guest device) to the group's
 WP8x6 phones only, from `wp8x6_config_1.0.3.39`. A WP8x6 in a group without the
 switch is written `P22521 = 0`, so taking it out of the group turns sharing off;
-every other model gets neither. The group name (`P22527`), group password
-(`P22523`, both default `AccountSharing`), SIP server port (`P22537`, 15060) and
-the shared account (`P22524`, account 1) stay at their defaults: handsets of
-different groups on one network share them, which a per-group password would
-prevent. The WP822 and the other vendors have no such setting. Hot desking is
+every other model gets neither. The group password (`P22523`, "Group Password")
+is the group's own secret: Hello generates it when the phone group is created
+(for an older group, when sharing is first switched on or a phone renders),
+stores it sealed like a device password, and writes it only into the
+configuration of the group's WP8x6 phones. It is never shown in the API, the
+console, a preview or the logs, so handsets of different groups on one network
+do not join each other's shared line. **Regenerate password** in the group's
+dialog (`regeneratePhoneGroupSharingSecret`) replaces it; resync the group
+straight after, because handsets that still hold the old one drop out of the
+shared line until they fetch the new one. The group name (`P22527`, default
+`AccountSharing`), SIP server port (`P22537`, 15060) and the shared account
+(`P22524`, account 1) stay at their defaults. The WP822 and the other vendors have no such setting. Hot desking is
 not offered by either WP family.
 
 ## Security model and its limits

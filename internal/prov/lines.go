@@ -85,6 +85,9 @@ func SupportsLineKeys(v Vendor, model string) bool {
 type SharingInfo struct {
 	Host  bool
 	Guest bool
+	// Password is the group's opened account sharing password (P22523); masked
+	// in previews. Empty writes nothing, so a phone keeps what it has.
+	Password string
 }
 
 // Sharing roles of a phone in a phone group with account sharing.

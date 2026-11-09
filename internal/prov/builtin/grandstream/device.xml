@@ -318,11 +318,14 @@
 {{- /* Check-sync (spec S-5): P95030 = 0 so a plain check-sync re-provisions without a reboot (WP8x6 fw 1.0.3.20 and later) [R8x6 section 1]; P4428 = 0 authenticates the NOTIFY (ACC-16: the WP8x6 and WP856 templates say "Enable SIP NOTIFY Authentication. 0 - Yes, 1 - No" and the WP8xx one "Disable SIP NOTIFY Authentication. 0 - No, 1 - Yes"; 0 challenges in all three), which hello-sip answers from the device's HA1. */}}
     <P95030>0</P95030>
     <P4428>0</P4428>
-{{- /* Account sharing (phone-feature-parity S-11), WP8x6 only (wp8x6_config_1.0.3.39, "Application/Account Sharing"; the WP810/822/825, WP820 and WP856 templates have none). P22521 = Enable Account Sharing (0 No, 1 Yes, default 0) and P22522 = Role in Account Sharing (0 Host Device, 1 Guest Device, default 1). RenderData.Sharing is set for a WP8x6 in a phone group that enabled account sharing: P22521 = 1 and P22522 by role, 0 for the host that holds the shared line and 1 for a guest. Any other WP8x6 is written P22521 = 0, so taking a phone out of the group (or switching the group off) turns sharing off. The same section has the group name P22527 (default AccountSharing), group password P22523 (default AccountSharing), SIP server port P22537 (15060), shared Account P22524 (0 Account 1, 1 Account 2, 2 Account 3; default 0) and Account Name P22525; they stay at their defaults, which every handset of every group shares, so handsets of different Hello groups on one network can see each other's shared line; a per-group password needs a stored secret and is not built. To confirm on two handsets (verify). */}}
+{{- /* Account sharing (phone-feature-parity S-11), WP8x6 only (wp8x6_config_1.0.3.39, "Application/Account Sharing"; the WP810/822/825, WP820 and WP856 templates have none). P22521 = Enable Account Sharing (0 No, 1 Yes, default 0) and P22522 = Role in Account Sharing (0 Host Device, 1 Guest Device, default 1). RenderData.Sharing is set for a WP8x6 in a phone group that enabled account sharing: P22521 = 1 and P22522 by role, 0 for the host that holds the shared line and 1 for a guest. Any other WP8x6 is written P22521 = 0, so taking a phone out of the group (or switching the group off) turns sharing off. The same section has the group name P22527 (default AccountSharing), group password P22523 (Group Password, a String, default AccountSharing; wp8x6_config_1.0.3.39 and _1.0.3.35), SIP server port P22537 (15060), shared Account P22524 (0 Account 1, 1 Account 2, 2 Account 3; default 0) and Account Name P22525; the group name and the others stay at their defaults, but the password is the group's own secret that Hello generated and stores sealed (SharingInfo.Password; written only into the group's WP8x6 phones, masked in previews), so handsets of different Hello groups on one network do not join each other's shared line. To confirm on two handsets (verify). */}}
 {{- if eq .Phone.WP "WP8x6"}}
 {{- with .Sharing}}
     <P22521>1</P22521>
     <P22522>{{if .Guest}}1{{else}}0{{end}}</P22522>
+{{- if .Password}}
+    <P22523>{{xml .Password}}</P22523>
+{{- end}}
 {{- else}}
     <P22521>0</P22521>
 {{- end}}

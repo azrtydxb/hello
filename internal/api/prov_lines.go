@@ -5,6 +5,7 @@ package api
 // WP8x6 account sharing on for a phone group.
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -105,6 +106,26 @@ func (s *server) putPhoneGroupAccountSharing(w http.ResponseWriter, r *http.Requ
 	}
 	g, err := s.Phonebooks.SetPhoneGroupAccountSharing(r.Context(), actor(r).String(), id, *in.Enabled)
 	if err != nil {
+		s.bookError(w, "phone group", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, g)
+}
+
+// postPhoneGroupSharingSecret replaces the group's account sharing password
+// with a new generated one. The response is the group; the secret is never
+// returned.
+func (s *server) postPhoneGroupSharingSecret(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok || s.booksDisabled(w) {
+		return
+	}
+	g, err := s.Phonebooks.RegeneratePhoneGroupSharingSecret(r.Context(), actor(r).String(), id)
+	if err != nil {
+		if errors.Is(err, prov.ErrSealed) {
+			s.provError(w, "phone group", err)
+			return
+		}
 		s.bookError(w, "phone group", err)
 		return
 	}

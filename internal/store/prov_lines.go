@@ -249,13 +249,49 @@ func (s *Store) renderLines(ctx context.Context, phoneID int64) ([]prov.Line, er
 // group enabled account sharing and the model has the setting.
 func (s *Store) phoneSharing(ctx context.Context, phoneID int64, v prov.Vendor, model string) (*prov.SharingInfo, error) {
 	var (
-		on   sql.NullBool
-		role string
+		on      sql.NullBool
+		groupID sql.NullInt64
+		enc     []byte
+		role    string
 	)
-	err := s.db.QueryRowContext(ctx, `SELECT g.account_sharing, p.sharing_role FROM phones p
-		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = $1`, phoneID).Scan(&on, &role)
+	err := s.db.QueryRowContext(ctx, `SELECT g.account_sharing, g.id, g.account_sharing_secret_enc, p.sharing_role FROM phones p
+		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = $1`, phoneID).Scan(&on, &groupID, &enc, &role)
 	if err != nil {
 		return nil, err
 	}
-	return prov.NewSharing(v, model, on.Valid && on.Bool, role), nil
+	sh := prov.NewSharing(v, model, on.Valid && on.Bool, role)
+	if sh == nil {
+		return nil, nil
+	}
+	if s.box == nil {
+		return nil, prov.ErrSealed
+	}
+	if enc == nil {
+		// A group that predates the per-group secret: give it one now.
+		if err := s.ensureSharingSecret(ctx, s.db, groupID.Int64); err != nil {
+			return nil, err
+		}
+		if err := s.db.QueryRowContext(ctx, `SELECT account_sharing_secret_enc FROM phone_groups WHERE id = $1`, groupID.Int64).Scan(&enc); err != nil {
+			return nil, err
+		}
+	}
+	if sh.Password, err = s.box.Open(enc, prov.SharingSecretAAD(groupID.Int64)); err != nil {
+		return nil, prov.ErrSealed
+	}
+	return sh, nil
+}
+
+// ensureSharingSecret gives phone group id a generated, sealed account
+// sharing password unless it has one. Without a secret box it does nothing.
+func (s *Store) ensureSharingSecret(ctx context.Context, q execer, id int64) error {
+	if s.box == nil {
+		return nil
+	}
+	sealed, err := s.box.Seal(newAdminPassword(), prov.SharingSecretAAD(id))
+	if err != nil {
+		return err
+	}
+	_, err = q.ExecContext(ctx, `UPDATE phone_groups SET account_sharing_secret_enc = $2
+		WHERE id = $1 AND account_sharing_secret_enc IS NULL`, id, sealed)
+	return err
 }

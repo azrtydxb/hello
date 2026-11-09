@@ -537,6 +537,11 @@ func maskSecrets(d *prov.RenderData) {
 		d.Lines[i].Password = mask
 	}
 	d.Phone.AdminPassword = mask
+	if d.Sharing != nil {
+		sh := *d.Sharing
+		sh.Password = mask
+		d.Sharing = &sh
+	}
 	d.Prov.URL = tokenInPathRe.ReplaceAllString(d.Prov.URL, "/p/"+mask+"/")
 	if d.Book != nil {
 		b := *d.Book

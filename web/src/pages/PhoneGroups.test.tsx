@@ -294,6 +294,36 @@ describe("Phone groups", () => {
     });
   });
 
+  it("regenerates the sharing password after a confirmation", async () => {
+    const calls = api("admin", {
+      "POST /api/v1/phone-groups/9/account-sharing/regenerate": () =>
+        json(group()),
+    });
+    renderApp("/phones/groups");
+    await groupsTable();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Site A" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Site A" });
+    fireEvent.click(
+      within(dialog).getByRole("button", {
+        name: "Regenerate sharing password",
+      }),
+    );
+    expect(
+      calls.some((c) => c.url.endsWith("/account-sharing/regenerate")),
+    ).toBe(false);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Regenerate password" }),
+    );
+    expect(
+      await screen.findByText(/A new sharing password was made/),
+    ).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "POST",
+      url: "/api/v1/phone-groups/9/account-sharing/regenerate",
+      body: undefined,
+    });
+  });
+
   it("does not call account sharing when it is unchanged", async () => {
     const calls = api("admin", {
       "PUT /api/v1/phone-groups/9": () => json(group()),

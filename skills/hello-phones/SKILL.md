@@ -217,6 +217,12 @@ its own voicemail light, BLF and ring tags.
   for a phone group; each phone of the group is the host or a guest
   (`updatePhone` with `sharingRole`, host by default). Without the group
   switch the phone is written account sharing off. Resync the group after.
+  Each group has its own sharing password (the phone's Group Password), which
+  Hello generates when the group is created, stores sealed and never shows,
+  so handsets of different groups on one network do not join each other's
+  line. `regeneratePhoneGroupSharingSecret` (admin, path `id`) replaces it;
+  handsets keep the old one until they are resynced, so resync the whole group
+  straight after and expect shared lines to drop in between.
 - The check-sync of a multi-line phone goes to line 1, or to the next line
   while line 1 is not registered.
 

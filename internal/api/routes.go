@@ -338,6 +338,7 @@ func (s *server) routes() []route {
 		{"PUT", "/api/v1/phone-groups/{id}/multicast", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupMulticast},
 		{"PUT", "/api/v1/phone-groups/{id}/ptt", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupPTT},
 		{"PUT", "/api/v1/phone-groups/{id}/account-sharing", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupAccountSharing},
+		{"POST", "/api/v1/phone-groups/{id}/account-sharing/regenerate", auth.ScopeAdmin, auth.RoleAdmin, false, s.postPhoneGroupSharingSecret},
 
 		{"GET", "/api/v1/prov/templates", auth.ScopeRead, auth.RoleViewer, false, s.listTemplates},
 		{"POST", "/api/v1/prov/templates", auth.ScopeWrite, auth.RoleOperator, false, s.createTemplate},
