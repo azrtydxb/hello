@@ -1461,3 +1461,23 @@ Implementation notes (template route, no migration):
     Snom, Fanvil and Poly TR-069/SSH keys (Fanvil's text format key not found,
     Poly and Snom none found).
 - The group can undo any of it with a setting override (item 15).
+
+### "Vendor template keys left out" (Poly caps/pickup, record keys, Fanvil CA, Snom/Yealink EXP, pickup values)
+
+- Result: no new key. The tracker row names five gaps without the keys they
+  need, and none could be confirmed this session:
+  - Poly caps and pickup: the UC Software Administrator Guide is script-rendered
+    and not fetchable (the same finding as `keycaps.go`); the FusionPBX Poly
+    templates use `attendant.resourceList` up to 47 entries, which is a template
+    default, not a documented limit. No BLF pickup attribute on a Poly key found.
+  - Record keys: Yealink's `bw.call_recording.mode` and
+    `account.N.call_recording.enable` are BroadSoft server-side recording, not a
+    key that sends the `*1` toggle. No Poly equivalent found.
+  - Fanvil CA: re-checked in the FusionPBX Fanvil templates (X-series, text and
+    XML forms): no CA certificate key. Still none.
+  - Yealink and Snom expansion modules: no Yealink Administrator Guide or Snom
+    page beyond what `keycaps.go` already cites.
+  - Pickup values: unchanged.
+- Documented in `docs/provisioning.md` ("Keys deliberately not written") so the
+  gaps are visible to operators. The tracker row stays open until sources are
+  found; the setting overrides (item 15) can carry a key meanwhile.

@@ -139,7 +139,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
 | Transfer-to-voicemail phone key                                                                           | done (#200)           |
-| Vendor template keys left out (Poly caps/pickup, record keys, Fanvil CA, Snom/Yealink EXP, pickup values) | todo                  |
+| Vendor template keys left out (Poly caps/pickup, record keys, Fanvil CA, Snom/Yealink EXP, pickup values) | wip (#PRV)            |
 | Competitor report into the repo (docs)                                                                    | done (#199)           |
 | Voicemail box after an extension forward stage uses the forwarded target                                  | done (#213)           |
 | Ring groups form: `announcement` failure kind chooser                                                     | done (#213)           |

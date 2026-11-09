@@ -451,6 +451,39 @@ shows otherwise.
   (`Time Zone`, `DST Type` and the rule fields) and the Poly daylight-saving
   keys are unconfirmed on hardware.
 
+### Keys deliberately not written
+
+These are known gaps, not oversights. Each stays out until a vendor document or
+a phone confirms the key; the setting overrides (phone group or phone) can carry
+one in the meantime.
+
+- **Poly BLF capacity.** Poly has no per-model limit on the attendant list
+  (`attendant.resourceList.N`): the UC Software Administrator Guide is a
+  script-rendered page that could not be read, so no limit can be cited and every
+  BLF is written. The phone ignores the keys it has no room for.
+- **Poly pickup.** `call.groupCallPickupString` and `call.directedCallPickupString`
+  are written (see Call park and call pickup). A Poly BLF key that picks up on
+  press has no confirmed attribute, so the BLF entries carry no pickup prefix.
+- **Record keys.** Grandstream (`P26028`/`P26029`, `P6760`), Snom
+  (`recording_mechanism`) and Fanvil (`SIP1 Record Start`/`Stop`) are written.
+  Yealink and Poly have no Record-key setting that sends the `*1` toggle to the
+  PBX in any document Hello was checked against: Yealink's recording keys
+  (`bw.call_recording.mode`, `account.N.call_recording.enable`) are BroadSoft
+  server-side recording, not a code dialled to the PBX.
+- **Fanvil CA.** No Fanvil configuration key for a trusted CA certificate is in
+  any Fanvil document or export Hello was checked against, so none is written.
+  Install Hello's CA on Fanvil phones by hand (see Install Hello's CA
+  certificate).
+- **Yealink and Snom expansion modules.** Yealink counts the EXP50 on the T53,
+  T54, T57 and T58 (up to three, 60 keys each) from the product pages, but no
+  Yealink Administrator Guide could be read for the other models. Snom provisions
+  expansion module 1 (UXM, 18 keys); modules 2 and 3 differ by module type and
+  Hello cannot tell which is attached.
+- **Pickup values.** Yealink's BLF key carries the directed-pickup code Hello
+  defines and Fanvil is written the line's `SIP1 Pickup Num`. Snom and Poly BLF
+  keys carry none: the Snom template writes no pickup setting and Poly's only
+  pickup keys are the two call-pickup strings above.
+
 ## Time zones
 
 `HELLO_PROV_TIMEZONE` is an IANA name (`Europe/Brussels`), which no vendor
