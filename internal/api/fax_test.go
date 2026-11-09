@@ -259,6 +259,12 @@ func TestFaxAPI(t *testing.T) {
 	c.must(http.StatusNotFound, "DELETE", "/api/v1/faxes/"+qid, nil)
 	c.must(http.StatusNoContent, "DELETE", fmt.Sprintf("/api/v1/faxes/%d", emptyID), nil)
 	c.must(http.StatusNoContent, "DELETE", "/api/v1/faxes/"+rowID(viaJSON), nil)
+
+	// With the route gone the destination can go; the faxes it received stay.
+	c.must(http.StatusNoContent, "DELETE", "/api/v1/fax-destinations/"+did, nil)
+	if got := c.must(http.StatusOK, "GET", fmt.Sprintf("/api/v1/faxes/%d", recvID), nil).json(t); got["destination"] != "" || got["ownerExtension"] != "101" {
+		t.Errorf("a received fax lost its owner with its destination: %v", got)
+	}
 }
 
 // TestFaxQueueAndRetention drives the store the SIP node and the retention

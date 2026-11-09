@@ -14495,9 +14495,7 @@
         "operationId": "listFaxDestinations",
         "summary": "List fax destinations",
         "description": "Lists the fax destinations an inbound route or an IVR key can name: each names the extension that owns the faxes arriving there and, optionally, an email address the PDF is sent to instead of the owner's.",
-        "tags": [
-          "fax"
-        ],
+        "tags": ["fax"],
         "responses": {
           "200": {
             "description": "The destinations",
@@ -14530,9 +14528,7 @@
         "operationId": "createFaxDestination",
         "summary": "Create a fax destination",
         "description": "Adds a fax destination. The name (1 to 40 of A-Z a-z 0-9 . _ -) is what a route or IVR key of kind fax names; it cannot change later. The owner extension must exist. With an email the received PDF goes there, otherwise to the users linked to the owner extension.",
-        "tags": [
-          "fax"
-        ],
+        "tags": ["fax"],
         "requestBody": {
           "required": true,
           "content": {
@@ -14583,9 +14579,7 @@
         "operationId": "getFaxDestination",
         "summary": "One fax destination",
         "description": "Returns one fax destination.",
-        "tags": [
-          "fax"
-        ],
+        "tags": ["fax"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -14626,9 +14620,7 @@
         "operationId": "updateFaxDestination",
         "summary": "Change a fax destination",
         "description": "Changes the owner extension and the email address. The name cannot change, because routes and IVR keys refer to it.",
-        "tags": [
-          "fax"
-        ],
+        "tags": ["fax"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -14682,9 +14674,7 @@
         "operationId": "deleteFaxDestination",
         "summary": "Delete a fax destination",
         "description": "Deletes a fax destination that no inbound route and no IVR key names. Faxes already received keep their owner.",
-        "tags": [
-          "fax"
-        ],
+        "tags": ["fax"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -14723,9 +14713,7 @@
         "operationId": "listFaxes",
         "summary": "List faxes",
         "description": "Lists received and sent faxes, newest first, with their state: pages, the T.30 result, whether a PDF is stored and the email delivery. Filter by direction and status. The PDF is fetched with the pdf route.",
-        "tags": [
-          "fax"
-        ],
+        "tags": ["fax"],
         "parameters": [
           {
             "name": "limit",
@@ -14751,10 +14739,7 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": [
-                "inbound",
-                "outbound"
-              ]
+              "enum": ["inbound", "outbound"]
             },
             "description": "Only received (inbound) or sent (outbound) faxes."
           },
@@ -14812,19 +14797,14 @@
         "operationId": "sendFax",
         "summary": "Send a fax",
         "description": "Queues a PDF to send. Send multipart/form-data with `file` (the PDF, at most 10 MB and 50 pages), `to` (the destination in E.164, such as +41441234567) and optionally `callerId`, or JSON with `to`, `callerId` and `pdfBase64` (at most 700 KiB decoded). The PDF is rasterised at 204 by 196 dpi by the fax engine; a PDF that cannot be rasterised is refused with 422. Hello places the call through the outbound routes and retries up to 3 times, 5 minutes apart, on busy, no answer or no carrier. The answer is the queued fax; poll the fax for its state.",
-        "tags": [
-          "fax"
-        ],
+        "tags": ["fax"],
         "requestBody": {
           "required": true,
           "content": {
             "multipart/form-data": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "file",
-                  "to"
-                ],
+                "required": ["file", "to"],
                 "properties": {
                   "file": {
                     "type": "string",
@@ -14894,9 +14874,7 @@
         "operationId": "getFax",
         "summary": "One fax",
         "description": "Returns one fax with its state.",
-        "tags": [
-          "fax"
-        ],
+        "tags": ["fax"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -14937,9 +14915,7 @@
         "operationId": "deleteFax",
         "summary": "Delete a fax",
         "description": "Deletes a fax and its stored PDF. A queued fax is removed; a fax being sent is cancelled (its row stays, as cancelled). A fax being received answers 409.",
-        "tags": [
-          "fax"
-        ],
+        "tags": ["fax"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -14978,9 +14954,7 @@
         "operationId": "getFaxPdf",
         "summary": "Download a fax PDF",
         "description": "Streams the PDF of a received or sent fax. The attachment name is fax-<yyyymmdd-hhmm>-<id>.pdf. A fax with no stored document answers 404.",
-        "tags": [
-          "fax"
-        ],
+        "tags": ["fax"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -15027,9 +15001,7 @@
         "operationId": "listMyFaxes",
         "summary": "My faxes",
         "description": "Lists the faxes whose destination is owned by one of the signed-in user's own extensions, newest first.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "name": "limit",
@@ -15055,10 +15027,7 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": [
-                "inbound",
-                "outbound"
-              ]
+              "enum": ["inbound", "outbound"]
             },
             "description": "Only received (inbound) or sent (outbound) faxes."
           },
@@ -15121,9 +15090,7 @@
         "operationId": "getMyFaxPdf",
         "summary": "Download one of my fax PDFs",
         "description": "Streams the PDF of a fax owned by one of the signed-in user's own extensions. A fax owned by anyone else answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -16871,7 +16838,7 @@
         }
       },
       "Unprocessable": {
-        "description": "A batch that is not valid: the errors name the operation, node and field (validation_failed)",
+        "description": "A request that is not valid: a batch whose errors name the operation, node and field, or a fax PDF that cannot be sent as a fax (validation_failed)",
         "content": {
           "application/json": {
             "schema": {
@@ -18160,9 +18127,19 @@
         "type": "object",
         "required": ["promptLanguage", "effective", "languages"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."},
-          "effective": {"type": "string", "description": "The language callers hear for this box now."},
-          "languages": {"type": "array", "items": {"type": "string"}, "description": "The languages a box can be set to."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."
+          },
+          "effective": {
+            "type": "string",
+            "description": "The language callers hear for this box now."
+          },
+          "languages": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The languages a box can be set to."
+          }
         }
       },
       "VoicemailBoxLanguageUpdate": {
@@ -18170,12 +18147,23 @@
         "additionalProperties": false,
         "required": ["promptLanguage"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."
+          }
         }
       },
       "VoicemailBoxSummary": {
         "type": "object",
-        "required": ["id", "extensionId", "number", "name", "unheard", "total", "promptLanguage"],
+        "required": [
+          "id",
+          "extensionId",
+          "number",
+          "name",
+          "unheard",
+          "total",
+          "promptLanguage"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -19540,9 +19528,15 @@
         "required": ["node", "text"],
         "properties": {
           "node": { "type": "string", "description": "A graph node id." },
-          "port": { "type": "string", "description": "The output port of the node the call leaves through; for a last step, the port it ends at." },
+          "port": {
+            "type": "string",
+            "description": "The output port of the node the call leaves through; for a last step, the port it ends at."
+          },
           "text": { "type": "string" },
-          "at": { "type": "string", "description": "On a time condition step, the instant that was evaluated." },
+          "at": {
+            "type": "string",
+            "description": "On a time condition step, the instant that was evaluated."
+          },
           "branches": {
             "type": "array",
             "description": "The choices of an IVR menu traced without a key.",
@@ -19556,22 +19550,45 @@
         "properties": {
           "port": { "type": "string" },
           "label": { "type": "string" },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } }
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          }
         }
       },
       "FlowTrace": {
         "type": "object",
-        "required": ["configRevision", "at", "from", "number", "outcome", "steps", "routingTrace"],
+        "required": [
+          "configRevision",
+          "at",
+          "from",
+          "number",
+          "outcome",
+          "steps",
+          "routingTrace"
+        ],
         "properties": {
           "configRevision": { "type": "integer", "format": "int64" },
           "at": { "type": "string" },
           "from": { "type": "string" },
           "number": { "type": "string" },
-          "outcome": { "type": "string", "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing." },
+          "outcome": {
+            "type": "string",
+            "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing."
+          },
           "route": { "type": "string" },
-          "reason": { "type": "string", "description": "Why the call was rejected." },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } },
-          "routingTrace": { "type": "array", "items": { "$ref": "#/components/schemas/TraceStep" } }
+          "reason": {
+            "type": "string",
+            "description": "Why the call was rejected."
+          },
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          },
+          "routingTrace": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TraceStep" }
+          }
         }
       },
       "FlowRevision": {
@@ -21260,7 +21277,7 @@
           },
           "languages": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": { "type": "string" },
             "description": "The languages the box can be set to."
           }
         }
@@ -22370,7 +22387,14 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["call", "page", "intercom", "conference", "callback", "fax"],
+            "enum": [
+              "call",
+              "page",
+              "intercom",
+              "conference",
+              "callback",
+              "fax"
+            ],
             "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or callback for a call Hello placed to a queue caller who asked to be called back, or fax for a fax call (the fax is in the faxes list, by correlation id)."
           },
           "ringTag": {
@@ -26814,10 +26838,7 @@
           },
           "direction": {
             "type": "string",
-            "enum": [
-              "inbound",
-              "outbound"
-            ]
+            "enum": ["inbound", "outbound"]
           },
           "status": {
             "type": "string",
@@ -26854,11 +26875,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "",
-              "g711",
-              "t38"
-            ],
+            "enum": ["", "g711", "t38"],
             "description": "How the fax travelled: G.711 audio or T.38."
           },
           "bitRate": {
@@ -26866,10 +26883,7 @@
             "description": "The modem rate of the last page, in bit/s."
           },
           "resultCode": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "description": "The T.30 completion code; 0 is success."
           },
           "resultText": {
@@ -26891,10 +26905,7 @@
             "format": "date-time"
           },
           "finishedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           },
           "attempts": {
@@ -26902,10 +26913,7 @@
             "description": "Attempts made to send (0 to 3)."
           },
           "nextAttemptAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time",
             "description": "When a queued fax is next tried."
           },
@@ -26915,22 +26923,13 @@
           },
           "mailStatus": {
             "type": "string",
-            "enum": [
-              "none",
-              "pending",
-              "sending",
-              "sent",
-              "failed"
-            ]
+            "enum": ["none", "pending", "sending", "sent", "failed"]
           }
         }
       },
       "FaxPage": {
         "type": "object",
-        "required": [
-          "items",
-          "next"
-        ],
+        "required": ["items", "next"],
         "properties": {
           "items": {
             "type": "array",
@@ -26946,10 +26945,7 @@
       },
       "FaxSend": {
         "type": "object",
-        "required": [
-          "to",
-          "pdfBase64"
-        ],
+        "required": ["to", "pdfBase64"],
         "additionalProperties": false,
         "properties": {
           "to": {
@@ -27007,9 +27003,7 @@
       },
       "FaxDestinationList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -27021,10 +27015,7 @@
       },
       "FaxDestinationCreate": {
         "type": "object",
-        "required": [
-          "name",
-          "extension"
-        ],
+        "required": ["name", "extension"],
         "additionalProperties": false,
         "properties": {
           "name": {
@@ -28319,23 +28310,73 @@
       },
       "QueueCallback": {
         "type": "object",
-        "required": ["id", "queueId", "number", "callerName", "status", "attempts", "positionKey", "nextAttemptAt", "claimedBy", "agent", "result", "createdAt", "expiresAt"],
+        "required": [
+          "id",
+          "queueId",
+          "number",
+          "callerName",
+          "status",
+          "attempts",
+          "positionKey",
+          "nextAttemptAt",
+          "claimedBy",
+          "agent",
+          "result",
+          "createdAt",
+          "expiresAt"
+        ],
         "properties": {
-          "id": {"type": "integer", "format": "int64"},
-          "queueId": {"type": "integer", "format": "int64"},
-          "number": {"type": "string", "description": "The number to call back."},
-          "callerName": {"type": "string", "description": "From the shared name sources (phonebooks); empty when none."},
-          "status": {"type": "string", "enum": ["waiting", "dialling", "connected", "failed", "cancelled", "expired"]},
-          "attempts": {"type": "integer", "description": "Attempts made, at most 3."},
-          "positionKey": {"type": "integer", "format": "int64", "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."},
-          "nextAttemptAt": {"type": "string", "format": "date-time"},
-          "claimedBy": {"type": "string", "description": "The node working on it while dialling."},
-          "leaseUntil": {"type": "string", "format": "date-time", "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."},
-          "agent": {"type": "string", "description": "The agent it was connected to."},
-          "result": {"type": "string", "description": "The last attempt's outcome or the way the request ended."},
-          "createdAt": {"type": "string", "format": "date-time"},
-          "expiresAt": {"type": "string", "format": "date-time"},
-          "finishedAt": {"type": "string", "format": "date-time"}
+          "id": { "type": "integer", "format": "int64" },
+          "queueId": { "type": "integer", "format": "int64" },
+          "number": {
+            "type": "string",
+            "description": "The number to call back."
+          },
+          "callerName": {
+            "type": "string",
+            "description": "From the shared name sources (phonebooks); empty when none."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "dialling",
+              "connected",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Attempts made, at most 3."
+          },
+          "positionKey": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."
+          },
+          "nextAttemptAt": { "type": "string", "format": "date-time" },
+          "claimedBy": {
+            "type": "string",
+            "description": "The node working on it while dialling."
+          },
+          "leaseUntil": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."
+          },
+          "agent": {
+            "type": "string",
+            "description": "The agent it was connected to."
+          },
+          "result": {
+            "type": "string",
+            "description": "The last attempt's outcome or the way the request ended."
+          },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "finishedAt": { "type": "string", "format": "date-time" }
         }
       },
       "QueueCallbackList": {

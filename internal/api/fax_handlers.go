@@ -414,7 +414,7 @@ func (s *server) sendFax(w http.ResponseWriter, r *http.Request) {
 	pages, err := s.Fax.Engine.Rasterise(ctx, pdf)
 	switch {
 	case errors.Is(err, fax.ErrRejected), errors.Is(err, fax.ErrTooManyPages), errors.Is(err, fax.ErrTooLarge):
-		writeError(w, http.StatusUnprocessableEntity, "unprocessable", "the PDF cannot be sent as a fax: "+strings.TrimPrefix(err.Error(), "fax: "))
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "the PDF cannot be sent as a fax: "+strings.TrimPrefix(err.Error(), "fax: "))
 		return
 	case err != nil:
 		s.Log.Error("fax rasterise", "error", err)
@@ -422,7 +422,7 @@ func (s *server) sendFax(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if pages > fax.MaxSendPages {
-		writeError(w, http.StatusUnprocessableEntity, "unprocessable", fmt.Sprintf("the PDF has more than %d pages", fax.MaxSendPages))
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", fmt.Sprintf("the PDF has more than %d pages", fax.MaxSendPages))
 		return
 	}
 	row, err := s.Fax.Store.CreateOutboundFax(ctx, store.OutboundFax{Peer: to, CallerID: callerID, Actor: actor(r).String(), Pages: pages})
