@@ -50,6 +50,7 @@ func (c *call) setHeld(held bool) {
 		return
 	}
 	c.s.m.HoldActive.Dec()
+	c.mediaTouched() // the silence clock of the dead-media watch restarts
 	c.addTrace("Call resumed")
 	c.noteHAState("", "")
 }

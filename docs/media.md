@@ -159,7 +159,34 @@ participant's mix in that participant's own codec (G.711, G.722 and Opus; the
 wideband ones are converted to and from 8 kHz). Each participant uses one RTP
 port from the range below.
 
+## Roaming and dead media
+
+A Wi-Fi handset that moves to another access point can keep its IP (same
+subnet) or get a new one (another subnet). Hello copes with both on an
+anchored call:
+
+- A re-INVITE whose `c=` address or port differs from the one the leg last
+  named is relayed to the other side as usual, and the anchor re-learns the
+  leg: the relay's source policy starts over from the new address, vouched by
+  the signalling source of that re-INVITE, and the old address is no longer
+  accepted. A hold's `0.0.0.0` and a re-INVITE that repeats the address leave
+  the leg alone. The other leg is not touched.
+- The relay notes when it last accepted a datagram from either peer. A call
+  that is bridged between two parties, anchored on this node and not on hold,
+  is ended after `HELLO_MEDIA_DEAD_SECONDS` (default 60, `0` turns it off)
+  with no RTP in either direction: both legs get BYE, the CDR side is
+  `system` and the reason `no media`. Resuming from hold restarts the clock.
+  One-way audio keeps a call up. A taken-over call keeps the watch too.
+
+The signalling half of roaming (the re-REGISTER from the new address replacing
+the old contact, and session timers) is in [phones.md](phones.md#roaming-keep-alive-and-dead-calls).
+
 ## Metrics
+
+`hello_sip_session_teardowns_total{reason}` counts the calls ended for a dead
+far end (`refresh_failed`, `refresh_missing`, `media_dead`), and
+`hello_sip_session_refreshes_total{method,result}` the refreshes Hello sent.
+The anchor's own series:
 
 `hello_rtp_sessions`, `hello_rtp_packets_total{direction}`,
 `hello_rtp_octets_total{direction}`, `hello_rtp_loss_total{direction}`,

@@ -28,6 +28,8 @@ type fakeConf struct {
 	states map[string]livestate.ConfRoomState
 	cmds   map[string][]livestate.ConfCommand
 	down   bool
+	// beforeDelete, when set, runs at the start of DeleteConfState (outside mu).
+	beforeDelete func()
 }
 
 type confLease struct {
@@ -99,6 +101,12 @@ func (f *fakeConf) PutConfState(_ context.Context, st livestate.ConfRoomState) e
 }
 
 func (f *fakeConf) DeleteConfState(_ context.Context, number string) error {
+	f.mu.Lock()
+	hook := f.beforeDelete
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.states, number)
@@ -286,6 +294,25 @@ func speaks(talker, listener *confSeat) int {
 	go func() { got <- listener.hear(500 * time.Millisecond) }()
 	talker.say(500, 8000, 500*time.Millisecond)
 	return <-got
+}
+
+// speaksUntilHeard repeats speaks until the listener hears the talker: the
+// media path (a relay latching on the first packet, a forwarded leg reaching
+// the owner's mixer) opens at a time that depends on the machine's load, so
+// one fixed window cannot tell "not yet" from "never". It fails only if
+// nothing is heard within 15 s.
+func speaksUntilHeard(t *testing.T, what string, talker, listener *confSeat) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		got := speaks(talker, listener)
+		if got >= 3000 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s (peak %d)", what, got)
+		}
+	}
 }
 
 func waitState(t *testing.T, f *fakeConf, room string, what string, cond func(livestate.ConfRoomState) bool) livestate.ConfRoomState {
@@ -549,12 +576,10 @@ func TestConferenceControls(t *testing.T) {
 	f.queue("sip-test", livestate.ConfCommand{ID: "3", Room: "800", Action: "end", Actor: "user:admin"})
 	waitReq(t, a.byes, "BYE when the room is ended")
 	eventually(t, "room gone", func() bool { return pbx.srv.conf.get("800") == nil })
-	if _, ok := f.state("800"); ok {
-		t.Fatal("the emptied room's state was not removed")
-	}
-	if f.ownerNow("800") != "" {
-		t.Fatal("the emptied room kept its ownership lease")
-	}
+	// The room leaves the hub before its teardown deletes the shared state
+	// and lease: wait for that, not for the hub alone.
+	eventually(t, "the emptied room's state is removed", func() bool { _, ok := f.state("800"); return !ok })
+	eventually(t, "the emptied room's lease is released", func() bool { return f.ownerNow("800") == "" })
 }
 
 // TestConferenceWaitForLeader fails if a participant is mixed in before a
@@ -674,12 +699,8 @@ func TestConferenceTwoNodes(t *testing.T) {
 	}
 	waitState(t, f, "800", "both in the one room", func(s livestate.ConfRoomState) bool { return len(s.Participants) == 2 && s.Node == "sip-a" })
 	remote.say(500, 0, 600*time.Millisecond) // the phone's steady stream (silence) opens the relay both ways
-	if got := speaks(local, remote); got < 3000 {
-		t.Fatalf("the forwarded participant did not hear the local one (peak %d)", got)
-	}
-	if got := speaks(remote, local); got < 3000 {
-		t.Fatalf("the local participant did not hear the forwarded one (peak %d)", got)
-	}
+	speaksUntilHeard(t, "the forwarded participant did not hear the local one", local, remote)
+	speaksUntilHeard(t, "the local participant did not hear the forwarded one", remote, local)
 	// DTMF through the forwarding node reaches the owner's participant.
 	remote.keys("*6")
 	waitState(t, f, "800", "forwarded participant muted over INFO", func(s livestate.ConfRoomState) bool {
@@ -712,9 +733,7 @@ func TestConferenceTwoNodes(t *testing.T) {
 		t.Fatalf("join after the owner died: %v", err)
 	}
 	time.Sleep(600 * time.Millisecond)
-	if got := speaks(third, remote); got < 3000 {
-		t.Fatalf("the re-homed participant does not hear the new one (peak %d)", got)
-	}
+	speaksUntilHeard(t, "the re-homed participant does not hear the new one", third, remote)
 	remote.leave()
 	third.leave()
 }
@@ -882,4 +901,54 @@ func TestConferenceHaltOnStop(t *testing.T) {
 		after, _, _ := room.mix.Stats()
 		return after == before
 	})
+}
+
+// TestConferenceJoinDuringTeardown fails if a caller who joins a room number
+// while the emptied room of that number is still tearing down gets a room
+// whose shared state and ownership lease the old room's teardown then
+// deletes (the new room would run with no state and no lease).
+func TestConferenceJoinDuringTeardown(t *testing.T) {
+	f := newFakeConf()
+	pbx := startPBX(t, confDevices(), withRooms(room800()), withConferences(f, nil))
+	s := pbx.srv
+	old, ok := s.confReserve(room800())
+	if !ok {
+		t.Fatal("no seat")
+	}
+	inDelete, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	f.mu.Lock()
+	f.beforeDelete = func() {
+		once.Do(func() { close(inDelete) })
+		<-release
+	}
+	f.mu.Unlock()
+	torn := make(chan struct{})
+	go func() { s.confRelease(old); close(torn) }()
+	<-inDelete // the old room has left the hub and is deleting its state
+	joined := make(chan *confRoom, 1)
+	go func() {
+		r, _ := s.confReserve(room800())
+		// The new room publishes its state and takes the lease.
+		_ = f.PutConfState(t.Context(), livestate.ConfRoomState{Room: "800", Node: "sip-test"})
+		_, _ = f.AcquireLease(t.Context(), livestate.ConfOwnerKey("800"), "sip-test", time.Minute)
+		joined <- r
+	}()
+	select {
+	case <-joined:
+		// Without the fix the join does not wait for the teardown; let it
+		// finish so the damage shows.
+		close(release)
+		<-torn
+	case <-time.After(300 * time.Millisecond):
+		close(release) // the join waits for the teardown, as it must
+		<-torn
+		<-joined
+	}
+	if _, ok := f.state("800"); !ok {
+		t.Fatal("the new room's state was deleted by the old room's teardown")
+	}
+	if f.ownerNow("800") != "sip-test" {
+		t.Fatal("the new room's ownership lease was released by the old room's teardown")
+	}
 }

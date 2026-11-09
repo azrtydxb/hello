@@ -48,8 +48,9 @@ func withOpusStack(fn func()) {
 type opusEnc struct{ e *opuslib.Encoder }
 
 type opusDec struct {
-	d    *opuslib.Decoder
-	rate int
+	d     *opuslib.Decoder
+	rate  int
+	fails int // consecutive packets the library refused
 }
 
 func newOpusEncoder(rate int) (enc opusEncoder, err error) {
@@ -81,7 +82,8 @@ func newOpusMusicEncoder(rate int) (enc opusEncoder, err error) {
 			enc, err = nil, fmt.Errorf("media: opus encoder: %v", r)
 		}
 	}()
-	e, err := opuslib.NewEncoder(rate, 1, opuslib.ApplicationAudio)
+	var e *opuslib.Encoder
+	withOpusStack(func() { e, err = opuslib.NewEncoder(rate, 1, opuslib.ApplicationAudio) })
 	if err != nil {
 		return nil, fmt.Errorf("media: opus encoder: %w", err)
 	}
@@ -125,21 +127,69 @@ func (o *opusEnc) encode(pcm []int16) (out []byte) {
 
 func (o *opusEnc) close() { withOpusStack(func() { _ = o.e.Close() }) }
 
+// opusDecodeCall is the library call behind decode; tests replace it.
+var opusDecodeCall = func(d *opuslib.Decoder, payload []byte, pcm []int16) (int, error) {
+	return d.Decode(payload, pcm, len(pcm), false)
+}
+
 func (o *opusDec) decode(payload []byte) (out []int16) {
+	panicked := true
 	defer func() {
 		if r := recover(); r != nil {
 			out = nil
+		}
+		switch {
+		case panicked:
+			o.fails = 0
+			o.rebuild()
+		case out == nil && len(payload) > 0:
+			// A packet the library refused: one stray packet is the
+			// network's, a run of them is a decoder that has gone bad.
+			if o.fails++; o.fails >= opusRebuildAfter {
+				o.fails = 0
+				o.rebuild()
+			}
+		case out != nil:
+			o.fails = 0
 		}
 	}()
 	// 120 ms is the longest Opus frame.
 	pcm := make([]int16, o.rate*120/1000)
 	var n int
 	var err error
-	withOpusStack(func() { n, err = o.d.Decode(payload, pcm, len(pcm), false) })
+	withOpusStack(func() { n, err = opusDecodeCall(o.d, payload, pcm) })
+	panicked = false
 	if err != nil || n <= 0 {
 		return nil
 	}
 	return pcm[:n]
+}
+
+// opusRebuildAfter is how many packets in a row the decoder may refuse
+// before it is replaced.
+const opusRebuildAfter = 5
+
+// rebuild replaces the decoder after a library failure. The library keeps
+// state on a Go stack the runtime may have moved (see opusStackPin); once
+// that happens every later frame fails the same assertion, so a call whose
+// decoder broke would stay deaf (a voicemail records silence, a bridged call
+// is mute one way). A fresh decoder loses only the codec's history.
+func (o *opusDec) rebuild() {
+	var d *opuslib.Decoder
+	var err error
+	func() {
+		defer func() { _ = recover() }()
+		withOpusStack(func() { d, err = opuslib.NewDecoder(o.rate, 1) })
+	}()
+	if err != nil || d == nil {
+		return
+	}
+	old := o.d
+	o.d = d
+	func() {
+		defer func() { _ = recover() }()
+		withOpusStack(func() { _ = old.Close() })
+	}()
 }
 
 func (o *opusDec) close() { withOpusStack(func() { _ = o.d.Close() }) }

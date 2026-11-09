@@ -400,7 +400,7 @@ export const TEMPLATE_VARIABLES: readonly { name: string; doc: string }[] = [
   { name: ".Line.VoicemailCode", doc: "message key feature code" },
   { name: ".Server.Host", doc: "registrar host" },
   { name: ".Server.Port", doc: "registrar port" },
-  { name: ".Server.Transport", doc: "always udp" },
+  { name: ".Server.Transport", doc: "udp, or tls for a model HELLO_PROV_SIP_TLS_MODELS lists" },
   { name: ".Server.Expiry", doc: "registration expiry, seconds" },
   {
     name: ".BLF",
