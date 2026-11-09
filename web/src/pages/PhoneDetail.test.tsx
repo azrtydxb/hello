@@ -254,13 +254,16 @@ describe("Phone detail", () => {
       expect(effective).toHaveTextContent("224.0.1.116:5001"),
     );
     const pick = screen.getByLabelText("PTT channel");
-    expect(
-      Array.from(pick.querySelectorAll("option")).map((o) => o.textContent),
-    ).toEqual([
-      "Group's channel (or the catalog default)",
-      "PTT (224.0.1.116:5001, PCMU)",
-      "Floor (224.0.1.117:5001, PCMU)",
-    ]);
+    // The catalog loads after the first render, so wait for its options.
+    await waitFor(() =>
+      expect(
+        Array.from(pick.querySelectorAll("option")).map((o) => o.textContent),
+      ).toEqual([
+        "Group's channel (or the catalog default)",
+        "PTT (224.0.1.116:5001, PCMU)",
+        "Floor (224.0.1.117:5001, PCMU)",
+      ]),
+    );
     fireEvent.change(pick, { target: { value: "2" } });
     expect(effective).toHaveTextContent("224.0.1.117:5001");
     fireEvent.click(screen.getByRole("button", { name: "Save PTT channel" }));
