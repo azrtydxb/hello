@@ -1345,6 +1345,12 @@ func (c *call) offerSDP() []byte {
 	if c.inv != nil {
 		return c.inv.Body()
 	}
+	c.mu.Lock()
+	cbOffer := c.cbOffer
+	c.mu.Unlock()
+	if cbOffer != nil {
+		return cbOffer // a callback's own offer to the caller it rings (queue_callback.go)
+	}
 	if hom := c.homed(); hom != nil && hom.legs[0] != nil {
 		hom.legs[0].mu.Lock()
 		defer hom.legs[0].mu.Unlock()

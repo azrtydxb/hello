@@ -79,6 +79,7 @@ type Store interface {
 	GetVoicemailBox(ctx context.Context, extensionID int64) (store.VoicemailBox, error)
 	GetVoicemailBoxByID(ctx context.Context, boxID int64) (store.VoicemailBox, error)
 	VoicemailPromptLanguages(ctx context.Context) ([]string, error)
+	QueuePromptLanguages(ctx context.Context) ([]string, error)
 	ListVoicemailBoxes(ctx context.Context) ([]store.VoicemailBoxSummary, error)
 	UpdateVoicemailBox(ctx context.Context, actor string, extensionID int64, c store.VoicemailBoxChange, check store.Check) (store.VoicemailBox, error)
 	ListVoicemailMessages(ctx context.Context, boxID int64, unheardOnly bool) ([]store.VoicemailMessage, error)
@@ -241,6 +242,9 @@ type Config struct {
 	// Queues is the call queues shared state (waiting callers, agent login
 	// and pause) in Valkey; nil answers 503 on the live queue routes.
 	Queues QueueLive
+	// Callbacks is the queue callback requests (PostgreSQL); nil answers 503
+	// on the callback routes.
+	Callbacks queue.CallbackStore
 	// SIPDomain is the realm device HA1 values are computed for.
 	SIPDomain  string
 	SessionTTL time.Duration
@@ -338,6 +342,11 @@ type Config struct {
 	// are set by Handler.
 	speech    *ttscache.Cache
 	prewarmMu *sync.Mutex
+	// prewarmKick asks the background worker to pre-generate the prompts of a
+	// language a queue just set. Batchable handlers kick it rather than call
+	// the pre-generation, which uses the speech cache and must not run inside a
+	// batch. Set by Handler.
+	prewarmKick chan struct{}
 	// self is the finished handler (middleware and test wrapper included),
 	// set by Handler: a batch replays its operations through it.
 	self *atomic.Pointer[http.Handler]
@@ -358,8 +367,10 @@ func Handler(c Config) http.Handler {
 		c.TTS = &tts.Client{}
 	}
 	c.speech, c.prewarmMu = newSpeechCache(c), &sync.Mutex{}
+	c.prewarmKick = make(chan struct{}, 1)
 	c.self = new(atomic.Pointer[http.Handler])
 	s := &server{c}
+	go s.runPrewarmKicks()
 	opts := auth.Options{Cookies: true}
 	if c.AI != nil {
 		opts.Resource, _ = c.AI.Resources()
