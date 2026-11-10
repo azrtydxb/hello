@@ -25021,7 +25021,13 @@
                   "maintenance",
                   "emergency_not_allowed",
                   "caller_id_not_allowed",
-                  "route_denied"
+                  "route_denied",
+                  "credentials_rejected",
+                  "provider_unreachable",
+                  "credentials_unreadable",
+                  "not_a_carrier_channel",
+                  "conversation_exists",
+                  "first_contact_off"
                 ]
               },
               "message": {
