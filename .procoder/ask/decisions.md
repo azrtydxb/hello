@@ -903,6 +903,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
   check). The WP856 (P22296) and other vendors get no window until their keys
   are known; the page offers the hour for Grandstream pins only.
 - TR-069 settings not touched.
+
 ## Negotiated codec per leg in the CDR (2026-10-26)
 
 `cdrs` gets `caller_codec` and `callee_codec` (migration 00055, nullable text,
@@ -915,6 +916,7 @@ itself, rows from before the migration) is NULL, shown as a dash. The list and
 detail API return `callerCodec`/`calleeCodec` (null when absent), the CSV
 export appends `caller_codec` and `callee_codec`, and Call history has a Codec
 column ("a" when both legs agree, "a → b" when they differ).
+
 ## Session timers on moved dialogs and trunk legs (S-9, follow-up 9b)
 
 - Parked call: the call keeps one dialog, its party's (`link.selfSide`). Its
@@ -983,6 +985,7 @@ column ("a" when both legs agree, "a → b" when they differ).
   voicemail and announcement calls are answered through the raw transaction and
   have no timer to refresh or answer a refresh for, so only the menu and queue
   dialogs answer refreshes.
+
 ## Door station extension kind and Door group (2026-10-27) — phone-feature-parity item 13 (S-45, S-46)
 
 - Migration `00053_door_station`: `extensions.kind` (user/door, default user),
@@ -1021,6 +1024,7 @@ column ("a" when both legs agree, "a → b" when they differ).
   builds it under the call lock, covers answered, homed and parked calls), and
   `haNewCall` restores them, so a taken-over door call keeps the trunk ban and CDR
   kind door (`TestDoorCallerSurvivesTakeover`).
+
 ## Ring map provisioning, phone-feature-parity S-42 and S-44 (2026-10-27)
 
 - Storage: `ring_map` (migration 00051) holds explicit choices only, keyed by
@@ -1126,6 +1130,7 @@ column ("a" when both legs agree, "a → b" when they differ).
 - API: `GET|POST /api/v1/ringtones`, `DELETE /api/v1/ringtones/{id}`; operator
   to write, viewer to read; upload is multipart and excluded from MCP like the
   other uploads; list and delete are MCP tools. UI: a Tones tab on Ringing.
+
 ## Queue callback (pbx-gaps wave B, B4)
 
 - **Merged gaps-languages.** PR #208 (voicemail box languages, `voiceprompt.Resolve`) was not on main, so origin/gaps-languages is merged into this branch. The queue's language is `Resolve(queue.prompt_language, deployment language)`; `queues.prompt_language` is NULL for inherit, no CHECK (validated by the API), migration 00049.
@@ -1627,6 +1632,7 @@ so the VIP stage cannot sit in that file.
   re-added its files; resolved by taking the stack's version of the VIP and
   legacy-socket code and main's TLS socket code (the VIP branch of the
   listens also gets a TLS listener on `EDGE_VIP`).
+
 ## TestConferenceTwoNodes flake: root cause (2026-11-09)
 
 - Two causes, one in the test and one in production code. Both reproduced on a
@@ -1647,6 +1653,7 @@ so the VIP stage cannot sit in that file.
   port is taken. All RTP is IPv4-only (SDP is `IN IP4` only), so relay and
   anchor sockets are now `udp4` like the rest; the port-in-use check is then
   the same on every kernel.
+
 ## Opus "inLen >= S->Fs_in_kHz" flake: root cause and fix (2026-11-09)
 
 - Symptom: `TestOpusSessionLoopback` failed on most runs (104 of 200 here, less
@@ -1672,6 +1679,7 @@ so the VIP stage cannot sit in that file.
   right and is unchanged.
 - Under `-race` the Opus build is off (opus_race.go), so the loopback test
   skips there; the -race count proves nothing about the codec.
+
 ## IVR homed-callee data race (ivrHomeCallee vs release)
 
 - Root cause: `homedCall.legs` had no lock of its own. `ivrHomeCallee`
@@ -1687,3 +1695,10 @@ so the VIP stage cannot sit in that file.
 - Firmware-upgrade confirmation prompt off (P8375=0, P84988=1) for unattended upgrades, or leave it
 - Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
 - Account sharing group password: shared default `AccountSharing`, or a per-group secret
+
+## AI on the canvas may apply its own batch (2026-11-10)
+
+- Asked: should the canvas AI assistant only propose (a person applies), or may it apply?
+- Answer (user): the AI may apply. Give the assistant a write tool that applies its batch,
+  audited and revertible, in line with the earlier AI-access decision. Operators still see
+  and can revert every applied batch.
