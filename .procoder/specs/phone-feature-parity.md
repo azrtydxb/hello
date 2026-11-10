@@ -41,7 +41,7 @@ The user asked for everything and left the details open. These defaults settle e
 12. **E911**: Hello serves a minimal HELD location server from the provisioning listener, with locations assigned per phone group. Geolocation/PIDF-LO is added on emergency trunk legs only for trunks flagged for it (default off).
 13. **Firmware**: WP8x6 is pinned to one lab-tested 1.0.3.x build, the newest of 1.0.3.29 to 1.0.3.39 that passes the lab run. WP822 is pinned to the lab build 1.0.11.78 until a newer one passes. A per-model minimum version blocks downgrades below a vendor floor (WP822 1.0.11.22 [R822 RN]).
 14. **Wi-Fi profiles** are opt-in per phone group, with secrets sealed. A profile push is refused unless the group already has one profile marked "verified on a test phone", because a bad Wi-Fi push strands the handset.
-15. **LDAP stays out of scope** because of the accepted decision of 2026-10-25 (phonebooks-ptt "no LDAP"). Every other row of both reports is built or explicitly configured.
+15. **LDAP out of scope: superseded by pbx-gaps S-24 to S-26 (2026-10-26).** It was left out because of the decision of 2026-10-25 (phonebooks-ptt "no LDAP"), which the 2026-10-26 decision reverses for phones. Every other row of both reports is built or explicitly configured.
 16. **Hot desking** is not offered by either WP family [R822 §3], so it is documented as unsupported. Account sharing [R8x6 AS] is provisioned instead.
 
 ## In scope
@@ -219,7 +219,7 @@ The user asked for everything and left the details open. These defaults settle e
 
 ## Out of scope
 
-- LDAP and LDAPS directories (decision of 2026-10-25, unchanged).
+- LDAP and LDAPS directories: superseded by pbx-gaps S-24 to S-26 (2026-10-26).
 - Hot desking (neither WP family documents it [R822 §3]); account sharing (S-11) covers the shared-handset case.
 - Provisioning door stations themselves (Grandstream GDS, 2N, Akuvox, DoorBird are configured on the device); Hello stores their SIP credentials and door-open code only.
 - Door-open over a station's HTTP API (relay URL), and access-control integration; only DTMF is used.
