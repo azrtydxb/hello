@@ -303,6 +303,10 @@ type Prov struct {
 	// marks its sockets with (spec phone-feature-parity S-21).
 	DSCPSIP int
 	DSCPRTP int
+	// RTCPXR (HELLO_PROV_RTCPXR, default off) provisions the phones that
+	// support it (Grandstream WP8xx) to publish RTCP-XR voice-quality reports
+	// to the SIP server (phone-feature-parity S-36).
+	RTCPXR bool
 	// RegisterExpiry is the registration expiry rendered configs carry:
 	// HELLO_SIP_REGISTER_MAX_EXPIRES (default 1h), the same value hello-sip
 	// caps registrations at, so it is always inside its window.
@@ -806,6 +810,7 @@ func (r *reader) prov() Prov {
 		TLSKey:             r.getenv("HELLO_PROV_TLS_KEY"),
 		BootCIDRs:          r.prefixes("HELLO_PROV_BOOT_CIDRS"),
 		AutoResync:         r.boolean("HELLO_PROV_AUTO_RESYNC"),
+		RTCPXR:             r.boolean("HELLO_PROV_RTCPXR"),
 	}
 	minExp := r.duration("HELLO_SIP_REGISTER_MIN_EXPIRES", 60*time.Second)
 	p.RegisterExpiry = r.duration("HELLO_SIP_REGISTER_MAX_EXPIRES", time.Hour)

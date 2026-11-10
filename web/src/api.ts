@@ -205,12 +205,29 @@ export interface Cdr {
   rtpPackets?: number | null;
   rtpLost?: number | null;
   rtpJitterMs?: number | null;
+  /** What the phones on the call reported (RTCP-XR); single-CDR read only. */
+  rtcpxr?: RtcpxrQuality[];
   /**
    * The audio codec each leg ended on, as "name/clock rate" ("PCMU/8000");
    * null when none was negotiated, and for calls recorded before it was kept.
    */
   callerCodec?: string | null;
   calleeCodec?: string | null;
+}
+
+/** One phone's own view of a call's voice quality (RFC 6035 report). */
+export interface RtcpxrQuality {
+  device: string;
+  extension: string;
+  /** True for the call-end report. */
+  final: boolean;
+  mosLq: number | null;
+  mosCq: number | null;
+  jitterMs: number | null;
+  lossPct: number | null;
+  discardPct: number | null;
+  roundTripMs: number | null;
+  reportedAt: string;
 }
 
 /** One line of a routing trace (routing.Step). */

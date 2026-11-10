@@ -1875,6 +1875,52 @@ Implementation notes (template route, no migration):
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
 
+## RTCP-XR collector (parity-rtcpxr, item 35, S-36) (2026-11-09)
+
+- Reports live in their own table `cdr_rtcpxr` (migration 00066), not in
+  columns on `cdrs` as the spec's Data says. A phone sends its call-end
+  report within moments of the BYE, usually before the CDR is written, and
+  the report names the phone's own leg of a B2BUA call, which is not always
+  the CDR's `sip_call_id`. The CDR therefore also stores the answering callee
+  leg's Call-ID (`cdrs.peer_call_id`) and `GetCDR` joins on either. A report
+  with no CDR yet (or ever) costs nothing.
+- One row per (dialog Call-ID, device): a later report replaces the earlier,
+  an interval report never replaces the call-end one. Kept 90 days, pruned on
+  every 1000th write. A device is held to 60 reports a minute in memory per
+  node. Remote metrics (what the far end reported) are ignored; the phone's
+  own receive-side view is the figure.
+- A malformed or out-of-range report (MOS outside 0 to 5, loss outside 0 to
+  100, no dialog id, no metrics, over 4 KiB) is answered 400 and stored not at
+  all. Wrong content type 415, other Event 489 (item 34 adds presence),
+  store down 503. The sender must authenticate as a device.
+- Vendor keys, checked against Grandstream's own configuration templates
+  (config-template-10212026.zip; 2026-11-09 review). Account 1:
+  P26093 collector name, P26094 collector address and P26095 collector port
+  (default 5060) are in `wp8x6_config_1.0.3.39`,
+  `wp810_822_825_config_1.0.11.83` and `wp856_config_1.0.3.16` (confirmed;
+  account 2 is P26193, P26194, P26195 in the same three). P60087 collector
+  address selection (0 Manual, 1 Auto) is in `wp8x6_config_1.0.3.39` and
+  `wp810_822_825_config_1.0.11.83` only (confirmed; account 2 is P60187).
+  P8489 "VQ RTCP-XR Session Report" (0 Disabled, 1 Enabled, default 0) is in
+  the same two and is newly found: without it the phone sends no call-end
+  report, so the collector would stay empty. `wp820_config_1.0.7.90` has no
+  RTCP-XR key. The earlier reading that the WP8x6 and WP856 name no such keys
+  (from release notes) was wrong: corrected, they now get the keys.
+  Template (only when `HELLO_PROV_RTCPXR=true`, default off, spec "off by
+  default"): WP8x6 and WP810/822/825 get P26093 = SIP server host, P60087 = 1,
+  empty P26094, P26095 = SIP server port, P8489 = 1; the WP856 has no Auto
+  selection and no session report key, so it gets P26093 and P26094 = SIP
+  server host and P26095, and nothing else; the WP820 and non-WP Grandstream
+  phones get none. P8490 (interval report) stays at its default off, because
+  the collector keeps the call-end report. Yealink, Poly, Snom and Fanvil are
+  not provisioned (no confirmed keys read). Behaviour is not yet seen on a
+  phone (verify: Auto with an empty address; the WP856 with the address set).
+- No MCP tool added; nothing to teach in skills/. The CDR REST read gains
+  `rtcpxr`, and the call detail page shows it beside the relay figures.
+- Merge note: `handlePublish` in `internal/sip/rtcpxr.go` owns the PUBLISH
+  route and answers 489 for other events; item 34 (presence PUBLISH) should
+  dispatch its event from there.
+
 ## SIP over TCP is provisioned per model, on the UDP address (2026-11-09)
 
 Phone-feature-parity S-13 (delivery item 22). hello-sip already records the

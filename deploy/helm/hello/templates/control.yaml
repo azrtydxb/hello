@@ -141,6 +141,10 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             {{- end }}
+            {{- if $prov.rtcpxr }}
+            - name: HELLO_PROV_RTCPXR
+              value: "true"
+            {{- end }}
             {{- with $prov.sipTcpModels }}
             # Phones of these models register over TCP (S-13), on the SIP server address.
             - name: HELLO_PROV_SIP_TCP_MODELS

@@ -72,6 +72,9 @@ control:
     # (default grandstream:WP; "none" keeps every phone on UDP).
     sipTlsServer: ""
     sipTlsModels: ""
+    # Provision Grandstream WP810/WP822/WP825 to publish RTCP-XR voice-quality
+    # reports to the SIP server (HELLO_PROV_RTCPXR, docs/provisioning.md).
+    rtcpxr: false
     # Models that register over TCP (same format as sipTlsModels, default
     # none: UDP). A model also in sipTlsModels uses TLS while TLS is on.
     sipTcpModels: ""
