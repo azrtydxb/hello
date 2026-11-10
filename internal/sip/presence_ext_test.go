@@ -244,7 +244,7 @@ func TestPresenceExtensions(t *testing.T) {
 		if res := a.publish(t, "100", 0, refreshed, "", ""); res.StatusCode != 412 {
 			t.Fatalf("second removal = %d, want 412", res.StatusCode)
 		}
-		if res := a.send(t, sip.PUBLISH, "100", map[string]string{"Event": "vq-rtcpxr", "Expires": "0"}, ""); res.StatusCode != 489 {
+		if res := a.send(t, sip.PUBLISH, "100", map[string]string{"Event": "dialog", "Expires": "0"}, ""); res.StatusCode != 489 {
 			t.Fatalf("PUBLISH of an unknown event = %d, want 489", res.StatusCode)
 		}
 	})

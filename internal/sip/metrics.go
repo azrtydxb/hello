@@ -70,6 +70,8 @@ type Metrics struct {
 	// Session counts the refreshes and the teardowns of session timers and
 	// dead-media detection (S-9).
 	Session *SessionMetrics
+	// RTCPXR counts the phones' voice-quality reports (S-36).
+	RTCPXR *RTCPXRMetrics
 	// CheckSync counts check-sync NOTIFYs by event and result (S-5).
 	CheckSync *prometheus.CounterVec // event, result
 	// MessagesIn counts SIP MESSAGE requests by source (phone, trunk) and
@@ -348,6 +350,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	m.Conf = newConfMetrics(reg)
 	m.Session = newSessionMetrics(reg)
+	m.RTCPXR = newRTCPXRMetrics(reg)
 	return m
 }
 

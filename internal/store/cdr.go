@@ -61,6 +61,9 @@ type CDR struct {
 	// QueueLegs is what the call did in a call queue (migration 00040); set
 	// by GetCDR.
 	QueueLegs []QueueLeg `json:"queueLegs,omitempty"`
+	// RTCPXR is what the phones on the call reported (migration 00066); set
+	// by GetCDR, empty when no phone sent a report.
+	RTCPXR []RTCPXRQuality `json:"rtcpxr,omitempty"`
 }
 
 // QueueLeg is one event of a call in a queue: enter, agent, answered, wait,
@@ -227,5 +230,9 @@ func (s *Store) GetCDR(ctx context.Context, id int64) (CDR, routing.Trace, error
 		}
 		c.QueueLegs = append(c.QueueLegs, l)
 	}
-	return c, trace, rows.Err()
+	if err := rows.Err(); err != nil {
+		return c, trace, err
+	}
+	c.RTCPXR, err = s.rtcpxrOf(ctx, id)
+	return c, trace, err
 }
