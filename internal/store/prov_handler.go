@@ -69,7 +69,9 @@ func (s *Store) MarkFetched(ctx context.Context, phoneID int64, hash []byte, st 
 		UPDATE phones SET first_fetch_at = COALESCE(first_fetch_at, $2), last_fetch_at = $2,
 		       last_fetch_ip = $3::inet, last_fetch_ua = $4, last_fetch_file = $5,
 		       firmware_seen = COALESCE(NULLIF($6, ''), firmware_seen),
-		       ua_mismatch = ua_mismatch OR $7, boot_armed = FALSE
+		       ua_mismatch = ua_mismatch OR $7, boot_armed = FALSE,
+		       ldap_prev_password_enc = CASE WHEN ldap_rotated_at IS NOT NULL AND ldap_rotated_at <= $2 AND $5 NOT LIKE 'pb/%'
+		                                     THEN NULL ELSE ldap_prev_password_enc END
 		WHERE id = $1 AND (token_hash = $8 OR (prev_token_hash = $8 AND prev_token_expires > now()))`,
 		phoneID, st.At, ipArg(st), st.UserAgent, st.File, st.FirmwareSeen, st.UAMismatch, hash)
 	return err
@@ -189,10 +191,10 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT p.mac, p.vendor, p.model, p.label, p.token_enc, p.admin_password_enc, p.template_id, p.blf,
-		       d.id, d.sip_username, d.secret_enc, e.name, e.number, COALESCE(e.call_waiting, TRUE)
+		       d.id, d.sip_username, d.secret_enc, e.name, e.number, COALESCE(e.call_waiting, TRUE), NOT COALESCE(e.voicemail_enabled, TRUE)
 		FROM phones p LEFT JOIN devices d ON d.id = p.device_id LEFT JOIN extensions e ON e.id = d.extension_id
 		WHERE p.id = $1`, phoneID).Scan(&d.Phone.MAC, &d.Phone.Vendor, &d.Phone.Model, &d.Phone.Label, &tokenEnc, &adminEnc,
-		&tplID, &blfJSON, &devID, nullStr(&d.Line.Username), &secEnc, nullStr(&d.Line.DisplayName), nullStr(&d.Line.Label), &d.Line.CallWaiting)
+		&tplID, &blfJSON, &devID, nullStr(&d.Line.Username), &secEnc, nullStr(&d.Line.DisplayName), nullStr(&d.Line.Label), &d.Line.CallWaiting, &d.Line.NoVoicemail)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, prov.Template{}, prov.ErrNotFound
 	}
@@ -239,11 +241,16 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Codes, err = s.featureCodes(ctx); err != nil {
 		return d, prov.Template{}, err
 	}
-	host, port := splitHostPort(s.prov.SIPServer)
-	d.Server = prov.Server{Host: host, Port: port, Transport: "udp", Expiry: int(s.prov.Expiry / time.Second)}
+	if d.Ring, err = s.ringInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
+		return d, prov.Template{}, err
+	}
+	d.Server = s.prov.server(d.Phone.Vendor, d.Phone.Model)
 	d.Prov = s.prov.info(token, d.Phone.MAC)
 	d.Time = prov.NewTimeInfo(s.prov.Timezone, s.prov.NTP, time.Now())
 	if d.Book, err = s.bookInfo(ctx, phoneID, token); err != nil {
+		return d, prov.Template{}, err
+	}
+	if d.LDAP, err = s.ldapInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
 		return d, prov.Template{}, err
 	}
 	if d.Multicast, d.PTT, d.Paging, err = s.multicastInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
@@ -353,39 +360,111 @@ func (s *Store) blfKeys(ctx context.Context, raw []byte) ([]prov.BLFKey, error) 
 	return keys, nil
 }
 
-// pinnedFirmware picks the pin matching the model: the more specific glob,
-// then the lower firmware id; nil when none matches.
-func (s *Store) pinnedFirmware(ctx context.Context, v prov.Vendor, model, base string) (*prov.FirmwareInfo, error) {
+// pinRow is one pin joined to its firmware file.
+type pinRow struct {
+	glob, file, version string
+	id                  int64
+	hour                *int
+}
+
+// loadPins returns the pins of a vendor with their files.
+func (s *Store) loadPins(ctx context.Context, v prov.Vendor) ([]pinRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT pn.model_glob, f.id, f.filename, f.version FROM prov_firmware_pins pn
+		SELECT pn.model_glob, f.id, f.filename, f.version, pn.upgrade_hour FROM prov_firmware_pins pn
 		JOIN prov_firmware f ON f.id = pn.firmware_id WHERE pn.vendor = $1`, v)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var (
-		best     *prov.FirmwareInfo
-		bestSpec int
-		bestID   int64
-	)
+	var out []pinRow
 	for rows.Next() {
 		var (
-			glob, file, version string
-			id                  int64
+			r    pinRow
+			hour sql.NullInt64
 		)
-		if err := rows.Scan(&glob, &id, &file, &version); err != nil {
+		if err := rows.Scan(&r.glob, &r.id, &r.file, &r.version, &hour); err != nil {
 			return nil, err
 		}
-		if ok, _ := path.Match(glob, model); !ok {
+		if hour.Valid {
+			h := int(hour.Int64)
+			r.hour = &h
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// matchPin picks the pin matching the model: the more specific glob, then
+// the lower firmware id. A pin below the model's minimum version is skipped
+// (spec S-26), so it is never rendered; nil when none is left.
+func matchPin(pins []pinRow, minimums []prov.FirmwareMinimum, v prov.Vendor, model string) *pinRow {
+	floor := prov.MinimumFor(minimums, v, model)
+	var best *pinRow
+	bestSpec := 0
+	for i := range pins {
+		p := &pins[i]
+		if ok, _ := path.Match(p.glob, model); !ok {
 			continue
 		}
-		spec := globSpecificity(glob)
-		if best == nil || spec > bestSpec || (spec == bestSpec && id < bestID) {
-			dir := strings.TrimSuffix(base, "/") + "/fw"
-			best, bestSpec, bestID = &prov.FirmwareInfo{URL: base + "fw/" + file, Dir: dir, Via: prov.UpgradeVia(dir), Version: version}, spec, id
+		if floor != "" && prov.CompareVersions(p.version, floor) < 0 {
+			continue
+		}
+		spec := globSpecificity(p.glob)
+		if best == nil || spec > bestSpec || (spec == bestSpec && p.id < best.id) {
+			best, bestSpec = p, spec
 		}
 	}
-	return best, rows.Err()
+	return best
+}
+
+// pinnedFirmware is the firmware to render for the model, nil when none is
+// pinned or the pin is below the model minimum.
+func (s *Store) pinnedFirmware(ctx context.Context, v prov.Vendor, model, base string) (*prov.FirmwareInfo, error) {
+	pins, err := s.loadPins(ctx, v)
+	if err != nil {
+		return nil, err
+	}
+	minimums, err := s.ListFirmwareMinimums(ctx)
+	if err != nil {
+		return nil, err
+	}
+	p := matchPin(pins, minimums, v, model)
+	if p == nil {
+		return nil, nil
+	}
+	dir := strings.TrimSuffix(base, "/") + "/fw"
+	fw := &prov.FirmwareInfo{URL: base + "fw/" + p.file, Dir: dir, Via: prov.UpgradeVia(dir), Version: p.version}
+	if p.hour != nil {
+		fw.Window = &prov.UpgradeWindow{Hour: *p.hour}
+	}
+	return fw, nil
+}
+
+// withFirmwareState fills each phone's pinned version, minimum and drift
+// flag (spec S-26).
+func (s *Store) withFirmwareState(ctx context.Context, phones []Phone) error {
+	if len(phones) == 0 {
+		return nil
+	}
+	minimums, err := s.ListFirmwareMinimums(ctx)
+	if err != nil {
+		return err
+	}
+	pins := map[prov.Vendor][]pinRow{}
+	for i := range phones {
+		p := &phones[i]
+		if _, ok := pins[p.Vendor]; !ok {
+			if pins[p.Vendor], err = s.loadPins(ctx, p.Vendor); err != nil {
+				return err
+			}
+		}
+		if m := matchPin(pins[p.Vendor], minimums, p.Vendor, p.Model); m != nil {
+			p.FirmwarePinned = m.version
+		}
+		p.FirmwareMinimum = prov.MinimumFor(minimums, p.Vendor, p.Model)
+		p.FirmwareDrift = prov.FirmwareDrift(p.FirmwareSeen, p.FirmwarePinned, p.FirmwareMinimum)
+	}
+	return nil
 }
 
 // FirmwareByName implements prov.Store.

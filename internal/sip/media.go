@@ -424,6 +424,24 @@ func (c *call) logCodec(why, leg, mode, app string, a media.AudioSDP) {
 	c.addTrace(text)
 }
 
+// legCodecNames is the codec each leg of the call last settled on, as
+// "name/clock rate" for the CDR ("PCMU/8000"); empty for a leg whose codec was
+// never logged (a call that was not answered, or the far leg of media Hello
+// ends itself). It reads what logCodec recorded, so the CDR and the
+// "call codec" log line never disagree.
+func (c *call) legCodecNames() (caller, callee string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	name := func(leg string) string {
+		key := c.codecSeen[leg] // "name/clock/pt"
+		if i := strings.LastIndexByte(key, '/'); i > 0 {
+			return key[:i]
+		}
+		return ""
+	}
+	return name(legCaller), name(legCallee)
+}
+
 // logDirectCodec logs the codec of an SDP answer that passes between the
 // two phones untouched (a direct call): both legs speak it.
 func (c *call) logDirectCodec(why string, answer []byte) {
@@ -906,6 +924,9 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 		return
 	}
 	dir := media.SDPDirection(body)
+	// A new media address after a roam (a handset on another AP or subnet)
+	// re-learns the leg's address before anything is relayed (S-9).
+	c.relearnMedia(fromCaller, req.Source(), off)
 	c.setHADirs(fromCaller, dir)
 	// An inactive hold stays inactive toward the holder, but the held peer
 	// is offered sendonly so it can hear the music (S-33).
@@ -931,6 +952,13 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	// The peer gets our SDP in the same direction (a held side hears
 	// silence because the held side stopped sending).
 	peer := c.withVideo(off.Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir), sideOf(!fromCaller))
+	if fromCaller {
+		c.noteSDP(sessCaller, ans)
+		c.noteSDP(sessCallee, peer)
+	} else {
+		c.noteSDP(sessCallee, ans)
+		c.noteSDP(sessCaller, peer)
+	}
 	c.mu.Lock()
 	w := c.winner
 	c.mu.Unlock()
@@ -1143,7 +1171,10 @@ func (c *call) byeCallerRaw() {
 		Params: sip.HeaderParams{{K: "tag", V: tagParam(inv.From())}}})
 	callID := sip.CallIDHeader(inv.CallID().Value())
 	req.AppendHeader(&callID)
-	req.AppendHeader(&sip.CSeqHeader{SeqNo: inv.CSeq().SeqNo + 1, MethodName: sip.BYE})
+	// One past anything sent on the dialog before (a session refresh).
+	seq := c.s.nextCSeq(callID.Value(), inv.CSeq().SeqNo)
+	c.s.noteSentCSeq(callID.Value(), seq)
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: seq, MethodName: sip.BYE})
 	req.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
 	req.AppendHeader(sip.HeaderClone(&c.s.contact))
 	req.SetTransport("UDP")

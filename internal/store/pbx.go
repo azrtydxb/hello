@@ -32,27 +32,58 @@ type VoicemailBox struct {
 	NameObject string `json:"nameObject"`
 	// GreetingTTS, UnreachableTTS and BusyTTS describe how a greeting was
 	// generated from text; nil for uploaded, recorded or picked audio.
-	GreetingTTS    *TTSMeta  `json:"greetingTts"`
-	UnreachableTTS *TTSMeta  `json:"unreachableTts"`
-	BusyTTS        *TTSMeta  `json:"busyTts"`
+	GreetingTTS    *TTSMeta `json:"greetingTts"`
+	UnreachableTTS *TTSMeta `json:"unreachableTts"`
+	BusyTTS        *TTSMeta `json:"busyTts"`
+	// PromptLanguage is the language the box speaks (migration 00047): "en",
+	// "nl", or "" to inherit the deployment language.
+	PromptLanguage string    `json:"promptLanguage"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
-const boxCols = `id, extension_id, password_hash <> '', email, greeting_object, unreachable_object, busy_object, name_object, greeting_tts, unreachable_tts, busy_tts, created_at, updated_at`
+const boxCols = `id, extension_id, password_hash <> '', email, greeting_object, unreachable_object, busy_object, name_object, greeting_tts, unreachable_tts, busy_tts, COALESCE(prompt_language, ''), created_at, updated_at`
 
 // GetVoicemailBox returns the box of extensionID.
 func (s *Store) GetVoicemailBox(ctx context.Context, extensionID int64) (VoicemailBox, error) {
-	b, err := scanBox(s.db.QueryRowContext(ctx,
+	b, err := scanBox(s.q(ctx).QueryRowContext(ctx,
 		`SELECT `+boxCols+` FROM voicemail_boxes WHERE extension_id = $1`, extensionID))
 	return b, mapErr(err)
+}
+
+// GetVoicemailBoxByID returns the box with id boxID.
+func (s *Store) GetVoicemailBoxByID(ctx context.Context, boxID int64) (VoicemailBox, error) {
+	b, err := scanBox(s.db.QueryRowContext(ctx,
+		`SELECT `+boxCols+` FROM voicemail_boxes WHERE id = $1`, boxID))
+	return b, mapErr(err)
+}
+
+// VoicemailPromptLanguages lists the languages boxes have set for
+// themselves, sorted, with no duplicates and no empty value. The static
+// prompts of each are pre-generated.
+func (s *Store) VoicemailPromptLanguages(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT prompt_language FROM voicemail_boxes WHERE prompt_language IS NOT NULL AND prompt_language <> '' ORDER BY 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []string{}
+	for rows.Next() {
+		var l string
+		if err := rows.Scan(&l); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 func scanBox(r interface{ Scan(...any) error }) (VoicemailBox, error) {
 	var b VoicemailBox
 	var gt, ut, bt []byte
 	err := r.Scan(&b.ID, &b.ExtensionID, &b.HasPassword, &b.Email, &b.GreetingObject, &b.UnreachableObject,
-		&b.BusyObject, &b.NameObject, &gt, &ut, &bt, &b.CreatedAt, &b.UpdatedAt)
+		&b.BusyObject, &b.NameObject, &gt, &ut, &bt, &b.PromptLanguage, &b.CreatedAt, &b.UpdatedAt)
 	b.GreetingTTS, b.UnreachableTTS, b.BusyTTS = parseTTSMeta(gt), parseTTSMeta(ut), parseTTSMeta(bt)
 	return b, err
 }
@@ -74,6 +105,8 @@ type VoicemailBoxChange struct {
 	GreetingTTS    *TTSMeta
 	UnreachableTTS *TTSMeta
 	BusyTTS        *TTSMeta
+	// PromptLanguage sets the box language; "" clears it to inherit.
+	PromptLanguage *string
 }
 
 // UpdateVoicemailBox changes the box of extensionID, creating the box if the
@@ -105,10 +138,12 @@ func (s *Store) UpdateVoicemailBox(ctx context.Context, actor string, extensionI
 				busy_object = COALESCE($8, busy_object),
 				name_object = COALESCE($9, name_object),
 				busy_tts = CASE WHEN $8::text IS NOT NULL THEN $10::jsonb ELSE busy_tts END,
+				prompt_language = CASE WHEN $11::boolean THEN NULLIF($12::text, '') ELSE prompt_language END,
 				updated_at = now()
 			WHERE extension_id = $1`,
 			extensionID, c.Email, hash, c.Greeting, c.Unreachable,
-			metaJSON(c.GreetingTTS), metaJSON(c.UnreachableTTS), c.Busy, c.Name, metaJSON(c.BusyTTS)); err != nil {
+			metaJSON(c.GreetingTTS), metaJSON(c.UnreachableTTS), c.Busy, c.Name, metaJSON(c.BusyTTS),
+			c.PromptLanguage != nil, strOrEmpty(c.PromptLanguage)); err != nil {
 			return "", err
 		}
 		var err error
@@ -152,7 +187,7 @@ func (s *Store) ListVoicemailMessages(ctx context.Context, boxID int64, unheardO
 	if unheardOnly {
 		where += ` AND NOT heard`
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+messageCols+` FROM voicemail_messages`+where+` ORDER BY id DESC`, boxID)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+messageCols+` FROM voicemail_messages`+where+` ORDER BY id DESC`, boxID)
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +205,7 @@ func (s *Store) ListVoicemailMessages(ctx context.Context, boxID int64, unheardO
 
 // GetVoicemailMessage returns one message.
 func (s *Store) GetVoicemailMessage(ctx context.Context, id int64) (VoicemailMessage, error) {
-	m, err := scanMessage(s.db.QueryRowContext(ctx,
+	m, err := scanMessage(s.q(ctx).QueryRowContext(ctx,
 		`SELECT `+messageCols+` FROM voicemail_messages WHERE id = $1`, id))
 	return m, mapErr(err)
 }
@@ -221,7 +256,7 @@ func notifyMailbox(ctx context.Context, tx *sql.Tx, box int64) error {
 
 // VoicemailCounts is a box's MWI summary: unheard and total messages.
 func (s *Store) VoicemailCounts(ctx context.Context, boxID int64) (unheard, total int64, err error) {
-	err = s.db.QueryRowContext(ctx,
+	err = s.q(ctx).QueryRowContext(ctx,
 		`SELECT count(*) FILTER (WHERE NOT heard), count(*) FROM voicemail_messages WHERE box_id = $1`, boxID).
 		Scan(&unheard, &total)
 	return unheard, total, err
@@ -236,14 +271,16 @@ type VoicemailBoxSummary struct {
 	Name        string `json:"name"`
 	Unheard     int64  `json:"unheard"`
 	Total       int64  `json:"total"`
+	// PromptLanguage is the box's own language; "" inherits.
+	PromptLanguage string `json:"promptLanguage"`
 }
 
 // ListVoicemailBoxes returns every box with its extension and message
 // counts, ordered by extension number.
 func (s *Store) ListVoicemailBoxes(ctx context.Context) ([]VoicemailBoxSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.q(ctx).QueryContext(ctx, `
 		SELECT b.id, b.extension_id, e.number, e.name,
-			count(m.id) FILTER (WHERE NOT m.heard), count(m.id)
+			count(m.id) FILTER (WHERE NOT m.heard), count(m.id), COALESCE(b.prompt_language, '')
 		FROM voicemail_boxes b
 		JOIN extensions e ON e.id = b.extension_id
 		LEFT JOIN voicemail_messages m ON m.box_id = b.id
@@ -256,7 +293,7 @@ func (s *Store) ListVoicemailBoxes(ctx context.Context) ([]VoicemailBoxSummary, 
 	out := []VoicemailBoxSummary{}
 	for rows.Next() {
 		var b VoicemailBoxSummary
-		if err := rows.Scan(&b.ID, &b.ExtensionID, &b.Number, &b.Name, &b.Unheard, &b.Total); err != nil {
+		if err := rows.Scan(&b.ID, &b.ExtensionID, &b.Number, &b.Name, &b.Unheard, &b.Total, &b.PromptLanguage); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
@@ -274,11 +311,11 @@ func (s *Store) ListVoicemailBoxes(ctx context.Context) ([]VoicemailBoxSummary, 
 // box lookup the *97 application and MWI make by dialled number.
 func (s *Store) VoicemailBoxByNumber(ctx context.Context, number string) (VoicemailBox, bool, error) {
 	var b VoicemailBox
-	err := s.db.QueryRowContext(ctx, `
-		SELECT b.id, b.email, b.greeting_object, b.unreachable_object, b.busy_object, b.name_object
+	err := s.q(ctx).QueryRowContext(ctx, `
+		SELECT b.id, b.email, b.greeting_object, b.unreachable_object, b.busy_object, b.name_object, COALESCE(b.prompt_language, '')
 		FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id
 		WHERE e.number = $1`, number).
-		Scan(&b.ID, &b.Email, &b.GreetingObject, &b.UnreachableObject, &b.BusyObject, &b.NameObject)
+		Scan(&b.ID, &b.Email, &b.GreetingObject, &b.UnreachableObject, &b.BusyObject, &b.NameObject, &b.PromptLanguage)
 	if errors.Is(err, sql.ErrNoRows) {
 		return VoicemailBox{}, false, nil
 	}
@@ -293,7 +330,7 @@ func (s *Store) VoicemailBoxByNumber(ctx context.Context, number string) (Voicem
 // which is constant-time in the password.
 func (s *Store) VerifyVoicemailPassword(ctx context.Context, boxID int64, password string) (bool, error) {
 	var hash string
-	err := s.db.QueryRowContext(ctx,
+	err := s.q(ctx).QueryRowContext(ctx,
 		`SELECT password_hash FROM voicemail_boxes WHERE id = $1`, boxID).Scan(&hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -311,7 +348,7 @@ func (s *Store) VerifyVoicemailPassword(ctx context.Context, boxID int64, passwo
 // callerName is the caller-ID display name, "" when the call carried none.
 func (s *Store) InsertVoicemailMessage(ctx context.Context, boxID int64, object, caller, callerName string, durationMs int64) (int64, error) {
 	var id int64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.q(ctx).QueryRowContext(ctx, `
 		INSERT INTO voicemail_messages (box_id, minio_object, caller, caller_name, duration_ms)
 		VALUES ($1, $2, $3, $4, $5) RETURNING id`,
 		boxID, object, caller, callerName, durationMs).Scan(&id)
@@ -339,7 +376,7 @@ func (s *Store) SetVoicemailGreeting(ctx context.Context, boxID int64, slot, obj
 		return "", errors.New("store: unknown greeting slot " + slot)
 	}
 	var prev string
-	if err := s.db.QueryRowContext(ctx,
+	if err := s.q(ctx).QueryRowContext(ctx,
 		`SELECT `+cols[0]+` FROM voicemail_boxes WHERE id = $1`, boxID).Scan(&prev); err != nil {
 		return "", mapErr(err)
 	}
@@ -347,7 +384,7 @@ func (s *Store) SetVoicemailGreeting(ctx context.Context, boxID int64, slot, obj
 	if cols[1] != "" {
 		set += `, ` + cols[1] + ` = NULL`
 	}
-	if _, err := s.db.ExecContext(ctx,
+	if _, err := s.q(ctx).ExecContext(ctx,
 		`UPDATE voicemail_boxes SET `+set+`, updated_at = now() WHERE id = $1`, boxID, object); err != nil {
 		return "", err
 	}
@@ -377,7 +414,7 @@ func (s *Store) SetVoicemailPIN(ctx context.Context, boxID int64, pin string) er
 	if err != nil {
 		return err
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.q(ctx).ExecContext(ctx,
 		`UPDATE voicemail_boxes SET password_hash = $2, updated_at = now() WHERE id = $1`, boxID, h)
 	if err != nil {
 		return err
@@ -390,7 +427,7 @@ func (s *Store) SetVoicemailPIN(ctx context.Context, boxID int64, pin string) er
 // is not found. Not audited, like the other call-plane paths.
 func (s *Store) RemoveVoicemailMessage(ctx context.Context, boxID, id int64) (string, error) {
 	var object string
-	err := s.db.QueryRowContext(ctx,
+	err := s.q(ctx).QueryRowContext(ctx,
 		`DELETE FROM voicemail_messages WHERE id = $1 AND box_id = $2 RETURNING minio_object`, id, boxID).Scan(&object)
 	return object, mapErr(err)
 }
@@ -398,7 +435,7 @@ func (s *Store) RemoveVoicemailMessage(ctx context.Context, boxID, id int64) (st
 // SetVoicemailMessageHeard sets a message's heard flag after the phone
 // played it (*97). The UI path is UpdateVoicemailMessageHeard, which audits.
 func (s *Store) SetVoicemailMessageHeard(ctx context.Context, id int64, heard bool) error {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.q(ctx).ExecContext(ctx,
 		`UPDATE voicemail_messages SET heard = $2 WHERE id = $1`, id, heard)
 	if err != nil {
 		return err
@@ -588,12 +625,12 @@ type RingGroupInput struct {
 
 // ListRingGroups returns every group with its members.
 func (s *Store) ListRingGroups(ctx context.Context) ([]RingGroup, error) {
-	return listRingGroups(ctx, s.db, "")
+	return listRingGroups(ctx, s.q(ctx), "")
 }
 
 // GetRingGroup returns one group with its members.
 func (s *Store) GetRingGroup(ctx context.Context, id int64) (RingGroup, error) {
-	gs, err := listRingGroups(ctx, s.db, ` WHERE g.id = $1`, id)
+	gs, err := listRingGroups(ctx, s.q(ctx), ` WHERE g.id = $1`, id)
 	if err != nil {
 		return RingGroup{}, err
 	}
@@ -818,7 +855,7 @@ type FeatureCode struct {
 
 // ListFeatureCodes returns every code ordered by code.
 func (s *Store) ListFeatureCodes(ctx context.Context) ([]FeatureCode, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT code, action, argument FROM feature_codes ORDER BY code`)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT code, action, argument FROM feature_codes ORDER BY code`)
 	if err != nil {
 		return nil, err
 	}
@@ -901,6 +938,7 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*46", Action: ActionQueueLogout},
 		{Code: "*47", Action: ActionQueuePause, Argument: "break"},
 		{Code: "*48", Action: ActionQueueUnpause},
+		{Code: "*42", Action: ActionDirectory},
 	}
 }
 
@@ -908,7 +946,7 @@ func DefaultFeatureCodes() []FeatureCode {
 // codes an administrator changed or removed. It runs at hello-control start.
 func (s *Store) EnsureFeatureCodes(ctx context.Context, defaults []FeatureCode) error {
 	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM feature_codes`).Scan(&n); err != nil {
+	if err := s.q(ctx).QueryRowContext(ctx, `SELECT count(*) FROM feature_codes`).Scan(&n); err != nil {
 		return err
 	}
 	if n > 0 {
@@ -926,3 +964,11 @@ const (
 	ArgSet   = "set"
 	ArgClear = "clear"
 )
+
+// strOrEmpty reads an optional string, "" for nil.
+func strOrEmpty(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}

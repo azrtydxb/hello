@@ -24,6 +24,8 @@ import (
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/migrate"
+	"github.com/azrtydxb/hello/internal/oauth"
+	"github.com/azrtydxb/hello/internal/originate"
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/prov/redirect"
 	"github.com/azrtydxb/hello/internal/safehttp"
@@ -32,6 +34,7 @@ import (
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/version"
 	"github.com/azrtydxb/hello/internal/vkconn"
+	"github.com/azrtydxb/hello/internal/webhook"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/valkey-io/valkey-go"
 )
@@ -44,7 +47,7 @@ const (
 	pruneEvery = time.Hour
 )
 
-const usage = "usage: hello-control serve | migrate up | migrate status | user add [--role viewer|operator|admin] <username> < password | user 2fa-reset <username>"
+const usage = "usage: hello-control serve | migrate up | migrate status | user add [--role viewer|operator|admin] <username> < password | user 2fa-reset <username> | backup restore --from <object-key>"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -87,6 +90,8 @@ func run(args []string) error {
 			fmt.Printf("%05d %-8s %s\n", s.Source.Version, s.State, s.Source.Path)
 		}
 		return nil
+	case len(args) >= 2 && args[0] == "backup" && args[1] == "restore":
+		return backupRestore(ctx, cfg, db, log, args[2:], os.Getenv, os.Stdin, os.Stdout)
 	case len(args) >= 2 && args[0] == "user" && args[1] == "add":
 		return userAdd(ctx, store.New(db), args[2:], os.Stdin, os.Stdout)
 	case len(args) == 3 && args[0] == "user" && args[1] == "2fa-reset":
@@ -133,11 +138,25 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	go ensureBuckets(ctx, objs, log)
 	metrics := telemetry.NewMetrics("hello-control", version.Version, version.Commit)
 	provMetrics := prov.NewMetrics(metrics.Registry)
+	if err := startLDAP(ctx, cfg, st, vk, log); err != nil {
+		log.Error("ldap directory", "error", err)
+		os.Exit(1)
+	}
 	if err := startProv(ctx, cfg, st, objs, vk, deployment, provMetrics, log); err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("HELLO_PROV_ADDR: %w", err)
 	}
 	go runMailer(ctx, envSMTP(cfg), st, objs, log)
+
+	// Scheduled and manual backups, and restore (spec pbx-gaps S-2 to S-4).
+	// Every replica runs the scheduler; the run itself is taken under an
+	// advisory lock, so one replica does it.
+	backups, err := newBackupService(cfg, st, db, vk, metrics.Registry, log)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("backup: %w", err)
+	}
+	go backups.Serve(ctx)
 
 	// External AI access (spec ai-external-access): the OAuth
 	// authorization server and /mcp, only with HELLO_PUBLIC_URL.
@@ -145,6 +164,14 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	if err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("HELLO_PUBLIC_URL: %w", err)
+	}
+	// Hello's own OAuth apps (spec integrations I-32): the dialer.
+	if as != nil {
+		for _, c := range oauth.PreregisteredClients(cfg.AI.PublicURL) {
+			if err := st.UpsertPreregisteredClient(ctx, c); err != nil {
+				log.Warn("could not register a first-party OAuth client", "client", c.ID, "error", err)
+			}
+		}
 	}
 	// The in-product AI agent (spec ai-agent): off, starting nothing,
 	// unless HELLO_AI_BASE_URL and HELLO_AI_MODEL are set.
@@ -168,23 +195,51 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		RetentionDays: cfg.EventRetentionDays, Log: log.With("component", "events"),
 		Metrics: events.NewServiceMetrics(metrics.Registry),
 	}
+	// Outbound webhooks (spec integrations I-42): a delivery is queued in
+	// the ingest transaction of every event that matches an endpoint, and
+	// the dispatcher on each replica sends the due ones.
+	hooks := &webhook.Service{
+		Store: &webhook.PG{DB: db}, Box: box, AllowedCIDRs: cfg.IntegrationsAllowedCIDRs,
+		Log: log.With("component", "webhooks"),
+	}
+	evSvc.Hooks = append(evSvc.Hooks, hooks.Hook())
+	dispatcher := &webhook.Dispatcher{
+		Svc: hooks, Locker: st, Metrics: webhook.NewMetrics(metrics.Registry), Log: log.With("component", "webhooks"),
+		RetentionDays: cfg.EventRetentionDays,
+		Notify: webhook.MailNotifier(st.AdminEmails, func(ctx context.Context) (mailer.Settings, bool, error) {
+			s, source, err := api.EffectiveSMTP(ctx, st, envSMTP(cfg))
+			if err != nil || source == api.SMTPNone || s.Validate() != nil {
+				return mailer.Settings{}, false, err
+			}
+			return s, true, nil
+		}, nil, log.With("component", "webhooks")),
+	}
+	go dispatcher.Run(ctx)
 	go evSvc.Run(ctx)
+	// Click-to-call (spec I-37): close the requests a dead SIP node left
+	// open and copy the states the nodes post into their rows.
+	sweeper := &originate.Sweeper{Store: st, Live: vk, Lock: st, Log: log.With("component", "originate")}
+	go sweeper.Run(ctx)
 	apiCfg := api.Config{
-		Events:    evSvc,
-		AIAgent:   agent,
-		Store:     st,
-		Live:      vk,
-		Queues:    vk,
-		Trunks:    vk,
-		Cluster:   vk,
-		Valkey:    vk,
-		PageTests: vk,
-		Parked:    vk,
+		Events:          evSvc,
+		Webhooks:        hooks,
+		AIAgent:         agent,
+		Store:           st,
+		Live:            vk,
+		Queues:          vk,
+		Callbacks:       st.QueueCallbacks(),
+		Trunks:          vk,
+		Cluster:         vk,
+		Valkey:          vk,
+		PageTests:       vk,
+		Parked:          vk,
 		CameraHTTP: &http.Client{
 			Transport:     safehttp.NewTransport(safehttp.Options{Allow: cfg.DoorCameraAllow}),
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 		Objects:         objs,
+		Backups:         backups,
+		Maintenance:     backups.Maintenance,
 		Diagnostics:     vk,
 		AuthFailLimit:   cfg.AuthFailLimit,
 		EmailDelivery:   cfg.SmtpHost != "",
@@ -195,6 +250,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Conferences:     st,
 		TwoFactor:       st,
 		TwoFALogins:     api.NewTwoFactorMetrics(metrics.Registry),
+		Batches:         st,
+		BatchMetrics:    api.NewBatchMetrics(metrics.Registry),
 		ConferenceLive:  vk,
 		Messages:        st,
 		Dialing:         cfg.Dial,
@@ -204,6 +261,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		SessionTTL:      cfg.SessionTTL,
 		Log:             log,
 	}
+	apiCfg.Originate, apiCfg.OriginateLive = st, vk
+	apiCfg.OriginateMetrics = api.NewOriginateMetrics(metrics.Registry)
 	// Proposals (spec ai-agent) exist only while the agent is on; reads in
 	// their validation replay through the API handler built just below.
 	var (

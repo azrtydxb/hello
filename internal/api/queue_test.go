@@ -15,7 +15,7 @@ func TestValidateQueue(t *testing.T) {
 		hang := store.IVRDestination{Kind: "hangup"}
 		return store.QueueInput{
 			Name: "sales", Number: "600", Enabled: true, Strategy: "ring_all", AgentTimeout: 20, RetryDelay: 5, MaxWait: 600,
-			Timeout: hang, Full: hang, NoAgents: hang,
+			Timeout: hang, Full: hang, NoAgents: hang, CallbackDigit: "2", CallbackOfferAfter: 120,
 			Members: []store.QueueMember{{ExtensionID: 1, Penalty: 0, Position: 1}, {ExtensionID: 2, Dynamic: true, Penalty: 5, Position: 2}},
 		}
 	}
@@ -40,6 +40,14 @@ func TestValidateQueue(t *testing.T) {
 		},
 		"announce needs frequency": func(in *store.QueueInput) { in.AnnounceWait = true },
 		"bad moh class":            func(in *store.QueueInput) { in.MOHClassID = ptr(int64(-1)) },
+		"callback digit":           func(in *store.QueueInput) { in.CallbackDigit = "x" },
+		"callback digit empty":     func(in *store.QueueInput) { in.CallbackDigit = "" },
+		"callback offer too long":  func(in *store.QueueInput) { in.CallbackOfferAfter = 3601 },
+		"callback offer negative":  func(in *store.QueueInput) { in.CallbackOfferAfter = -1 },
+		"callback on breakout key": func(in *store.QueueInput) {
+			in.CallbackEnabled, in.BreakoutKey, in.BreakoutVoicemail, in.CallbackDigit = true, "2", "101", "2"
+		},
+		"unknown language": func(in *store.QueueInput) { in.PromptLanguage = "xx" },
 	}
 	for name, mut := range cases {
 		in := good()
@@ -209,5 +217,71 @@ func TestQueueAgentsAndStatus(t *testing.T) {
 	}
 	if st, _, _ := qs.Agent(ctx, "101"); st.LoggedIn {
 		t.Fatalf("state after logout = %+v", st)
+	}
+}
+
+// TestQueueCallbackAPI: the callback settings and the prompt language are
+// stored with defaults (off, 120 s, key 2, inherit), a bad key or language is
+// refused, and the operator reads a queue's callback requests and cancels an
+// open one. It fails if a default changes, a setting is dropped, a finished
+// or unknown request can be cancelled, or the list is not the queue's own.
+func TestQueueCallbackAPI(t *testing.T) {
+	cbs := queue.NewMemCallbacks()
+	e := newEnvConfig(t, Config{Objects: newMemObjects(), Queues: queue.NewMemStore(), Callbacks: cbs}, nil)
+	c := e.login()
+	q := c.must(http.StatusCreated, "POST", "/api/v1/queues", map[string]any{"name": "sales", "number": "600"}).json(t)
+	if q["callbackEnabled"] != false || q["callbackOfferAfterSeconds"] != float64(120) || q["callbackDigit"] != "2" || q["promptLanguage"] != "" {
+		t.Fatalf("defaults = %v", q)
+	}
+	id := fmt.Sprint(q["id"])
+	put := map[string]any{"name": "sales", "number": "600", "callbackEnabled": true, "callbackOfferAfterSeconds": 30,
+		"callbackDigit": "5", "promptLanguage": "nl"}
+	got := c.must(http.StatusOK, "PUT", "/api/v1/queues/"+id, put).json(t)
+	if got["callbackEnabled"] != true || got["callbackOfferAfterSeconds"] != float64(30) || got["callbackDigit"] != "5" || got["promptLanguage"] != "nl" {
+		t.Fatalf("replaced = %v", got)
+	}
+	for name, bad := range map[string]map[string]any{
+		"digit":    {"callbackDigit": "55"},
+		"offer":    {"callbackOfferAfterSeconds": 9999},
+		"language": {"promptLanguage": "xx"},
+	} {
+		body := map[string]any{"name": "sales", "number": "600"}
+		for k, v := range bad {
+			body[k] = v
+		}
+		if r := c.do("PUT", "/api/v1/queues/"+id, body); r.code != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400", name, r.code)
+		}
+	}
+
+	qid := int64(q["id"].(float64))
+	open, _, _ := cbs.Request(context.Background(), qid, "0471234567", "Ann", 1000)
+	done, _, _ := cbs.Request(context.Background(), qid, "100", "", 2000)
+	_, _, _ = cbs.Request(context.Background(), qid+1, "0499", "", 1) // another queue's
+	list := c.must(http.StatusOK, "GET", "/api/v1/queues/"+id+"/callbacks", nil).json(t)
+	items := list["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("callbacks = %v, want the queue's two", items)
+	}
+	first := items[0].(map[string]any)
+	if first["number"] != "100" || first["status"] != "waiting" || first["positionKey"] != float64(2000) {
+		t.Fatalf("newest callback = %v", first)
+	}
+	c.must(http.StatusNotFound, "GET", "/api/v1/queues/987654/callbacks", nil)
+
+	path := fmt.Sprintf("/api/v1/queues/%s/callbacks/%d", id, open.ID)
+	c.must(http.StatusNoContent, "DELETE", path, nil)
+	c.must(http.StatusNotFound, "DELETE", path, nil) // already cancelled
+	c.must(http.StatusNotFound, "DELETE", fmt.Sprintf("/api/v1/queues/%s/callbacks/%d", id, done.ID+100), nil)
+	c.must(http.StatusNotFound, "DELETE", fmt.Sprintf("/api/v1/queues/%s/callbacks/x", id), nil)
+	c.must(http.StatusNotFound, "DELETE", fmt.Sprintf("/api/v1/queues/987654/callbacks/%d", done.ID), nil)
+	rows, _ := cbs.List(context.Background(), qid)
+	for _, r := range rows {
+		if r.ID == open.ID && r.Status != queue.CallbackCancelled {
+			t.Fatalf("cancelled request is %s", r.Status)
+		}
+		if r.ID == done.ID && r.Status != queue.CallbackWaiting {
+			t.Fatalf("the other request changed to %s", r.Status)
+		}
 	}
 }

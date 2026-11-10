@@ -83,6 +83,11 @@ type Relay struct {
 	onPacket func(leg string, pkt *RTPPacket)
 
 	started bool
+	// lastRx is when a datagram from a leg's accepted peer last arrived
+	// (unix nanoseconds, 0 before any); startedAt is when Start ran. They
+	// let a call detect dead media (LastRTP).
+	lastRx    atomic.Int64
+	startedAt atomic.Int64
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
@@ -208,11 +213,12 @@ func (r *Relay) AddLeg(name string) (int, error) {
 		if r.used[p] {
 			continue
 		}
-		c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: p})
+		c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: p})
 		if err != nil {
 			lastErr = err
 			continue
 		}
+		markRTP(c)
 		conn, port = c, p
 		break
 	}
@@ -471,6 +477,7 @@ func (r *Relay) Start() {
 		return
 	}
 	r.started = true
+	r.startedAt.Store(time.Now().UnixNano())
 	r.wg.Add(len(r.legs))
 	for _, l := range r.legs {
 		go r.runLeg(l)
@@ -526,6 +533,7 @@ func (r *Relay) recv(l *relayLeg) {
 			l.rejected.Add(1)
 			continue // not the leg's peer: never counted, tapped or relayed
 		}
+		r.lastRx.Store(time.Now().UnixNano())
 		r.latch(l, from)
 		pkt, ok := ParseRTP(buf[:n])
 		if !ok {
@@ -538,7 +546,7 @@ func (r *Relay) recv(l *relayLeg) {
 		if dtmfPT != 0 && pkt.PayloadType == dtmfPT {
 			if ev, ok := ParseTelephoneEvent(pkt.Payload); ok {
 				ev.Sequence = pkt.Sequence
-				if code, deliver := l.filter.Observe(ev, pkt.Marker); deliver && r.onDTMF != nil {
+				if code, deliver := l.filter.Observe(ev, pkt.Marker); deliver {
 					r.mu.Lock()
 					h := r.onDTMF
 					r.mu.Unlock()
@@ -548,13 +556,13 @@ func (r *Relay) recv(l *relayLeg) {
 				}
 			}
 		}
-		if r.onPacket != nil {
-			r.mu.Lock()
-			h := r.onPacket
-			r.mu.Unlock()
-			if h != nil {
-				h(l.name, pkt)
-			}
+		// The hooks are read under the lock: a caller may set them after Start
+		// (a resumed call's relay), and an unlocked read races with that.
+		r.mu.Lock()
+		tap := r.onPacket
+		r.mu.Unlock()
+		if tap != nil {
+			tap(l.name, pkt)
 		}
 		if l.muted.Load() {
 			continue
@@ -845,6 +853,19 @@ func (r *Relay) Metrics() RelayStats {
 		out.Directions[l.name+">"+peer.name] = st
 	}
 	return out
+}
+
+// LastRTP is when a datagram from either leg's peer last arrived; before
+// any arrived it is when the relay started (the zero time before Start). A
+// call whose LastRTP is long past carries no media in either direction.
+func (r *Relay) LastRTP() time.Time {
+	if ns := r.lastRx.Load(); ns != 0 {
+		return time.Unix(0, ns)
+	}
+	if ns := r.startedAt.Load(); ns != 0 {
+		return time.Unix(0, ns)
+	}
+	return time.Time{}
 }
 
 // Observe registers the stats callback, invoked each statsInterval and at

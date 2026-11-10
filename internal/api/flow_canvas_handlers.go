@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -67,7 +68,11 @@ func (b flowCanvasBody) validate() fieldErrs {
 // liveFlowNodes is the id of every node the configuration draws now, devices
 // and phones included: the layout of anything else is stale.
 func (s *server) liveFlowNodes(r *http.Request) (map[string]bool, error) {
-	in, err := s.flowInput(r, true)
+	return s.liveFlowNodesCtx(r.Context())
+}
+
+func (s *server) liveFlowNodesCtx(ctx context.Context) (map[string]bool, error) {
+	in, err := s.flowInput(ctx, true)
 	if err != nil {
 		return nil, err
 	}

@@ -538,6 +538,64 @@ describe("Routes", () => {
     },
   );
 
+  it("offers conference as an inbound destination chosen by room number", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: TRUNKS }),
+      "GET /api/v1/routes/outbound": () => json({ items: [] }),
+      "GET /api/v1/routes/inbound": () => json({ items: [] }),
+      "GET /api/v1/conferences": () =>
+        json({ items: [{ id: 1, name: "All hands", number: "8001" }] }),
+      "POST /api/v1/routes/inbound": () =>
+        json(
+          {
+            ...inbound(9, 1, "Meet"),
+            destinationKind: "conference",
+            destination: "8001",
+          },
+          201,
+        ),
+    });
+    renderApp("/routes?tab=inbound");
+    fireEvent.click(
+      (await screen.findAllByRole("button", { name: "New route" }))[0]!,
+    );
+    await screen.findByRole("option", { name: "carrier-backup" });
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Meet" },
+    });
+    fireEvent.change(screen.getByLabelText("DID"), {
+      target: { value: "97142000101" },
+    });
+    fireEvent.change(screen.getByLabelText("Send to"), {
+      target: { value: "conference" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create route" }));
+    expect(await screen.findByText("Choose a conference room.")).toBeVisible();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+
+    await waitFor(() =>
+      expect(
+        within(screen.getByLabelText("Conference room")).getAllByRole("option")
+          .length,
+      ).toBeGreaterThan(1),
+    );
+    fireEvent.change(screen.getByLabelText("Conference room"), {
+      target: { value: "8001" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create route" }));
+    expect(await screen.findByText("Route Meet created.")).toBeVisible();
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
+      destinationKind: "conference",
+      destination: "8001",
+    });
+    expect(
+      within(
+        screen.getByRole("rowheader", { name: "Meet" }).closest("tr")!,
+      ).getByText("Conference room"),
+    ).toBeVisible();
+  });
+
   it("clears the target when the destination kind changes", async () => {
     mockApi({
       ...ME,

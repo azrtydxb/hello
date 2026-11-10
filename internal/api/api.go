@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -20,7 +21,9 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/mailer"
+	"github.com/azrtydxb/hello/internal/originate"
 	"github.com/azrtydxb/hello/internal/phonebook"
+	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
@@ -82,6 +85,9 @@ type Store interface {
 	DoorCameraForView(ctx context.Context, id int64) (store.DoorCameraAccess, bool, error)
 
 	GetVoicemailBox(ctx context.Context, extensionID int64) (store.VoicemailBox, error)
+	GetVoicemailBoxByID(ctx context.Context, boxID int64) (store.VoicemailBox, error)
+	VoicemailPromptLanguages(ctx context.Context) ([]string, error)
+	QueuePromptLanguages(ctx context.Context) ([]string, error)
 	ListVoicemailBoxes(ctx context.Context) ([]store.VoicemailBoxSummary, error)
 	UpdateVoicemailBox(ctx context.Context, actor string, extensionID int64, c store.VoicemailBoxChange, check store.Check) (store.VoicemailBox, error)
 	ListVoicemailMessages(ctx context.Context, boxID int64, unheardOnly bool) ([]store.VoicemailMessage, error)
@@ -124,6 +130,12 @@ type Store interface {
 	DeleteRingTag(ctx context.Context, actor, name string) error
 	ListRingRules(ctx context.Context) ([]store.RingRule, error)
 	ReplaceRingRules(ctx context.Context, actor string, in []store.RingRuleInput) ([]store.RingRule, error)
+	GetRingMap(ctx context.Context) (store.RingMap, error)
+	ReplaceRingMap(ctx context.Context, actor string, groupID *int64, in []store.RingMapEntry) (store.RingMap, error)
+	ListRingtones(ctx context.Context) ([]store.RingtoneFile, error)
+	RingtoneExists(ctx context.Context, name string) (bool, error)
+	CreateRingtone(ctx context.Context, actor, name string, info prov.ToneInfo, size int64, sha256 string) (store.RingtoneFile, error)
+	DeleteRingtone(ctx context.Context, actor string, id int64) (string, error)
 	ListTimeConditions(ctx context.Context) ([]store.TimeCondition, error)
 	GetTimeCondition(ctx context.Context, id int64) (store.TimeCondition, error)
 	CreateTimeCondition(ctx context.Context, actor string, in store.TimeConditionInput, check store.Check) (store.TimeCondition, error)
@@ -251,6 +263,9 @@ type Config struct {
 	// Queues is the call queues shared state (waiting callers, agent login
 	// and pause) in Valkey; nil answers 503 on the live queue routes.
 	Queues QueueLive
+	// Callbacks is the queue callback requests (PostgreSQL); nil answers 503
+	// on the callback routes.
+	Callbacks queue.CallbackStore
 	// SIPDomain is the realm device HA1 values are computed for.
 	SIPDomain  string
 	SessionTTL time.Duration
@@ -279,6 +294,18 @@ type Config struct {
 	// Events is the call-event pipeline (stream, history, tickets); nil
 	// answers 503 on the event routes.
 	Events EventService
+	// Webhooks is the outbound webhook service (endpoints, deliveries,
+	// dead letters); nil answers 503 on the webhook routes.
+	Webhooks WebhookService
+	// Originate and OriginateLive carry click-to-call (spec integrations
+	// I-37): its requests and policy in PostgreSQL, its queue, live state
+	// and limit counters in Valkey; nil answers 503. OriginateLimits
+	// overrides the default abuse limits (tests); OriginateMetrics counts
+	// the requests the limits refused.
+	Originate        OriginateStore
+	OriginateLive    OriginateLive
+	OriginateLimits  *originate.Limits
+	OriginateMetrics *OriginateMetrics
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
 	// CameraHTTP fetches door station camera pictures; it should be built on
@@ -299,6 +326,11 @@ type Config struct {
 	// DefaultTimeZone is the zone a new schedule gets when the request names
 	// none: the phones time zone setting (HELLO_PROV_TIMEZONE).
 	DefaultTimeZone string
+	// Backups runs, deletes and restores backups; nil answers 503 on the
+	// backup routes. Maintenance, when set and active, makes every API write
+	// answer 503 (a restore is running).
+	Backups     BackupRunner
+	Maintenance MaintenanceGate
 	// SMTPEnv is the deployment's SMTP_* settings, used while no settings
 	// are saved in the console; SMTPDeliver replaces the SMTP send in tests.
 	SMTPEnv     mailer.Settings
@@ -327,6 +359,10 @@ type Config struct {
 	// Proposals serves the AI proposal routes (spec ai-agent); nil answers
 	// 503 ai_disabled.
 	Proposals ProposalService
+	// Batches serves the configuration batch routes (spec flow-canvas S-13,
+	// S-14); nil answers 503. BatchMetrics counts them; nil counts nothing.
+	Batches      BatchService
+	BatchMetrics *BatchMetrics
 	// TTS generates prompt audio through OpenRouter; nil means the real
 	// client. Generation only happens on an operator's explicit request.
 	TTS Synthesizer
@@ -347,6 +383,14 @@ type Config struct {
 	// are set by Handler.
 	speech    *ttscache.Cache
 	prewarmMu *sync.Mutex
+	// prewarmKick asks the background worker to pre-generate the prompts of a
+	// language a queue just set. Batchable handlers kick it rather than call
+	// the pre-generation, which uses the speech cache and must not run inside a
+	// batch. Set by Handler.
+	prewarmKick chan struct{}
+	// self is the finished handler (middleware and test wrapper included),
+	// set by Handler: a batch replays its operations through it.
+	self *atomic.Pointer[http.Handler]
 }
 
 type server struct{ Config }
@@ -364,7 +408,10 @@ func Handler(c Config) http.Handler {
 		c.TTS = &tts.Client{}
 	}
 	c.speech, c.prewarmMu = newSpeechCache(c), &sync.Mutex{}
+	c.prewarmKick = make(chan struct{}, 1)
+	c.self = new(atomic.Pointer[http.Handler])
 	s := &server{c}
+	go s.runPrewarmKicks()
 	opts := auth.Options{Cookies: true}
 	if c.AI != nil {
 		opts.Resource, _ = c.AI.Resources()
@@ -388,7 +435,11 @@ func Handler(c Config) http.Handler {
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.
-	return wrapForTest(http.NewCrossOriginProtection().Handler(mux))
+	// The maintenance gate sits outside the conformance wrapper: its 503 is
+	// not an operation's own answer, it applies to every write (see info).
+	h := maintenance(c.Maintenance, wrapForTest(http.NewCrossOriginProtection().Handler(mux)))
+	c.self.Store(&h)
+	return h
 }
 
 // passwordGate refuses every route but the few a user needs to choose their
