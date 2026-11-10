@@ -135,3 +135,17 @@ capabilities:
   drop:
     - ALL
 {{- end -}}
+
+{{/* Where phones reach Kamailio: the VIP with kamailio.vip.enabled, else kamailio.publicHost. */}}
+{{- define "hello.kamailioPublicHost" -}}
+{{- $k := .Values.kamailio -}}
+{{- if $k.vip.enabled -}}
+{{- $addr := required "kamailio.vip.address is required with kamailio.vip.enabled: the virtual IP phones use" $k.vip.address -}}
+{{- if and $k.publicHost (ne $k.publicHost $addr) -}}
+{{- fail (printf "kamailio.publicHost %q differs from kamailio.vip.address %q: with a VIP, phones are told to use the VIP; leave publicHost empty" $k.publicHost $addr) -}}
+{{- end -}}
+{{- $addr -}}
+{{- else -}}
+{{- required "kamailio.publicHost is required: the address phones reach Kamailio at" $k.publicHost -}}
+{{- end -}}
+{{- end -}}

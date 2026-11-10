@@ -147,6 +147,17 @@ func TestGreetingFallsBackToNothing(t *testing.T) {
 
 // guidedPBX wires a PBX where extension 100 (device a1) owns box 3, PIN 1234
 // and two messages from 200, 300.
+// sameDayAgo is a time d before now that is still today in UTC, the zone the
+// headers are worded in: between midnight UTC and d after it the header would
+// say "yesterday", and the test expects "today at".
+func sameDayAgo(d time.Duration) time.Time {
+	now := time.Now().UTC()
+	if t := now.Add(-d); t.YearDay() == now.YearDay() && t.Year() == now.Year() {
+		return t
+	}
+	return now
+}
+
 func guidedPBX(t *testing.T, sp Speaker) (*testPBX, *fakeVMStore, *fakeObjects) {
 	t.Helper()
 	vm := newVMStore()
@@ -155,8 +166,8 @@ func guidedPBX(t *testing.T, sp Speaker) (*testPBX, *fakeVMStore, *fakeObjects) 
 	vm.nextID = 0
 	objs := &fakeObjects{objs: map[string][]byte{"box/3/1.wav": tone(1600), "box/3/2.wav": tone(1600)}}
 	vm.msgs = []VoicemailMessage{
-		{ID: 2, BoxID: 3, MinioObject: "box/3/2.wav", Caller: "300", CreatedAt: time.Now().Add(-time.Hour)},
-		{ID: 1, BoxID: 3, MinioObject: "box/3/1.wav", Caller: "200", CreatedAt: time.Now().Add(-2 * time.Hour)},
+		{ID: 2, BoxID: 3, MinioObject: "box/3/2.wav", Caller: "300", CreatedAt: sameDayAgo(time.Hour)},
+		{ID: 1, BoxID: 3, MinioObject: "box/3/1.wav", Caller: "200", CreatedAt: sameDayAgo(2 * time.Hour)},
 	}
 	feats := func(s *snapshot.Snapshot) {
 		featureSnapshot(s)

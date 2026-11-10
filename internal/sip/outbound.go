@@ -255,6 +255,9 @@ type heldSlot struct {
 // emergency call ignores the limit and is never blocked by the trunk state
 // being unreachable.
 func (c *call) acquireSlot(t *routing.Trunk, emergency bool, member string) (bool, string) {
+	if c.doorBlocksTrunk(emergency) {
+		return false, "a door station may not use a trunk"
+	}
 	st := c.s.deps.Trunks
 	if st == nil {
 		if emergency {

@@ -146,14 +146,24 @@ func (s *Store) DeleteProvTemplate(ctx context.Context, actor string, id int64) 
 type FirmwareFile struct {
 	prov.Firmware
 	Pinned bool
+	// UpgradeHour is the pin's daily upgrade hour, nil for none or no pin.
+	UpgradeHour *int
 }
 
 const firmwareCols = `f.id, f.vendor, f.model_glob, f.version, f.filename, f.object_key, f.size, f.sha256, f.uploaded_at,
-	EXISTS (SELECT 1 FROM prov_firmware_pins pn WHERE pn.firmware_id = f.id)`
+	EXISTS (SELECT 1 FROM prov_firmware_pins pn WHERE pn.firmware_id = f.id),
+	(SELECT pn.upgrade_hour FROM prov_firmware_pins pn WHERE pn.firmware_id = f.id ORDER BY pn.vendor, pn.model_glob LIMIT 1)`
 
 func scanFirmware(r interface{ Scan(...any) error }) (FirmwareFile, error) {
-	var f FirmwareFile
-	err := r.Scan(&f.ID, &f.Vendor, &f.ModelGlob, &f.Version, &f.Filename, &f.ObjectKey, &f.Size, &f.SHA256, &f.UploadedAt, &f.Pinned)
+	var (
+		f    FirmwareFile
+		hour sql.NullInt64
+	)
+	err := r.Scan(&f.ID, &f.Vendor, &f.ModelGlob, &f.Version, &f.Filename, &f.ObjectKey, &f.Size, &f.SHA256, &f.UploadedAt, &f.Pinned, &hour)
+	if hour.Valid {
+		h := int(hour.Int64)
+		f.UpgradeHour = &h
+	}
 	return f, err
 }
 
@@ -219,11 +229,13 @@ func (s *Store) DeleteFirmware(ctx context.Context, actor string, id int64) (str
 	return key, err
 }
 
-// FirmwarePin pins one firmware file for a vendor's models.
+// FirmwarePin pins one firmware file for a vendor's models. UpgradeHour is
+// the daily hour (0 to 23) Grandstream WPs fetch it in, nil for any time.
 type FirmwarePin struct {
-	Vendor     prov.Vendor `json:"vendor"`
-	ModelGlob  string      `json:"modelGlob"`
-	FirmwareID int64       `json:"firmwareId"`
+	Vendor      prov.Vendor `json:"vendor"`
+	ModelGlob   string      `json:"modelGlob"`
+	FirmwareID  int64       `json:"firmwareId"`
+	UpgradeHour *int        `json:"upgradeHour"`
 }
 
 // ListFirmwarePins returns every pin.
@@ -232,33 +244,94 @@ func (s *Store) ListFirmwarePins(ctx context.Context) ([]FirmwarePin, error) {
 }
 
 func listPins(ctx context.Context, q querier) ([]FirmwarePin, error) {
-	rows, err := q.QueryContext(ctx, `SELECT vendor, model_glob, firmware_id FROM prov_firmware_pins ORDER BY vendor, model_glob`)
+	rows, err := q.QueryContext(ctx, `SELECT vendor, model_glob, firmware_id, upgrade_hour FROM prov_firmware_pins ORDER BY vendor, model_glob`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	out := []FirmwarePin{}
 	for rows.Next() {
-		var p FirmwarePin
-		if err := rows.Scan(&p.Vendor, &p.ModelGlob, &p.FirmwareID); err != nil {
+		var (
+			p    FirmwarePin
+			hour sql.NullInt64
+		)
+		if err := rows.Scan(&p.Vendor, &p.ModelGlob, &p.FirmwareID, &hour); err != nil {
 			return nil, err
+		}
+		if hour.Valid {
+			h := int(hour.Int64)
+			p.UpgradeHour = &h
 		}
 		out = append(out, p)
 	}
 	return out, rows.Err()
 }
 
+// ListFirmwareMinimums returns every minimum and recommended version rule.
+func (s *Store) ListFirmwareMinimums(ctx context.Context) ([]prov.FirmwareMinimum, error) {
+	return listMinimums(ctx, s.db)
+}
+
+func listMinimums(ctx context.Context, q querier) ([]prov.FirmwareMinimum, error) {
+	rows, err := q.QueryContext(ctx, `SELECT vendor, model_glob, min_version, recommended FROM prov_firmware_minimums ORDER BY vendor, model_glob`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []prov.FirmwareMinimum{}
+	for rows.Next() {
+		var m prov.FirmwareMinimum
+		if err := rows.Scan(&m.Vendor, &m.ModelGlob, &m.MinVersion, &m.Recommended); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// PutFirmwareMinimums replaces every minimum rule with rules. A pin that
+// already sits below a new minimum stays stored but is no longer rendered.
+func (s *Store) PutFirmwareMinimums(ctx context.Context, actor string, rules []prov.FirmwareMinimum) ([]prov.FirmwareMinimum, error) {
+	var out []prov.FirmwareMinimum
+	err := s.provChange(ctx, actor, "update", "prov_firmware_minimums", func(tx *sql.Tx) (string, bool, error) {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM prov_firmware_minimums`); err != nil {
+			return "", false, err
+		}
+		for i, m := range rules {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO prov_firmware_minimums (vendor, model_glob, min_version, recommended) VALUES ($1, $2, $3, $4)`,
+				m.Vendor, m.ModelGlob, m.MinVersion, m.Recommended); err != nil {
+				if errors.Is(mapErr(err), ErrConflict) {
+					return "", false, fieldError(fmt.Sprintf("[%d].modelGlob", i), "listed twice")
+				}
+				return "", false, err
+			}
+		}
+		var err error
+		out, err = listMinimums(ctx, tx)
+		return "all", false, err
+	})
+	return out, err
+}
+
 // PutFirmwarePins replaces every pin with pins. A pin must name a firmware
-// file of its own vendor.
+// file of its own vendor, and not one below the minimum version of the
+// models the pin covers.
 func (s *Store) PutFirmwarePins(ctx context.Context, actor string, pins []FirmwarePin) ([]FirmwarePin, error) {
 	var out []FirmwarePin
 	err := s.provChange(ctx, actor, "update", "prov_firmware_pins", func(tx *sql.Tx) (string, bool, error) {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM prov_firmware_pins`); err != nil {
 			return "", false, err
 		}
+		minimums, err := listMinimums(ctx, tx)
+		if err != nil {
+			return "", false, err
+		}
 		for i, p := range pins {
-			var v prov.Vendor
-			err := tx.QueryRowContext(ctx, `SELECT vendor FROM prov_firmware WHERE id = $1`, p.FirmwareID).Scan(&v)
+			var (
+				v       prov.Vendor
+				version string
+			)
+			err := tx.QueryRowContext(ctx, `SELECT vendor, version FROM prov_firmware WHERE id = $1`, p.FirmwareID).Scan(&v, &version)
 			switch {
 			case errors.Is(err, sql.ErrNoRows):
 				return "", false, fieldError(fmt.Sprintf("[%d].firmwareId", i), "no such firmware")
@@ -267,15 +340,18 @@ func (s *Store) PutFirmwarePins(ctx context.Context, actor string, pins []Firmwa
 			case v != p.Vendor:
 				return "", false, fieldError(fmt.Sprintf("[%d].firmwareId", i), "the firmware is for "+string(v))
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO prov_firmware_pins (vendor, model_glob, firmware_id) VALUES ($1, $2, $3)`,
-				p.Vendor, p.ModelGlob, p.FirmwareID); err != nil {
+			if floor := prov.MinimumForPin(minimums, p.Vendor, p.ModelGlob); floor != "" && prov.CompareVersions(version, floor) < 0 {
+				return "", false, fieldError(fmt.Sprintf("[%d].firmwareId", i),
+					fmt.Sprintf("version %s is below the minimum %s for %s %s", version, floor, p.Vendor, p.ModelGlob))
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO prov_firmware_pins (vendor, model_glob, firmware_id, upgrade_hour) VALUES ($1, $2, $3, $4)`,
+				p.Vendor, p.ModelGlob, p.FirmwareID, p.UpgradeHour); err != nil {
 				if errors.Is(mapErr(err), ErrConflict) {
 					return "", false, fieldError(fmt.Sprintf("[%d].modelGlob", i), "pinned twice")
 				}
 				return "", false, err
 			}
 		}
-		var err error
 		out, err = listPins(ctx, tx)
 		return "all", false, err
 	})

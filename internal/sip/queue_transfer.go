@@ -73,6 +73,7 @@ func (c *call) transferIntoQueue(snap *snapshot.Snapshot, q snapshot.Queue, w *l
 	c2.anchorHost = host
 	c.mu.Unlock()
 	c2.adoptRelay(c, relay)
+	c2.sessionQueued(c, aOffer)
 	st := newIVRState()
 	ctx, cancel := context.WithCancel(context.Background())
 	now := time.Now()

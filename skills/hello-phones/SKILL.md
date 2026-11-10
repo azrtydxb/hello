@@ -220,6 +220,28 @@ joins the networks Hello gives it. Other models and vendors get no Wi-Fi keys.
   template has; 802.11k has no key anywhere and is set on the access points.
 - A WP8x6 holds 10 networks, a WP810/822/825 17 and a WP856 one (the best
   priority it can take). Open hardware checks are in `docs/provisioning.md`.
+## Custom tones
+
+The tone library holds WAV files a ring map choice can play as `custom:<name>`
+(Yealink and Snom phones; other vendors keep their built-in ringer).
+
+- `listRingtones` shows each tone and how many ring map choices use it.
+- `createRingtone` (`/ringtones`) adds one: `{ "name": "bell-2", "audioBase64":
+  "..." }` with PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB. A
+  taken name is a 409.
+- `deleteRingtone` (`/ringtones/{id}`) removes a tone; a tone a ring map choice
+  still uses is refused.
+
+## Firmware minimums
+
+Each vendor and model glob has a minimum firmware version. A pin below the
+minimum is refused and never rendered to a phone, and the phone list shows a
+drift badge when a phone runs below its minimum.
+
+- `listFirmwareMinimums` (`/prov/firmware/minimums`) lists the rules with the
+  recommended version (the documented lab build).
+- `putFirmwareMinimums` replaces every rule at once: send the whole list, since
+  any rule left out is removed. Say which rules you changed before you send it.
 
 ## References
 
