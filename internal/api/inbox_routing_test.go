@@ -104,7 +104,7 @@ func TestRoutingAPI(t *testing.T) {
 			admin.must(http.StatusBadRequest, "PUT", idPath("/api/v1/queues", id, ""), body)
 		}
 		got := admin.must(http.StatusOK, "PUT", idPath("/api/v1/queues", id, ""), map[string]any{
-			"name": "support", "members": base["members"], "textEnabled": true, "textCapacity": 2, "textReassignSeconds": 120, "textRequiresIdleVoice": true}).json(t)
+			"name": "support", "members": base["members"], "strategy": "linear", "textEnabled": true, "textCapacity": 2, "textReassignSeconds": 120, "textRequiresIdleVoice": true}).json(t)
 		if got["textEnabled"] != true || got["textCapacity"] != float64(2) || got["textReassignSeconds"] != float64(120) || got["textRequiresIdleVoice"] != true {
 			t.Fatalf("queue = %v", got)
 		}
