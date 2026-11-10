@@ -3,6 +3,7 @@ package sip
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
@@ -65,4 +66,13 @@ func (s *Server) doDigest(ctx context.Context, req *sip.Request, res *sip.Respon
 	ctx, cancel := s.untilShutdown(ctx)
 	defer cancel()
 	return requireResponse(s.client.DoDigestAuth(ctx, req, res, auth))
+}
+
+// timeoutUntilShutdown is untilShutdown for a background request: a ctx of
+// its own, bounded by d, for the BYE, CANCEL and INFO sends that run on
+// goroutines Serve waits for (or that a call's teardown leaves behind).
+func (s *Server) timeoutUntilShutdown(d time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	ctx, stop := s.untilShutdown(ctx)
+	return ctx, func() { stop(); cancel() }
 }

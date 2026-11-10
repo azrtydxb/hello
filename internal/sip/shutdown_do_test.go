@@ -38,3 +38,34 @@ func TestRequestAfterShutdownReturns(t *testing.T) {
 		t.Fatalf("a request after shutdown waited %v for an answer that cannot come", d)
 	}
 }
+
+// TestBackgroundSendsAfterShutdownReturn fails if the background BYE, CANCEL
+// and INFO paths (edge.go sendCancel, a fork's BYE) keep waiting on their own
+// 35 s ctx once Serve has shut down.
+func TestBackgroundSendsAfterShutdownReturn(t *testing.T) {
+	pbx := startPBX(t, threeDevices())
+	sink, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sink.Close() })
+	pbx.stop()
+	select {
+	case <-pbx.srv.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Serve never closed its done channel")
+	}
+	ctx, cancel := pbx.srv.timeoutUntilShutdown(byeTimeout)
+	defer cancel()
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("a background send's ctx outlived shutdown")
+	}
+	c := sip.NewRequest(sip.CANCEL, sip.Uri{Scheme: "sip", User: "x", Host: "127.0.0.1", Port: sink.LocalAddr().(*net.UDPAddr).Port})
+	start := time.Now()
+	pbx.srv.sendCancel(c)
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("sendCancel after shutdown waited %v", d)
+	}
+}
