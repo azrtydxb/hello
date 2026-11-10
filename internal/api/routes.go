@@ -270,6 +270,8 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/phones/{id}/rearm", auth.ScopeSecrets, auth.RoleAdmin, false, s.rearmPhone},
 		{"POST", "/api/v1/phones/{id}/admin-password/reveal", auth.ScopeSecrets, auth.RoleAdmin, false, s.revealAdminPassword},
 		{"POST", "/api/v1/phones/{id}/admin-password/rotate", auth.ScopeSecrets, auth.RoleAdmin, false, s.rotateAdminPassword},
+		{"GET", "/api/v1/phones/{id}/ldap", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneLDAP},
+		{"POST", "/api/v1/phones/{id}/ldap/password", auth.ScopeSecrets, auth.RoleAdmin, false, s.rotatePhoneLDAPPassword},
 		{"GET", "/api/v1/phones/{id}/fetches", auth.ScopeRead, auth.RoleViewer, false, s.phoneFetches},
 		{"POST", "/api/v1/phones/resync", auth.ScopeWrite, auth.RoleOperator, false, s.pushBulk(store.PushResync, false)},
 		{"POST", "/api/v1/phones/reboot", auth.ScopeWrite, auth.RoleOperator, false, s.pushBulk(store.PushReboot, false)},
@@ -323,6 +325,13 @@ func (s *server) routes() []route {
 		{"PUT", "/api/v1/settings/smtp", auth.ScopeAdmin, auth.RoleAdmin, false, s.putSMTP},
 		{"POST", "/api/v1/settings/smtp/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testSMTP},
 
+		{"GET", "/api/v1/backups/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.getBackupSettings},
+		{"PUT", "/api/v1/backups/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.putBackupSettings},
+		{"GET", "/api/v1/backups", auth.ScopeAdmin, auth.RoleAdmin, false, s.listBackups},
+		{"POST", "/api/v1/backups", auth.ScopeAdmin, auth.RoleAdmin, false, s.createBackup},
+		{"DELETE", "/api/v1/backups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteBackup},
+		{"POST", "/api/v1/backups/{id}/restore", auth.ScopeAdmin, auth.RoleAdmin, false, s.restoreBackup},
+
 		{"GET", "/api/v1/messages", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessages},
 		{"POST", "/api/v1/messages", auth.ScopeWrite, auth.RoleOperator, false, s.sendMessage},
 		{"GET", "/api/v1/messages/conversations", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessageConversations},
@@ -343,6 +352,8 @@ func (s *server) routes() []route {
 		{"PUT", "/api/v1/phone-groups/{id}/books", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupBooks},
 		{"PUT", "/api/v1/phone-groups/{id}/multicast", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupMulticast},
 		{"PUT", "/api/v1/phone-groups/{id}/ptt", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupPTT},
+		{"GET", "/api/v1/phone-groups/{id}/ldap", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneGroupLDAP},
+		{"PUT", "/api/v1/phone-groups/{id}/ldap", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupLDAP},
 
 		{"GET", "/api/v1/prov/templates", auth.ScopeRead, auth.RoleViewer, false, s.listTemplates},
 		{"POST", "/api/v1/prov/templates", auth.ScopeWrite, auth.RoleOperator, false, s.createTemplate},

@@ -28,6 +28,7 @@ func TestRoutesTable(t *testing.T) {
 		"POST /api/v1/phones/{id}/rearm":                 true,
 		"POST /api/v1/phones/{id}/admin-password/reveal": true,
 		"POST /api/v1/phones/{id}/admin-password/rotate": true,
+		"POST /api/v1/phones/{id}/ldap/password":         true,
 		// A webhook's signing secret is shown at creation and at rotation.
 		"POST /api/v1/webhooks":                    true,
 		"POST /api/v1/webhooks/{id}/rotate-secret": true,
