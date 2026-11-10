@@ -38,7 +38,19 @@ func ivrPBX(t *testing.T, greetSeconds int, menus ...snapshot.IVRMenu) (*testPBX
 
 // ivrPBXWith is ivrPBX with extra snapshot setup, applied before the server
 // serves (changing a live snapshot races the INVITE handlers reading it).
+// ivrPBXWith is ivrPBX with extra snapshot setup, applied before the server
+// serves (changing a live snapshot races the INVITE handlers reading it).
 func ivrPBXWith(t *testing.T, greetSeconds int, extra func(*snapshot.Snapshot), menus ...snapshot.IVRMenu) (*testPBX, *fakeObjects) {
+	return ivrPBXFull(t, greetSeconds, extra, nil, menus...)
+}
+
+// ivrPBXOpts is ivrPBX with more PBX options (an event sink).
+func ivrPBXOpts(t *testing.T, greetSeconds int, opts []pbxOpt, menus ...snapshot.IVRMenu) (*testPBX, *fakeObjects) {
+	return ivrPBXFull(t, greetSeconds, nil, opts, menus...)
+}
+
+// ivrPBXFull is ivrPBXWith and ivrPBXOpts together.
+func ivrPBXFull(t *testing.T, greetSeconds int, extra func(*snapshot.Snapshot), opts []pbxOpt, menus ...snapshot.IVRMenu) (*testPBX, *fakeObjects) {
 	t.Helper()
 	objs := &fakeObjects{}
 	_ = objs.Put(context.Background(), "ann/greet.wav", media.EncodeWAV(make([]byte, 16000*greetSeconds), 8000))
@@ -51,8 +63,8 @@ func ivrPBXWith(t *testing.T, greetSeconds int, extra func(*snapshot.Snapshot), 
 			extra(s)
 		}
 	}
-	pbx := startPBX(t, threeDevices(), shortRing(2*time.Second), withMedia(false),
-		withFeatures(feats), withVoicemail(newVMStore(), objs))
+	pbx := startPBX(t, threeDevices(), append([]pbxOpt{shortRing(2 * time.Second), withMedia(false),
+		withFeatures(feats), withVoicemail(newVMStore(), objs)}, opts...)...)
 	return pbx, objs
 }
 

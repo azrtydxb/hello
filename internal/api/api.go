@@ -21,7 +21,9 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/mailer"
+	"github.com/azrtydxb/hello/internal/originate"
 	"github.com/azrtydxb/hello/internal/phonebook"
+	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
@@ -73,6 +75,7 @@ type Store interface {
 	ListExtensions(ctx context.Context) ([]store.Extension, error)
 	GetExtension(ctx context.Context, id int64) (store.Extension, error)
 	CreateExtension(ctx context.Context, actor, number, name, externalNumber string, check store.Check) (store.Extension, error)
+	CreateExtensionKind(ctx context.Context, actor, number, name, externalNumber, kind string, targets store.DoorTargets, check store.Check) (store.Extension, error)
 	UpdateExtension(ctx context.Context, actor string, id int64, c store.ExtensionChange, check store.Check) (store.Extension, error)
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
 
@@ -124,6 +127,10 @@ type Store interface {
 	ReplaceRingRules(ctx context.Context, actor string, in []store.RingRuleInput) ([]store.RingRule, error)
 	GetRingMap(ctx context.Context) (store.RingMap, error)
 	ReplaceRingMap(ctx context.Context, actor string, groupID *int64, in []store.RingMapEntry) (store.RingMap, error)
+	ListRingtones(ctx context.Context) ([]store.RingtoneFile, error)
+	RingtoneExists(ctx context.Context, name string) (bool, error)
+	CreateRingtone(ctx context.Context, actor, name string, info prov.ToneInfo, size int64, sha256 string) (store.RingtoneFile, error)
+	DeleteRingtone(ctx context.Context, actor string, id int64) (string, error)
 	ListTimeConditions(ctx context.Context) ([]store.TimeCondition, error)
 	GetTimeCondition(ctx context.Context, id int64) (store.TimeCondition, error)
 	CreateTimeCondition(ctx context.Context, actor string, in store.TimeConditionInput, check store.Check) (store.TimeCondition, error)
@@ -282,6 +289,18 @@ type Config struct {
 	// Events is the call-event pipeline (stream, history, tickets); nil
 	// answers 503 on the event routes.
 	Events EventService
+	// Webhooks is the outbound webhook service (endpoints, deliveries,
+	// dead letters); nil answers 503 on the webhook routes.
+	Webhooks WebhookService
+	// Originate and OriginateLive carry click-to-call (spec integrations
+	// I-37): its requests and policy in PostgreSQL, its queue, live state
+	// and limit counters in Valkey; nil answers 503. OriginateLimits
+	// overrides the default abuse limits (tests); OriginateMetrics counts
+	// the requests the limits refused.
+	Originate        OriginateStore
+	OriginateLive    OriginateLive
+	OriginateLimits  *originate.Limits
+	OriginateMetrics *OriginateMetrics
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
 	// Objects is the voicemail audio store; nil makes the audio routes and
@@ -299,6 +318,11 @@ type Config struct {
 	// DefaultTimeZone is the zone a new schedule gets when the request names
 	// none: the phones time zone setting (HELLO_PROV_TIMEZONE).
 	DefaultTimeZone string
+	// Backups runs, deletes and restores backups; nil answers 503 on the
+	// backup routes. Maintenance, when set and active, makes every API write
+	// answer 503 (a restore is running).
+	Backups     BackupRunner
+	Maintenance MaintenanceGate
 	// SMTPEnv is the deployment's SMTP_* settings, used while no settings
 	// are saved in the console; SMTPDeliver replaces the SMTP send in tests.
 	SMTPEnv     mailer.Settings
@@ -411,7 +435,9 @@ func Handler(c Config) http.Handler {
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.
-	h := wrapForTest(http.NewCrossOriginProtection().Handler(mux))
+	// The maintenance gate sits outside the conformance wrapper: its 503 is
+	// not an operation's own answer, it applies to every write (see info).
+	h := maintenance(c.Maintenance, wrapForTest(http.NewCrossOriginProtection().Handler(mux)))
 	c.self.Store(&h)
 	return h
 }

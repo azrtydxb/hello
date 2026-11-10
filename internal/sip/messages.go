@@ -219,6 +219,12 @@ func (s *Server) handleMessage(req *sip.Request, tx sip.ServerTransaction) {
 		s.respond(tx, req, code, reason)
 		return
 	}
+	// A door station neither sends nor receives MESSAGE (spec S-45).
+	if trunk == nil && (snap.IsDoor(dev.Extension) || snap.IsDoor(req.Recipient.User)) {
+		count(msgForbidden)
+		s.respond(tx, req, sip.StatusForbidden, "Forbidden")
+		return
+	}
 	// A typing indication (RFC 3994) is only worth anything now: relayed to
 	// the recipient's contacts if registered, never stored.
 	typing := strings.HasPrefix(strings.ToLower(ct), "application/im-iscomposing")

@@ -83,6 +83,12 @@ export interface CreatedApiToken extends ApiToken {
   token: string;
 }
 
+/** The extra destinations a door station may call (ids); every Door group is allowed too. */
+export interface DoorTargets {
+  extensions: Id[];
+  ringGroups: Id[];
+}
+
 /** An extension: a dialable number, with its Phase 4 call features. */
 export interface Extension {
   id: Id;
@@ -116,6 +122,10 @@ export interface Extension {
   voicemailBoxId?: Id | null;
   /** Music on hold class callers hear while this extension holds them; null = the default. */
   mohClassId?: Id | null;
+  /** user (default) or door: a door station calls only its targets and the Door groups. */
+  kind?: "user" | "door";
+  /** The destinations a door station may call besides the Door groups. */
+  doorTargets?: DoorTargets;
   createdAt: string;
   updatedAt: string;
 }
@@ -200,6 +210,12 @@ export interface Cdr {
   rtpPackets?: number | null;
   rtpLost?: number | null;
   rtpJitterMs?: number | null;
+  /**
+   * The audio codec each leg ended on, as "name/clock rate" ("PCMU/8000");
+   * null when none was negotiated, and for calls recorded before it was kept.
+   */
+  callerCodec?: string | null;
+  calleeCodec?: string | null;
 }
 
 /** One line of a routing trace (routing.Step). */
@@ -294,6 +310,12 @@ export interface TrunkFields {
   internalDialing: InternalDialing;
   /** SMS over SIP: text messages may be sent and received through it. */
   messaging: boolean;
+  /**
+   * RFC 4028 session timers on the trunk's calls: "on" asks for and keeps
+   * one, "off" never does, "default" follows Hello's own setting
+   * (HELLO_SIP_SESSION_TIMERS_TRUNKS).
+   */
+  sessionTimers: "default" | "on" | "off";
   /**
    * The audio codecs offered to the trunk (store.Trunk.codecs): any of
    * "PCMU", "PCMA", "G722", "opus". Default ["PCMU", "PCMA"]: most carriers
@@ -763,6 +785,8 @@ export const createExtension = (input: {
   number: string;
   name: string;
   externalNumber?: string;
+  kind?: "user" | "door";
+  doorTargets?: DoorTargets;
 }) => request<Extension>("POST", "/api/v1/extensions", { body: input });
 
 export const updateExtension = (
@@ -780,6 +804,8 @@ export const updateExtension = (
     directoryHidden?: boolean;
     allowIntercom?: boolean;
     callWaiting?: boolean;
+    kind?: "user" | "door";
+    doorTargets?: DoorTargets;
     /** null clears the pick (the global default plays). */
     mohClassId?: Id | null;
     noAnswerRings?: number;
@@ -1209,6 +1235,8 @@ export interface RingGroupFields {
   mohRingback?: boolean;
   /** Ring tag that replaces ringgroup for calls through the group; "" keeps it. */
   ringTag?: string;
+  /** The Door group: a door station may call it; its calls ring as a doorbell. */
+  isDoor?: boolean;
 }
 
 /** A ring group as returned. */
