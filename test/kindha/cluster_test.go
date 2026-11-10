@@ -491,13 +491,27 @@ func (l *labEnv) retry(t *testing.T, args ...string) {
 	t.Fatalf("kubectl %s: %v\n%s", strings.Join(args, " "), err, out)
 }
 
-// noMasqueradeForVIP exempts the VIP from kind's masquerading. kind's
-// kind-masq-agent source-NATs every new flow that leaves a node for a non-pod
-// address, host-network traffic included, so a Kamailio that has just taken
-// the VIP would send its first packet to a Hello node from the node's address
-// and an ephemeral port instead of from the VIP: not what a LAN does (Cilium
-// masquerades pod traffic, never the host's) and not what Hello's symmetric
-// answers and the Via it records expect.
+// noMasqueradeForVIP exempts the VIP from kind's masquerading, both ways.
+//
+// From the VIP: kind's kind-masq-agent source-NATs every new flow that leaves
+// a node for a non-pod address, host-network traffic included, so a Kamailio
+// that has just taken the VIP would send its first packet to a Hello node from
+// the node's address and an ephemeral port instead of from the VIP: not what a
+// LAN does (Cilium masquerades pod traffic, never the host's) and not what
+// Hello's symmetric answers and the Via it records expect.
+//
+// To the VIP: for a few seconds after the VIP moves, the runner (Hello and the
+// phones) still has the old holder's MAC for it, and the old holder, a router
+// as far as the kernel is concerned, forwards what it receives to the new one.
+// The masquerade rule rewrote the source of that forwarded packet to the old
+// holder's address and left a conntrack entry that rewrites the source of
+// every later packet of the same 5-tuple (Hello's fixed port to the VIP's
+// SIP port) too, in the INPUT hook, for as long as the flow lives (two minutes
+// of UDP traffic), including once the node holds the VIP itself. Kamailio then
+// saw Hello's requests from its own node address, which is not a Hello node,
+// and answered 403 (the "not a hello-sip node" refusal): the flake that failed
+// graceful_loss_of_the_active_instance on PR #273. A LAN forwards such a
+// packet with its source intact.
 func (l *labEnv) noMasqueradeForVIP(t *testing.T) {
 	t.Helper()
 	for _, n := range l.nodes {
@@ -563,9 +577,31 @@ func (l *labEnv) diagnostics(t *testing.T) {
 		}
 		out, _ := tryRun("docker", "exec", n, "ip", "-4", "-o", "addr", "show", "dev", "eth0")
 		t.Logf("%s eth0: %s", n, out)
-		ct, _ := tryRun("docker", "exec", n, "sh", "-c", "grep -E '15060|5070' /proc/net/nf_conntrack; echo ---; iptables-save -t nat | grep -v -e KUBE-SVC -e KUBE-SEP -e KUBE-EXT")
-		t.Logf("%s conntrack and nat:\n%s", n, ct)
 	}
-	nb, _ := tryRun("sh", "-c", "ip neigh show; ip route get "+l.vip)
-	t.Logf("runner neighbours:\n%s", nb)
+}
+
+// withStaleVIPNeighbour makes the runner address the VIP to node's MAC while f
+// runs, as a runner whose ARP cache still holds the VIP's previous holder
+// does for the seconds after a move: whatever the runner sends the VIP then
+// reaches that node, which forwards it on to the node that holds the VIP.
+func (l *labEnv) withStaleVIPNeighbour(t *testing.T, node string, f func()) {
+	t.Helper()
+	mac := strings.TrimSpace(run(t, "docker", "exec", node, "cat", "/sys/class/net/eth0/address"))
+	var dev string
+	fields := strings.Fields(run(t, "ip", "-o", "route", "get", l.vip))
+	for i, w := range fields {
+		if w == "dev" && i+1 < len(fields) {
+			dev = fields[i+1]
+		}
+	}
+	if dev == "" {
+		t.Fatalf("no interface towards %s in %v", l.vip, fields)
+	}
+	run(t, "sudo", "-n", "ip", "neigh", "replace", l.vip, "lladdr", mac, "dev", dev, "nud", "permanent")
+	defer func() {
+		if out, err := tryRun("sudo", "-n", "ip", "neigh", "del", l.vip, "dev", dev); err != nil {
+			t.Errorf("unpinning %s: %v %s", l.vip, err, out)
+		}
+	}()
+	f()
 }
