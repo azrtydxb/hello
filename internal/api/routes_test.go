@@ -18,6 +18,9 @@ func TestRoutesTable(t *testing.T) {
 		// The events scope guards the call-event routes, which every role
 		// reads (a user only their own extensions' events).
 		auth.ScopeEvents: auth.RoleViewer,
+		// The calls scope guards the HubSpot engagement handshake, which a
+		// user makes for their own calls only.
+		auth.ScopeCalls: auth.RoleViewer,
 	}
 	secrets := map[string]bool{
 		"POST /api/v1/devices/{id}/rotate-secret":        true,
@@ -40,9 +43,11 @@ func TestRoutesTable(t *testing.T) {
 		case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password":
 			return true
 		}
-		return strings.HasPrefix(r.Pattern, "/api/v1/me/") || strings.HasPrefix(r.Pattern, "/api/v1/events")
+		return strings.HasPrefix(r.Pattern, "/api/v1/me/") || strings.HasPrefix(r.Pattern, "/api/v1/events") ||
+			r.Pattern == "/api/v1/integrations/hubspot/engagements"
 	}
-	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true, "POST /api/v1/auth/login/2fa": true}
+	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true, "POST /api/v1/auth/login/2fa": true,
+		"GET /api/v1/integrations/crm/oauth/callback": true}
 	seen := map[string]bool{}
 	for _, r := range Routes() {
 		key := r.Method + " " + r.Pattern

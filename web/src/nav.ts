@@ -238,6 +238,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         phase: 5,
         icon: "radio-tower",
       },
+      {
+        label: "CRM",
+        path: "/integrations/crm",
+        phase: 5,
+        icon: "contact",
+        minRole: "admin",
+      },
     ],
   },
   {

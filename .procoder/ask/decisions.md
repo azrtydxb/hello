@@ -1702,3 +1702,54 @@ so the VIP stage cannot sit in that file.
 - Answer (user): the AI may apply. Give the assistant a write tool that applies its batch,
   audited and revertible, in line with the earlier AI-access decision. Operators still see
   and can revert every applied batch.
+
+## Integrations P6: HubSpot and the internal/crm framework (2026-11-10)
+
+Decided while building, without asking, within the spec and the brief:
+
+- **Scope of P6 as built.** Framework, HubSpot connector (OAuth, contact search, call
+  engagements, owners, caller names), admin API, console page, MCP reads, the `hello-crm`
+  skill and docs. The HubSpot calling iframe and its SDK controller (I-50) are NOT in this
+  PR: its click-to-call needs the originate API and the first-party `hello-hubspot` OAuth
+  client from P3 (#234), which are not on main. The server half of the handshake
+  (`POST /api/v1/integrations/hubspot/engagements`) is built and tested so the iframe can
+  land as a small follow-up once P3 merges.
+- **Recording links** are behind a `crm.LinkMinter` interface (mint, revoke by label). The
+  link service is P4's (#281, not merged), so `hello-control` passes none yet: a connector
+  with recordings on logs calls without a link. Wiring P4's service in is one line in
+  `cmd/hello-control/crm.go`. Links are minted with label `crm:<connectorId>`; disabling a
+  connector, switching recordings off, disconnecting or deleting it revokes that label.
+- **Caller-name budget.** The spec bounds a lookup to 1.5 s, but a call must never be held
+  that long. The CRM query keeps the 1.5 s bound and runs in the background (it fills the
+  Valkey cache); the SIP path waits at most 250 ms (`DefaultCallerNameBudget`). A repeat
+  caller is a cache hit. Three failures in a row open a 30 s breaker per connector.
+- **Carrier name wins** when it is a real name; a display name that is only a number is
+  replaced by the CRM's. Numbers under 6 digits (extensions) are never looked up.
+- **Ownership.** A call is owned by the HubSpot owner with the same email as the Hello user
+  of the call's extension (exact, case-insensitive match; never display name). Hello's
+  `users.email` is administrator-set, so it is treated as verified. No match: the
+  connector's fallback owner, or the call is `skipped` and shows in the console with a
+  retry. A manual mapping is never replaced by an automatic one.
+- **One log per call per connector** (unique `(connector, callId)`): a missed call logged
+  first is not logged again by the call's `call.completed`; a ring group's call is logged for
+  the first member's event.
+- **Late engagement handshake:** if the server already logged a call, its engagement is kept
+  (`adopted: false`); the iframe's stays in HubSpot as a separate record.
+- **Callback is a public route** (`GET /api/v1/integrations/crm/oauth/callback`): the
+  cross-site redirect carries no Strict session cookie, so the single-use 10-minute state
+  (stored as a hash, bound to the administrator) is the credential. It always redirects to
+  `/integrations/crm`. No PKCE: HubSpot does not use it for confidential apps.
+- **Routes beyond the spec table:** `DELETE .../{id}/connection` (disconnect),
+  `GET .../{id}/users` and `PUT .../{id}/users/{userId}` (user mapping, the "field mapping"
+  of the console), `GET .../oauth/callback`. The job list is scope `write`, role `operator`
+  (the route test ties `read` to viewer; the spec wants operator).
+- **MCP:** reads only (`listCRMConnectors`, `getCRMConnector`, `listCRMUsers`,
+  `listCRMLogs`); everything that handles credentials or requeues is console-only.
+- **Needs-reauth notice** is e-mailed to every administrator with an address, when SMTP is
+  configured; otherwise it is the console banner only. "The owner" in the spec is read as
+  the administrators, since a connection has no single owner.
+- **Link renewal job** runs hourly on every replica (idempotent single UPDATE) instead of a
+  daily job under an advisory lock.
+- **HubSpot facts still to prove with a real account** (listed in docs/crm.md): the scope
+  set (`crm.objects.contacts.write` for the Calls object), the phone search filters, the
+  disposition ids lookup, and the EU host split.

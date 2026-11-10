@@ -146,6 +146,7 @@ var NonFlowResources = map[string]string{
 	"me/contacts":                   "a user's personal contacts, not call routing",
 	"ai/sessions":                   "assistant conversations, not call routing",
 	"flow/canvases":                 "named views of the canvas that store only node positions, not call routing",
+	"integrations/crm":              "CRM connectors that log finished calls and name callers in a CRM; they never change where a call goes",
 }
 
 // NotDestinationEnums lists the OpenAPI enums that look like destination

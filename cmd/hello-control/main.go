@@ -161,13 +161,19 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	// Call events (spec integrations I-35): consume the stream hello-sip
 	// appends to, store it, and fan it out to the SSE clients of this pod.
+	// CRM connectors (spec integrations I-47): their hook queues calls in
+	// the ingest transaction, so it is registered before the service runs.
+	crmSvc := newCRM(cfg, st, db, box, vk, metrics.Registry, nil, log)
 	evSvc := &events.Service{
-		DB: db, Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
+		Hooks: []events.TxHook{crmSvc.Hook},
+		DB:    db, Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
 		RetentionDays: cfg.EventRetentionDays, Log: log.With("component", "events"),
 		Metrics: events.NewServiceMetrics(metrics.Registry),
 	}
 	go evSvc.Run(ctx)
+	go crmSvc.Run(ctx)
 	apiCfg := api.Config{
+		CRM:             crmSvc.Service,
 		Events:          evSvc,
 		AIAgent:         agent,
 		Store:           st,
