@@ -33,6 +33,7 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { listTimeConditions, type TimeCondition } from "../api/timecond";
+import { listVoicemailGroups, type VoicemailGroup } from "../api/vmgroups";
 import { Can } from "../role";
 import { QueueDrawer, type Choices } from "../forms/QueueForm";
 
@@ -49,6 +50,7 @@ function useChoices(): { choices: Choices; error: string | null } {
   const [menus, setMenus] = useState<IvrMenu[]>([]);
   const [mohClasses, setMohClasses] = useState<MOHClass[]>([]);
   const [timeConditions, setTimeConditions] = useState<TimeCondition[]>([]);
+  const [voicemailGroups, setVoicemailGroups] = useState<VoicemailGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -64,6 +66,9 @@ function useChoices(): { choices: Choices; error: string | null } {
     listTimeConditions(controller.signal)
       .then(setTimeConditions)
       .catch(() => undefined); // the picker stays empty; saving still works
+    listVoicemailGroups(controller.signal)
+      .then(setVoicemailGroups)
+      .catch(() => undefined); // the picker stays empty; saving still works
     return () => controller.abort();
   }, []);
   return {
@@ -74,6 +79,7 @@ function useChoices(): { choices: Choices; error: string | null } {
       pagingGroups,
       menus,
       timeConditions,
+      voicemailGroups,
       all: extensions,
       mohClasses,
     },
