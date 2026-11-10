@@ -1753,3 +1753,14 @@ Decided while building, without asking, within the spec and the brief:
 - **HubSpot facts still to prove with a real account** (listed in docs/crm.md): the scope
   set (`crm.objects.contacts.write` for the Calls object), the phone search filters, the
   disposition ids lookup, and the EU host split.
+
+## Conference two-node test raced on srv.deps (2026-11-10)
+
+- Root cause: not production code. `TestConferenceTwoNodes` assigned
+  `p.srv.deps.Membership` after `startPBX` had already started the servers, so
+  the test goroutine wrote `s.deps` while sipgo handler goroutines (`confMember`
+  via `confResolve`) and `confWatchPeer` read it. Seen under `-race` in the
+  integration job. The server never writes `deps` after construction.
+- Fix: inject the membership through a `withMembership` pbxOpt at build time,
+  as `withHA` and `withConferences` do. Rule: tests never mutate `srv.deps`
+  once the node runs.
