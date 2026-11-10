@@ -564,6 +564,23 @@ func (l *lab) failover(t *testing.T, crash bool) {
 	victimPod := l.podOn(t, victim)
 	t.Logf("losing %s (pod %s); survivor %s; crash=%v", victim, victimPod, survivor, crash)
 
+	if os.Getenv("KINDHA_STALE_ARP") == "1" && !crash {
+		// The runner keeps the old holder's MAC for the VIP for 2.5 s after the move.
+		mac := strings.TrimSpace(run(t, "docker", "exec", victim, "cat", "/sys/class/net/eth0/address"))
+		dev := strings.Fields(run(t, "sh", "-c", "ip -o route get "+l.vip))
+		devName := ""
+		for i, f := range dev {
+			if f == "dev" && i+1 < len(dev) {
+				devName = dev[i+1]
+			}
+		}
+		run(t, "sudo", "-n", "ip", "neigh", "replace", l.vip, "lladdr", mac, "dev", devName, "nud", "permanent")
+		t.Logf("pinned %s to %s (%s) on %s", l.vip, mac, victim, devName)
+		go func() {
+			time.Sleep(2500 * time.Millisecond)
+			_, _ = tryRun("sudo", "-n", "ip", "neigh", "del", l.vip, "dev", devName)
+		}()
+	}
 	t0 := time.Now()
 	if crash {
 		// A power-off: the node container is killed, its network namespace goes
