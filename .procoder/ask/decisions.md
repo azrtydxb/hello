@@ -969,6 +969,7 @@ forbidden_role` for another, `403 no_extension` with none); an operator or
   settings `update`. The OAuth client is the audit `via` automatically.
 - **Device**: the API takes the numeric device id and the queued request
   carries its SIP username; a device of another extension is a `400`.
+
 ## 2026-10-27 Phone feature parity item 19: firmware policy (S-26)
 
 - Already on main: `prov_firmware` and `prov_firmware_pins`, upload and pin API
@@ -1809,3 +1810,24 @@ so the VIP stage cannot sit in that file.
 - Fix: inject the membership through a `withMembership` pbxOpt at build time,
   as `withHA` and `withConferences` do. Rule: tests never mutate `srv.deps`
   once the node runs.
+
+## TestValkeyFailover red in the nightly lab since 2026-11-07
+
+- Root cause: a lab/runner problem, not a Hello bug. The first failing run is
+  the first one on the GitHub-hosted `ubuntu-24.04-arm` runner (#249); the last
+  green ran on ARC (`arc-azrtydxb`). After `docker compose stop valkey-1` all
+  three Sentinels go sdown on the primary within 5 s and then sit in TILT
+  (`+tilt` every ~8 s, never `-tilt`), which suspends failover; even a manual
+  `SENTINEL failover` answered NOGOODSLAVE. Hello never gets to reconnect, so
+  nothing in hello-sip/hello-control or Kamailio HA (#201 landed after the first
+  failure) is involved. The later failures in that run cascade from the
+  still-stopped primary.
+- Mechanism (inferred from the log, to be confirmed by the lab dispatch):
+  Sentinel resolves `valkey-1` synchronously (resolve-hostnames). A stopped
+  container's name is unknown to Docker's embedded DNS, which forwards it to the
+  runner's upstream resolver; that is slow on the hosted runner and stalls the
+  Sentinel loop past the 2 s tilt trigger.
+- Fix: the lab `state` network is `internal`, so the lookup is answered NXDOMAIN
+  at once. Nodes keep outside access through `edge`.
+- kw is not affected: sentinels and valkey are healthy there (ckquorum OK 3
+  usable, primary valkey-1) and in-cluster DNS answers a missing pod fast.
