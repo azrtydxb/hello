@@ -196,8 +196,14 @@ func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.H
 			if a.Kind == KindAgent {
 				// Every read made for the assistant is logged as the user
 				// it works for, with the assistant's via (spec ai-agent
-				// S-7). The path only: a query may carry data.
-				log.Info("agent request", "method", r.Method, "path", r.URL.Path, "actor", a.String(),
+				// S-7); a write (a batch preview or the assistant applying
+				// its batch) as "agent write". The path only: a query may
+				// carry data.
+				msg := "agent read"
+				if r.Method != http.MethodGet && r.Method != http.MethodHead {
+					msg = "agent write"
+				}
+				log.Info(msg, "method", r.Method, "path", r.URL.Path, "actor", a.String(),
 					"task", ag.TaskID, "via", a.Via)
 			}
 			next.ServeHTTP(w, r.WithContext(WithActor(withChallenge(r.Context(), o.MetadataURL), a)))
