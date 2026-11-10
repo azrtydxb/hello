@@ -106,6 +106,7 @@ import { VoicemailGroups } from "./pages/VoicemailGroups";
 import { RingGroups } from "./pages/RingGroups";
 import { RingTags } from "./pages/RingTags";
 import { System } from "./pages/System";
+import { UnknownSyslog } from "./pages/UnknownSyslog";
 import { Trunks } from "./pages/Trunks";
 import { Voicemail } from "./pages/Voicemail";
 import { useControlPlane } from "./useControlPlane";
@@ -378,6 +379,7 @@ export function App() {
             <Route path="/phones/groups" element={<PhoneGroups />} />
             <Route path="/phones/templates" element={<ProvTemplates />} />
             <Route path="/phones/firmware" element={<ProvFirmware />} />
+            <Route path="/phones/syslog" element={<UnknownSyslog />} />
             <Route path="/phones/settings" element={<ProvSettings />} />
             <Route path="/phones/:id" element={<PhoneDetail />} />
             <Route path="*" element={<NotFound />} />
