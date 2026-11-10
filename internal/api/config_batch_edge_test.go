@@ -28,6 +28,7 @@ var edgeTargets = map[string]string{
 	"extension": "101", "voicemail": "101", "ring_group": "sales", "ivr": "dest-ivr", "queue": "dest-queue",
 	"announcement": "greet", "paging": "*88", "conference": "800", "time_condition": "dest-tc",
 	"external": "+97142000001", "sip_uri": "sip:agent@ai.example",
+	"voicemail_group": "900",
 	// The dial-by-name directory names no stored object: its target is empty.
 	"directory": "",
 }
@@ -62,6 +63,7 @@ func newEdgeFixtures(t *testing.T) *edgeFixtures {
 	}
 	create("paging", "/api/v1/paging-groups", map[string]any{"name": "all", "code": "*88", "members": []any{e.ext101["id"]}})
 	create("conference", "/api/v1/conferences", map[string]any{"name": "room", "number": "800"})
+	create("vmgroup", "/api/v1/voicemail-groups", map[string]any{"number": "900", "name": "vmg", "enabled": true, "maxSeconds": 60, "members": []any{e.ext101["id"]}})
 	create("in1", "/api/v1/routes/inbound", map[string]any{"name": "in1", "destinationKind": "extension", "destination": "101"})
 	return f
 }
