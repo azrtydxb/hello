@@ -96,7 +96,16 @@ Before going live, prove the reach in **Routes → Test** with `from:
 trunk:<id>`: the trace shows the policy verdict and the internal lookup
 exactly as a real call would see them.
 
-## 6. The manual check
+## 6. Turn unwanted callers away
+
+A trunk can screen its inbound calls before any route or phone: reject
+anonymous callers, allow only callers from listed countries (**Allowed country
+codes** in the trunk form), and answer a screened call with `603 Decline` or
+`486 Busy Here`. Numbers you block or always allow are on **Call flow →
+Blocklist**. See [blocklist.md](blocklist.md) for the order of checks, the CSV
+import and the limits. Nothing is on by default.
+
+## 7. The manual check
 
 1. Call an external mobile from your extension. It rings, answers, and both
    sides hear audio.
