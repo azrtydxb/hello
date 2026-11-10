@@ -103,6 +103,7 @@ export function updateProfile(change: {
   displayName?: string;
   email?: string;
   voicemailEmail?: Partial<VoicemailEmailPrefs>;
+  deskphoneDelivery?: boolean;
 }): Promise<void> {
   return request<void>("PATCH", "/api/v1/me/profile", { body: change });
 }

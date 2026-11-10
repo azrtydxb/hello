@@ -98,6 +98,16 @@ func (r *inboxRig) assign(conv, user int64) {
 	}
 }
 
+// operatorID is the operator's user id.
+func (r *inboxRig) operatorID(t *testing.T) int64 {
+	t.Helper()
+	var id int64
+	if err := r.db.QueryRowContext(context.Background(), `SELECT id FROM users WHERE username = 'otto'`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
 func peerNumber() string { return fmt.Sprintf("+3247510%04d", inboxSeq.Add(1)) }
 
 func idPath(base string, id int64, tail string) string {
@@ -188,6 +198,27 @@ func TestMessagingConfigAPI(t *testing.T) {
 		admin.must(http.StatusBadRequest, "PUT", idPath("/api/v1/messaging/addresses", id, ""), map[string]any{"address": "+3270111111"})
 		admin.must(http.StatusBadRequest, "PUT", idPath("/api/v1/messaging/addresses", id, ""), map[string]any{"channelId": 99999})
 		admin.must(http.StatusNotFound, "PUT", "/api/v1/messaging/addresses/99999", map[string]any{"label": "x"})
+		// Desk-phone delivery and the owner extension.
+		own, err := r.st.CreateExtension(context.Background(), "test", "6001", "Reception", "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := admin.must(http.StatusOK, "PUT", idPath("/api/v1/messaging/addresses", id, ""),
+			map[string]any{"deskPhoneDelivery": true, "ownerExtensionId": own.ID}).json(t)
+		if got["deskPhoneDelivery"] != true || got["ownerExtensionId"] != float64(own.ID) {
+			t.Fatalf("desk phone settings = %v", got)
+		}
+		got = admin.must(http.StatusOK, "PUT", idPath("/api/v1/messaging/addresses", id, ""), map[string]any{"label": "Sales again"}).json(t)
+		if got["deskPhoneDelivery"] != true || got["ownerExtensionId"] != float64(own.ID) {
+			t.Fatalf("a replace that leaves them out changed them: %v", got)
+		}
+		admin.must(http.StatusBadRequest, "PUT", idPath("/api/v1/messaging/addresses", id, ""), map[string]any{"ownerExtensionId": 99999})
+		admin.must(http.StatusBadRequest, "PUT", idPath("/api/v1/messaging/addresses", id, ""), map[string]any{"ownerExtensionId": "x"})
+		admin.must(http.StatusBadRequest, "PUT", idPath("/api/v1/messaging/addresses", id, ""), map[string]any{"ownerExtensionId": 0})
+		got = admin.must(http.StatusOK, "PUT", idPath("/api/v1/messaging/addresses", id, ""), map[string]any{"ownerExtensionId": nil}).json(t)
+		if got["ownerExtensionId"] != nil || got["deskPhoneDelivery"] != true {
+			t.Fatalf("clearing the owner = %v", got)
+		}
 		// A number with a conversation is not deleted.
 		r.text(peerNumber(), "hello")
 		admin.must(http.StatusConflict, "DELETE", idPath("/api/v1/messaging/addresses", r.address, ""), nil)
@@ -448,6 +479,55 @@ func (s *scenario) run(t *testing.T) {
 		back := c.must(http.StatusOK, "POST", s.path(conv, "/status"), map[string]any{"status": "open"}).json(t)
 		if back["status"] != "open" {
 			t.Fatalf("reopened = %v", back)
+		}
+	})
+
+	t.Run("contact", func(t *testing.T) {
+		body := map[string]any{"firstName": "Carla", "lastName": "Peeters"}
+		c.must(http.StatusNotFound, "POST", s.path(99999, "/contact"), body)
+		c.must(http.StatusBadRequest, "POST", s.path(conv, "/contact"), map[string]any{})
+		c.must(http.StatusBadRequest, "POST", s.path(conv, "/contact"), map[string]any{"lastName": "X", "book": "bogus"})
+		c.must(http.StatusBadRequest, "POST", s.path(conv, "/contact"), map[string]any{"lastName": strings.Repeat("x", 101)})
+		// 403: a user an administrator has not linked to an extension has no
+		// personal contacts.
+		c.must(http.StatusForbidden, "POST", s.path(conv, "/contact"), body)
+		uid, name := r.operatorID(t), "Otto"
+		if s.mine {
+			uid, name = s.self, "Agnes"
+		}
+		ext, err := r.st.CreateExtension(context.Background(), "test", strconv.FormatInt(7000+inboxSeq.Add(1), 10), name, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.st.SetUserExtension(context.Background(), "test", uid, &ext.ID); err != nil {
+			t.Fatal(err)
+		}
+		got := c.must(http.StatusOK, "POST", s.path(conv, "/contact"), body).json(t)
+		if got["peerName"] != "Carla Peeters" || got["peerNameSource"] != "personal" {
+			t.Fatalf("after adding a personal contact = %v", got["peerName"])
+		}
+		// The name is the owner's alone: the admin, who has no such contact,
+		// sees none, and nothing personal is stored.
+		adm := r.admin.must(http.StatusOK, "GET", idPath("/api/v1/inbox/conversations", conv, ""), nil).json(t)
+		if adm["peerName"] == "Carla Peeters" {
+			t.Fatalf("a personal contact named the peer for another reader: %v", adm["peerName"])
+		}
+		var src string
+		if err := r.db.QueryRowContext(context.Background(), `SELECT peer_name_source FROM conversations WHERE id = $1`, conv).Scan(&src); err != nil || src == "personal" {
+			t.Fatalf("stored source %q, %v", src, err)
+		}
+		if s.mine {
+			c.must(http.StatusBadRequest, "POST", s.path(conv, "/contact"), map[string]any{"lastName": "Acme", "book": "company"})
+			return
+		}
+		pool, _ := s.newConv("shared name please")
+		shared := c.must(http.StatusOK, "POST", s.path(pool, "/contact"), map[string]any{"company": "Acme", "book": "company"}).json(t)
+		if shared["peerName"] != "Acme" || shared["peerNameSource"] != "company" {
+			t.Fatalf("after adding a company contact = %v", shared)
+		}
+		seen := r.admin.must(http.StatusOK, "GET", idPath("/api/v1/inbox/conversations", pool, ""), nil).json(t)
+		if seen["peerName"] != "Acme" {
+			t.Fatalf("a company contact does not name the peer for everyone: %v", seen["peerName"])
 		}
 	})
 

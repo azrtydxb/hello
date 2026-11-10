@@ -15944,6 +15944,65 @@
         }
       }
     },
+    "/api/v1/me/inbox/conversations/{id}/contact": {
+      "post": {
+        "operationId": "addMyInboxContact",
+        "summary": "Add the customer to contacts",
+        "description": "Saves the conversation's number as a contact under the given name and returns the conversation with its refreshed name. It goes into the caller's own personal contacts; a user an administrator has not linked to an extension has none (403). The number is the conversation's; the caller cannot choose another. A personal contact names the number for its owner only, at read time; a company contact is shared and its name is kept on the conversation.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxContactInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
     "/api/v1/me/inbox/conversations/{id}/read": {
       "post": {
         "operationId": "readMyInboxConversation",
@@ -16604,6 +16663,65 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/InboxTagsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/contact": {
+      "post": {
+        "operationId": "addInboxContact",
+        "summary": "Add the customer to contacts",
+        "description": "Saves the conversation's number as a contact under the given name and returns the conversation with its refreshed name. The book is personal (the caller's own contacts, the default) or company (the shared book). The number is the conversation's; the caller cannot choose another. A personal contact names the number for its owner only, at read time; a company contact is shared and its name is kept on the conversation.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxContactInput"
               }
             }
           }
@@ -25062,7 +25180,9 @@
           "extensions",
           "voicemailEmail",
           "emailDelivery",
-          "mustEnrollMfa"
+          "mustEnrollMfa",
+          "deskphoneDelivery",
+          "deskphoneCapable"
         ],
         "properties": {
           "username": {
@@ -25101,6 +25221,14 @@
           "emailDelivery": {
             "type": "boolean",
             "description": "Whether the system can send email at all."
+          },
+          "deskphoneDelivery": {
+            "type": "boolean",
+            "description": "Whether customer texts of the user's conversations are also sent to the phones of their extension (needs the number's switch too)."
+          },
+          "deskphoneCapable": {
+            "type": "boolean",
+            "description": "False when every phone of the user's extension is of a vendor with no text UI; an extension with no phone yet is capable."
           },
           "mustEnrollMfa": {
             "type": "boolean",
@@ -25404,6 +25532,10 @@
           },
           "voicemailEmail": {
             "$ref": "#/components/schemas/VoicemailEmailPrefsUpdate"
+          },
+          "deskphoneDelivery": {
+            "type": "boolean",
+            "description": "Send customer texts of the user's conversations to the phones of their extension."
           }
         },
         "description": "At least one field."
@@ -33873,6 +34005,8 @@
           "optOutKeywords",
           "helpText",
           "optOutText",
+          "deskPhoneDelivery",
+          "ownerExtensionId",
           "conversations",
           "createdAt"
         ],
@@ -33917,6 +34051,15 @@
           "optOutText": {
             "type": "string",
             "description": "What Hello answers when a customer opts out; empty is the default sentence."
+          },
+          "deskPhoneDelivery": {
+            "type": "boolean",
+            "description": "Whether a customer text of a conversation assigned to a user who turned desk-phone delivery on is also sent to the phones of their extension."
+          },
+          "ownerExtensionId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The extension whose phone may reply into an existing conversation on this number, when it is unassigned or the extension's user's; null for none."
           },
           "conversations": {
             "type": "integer"
@@ -33966,6 +34109,15 @@
             "type": "string",
             "description": "What Hello answers when a customer opts out, at most 480 bytes; empty is the default sentence.",
             "maxLength": 480
+          },
+          "deskPhoneDelivery": {
+            "type": "boolean",
+            "description": "Send customer texts of conversations assigned to a user who turned desk-phone delivery on to the phones of their extension; false when created without it."
+          },
+          "ownerExtensionId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The extension whose phone may reply into an existing conversation on this number; null clears it, absent keeps it."
           }
         }
       },
@@ -34187,7 +34339,7 @@
           },
           "peerName": {
             "type": "string",
-            "description": "A name from a shared source, never from a personal address book."
+            "description": "What the reader's address books call the number: the extensions, the reader's own personal book, the named books of their phones, then the company book; else the name the carrier sent. Computed per reader; only a shared name is ever stored."
           },
           "peerNameSource": {
             "type": "string"
@@ -34430,6 +34582,29 @@
             "type": ["string", "null"],
             "format": "date-time",
             "description": "When a snoozed conversation comes back, within 30 days; required for snoozed and not allowed otherwise."
+          }
+        }
+      },
+      "InboxContactInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "firstName": {
+            "type": "string",
+            "description": "At most 100 characters."
+          },
+          "lastName": {
+            "type": "string",
+            "description": "At most 100 characters."
+          },
+          "company": {
+            "type": "string",
+            "description": "At most 100 characters. At least one of the three names is required."
+          },
+          "book": {
+            "type": "string",
+            "enum": ["personal", "company"],
+            "description": "Where to save it: personal (the caller's own contacts, the default) or company (the shared book; supervisors only, and not accepted on the /me route)."
           }
         }
       },

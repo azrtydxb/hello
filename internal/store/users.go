@@ -49,11 +49,15 @@ type User struct {
 	TOTPEnabled  bool      `json:"totpEnabled"`
 	TOTPRequired bool      `json:"totpRequired"`
 	CreatedAt    time.Time `json:"createdAt"`
+	// DeskphoneDelivery sends the customer texts of conversations assigned to
+	// the user to the phones of their extension (spec messaging-channels
+	// M-26); it also needs the number's own switch.
+	DeskphoneDelivery bool `json:"-"`
 }
 
 const userCols = `id, username, display_name, email, auth_method, role, enabled, must_change_password, extension_id,
 	coalesce((SELECT json_agg(extension_id ORDER BY position, extension_id) FROM user_extensions WHERE user_id = users.id), '[]'::json)::text,
-	vm_email_notify, vm_email_attach, vm_email_after, totp_enabled_at IS NOT NULL, totp_required, created_at`
+	vm_email_notify, vm_email_attach, vm_email_after, totp_enabled_at IS NOT NULL, totp_required, created_at, deskphone_delivery`
 
 func scanUser(r interface{ Scan(...any) error }) (User, error) {
 	var (
@@ -61,7 +65,7 @@ func scanUser(r interface{ Scan(...any) error }) (User, error) {
 		exts string
 	)
 	err := r.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.AuthMethod, &u.Role, &u.Enabled, &u.MustChangePassword,
-		&u.ExtensionID, &exts, &u.VoicemailEmail.Notify, &u.VoicemailEmail.Attach, &u.VoicemailEmail.After, &u.TOTPEnabled, &u.TOTPRequired, &u.CreatedAt)
+		&u.ExtensionID, &exts, &u.VoicemailEmail.Notify, &u.VoicemailEmail.Attach, &u.VoicemailEmail.After, &u.TOTPEnabled, &u.TOTPRequired, &u.CreatedAt, &u.DeskphoneDelivery)
 	if err != nil {
 		return u, err
 	}
@@ -451,6 +455,9 @@ type ProfileChange struct {
 	DisplayName *string
 	Email       *string
 	Voicemail   *VoicemailEmailPrefs
+	// DeskphoneDelivery turns desk-phone delivery of the user's conversations
+	// on or off.
+	DeskphoneDelivery *bool
 }
 
 // UpdateProfile changes the caller's own profile.
@@ -463,8 +470,9 @@ func (s *Store) UpdateProfile(ctx context.Context, actor string, id int64, c Pro
 				email = COALESCE($3, email),
 				vm_email_notify = COALESCE($4, vm_email_notify),
 				vm_email_attach = COALESCE($5, vm_email_attach),
-				vm_email_after = COALESCE($6, vm_email_after)
-			WHERE id = $1`, id, c.DisplayName, c.Email, prefNotify(c.Voicemail), prefAttach(c.Voicemail), prefAfter(c.Voicemail))
+				vm_email_after = COALESCE($6, vm_email_after),
+				deskphone_delivery = COALESCE($7, deskphone_delivery)
+			WHERE id = $1`, id, c.DisplayName, c.Email, prefNotify(c.Voicemail), prefAttach(c.Voicemail), prefAfter(c.Voicemail), c.DeskphoneDelivery)
 		if err != nil {
 			return err
 		}

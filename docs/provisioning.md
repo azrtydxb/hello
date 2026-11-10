@@ -517,6 +517,14 @@ own extension (anything else is `403`), `Expires` is held between 60 and
 Contacts that hold no subscription get an unsolicited `NOTIFY` with the same
 body instead, never both. Hello no longer sends MWI as a SIP `MESSAGE`.
 
+**Texts on the handset.** The built-in Grandstream template sets `P22650 = 1`
+(account 1 is the designated instant-message account) so a WP822 or WP836
+shows SIP `MESSAGE`; this is unverified on hardware. Each vendor carries a
+`sip_message` capability (`prov.Vendor.SIPMessage`), true only for Grandstream,
+and the profile page offers customer texts on the desk phone only to a user
+with at least one phone of a vendor that has it (or none yet). See
+[inbox.md](inbox.md#desk-phones).
+
 A subscription lives on the node that accepted it. After a node restart or
 failover the phone re-subscribes on its next refresh and gets the current
 counts at once. Messages heard or deleted through the API reach the phone

@@ -2074,3 +2074,49 @@ so the VIP stage cannot sit in that file.
 - Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
+
+## Messaging item 3: desk-phone texting and the SIP trunk channel (2026-11-10)
+
+The SIP-trunk adapter, the inbox gateway hand-off (`InboundFromTrunk`), replies
+through the trunk and the `messages.conversation_message_id` link already
+shipped with the inbox core (#211). This item adds what was missing. Where the
+spec left a product decision open, the conservative option below was chosen by
+default; each is a one-line change if the user decides otherwise.
+
+- Part size stays 700 bytes (the sip-messaging queue limit, which also keeps a
+  part in one UDP datagram), not the spec's 1000. Desk-phone parts include the
+  `(1/3) ` counter and any `[WhatsApp] ` prefix inside the 700. A body from a
+  phone above 700 bytes is refused with 413 as sip-messaging already does,
+  below RFC 3428's 1300.
+- Delivery to the desk phone happens when a conversation is assigned or taken
+  (the latest customer text) and on each later customer text while it is
+  assigned. Resolving, snoozing or returning it to the pool sends nothing.
+- A phone never makes first contact: a number with no conversation is
+  `handled=false` and takes the old external-number path, so no conversation is
+  opened from a handset. Spec M-17 consent gating therefore needs no phone path.
+- A customer who is in another agent's open conversation is refused to a phone
+  (with the reason sent to it), never texted around the inbox, and so are
+  opted-out customers. A resolved conversation of the user's own is not
+  reachable from a phone unless the number's owner extension is theirs.
+- A phone's reply is rate limited per user by the text queue's
+  `rate_per_minute`, counted on inbox replies; the refusal is 429.
+- `owner_extension_id` lets the owner's phone reply only into an existing
+  conversation that is unassigned or its user's. It does not create one.
+- Desk-phone delivery is off for the number and for the user by default and
+  needs both. A text that cannot be queued for the phone (text messaging off, a
+  door station, the text queue's rate limit) is skipped silently: the inbox
+  always keeps the text.
+- Vendor capability `sip_message` is on for Grandstream only. Every other
+  vendor stays off until a lab check shows its handset has a text UI. An
+  extension with no phone yet counts as capable, so an administrator can set it
+  up first.
+- Contact naming overlays the stored name at read time with the reader's own
+  books (personal, named, company, extensions), contact first, then the
+  carrier's name. Only a shared source is ever stored on the conversation. Add
+  to contacts defaults to the user's own book; the company book is chosen
+  explicitly by an operator or administrator. The click-to-call button and the
+  peer's recent CDRs in the right panel of spec M-15 wait for the integrations
+  click-to-call and the CDR number filter.
+- Chat visitor alerts ("New chat in Support") are not built: there is no chat
+  channel yet (item 4).
+

@@ -157,6 +157,12 @@ type meView struct {
 	VoicemailEmail store.VoicemailEmailPrefs `json:"voicemailEmail"`
 	// EmailDelivery is whether the system can send email at all.
 	EmailDelivery bool `json:"emailDelivery"`
+	// DeskphoneDelivery is the user's switch for customer texts on their desk
+	// phone; DeskphoneCapable is false when every phone of their extension
+	// is of a vendor without a text UI (an extension with no phone yet is
+	// capable).
+	DeskphoneDelivery bool `json:"deskphoneDelivery"`
+	DeskphoneCapable  bool `json:"deskphoneCapable"`
 }
 
 func (s *server) me(w http.ResponseWriter, r *http.Request) {
@@ -170,6 +176,16 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		v.DisplayName, v.Email, v.AuthMethod, v.VoicemailEmail = u.DisplayName, u.Email, u.AuthMethod, u.VoicemailEmail
+		v.DeskphoneDelivery = u.DeskphoneDelivery
+		vendors, err := s.Store.UserPhoneVendors(r.Context(), a.UserID)
+		if err != nil {
+			s.internal(w, "me: phone vendors", err)
+			return
+		}
+		v.DeskphoneCapable = len(vendors) == 0
+		for _, vd := range vendors {
+			v.DeskphoneCapable = v.DeskphoneCapable || vd.SIPMessage()
+		}
 		exts, err := s.Store.UserExtensions(r.Context(), a.UserID)
 		if err != nil {
 			s.internal(w, "me: extensions", err)

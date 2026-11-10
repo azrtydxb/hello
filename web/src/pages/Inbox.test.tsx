@@ -295,6 +295,35 @@ describe("Inbox", () => {
     });
   });
 
+  it("saves the customer as a contact and shows the new name", async () => {
+    const calls = inbox("operator", {
+      "POST /api/v1/inbox/conversations/7/contact": () =>
+        json(conv({ peerName: "Carla Peeters", peerNameSource: "personal" })),
+    });
+    await open();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Add to contacts" }),
+    );
+    fireEvent.change(screen.getByLabelText("First name"), {
+      target: { value: "Carla" },
+    });
+    fireEvent.change(screen.getByLabelText("Last name"), {
+      target: { value: "Peeters" },
+    });
+    // A supervisor may share it; the default is their own contacts.
+    expect(screen.getByLabelText("Save to")).toHaveValue("personal");
+    fireEvent.click(screen.getByRole("button", { name: "Save contact" }));
+    await waitFor(() => {
+      expect(calls.find((c) => c.url.endsWith("/contact"))?.body).toEqual({
+        firstName: "Carla",
+        lastName: "Peeters",
+        company: "",
+        book: "personal",
+      });
+    });
+    expect(await screen.findByText("Carla Peeters")).toBeInTheDocument();
+  });
+
   it("refreshes on a stream event and notifies without the text", async () => {
     const shown: { title: string; options?: NotificationOptions }[] = [];
     class FakeNotification {

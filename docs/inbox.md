@@ -81,6 +81,50 @@ nothing more.
 
 Internal **notes** are visible to agents and supervisors and are never sent.
 
+## Contacts and names
+
+A customer's number is named for whoever reads it, at read time, from the same
+books as caller-name lookup: the extensions, **their own personal contacts**,
+the named books of their phones' groups, then the company book. A personal
+contact names the number for its owner only and is never stored on the
+conversation; a name from a shared book (extensions, company) is stored with
+its source, so everyone sees it. If no book names the number, the name the
+carrier sent is shown. **Add to contacts** in the conversation's details saves
+the number under a name: to your own contacts (a user an administrator has not
+linked to an extension has none), or, for an operator or administrator, to the
+company book.
+
+## Desk phones
+
+A text can follow the conversation to the desk phone. Two switches must both be
+on, both off by default: **Deliver to desk phones** on the number (Messaging
+channels) and **Show customer texts on my desk phone** in the user's profile.
+Then, when a conversation is assigned to or taken by that user, and for each
+later customer text while it is theirs, Hello queues a SIP MESSAGE to every
+registered phone of the user's extension (an unregistered phone gets it at its
+next REGISTER, within the text queue's TTL). The phone shows it from the
+customer, with the contact name resolved for that user, and a non-SMS channel
+is prefixed (`[WhatsApp] `). A text longer than 700 bytes is split into parts
+numbered `(1/3) `. Turning text messaging off ([messaging.md](messaging.md))
+stops phone delivery but never the inbox.
+
+A text typed on the phone to the customer's number replies into the
+conversation, in this order: the user's own open conversation with that
+customer; else an existing conversation with them on a number whose **owner
+extension** is the phone's extension (unassigned or the user's). It is sent as a
+reply from the web would be: the sender is the phone's authenticated extension
+(never the `From` header), an opted-out customer is refused, and it is limited
+to the text queue's per-minute rate. A refusal is answered to the phone as a
+text from the system with the reason (`403`, or `429` for the rate). A customer
+who is in another agent's open conversation is refused too, not texted around
+the inbox. A number with no conversation is not the inbox's and takes the
+ordinary external-number path unchanged: **a phone never makes first contact
+through the inbox**. Only text is accepted from a phone.
+
+Only Grandstream is known to show SIP MESSAGE on the handset (P22650 in the
+built-in template); other vendors are off until a lab check. A user whose phones
+are all of such vendors does not see the profile switch.
+
 ## Opt-out (STOP)
 
 Hello handles opt-out itself, whatever the carrier does:
@@ -157,6 +201,7 @@ The page also:
 | `POST /api/v1/inbox/erase`                                           | admin, `admin`        |
 | `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`              | operator, `messages`  |
 | `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream` | any agent, `messages` |
+| `POST .../conversations/{id}/contact` (add to contacts)              | as the area it is in  |
 
 Conversations list with `view` (`all`, `mine`, `unassigned`), `status`, `q`
 (number, name or text), `channelId`, and a cursor. Every operation is in
@@ -165,7 +210,8 @@ Conversations list with `view` (`all`, `mine`, `unassigned`), `status`, `q`
 ## Metrics
 
 `hello_msg_inbound_total{provider,result}` (stored, duplicate, not_text,
-failed), `hello_msg_optout_total{source}`, `hello_msg_purged_total{kind}`,
+failed), `hello_msg_device_replies_total{result}` (sent, refused, failed: texts typed on
+a desk phone), `hello_msg_optout_total{source}`, `hello_msg_purged_total{kind}`,
 `hello_msg_unassigned` and `hello_msg_unassigned_oldest_seconds`. No label
 carries a number, a name or text.
 
@@ -185,3 +231,10 @@ IP-authenticated trunk, and whether it accepts outbound MESSAGE for SMS, is
 unverified. With a real trunk check: receive a text; send a reply; a long reply
 (split); non-ASCII text; what the carrier does on STOP; what happens when the
 trunk refuses (the reply shows failed).
+
+With real Grandstream phones (WP822 and WP836, IM account `P22650 = 1`):
+assign a conversation to a user with both switches on and see the text on the
+phone; a long text arrives as numbered parts; reply from the phone and see it
+in the conversation and at the customer; a reply to an opted-out customer is
+refused with the reason shown on the phone; the contact name shows as the
+sender.

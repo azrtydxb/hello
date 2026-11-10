@@ -40,6 +40,8 @@ const address = {
   optOutKeywords: ["stop"],
   helpText: "",
   optOutText: "",
+  deskPhoneDelivery: false,
+  ownerExtensionId: null,
   conversations: 2,
   createdAt: STAMP,
 };
@@ -57,6 +59,8 @@ function api(more: Routes = {}) {
     "GET /api/v1/messaging/channels": () => json({ items: [channel()] }),
     "GET /api/v1/messaging/addresses": () => json({ items: [address] }),
     "GET /api/v1/trunks": () => json(trunks),
+    "GET /api/v1/extensions": () =>
+      json({ items: [{ id: 10, number: "101", name: "Reception" }] }),
     ...more,
   });
 }
@@ -169,6 +173,8 @@ describe("Messaging channels", () => {
     );
     await waitFor(() =>
       expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+        deskPhoneDelivery: false,
+        ownerExtensionId: null,
         label: "",
         enabled: true,
         optOutKeywords: ["stop", "arret"],
@@ -176,6 +182,31 @@ describe("Messaging channels", () => {
         optOutText: "",
         channelId: 1,
         address: "+3270999999",
+      }),
+    );
+  });
+
+  it("turns on desk phone delivery and names an owner extension", async () => {
+    const calls = api({
+      "PUT /api/v1/messaging/addresses/5": () =>
+        json({ ...address, deskPhoneDelivery: true, ownerExtensionId: 10 }),
+    });
+    renderApp("/messaging/channels");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit +3270123456" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("switch", { name: /Deliver to desk phones/ }),
+    );
+    await screen.findByRole("option", { name: "101 Reception" });
+    fireEvent.change(screen.getByLabelText("Owner extension"), {
+      target: { value: "10" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save number" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PUT")?.body).toMatchObject({
+        deskPhoneDelivery: true,
+        ownerExtensionId: 10,
       }),
     );
   });

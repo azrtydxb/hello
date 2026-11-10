@@ -6,7 +6,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { errorMessage } from "../api";
+import { errorMessage, fieldErrors } from "../api";
 import {
   getInboxStatus,
   listInboxAgents,
@@ -389,6 +389,20 @@ function Thread({
               <dd style={{ margin: 0 }}>{conv.peerName}</dd>
             </>
           )}
+          <dt className="az-caption">Contact</dt>
+          <dd style={{ margin: 0 }}>
+            <AddContact
+              api={api}
+              id={id}
+              supervisor={supervisor}
+              named={conv.peerName !== ""}
+              onSaved={(c) => {
+                setConv(c);
+                toast.show("Saved to contacts.");
+                onChanged();
+              }}
+            />
+          </dd>
           <dt className="az-caption">Assigned to</dt>
           <dd style={{ margin: 0 }}>
             {unassigned ? "Nobody" : conv.assigneeName}
@@ -513,6 +527,120 @@ function Thread({
       </div>
       {toast.node}
     </>
+  );
+}
+
+/**
+ * "Add to contacts": names the customer's number. A personal contact names it
+ * for the person who saves it; a supervisor may save it to the shared company
+ * book instead.
+ */
+function AddContact({
+  api,
+  id,
+  supervisor,
+  named,
+  onSaved,
+}: {
+  api: InboxApi;
+  id: number;
+  supervisor: boolean;
+  named: boolean;
+  onSaved: (c: Conversation) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [first, setFirst] = useState("");
+  const [last, setLast] = useState("");
+  const [company, setCompany] = useState("");
+  const [book, setBook] = useState<"personal" | "company">("personal");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <Button
+        size="sm"
+        variant="secondary"
+        icon="user-plus"
+        onClick={() => setOpen(true)}
+      >
+        {named ? "Add another contact" : "Add to contacts"}
+      </Button>
+    );
+  }
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const c = await api.addContact(id, {
+        firstName: first.trim(),
+        lastName: last.trim(),
+        company: company.trim(),
+        book,
+      });
+      setOpen(false);
+      setFirst("");
+      setLast("");
+      setCompany("");
+      onSaved(c);
+    } catch (err: unknown) {
+      const f = fieldErrors(err)[0];
+      setError(f ? `${f.path}: ${f.message}` : errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form
+      className="cf-stack"
+      onSubmit={(e) => void save(e)}
+      aria-label="Add to contacts"
+    >
+      {error && <Alert tone="bad">{error}</Alert>}
+      <Input
+        label="First name"
+        value={first}
+        onChange={(e) => setFirst(e.target.value)}
+      />
+      <Input
+        label="Last name"
+        value={last}
+        onChange={(e) => setLast(e.target.value)}
+      />
+      <Input
+        label="Company"
+        value={company}
+        onChange={(e) => setCompany(e.target.value)}
+      />
+      {supervisor && (
+        <Select
+          label="Save to"
+          value={book}
+          options={[
+            { value: "personal", label: "My contacts" },
+            { value: "company", label: "Company book (everyone)" },
+          ]}
+          onChange={(e) => setBook(e.target.value as "personal" | "company")}
+        />
+      )}
+      <div className="inbox-actions">
+        <Button type="submit" size="sm" disabled={busy}>
+          Save contact
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => setOpen(false)}
+        >
+          Cancel
+        </Button>
+      </div>
+    </form>
   );
 }
 

@@ -13,6 +13,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -60,6 +61,7 @@ type InboxStore interface {
 	ListInboxAgents(ctx context.Context) ([]store.InboxAgent, error)
 	GetInboxStatus(ctx context.Context, acc store.InboxAccess) (store.InboxStatus, error)
 	GetInboxStats(ctx context.Context) (store.InboxStats, error)
+	AddConversationContact(ctx context.Context, acc store.InboxAccess, convID int64, book string, in phonebook.EntryInput) (store.Conversation, error)
 	ListInboxEvents(ctx context.Context, userID, after int64, limit int) ([]store.InboxEvent, error)
 	LatestInboxEventID(ctx context.Context, userID int64) (int64, error)
 	TouchInboxPresence(ctx context.Context, userID int64) error
@@ -350,6 +352,11 @@ type addressBody struct {
 	OptOutWords *[]string `json:"optOutKeywords"`
 	HelpText    *string   `json:"helpText"`
 	OptOutText  *string   `json:"optOutText"`
+	// DeskPhoneDelivery turns on delivery of assigned conversations to desk
+	// phones; OwnerExtensionID names the extension whose phone may reply
+	// (null clears it, absent keeps it).
+	DeskPhoneDelivery *bool           `json:"deskPhoneDelivery"`
+	OwnerExtensionID  json.RawMessage `json:"ownerExtensionId"`
 }
 
 func (s *server) addressInput(b addressBody, create bool, cur store.MsgAddress) (store.MsgAddressInput, fieldErrs) {
@@ -357,6 +364,18 @@ func (s *server) addressInput(b addressBody, create bool, cur store.MsgAddress) 
 	in := store.MsgAddressInput{
 		ChannelID: cur.ChannelID, Address: cur.Address, Key: cur.Key, Label: cur.Label, Enabled: true,
 		OptOutWords: cur.OptOutWords, HelpText: cur.HelpText, OptOutText: cur.OptOutText,
+		DeskPhoneDelivery: cur.DeskPhoneDelivery, OwnerExtensionID: cur.OwnerExtensionID,
+	}
+	if b.DeskPhoneDelivery != nil {
+		in.DeskPhoneDelivery = *b.DeskPhoneDelivery
+	}
+	if len(b.OwnerExtensionID) > 0 {
+		var id *int64
+		if err := json.Unmarshal(b.OwnerExtensionID, &id); err != nil || (id != nil && *id <= 0) {
+			f.add("ownerExtensionId", "must be an extension id or null")
+		} else {
+			in.OwnerExtensionID = id
+		}
 	}
 	if !create {
 		in.Enabled = cur.Enabled
@@ -1046,6 +1065,73 @@ func (s *server) setInboxTagsCommon(w http.ResponseWriter, r *http.Request, all 
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
+}
+
+// inboxContactBody is the "add to contacts" request: a name for the
+// conversation's number. The number is the conversation's, not the caller's
+// to choose.
+type inboxContactBody struct {
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Company   string `json:"company"`
+	// Book is personal (the caller's own contacts, the default) or company
+	// (the shared book, supervisors only).
+	Book string `json:"book"`
+}
+
+func (s *server) addInboxContactCommon(w http.ResponseWriter, r *http.Request, all bool) {
+	is, acc, ok := s.inboxCaller(w, r, all, true)
+	if !ok {
+		return
+	}
+	id, ok := convID(w, r)
+	if !ok {
+		return
+	}
+	var b inboxContactBody
+	if !decode(w, r, &b) {
+		return
+	}
+	book := b.Book
+	if book == "" {
+		book = store.NameSourcePersonal
+	}
+	if book != store.NameSourcePersonal && (!all || book != store.NameSourceCompany) {
+		msg := "must be personal"
+		if all {
+			msg = "must be personal or company"
+		}
+		writeFields(w, fieldErrs{{Path: "book", Message: msg}})
+		return
+	}
+	conv, err := is.GetConversation(r.Context(), acc, id)
+	if err != nil {
+		s.inboxError(w, "conversation", err)
+		return
+	}
+	in := phonebook.EntryInput{FirstName: b.FirstName, LastName: b.LastName, Company: b.Company,
+		Numbers: []phonebook.Number{{Label: phonebook.LabelMobile, Number: conv.Peer}}}
+	if errs := in.Normalize(s.Dialing); len(errs) > 0 {
+		writePhonebookFields(w, errs)
+		return
+	}
+	c, err := is.AddConversationContact(r.Context(), acc, id, book, in)
+	if err != nil {
+		if errors.Is(err, store.ErrNoExtensionLink) {
+			s.contactError(w, "contact", err)
+			return
+		}
+		s.configError(w, "contact", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+func (s *server) addInboxContact(w http.ResponseWriter, r *http.Request) {
+	s.addInboxContactCommon(w, r, true)
+}
+func (s *server) addMyInboxContact(w http.ResponseWriter, r *http.Request) {
+	s.addInboxContactCommon(w, r, false)
 }
 
 func (s *server) readInboxConversationCommon(w http.ResponseWriter, r *http.Request, all bool) {

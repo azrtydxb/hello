@@ -62,6 +62,7 @@ type Store interface {
 	UpdateAccount(ctx context.Context, actor string, id int64, c store.AccountChange) (store.User, error)
 	DeleteUser(ctx context.Context, actor string, id int64) error
 	UserExtensions(ctx context.Context, userID int64) ([]store.Extension, error)
+	UserPhoneVendors(ctx context.Context, userID int64) ([]prov.Vendor, error)
 	UserExtension(ctx context.Context, userID, id int64) (store.Extension, error)
 	UserVoicemailMessage(ctx context.Context, userID, id int64) (store.VoicemailMessage, error)
 	UserCDRs(ctx context.Context, userID, before int64, limit int) ([]store.CDR, string, error)

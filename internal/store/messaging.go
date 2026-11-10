@@ -241,6 +241,12 @@ type MsgAddress struct {
 	OptOutText    string    `json:"optOutText"`
 	Conversations int       `json:"conversations"`
 	CreatedAt     time.Time `json:"createdAt"`
+	// DeskPhoneDelivery delivers conversations assigned to a user who turned
+	// it on to the phones of their extension (spec M-26).
+	DeskPhoneDelivery bool `json:"deskPhoneDelivery"`
+	// OwnerExtensionID is the extension whose phone may reply into an
+	// existing conversation on this number; nil when none.
+	OwnerExtensionID *int64 `json:"ownerExtensionId"`
 	// Key is the lookup key inbound texts are matched by.
 	Key string `json:"-"`
 }
@@ -256,11 +262,15 @@ type MsgAddressInput struct {
 	OptOutWords []string
 	HelpText    string
 	OptOutText  string
+	// DeskPhoneDelivery and OwnerExtensionID: see MsgAddress.
+	DeskPhoneDelivery bool
+	OwnerExtensionID  *int64
 }
 
 const msgAddressCols = `a.id, a.channel_id, c.name, a.address, a.address_key, a.label, a.route_kind, a.enabled,
 	to_json(a.optout_keywords)::text, a.help_text, a.optout_text,
-	(SELECT count(*) FROM conversations v WHERE v.address_id = a.id), a.created_at`
+	(SELECT count(*) FROM conversations v WHERE v.address_id = a.id), a.created_at,
+	a.desk_phone_delivery, a.owner_extension_id`
 
 const msgAddressFrom = ` FROM msg_addresses a JOIN msg_channels c ON c.id = a.channel_id`
 
@@ -268,10 +278,14 @@ func scanMsgAddress(r interface{ Scan(...any) error }) (MsgAddress, error) {
 	var (
 		a     MsgAddress
 		words string
+		owner sql.NullInt64
 	)
 	if err := r.Scan(&a.ID, &a.ChannelID, &a.ChannelName, &a.Address, &a.Key, &a.Label, &a.RouteKind, &a.Enabled,
-		&words, &a.HelpText, &a.OptOutText, &a.Conversations, &a.CreatedAt); err != nil {
+		&words, &a.HelpText, &a.OptOutText, &a.Conversations, &a.CreatedAt, &a.DeskPhoneDelivery, &owner); err != nil {
 		return a, err
+	}
+	if owner.Valid {
+		a.OwnerExtensionID = &owner.Int64
 	}
 	if err := json.Unmarshal([]byte(words), &a.OptOutWords); err != nil {
 		return a, err
@@ -316,10 +330,15 @@ func (s *Store) CreateMsgAddress(ctx context.Context, actor string, in MsgAddres
 		if !ok {
 			return fieldError("channelId", "no such channel")
 		}
+		if err := checkOwnerExtension(ctx, tx, in.OwnerExtensionID); err != nil {
+			return err
+		}
 		if err := tx.QueryRowContext(ctx, `
-			INSERT INTO msg_addresses (channel_id, address, address_key, address_suffix, label, enabled, optout_keywords, help_text, optout_text)
-			VALUES ($1, $2, $3, $9, $4, $5, $6::text[], $7, $8) RETURNING id`,
-			in.ChannelID, in.Address, in.Key, in.Label, in.Enabled, keywordsArg(in.OptOutWords), in.HelpText, in.OptOutText, in.Suffix).Scan(&id); err != nil {
+			INSERT INTO msg_addresses (channel_id, address, address_key, address_suffix, label, enabled, optout_keywords, help_text, optout_text,
+				desk_phone_delivery, owner_extension_id)
+			VALUES ($1, $2, $3, $9, $4, $5, $6::text[], $7, $8, $10, $11) RETURNING id`,
+			in.ChannelID, in.Address, in.Key, in.Label, in.Enabled, keywordsArg(in.OptOutWords), in.HelpText, in.OptOutText, in.Suffix,
+			in.DeskPhoneDelivery, ownerArg(in.OwnerExtensionID)).Scan(&id); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "create", "msg_address", strconv.FormatInt(id, 10))
@@ -328,6 +347,28 @@ func (s *Store) CreateMsgAddress(ctx context.Context, actor string, in MsgAddres
 		return MsgAddress{}, err
 	}
 	return s.GetMsgAddress(ctx, id)
+}
+
+// ownerArg is the owner extension column's value.
+func ownerArg(id *int64) any {
+	if id == nil {
+		return nil
+	}
+	return *id
+}
+
+// checkOwnerExtension refuses an owner that is not a user extension: a door
+// station or a missing extension cannot text.
+func checkOwnerExtension(ctx context.Context, tx *sql.Tx, id *int64) error {
+	if id == nil {
+		return nil
+	}
+	var kind string
+	err := tx.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = $1`, *id).Scan(&kind)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && kind == ExtensionDoor) {
+		return fieldError("ownerExtensionId", "no such extension that can text")
+	}
+	return err
 }
 
 // keywordsArg is the stored keyword list: lower case, or the default.
@@ -346,9 +387,14 @@ func keywordsArg(words []string) []string {
 // stay.
 func (s *Store) UpdateMsgAddress(ctx context.Context, actor string, id int64, in MsgAddressInput) (MsgAddress, error) {
 	err := s.tx(ctx, func(tx *sql.Tx) error {
+		if err := checkOwnerExtension(ctx, tx, in.OwnerExtensionID); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx, `
-			UPDATE msg_addresses SET label = $2, enabled = $3, optout_keywords = $4::text[], help_text = $5, optout_text = $6
-			WHERE id = $1`, id, in.Label, in.Enabled, keywordsArg(in.OptOutWords), in.HelpText, in.OptOutText)
+			UPDATE msg_addresses SET label = $2, enabled = $3, optout_keywords = $4::text[], help_text = $5, optout_text = $6,
+				desk_phone_delivery = $7, owner_extension_id = $8
+			WHERE id = $1`, id, in.Label, in.Enabled, keywordsArg(in.OptOutWords), in.HelpText, in.OptOutText,
+			in.DeskPhoneDelivery, ownerArg(in.OwnerExtensionID))
 		if err != nil {
 			return err
 		}
