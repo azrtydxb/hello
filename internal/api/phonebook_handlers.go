@@ -363,6 +363,12 @@ type phonebookImportJSON struct {
 // body (the console) or the rows of a JSON body (agents) rendered as CSV.
 // It answers 400 itself and reports false.
 func importSource(w http.ResponseWriter, r *http.Request) (io.Reader, bool) {
+	return rowsSource(w, r, phonebook.CSVColumns)
+}
+
+// rowsSource is importSource for any CSV with the given columns: a JSON body
+// of rows keyed by those columns, or the multipart upload.
+func rowsSource(w http.ResponseWriter, r *http.Request, columns []string) (io.Reader, bool) {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		return csvUpload(w, r)
 	}
@@ -384,16 +390,16 @@ func importSource(w http.ResponseWriter, r *http.Request) (io.Reader, bool) {
 	}
 	var buf bytes.Buffer
 	cw := csv.NewWriter(&buf)
-	_ = cw.Write(phonebook.CSVColumns)
+	_ = cw.Write(columns)
 	for _, row := range in.Rows {
 		for k := range row {
-			if !slices.Contains(phonebook.CSVColumns, k) {
-				badRequest(w, "unknown column "+strconv.Quote(truncateRunes(k, 30))+"; the columns are "+strings.Join(phonebook.CSVColumns, ", "))
+			if !slices.Contains(columns, k) {
+				badRequest(w, "unknown column "+strconv.Quote(truncateRunes(k, 30))+"; the columns are "+strings.Join(columns, ", "))
 				return nil, false
 			}
 		}
-		rec := make([]string, len(phonebook.CSVColumns))
-		for i, c := range phonebook.CSVColumns {
+		rec := make([]string, len(columns))
+		for i, c := range columns {
 			rec[i] = row[c]
 		}
 		_ = cw.Write(rec)

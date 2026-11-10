@@ -242,9 +242,17 @@ func (s *Store) DeleteVoicemailMessage(ctx context.Context, actor string, id int
 		if err := requireRow(res); err != nil {
 			return id, err
 		}
+		// A copy delivered to a voicemail group shares the object: it goes
+		// only with its last row.
+		if object, err = releaseVoicemailObject(ctx, tx, object); err != nil {
+			return id, err
+		}
 		return id, notifyMailbox(ctx, tx, box)
 	})
-	return object, err
+	if err != nil {
+		return "", err
+	}
+	return object, nil
 }
 
 // notifyMailbox queues the mailbox-changed NOTIFY in the changing
@@ -429,7 +437,12 @@ func (s *Store) RemoveVoicemailMessage(ctx context.Context, boxID, id int64) (st
 	var object string
 	err := s.q(ctx).QueryRowContext(ctx,
 		`DELETE FROM voicemail_messages WHERE id = $1 AND box_id = $2 RETURNING minio_object`, id, boxID).Scan(&object)
-	return object, mapErr(err)
+	if err != nil {
+		return "", mapErr(err)
+	}
+	// A copy delivered to a voicemail group shares the object: it goes only
+	// with its last row.
+	return releaseVoicemailObject(ctx, s.db, object)
 }
 
 // SetVoicemailMessageHeard sets a message's heard flag after the phone
@@ -926,6 +939,7 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*93", Action: "forward_no_answer", Argument: "clear"},
 		{Code: "*97", Action: "voicemail"},
 		{Code: "*80", Action: "intercom"},
+		{Code: "*63", Action: "voicemail_broadcast"},
 		{Code: "*28", Action: "tc_override", Argument: "toggle"},
 		{Code: "*70", Action: "call_waiting_off"},
 		{Code: "*71", Action: "call_waiting_on"},

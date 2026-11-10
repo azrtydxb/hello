@@ -97,21 +97,22 @@ asking you to approve more).
 The integration scopes (see [Integrations](#integration-scopes)) are for apps
 that place calls or follow them:
 
-| Scope        | Allows                                                                                                                                                         |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `calls`      | Place and hang up calls from the holder's own extensions (click-to-call) and read the state of the calls it started. Never pre-selected on the consent screen. |
-| `events`     | Receive live call events (ringing, answered, ended, missed) for the extensions the holder may see.                                                             |
-| `recordings` | Create and revoke expiring links to call recordings.                                                                                                           |
+| Scope        | Allows                                                                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `calls`      | Place and hang up calls from the holder's own extensions (click-to-call) and read the state of the calls it started. Never pre-selected on the consent screen.                  |
+| `events`     | Receive live call events (ringing, answered, ended, missed) for the extensions the holder may see.                                                                              |
+| `recordings` | Create and revoke expiring links to call recordings.                                                                                                                            |
+| `messages`   | Read and answer customer text conversations in the messaging inbox, for the conversations the holder may see (see [inbox.md](inbox.md)). Customer text is never exposed to MCP. |
 
-`admin` implies `write`, which implies `read`; `secrets`, `calls`, `events` and
-`recordings` stand alone.
+`admin` implies `write`, which implies `read`; `secrets`, `calls`, `events`,
+`recordings` and `messages` stand alone.
 
-| Role       | May grant                                                            |
-| ---------- | -------------------------------------------------------------------- |
-| `user`     | `read`, `write` (own extensions only)                                |
-| `viewer`   | `read`, `events`                                                     |
-| `operator` | `read`, `write`, `calls`, `events`, `recordings`                     |
-| `admin`    | `read`, `write`, `admin`, `secrets`, `calls`, `events`, `recordings` |
+| Role       | May grant                                                                        |
+| ---------- | -------------------------------------------------------------------------------- |
+| `user`     | `read`, `write` (own extensions only), `messages` (own conversations)            |
+| `viewer`   | `read`, `events`                                                                 |
+| `operator` | `read`, `write`, `calls`, `events`, `recordings`, `messages`                     |
+| `admin`    | `read`, `write`, `admin`, `secrets`, `calls`, `events`, `recordings`, `messages` |
 
 An agent never has more than its user: the role is read on every request,
 so demoting a user (System → Users, admin only) narrows every app they
@@ -211,6 +212,11 @@ current.
 | `saveAnnouncementPrompt`            | write  | `PATCH /api/v1/announcements/{id}`                          | Save an announcement's prompt text                                                                                                       |
 | `deleteAnnouncement`                | write  | `DELETE /api/v1/announcements/{id}`                         | Delete an announcement                                                                                                                   |
 | `getMe`                             | read   | `GET /api/v1/auth/me`                                       | The authenticated user                                                                                                                   |
+| `listBlocklist`                 | read     | `GET /api/v1/blocklist`                                    | List blocklist entries                                                                                                                   |
+| `createBlocklistEntry`          | write    | `POST /api/v1/blocklist`                                   | Add a blocklist entry                                                                                                                    |
+| `importBlocklist`               | write    | `POST /api/v1/blocklist/import`                            | Import blocklist entries from CSV                                                                                                        |
+| `putBlocklistEntry`             | write    | `PUT /api/v1/blocklist/{id}`                               | Replace a blocklist entry                                                                                                                |
+| `deleteBlocklistEntry`          | write    | `DELETE /api/v1/blocklist/{id}`                            | Delete a blocklist entry                                                                                                                 |
 | `listCalendars`                     | read   | `GET /api/v1/calendars`                                     | List calendars                                                                                                                           |
 | `createCalendar`                    | write  | `POST /api/v1/calendars`                                    | Create a calendar                                                                                                                        |
 | `getCalendar`                       | read   | `GET /api/v1/calendars/{id}`                                | One calendar                                                                                                                             |
@@ -265,6 +271,7 @@ current.
 | `getFlowGraph`                      | read   | `GET /api/v1/flow/graph`                                    | Read the call flow as a graph                                                                                                            |
 | `getFlowRevision`                   | read   | `GET /api/v1/flow/revision`                                 | Read the configuration revision                                                                                                          |
 | `traceFlow`                         | read   | `GET /api/v1/flow/trace`                                    | Trace the path a call would take through the call flow                                                                                   |
+| `getInboxStats`                 | messages | `GET /api/v1/inbox/stats`                                  | Inbox counts                                                                                                                             |
 | `listIVRMenus`                      | read   | `GET /api/v1/ivr-menus`                                     | List IVR menus                                                                                                                           |
 | `createIVRMenu`                     | write  | `POST /api/v1/ivr-menus`                                    | Create an IVR menu                                                                                                                       |
 | `getIVRMenu`                        | read   | `GET /api/v1/ivr-menus/{id}`                                | One IVR menu                                                                                                                             |
@@ -431,6 +438,11 @@ current.
 | `deleteTtsKey`                      | admin  | `DELETE /api/v1/tts/settings/key`                           | Remove the stored OpenRouter key                                                                                                         |
 | `listTtsVoices`                     | write  | `GET /api/v1/tts/voices`                                    | List the ElevenLabs models and voices                                                                                                    |
 | `getVersion`                        |        | `GET /api/v1/version`                                       | Build and configuration revision of this control-plane node                                                                              |
+| `listVoicemailGroups`           | read     | `GET /api/v1/voicemail-groups`                             | List voicemail groups                                                                                                                    |
+| `createVoicemailGroup`          | admin    | `POST /api/v1/voicemail-groups`                            | Create a voicemail group                                                                                                                 |
+| `getVoicemailGroup`             | read     | `GET /api/v1/voicemail-groups/{id}`                        | Get a voicemail group                                                                                                                    |
+| `putVoicemailGroup`             | admin    | `PUT /api/v1/voicemail-groups/{id}`                        | Replace a voicemail group                                                                                                                |
+| `deleteVoicemailGroup`          | admin    | `DELETE /api/v1/voicemail-groups/{id}`                     | Delete a voicemail group                                                                                                                 |
 | `listVoicemailBoxes`                | read   | `GET /api/v1/voicemail/boxes`                               | List voicemail boxes                                                                                                                     |
 | `getVoicemailBoxLanguage`           | read   | `GET /api/v1/voicemail/boxes/{id}/language`                 | A voicemail box's prompt language                                                                                                        |
 | `updateVoicemailBoxLanguage`        | write  | `PUT /api/v1/voicemail/boxes/{id}/language`                 | Set a voicemail box's prompt language                                                                                                    |

@@ -150,6 +150,11 @@ type Store interface {
 	UpdateParkLot(ctx context.Context, actor string, id int64, in store.ParkLotInput, check store.Check) (store.ParkLot, error)
 	DeleteParkLot(ctx context.Context, actor string, id int64, check store.Check) error
 
+	ListVoicemailGroups(ctx context.Context) ([]store.VoicemailGroup, error)
+	GetVoicemailGroup(ctx context.Context, id int64) (store.VoicemailGroup, error)
+	CreateVoicemailGroup(ctx context.Context, actor string, in store.VoicemailGroupInput, check store.Check) (store.VoicemailGroup, error)
+	UpdateVoicemailGroup(ctx context.Context, actor string, id int64, in store.VoicemailGroupInput, check store.Check) (store.VoicemailGroup, error)
+	DeleteVoicemailGroup(ctx context.Context, actor string, id int64, check store.Check) error
 	ListPickupGroups(ctx context.Context) ([]store.PickupGroup, error)
 	GetPickupGroup(ctx context.Context, id int64) (store.PickupGroup, error)
 	CreatePickupGroup(ctx context.Context, actor string, in store.PickupGroupInput, check store.Check) (store.PickupGroup, error)
@@ -336,9 +341,15 @@ type Config struct {
 	// lookup keys of stored numbers are built in.
 	Phonebooks PhonebookStore
 	Dialing    phonebook.Dialing
+	// Blocklist is the call blocklist persistence; nil answers 503 on the
+	// blocklist routes.
+	Blocklist BlocklistStore
 	// Messages is the SIP MESSAGE persistence; nil answers 503 on the
 	// message routes.
 	Messages MessageStore
+	// Inbox is the messaging inbox persistence (spec messaging-channels);
+	// nil answers 503 on the inbox and messaging routes.
+	Inbox InboxStore
 	// AI is the OAuth authorization server (spec ai-external-access); nil
 	// without HELLO_PUBLIC_URL, when the consent, grant and service-account
 	// routes answer 404 and bearer tokens get no audience check.
