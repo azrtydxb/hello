@@ -20,18 +20,18 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)    | done (#232)            |
 | 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                      | todo                   |
 | 21  | Multiple lines and account sharing (S-10, S-11)                               | todo                   |
-| 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial      | wip (#258)             |
+| 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial      | done (#258)            |
 | 23  | SIP over TLS and sips (S-14)                                                  | done (#202)            |
 | 24  | SRTP SDES (S-15)                                                              | todo (after 23)        |
 | 25  | DTLS-SRTP and ICE-lite (S-16)                                                 | todo (after 24)        |
-| 26  | PRACK/100rel, anonymous outbound (Privacy), partial                           | wip (#265)             |
+| 26  | PRACK/100rel, anonymous outbound (Privacy), partial                           | done (#265)            |
 | 27  | Provisioning hardening (S-22, S-32), TR-069 off etc. (explicitly in spec)     | todo                   |
 | 28  | DSCP marking (S-21)                                                           | done (#231)            |
 | 29  | Phone backup/secondary servers (S-20), partial                                | todo                   |
 | 30  | HELD, Geolocation, locations, callback tag, alarm `*55` (S-28, S-29), partial | todo                   |
 | 31  | Wi-Fi profiles and roaming (S-23, S-24)                                       | todo                   |
-| 34  | Presence: reg event, PUBLISH, eventlist (S-35)                                | wip (#268)             |
-| 35  | RTCP-XR collector (S-36)                                                      | todo                   |
+| 34  | Presence: reg event, PUBLISH, eventlist (S-35)                                | done (#268)            |
+| 35  | RTCP-XR collector (S-36)                                                      | done (#260)            |
 | 36  | Syslog sink (S-27)                                                            | done (#235)            |
 | 37  | SCEP and 802.1X (S-25)                                                        | todo                   |
 
@@ -159,7 +159,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                                                                                      | Status                |
 | --------------------------------------------------------------------------------------------------------- | --------------------- |
-| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-f1d7e1e)    |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-72bce9b)    |
 | MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
 | Transfer-to-voicemail phone key                                                                           | done (#200)           |
