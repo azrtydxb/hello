@@ -151,6 +151,7 @@ type Store interface {
 	DeleteParkLot(ctx context.Context, actor string, id int64, check store.Check) error
 
 	ListVoicemailGroups(ctx context.Context) ([]store.VoicemailGroup, error)
+	GetVoicemailGroup(ctx context.Context, id int64) (store.VoicemailGroup, error)
 	CreateVoicemailGroup(ctx context.Context, actor string, in store.VoicemailGroupInput, check store.Check) (store.VoicemailGroup, error)
 	UpdateVoicemailGroup(ctx context.Context, actor string, id int64, in store.VoicemailGroupInput, check store.Check) (store.VoicemailGroup, error)
 	DeleteVoicemailGroup(ctx context.Context, actor string, id int64, check store.Check) error

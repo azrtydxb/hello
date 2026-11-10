@@ -7116,6 +7116,44 @@
       }
     },
     "/api/v1/voicemail-groups/{id}": {
+      "get": {
+        "operationId": "getVoicemailGroup",
+        "summary": "Get a voicemail group",
+        "description": "One voicemail group: its dial number, name, member extensions and maximum message length.",
+        "tags": ["voicemail"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The voicemail group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailGroup"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
       "put": {
         "operationId": "putVoicemailGroup",
         "summary": "Replace a voicemail group",

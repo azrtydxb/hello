@@ -196,6 +196,7 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/pickup-groups/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deletePickupGroup},
 		{"GET", "/api/v1/voicemail-groups", auth.ScopeRead, auth.RoleViewer, false, s.listVoicemailGroups},
 		{"POST", "/api/v1/voicemail-groups", auth.ScopeAdmin, auth.RoleAdmin, false, s.createVoicemailGroup},
+		{"GET", "/api/v1/voicemail-groups/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getVoicemailGroup},
 		{"PUT", "/api/v1/voicemail-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putVoicemailGroup},
 		{"DELETE", "/api/v1/voicemail-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteVoicemailGroup},
 		{"GET", "/api/v1/multicast-channels", auth.ScopeRead, auth.RoleViewer, false, s.listMulticastChannels},

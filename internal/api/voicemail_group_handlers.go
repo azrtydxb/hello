@@ -80,6 +80,19 @@ func (s *server) listVoicemailGroups(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items(gs))
 }
 
+func (s *server) getVoicemailGroup(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	g, err := s.Store.GetVoicemailGroup(r.Context(), id)
+	if err != nil {
+		s.configError(w, "voicemail group", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, g)
+}
+
 func (s *server) createVoicemailGroup(w http.ResponseWriter, r *http.Request) {
 	var b voicemailGroupBody
 	if !decode(w, r, &b) {
