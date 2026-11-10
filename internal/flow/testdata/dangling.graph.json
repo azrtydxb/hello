@@ -18,7 +18,7 @@
         "number": "101",
         "voicemail": false
       },
-      "version": "a3da41d50f68a81b"
+      "version": "955b2dee2f16c8be"
     },
     {
       "id": "featureCode:*60",
@@ -87,7 +87,7 @@
         "ringTimeout": 0,
         "strategy": "ring-all"
       },
-      "version": "172dfebde4270a6e"
+      "version": "68c95cbf0649de22"
     }
   ],
   "edges": [

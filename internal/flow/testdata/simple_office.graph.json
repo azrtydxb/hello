@@ -18,7 +18,7 @@
         "number": "101",
         "voicemail": true
       },
-      "version": "48e27a0a8aef2b92"
+      "version": "028c9ba6c6a35a9e"
     },
     {
       "id": "extension:11",
@@ -31,7 +31,7 @@
         "number": "102",
         "voicemail": true
       },
-      "version": "7cd31bdeea467d6f"
+      "version": "7afaba151ed66fad"
     },
     {
       "id": "extension:12",
@@ -44,7 +44,7 @@
         "number": "103",
         "voicemail": false
       },
-      "version": "a4d52a7f5971addd"
+      "version": "c46c93180e36c7a9"
     },
     {
       "id": "inboundRoute:1",
@@ -80,7 +80,7 @@
         "ringTimeout": 20,
         "strategy": "ring-all"
       },
-      "version": "53cae47fa4a49b6a"
+      "version": "bcb5ba1545d0eb97"
     },
     {
       "id": "trunk:1",
@@ -91,7 +91,7 @@
         "maxCalls": 0,
         "mode": "ip"
       },
-      "version": "bc39972580b50bd4"
+      "version": "d3bbcf86bbc1be42"
     }
   ],
   "edges": [

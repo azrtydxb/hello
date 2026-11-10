@@ -35,6 +35,8 @@ type Config struct {
 	// softkeys use (Grandstream WP8x6: P60069 and P2336); "" when unset.
 	ParkCode         string
 	ParkRetrieveCode string
+	// LDAP is the directory setting, nil when the file has none.
+	LDAP *LDAPConfig
 }
 
 // caCommentRE finds the CA URL the XML formats carry in a comment, where
@@ -93,6 +95,7 @@ func ParseYealink(b []byte) (Config, error) {
 		DisplayName: kv["account.1.display_name"], ProvURL: kv["static.auto_provision.server.url"],
 		CAURL: kv["static.trusted_certificates.url"], FirmwareURL: kv["static.firmware.url"],
 	}
+	c.LDAP = ldapFromYealink(kv)
 	c.AdminPassword, _ = strings.CutPrefix(kv["static.security.user_password"], "admin:")
 	c.Port, _ = strconv.Atoi(kv["account.1.sip_server.1.port"])
 	c.BLF = numbered(kv, `^linekey\.(\d+)\.value$`, func(n int) bool { return kv["linekey."+strconv.Itoa(n)+".type"] == "16" })
@@ -188,6 +191,7 @@ func ParsePoly(master, device []byte) (Config, error) {
 		FirmwareURL: ma["APP_FILE_PATH"], AdminPassword: a["device.auth.localAdminPassword"],
 	}
 	c.Port, _ = strconv.Atoi(a["reg.1.server.1.port"])
+	c.LDAP = ldapFromPoly(a)
 	for _, uri := range numbered(a, `^attendant\.resourceList\.(\d+)\.address$`, func(int) bool { return true }) {
 		c.BLF = append(c.BLF, numberOfURI(uri))
 	}
@@ -228,6 +232,7 @@ func ParseGrandstream(b []byte, mac string) (Config, error) {
 		User: p["P35"], AuthUser: p["P36"], Password: p["P34"], DisplayName: p["P3"],
 		ProvURL: gsURL(p["P212"], p["P237"], "/"), CAURL: caFromComment(b), FirmwareURL: gsURL(p["P6767"], p["P192"], ""), AdminPassword: p["P2"],
 	}
+	c.LDAP = ldapFromGrandstream(p)
 	if c.Server, c.Port, err = hostPort(p["P47"]); err != nil {
 		return Config{}, fmt.Errorf("grandstream: P47: %w", err)
 	}
@@ -255,6 +260,7 @@ func ParseSnom(b []byte) (Config, error) {
 		DisplayName: first(t, "user_realname"), CAURL: caFromComment(b),
 		FirmwareURL: first(t, "firmware"), AdminPassword: first(t, "admin_mode_password"),
 	}
+	c.LDAP = ldapFromSnom(t)
 	c.ProvURL = strings.TrimSuffix(first(t, "setting_server"), "{mac}")
 	if c.Server, c.Port, err = hostPort(first(t, "user_host")); err != nil {
 		return Config{}, fmt.Errorf("snom: user_host: %w", err)
@@ -296,6 +302,7 @@ func ParseFanvil(b []byte) (Config, error) {
 		CAURL: kv["CACertURL"], FirmwareURL: kv["Auto Image Url"], AdminPassword: kv["Account1 Password"],
 	}
 	c.Port, _ = strconv.Atoi(kv["SIP1 Register Port"])
+	c.LDAP = ldapFromFanvil(kv)
 	// DSS keys sit in pages ("--Dsskey Config2--:"), each numbering its
 	// keys from 1, so a key is its page and number. Account1 is the web
 	// admin (--MMI Account--).

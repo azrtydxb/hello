@@ -36,7 +36,7 @@ type Extension struct {
 	// identity asserted by the trunk.
 	AnonymousOutbound bool `json:"anonymousOutbound"`
 	// PhoneSendAnonymous is the phone's own "Send Anonymous" setting
-	// (migration 00053): provisioning writes P65=1 to the bound Grandstream
+	// (migration 00068): provisioning writes P65=1 to the bound Grandstream
 	// phone, which then blanks its caller ID on every call, internal ones
 	// included. Not the trunk-only AnonymousOutbound.
 	PhoneSendAnonymous bool `json:"phoneSendAnonymous"`
@@ -48,22 +48,30 @@ type Extension struct {
 	DirectoryHidden bool `json:"directoryHidden"`
 	// MOHClassID is the music on hold class callers hear while this
 	// extension holds them (migration 00021); nil uses the global default.
-	MOHClassID *int64    `json:"mohClassId"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	MOHClassID *int64 `json:"mohClassId"`
+	// Kind is user (default) or door (migration 00053, spec S-45): a door
+	// station has no voicemail, joins no group, receives no pickup, page,
+	// intercom or MESSAGE, and may call only DoorTargets and the Door groups.
+	Kind        string      `json:"kind"`
+	DoorTargets DoorTargets `json:"doorTargets"`
+	CreatedAt   time.Time   `json:"createdAt"`
+	UpdatedAt   time.Time   `json:"updatedAt"`
 }
 
 const extensionCols = `id, number, name, external_number, dnd, forward_always, forward_busy, forward_no_answer,
-	voicemail_enabled, record_default, allow_intercom, call_waiting, no_answer_rings, directory_hidden, moh_class_id, anonymous_outbound, phone_send_anonymous, created_at, updated_at`
+	voicemail_enabled, record_default, allow_intercom, call_waiting, no_answer_rings, directory_hidden, moh_class_id, anonymous_outbound, phone_send_anonymous, kind, door_targets, created_at, updated_at`
 
 func scanExtension(r interface{ Scan(...any) error }) (Extension, error) {
 	var e Extension
 	var moh sql.NullInt64
+	var targets []byte
 	err := r.Scan(&e.ID, &e.Number, &e.Name, &e.ExternalNumber, &e.DND, &e.ForwardAlways, &e.ForwardBusy,
-		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.CallWaiting, &e.NoAnswerRings, &e.DirectoryHidden, &moh, &e.AnonymousOutbound, &e.PhoneSendAnonymous, &e.CreatedAt, &e.UpdatedAt)
+		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.CallWaiting, &e.NoAnswerRings, &e.DirectoryHidden, &moh, &e.AnonymousOutbound, &e.PhoneSendAnonymous,
+		&e.Kind, &targets, &e.CreatedAt, &e.UpdatedAt)
 	if moh.Valid {
 		e.MOHClassID = &moh.Int64
 	}
+	e.DoorTargets = parseDoorTargets(targets)
 	return e, err
 }
 
@@ -94,17 +102,37 @@ func (s *Store) GetExtension(ctx context.Context, id int64) (Extension, error) {
 // CreateExtension inserts an extension and, with it, its voicemail box
 // (spec S-8: a box per extension, created automatically).
 func (s *Store) CreateExtension(ctx context.Context, actor, number, name, externalNumber string, check Check) (Extension, error) {
+	return s.CreateExtensionKind(ctx, actor, number, name, externalNumber, ExtensionUser, DoorTargets{}, check)
+}
+
+// CreateExtensionKind inserts an extension of the given kind. A door station
+// (spec S-45) gets no voicemail box, is hidden from the extensions phonebook
+// and keeps the door targets; a user extension must have none.
+func (s *Store) CreateExtensionKind(ctx context.Context, actor, number, name, externalNumber, kind string, targets DoorTargets, check Check) (Extension, error) {
 	var e Extension
 	err := s.configChange(ctx, actor, "create", "extension", check, func(tx *sql.Tx) (int64, error) {
+		if kind != ExtensionUser && kind != ExtensionDoor {
+			return 0, fieldError("kind", "must be user or door")
+		}
+		if kind == ExtensionUser && !targets.Empty() {
+			return 0, fieldError("doorTargets", "only a door station has door targets")
+		}
 		if err := checkDialNumber(ctx, tx, "number", number, numExtension); err != nil {
+			return 0, err
+		}
+		if err := checkDoorTargets(ctx, tx, 0, targets); err != nil {
 			return 0, err
 		}
 		var err error
 		e, err = scanExtension(tx.QueryRowContext(ctx,
-			`INSERT INTO extensions (number, name, external_number) VALUES ($1, $2, $3) RETURNING `+extensionCols,
-			number, name, externalNumber))
+			`INSERT INTO extensions (number, name, external_number, kind, door_targets, voicemail_enabled, directory_hidden)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING `+extensionCols,
+			number, name, externalNumber, kind, targets.JSON(), kind == ExtensionUser, kind == ExtensionDoor))
 		if err != nil {
 			return 0, err
+		}
+		if kind == ExtensionDoor {
+			return e.ID, nil
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO voicemail_boxes (extension_id) VALUES ($1) ON CONFLICT (extension_id) DO NOTHING`, e.ID)
 		return e.ID, err
@@ -131,6 +159,10 @@ type ExtensionChange struct {
 	// (a nil MOHClassID alone keeps the current value).
 	MOHClassID    *int64
 	ClearMOHClass bool
+	// Kind switches the extension between user and door (spec S-45);
+	// DoorTargets replaces a door station's targets.
+	Kind        *string
+	DoorTargets *DoorTargets
 }
 
 // UpdateExtension changes the fields that are not nil. Renumbering an
@@ -161,6 +193,10 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 		if err := checkMOHClass(ctx, tx, "mohClassId", c.MOHClassID); err != nil {
 			return id, err
 		}
+		kind, targets, err := doorChange(ctx, tx, id, &c)
+		if err != nil {
+			return id, err
+		}
 		e, err = scanExtension(tx.QueryRowContext(ctx, `
 			UPDATE extensions SET number = COALESCE($2, number), name = COALESCE($3, name),
 			       external_number = COALESCE($4, external_number), dnd = COALESCE($5, dnd),
@@ -170,11 +206,14 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 			       directory_hidden = COALESCE($12, directory_hidden), call_waiting = COALESCE($13, call_waiting),
 			       moh_class_id = CASE WHEN $15 THEN NULL ELSE COALESCE($14, moh_class_id) END,
 			       no_answer_rings = COALESCE($16, no_answer_rings), anonymous_outbound = COALESCE($17, anonymous_outbound),
-			       phone_send_anonymous = COALESCE($18, phone_send_anonymous), updated_at = now()
+			       phone_send_anonymous = COALESCE($18, phone_send_anonymous), kind = $19, door_targets = $20, updated_at = now()
 			WHERE id = $1 RETURNING `+extensionCols, id, c.Number, c.Name, c.ExternalNumber,
 			c.DND, c.ForwardAlways, c.ForwardBusy, c.ForwardNoAnswer, c.VoicemailEnabled, c.RecordDefault, c.AllowIntercom, c.DirectoryHidden, c.CallWaiting,
-			c.MOHClassID, c.ClearMOHClass, c.NoAnswerRings, c.AnonymousOutbound, c.PhoneSendAnonymous))
-		return id, err
+			c.MOHClassID, c.ClearMOHClass, c.NoAnswerRings, c.AnonymousOutbound, c.PhoneSendAnonymous, kind, targets.JSON()))
+		if err != nil {
+			return id, err
+		}
+		return id, afterKindChange(ctx, tx, e)
 	})
 	return e, err
 }

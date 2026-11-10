@@ -165,6 +165,83 @@ describe("Extensions", () => {
     });
   });
 
+  it("creates a door station with kind door", async () => {
+    const calls = api([], {
+      "POST /api/v1/extensions": () =>
+        json(
+          { ...EXT, id: 9, number: "900", name: "Front door", kind: "door" },
+          201,
+        ),
+    });
+    renderApp("/extensions");
+    const dialog = await openNew();
+    fireEvent.click(
+      within(dialog).getByRole("switch", { name: /Door station/ }),
+    );
+    fill(dialog, "900", "Front door");
+
+    expect(await screen.findByText("Extension 900 created.")).toBeVisible();
+    expect(screen.getByRole("row", { name: /900/ })).toHaveTextContent(
+      "Door station",
+    );
+    expect(calls).toContainEqual({
+      method: "POST",
+      url: "/api/v1/extensions",
+      body: { number: "900", name: "Front door", kind: "door" },
+    });
+  });
+
+  it("saves a door station's targets and offers no voicemail or intercom", async () => {
+    const door = {
+      ...EXT,
+      id: 9,
+      number: "900",
+      name: "Front door",
+      kind: "door",
+      voicemailEnabled: false,
+      doorTargets: { extensions: [], ringGroups: [] },
+    };
+    const calls = api([EXT, door], {
+      "GET /api/v1/ring-groups": () =>
+        json({
+          items: [
+            { id: 5, name: "800", isDoor: true, members: [] },
+            { id: 6, name: "810", isDoor: false, members: [] },
+          ],
+        }),
+      "PATCH /api/v1/extensions/9": () =>
+        json({ ...door, doorTargets: { extensions: [1], ringGroups: [6] } }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer("900");
+    expect(
+      within(drawer).queryByRole("switch", { name: "Voicemail" }),
+    ).toBeNull();
+    expect(
+      within(drawer).queryByRole("switch", { name: "Allow intercom" }),
+    ).toBeNull();
+    // The Door group is always allowed and is named in the note.
+    expect(await within(drawer).findByText(/Door group 800/)).toBeVisible();
+
+    fireEvent.click(
+      within(drawer).getByRole("checkbox", { name: "100 Reception" }),
+    );
+    fireEvent.click(
+      await within(drawer).findByRole("checkbox", { name: "Group 810" }),
+    );
+    expect(
+      within(drawer).queryByRole("checkbox", { name: "900 Front door" }),
+    ).toBeNull();
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Extension 900 saved.")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/extensions/9",
+      body: { doorTargets: { extensions: [1], ringGroups: [6] } },
+    });
+  });
+
   it("keeps an extension created before the list finished loading", async () => {
     // The header's "New extension" is usable while the list is still
     // loading; a list response that predates the create must not drop it.

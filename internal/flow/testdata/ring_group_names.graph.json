@@ -18,7 +18,7 @@
         "number": "101",
         "voicemail": true
       },
-      "version": "48e27a0a8aef2b92"
+      "version": "028c9ba6c6a35a9e"
     },
     {
       "id": "extension:11",
@@ -31,7 +31,7 @@
         "number": "102",
         "voicemail": false
       },
-      "version": "58d0dbf21ab8a400"
+      "version": "08957573dc3889ce"
     },
     {
       "id": "extension:12",
@@ -44,7 +44,7 @@
         "number": "103",
         "voicemail": false
       },
-      "version": "0ec3bfc2f6cfffe2"
+      "version": "37b61f32e6cc0aa4"
     },
     {
       "id": "inboundRoute:1",
@@ -79,7 +79,7 @@
         "ringTimeout": 0,
         "strategy": "ring-all"
       },
-      "version": "5731b8fcf27025fd"
+      "version": "37441cf02f521e00"
     },
     {
       "id": "ringGroup:2",
@@ -90,7 +90,7 @@
         "ringTimeout": 0,
         "strategy": "ring-all"
       },
-      "version": "98f8233a107ae49b"
+      "version": "4e5c1a84f02c4d10"
     }
   ],
   "edges": [
