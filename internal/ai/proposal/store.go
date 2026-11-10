@@ -42,7 +42,8 @@ func NewStore(db *sql.DB, v *SchemaValidator) *DBStore { return &DBStore{db: db,
 var uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 const cols = `id, source, session_id, finding_id, fingerprint, title, rationale, actions, config_revision, status,
-	created_by, created_at, updated_at, applied_by, applied_at, dismissed_by, dismissed_at, dismiss_reason, dismiss_text, failure`
+	created_by, created_at, updated_at, applied_by, applied_at, dismissed_by, dismissed_at, dismiss_reason, dismiss_text, failure,
+	applied_via, batch_id`
 
 type scanner interface{ Scan(...any) error }
 
@@ -50,13 +51,15 @@ func scan(r scanner) (Proposal, error) {
 	var (
 		p                      Proposal
 		sess, find, reason, tx sql.NullString
+		via, batch             sql.NullString
 		by, ab, db             sql.NullInt64
 		aat, dat               sql.NullTime
 		actions, failure       []byte
 		status                 string
 	)
 	if err := r.Scan(&p.ID, &p.Source, &sess, &find, &p.Fingerprint, &p.Title, &p.Rationale, &actions, &p.ConfigRevision,
-		&status, &by, &p.CreatedAt, &p.UpdatedAt, &ab, &aat, &db, &dat, &reason, &tx, &failure); err != nil {
+		&status, &by, &p.CreatedAt, &p.UpdatedAt, &ab, &aat, &db, &dat, &reason, &tx, &failure,
+		&via, &batch); err != nil {
 		return p, err
 	}
 	p.Status = Status(status)
@@ -71,6 +74,7 @@ func scan(r scanner) (Proposal, error) {
 	}
 	p.SessionID, p.FindingID = nullStr(sess), nullStr(find)
 	p.DismissReason, p.DismissText = nullStr(reason), nullStr(tx)
+	p.AppliedVia, p.BatchID = nullStr(via), nullStr(batch)
 	p.CreatedBy, p.AppliedBy, p.DismissedBy = nullInt(by), nullInt(ab), nullInt(db)
 	p.AppliedAt, p.DismissedAt = nullTime(aat), nullTime(dat)
 	return p, nil
@@ -285,8 +289,9 @@ func lock(ctx context.Context, tx *sql.Tx, id string) (Proposal, error) {
 }
 
 // audit writes the proposal's own audit row, naming the actor as the API's
-// audit rows do (auth.Actor.String).
-func audit(ctx context.Context, tx *sql.Tx, userID int64, action, id string) error {
+// audit rows do (auth.Actor.String), with via when the change was not the
+// actor's own click (the assistant applying for them: "ai:<session>").
+func audit(ctx context.Context, tx *sql.Tx, userID int64, action, id, via string) error {
 	name := ""
 	if a, ok := auth.ActorFrom(ctx); ok && a.UserID == userID {
 		name = a.String()
@@ -297,8 +302,8 @@ func audit(ctx context.Context, tx *sql.Tx, userID int64, action, id string) err
 		}
 		name = "user:" + u
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO audit_events (actor, action, resource, resource_id) VALUES ($1, $2, 'ai_proposal', $3)`,
-		name, action, id)
+	_, err := tx.ExecContext(ctx, `INSERT INTO audit_events (actor, action, resource, resource_id, via) VALUES ($1, $2, 'ai_proposal', $3, NULLIF($4, ''))`,
+		name, action, id, via)
 	return err
 }
 
@@ -323,7 +328,7 @@ func (s *DBStore) Dismiss(ctx context.Context, id string, userID int64, reason, 
 		dismiss_reason = $3, dismiss_text = NULLIF($4, ''), updated_at = now() WHERE id = $1`, id, userID, reason, text); err != nil {
 		return err
 	}
-	if err := audit(ctx, tx, userID, "dismiss", id); err != nil {
+	if err := audit(ctx, tx, userID, "dismiss", id, ""); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

@@ -129,10 +129,20 @@ func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.H
 				// as the user it works for, with their current role.
 				a, err = l.UserActor(r.Context(), ag.UserID)
 				a.Kind, a.Scopes, a.Via = KindAgent, Scopes{ScopeRead}, ViaAssistant
-				if ag.Preview {
+				switch {
+				case ag.Preview:
 					// A batch preview: the API admits its writes only
-					// inside a dry-run batch (api's previewGuard).
+					// inside a dry-run batch (api's agentGuard).
 					a.Scopes = Scopes{ScopeRead, ScopeWrite, ScopeAdmin}
+				case ag.Apply:
+					// The assistant applying its batch for the user: the
+					// API admits its writes only through a configuration
+					// batch (api's agentGuard), and the user's role still
+					// decides. Its via names the session ("ai:<id>").
+					a.Scopes = Scopes{ScopeRead, ScopeWrite, ScopeAdmin}
+					if v := ViaFrom(r.Context()); v != "" {
+						a.Via = v
+					}
 				}
 			case h != "":
 				tok, ok := strings.CutPrefix(h, "Bearer ")
@@ -187,7 +197,7 @@ func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.H
 				// Every read made for the assistant is logged as the user
 				// it works for, with the assistant's via (spec ai-agent
 				// S-7). The path only: a query may carry data.
-				log.Info("agent read", "method", r.Method, "path", r.URL.Path, "actor", a.String(),
+				log.Info("agent request", "method", r.Method, "path", r.URL.Path, "actor", a.String(),
 					"task", ag.TaskID, "via", a.Via)
 			}
 			next.ServeHTTP(w, r.WithContext(WithActor(withChallenge(r.Context(), o.MetadataURL), a)))

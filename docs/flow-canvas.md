@@ -9,11 +9,11 @@ sit, never the configuration.
 
 ## Roles
 
-| Role     | Can                                                                                            |
-| -------- | ---------------------------------------------------------------------------------------------- |
-| viewer   | Look at every canvas, trace a call, read warnings, look at AI proposals drawn on the canvas.   |
-| operator | All of that, plus move nodes, draft changes and apply them, ask the AI, apply AI proposals.    |
-| admin    | All of that, including admin-only objects (paging groups, conferences, multicast) in a change. |
+| Role     | Can                                                                                                           |
+| -------- | ------------------------------------------------------------------------------------------------------------- |
+| viewer   | Look at every canvas, trace a call, read warnings, look at AI proposals drawn on the canvas.                  |
+| operator | All of that, plus move nodes, draft changes and apply them, ask the AI, apply AI proposals, let the AI apply. |
+| admin    | All of that, including admin-only objects (paging groups, conferences, multicast) in a change.                |
 
 ## Editing
 
@@ -47,7 +47,8 @@ role.
   matched route, the schedule or override, the key pressed, the fallback.
 - **Propose a change.** Describe it ("after 18:00 send the main number to the
   voicemail of 100"). The assistant answers with a proposal whose single
-  action is a configuration batch.
+  action is a configuration batch, or, with **Let AI apply changes** on,
+  applies that batch itself (below).
 
 Every question carries the canvas as context (the canvas id, the selected
 node and a traced call). The assistant receives it as data, not instructions,
@@ -56,7 +57,8 @@ role.
 
 ### A proposal on the canvas
 
-A proposal is never applied by the assistant. When it is made, Hello checks
+With **Let AI apply changes** off (the default) a proposal is never applied by
+the assistant. When it is made, Hello checks
 its batch the way an apply would: every operation must be an object write a
 batch accepts, none may set a password, PIN or secret, there are at most 50,
 and the whole batch is dry-run as you, with your role, and rolled back. A
@@ -81,6 +83,29 @@ If the configuration changed since the proposal was made, applying is refused
 when any object the batch changes changed too (the proposal becomes stale and
 nothing is sent); changes to other objects do not matter.
 
+### Let AI apply changes
+
+The panel's switch **Let AI apply changes** is off whenever the panel opens
+(ask first). It holds for the questions you send while the panel stays open on
+this canvas, and each question records whether it was on. With it on, the
+assistant may apply the change you asked for itself, through its one write
+tool (`applyConfigBatch`):
+
+- the batch is checked exactly as a proposal's (same operations, no secrets,
+  at most 50, dry-run as you) and stored as a proposal, so the panel and the
+  proposal page show it;
+- it is then applied in one transaction as you, with your role: a viewer can
+  never apply (the panel offers no switch, and the API refuses the batch), and
+  an operator cannot apply admin-only objects;
+- the assistant can do nothing else with write access: no direct object
+  write, layout or revert, only that one batch per question.
+
+When it applied something, the panel shows **Applied by the assistant for
+you** with the counts and the operations, marks the new and changed nodes on
+the canvas, and offers **Revert** (dry run first, then one confirmation), the
+same revert as **History**. A refused, stale or failed batch changes nothing;
+the answer says why.
+
 ### What is logged
 
 - The question, with its canvas context, and the answer are kept in the AI
@@ -91,6 +116,11 @@ nothing is sent); changes to other objects do not matter.
 - An applied proposal is one configuration batch whose origin (`via`) is
   `ai-proposal:<id>`, with an audit row per object it changed. It appears in the
   canvas **History** and can be reverted there.
+- A batch the assistant applied itself names you as the actor and has the
+  origin `ai:<session>`: the batch row, the proposal (`appliedVia`, `batchId`)
+  and the proposal's audit row carry it, and each object it changed has its own
+  audit row. **History** and the proposal page show it as applied by the
+  assistant for you, and it reverts like any other batch.
 
 ## For MCP clients
 

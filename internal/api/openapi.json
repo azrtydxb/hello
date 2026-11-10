@@ -20028,7 +20028,7 @@
           },
           "via": {
             "type": "string",
-            "description": "The origin: an OAuth client id, ai-proposal:<id> or ai-assistant; empty for the console and API tokens."
+            "description": "The origin: an OAuth client id, ai-proposal:<id> (a person applied an AI proposal), ai:<session> (the assistant applied its own batch for the actor) or ai-assistant; empty for the console and API tokens."
           },
           "baseRevision": {
             "type": "integer",
@@ -22161,7 +22161,14 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["call", "page", "intercom", "conference", "door", "callback"],
+            "enum": [
+              "call",
+              "page",
+              "intercom",
+              "conference",
+              "door",
+              "callback"
+            ],
             "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or door for a door station or a Door group, or callback for a call Hello placed to a queue caller who asked to be called back."
           },
           "ringTag": {
@@ -25004,7 +25011,9 @@
           "dismissedAt",
           "dismissReason",
           "dismissText",
-          "failure"
+          "failure",
+          "appliedVia",
+          "batchId"
         ],
         "properties": {
           "id": {
@@ -25112,6 +25121,15 @@
               }
             ],
             "description": "Why a failed proposal stopped."
+          },
+          "appliedVia": {
+            "type": ["string", "null"],
+            "description": "How an applied proposal was applied: `ai:<session>` when the assistant applied its own batch for appliedBy (the user turned on \"Let AI apply changes\"); null when appliedBy applied it."
+          },
+          "batchId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The configuration batch an applied batch proposal ran as: revertConfigBatch undoes it. Null otherwise, and once the batch is pruned."
           }
         }
       },
@@ -25275,6 +25293,11 @@
         "additionalProperties": false,
         "description": "What the console showed when the question was asked from a call-flow canvas. The model receives it as data with the question and reads the graph and traces the call with its own tools.",
         "properties": {
+          "allowApply": {
+            "type": "boolean",
+            "default": false,
+            "description": "The canvas switch \"Let AI apply changes\". When true the assistant may apply the change asked for itself: its batch is validated and dry-run as a proposal, then applied through applyConfigBatch as the asking user with their role (a viewer never can), audited with via `ai:<session>` and revertible. False (ask first): a change is a proposal a person applies."
+          },
           "canvasId": {
             "type": "integer",
             "format": "int64",

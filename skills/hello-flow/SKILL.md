@@ -61,15 +61,21 @@ of it, and the dry run shows exactly what it will do first.
 
 ## AI proposals on the canvas
 
-The in-product assistant never applies a change itself. It answers a change
-request with a proposal whose one action is `applyConfigBatch`; Hello has
-already dry-run it as the user and drawn it on the call-flow canvas
-(`/flow/<canvasId>?proposal=<id>`). To review one: `getAIProposal` and read
-the action's `preview` (`results`, `warnings`, `flowDiff`). Only a person
-applies or discards it, in the console: applying and dismissing proposals are
-not MCP tools (human in the loop). The applied batch shows in
-`listConfigBatches` with `via` `ai-proposal:<id>` and reverts like any
-other.
+By default the in-product assistant does not apply a change itself. It
+answers a change request with a proposal whose one action is
+`applyConfigBatch`; Hello has already dry-run it as the user and drawn it on
+the call-flow canvas (`/flow/<canvasId>?proposal=<id>`). To review one:
+`getAIProposal` and read the action's `preview` (`results`, `warnings`,
+`flowDiff`). Only a person applies or discards it, in the console: applying
+and dismissing proposals are not MCP tools (human in the loop). The applied
+batch shows in `listConfigBatches` with `via` `ai-proposal:<id>` and reverts
+like any other.
+
+When the user turned on **Let AI apply changes** in the canvas, the assistant
+applies its batch itself, as that user with their role. Such a proposal is
+`applied` with `appliedVia` `ai:<session>` and `batchId`; the batch shows in
+`listConfigBatches` with that `via` and the user as `actor`. Revert it like
+any other: `revertConfigBatch` with `dryRun` first.
 
 ## References
 

@@ -33,11 +33,24 @@ export interface FlowAI {
   marks: Marks;
   /** Marks the overlay on a built view. */
   mark: (view: CanvasView) => CanvasView;
-  /** After an apply: the new graph and where the created nodes go. */
-  applied: (before: FlowGraph) => Promise<{
+  /**
+   * After an apply: the new graph and where the created nodes go. With p,
+   * the batch of p (one the assistant applied itself, never drawn as a
+   * proposal) instead of the drawn one.
+   */
+  applied: (
+    before: FlowGraph,
+    p?: AIProposal,
+  ) => Promise<{
     graph: FlowGraph;
     nodes: { node: string; x: number; y: number }[];
   }>;
+  /** The batch the assistant applied itself, shown in the panel, or null. */
+  aiApplied: AIProposal | null;
+  /** Shows what the assistant applied: its nodes marked new and changed. */
+  showAIApplied: (p: AIProposal, created: string[]) => void;
+  /** Hides it (after a revert, or when dismissed). */
+  clearAIApplied: () => void;
 }
 
 export function useFlowAI({
@@ -54,6 +67,8 @@ export function useFlowAI({
 }): FlowAI {
   const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<AIProposal | null>(null);
+  const [aiApplied, setAIApplied] = useState<AIProposal | null>(null);
+  const [appliedMarks, setAppliedMarks] = useState<Marks>({});
 
   useEffect(() => {
     if (!proposalId) return;
@@ -78,8 +93,11 @@ export function useFlowAI({
     [positions, graph, diff],
   );
   const drawnMarks = useMemo(
-    () => (diff ? { ...marks, ...overlayMarks(diff) } : marks),
-    [marks, diff],
+    () =>
+      diff
+        ? { ...marks, ...appliedMarks, ...overlayMarks(diff) }
+        : { ...marks, ...appliedMarks },
+    [marks, diff, appliedMarks],
   );
   const mark = useCallback(
     (view: CanvasView) => {
@@ -97,16 +115,34 @@ export function useFlowAI({
     [diff],
   );
   const applied = useCallback(
-    async (before: FlowGraph) => {
+    async (before: FlowGraph, p?: AIProposal) => {
       const after = await getFlowGraph();
-      const nodes = diff
-        ? placementsAfterApply(before, after, diff.added, drawnPositions)
-        : [];
+      const d = p ? (batchActionOf(p)?.preview?.flowDiff ?? null) : diff;
+      // Where the ghosts of d would have been drawn: next to what they
+      // connect to, as for a proposal shown before its apply.
+      const at =
+        p && d
+          ? ghostPositions(positions, overlayGraph(before, d), d)
+          : drawnPositions;
+      const nodes = d ? placementsAfterApply(before, after, d.added, at) : [];
       setPreview(null);
       return { graph: after, nodes };
     },
-    [diff, drawnPositions],
+    [diff, drawnPositions, positions],
   );
+  const showAIApplied = useCallback((p: AIProposal, created: string[]) => {
+    const d = batchActionOf(p)?.preview?.flowDiff;
+    const m: Marks = {};
+    for (const n of d?.changed ?? []) m[n.id] = "changed";
+    for (const id of created) m[id] = "new";
+    setAppliedMarks(m);
+    setAIApplied(p);
+    setOpen(true);
+  }, []);
+  const clearAIApplied = useCallback(() => {
+    setAppliedMarks({});
+    setAIApplied(null);
+  }, []);
 
   return {
     open,
@@ -118,5 +154,8 @@ export function useFlowAI({
     marks: drawnMarks,
     mark,
     applied,
+    aiApplied,
+    showAIApplied,
+    clearAIApplied,
   };
 }

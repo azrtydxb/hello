@@ -2,13 +2,16 @@
 // canvas (explain a flow, why a traced call went where it did) or for a
 // change. A change comes back as a proposal whose configuration batch is
 // drawn on the canvas as an overlay; the operator applies or discards it.
-// Nothing is applied without that click. Viewers may look at proposals but
-// not ask; with no model configured the panel says so.
+// With "Let AI apply changes" on (off each time the panel opens: ask first)
+// the assistant applies its batch itself, as the operator; the panel then
+// shows what it applied, marked on the canvas, with Revert. Viewers may look
+// at proposals but not ask; with no model configured the panel says so.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { errorMessage } from "../../../api";
 import {
+  appliedByAI,
   applyProposal,
   batchActionOf,
   createSession,
@@ -22,6 +25,10 @@ import {
   type AIStatus,
 } from "../../../api/aiagent";
 import { streamMessage, type StreamEvent } from "../../../api/aistream";
+import {
+  revertConfigBatch,
+  type BatchResponse,
+} from "../../../api/configBatch";
 import type { FlowGraph } from "../../../api/flow";
 import type { FlowTraceQuery } from "../../../api/flowTrace";
 import { AIOff } from "../../../components/ai/AIOff";
@@ -34,8 +41,10 @@ import {
   ConfirmDialog,
   Drawer,
   Spinner,
+  Switch,
 } from "../../../design/azrty/components";
 import { useCan } from "../../../role";
+import { ReviewDialog } from "../ReviewDialog";
 import { overlayCounts } from "./overlay";
 import "./flowai.css";
 
@@ -51,6 +60,12 @@ export interface FlowAIPanelProps {
   onPreview: (p: AIProposal | null) => void;
   /** An applied proposal: the canvas reloads and places what it created. */
   onApplied: (p: AIProposal) => Promise<void>;
+  /** The batch the assistant applied itself, shown in the panel, or null. */
+  aiApplied: AIProposal | null;
+  /** The assistant applied its batch: reload, place and mark it. */
+  onAIApplied: (p: AIProposal) => Promise<void>;
+  /** The assistant's batch was reverted (null) or hidden: clear it. */
+  onAIAppliedClear: (reverted: boolean) => void;
   onClose: () => void;
 }
 
@@ -64,6 +79,8 @@ interface Exchange {
   done: boolean;
   error?: string;
   proposalId?: string | null;
+  /** The assistant applied the proposal itself. */
+  applied?: boolean;
 }
 
 /** The question context the canvas sends with every message. */
@@ -71,8 +88,10 @@ export function contextOf(
   canvasId: number | string,
   selected: string | null,
   trace: FlowTraceQuery | null,
+  allowApply = false,
 ): AIMessageContext {
   const c: AIMessageContext = { canvasId: Number(canvasId) };
+  if (allowApply) c.allowApply = true;
   if (selected) c.nodes = [selected];
   if (trace) {
     c.trace = { from: trace.from, number: trace.number };
@@ -113,7 +132,7 @@ export function FlowAIPanel(props: FlowAIPanelProps) {
         inline
         open
         title="Ask AI"
-        description="Explain this flow, ask why a call went somewhere, or describe a change. A change is shown on the canvas first; nothing is applied until you apply it."
+        description="Explain this flow, ask why a call went somewhere, or describe a change. A change is shown on the canvas first and applied only when you apply it, unless you let the AI apply changes."
         onClose={onClose}
         width="100%"
       >
@@ -140,8 +159,15 @@ function Enabled({
   preview,
   onPreview,
   onApplied,
+  aiApplied,
+  onAIApplied,
+  onAIAppliedClear,
 }: FlowAIPanelProps) {
   const canAsk = useCan("operator");
+  // Ask first: off each time the panel opens, for the questions sent while
+  // it stays open. Each question carries it; the server gives the assistant
+  // its write tool only for a question sent with it on.
+  const [allowApply, setAllowApply] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
@@ -157,17 +183,21 @@ function Enabled({
       xs.map((x, i) => (i === xs.length - 1 ? { ...x, ...patch } : x)),
     );
 
-  const showProposal = useCallback(
-    async (id: string) => {
-      try {
-        const p = await getProposal(id);
-        if (batchActionOf(p)) onPreview(p);
-      } catch {
-        // The answer still links to it.
+  // The proposal an answer links: drawn on the canvas when it is open, or,
+  // when the assistant applied it itself, shown as what it applied.
+  async function showProposal(id: string) {
+    try {
+      const p = await getProposal(id);
+      if (appliedByAI(p)) {
+        update({ applied: true });
+        await onAIApplied(p);
+      } else if (batchActionOf(p) && p.status === "open") {
+        onPreview(p);
       }
-    },
-    [onPreview],
-  );
+    } catch {
+      // The answer still links to it.
+    }
+  }
 
   async function ask(question: string) {
     const content = question.trim();
@@ -213,7 +243,7 @@ function Enabled({
         content,
         onEvent,
         c.signal,
-        contextOf(canvasId, selected, trace),
+        contextOf(canvasId, selected, trace, allowApply),
       );
       switch (out.kind) {
         case "done":
@@ -263,6 +293,13 @@ function Enabled({
 
   return (
     <div className="flow-ai">
+      {aiApplied && (
+        <AIAppliedReview
+          proposal={aiApplied}
+          canRevert={canAsk}
+          onClear={onAIAppliedClear}
+        />
+      )}
       {preview && (
         <ProposalReview
           proposal={preview}
@@ -314,6 +351,17 @@ function Enabled({
               void ask(draft);
             }}
           >
+            <Switch
+              label="Let AI apply changes"
+              hint={
+                allowApply
+                  ? "The assistant applies the change you ask for as you, audited as applied by the AI. You can revert it."
+                  : "Off: a change is shown on the canvas for you to apply."
+              }
+              checked={allowApply}
+              disabled={busy}
+              onChange={(e) => setAllowApply(e.target.checked)}
+            />
             <label htmlFor="flow-ai-message">Ask, or describe a change</label>
             <textarea
               id="flow-ai-message"
@@ -360,7 +408,9 @@ function Enabled({
               {x.proposalId && (
                 <p>
                   <Link to={`/ai/proposals/${x.proposalId}`}>
-                    The proposal with its full diff
+                    {x.applied
+                      ? "What the assistant applied, with its full diff"
+                      : "The proposal with its full diff"}
                   </Link>
                 </p>
               )}
@@ -370,6 +420,115 @@ function Enabled({
       )}
       <OpenProposals current={preview?.id ?? null} onPreview={onPreview} />
     </div>
+  );
+}
+
+/**
+ * The batch the assistant applied itself (with "Let AI apply changes" on):
+ * what it changed, that the AI applied it for you, and Revert, which is the
+ * history's revert (a dry run first, then one confirmation).
+ */
+export function AIAppliedReview({
+  proposal,
+  canRevert,
+  onClear,
+}: {
+  proposal: AIProposal;
+  canRevert: boolean;
+  onClear: (reverted: boolean) => void;
+}) {
+  const [revert, setRevert] = useState<BatchResponse | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const prev = batchActionOf(proposal)?.preview;
+  const counts = prev ? overlayCounts(prev.flowDiff) : null;
+  const batchId = proposal.batchId;
+
+  const startRevert = async () => {
+    if (!batchId) return;
+    setBusy(true);
+    setError("");
+    try {
+      setRevert(await revertConfigBatch(batchId, true));
+    } catch (e) {
+      setError(`Cannot revert: ${errorMessage(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section
+      className="flow-panel__section flow-ai__review"
+      aria-label={`Applied by the assistant: ${proposal.title}`}
+    >
+      <h3>
+        {proposal.title} <Badge tone="info">Applied by the assistant</Badge>
+      </h3>
+      <p>
+        The assistant applied this for you, as you, at{" "}
+        {proposal.appliedAt
+          ? new Date(proposal.appliedAt).toLocaleString()
+          : "now"}
+        . It is audited as applied by the AI on your behalf and is in the
+        history.
+      </p>
+      <PlainText text={proposal.rationale} className="aix-muted" />
+      {counts && (
+        <p>
+          <Badge tone="good">{counts.added} new</Badge>{" "}
+          <Badge tone="warn">{counts.changed} changed</Badge>{" "}
+          <Badge tone="bad">{counts.removed} deleted</Badge>{" "}
+          <Badge tone="outline">{counts.connections} connections</Badge>
+        </p>
+      )}
+      {prev && (
+        <ol className="flow-ai__ops" aria-label="Applied operations">
+          {prev.results.map((r, i) => (
+            <li key={i}>
+              {r.status} {r.node ?? r.operationId}
+            </li>
+          ))}
+        </ol>
+      )}
+      {error && <Alert tone="bad">{error}</Alert>}
+      <div className="flow-ai__actions">
+        {canRevert && batchId && (
+          <Button
+            size="sm"
+            variant="secondary"
+            icon="undo-2"
+            disabled={busy}
+            onClick={() => void startRevert()}
+          >
+            Revert
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={() => onClear(false)}>
+          Hide
+        </Button>
+        <Link to={`/ai/proposals/${proposal.id}`}>Full diff</Link>
+      </div>
+      {revert && batchId && (
+        <ReviewDialog
+          title="Revert what the assistant applied?"
+          description={`Puts back what "${proposal.title}" changed.`}
+          items={revert.results.map((r) => ({
+            title: `${r.status} ${r.node ?? r.operationId}`,
+            result: r,
+          }))}
+          warnings={revert.warnings}
+          skipped={revert.skipped}
+          confirmLabel="Revert"
+          onClose={() => setRevert(null)}
+          onConfirm={async () => {
+            await revertConfigBatch(batchId, false);
+            setRevert(null);
+            onClear(true);
+          }}
+        />
+      )}
+    </section>
   );
 }
 

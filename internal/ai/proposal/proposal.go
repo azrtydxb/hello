@@ -110,6 +110,11 @@ type Proposal struct {
 	AppliedAt, DismissedAt                    *time.Time
 	DismissReason, DismissText                *string
 	Failure                                   *Failure
+	// AppliedVia is how an applied proposal was applied: "ai:<session>"
+	// when the assistant applied it for AppliedBy (ViaAI), nil when
+	// AppliedBy did. BatchID is the configuration batch an applied batch
+	// proposal ran as, the one a revert undoes.
+	AppliedVia, BatchID *string
 }
 
 // Identity is who a validation reads as: the user the assistant works for

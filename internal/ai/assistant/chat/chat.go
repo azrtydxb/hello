@@ -53,6 +53,12 @@ type Context struct {
 	Nodes []string `json:"nodes,omitempty"`
 	// Trace is a call traced on the canvas (traceFlow's parameters).
 	Trace *TraceContext `json:"trace,omitempty"`
+	// AllowApply is the canvas switch "Let AI apply changes" as it stood
+	// when the question was asked (flow canvas decision of 2026-11-10):
+	// only then does the assistant get its write tool for this question,
+	// and the batch it applies is audited as applied by the AI for the
+	// user. Off (ask first) by default: a change is a proposal.
+	AllowApply bool `json:"allowApply,omitempty"`
 }
 
 // TraceContext is a traced call: traceFlow's query parameters.

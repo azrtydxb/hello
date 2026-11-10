@@ -143,6 +143,11 @@ export interface AIMessageContext {
     at?: string;
     digits?: string;
   };
+  /**
+   * The canvas switch "Let AI apply changes": the assistant may apply this
+   * question's change itself, as the asking user. Off (ask first) by default.
+   */
+  allowApply?: boolean;
 }
 
 export interface ProposalFailure {
@@ -174,7 +179,18 @@ export interface AIProposal {
   dismissReason: string | null;
   dismissText: string | null;
   failure: ProposalFailure | null;
+  /** `ai:<session>` when the assistant applied it for appliedBy; null when appliedBy did. */
+  appliedVia: string | null;
+  /** The configuration batch an applied batch proposal ran as (what a revert undoes). */
+  batchId: string | null;
 }
+
+/** The via of a batch the assistant applied itself for the user. */
+export const VIA_AI = "ai:";
+
+/** Whether the assistant applied this proposal itself (not a person). */
+export const appliedByAI = (p: AIProposal | null | undefined) =>
+  !!p && p.status === "applied" && !!p.appliedVia?.startsWith(VIA_AI);
 
 export type DismissReason = "not_needed" | "wrong" | "later" | "other";
 export const DISMISS_REASONS: readonly {

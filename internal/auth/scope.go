@@ -199,6 +199,15 @@ type Agent struct {
 	// lets the validator check a batch exactly as the applier would run
 	// it, with nothing committed.
 	Preview bool
+	// Apply marks the assistant applying its own batch for the user (flow
+	// canvas decision of 2026-11-10, the user turned on "Let AI apply
+	// changes"): like Preview it holds the write and admin scopes with the
+	// user's own role, so a viewer is still refused, but the API admits its
+	// writes only on POST /api/v1/config/batch and for the operations
+	// replayed inside that batch. A revert, a layout write or any direct
+	// object write is refused. Its changes carry the via the caller set
+	// (WithVia, "ai:<session>"). Preview wins when both are set.
+	Apply bool
 }
 
 type agentKey struct{}

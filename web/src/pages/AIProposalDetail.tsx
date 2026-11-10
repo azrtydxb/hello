@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { errorMessage } from "../api";
 import {
+  appliedByAI,
   applyProposal,
   BATCH_OP,
   DISMISS_REASONS,
@@ -96,6 +97,11 @@ function Detail({ id }: { id: string }) {
         <div className="aix-card__head">
           <ProposalStatusBadge status={p.status} />
           <Badge tone="outline">from {p.source}</Badge>
+          {appliedByAI(p) && (
+            <Badge tone="info" icon="sparkles">
+              Applied by the assistant for the user who asked
+            </Badge>
+          )}
           {p.hasDelete && (
             <Badge tone="bad" icon="trash-2">
               Deletes

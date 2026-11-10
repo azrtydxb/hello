@@ -1,9 +1,10 @@
 // Package assistant is the in-product AI assistant (spec ai-agent S-6 to
 // S-9): chat sessions and messages, the read-only tools the model may call,
 // replayed through Hello's own API as the user with scope read only, and
-// the message task whose structured answer may carry a proposal. Nothing
-// here changes configuration: a proposal is validated and stored for a
-// human to apply.
+// the message task whose structured answer may carry a proposal. A
+// proposal is validated and stored for a human to apply; only when the user
+// turned on "Let AI apply changes" for a question may the assistant apply
+// its own batch, as the user (apply.go).
 package assistant
 
 import (
@@ -83,6 +84,10 @@ type Tasks interface {
 type Proposals struct {
 	Validator proposal.Validator
 	Store     proposal.Store
+	// Applier, when set, lets the assistant apply its own batch for a
+	// question asked with "Let AI apply changes" on (ApplyTool); nil keeps
+	// every change a proposal.
+	Applier AgentApplier
 }
 
 // Config wires an Assistant.

@@ -1330,6 +1330,26 @@ function CanvasView({
               }
               setNote(`Applied the AI proposal "${p.title}".`);
             }}
+            aiApplied={ai.aiApplied}
+            onAIApplied={async (p) => {
+              const placed = await ai.applied(graph, p);
+              acceptGraph(placed.graph);
+              if (placed.nodes.length > 0) {
+                dispatch({ type: "place", nodes: placed.nodes });
+              }
+              ai.showAIApplied(
+                p,
+                placed.nodes.map((n) => n.node),
+              );
+              setNote(`The assistant applied "${p.title}" for you.`);
+            }}
+            onAIAppliedClear={(reverted) => {
+              ai.clearAIApplied();
+              if (reverted) {
+                setNote("Reverted what the assistant applied.");
+                void reload().catch(() => undefined);
+              }
+            }}
             onClose={() => ai.setOpen(false)}
           />
         )}

@@ -66,6 +66,7 @@ var toolLabels = map[string]string{
 	"listFlowCanvases":      "Reading call flow canvases…",
 	"traceFlow":             "Tracing a call…",
 	DescribeTool:            "Reading how to make the change…",
+	ApplyTool:               "Applying the change…",
 }
 
 // ToolLabel is the human label of a tool call for the typing indicator.

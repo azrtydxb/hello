@@ -133,6 +133,8 @@ const WEB = {
     dismissReason: 0,
     dismissText: 0,
     failure: 0,
+    appliedVia: 0,
+    batchId: 0,
   } satisfies Record<keyof AIProposal, 0>,
   AISession: {
     id: 0,

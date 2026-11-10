@@ -77,9 +77,10 @@ func (r answered) done(taskID string, userMessageID int64) chat.Done {
 			ReasoningTokens: r.usage.ReasoningTokens, Calls: r.usage.Calls}}
 }
 
-// answer is the message task: one Generate with the read tools, the answer
-// validated against the calls made, its proposal validated and stored, and
-// the assistant message stored with the calls' summaries. With a sink it
+// answer is the message task: one Generate with the read tools (and the
+// write tool when the user allowed it), the answer validated against the
+// calls made, its proposal validated and stored, and the assistant message
+// stored with the calls' summaries, linking the batch applied if any. With a sink it
 // also reports progress to it, and stops when the sink's reader is gone.
 func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID string, history []Message, k *sink) (answered, error) {
 	if len(history) == 0 {
@@ -97,6 +98,14 @@ func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID 
 	}
 
 	current := history[len(history)-1]
+	system := systemPrompt
+	if current.Context != nil && current.Context.AllowApply {
+		// The user let the assistant apply this question's change.
+		if t := a.applyTool(ts, ident, sessionID); t != nil {
+			tools = append(tools, t)
+			system += "\n" + applyPrompt
+		}
+	}
 	prior := make([]historyEntry, 0, len(history)-1)
 	for _, m := range history[:len(history)-1] {
 		prior = append(prior, historyEntry{Role: m.Role, Content: m.Content, At: m.CreatedAt, Context: m.Context})
@@ -114,7 +123,7 @@ func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID 
 	started := time.Now()
 	ans, usage, err := a.cfg.Generate(ctx, ai.Call[Answer]{
 		Feature:     Feature,
-		System:      systemPrompt,
+		System:      system,
 		Data:        messageData(prior, findings, current.Context),
 		Prompt:      current.Content,
 		Tools:       tools,
@@ -156,6 +165,11 @@ func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID 
 		default:
 			proposalID = &id
 		}
+	}
+	if applied := ts.appliedProposal(); applied != "" {
+		// The batch the assistant applied (or tried to) is what the
+		// message links, so the canvas shows what was done.
+		proposalID = &applied
 	}
 	calls := ts.Calls()
 	citations := ans.Citations

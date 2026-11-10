@@ -24,6 +24,8 @@ const PROPOSAL: AIProposal = {
   dismissReason: null,
   dismissText: null,
   failure: null,
+  appliedVia: null,
+  batchId: null,
   actions: [
     {
       operationId: "applyConfigBatch",
@@ -159,6 +161,10 @@ describe("AI on the flow canvas", () => {
       within(panel).getByText(/needs the operator role/),
     ).toBeInTheDocument();
     expect(within(panel).queryByRole("button", { name: "Send" })).toBeNull();
+    // A viewer can never let the AI apply.
+    expect(
+      within(panel).queryByRole("switch", { name: /Let AI apply changes/ }),
+    ).toBeNull();
     await waitFor(() =>
       expect(nodeEl("ivr:90")).toHaveClass("flow-node--ai-added"),
     );
@@ -185,6 +191,10 @@ describe("AI on the flow canvas", () => {
       await within(panel).findByLabelText("Ask, or describe a change"),
       { target: { value: "Replace sales with a menu" } },
     );
+    // Ask first is the default.
+    expect(
+      within(panel).getByRole("switch", { name: /Let AI apply changes/ }),
+    ).not.toBeChecked();
     fireEvent.click(within(panel).getByRole("button", { name: "Send" }));
 
     expect(
@@ -239,5 +249,151 @@ describe("AI on the flow canvas", () => {
     const dismiss = calls.find((c) => c.url.endsWith("/dismiss"));
     expect(dismiss?.body).toEqual({ reason: "not_needed" });
     expect(calls.some((c) => c.url.endsWith("/apply"))).toBe(false);
+  });
+
+  it("with Let AI apply changes on, shows what the assistant applied, marked, and reverts it", async () => {
+    const aiApplied: AIProposal = {
+      ...PROPOSAL,
+      id: "p2",
+      status: "applied",
+      appliedBy: 2,
+      appliedAt: "2026-11-10T10:00:02Z",
+      appliedVia: "ai:s1",
+      batchId: "b9",
+      actions: [
+        {
+          ...PROPOSAL.actions[0]!,
+          preview: {
+            ...PROPOSAL.actions[0]!.preview!,
+            flowDiff: {
+              ...PROPOSAL.actions[0]!.preview!.flowDiff,
+              changed: [GRAPH.nodes[0]!],
+            },
+          },
+        },
+      ],
+    };
+    let reverted = false;
+    const calls = api("operator", {
+      "POST /api/v1/ai/sessions": () =>
+        json(
+          { id: "s1", owner: 2, title: "", createdAt: "", lastActiveAt: "" },
+          201,
+        ),
+      "POST /api/v1/ai/sessions/s1/messages": stream("p2"),
+      "GET /api/v1/ai/proposals/p2": () => json(aiApplied),
+      "POST /api/v1/config/batches/b9/revert": () => {
+        const sent = calls.filter((c) => c.url.endsWith("/revert")).at(-1)!;
+        if (!(sent.body as { dryRun: boolean }).dryRun) reverted = true;
+        return json({
+          applied: !(sent.body as { dryRun: boolean }).dryRun,
+          baseRevision: 12,
+          revision: 13,
+          results: [
+            {
+              operationId: "deleteIVRMenu",
+              status: "deleted",
+              node: "ivr:90",
+              before: {},
+              after: null,
+              diff: [],
+            },
+          ],
+          warnings: [],
+        });
+      },
+    });
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI" }));
+    const panel = await screen.findByRole("complementary", { name: "Ask AI" });
+    const toggle = await within(panel).findByRole("switch", {
+      name: /Let AI apply changes/,
+    });
+    fireEvent.click(toggle);
+    expect(toggle).toBeChecked();
+    fireEvent.change(
+      within(panel).getByLabelText("Ask, or describe a change"),
+      {
+        target: { value: "Replace sales with a menu" },
+      },
+    );
+    fireEvent.click(within(panel).getByRole("button", { name: "Send" }));
+
+    const review = await within(panel).findByRole("region", {
+      name: `Applied by the assistant: ${PROPOSAL.title}`,
+    });
+    const post = calls.find((c) => c.url === "/api/v1/ai/sessions/s1/messages");
+    expect(post?.body).toEqual({
+      content: "Replace sales with a menu",
+      context: { canvasId: 1, allowApply: true },
+    });
+    expect(
+      within(review).getByText(/applied this for you/),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByRole("link", {
+        name: "What the assistant applied, with its full diff",
+      }),
+    ).toBeInTheDocument();
+    // The console applied nothing itself: the assistant did.
+    expect(calls.some((c) => c.url.endsWith("/apply"))).toBe(false);
+    // What changed is marked on the canvas, not drawn as a ghost.
+    await waitFor(() =>
+      expect(nodeEl("inboundRoute:1")?.querySelector(".flow-node")).toHaveClass(
+        "flow-node--draft-changed",
+      ),
+    );
+    expect(nodeEl("ivr:90")).toBeNull();
+    await screen.findByText(/The assistant applied ".*" for you/);
+
+    fireEvent.click(within(review).getByRole("button", { name: "Revert" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Revert what the assistant applied?",
+    });
+    expect(reverted).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Revert" }));
+    await waitFor(() => expect(reverted).toBe(true));
+    expect(
+      calls.filter((c) => c.url.endsWith("/revert")).map((c) => c.body),
+    ).toEqual([{ dryRun: true }, { dryRun: false }]);
+    await waitFor(() =>
+      expect(
+        within(panel).queryByRole("region", {
+          name: `Applied by the assistant: ${PROPOSAL.title}`,
+        }),
+      ).toBeNull(),
+    );
+    await screen.findByText("Reverted what the assistant applied.");
+  });
+
+  it("labels a batch the assistant applied in the history", async () => {
+    api("operator", {
+      "GET /api/v1/config/batches?limit=30": () =>
+        json({
+          items: [
+            {
+              id: "b9",
+              actor: "user:ann",
+              via: "ai:s1",
+              baseRevision: 12,
+              revision: 13,
+              opCount: 2,
+              createdAt: "2026-11-10T10:00:02Z",
+            },
+          ],
+        }),
+    });
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    const history = await screen.findByRole("dialog", {
+      name: "Change history",
+    });
+    expect(
+      await within(history).findByText(/by the assistant for user:ann/),
+    ).toBeInTheDocument();
+    expect(
+      within(history).getByText("Applied by the assistant"),
+    ).toBeInTheDocument();
+    expect(within(history).queryByText(/\(ai:s1\)/)).toBeNull();
   });
 });
