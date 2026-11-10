@@ -4,6 +4,7 @@ package api
 // CSV phone import (plan contract 7).
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -294,11 +295,13 @@ type firmwareView struct {
 	SHA256     string      `json:"sha256"`
 	UploadedAt time.Time   `json:"uploadedAt"`
 	Pinned     bool        `json:"pinned"`
+	// UpgradeHour is the pin's daily upgrade hour (Grandstream), or null.
+	UpgradeHour *int `json:"upgradeHour"`
 }
 
 func viewFirmware(f store.FirmwareFile) firmwareView {
 	return firmwareView{ID: f.ID, Vendor: f.Vendor, ModelGlob: f.ModelGlob, Version: f.Version, Filename: f.Filename,
-		Size: f.Size, SHA256: f.SHA256, UploadedAt: f.UploadedAt, Pinned: f.Pinned}
+		Size: f.Size, SHA256: f.SHA256, UploadedAt: f.UploadedAt, Pinned: f.Pinned, UpgradeHour: f.UpgradeHour}
 }
 
 func (s *server) listFirmware(w http.ResponseWriter, r *http.Request) {
@@ -518,6 +521,9 @@ func (s *server) putFirmwarePins(w http.ResponseWriter, r *http.Request) {
 		if p.FirmwareID <= 0 {
 			fe.add(fmt.Sprintf("[%d].firmwareId", i), "is required")
 		}
+		if p.UpgradeHour != nil && (*p.UpgradeHour < 0 || *p.UpgradeHour > 23) {
+			fe.add(fmt.Sprintf("[%d].upgradeHour", i), "must be an hour from 0 to 23")
+		}
 	}
 	if len(fe) > 0 {
 		writeFields(w, fe)
@@ -526,6 +532,58 @@ func (s *server) putFirmwarePins(w http.ResponseWriter, r *http.Request) {
 	out, err := s.ProvStore.PutFirmwarePins(r.Context(), actor(r).String(), pins)
 	if err != nil {
 		s.provError(w, "firmware pins", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items(out))
+}
+
+var firmwareVersionRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$`)
+
+// listFirmwareMinimums returns the minimum and recommended version rules.
+func (s *server) listFirmwareMinimums(w http.ResponseWriter, r *http.Request) {
+	if s.provDisabled(w) {
+		return
+	}
+	out, err := s.ProvStore.ListFirmwareMinimums(r.Context())
+	if err != nil {
+		s.internal(w, "list firmware minimums", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items(out))
+}
+
+// putFirmwareMinimums replaces every minimum rule with the body's list (spec
+// S-26). A pin below a minimum is refused at the pin and not rendered.
+func (s *server) putFirmwareMinimums(w http.ResponseWriter, r *http.Request) {
+	if s.provDisabled(w) {
+		return
+	}
+	var rules []prov.FirmwareMinimum
+	if !decode(w, r, &rules) {
+		return
+	}
+	var fe fieldErrs
+	for i, m := range rules {
+		if !m.Vendor.Valid() {
+			fe.add(fmt.Sprintf("[%d].vendor", i), "must be a vendor")
+		}
+		if !globRe.MatchString(m.ModelGlob) {
+			fe.add(fmt.Sprintf("[%d].modelGlob", i), "must be 1-64 characters of a model name or * ? [ ]")
+		}
+		if m.MinVersion != "" && !firmwareVersionRe.MatchString(m.MinVersion) {
+			fe.add(fmt.Sprintf("[%d].minVersion", i), "must be a version such as 1.0.11.22, or empty")
+		}
+		if m.Recommended != "" && !firmwareVersionRe.MatchString(m.Recommended) {
+			fe.add(fmt.Sprintf("[%d].recommended", i), "must be a version such as 1.0.11.78, or empty")
+		}
+	}
+	if len(fe) > 0 {
+		writeFields(w, fe)
+		return
+	}
+	out, err := s.ProvStore.PutFirmwareMinimums(r.Context(), actor(r).String(), rules)
+	if err != nil {
+		s.provError(w, "firmware minimums", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, items(out))
@@ -822,14 +880,8 @@ func (s *server) importPhones(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "dryRun must be true or false")
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxImportBytes))
-	if err != nil {
-		badRequest(w, "the CSV body is larger than 1 MiB")
-		return
-	}
-	recs, err := readCSV(body)
-	if err != nil {
-		badRequest(w, err.Error())
+	recs, ok := phoneImportRecords(w, r)
+	if !ok {
 		return
 	}
 	rows, inputs, err := s.checkImport(r.Context(), recs)
@@ -837,7 +889,7 @@ func (s *server) importPhones(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "import phones: check", err)
 		return
 	}
-	ok := true
+	ok = true
 	for _, row := range rows {
 		ok = ok && len(row.Errors) == 0
 	}
@@ -858,6 +910,59 @@ func (s *server) importPhones(w http.ResponseWriter, r *http.Request) {
 	}
 	resp["created"] = len(created)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// phoneImportJSON is the JSON form of the import: the same columns as the
+// CSV, one object per row, checked by the same code.
+type phoneImportJSON struct {
+	Rows []struct {
+		MAC       string   `json:"mac"`
+		Vendor    string   `json:"vendor"`
+		Model     string   `json:"model"`
+		Extension string   `json:"extension"`
+		Label     string   `json:"label"`
+		BLF       []string `json:"blf"`
+	} `json:"rows"`
+}
+
+// phoneImportRecords reads the rows of an import, from text/csv (the
+// console) or JSON (agents), as the records checkImport validates. It
+// answers 400 itself and reports false.
+func phoneImportRecords(w http.ResponseWriter, r *http.Request) ([]csvRecord, bool) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxImportBytes))
+	if err != nil {
+		badRequest(w, "the body is larger than 1 MiB")
+		return nil, false
+	}
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		recs, err := readCSV(body)
+		if err != nil {
+			badRequest(w, err.Error())
+			return nil, false
+		}
+		return recs, true
+	}
+	var in phoneImportJSON
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		badRequest(w, "invalid JSON body: "+jsonProblem(err))
+		return nil, false
+	}
+	switch {
+	case len(in.Rows) == 0:
+		badRequest(w, "rows has no rows")
+		return nil, false
+	case len(in.Rows) > maxImportRows:
+		badRequest(w, fmt.Sprintf("at most %d rows per import", maxImportRows))
+		return nil, false
+	}
+	recs := make([]csvRecord, len(in.Rows))
+	for i, row := range in.Rows {
+		// "line" of a JSON row is its 1-based position in rows.
+		recs[i] = csvRecord{line: i + 1, fields: []string{row.MAC, row.Vendor, row.Model, row.Extension, row.Label, strings.Join(row.BLF, ";")}}
+	}
+	return recs, true
 }
 
 type csvRecord struct {

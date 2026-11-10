@@ -37,6 +37,7 @@ import {
   IntegrationsOverview,
 } from "./pages/Integrations";
 import { IntegrationEvents } from "./pages/IntegrationEvents";
+import { Webhooks } from "./pages/Webhooks";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
 import { AIProposalDetail } from "./pages/AIProposalDetail";
@@ -65,9 +66,11 @@ import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
 import { ProvSettings } from "./pages/ProvSettings";
 import { ProvTemplates } from "./pages/ProvTemplates";
+import { Dial } from "./pages/Dial";
 import { Placeholder } from "./pages/Placeholder";
 import { FlowCanvases } from "./pages/FlowCanvases";
 import { Users } from "./pages/Users";
+import { Backups } from "./pages/Backups";
 import { EmailSettings } from "./pages/EmailSettings";
 import { MyForwarding } from "./pages/myphone/MyForwarding";
 import { MyHistory } from "./pages/myphone/MyHistory";
@@ -90,6 +93,7 @@ import { Paging } from "./pages/Paging";
 import { Conferences } from "./pages/Conferences";
 import { Ivr } from "./pages/Ivr";
 import { Queues } from "./pages/Queues";
+import { QueueCallbacks } from "./pages/QueueCallbacks";
 import { Wallboard } from "./pages/Wallboard";
 import { TimeConditions } from "./pages/TimeConditions";
 import { ParkPickup } from "./pages/ParkPickup";
@@ -108,6 +112,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/phones": Phones,
   "/onboarding": Onboarding,
   "/phonebooks": Phonebooks,
+  "/dial": Dial,
   "/me/contacts": MyContacts,
   "/me/messages": MyMessages,
   "/messages": Messages,
@@ -115,6 +120,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/me/forwarding": MyForwarding,
   "/me/history": MyHistory,
   "/me/profile": MyProfile,
+  "/settings/backups": Backups,
   "/settings/email": EmailSettings,
   "/registrations": Registrations,
   "/calls": Calls,
@@ -127,6 +133,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/ring-groups": RingGroups,
   "/ring-tags": RingTags,
   "/door": Door,
+  "/ringing": RingTags,
   "/paging": Paging,
   "/conferences": Conferences,
   "/ivr": Ivr,
@@ -149,6 +156,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/integrations": IntegrationsOverview,
   "/integrations/api-access": IntegrationsApiAccess,
   "/integrations/events": IntegrationEvents,
+  "/integrations/webhooks": Webhooks,
 };
 
 /** The canvas pulls in the graph library, so it loads on first use. */
@@ -335,6 +343,7 @@ export function App() {
               }
             />
             <Route path="/history/:id" element={<CallDetail />} />
+            <Route path="/queues/:id/callbacks" element={<QueueCallbacks />} />
             <Route path="/ai/assistant/:id" element={<AIAssistant />} />
             <Route path="/ai/proposals/:id" element={<AIProposalDetail />} />
             {/* Phones sections; static paths outrank /phones/:id. */}

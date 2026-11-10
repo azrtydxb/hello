@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/store"
+	"github.com/azrtydxb/hello/internal/voiceprompt"
 )
 
 // IVR / auto-attendant menus (migration 00033). Reads are open to a viewer;
@@ -36,6 +38,7 @@ type ivrBody struct {
 	InterDigitTimeout *int               `json:"interDigitTimeout"`
 	MaxRetries        *int               `json:"maxRetries"`
 	AllowDirectDial   *bool              `json:"allowDirectDial"`
+	PromptLanguage    *string            `json:"promptLanguage"`
 	Timeout           *ivrDestBody       `json:"timeout"`
 	Invalid           *ivrDestBody       `json:"invalid"`
 	Options           *[]store.IVROption `json:"options"`
@@ -75,6 +78,9 @@ func (b ivrBody) toInput() store.IVRMenuInput {
 	if b.AllowDirectDial != nil {
 		in.AllowDirectDial = *b.AllowDirectDial
 	}
+	if b.PromptLanguage != nil {
+		in.PromptLanguage = strings.ToLower(strings.TrimSpace(*b.PromptLanguage))
+	}
 	if b.Timeout != nil {
 		in.Timeout = store.IVRDestination{Kind: b.Timeout.Kind, Target: b.Timeout.Target}
 	}
@@ -99,6 +105,8 @@ func validateIVRDestination(f *fieldErrs, path, kind, target string) {
 	switch kind {
 	case store.IVRHangup:
 		ok, want = target == "", `empty when kind is "hangup"`
+	case store.IVRDirectory:
+		ok, want = target == "", `empty when kind is "directory"`
 	case store.IVRExtension, store.IVRVoicemail:
 		ok, want = numberRe.MatchString(target), "an extension number (2-10 digits)"
 	case store.IVRRingGroup, store.IVRAnnouncement, store.IVRMenuDest, store.IVRTimeCondition:
@@ -123,6 +131,9 @@ func validateIVRMenu(in *store.IVRMenuInput) fieldErrs {
 	}
 	if !ivrNumberRe.MatchString(in.Number) {
 		f.add("number", "must be empty or 2-16 digits")
+	}
+	if in.PromptLanguage != "" && !voiceprompt.Valid(in.PromptLanguage) {
+		f.add("promptLanguage", "must be empty (the deployment language) or a language with a prompt table")
 	}
 	if in.GreetingID <= 0 {
 		f.add("greetingId", "must name the greeting announcement")

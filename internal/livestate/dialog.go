@@ -87,6 +87,46 @@ type DialogState struct {
 	Kind      string   `json:"kind,omitempty"`
 	Rewritten string   `json:"rewritten,omitempty"`
 	Trace     []string `json:"trace,omitempty"`
+	// Events is the call-event state a taker continues (spec integrations
+	// I-34): who answered, who rang and how far the call's event sequence
+	// got. Nil from older nodes, whose calls a taker never reports missed.
+	Events *DialogEvents `json:"events,omitempty"`
+	// Session is the call's RFC 4028 session-timer state, so a taker
+	// resumes the timers with the parameters the call negotiated instead
+	// of restarting every leg at its own default (nil from older nodes,
+	// and for a call with no session timer).
+	Session *DialogSession `json:"session,omitempty"`
+}
+
+// DialogEvents is the part of a call's event bookkeeping a taker needs: the
+// calling extension (a taker does not know the caller's device), the
+// extension that answered (a call answered by a person is not missed), the
+// extensions that rang (they still receive call.ended) and the last event
+// sequence number the owner used.
+type DialogEvents struct {
+	AnsweredExt string   `json:"answeredExt,omitempty"`
+	CallerExt   string   `json:"callerExt,omitempty"`
+	Rung        []string `json:"rung,omitempty"`
+	Seq         int64    `json:"seq,omitempty"`
+}
+
+// DialogSession is a call's negotiated session timers by dialog: index 0 is
+// the caller's dialog and 1 the callee's, whatever Legs holds (a parked call
+// replicates only the dialog of the party it kept). A nil entry means that
+// dialog has no timer.
+type DialogSession struct {
+	Legs [2]*SessionLeg `json:"legs"`
+}
+
+// SessionLeg is one dialog's session timer.
+type SessionLeg struct {
+	// IntervalSecs is the negotiated Session-Expires.
+	IntervalSecs int `json:"intervalSecs"`
+	// Local is true when the owner (Hello) refreshes the dialog, false when
+	// the phone does.
+	Local bool `json:"local"`
+	// Update is true when the phone lists UPDATE in Allow.
+	Update bool `json:"update,omitempty"`
 }
 
 // LegCallIDs are the Call-IDs of the dialogs the record carries.

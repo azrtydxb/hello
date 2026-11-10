@@ -45,6 +45,7 @@ func (s *Store) ListRingTags(ctx context.Context) ([]RingTag, error) {
 		SELECT t.name, t.builtin, t.bellcore_slot, t.description,
 		       (SELECT count(*) FROM ring_rules r WHERE r.tag = t.name)
 		     + (SELECT count(*) FROM ring_groups g WHERE g.ring_tag = t.name)
+		     + (SELECT count(*) FROM ring_map m WHERE m.tag = t.name)
 		FROM ring_tags t ORDER BY t.builtin DESC, t.name`)
 	if err != nil {
 		return nil, err
@@ -132,13 +133,14 @@ func (s *Store) DeleteRingTag(ctx context.Context, actor, name string) error {
 		if builtin {
 			return name, &InUseError{Msg: "ring tag " + name + " is built in and cannot be deleted"}
 		}
-		var rules, groups []string
+		var rules, groups, maps []string
 		for _, q := range []struct {
 			sql string
 			dst *[]string
 		}{
 			{`SELECT 'rule ' || position FROM ring_rules WHERE tag = $1 ORDER BY position`, &rules},
 			{`SELECT 'ring group ' || name FROM ring_groups WHERE ring_tag = $1 ORDER BY name`, &groups},
+			{`SELECT DISTINCT 'the ring map (' || vendor || ')' FROM ring_map WHERE tag = $1 ORDER BY 1`, &maps},
 		} {
 			rows, err := tx.QueryContext(ctx, q.sql, name)
 			if err != nil {
@@ -157,7 +159,7 @@ func (s *Store) DeleteRingTag(ctx context.Context, actor, name string) error {
 				return name, err
 			}
 		}
-		if used := append(rules, groups...); len(used) > 0 {
+		if used := append(append(rules, groups...), maps...); len(used) > 0 {
 			if len(used) > 5 {
 				used = used[:5]
 			}

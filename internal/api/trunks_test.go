@@ -186,3 +186,45 @@ func TestTrunkCodecs(t *testing.T) {
 		t.Fatalf("PATCH of codecs = %v", got)
 	}
 }
+
+// TestTrunkSessionTimers covers the trunk's RFC 4028 setting: the default,
+// the three values, the refusal of any other, and PATCH keeping or replacing
+// it.
+func TestTrunkSessionTimers(t *testing.T) {
+	p := newP2Env(t, nil, false)
+	c := p.login()
+	plain := func(extra map[string]any) map[string]any {
+		b := map[string]any{"name": trunkName(), "mode": "ip", "destinations": []map[string]any{{"host": "10.0.0.5"}}}
+		for k, v := range extra {
+			b[k] = v
+		}
+		return b
+	}
+	created := c.must(http.StatusCreated, "POST", "/api/v1/trunks", plain(nil)).json(t)
+	if got := created["sessionTimers"]; got != "default" {
+		t.Fatalf("default sessionTimers = %v, want default", got)
+	}
+	for _, v := range []string{"on", "off", "default"} {
+		got := c.must(http.StatusCreated, "POST", "/api/v1/trunks", plain(map[string]any{"sessionTimers": v})).json(t)
+		if got["sessionTimers"] != v {
+			t.Fatalf("sessionTimers %q stored as %v", v, got["sessionTimers"])
+		}
+	}
+	for _, bad := range []string{"yes", "ON", "true"} {
+		if got := fieldPaths(t, c.do("POST", "/api/v1/trunks", plain(map[string]any{"sessionTimers": bad}))); !slices.Contains(got, "sessionTimers") {
+			t.Errorf("sessionTimers %q: fields %v lack sessionTimers", bad, got)
+		}
+	}
+	id := fmt.Sprint(created["id"])
+	on := c.must(http.StatusOK, "PATCH", "/api/v1/trunks/"+id, map[string]any{"sessionTimers": "on"}).json(t)
+	if on["sessionTimers"] != "on" {
+		t.Fatalf("PATCH sessionTimers = %v, want on", on["sessionTimers"])
+	}
+	kept := c.must(http.StatusOK, "PATCH", "/api/v1/trunks/"+id, map[string]any{"maxCalls": 3}).json(t)
+	if kept["sessionTimers"] != "on" {
+		t.Fatalf("PATCH of maxCalls changed sessionTimers to %v", kept["sessionTimers"])
+	}
+	if got := fieldPaths(t, c.do("PATCH", "/api/v1/trunks/"+id, map[string]any{"sessionTimers": "sometimes"})); !slices.Contains(got, "sessionTimers") {
+		t.Fatalf("PATCH with a bad sessionTimers: fields %v", got)
+	}
+}

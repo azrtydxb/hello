@@ -120,6 +120,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveBookSlot(w, r, ev, seg, strings.TrimPrefix(name, "pb/"), https)
 	case strings.HasPrefix(name, "fw/") && readOnly:
 		h.serveFirmware(w, r, ev, seg, strings.TrimPrefix(name, "fw/"), https)
+	case strings.HasPrefix(name, "ring/") && readOnly:
+		h.serveRingtone(w, r, ev, seg, strings.TrimPrefix(name, "ring/"), https)
 	default:
 		h.serveDevice(w, r, ev, seg, name, https)
 	}
@@ -445,6 +447,57 @@ func (h *handler) serveFirmware(w http.ResponseWriter, r *http.Request, ev *even
 		ev.rec.Result = ResultNotFound
 	}
 	h.opt.Metrics.FirmwareBytes.WithLabelValues(string(rec.Vendor)).Add(float64(cw.n))
+}
+
+// serveRingtone answers GET /p/<token>/ring/<name>.wav (S-43): a tone of the
+// library, to a phone that holds a valid token, with the tone's SHA-256 as
+// its ETag so a phone that has it gets 304. Every denial is an empty 404.
+func (h *handler) serveRingtone(w http.ResponseWriter, r *http.Request, ev *event, token, file string, https bool) {
+	ctx := r.Context()
+	ev.rec.Kind = KindRingtone
+	if _, ok := h.authorize(w, r, ev, token, https); !ok {
+		return
+	}
+	name, ok := strings.CutSuffix(file, ".wav")
+	if !ok || !ValidToneName(name) {
+		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
+		return
+	}
+	t, err := h.s.RingtoneByName(ctx, name)
+	if errors.Is(err, ErrNotFound) {
+		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
+		return
+	}
+	if err != nil {
+		h.outage(w, ev, "ringtone by name", err)
+		return
+	}
+	etag := `"` + t.SHA256 + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-store")
+	if etagMatch(r.Header.Get("If-None-Match"), etag) {
+		ev.rec.Status, ev.rec.Result = http.StatusNotModified, ResultNotModified
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	f, err := h.o.OpenRingtone(ctx, t.ObjectKey)
+	if err != nil {
+		h.outage(w, ev, "open ringtone", err)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	cw := &countingWriter{ResponseWriter: w}
+	w.Header().Set("Content-Type", "audio/wav")
+	http.ServeContent(cw, r, t.Name+".wav", t.UploadedAt, f)
+	ev.rec.Status, ev.rec.Bytes = cw.status, cw.n
+	switch {
+	case cw.status == http.StatusNotModified:
+		ev.rec.Result = ResultNotModified
+	case cw.status < 300:
+		ev.rec.Result = ResultServed
+	default:
+		ev.rec.Result = ResultNotFound
+	}
 }
 
 type countingWriter struct {
