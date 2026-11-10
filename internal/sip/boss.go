@@ -190,6 +190,13 @@ func (c *call) noteBossAnswer(w *leg) {
 	c.addTrace(fmt.Sprintf("Answered by assistant %s for %s", b.assistant, b.boss))
 }
 
+// clearBossAnswer withdraws noteBossAnswer for an answer that did not connect.
+func (c *call) clearBossAnswer() {
+	c.mu.Lock()
+	c.answeredBy = ""
+	c.mu.Unlock()
+}
+
 // outboundCallerIDExt is the extension whose outbound caller-ID rule a call
 // from ext uses: the boss of an assistant whose link presents the boss's
 // identity (S-19), else "".

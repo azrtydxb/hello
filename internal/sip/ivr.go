@@ -1041,12 +1041,18 @@ func (c *call) ivrRing(ctx context.Context, forks []ivrFork, hunt bool, total ti
 // is already up on the relay's caller leg; the callee's answer aims the
 // relay's callee leg.
 func (c *call) ivrConnect(w *leg, ext string) ivrResult {
+	// The assistant's answer is recorded before the boss's phone is
+	// cancelled: the caller is already connected to the menu and may hang up
+	// the moment the CANCEL is seen, and the CDR written by that hangup must
+	// already name who answered.
+	c.noteBossAnswer(w)
 	c.cancelForks(w)
 	dcs := w.session()
 	bres := dcs.InviteResponse
 	w.ack(nil, "")
 	if hom := c.homed(); hom != nil && !c.ivrHomeCallee(hom, w) {
 		w.bye()
+		c.clearBossAnswer()
 		c.addTrace("IVR: the new leg could not be taken into the recovered call")
 		c.setIVRUnrecoverable()
 		return ivrResult{kind: ivrFailed}
@@ -1076,7 +1082,6 @@ func (c *call) ivrConnect(w *leg, ext string) ivrResult {
 	// answered) and gets the destination's, with the media watch.
 	c.sessionBridgedTo(w, bres)
 	c.ivrFinishSetup()
-	c.noteBossAnswer(w)
 	c.addTrace("IVR: caller connected to " + orDefault(ext, "the destination"))
 	c.s.m.IVRTotal.WithLabelValues("connected").Inc()
 	c.publish()
