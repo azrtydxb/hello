@@ -252,6 +252,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		ConferenceLive:  vk,
 		Messages:        st,
 		Inbox:           st,
+		Blocklist:       st,
 		Dialing:         cfg.Dial,
 		PromptLanguage:  cfg.VoicePromptLanguage,
 		Prov:            provAPI(cfg, settings, deployment, objs, log),

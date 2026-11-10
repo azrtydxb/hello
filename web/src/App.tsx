@@ -65,6 +65,7 @@ import { MessagingSettings } from "./pages/MessagingSettings";
 import { getInboxStatus } from "./api/inbox";
 import { Messages } from "./pages/Messages";
 import { Phonebooks } from "./pages/Phonebooks";
+import { Blocklist } from "./pages/Blocklist";
 import { Onboarding } from "./pages/Onboarding";
 import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
@@ -136,6 +137,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/calls": Calls,
   "/history": History,
   "/trunks": Trunks,
+  "/blocklist": Blocklist,
   "/routes": RoutesPage,
   "/cluster": Cluster,
   "/diagnostics": Diagnostics,
