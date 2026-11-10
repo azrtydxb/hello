@@ -53,6 +53,7 @@ func (s *Server) inboundCall(req *sip.Request, tx sip.ServerTransaction, snap *s
 	c := s.newCall(req)
 	from := req.From()
 	c.direction, c.trunkName = cdr.DirectionInbound, t.Name
+	c.inTrunk = t
 	c.trunkSRTP = t.SRTP
 	if !c.srtpGate(tx, snap) {
 		return

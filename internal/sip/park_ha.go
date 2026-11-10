@@ -65,7 +65,7 @@ func (c *call) haParkState() (livestate.DialogState, bool) {
 	var leg livestate.DialogLeg
 	switch {
 	case hom != nil:
-		l := hom.legs[0]
+		l := hom.leg(false)
 		if l == nil {
 			return livestate.DialogState{}, false
 		}

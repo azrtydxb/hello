@@ -227,6 +227,9 @@ func writePagingLists(ctx context.Context, tx *sql.Tx, id int64, in PagingGroupI
 			return err
 		}
 	}
+	if err := checkNoDoor(ctx, tx, "members", in.Members); err != nil {
+		return err
+	}
 	for i, ext := range in.Members {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO paging_group_members (group_id, extension_id, position)
 			VALUES ($1, $2, $3)`, id, ext, i+1); err != nil {
