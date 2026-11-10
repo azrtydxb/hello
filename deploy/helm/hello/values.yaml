@@ -74,6 +74,23 @@ control:
       annotations:
         nginx.ingress.kubernetes.io/ssl-redirect: "false"
         nginx.ingress.kubernetes.io/enable-access-log: "false"
+  # Phone LDAP directory (pbx-gaps S-24): read-only, LDAPS only. Needs
+  # control.provisioning.publicUrl (phones are given its host) and a TLS
+  # Secret (tls.crt, tls.key; cert-manager writes it) for the listener.
+  ldap:
+    enabled: false
+    tlsSecret: ""
+    base: dc=hello,dc=local
+    # The Service port phones are given (HELLO_LDAP_PUBLIC_PORT).
+    port: 636
+    # Also offer StartTLS on a second Service port (389).
+    startTls: false
+    # Allow an anonymous bind (extensions and company books only).
+    anonymous: false
+    service:
+      type: ClusterIP
+      nodePort: null
+      startTlsNodePort: null
   # Backups (docs/backup.md): the scheduler runs in every replica and one
   # takes the run. The dump and the archive are staged in an emptyDir of this
   # size before upload; it must hold the database dump plus its encrypted
