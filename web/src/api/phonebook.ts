@@ -60,6 +60,8 @@ export interface Group {
   ptt?: Ptt;
   /** How the group's phones take a page and an intercom call. */
   pagingOptions?: PagingOptions;
+  /** Whether the group's phones send their log to Hello's syslog sink. */
+  syslog?: Syslog;
   /** The group's phones are given the LDAP directory. */
   ldapEnabled?: boolean;
   phoneCount: number;
@@ -423,6 +425,21 @@ export const setGroupMulticast = (
 ) =>
   request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/multicast`, {
     body: options ? { channels, options } : { channels },
+  });
+
+export const SYSLOG_LEVELS = ["debug", "info", "warning", "error"] as const;
+export type SyslogLevel = (typeof SYSLOG_LEVELS)[number];
+
+/** A phone group's syslog setting; off by default. */
+export interface Syslog {
+  enabled: boolean;
+  level: SyslogLevel;
+}
+
+/** PUT /api/v1/phone-groups/{id}/syslog: sets the group's syslog setting. */
+export const setGroupSyslog = (groupId: Id, syslog: Syslog) =>
+  request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/syslog`, {
+    body: { enabled: syslog.enabled, level: syslog.level },
   });
 
 /** GET|PUT /api/v1/phone-groups/{id}/ldap (pbx-gaps S-26). */

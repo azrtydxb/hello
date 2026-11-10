@@ -101,11 +101,13 @@ import { Queues } from "./pages/Queues";
 import { QueueCallbacks } from "./pages/QueueCallbacks";
 import { Wallboard } from "./pages/Wallboard";
 import { TimeConditions } from "./pages/TimeConditions";
+import { BossAssistant } from "./pages/BossAssistant";
 import { ParkPickup } from "./pages/ParkPickup";
 import { VoicemailGroups } from "./pages/VoicemailGroups";
 import { RingGroups } from "./pages/RingGroups";
 import { RingTags } from "./pages/RingTags";
 import { System } from "./pages/System";
+import { UnknownSyslog } from "./pages/UnknownSyslog";
 import { Trunks } from "./pages/Trunks";
 import { Voicemail } from "./pages/Voicemail";
 import { useControlPlane } from "./useControlPlane";
@@ -152,6 +154,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/wallboard": Wallboard,
   "/time-conditions": TimeConditions,
   "/park": ParkPickup,
+  "/boss": BossAssistant,
   "/recordings": Recordings,
   "/announcements": Announcements,
   "/moh": MusicOnHold,
@@ -378,6 +381,7 @@ export function App() {
             <Route path="/phones/groups" element={<PhoneGroups />} />
             <Route path="/phones/templates" element={<ProvTemplates />} />
             <Route path="/phones/firmware" element={<ProvFirmware />} />
+            <Route path="/phones/syslog" element={<UnknownSyslog />} />
             <Route path="/phones/settings" element={<ProvSettings />} />
             <Route path="/phones/:id" element={<PhoneDetail />} />
             <Route path="*" element={<NotFound />} />

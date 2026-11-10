@@ -149,6 +149,41 @@ func TestSIPTransports(t *testing.T) {
 		}
 	})
 
+	t.Run("a call between TCP phones rings the TCP binding", func(t *testing.T) {
+		pbx := startPBX(t, ringAllDevices(), trustLoopback)
+		a, b1 := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
+		registerOver(t, a, "tcp")
+		registerOver(t, b1, "tcp")
+		if got := bindingTransport(t, pbx, b1); got != "tcp" {
+			t.Fatalf("callee binding transport = %q, want tcp", got)
+		}
+		req := viaEdge(a.inviteReq("200"), "tcp")
+		ch := make(chan callResult, 1)
+		go func() {
+			dcs, err := a.callReq(t.Context(), req)
+			ch <- callResult{dcs, err}
+		}()
+		waitReq(t, b1.invites, "INVITE at the TCP device")
+		r := waitCall(t, ch)
+		if r.err != nil {
+			t.Fatalf("call: %v", r.err)
+		}
+		hangup(t, r.dcs)
+		pbx.nextCDR(t)
+	})
+
+	t.Run("sips from a TCP phone is refused", func(t *testing.T) {
+		pbx := startPBX(t, ringAllDevices(), trustLoopback)
+		a, b1 := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
+		registerOver(t, a, "tcp")
+		registerOver(t, b1, "tls")
+		req := viaEdge(a.inviteReq("200"), "tcp")
+		req.Recipient.Scheme = "sips"
+		if _, err := a.callReq(t.Context(), req); responseCode(err) != 480 {
+			t.Fatalf("sips INVITE from a TCP caller: %v, want 480", err)
+		}
+	})
+
 	t.Run("a sip: call from a TLS phone still reaches a UDP phone", func(t *testing.T) {
 		pbx := startPBX(t, ringAllDevices(), trustLoopback)
 		a, b1 := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")

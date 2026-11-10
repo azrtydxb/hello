@@ -149,6 +149,21 @@ A group delivers address books and multicast settings to its phones.
 switches; the named books stay), `deletePhoneGroup` (phones fall back to no
 group).
 
+## Phone syslog
+
+Phones can send their log to Hello's syslog sink. It is off by default, and
+no phone is told about syslog until `HELLO_SYSLOG_HOST` is set on the server.
+
+1. `setPhoneGroupSyslog` (admin) with `{ "enabled": true, "level": "warning" }`.
+   The level is debug, info, warning or error. The phone template writes the
+   sink and level, so run `resyncPhoneGroup` afterwards.
+2. `listPhoneSyslog` shows one phone's newest lines. Hello keeps the last 10000
+   lines per phone for 24 hours, with secrets redacted before storage. It
+   answers 503 while live state is unavailable.
+3. `listUnknownSyslog` lists the senders no phone owns. Pass `ip` to read that
+   address's lines. A line from an address shared through NAT lands here, not
+   on a phone.
+
 ## Phonebooks
 
 Books: the computed extensions book (read-only), the company book and up to
