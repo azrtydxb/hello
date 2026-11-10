@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -56,7 +57,7 @@ func TestRTCPXRStoredOnMatchingCDR(t *testing.T) {
 	for _, q := range c.RTCPXR {
 		byDev[q.Device] = q
 	}
-	if q := byDev["dev200"]; q.MOSLQ == nil || *q.MOSLQ != 4.1 || !q.Final || q.LossPct == nil || *q.LossPct != 0.5 || q.Extension != "200" {
+	if q := byDev["dev200"]; q.MOSLQ == nil || math.Abs(*q.MOSLQ-4.1) > 1e-6 || !q.Final || q.LossPct == nil || *q.LossPct != 0.5 || q.Extension != "200" {
 		t.Fatalf("callee report = %+v", q)
 	}
 	if q := byDev["dev100"]; q.JitterMs == nil || *q.JitterMs != 9 || q.MOSLQ != nil {
