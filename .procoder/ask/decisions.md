@@ -873,6 +873,361 @@ another group) is lifted: the ring state machine can open a new ring stage.
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
 
+## Integrations P3: click-to-call (2026-10-27)
+
+Built from spec `integrations.md` I-37 to I-39. Choices the spec left open:
+
+- **The phone's answer drives the ordinary call path.** `call` and everything
+  under it (recording, anchoring, hold, transfer, voicemail, events, in-call
+  HA) assume the caller is a UAS dialog (`c.dss`, 43 uses). Rather than a
+  second call engine, leg A is an INVITE to the extension's contacts with no
+  SDP, and the phone's 200 (carrying its offer) becomes a synthetic INVITE
+  "from the extension to the destination" that enters `routeCaller` (the part
+  of `handleInvite` after digest verification, split out unchanged). The
+  synthetic request mirrors the phone's dialog: Call-ID, the phone's tag as the
+  From tag, our From tag as the To tag (set in `originateTx.attach`, because
+  sipgo draws a random To tag in `ReadInvite`), the 200's Contact, its
+  Record-Route reversed, its source address and our CSeq. A transaction
+  adapter (`originateTx`) stands in for the server transaction: the engine's
+  answer becomes the ACK of the phone's 200 (with the SDP answer), a final
+  failure becomes a BYE, the phone's BYE before the destination answers is the
+  caller's CANCEL. Then BYE, re-INVITE, hold and takeover from either side
+  work with no click-to-call code. The cost: three small hooks in `b2bua.go`
+  (`begin`, `byeA`, `handleBye`) and one in `record`.
+- **Leg A is a late-offer INVITE.** The destination's SDP answer is the first
+  media description the phone sees, so no media address is promised before the
+  destination answers. A phone that answers without an offer fails the request
+  `agent_no_answer` (it cannot be bridged).
+- **Not on 180**: leg B is dialled only on the phone's 2xx, as the spec says;
+  the phone is ACKed only when the destination answers (RFC 3261 permits it,
+  the 200 is retransmitted meanwhile). A phone that hangs up in between is
+  handled (the destination's ring is cancelled).
+- **State**: the live state is Valkey (`hello:originate:state:<id>`, an hour);
+  `originate_requests` is the record. `GET` shows the live state and copies a
+  changed state into the row; a sweeper in hello-control (one pod at a time,
+  advisory lock) copies the rest, closes requests stuck for 60 s
+  `node_unavailable` (a connected one after 12 h `ended`), frees the setup
+  slot and purges finished rows after 30 days. Migration 00056 (the highest
+  open PR migration is 00046; the merge captain renumbers).
+- **Limits** are fixed windows (the window number is in the key, so the
+  Retry-After is the time left). A request first takes the extension's setup
+  slot (`SET NX`, released by the node once the request is past
+  `ringing_agent`, by the sweeper or on any refusal), then counts credential
+  minute and day, extension hour, destination and global. A replay with a known
+  idempotency key is answered before any counting. Five refusals in ten
+  minutes raise one `originate.anomaly` audit row per credential per window.
+- **Emergency** is refused at the API (`422 emergency_not_allowed`) from the
+  route table's `emergency` flag, and again at the node. Destinations the
+  routing denies, feature codes and paging codes fail `route_denied` at the node
+  before the phone rings (the control process cannot tell a ring group or
+  queue number from a bad one). The administrator's country restriction
+  travels with the queued request and is applied by the node to outbound
+  routes only (internal numbers are never restricted); a prefix may match the
+  dialled or the rewritten number.
+- **Caller ID**: the presented number is always the routing's choice for the
+  extension (the engine has no caller-ID input for an extension caller). A
+  `callerId` in the request is accepted only if it equals the extension's
+  number, its external number or what the outbound route presents for that
+  destination, else `422 caller_id_not_allowed`; so it is a check, not a
+  selector, until the routing offers more than one number per extension.
+- **Who**: a user or viewer rings only their own linked extensions (`403
+forbidden_role` for another, `403 no_extension` with none); an operator or
+  administrator any; a service account any inside its `extensionScope` (any
+  when it has none), and one extension in scope is the default. `GET` and
+  `DELETE` belong to the credential that started the request (same audit
+  actor) and to operators and administrators (not to service accounts, which
+  see their own); anyone else gets 404.
+- **Auto-answer** asked for while the administrator has not enabled it is a
+  `400` on `autoAnswer` (the request is not downgraded to a plain ring).
+- **DELETE answers 202** with the state at that moment: hanging up is
+  asynchronous. A queued request no node took is closed by the DELETE itself.
+- **New reason `cancelled`** (client DELETE, or the phone hung up while the
+  destination rang), added to the spec's list; new error codes
+  `emergency_not_allowed`, `caller_id_not_allowed`, `route_denied`.
+- **MCP**: the three originate operations and the policy operations are
+  excluded (`x-hello-mcp.exclude`). The spec excludes originate; the policy
+  (toll-fraud controls) is excluded on the same grounds.
+- **Policy routes** are `GET`/`PUT /api/v1/integrations/click-to-call` (admin),
+  not under `/calls/originate`, which `{id}` would shadow. Settings live in the
+  singleton `originate_settings`; the policy shown on Integrations > Overview.
+- **`/dial` follows the P1 event stream** (`call.originate.progress`, filtered
+  by `originateId`) and does one `GET /calls/originate/{id}` when the stream
+  opens, to cover a change that came before it. Only if the stream drops or is
+  refused does it poll once a second. The page is a nav item in _My phone_ and
+  a route for every role. `tel:` registration is the explicit _Use Hello for
+  phone links_ button.
+- **`hello-dialer` is registered** as a `preregistered` OAuth client
+  (`oauth.PreregisteredClients`, upserted by hello-control at start when
+  `HELLO_PUBLIC_URL` is set): a public PKCE client, Verified, redirect URI
+  `<public URL>/integrations/dialer/callback`. The console dialer itself uses
+  the session cookie; the client is there for the pop-up consent flow later
+  apps reuse.
+- **Setup timeout** is `HELLO`-independent: 30 s (`Config.OriginateRing`), not
+  an environment variable; the request carries no override.
+- **Audit** rows: `originate` (the extension and the first four digits of the
+  number, the rest masked), `originate_refused`, `originate.anomaly`,
+  settings `update`. The OAuth client is the audit `via` automatically.
+- **Device**: the API takes the numeric device id and the queued request
+  carries its SIP username; a device of another extension is a `400`.
+
+## 2026-10-27 Phone feature parity item 19: firmware policy (S-26)
+
+- Already on main: `prov_firmware` and `prov_firmware_pins`, upload and pin API
+  and page, `firmware_seen` from the User-Agent shown as plain text, P238 = 0.
+- Minimum versions are a table (`prov_firmware_minimums`, migration 00056) with
+  an admin PUT/GET, not a constant, because the spec says per vendor and model
+  glob. Seeded: Grandstream `WP822*` min 1.0.11.22 (R822 RN). A rule's
+  recommended version holds the "WP defaults" of the spec: WP822 1.0.11.78
+  (lab build) and WP8x6 `WP8?6*` 1.0.3.39 (the newest 1.0.3.x template in the
+  spec; the lab pick among 1.0.3.29 to .39 is the admin's to change). It is
+  documentation only and is never rendered. WP8x6 has no floor in the spec, so
+  its min is empty.
+- Enforcement: a pin is refused (400, field error) when its version is below the
+  highest minimum of any rule whose glob matches the pin's glob or the reverse
+  (conservative, so `*` cannot smuggle a file under a floor). Rendering skips a
+  pin below the minimum of the phone's actual model, so lowering nothing is
+  needed when a floor is raised later.
+- Drift: computed server-side in `ListPhones` and `GetPhone`
+  (`firmwarePinned`, `firmwareMinimum`, `firmwareDrift`). Drift is seen != pin
+  (numeric compare, so 96.86.0.070 equals 96.86.0.70) or seen below the floor.
+  No version seen is not drift. Other phone readers (push, render) do not
+  carry the fields.
+- Upgrade window: an optional `upgrade_hour` on the pin. Grandstream WP8x6 and
+  WP8xx only: P194 = 2 with P285 = hour, and P238 = 1. P194 is the phone's
+  whole automatic upgrade (config too), so a window makes config resync daily
+  unless check-sync is sent; the window is therefore opt-in. P285 and P194 = 2
+  are the generic Grandstream keys and are not verified on a WP (hardware
+  check). The WP856 (P22296) and other vendors get no window until their keys
+  are known; the page offers the hour for Grandstream pins only.
+- TR-069 settings not touched.
+
+## Negotiated codec per leg in the CDR (2026-10-26)
+
+`cdrs` gets `caller_codec` and `callee_codec` (migration 00055, nullable text,
+`name/clock rate` such as `PCMU/8000`, `G722/8000`, `opus/48000`), fed by the
+same `logCodec` bookkeeping as the `call codec` log line, so the two never
+disagree. Choices: the value is the last codec the leg settled on (a re-INVITE
+that switches codec replaces it); payload type and ptime stay in the log only;
+a leg that never had a codec (unanswered call, the far side of media Hello ends
+itself, rows from before the migration) is NULL, shown as a dash. The list and
+detail API return `callerCodec`/`calleeCodec` (null when absent), the CSV
+export appends `caller_codec` and `callee_codec`, and Call history has a Codec
+column ("a" when both legs agree, "a → b" when they differ).
+
+## Session timers on moved dialogs and trunk legs (S-9, follow-up 9b)
+
+- Parked call: the call keeps one dialog, its party's (`link.selfSide`). Its
+  timer used to re-arm for ever while the call was linked, so nothing was
+  refreshed. Now only the party's dialog is refreshed, or must refresh when
+  the phone took the refresher role; the released parker's timer just ends.
+  A refresh from the party goes through `sessionIn` from `linkedReinvite`, so
+  a phone that refreshes keeps its call, and the SDP last given to the party
+  is recorded for a re-INVITE refresh.
+- Retrieve and pickup: the retriever's and the picker's dialog is answered by
+  `answerSelf` through the raw transaction (no sipgo dialog). It gets a timer
+  only when the call is linked (a voicemail or an announcement gets none),
+  Hello as refresher at its own interval, and refreshes are built from the
+  INVITE and `vmTag` (`sendRawCallerRefresh`), with a CSeq past anything sent
+  on the dialog (`nextCSeq`, also used by `byeCallerRaw` so its BYE follows a
+  refresh). The picked-up caller's 200 carries the negotiation, and the
+  dead-media watch starts for it, since the call had no answer before.
+- Returned call (parker rung again): the call that rang the parker owns the
+  parker's dialog and negotiates its timer from the parker's answer; the
+  held party stays on the original call.
+- Dead media for a linked pair: watched on the call that holds the relay, not
+  while either party signalled hold (`linkHeld`, set on both calls of the
+  pair), with the silence clock restarting after a retrieve.
+- Blind transfer, attended transfer: the call that carries the caller on takes
+  over the caller dialog's negotiated timer (copied, new timer) and negotiates
+  the target's leg from its answer; the attended bridge copies each dialog's
+  timer from the call it came from. The SDPs the hand-over re-INVITEs sent are
+  recorded for refreshes. A transfer into a queue is not changed: queue and
+  IVR calls have no session timers today (their dialog requests do not pass
+  `sessionIn`), so carrying one over could end a call whose phone refreshes.
+- Trunk setting: `trunks.session_timers` is `default`, `on` or `off`
+  (migration 00065, TEXT with a CHECK, `default` for every existing trunk, so
+  nothing changes on upgrade). `on` requests Session-Expires on legs to the
+  trunk and gives a call from it Hello's interval when the carrier sent none;
+  `off` does neither; `default` follows `HELLO_SIP_SESSION_TIMERS_TRUNKS`,
+  false by default, so an existing install behaves as before. A global
+  `HELLO_SIP_SESSION_EXPIRES_SECONDS=0` wins over every trunk. A carrier that
+  sends Session-Expires itself is honoured on a trunk set to default (as in 9) and ignored on one set to off.
+- A trunk refresh answered 401, 407, 403 or 488 proves the far end is alive,
+  so it does not end the call (some carriers do not take an in-dialog
+  re-INVITE with credentials or a re-offered SDP); no answer, 408, 481 and the
+  other failures still do.
+- HA takeover: the call's negotiated timers (interval, refresher, UPDATE) ride
+  in the replicated dialog state (`DialogState.Session`, by dialog: caller or
+  callee, whatever `Legs` holds), also for a parked call, which replicates only
+  its party's dialog. A survivor resumes them as they were (a 6 s timer that
+  Hello refreshes is refreshed at 3 s, a phone that must refresh is ended when
+  it does not) instead of restarting at its own default. From an owner that
+  sent none, a taken-over call gets Hello-refreshed defaults only on dialogs it
+  still has: a one-legged call (menu, queue, voicemail) or a parked call used
+  to be given a callee timer whose refresh could not be sent and ended it.
+- IVR menus and queues: the caller's dialog gets a timer when the application
+  answers, whoever refreshes. A caller that names itself the refresher is
+  honoured: the application's dialog answers its re-INVITE or UPDATE refresh
+  with 200 and the SDP Hello last gave it (direction mirrored, the relay
+  re-aimed at a new media address) instead of 481, which would end its session
+  (`soloInDialog`; a queued caller already had this through the anchored
+  handler, the menu phase answered 481); a caller that stops refreshing is ended as on any call.
+  When the application connects the caller to a destination, the call keeps
+  the caller's timer, gets the destination's, and the dead-media watch starts
+  (it was off for the whole call before). A transfer into a queue carries the
+  caller's timer over.
+- Not given session timers, with the reason: voicemail, announcements, paging
+  and music on hold are short and bounded by the application; a conference
+  participant is on the room's mixer and handles its own in-dialog requests; a
+  voicemail and announcement calls are answered through the raw transaction and
+  have no timer to refresh or answer a refresh for, so only the menu and queue
+  dialogs answer refreshes.
+
+## Door station extension kind and Door group (2026-10-27) — phone-feature-parity item 13 (S-45, S-46)
+
+- Migration `00053_door_station`: `extensions.kind` (user/door, default user),
+  `extensions.door_targets` (jsonb `{"extensions":[ids],"ringGroups":[ids]}`, ids
+  not foreign keys; the snapshot drops an id that no longer exists),
+  `ring_groups.is_door`, and `door` added to `cdrs_kind_check` through
+  `pg_temp.hello_check_values`. The open code, hang-up flag and webhooks belong
+  to items 14 and 16 and are not in this migration.
+- A station may call its listed extensions, its listed ring groups and every ring
+  group marked door (reading S-45 "the Door ring group" as any Door group). A
+  door station can be listed as no one's target and cannot list itself.
+- Enforcement is in `handleInvite` right after the caller is verified: the
+  dialled number goes straight to the ring group or extension and never through
+  routing, so no route can send it out; anything else is `403` with the CDR kind
+  door. The trunk ban is also in `acquireSlot` (every trunk leg takes a slot), so
+  a callee's forward-always, a group's external failure, an IVR dial-out and a
+  transfer cannot carry a station's call onto a trunk. Emergency routes are
+  never blocked (S-45 edge case). Transfer copies the flag to the new call.
+- Call kind: a call from a station, or into a Door group, has kind door, so rule
+  1 of S-40 gives it the doorbell tag; the caller kind for rules is `door`. Kind
+  already set to page or intercom is not overwritten by reaching a Door group.
+- No voicemail, no groups: creating a station makes no voicemail box; turning a
+  user into a station switches voicemail and intercom off and hides it from the
+  extensions phonebook (admin may show it); it is refused (field `kind`) while the
+  extension is in a ring group, paging group, pickup group or queue. The same
+  members are refused on write (`checkNoDoor`), the snapshot drops a station from
+  ring group members, and a station has an empty pickup scope and is in no
+  one's. Intercom to a station is `403`. MESSAGE to or from a station is `403`
+  (SIP) and `ErrMessageForbidden` (store); broadcast skips stations. Page needs no
+  extra code: a station is never a paging member.
+- A new Door group with no ring tag gets `doorbell` (S-46), stored explicitly so
+  the group shows it; later edits keep whatever tag is set.
+- Hello still does not provision door stations; the station's button dials the
+  group's number, set on the unit.
+- HA: `Door` and `Kind` ride the replicated dialog state (`haContinuity`, which
+  builds it under the call lock, covers answered, homed and parked calls), and
+  `haNewCall` restores them, so a taken-over door call keeps the trunk ban and CDR
+  kind door (`TestDoorCallerSurvivesTakeover`).
+
+## Ring map provisioning, phone-feature-parity S-42 and S-44 (2026-10-27)
+
+- Storage: `ring_map` (migration 00051) holds explicit choices only, keyed by
+  (group or global, tag, vendor), tone being a vendor ringer id. A tag and
+  vendor with no row use the vendor's default for the tag's current Bellcore
+  slot, so the map needs no seeding and a new custom tag works at once. The
+  tag foreign key is RESTRICT; the delete handler names the map in its 409
+  (spec edge case: refused until unassigned). A group's rows go with the group.
+- The map is read only by provisioning, so a change does not bump the
+  configuration revision (hello-sip does not use it). It rides in
+  `RenderData.Ring`, which the existing sync hash covers, so the automatic
+  resync (S-5) pushes a changed map with no new trigger.
+- Group over global over default is merged in the store (`ringInfo`); the
+  template only sees the result (`prov.NewRingInfo`, pure and unit tested).
+- Tones offered per vendor are the vendor built-ins of S-42 only: Yealink Ring
+  1 to 8 and Bellcore 1 to 5, Poly ringer1 to 24, Grandstream system/1/2/3, Snom
+  Ringer1 to 10, Fanvil Type 1 to 9. Silent only on Poly and Snom (the other
+  vendors' lists have none we can cite). Custom tones (S-43 tone library) are
+  a separate item and not offered; the Grandstream custom tones 1 to 3 are
+  whatever the phone holds. Grandstream defaults are all `system`, because a
+  custom tone may not exist on the phone.
+- Defaults per Bellcore slot: Yealink Ring N, Fanvil Type N, Snom RingerN, Poly
+  ringer(N+1) (ringer2 is Poly's own default for slot 1).
+- Poly matches on the text `hello-<tag>` (as the existing auto-answer rule
+  does), not the URL the spec table names: all tags of one slot share the same
+  URL, so a URL match could not tell them apart. Poly rule 1 stays the
+  auto-answer rule; ours start at 2 with classes custom1..custom23.
+- Tag names that start another tag's (`door`, `doorbell`) would let the
+  shorter text shadow the longer on a substring match; rules are written
+  longest text first (stable on priority).
+- Slot limits: Yealink 10, Fanvil 10, Grandstream WP8xx 10, Poly 23, Snom 3
+  classes, WP8x6 5 Bellcore slots. Past a limit the first tags in priority
+  order (built-ins in canonical order, then custom by name) are written. On a
+  WP8x6 the first tag of a Bellcore slot decides that slot's tone; the page
+  warns about shared slots.
+- Snom has three named classes: only internal, external and ringgroup are
+  written (the tags SIP sends `alert-*` for); other tags have no Snom rule.
+- The line's own ring tone follows the internal tag (spec S-37 for the
+  Grandstream P104; the same for the other vendors' "default line tone" row).
+  Yealink's `ring_type` takes `RingN.wav`; Bellcore ringers have no known file
+  name there, so the line key is left unset for them.
+- No Grandstream WP856 or GRP/GXP keys: the spec names none ("verify key"), so
+  those models get no ring map rather than a guessed key. For the WP8x6 P95026
+  is written as five comma-separated tones (slot 1 to 5) and for the WP8xx the
+  rules as P1488 + 2(n-1) (match text) and the next P-value (tone): the spec
+  names the keys but not the field layout, so both layouts, and the Fanvil rule
+  keys (`SIP1 Alert Info Text/Ring n`) and the Yealink Bellcore value (8 + n)
+  are marked verify in the templates and in docs/ring-tags.md.
+- API: `GET /api/v1/ring-map` (vendor lists, defaults, choices),
+  `PUT /api/v1/ring-map` (replace global), `PUT /api/v1/ring-map/groups/{id}`
+  (replace one group; empty list removes). Whole-list replace, like the rules.
+  Operator for writes, viewer reads. Three MCP tools follow from the spec.
+- UI: the page is now called Ringing (`/ringing`; the old `/ring-tags`
+  route is gone, it was never linked outside the nav) with a new Ring map tab (a Tones tab follows with S-43).
+- Tests that touch real configs assert on lines inline; no golden file of a
+  rendered phone configuration is added.
+
+## Tone library (phone-feature-parity S-43), 2026-10-27
+
+- Built on ring-map (#226), which depends on #204. Migration 00052 is the next
+  number after ring-map's 00051 (main has 00045).
+- Storage: table `ringtones` (id, name unique, object_key, size, sha256,
+  sample rate, duration) and the audio in MinIO bucket `hello-ringtones` under
+  `<name>/<sha256>.wav`. The hash in the key means a name that is deleted and
+  uploaded again with other audio never overwrites an object a phone may still
+  be fetching. The spec says `DELETE /api/v1/ringtones/{id}`, so the row has an
+  id; the name is also unique and is what the phone URL and the ring map use.
+- A name is `[a-z0-9][a-z0-9-]{0,31}`, never changes and cannot be re-uploaded
+  while it exists (409), so a phone's ETag for a name is stable.
+- Format check is by the bytes (RIFF/WAVE, fmt tag 1, mono, 16-bit, 8000 or
+  16000 Hz, at most 30 s, file at most 512 KiB, the request at most 576 KiB);
+  every refusal is a `400` field error on `file` or `name`.
+- Ring map reference: the API id is `custom:<name>`. In the table the choice is
+  `tone = 'custom'` plus `custom_tone_id` (FK, ON DELETE RESTRICT) with a CHECK
+  that the two agree, so the existing `tone` regex CHECK is not widened (it
+  already accepts `custom`) and no value-list CHECK needs changing. Deleting a
+  tone a choice uses is a 409 naming the choice.
+- The one CHECK that is a value list, `prov_fetches_kind_check`, gets `ringtone`
+  through `pg_temp.hello_check_values` (additive; the Down removes the rows of
+  that kind first). The Go contract test reads 00052 for it.
+- Vendors given a custom tone: Yealink (`ringtone.url` = the phone's tone URL
+  under its own token, rule `.ringer` = `<name>.wav`) and Snom
+  (`custom_melody_url`, class sound `Custom`), the spec's keys for the "custom
+  tone delivery" row. Both keys take one file, so a phone is delivered the
+  first custom choice in tag order; another custom tone on the same phone plays
+  the default for its slot. The value forms are marked verify in the templates.
+- No key, so no custom tone: **Poly** (the spec names `saf.x` for the file but
+  no ringer value that plays it; guessing the saf-to-ringer mapping is not
+  allowed), **Fanvil** (the spec says "custom ring URL key (verify)" and names
+  none), **Grandstream** (format verify, not produced, as the spec says). The API
+  refuses `custom:` for those vendors (400) and the page only offers library
+  tones to Yealink and Snom. A Grandstream template never references a custom
+  tone (tested).
+- The Yealink line key `account.1.ringtone.ring_type` is left unset when the
+  internal tag maps a custom tone (it takes a built-in ringer or a sound file
+  of a name the spec does not give).
+- Conversion: the spec allows server-side resample/PCM conversion "only where
+  stdlib can do it" for vendors that need another format. None of the vendors
+  Hello gives a custom tone has a documented other format in the spec, so none
+  is done; a converter would be unused code. Revisit with the lab run.
+- The tone URL is built from the phone's `Prov.URL` in the template, so
+  previews mask the token as they do for the firmware URL.
+- API: `GET|POST /api/v1/ringtones`, `DELETE /api/v1/ringtones/{id}`; operator
+  to write, viewer to read; upload is multipart and excluded from MCP like the
+  other uploads; list and delete are MCP tools. UI: a Tones tab on Ringing.
+
 ## Queue callback (pbx-gaps wave B, B4)
 
 - **Merged gaps-languages.** PR #208 (voicemail box languages, `voiceprompt.Resolve`) was not on main, so origin/gaps-languages is merged into this branch. The queue's language is `Resolve(queue.prompt_language, deployment language)`; `queues.prompt_language` is NULL for inherit, no CHECK (validated by the API), migration 00049.
@@ -1355,8 +1710,8 @@ Implementation notes (template route, no migration):
 
 ### Item 15: setting overrides (S-12)
 
-- Table `prov_setting_overrides` (migration 00066: numbered above the 00051 to
-  00065 the open PRs use, so the PRs do not collide). One table for both scopes
+- Table `prov_setting_overrides` (migration 00069: numbered after the 00061 to
+  00068 the open PRs use, so the PRs do not collide). One table for both scopes
   (`group_id` or `phone_id`), secret values sealed with the scope, owner and key
   as additional data.
 - Applied to the finished per-phone file (`ApplyOverrides`), not through the
@@ -1452,3 +1807,140 @@ Implementation notes (template route, no migration):
   every WP template, though the numbers 1 and 2 differ (WP8x6 1 HTTP, 2 TFTP;
   WP856 1 TFTP, 2 HTTP). The firmware gate "1.0.3.24 and later" is not checked:
   the page simply does not exist on older firmware.
+
+## Kamailio HA: the VIP ships off, go-live is a separate step (2026-11-09)
+
+The user's deploy constraint: the PRs of kamailio-ha get merged ready, but the
+change that re-points phones to the VIP must not go live until the user asks.
+Sync deploys `deploy/kuvryn-sync/kw/resources.yaml` as soon as it is on main,
+so the VIP stage cannot sit in that file.
+
+- `kw/resources.yaml` keeps the state of PR 1/4 (a pair on their own node
+  addresses; phones stay on `192.168.10.101:30508`). The config with
+  `EDGE_VIP`/`LEGACY_IP` support ships in the ConfigMap (inert: neither is set),
+  which rolls the Kamailio pair once (new config checksum).
+- Everything that turns the VIP on is `deploy/kuvryn-sync/kamailio-vip/go-live.patch`
+  (pod env, the kube-vip container, its ServiceAccount, Role and RoleBinding,
+  and the control plane's advertised proxy host). `test/deploy` and the
+  `test/kindha` failover lab apply it to a copy, so the patch is always
+  proven and always applies; `TestKwKamailioVIPIsOff` guards the off state.
+- Alternatives: a values flag cannot work for kw (plain manifests, no
+  templating); keeping the PRs unmerged blocks the chart and docs for other
+  clusters. The chart option (4/4) defaults to off.
+- Merge conflict note: #201 was squash-merged, so the stacked branches
+  re-added its files; resolved by taking the stack's version of the VIP and
+  legacy-socket code and main's TLS socket code (the VIP branch of the
+  listens also gets a TLS listener on `EDGE_VIP`).
+
+## TestConferenceTwoNodes flake: root cause (2026-11-09)
+
+- Two causes, one in the test and one in production code. Both reproduced on a
+  Mac (16 parallel test processes, or 12 busy loops).
+- "rehomed = 0, want 1" (also seen in CI, run 40695787431): the test read the
+  counter as soon as `conf.get("800")` was non-nil. `confRehome` makes the room
+  visible in `confReserve` and counts `rehomed` several statements later, after
+  `NewParty`, so a goroutine switch in between shows 0. The test now waits for
+  the counter. The production order stays: the event is counted only once the
+  rehome has succeeded.
+- "forwarded participant hears no audio" (peak 0): the relay and anchor sockets
+  were bound with network `udp` (dual-stack `[::]`), the conference party and
+  fanout sockets with `udp4`. On BSD kernels a dual-stack bind succeeds on a
+  port an IPv4 socket already holds, and IPv4 datagrams then go to the IPv4
+  socket. A relay leg could share a port with a party socket (a previous run's,
+  or another test process's), and the phone's media never reached the relay
+  (relay saw 0 packets, 0 rejected). Linux refuses that bind, so the next free
+  port is taken. All RTP is IPv4-only (SDP is `IN IP4` only), so relay and
+  anchor sockets are now `udp4` like the rest; the port-in-use check is then
+  the same on every kernel.
+
+## Opus "inLen >= S->Fs_in_kHz" flake: root cause and fix (2026-11-09)
+
+- Symptom: `TestOpusSessionLoopback` failed on most runs (104 of 200 here, less
+  on CI) with the SILK resampler assertion; the same assertion hit a voicemail
+  call in production. PR 243's rebuild-after-panic only recovers; it did not
+  remove the cause.
+- Root cause: the transpiled libopus passes addresses of its Go stack locals
+  as uintptr. `silk_decode_frame` writes the frame length through one; if the
+  stack moves during the call the write goes to the old copy, the caller reads
+  0, and `silk_resampler` aborts. The pin in `withOpusStack` was meant to
+  prevent the move, but `var pin [512<<10]byte` is over the compiler's 128 KB
+  limit for stack variables, so it was moved to the heap (`go build -gcflags=-m`
+  says "moved to heap: pin"). It pinned nothing and allocated 512 KB per call.
+  Survival depended on the caller's stack at that moment (a fresh goroutine, or
+  a receive loop a GC had shrunk while parked in a read).
+- Ruled out: shared decoder state across goroutines (each decoder has its own
+  TLS and mutex; sessions use one goroutine per decoder), frame sizes (320
+  samples, packets replay clean on a big stack), test timing.
+- Fix: all library calls run on a few dedicated worker goroutines that build a
+  512 KB stack once from 64 KB frames (under the 128 KB limit) and hold it, so
+  nothing grows or shrinks it. A call that still moves the stack is returned as
+  a failure, which feeds the existing decoder rebuild. The test expectation was
+  right and is unchanged.
+- Under `-race` the Opus build is off (opus_race.go), so the loopback test
+  skips there; the -race count proves nothing about the codec.
+
+## IVR homed-callee data race (ivrHomeCallee vs release)
+
+- Root cause: `homedCall.legs` had no lock of its own. `ivrHomeCallee`
+  (IVR dial-out goroutine, started by takeover) wrote `legs[1]` under
+  `call.mu`, while `call.release` (BYE handler goroutine) iterated `hom.legs`
+  after dropping `call.mu`; `haHomedState` and `homedCall.leg` read it with no
+  lock either. Seen in `TestIVRHuntAnswerAtMemberTimeout` under `-race`.
+- Fix: `homedCall` carries a leaf mutex; all access goes through `leg`,
+  `pair` and `setCallee`. Regression test: `homed_race_test.go`.
+
+## Grandstream key choices from the official templates (2026-11-09)
+
+- Firmware-upgrade confirmation prompt off (P8375=0, P84988=1) for unattended upgrades, or leave it
+- Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
+- Account sharing group password: shared default `AccountSharing`, or a per-group secret
+
+## AI on the canvas may apply its own batch (2026-11-10)
+
+- Asked: should the canvas AI assistant only propose (a person applies), or may it apply?
+- Answer (user): the AI may apply. Give the assistant a write tool that applies its batch,
+  audited and revertible, in line with the earlier AI-access decision. Operators still see
+  and can revert every applied batch.
+
+## Conference two-node test raced on srv.deps (2026-11-10)
+
+- Root cause: not production code. `TestConferenceTwoNodes` assigned
+  `p.srv.deps.Membership` after `startPBX` had already started the servers, so
+  the test goroutine wrote `s.deps` while sipgo handler goroutines (`confMember`
+  via `confResolve`) and `confWatchPeer` read it. Seen under `-race` in the
+  integration job. The server never writes `deps` after construction.
+- Fix: inject the membership through a `withMembership` pbxOpt at build time,
+  as `withHA` and `withConferences` do. Rule: tests never mutate `srv.deps`
+  once the node runs.
+
+## TestValkeyFailover red in the nightly lab since 2026-11-07
+
+- Root cause: a lab/runner problem, not a Hello bug. The first failing run is
+  the first one on the GitHub-hosted `ubuntu-24.04-arm` runner (#249); the last
+  green ran on ARC (`arc-azrtydxb`). After `docker compose stop valkey-1` all
+  three Sentinels go sdown on the primary within 5 s and then sit in TILT
+  (`+tilt` every ~8 s, never `-tilt`), which suspends failover; even a manual
+  `SENTINEL failover` answered NOGOODSLAVE. Hello never gets to reconnect, so
+  nothing in hello-sip/hello-control or Kamailio HA (#201 landed after the first
+  failure) is involved. The later failures in that run cascade from the
+  still-stopped primary.
+- Mechanism (confirmed on the hosted runner with probes in the lab): Sentinel
+  resolves `valkey-1` synchronously (resolve-hostnames). A stopped container's
+  name is unknown to Docker's embedded DNS; musl then adds the runner's search
+  domain (`*.cloudapp.net`) and the query is forwarded upstream and never
+  answered, so `getent hosts valkey-1` blocks 10 s. That stalls the Sentinel
+  loop past the 2 s tilt trigger, over and over. Measured in the same
+  container: default 10 s, `--dns 127.0.0.1` 10 s, an internal network 10 s,
+  `timeout:1 attempts:1` 2 s, `ndots:0` 0 s.
+- Fix: `dns_opt: ["ndots:0"]` on the lab Sentinels, so the bare service name
+  gets NXDOMAIN at once. (Making the `state` network internal was tried and did
+  not help.)
+- kw is not affected: sentinels and valkey are healthy there (ckquorum OK 3
+  usable, primary valkey-1) and in-cluster DNS answers a missing pod fast.
+
+## Relay hook data race (2026-11-10)
+
+- Root cause: `Relay.recv` tested `r.onPacket` / `r.onDTMF` for nil without `r.mu`, while
+  `OnPacket` / `OnDTMF` set them under it. Seen in `TestQueueCallbackReservesAgent` under `-race`.
+- Fix: the receive loop reads each hook only under the lock, as #266 and #273 already do, so
+  they rebase onto this cleanly. Regression test: `relay_hook_race_test.go`.

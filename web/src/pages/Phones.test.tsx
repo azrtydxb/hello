@@ -475,6 +475,20 @@ describe("Phone admin password", () => {
       "POST /api/v1/phones/5/admin-password/reveal": () =>
         json({ adminPassword: secret }),
       "POST /api/v1/phones/5/admin-password/rotate": noContent,
+      "GET /api/v1/phones/5/ldap": () =>
+        json({
+          served: false,
+          supported: true,
+          groupEnabled: false,
+          host: "",
+          port: 0,
+          base: "",
+          bindDn: "",
+          passwordSet: false,
+          rotatedAt: null,
+          previousValid: false,
+          lastBindAt: null,
+        }),
     });
   }
 
