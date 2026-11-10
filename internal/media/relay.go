@@ -160,6 +160,10 @@ type legStats struct {
 
 type relayMsg struct {
 	data []byte // the full RTP packet, copied before queueing
+	// own marks a packet of the relay's own stream (SendDTMF): it is sent as
+	// built, not rewritten into the relayed stream. It rides the same queue
+	// so it cannot overtake relayed packets queued before it.
+	own bool
 }
 
 // rewriteState tracks one direction's rewrite: our outbound stream (fresh
@@ -523,17 +527,26 @@ func (r *Relay) recv(l *relayLeg) {
 		if l.carries(pkt.PayloadType) && pkt.PayloadType != dtmfPT {
 			r.noteAudio(l, pkt)
 		}
+		var digit byte
+		var digitDelivered bool
 		if dtmfPT != 0 && pkt.PayloadType == dtmfPT {
 			if ev, ok := ParseTelephoneEvent(pkt.Payload); ok {
 				ev.Sequence = pkt.Sequence
-				if code, deliver := l.filter.Observe(ev, pkt.Marker); deliver {
-					r.mu.Lock()
-					h := r.onDTMF
-					r.mu.Unlock()
-					if h != nil {
-						h(l.name, code)
-					}
-				}
+				digit, digitDelivered = l.filter.Observe(ev, pkt.Marker)
+			}
+		}
+		// The digit hook runs after the packet is queued for the peer, so
+		// whatever the hook sends into the peer leg (the door-open code)
+		// lands behind the digit's own packet, never ahead of it.
+		deliverDigit := func() {
+			if !digitDelivered {
+				return
+			}
+			r.mu.Lock()
+			h := r.onDTMF
+			r.mu.Unlock()
+			if h != nil {
+				h(l.name, digit)
 			}
 		}
 		// The hooks are read under the lock: a caller may set them after Start
@@ -544,10 +557,10 @@ func (r *Relay) recv(l *relayLeg) {
 		if tap != nil {
 			tap(l.name, pkt)
 		}
-		if l.muted.Load() {
-			continue
+		if !l.muted.Load() {
+			r.forward(l, buf[:n])
 		}
-		r.forward(l, buf[:n])
+		deliverDigit()
 	}
 }
 
@@ -700,12 +713,28 @@ func (r *Relay) pump(l *relayLeg) {
 		}
 		select {
 		case m := <-l.q:
-			if out, ok := r.rewrite(l, m.data); ok {
+			if m.own {
+				l.send(m.data)
+			} else if out, ok := r.rewrite(l, m.data); ok {
 				l.send(out)
 			}
 		case <-r.ctx.Done():
 			return
 		}
+	}
+}
+
+// enqueueOwn queues a packet of the relay's own stream behind everything
+// already queued for the leg, so it is sent in order with the relayed
+// packets. It blocks while the queue is full, never drops.
+func (l *relayLeg) enqueueOwn(ctx context.Context, r *Relay, pkt []byte) error {
+	select {
+	case l.q <- relayMsg{data: pkt, own: true}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.ctx.Done():
+		return errors.New("media: relay closed")
 	}
 }
 
@@ -1071,7 +1100,9 @@ func (r *Relay) SendDTMF(ctx context.Context, legName, digits string) error {
 			if dst == nil {
 				return errors.New("media: the leg has no address yet")
 			}
-			_, _ = l.conn.WriteToUDP(pkt, dst)
+			if err := l.enqueueOwn(ctx, r, pkt); err != nil {
+				return err
+			}
 			if err := wait(frameDur); err != nil {
 				return err
 			}

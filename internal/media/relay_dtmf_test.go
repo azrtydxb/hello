@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 // TestRelaySendDTMF fails if SendDTMF does not put the digits on the leg as
@@ -76,5 +77,36 @@ func TestRelaySendDTMF(t *testing.T) {
 	}
 	if err := r.SendDTMF(context.Background(), "b", "5x"); err == nil {
 		t.Error("a non-DTMF character was sent")
+	}
+}
+
+// TestRelaySendDTMFKeepsOrder fails if a telephone event the relay sends into
+// a leg from the DTMF hook (the door-open code) can overtake the relayed
+// event that triggered it. The hook fires for the press's marker packet; that
+// packet is queued for the peer leg, so what the hook sends must come out
+// behind it. The test sends the code from the hook and
+// requires the relayed press to arrive first.
+func TestRelaySendDTMFKeepsOrder(t *testing.T) {
+	r, pa, pb := testRelay(t)
+	r.SetPayloadTypes("a", 0, 101)
+	r.SetPayloadTypes("b", 0, 96)
+	r.OnDTMF(func(leg string, _ byte) {
+		if leg != "a" {
+			return
+		}
+		// SendDTMF puts its first packet out at once, then waits a frame:
+		// a short deadline keeps just that first packet, sent from inside
+		// the hook, the worst case for overtaking.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+		defer cancel()
+		_ = r.SendDTMF(ctx, "b", "8")
+	})
+	// A press of digit 0 from leg a: marker start, then the end packets.
+	pa.send(101, []byte{0, 10, 0, 160}, true)
+	// The relayed press comes out as payload type 101 and the code as 96.
+	first := pb.recv(t)
+	if first.PayloadType != 101 || first.Payload[0] != 0 {
+		t.Fatalf("first packet at the far leg = type %d event %d, want the relayed press (101, 0) ahead of the code",
+			first.PayloadType, first.Payload[0])
 	}
 }

@@ -50,8 +50,10 @@ func newRTPSink(t *testing.T, p *phone) *rtpSink {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	port := conn.LocalAddr().(*net.UDPAddr).Port
-	p.sdp = regexp.MustCompile(`m=audio \d+`).ReplaceAllString(p.sdp, "m=audio "+strconv.Itoa(port))
-	sdp, err := media.ParseAudioSDP([]byte(p.sdp))
+	text := p.rewriteSDP(func(s string) string {
+		return regexp.MustCompile(`m=audio \d+`).ReplaceAllString(s, "m=audio "+strconv.Itoa(port))
+	})
+	sdp, err := media.ParseAudioSDP([]byte(text))
 	if err != nil {
 		t.Fatal(err)
 	}
