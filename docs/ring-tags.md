@@ -138,10 +138,30 @@ WP856 and the GRP/GXP desk phones get no ring map until their key is confirmed
 on hardware. A tag whose name is the start of another tag's (`door`,
 `doorbell`) is written after it, so the phone's match cannot take the wrong one.
 
-Custom tones from the tone library and the Grandstream ring tone format are not
-produced yet; only the vendors' built-in ringers can be chosen. Every key and
-value is from the vendor's administrator guide and has not been checked on a
-phone yet; check one phone of each vendor before relying on it.
+### Tone library (custom tones)
+
+Under **Ringing > Tones** an operator uploads WAV files. A file is PCM, 8 or
+16 kHz, mono, 16-bit, at most 30 seconds and 512 KiB; anything else is
+refused with a `400` that says why. The audio is kept in the `hello-ringtones`
+bucket and a phone downloads it at `GET /p/<token>/ring/<name>.wav` with the
+same rules as its other files: the phone's own token over HTTPS, an `ETag` (the
+file's SHA-256) so an unchanged tone is a `304`, an empty `404` for anything
+else, and an audit row of kind `ringtone`. A name is never reused for other
+audio while the tone exists. A tone a ring map choice names cannot be deleted.
+
+On the Ring map tab a vendor that is provisioned custom tones lists them as
+"Custom: name". That is **Yealink** (`ringtone.url`, the rule's ringer is the
+file name) and **Snom** (`custom_melody_url`, the class sound is `Custom`).
+Both keys hold one file, so a phone is delivered one custom tone: the first
+custom choice in tag order. A later tag that maps another custom tone plays its
+default tone. **Poly** has `saf.x` for the file, but no ringer value that plays
+it is known, **Fanvil** has no known key and the **Grandstream** ring tone
+format is not produced; those vendors keep to their built-in ringers until the
+lab confirms their keys. No format conversion is done: the format limits above
+are what the phones that get a custom tone are given.
+
+Every key and value is from the vendor's administrator guide and has not been
+checked on a phone yet; check one phone of each vendor before relying on it.
 
 ## API
 
@@ -157,6 +177,9 @@ phone yet; check one phone of each vendor before relying on it.
 | `GET /api/v1/ring-map`                    | the ringer lists, the defaults and the choices    |
 | `PUT /api/v1/ring-map`                    | replace the global choices                        |
 | `PUT /api/v1/ring-map/groups/{id}`        | replace a phone group's overrides                 |
+| `GET /api/v1/ringtones`                   | the tone library                                  |
+| `POST /api/v1/ringtones`                  | upload a WAV (multipart `name` and `file`)        |
+| `DELETE /api/v1/ringtones/{id}`           | delete a tone no ring map choice uses             |
 
 Reads need the read scope and the viewer role; changes need the write scope and
 the operator role.

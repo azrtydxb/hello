@@ -21,6 +21,10 @@
 {{- with .Ring.Default}}
     <ring_sound idx="1" perm="R">{{xml .}}</ring_sound>
 {{- end}}
+{{- /* Custom tone (phone-feature-parity S-43): custom_melody_url is the one custom melody the phone downloads, from Hello under the phone's token; a class whose sound is Custom plays it (Snom Service Hub, custom_melody_url). Unverified on hardware (verify). */}}
+{{- with .Ring.Custom}}
+    <custom_melody_url perm="R">{{xml $.Prov.URL}}ring/{{.}}.wav</custom_melody_url>
+{{- end}}
 {{- /* MWI (spec S-1): user_mailbox names the mailbox the phone ties MWI to and dials for voicemail (Snom Service Hub, user_mailbox, D-series); Snom documents no separate subscribe flag. Unverified on hardware (lab item 1). */}}
     <user_mailbox idx="1" perm="R">{{xml (or .Line.VoicemailCode "*97")}}</user_mailbox>
 {{- /* Call waiting (phone-feature-parity S-18): call_waiting per line is on (waiting tone), visual (no tone) or off; Hello writes on or off from the extension's flag. Key and values as in Snom's own settings reference and the Tancredi snom template. Unverified on hardware (verify, lab item 26). */}}
@@ -87,6 +91,21 @@
     <answer_after_policy perm="R">idle</answer_after_policy>
 {{- with .Book}}
     <dkey_directory perm="R">url {{xml .URL}}</dkey_directory>
+{{- end}}
+{{- /* LDAP directory (pbx-gaps S-26): ldap_* settings of the Snom Service Hub ("LDAP"): server, port, base, username, password, max_hits, search and number filters, name and number attributes, display name. ldaps:// in ldap_server for TLS is not checked on a phone (verify). The CA below (certificates) is what the phone trusts for the server. */}}
+{{- with .LDAP}}
+    <ldap_server perm="R">ldaps://{{xml .Host}}</ldap_server>
+    <ldap_port perm="R">{{.Port}}</ldap_port>
+    <ldap_base perm="R">{{xml .Base}}</ldap_base>
+    <ldap_username perm="R">{{xml .BindDN}}</ldap_username>
+    <ldap_password perm="R">{{xml .Password}}</ldap_password>
+    <ldap_max_hits perm="R">{{.MaxHits}}</ldap_max_hits>
+    <ldap_search_filter perm="R">(|(cn=%)(sn=%))</ldap_search_filter>
+    <ldap_number_filter perm="R">(|(telephoneNumber=%)(mobile=%)(homePhone=%))</ldap_number_filter>
+    <ldap_name_attributes perm="R">cn sn</ldap_name_attributes>
+    <ldap_number_attributes perm="R">telephoneNumber mobile homePhone</ldap_number_attributes>
+    <ldap_display_name perm="R">cn</ldap_display_name>
+    <ldap_sort_results perm="R">on</ldap_sort_results>
 {{- end}}
 {{- with .Firmware}}
     <update_policy perm="R">auto_update</update_policy>

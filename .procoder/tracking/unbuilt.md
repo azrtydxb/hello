@@ -7,17 +7,17 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | #   | Item                                                                          | Status                 |
 | --- | ----------------------------------------------------------------------------- | ---------------------- |
 | 9   | Session timers, CRLF keep-alive, dead-media teardown, roaming relearn (S-9)   | done (#203)            |
-| 9b  | Session timers on parked/picked-up/transferred dialogs and trunk legs         | wip (#228)             |
-| 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                          | wip (#204)             |
-| 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | wip (#226)             |
-| 12  | Tone library (S-43)                                                           | todo (after 11)        |
-| 13  | Door station extension kind, Door group (S-45, S-46)                          | wip (#225)             |
+| 9b  | Session timers on parked/picked-up/transferred dialogs and trunk legs         | done (#228)            |
+| 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                          | done (#204)            |
+| 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | done (#226)            |
+| 12  | Tone library (S-43)                                                           | done (#238)            |
+| 13  | Door station extension kind, Door group (S-45, S-46)                          | done (#225)            |
 | 14  | Door-open DTMF `*50` (S-47)                                                   | todo (after 13)        |
 | 15  | Setting overrides and WP extras (S-12)                                        | todo                   |
 | 16  | Doorbell webhook (S-48)                                                       | todo (after 13)        |
 | 17  | Door video preview (S-49)                                                     | todo (code), hw (test) |
 | 18  | vCard phonebook slot (S-31), partial                                          | todo                   |
-| 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)    | wip (parity-firmware)  |
+| 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)    | done (#232)            |
 | 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                      | todo                   |
 | 21  | Multiple lines and account sharing (S-10, S-11)                               | wip (#270)             |
 | 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial      | todo                   |
@@ -37,6 +37,30 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 ## integrations
 
+| #   | Item                                           | Status      |
+| --- | ---------------------------------------------- | ----------- |
+| P1  | Call events: stream, integration_events, SSE   | done (#205) |
+| P2  | Webhooks: signing, retries, DLQ                | done (#222) |
+| P3  | Click-to-call: originate API, /dial, tel:      | done (#234) |
+| P4  | Recording links and lookup API                 | todo        |
+| P5  | Browser extension (MV3), fixed signing key     | todo        |
+| P6  | HubSpot and internal/crm framework             | todo        |
+| P7  | Zapier                                         | todo        |
+| P8  | Directory engine, AD/LDAP                      | todo        |
+| P9  | Google Workspace and Entra connectors          | todo        |
+| P10 | SCIM 2.0                                       | todo        |
+| P11 | OIDC SSO, LDAP bind login                      | todo        |
+| P12 | Auto-provisioning extensions from a range      | todo        |
+| P13 | Salesforce Open CTI                            | todo        |
+| P14 | Pipedrive                                      | todo        |
+| P15 | Zoho CRM                                       | todo        |
+| P16 | Zendesk, Freshdesk                             | todo        |
+| P17 | Slack, n8n, Make                               | todo        |
+| P18 | Outlook/Google contacts lookup, calendar DND   | todo        |
+| P19 | Dynamics 365 CIF                               | todo        |
+| P20 | ConnectWise, Autotask, HaloPSA, Clio           | todo        |
+| P21 | Odoo, Bitrix24                                 | todo        |
+| P22 | Teams Direct Routing guide (shared with WR 13) | todo        |
 | #   | Item                                           | Status      |
 | --- | ---------------------------------------------- | ----------- |
 | P1  | Call events: stream, integration_events, SSE   | done (#205) |
@@ -89,7 +113,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 6b  | Video recording                             | blocked (6)                  |
 | 10  | Video phones and door stations              | todo (code), hw (test)       |
 | 11  | Conference-room video                       | blocked (6)                  |
-| 13  | Teams SBC-peer trunk profile, docs/teams.md | todo                         |
+| 13  | Teams SBC-peer trunk profile, docs/teams.md | wip (#225)                   |
 | 7-9 | Push gateway, mobile apps, mobile video     | not now                      |
 | 12  | Public reach                                | not now (user decides later) |
 
@@ -109,33 +133,33 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 ## kamailio-ha
 
-| #   | Item                                              | Status                   |
-| --- | ------------------------------------------------- | ------------------------ |
-| -   | Choose option A or B, VIP IP                      | done (A, 192.168.10.109) |
-| 1-4 | Second instance, VIP, re-point phones, chart/docs | partial (#201, 1/4)      |
+| #   | Item                                              | Status                                                |
+| --- | ------------------------------------------------- | ----------------------------------------------------- |
+| -   | Choose option A or B, VIP IP                      | done (A, 192.168.10.109)                              |
+| 1-4 | Second instance, VIP, re-point phones, chart/docs | done (#201, #207, #215, #216; VIP go-live on request) |
 
 ## Competitor gaps (spec pbx-gaps, #199)
 
-| Item                                          | Status                         |
-| --------------------------------------------- | ------------------------------ |
-| Backup and restore                            | wip (#219, A2)                 |
-| Follow-me                                     | todo (spec done #199)          |
-| Blocklist, anonymous reject, country limits   | wip (#210, A1)                 |
-| Queue callback                                | wip (#237, B4)                 |
-| 2FA                                           | done (#209)                    |
-| Dial-by-name                                  | done (#229, B3)                |
-| Voicemail groups                              | wip (#220, A6)                 |
-| Fax                                           | todo (spec done #199)          |
-| Boss/secretary                                | todo (spec done #199)          |
-| Multi-language prompts (Dutch option per box) | done (#208, A5)                |
-| Codec in call history                         | wip (spec pbx-gaps; cdr-codec) |
-| Phone LDAP directory                          | wip (#223, A7)                 |
+| Item                                          | Status                |
+| --------------------------------------------- | --------------------- |
+| Backup and restore                            | wip (#219, A2)        |
+| Follow-me                                     | todo (spec done #199) |
+| Blocklist, anonymous reject, country limits   | wip (#210, A1)        |
+| Queue callback                                | done (#237)           |
+| 2FA                                           | done (#209)           |
+| Dial-by-name                                  | done (#229, B3)       |
+| Voicemail groups                              | wip (#220, A6)        |
+| Fax                                           | todo (spec done #199) |
+| Boss/secretary                                | todo (spec done #199) |
+| Multi-language prompts (Dutch option per box) | done (#208, A5)       |
+| Codec in call history                         | done (#206)           |
+| Phone LDAP directory                          | wip (#223, A7)        |
 
 ## Other
 
 | Item                                                                                                      | Status                |
 | --------------------------------------------------------------------------------------------------------- | --------------------- |
-| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-0fd53d6)    |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-3dcd77c)    |
 | MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
 | Transfer-to-voicemail phone key                                                                           | done (#200)           |
@@ -149,6 +173,9 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | Integration flakes: queue HA BYE, takeover voicemail, queue timeout, conference two nodes, MinIO bucket   | done (#221)           |
 | Remove MOH test queue 8888                                                                                | todo (when user done) |
 | Call heartbeat leak, trunk slot race, Opus decoder rebuild (fix-trunk-slot-leak)                          | done (#243)           |
+| Phone resync/reboot: answer digest challenges in the phone realm                                          | done (#257)           |
+| Data race on homed calls (ivrHomeCallee)                                                                  | done (#267)           |
+| Opus codec stack pin (decoder failures, TestOpusSessionLoopback)                                          | done (#269)           |
 | HT813 FXO disconnect supervision                                                                          | done (#244)           |
 | Onboarding sends the adopted extension id as a number                                                     | done (#256)           |
 

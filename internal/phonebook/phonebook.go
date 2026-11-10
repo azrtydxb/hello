@@ -174,10 +174,13 @@ type Group struct {
 	PTT           PTT                `json:"ptt"`
 	// AccountSharing switches Grandstream WP8x6 account sharing on for the
 	// group's phones, each a host or a guest (phone-feature-parity S-11).
-	AccountSharing bool      `json:"accountSharing"`
-	PhoneCount     int       `json:"phoneCount"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	AccountSharing bool `json:"accountSharing"`
+	// LDAPEnabled turns the phone LDAP directory on for the group's phones
+	// (spec pbx-gaps S-26).
+	LDAPEnabled bool      `json:"ldapEnabled"`
+	PhoneCount  int       `json:"phoneCount"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // ValidName reports whether s is a usable book or group name: 1 to max

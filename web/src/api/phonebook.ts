@@ -62,6 +62,9 @@ export interface Group {
   pagingOptions?: PagingOptions;
   /** Grandstream WP8x6 account sharing is on for the group's phones. */
   accountSharing?: boolean;
+
+  /** The group's phones are given the LDAP directory. */
+  ldapEnabled?: boolean;
   phoneCount: number;
   createdAt: string;
   updatedAt: string;
@@ -442,6 +445,26 @@ export const setGroupAccountSharing = (groupId: Id, enabled: boolean) =>
     `/api/v1/phone-groups/${seg(groupId)}/account-sharing`,
     { body: { enabled } },
   );
+
+/** GET|PUT /api/v1/phone-groups/{id}/ldap (pbx-gaps S-26). */
+export interface GroupLdap {
+  enabled: boolean;
+  served: boolean;
+  host: string;
+  port: number;
+  base: string;
+  phoneCount: number;
+}
+
+export const getGroupLdap = (groupId: Id, signal?: AbortSignal) =>
+  request<GroupLdap>("GET", `/api/v1/phone-groups/${seg(groupId)}/ldap`, {
+    signal,
+  });
+
+export const setGroupLdap = (groupId: Id, enabled: boolean) =>
+  request<GroupLdap>("PUT", `/api/v1/phone-groups/${seg(groupId)}/ldap`, {
+    body: { enabled },
+  });
 
 /** PUT /api/v1/phone-groups/{id}/ptt: replaces the group's push-to-talk settings. */
 export const setGroupPtt = (groupId: Id, ptt: Ptt) =>
