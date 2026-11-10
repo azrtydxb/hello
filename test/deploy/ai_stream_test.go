@@ -32,3 +32,30 @@ func TestUIProxyStreamsAssistantAnswers(t *testing.T) {
 		}
 	}
 }
+
+// TestUIProxyStreamsInbox fails if the UI's nginx can buffer the inbox's
+// event stream: it needs a location of its own, which wins over /api/, with
+// response buffering, caching and compression off and X-Accel-Buffering set
+// for the ingress controller in front.
+func TestUIProxyStreamsInbox(t *testing.T) {
+	body := nginxLocation(t, "= /api/v1/me/inbox/stream")
+	if body == "" {
+		t.Fatal("nginx: no location for the inbox stream")
+	}
+	for _, want := range []string{
+		"set $hello_control ${HELLO_CONTROL_UPSTREAM};",
+		"proxy_pass $hello_control;",
+		"proxy_http_version 1.1;",
+		`proxy_set_header Connection "";`,
+		"X-Forwarded-Proto $hello_forwarded_proto",
+		"proxy_buffering off;",
+		"proxy_cache off;",
+		"gzip off;",
+		`add_header X-Accel-Buffering "no" always;`,
+		"proxy_read_timeout 600s;",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("nginx: the inbox stream location lacks %q", want)
+		}
+	}
+}
