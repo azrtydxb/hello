@@ -246,6 +246,9 @@ func (c *call) answerSelf(body []byte) bool {
 		return false
 	}
 	tag := sip.GenerateTagN(8)
+	if c.orig != nil {
+		tag = c.orig.agentTag // the phone's dialog knows us by the tag of our INVITE
+	}
 	res := sip.NewResponseFromRequest(c.inv, sip.StatusOK, "OK", body)
 	res.To().Params = append(res.To().Params, sip.HeaderParams{{K: "tag", V: tag}}...)
 	if len(body) > 0 {
@@ -258,6 +261,11 @@ func (c *call) answerSelf(body []byte) bool {
 	c.answerTime = time.Now()
 	c.vmTag = tag
 	c.mu.Unlock()
+	// A retriever's or a picker's dialog gets a session timer (S-9); a
+	// voicemail or an announcement does not.
+	for _, h := range c.sessionSelf(body) {
+		res.AppendHeader(h)
+	}
 	if h := s.answerHook.Load(); h != nil {
 		(*h)()
 	}
@@ -277,6 +285,7 @@ func (c *call) answerSelf(body []byte) bool {
 		c.maxTimer = time.AfterFunc(s.cfg.MaxCallDuration, c.expire)
 	}
 	c.mu.Unlock()
+	c.sessionArm()
 	return true
 }
 

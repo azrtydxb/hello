@@ -188,6 +188,12 @@ func withConferences(cs Conferences, a ConferenceAudit) pbxOpt {
 	return func(_ *Config, d *Deps) { d.Conferences, d.ConferenceAudit = cs, a }
 }
 
+// withMembership gives the node a cluster view when it is built. Setting
+// srv.deps afterwards races with the node's own goroutines reading it.
+func withMembership(m Membership) pbxOpt {
+	return func(_ *Config, d *Deps) { d.Membership = m }
+}
+
 // room800 is the plain test room: no PINs, ten seats, tones on entry.
 func room800() snapshot.Conference {
 	return snapshot.Conference{ID: 7, Name: "Weekly", Number: "800", MaxParticipants: 10, EntryExit: snapshot.ConfSoundTone, Enabled: true}
@@ -668,11 +674,8 @@ func TestConferenceTwoNodes(t *testing.T) {
 	room := room800()
 	// Two nodes share this process, so they get separate RTP port ranges.
 	ports := func(lo, hi int) pbxOpt { return func(c *Config, _ *Deps) { c.RTPPortMin, c.RTPPortMax = lo, hi } }
-	pbxA := startPBX(t, devs, withNodeID("sip-a"), ports(20000, 20499), withRooms(room), withConferences(f, nil))
-	pbxB := startPBX(t, devs, withNodeID("sip-b"), ports(20500, 20999), withRooms(room), withConferences(f, nil))
-	for _, p := range []*testPBX{pbxA, pbxB} {
-		p.srv.deps.Membership = mem
-	}
+	pbxA := startPBX(t, devs, withNodeID("sip-a"), ports(20000, 20499), withRooms(room), withConferences(f, nil), withMembership(mem))
+	pbxB := startPBX(t, devs, withNodeID("sip-b"), ports(20500, 20999), withRooms(room), withConferences(f, nil), withMembership(mem))
 	ready := func(id, addr string) cluster.Member {
 		return cluster.Member{ID: id, Kind: cluster.KindSIP, State: cluster.Ready, SIPAddr: addr}
 	}
@@ -750,7 +753,7 @@ func TestConferenceTakeover(t *testing.T) {
 	ports := func(lo, hi int) pbxOpt { return func(c *Config, _ *Deps) { c.RTPPortMin, c.RTPPortMax = lo, hi } }
 	room := room800()
 	owner := startPBX(t, confDevices(), withNodeID("sip-1"), withHA(ha, mem), ports(20000, 20499), withRooms(room), withConferences(f, nil))
-	taker := startPBX(t, confDevices(), withNodeID("sip-2"), withHA(ha, mem), ports(20500, 20999), withRooms(room), withConferences(f, nil))
+	taker := startPBX(t, confDevices(), withNodeID("sip-2"), withHA(ha, mem), ports(20500, 20999), withRooms(room), withConferences(f, nil), withMembership(mem))
 	a, b := newPhone(t, owner, "a1", "pa"), newPhone(t, taker, "b1", "pb1")
 	a.register(t)
 	b.register(t)
