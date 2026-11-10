@@ -18,7 +18,6 @@ import (
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
-	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 )
 
@@ -80,15 +79,35 @@ func haLegFrom(d livestate.DialogLeg, uas bool) *haLeg {
 type homedCall struct {
 	takenFrom string
 	takenAt   time.Time
-	legs      [2]*haLeg
+	// mu guards legs: an IVR dial-out homes the callee leg after the call
+	// is published, while hang-up and replication read the pair. It is a
+	// leaf lock, taken inside call.mu where both are held.
+	mu   sync.Mutex
+	legs [2]*haLeg
 }
 
 // leg is the caller's (false) or callee's (true) homed leg.
 func (h *homedCall) leg(callee bool) *haLeg {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if callee {
 		return h.legs[1]
 	}
 	return h.legs[0]
+}
+
+// pair is a consistent snapshot of the caller and callee legs.
+func (h *homedCall) pair() [2]*haLeg {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.legs
+}
+
+// setCallee homes the callee leg.
+func (h *homedCall) setCallee(l *haLeg) {
+	h.mu.Lock()
+	h.legs[1] = l
+	h.mu.Unlock()
 }
 
 // useCSeq spends the leg's next CSeq value.
@@ -200,7 +219,7 @@ func (s *Server) haAck(l *haLeg, inv *sip.Request, res *sip.Response) {
 	if hop := l.helloHop(s); hop != "" {
 		ack.SetDestination(hop)
 	}
-	if err := s.client.WriteRequest(ack, sipgo.ClientRequestAddVia); err != nil {
+	if err := s.client.WriteRequest(ack, s.addViaFromListener); err != nil {
 		s.log.Debug("takeover ACK failed", "error", err)
 	}
 }
@@ -252,10 +271,33 @@ func (s *Server) haBye(l *haLeg) {
 	l.useCSeq()
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	if res, err := s.do(ctx, req); err == nil && res != nil {
-		s.m.response(res.StatusCode)
+	// A BYE that failed to go out (a transaction the transport cancelled)
+	// left the far end on a dead call with nothing said. Send it again,
+	// as a new transaction, a few times while the node serves.
+	for attempt := 0; ; attempt++ {
+		res, err := s.do(ctx, req)
+		if err == nil {
+			if res != nil {
+				s.m.response(res.StatusCode)
+			}
+			return
+		}
+		if attempt >= haByeAttempts-1 || !s.serving.Load() || ctx.Err() != nil {
+			s.log.Warn("BYE to a taken-over leg failed", "call_id", l.callID, "error", err)
+			return
+		}
+		time.Sleep(haByeRetryDelay)
+		if req, err = l.request(s, sip.BYE, nil, ""); err != nil {
+			return
+		}
 	}
 }
+
+// haByeAttempts and haByeRetryDelay bound haBye's resends.
+const (
+	haByeAttempts   = 3
+	haByeRetryDelay = 200 * time.Millisecond
+)
 
 // --- the poller ---------------------------------------------------------------
 
@@ -523,16 +565,18 @@ type haOfflineNode struct {
 // haOfflineSee remembers a node's OFFLINE state and when its takeovers
 // should be over; haOfflineCount marks it reaped; haOfflineForget clears it
 // when the node is back.
-func (s *Server) haOfflineSee(id string, active int) *haOfflineNode {
+// It returns a copy: haOfflineCount sets counted under haOfflineMu, so a
+// pointer read after the lock is released races with it.
+func (s *Server) haOfflineSee(id string, active int) haOfflineNode {
 	s.haOfflineMu.Lock()
 	defer s.haOfflineMu.Unlock()
 	if e, ok := s.haOffline[id]; ok {
-		return e
+		return *e
 	}
 	active = max(active, s.haLastActive[id])
 	e := &haOfflineNode{active: active, deadline: time.Now().Add(haReapDelay)}
 	s.haOffline[id] = e
-	return e
+	return *e
 }
 
 func (s *Server) haOfflineCount(id string) {
@@ -1045,6 +1089,10 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		c.queueResume(st.StateDetail)
 		return
 	}
+	if st.State == haPhaseDirectory {
+		c.directoryResume()
+		return
+	}
 	if st.State == haPhaseIVR {
 		c.ivrResume(strings.TrimPrefix(st.StateDetail, haIVRDetailPrefix))
 		return
@@ -1072,6 +1120,7 @@ func (s *Server) haNewCall(st livestate.DialogState, from string, a, b *haLeg, t
 		start: orTime(st.StartedAt, orTime(st.AnsweredAt, takenAt)), ringTime: st.RingAt,
 		direction: orDefault(st.Direction, cdr.DirectionInternal), mediaMode: "anchored",
 		route: st.Route, trunkName: st.Trunk, rewritten: st.Rewritten,
+		doorCaller: st.Door, kind: st.Kind,
 		canceled: make(chan struct{}), stopHB: make(chan struct{}),
 		setupDone: make(chan struct{}), aborted: make(chan struct{}),
 		haStop: make(chan struct{}),
@@ -1084,6 +1133,7 @@ func (s *Server) haNewCall(st livestate.DialogState, from string, a, b *haLeg, t
 	}
 	c.connected = true
 	c.answerTime = orTime(st.AnsweredAt, takenAt)
+	c.ses.carry(st.Session)
 	c.homedCall = &homedCall{takenFrom: from, takenAt: takenAt, legs: [2]*haLeg{a, b}}
 	c.restoreEvents(st.Events)
 	if b != nil {

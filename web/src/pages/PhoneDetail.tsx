@@ -37,6 +37,7 @@ import {
   IssuedUrlModal,
   issuedView,
   type IssuedUrl,
+  FirmwareVersion,
   PhoneFlags,
   phoneName,
   RearmDialog,
@@ -281,7 +282,7 @@ export function PhoneDetail() {
                   value: phone.lastFetchFile ?? "—",
                   mono: true,
                 },
-                { label: "Firmware", value: phone.firmwareSeen ?? "—" },
+                { label: "Firmware", value: <FirmwareVersion phone={phone} /> },
                 { label: "Added", value: formatTime(phone.createdAt) },
                 { label: "Updated", value: formatTime(phone.updatedAt) },
               ]}

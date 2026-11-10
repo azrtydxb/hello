@@ -368,7 +368,7 @@ func TestCallEventsQueueAgentMissed(t *testing.T) {
 // call.answered and call.ended and the caller call.answered.
 func TestCallEventsIVRExtension(t *testing.T) {
 	ev := &fakeEvents{}
-	pbx, _ := ivrPBXWith(t, 1, []pbxOpt{withEvents(ev)},
+	pbx, _ := ivrPBXOpts(t, 1, []pbxOpt{withEvents(ev)},
 		ivrMenu("main", "800", map[string]snapshot.IVRDest{"1": ext("300")}))
 	a, _, c := registerABC(t, pbx)
 	answer := make(chan struct{})

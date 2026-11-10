@@ -23,14 +23,16 @@ import (
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/migrate"
+	"github.com/azrtydxb/hello/internal/oauth"
+	"github.com/azrtydxb/hello/internal/originate"
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/prov/redirect"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/version"
-	"github.com/azrtydxb/hello/internal/webhook"
 	"github.com/azrtydxb/hello/internal/vkconn"
+	"github.com/azrtydxb/hello/internal/webhook"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/valkey-io/valkey-go"
 )
@@ -145,6 +147,14 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		_ = ln.Close()
 		return fmt.Errorf("HELLO_PUBLIC_URL: %w", err)
 	}
+	// Hello's own OAuth apps (spec integrations I-32): the dialer.
+	if as != nil {
+		for _, c := range oauth.PreregisteredClients(cfg.AI.PublicURL) {
+			if err := st.UpsertPreregisteredClient(ctx, c); err != nil {
+				log.Warn("could not register a first-party OAuth client", "client", c.ID, "error", err)
+			}
+		}
+	}
 	// The in-product AI agent (spec ai-agent): off, starting nothing,
 	// unless HELLO_AI_BASE_URL and HELLO_AI_MODEL are set.
 	agent, err := ai.NewWith(cfg.AIAgent, st, nil, metrics.Registry, log, ai.Options{Replica: cfg.NodeID})
@@ -188,6 +198,10 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	go dispatcher.Run(ctx)
 	go evSvc.Run(ctx)
+	// Click-to-call (spec I-37): close the requests a dead SIP node left
+	// open and copy the states the nodes post into their rows.
+	sweeper := &originate.Sweeper{Store: st, Live: vk, Lock: st, Log: log.With("component", "originate")}
+	go sweeper.Run(ctx)
 	apiCfg := api.Config{
 		Events:          evSvc,
 		Webhooks:        hooks,
@@ -195,6 +209,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Store:           st,
 		Live:            vk,
 		Queues:          vk,
+		Callbacks:       st.QueueCallbacks(),
 		Trunks:          vk,
 		Cluster:         vk,
 		Valkey:          vk,
@@ -211,6 +226,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Conferences:     st,
 		TwoFactor:       st,
 		TwoFALogins:     api.NewTwoFactorMetrics(metrics.Registry),
+		Batches:         st,
+		BatchMetrics:    api.NewBatchMetrics(metrics.Registry),
 		ConferenceLive:  vk,
 		Messages:        st,
 		Dialing:         cfg.Dial,
@@ -220,6 +237,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		SessionTTL:      cfg.SessionTTL,
 		Log:             log,
 	}
+	apiCfg.Originate, apiCfg.OriginateLive = st, vk
+	apiCfg.OriginateMetrics = api.NewOriginateMetrics(metrics.Registry)
 	// Proposals (spec ai-agent) exist only while the agent is on; reads in
 	// their validation replay through the API handler built just below.
 	var (

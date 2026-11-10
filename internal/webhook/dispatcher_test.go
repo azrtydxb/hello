@@ -20,7 +20,7 @@ import (
 // if the event id is not stable across the attempts while the delivery id is
 // unique per attempt, or if the success is not recorded once.
 // near reports whether two times agree to the microsecond PostgreSQL keeps.
-func near(a, b time.Duration) bool { return (a-b).Abs() < time.Millisecond }
+func near(a, b time.Duration) bool { return (a - b).Abs() < time.Millisecond }
 
 func TestDeliverSignsAndRetriesAServerError(t *testing.T) {
 	forEachStore(t, func(t *testing.T, r *rig) {

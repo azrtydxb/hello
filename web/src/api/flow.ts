@@ -25,6 +25,8 @@ export interface FlowPort {
   type: string;
   many: boolean;
   label: string;
+  /** One port per configured key (an IVR key): addressed as `<id>:<key>`. */
+  perKey?: boolean;
   field?: string;
   targets?: FlowTarget[];
 }

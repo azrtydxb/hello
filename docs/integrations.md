@@ -10,14 +10,15 @@ later phases. [Webhooks](#webhooks) push the events to your server.
 
 ## What is emitted
 
-| Event                  | When                                                                                                                                   |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `call.ringing`         | An extension starts ringing. A call that rings several extensions (a ring group) yields one event per ringing extension.               |
-| `call.answered`        | An extension answered. The calling extension of an internal or outbound call gets one too.                                             |
-| `call.ended`           | The call ended, for each extension it involved.                                                                                        |
-| `call.missed`          | The call reached an extension and nobody answered. A call answered by another member of a ring group is not missed for the others.     |
-| `call.recording.ready` | A recording of the call was stored. It is stored after the call ends, so it follows `call.ended`. Carries `recordingId`, `durationMs`. |
-| `call.completed`       | The call detail record was stored. Carries `cdrId`; this is the point to log the call elsewhere.                                       |
+| Event                     | When                                                                                                                                   |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `call.ringing`            | An extension starts ringing. A call that rings several extensions (a ring group) yields one event per ringing extension.               |
+| `call.answered`           | An extension answered. The calling extension of an internal or outbound call gets one too.                                             |
+| `call.ended`              | The call ended, for each extension it involved.                                                                                        |
+| `call.missed`             | The call reached an extension and nobody answered. A call answered by another member of a ring group is not missed for the others.     |
+| `call.recording.ready`    | A recording of the call was stored. It is stored after the call ends, so it follows `call.ended`. Carries `recordingId`, `durationMs`. |
+| `call.completed`          | The call detail record was stored. Carries `cdrId`; this is the point to log the call elsewhere.                                       |
+| `call.originate.progress` | A click-to-call changed state ([click-to-call](click-to-call.md)). Carries `originateId`, `state` and, for a failure, `reason`.        |
 
 Pages, intercoms and conference legs do not produce call events.
 
@@ -409,7 +410,7 @@ listed). Creating or changing such an endpoint is audited.
 | `hello_webhook_endpoints_disabled`       | endpoints switched off                           |
 | `hello_webhook_dead_dropped_total`       | dead letters dropped by the per-endpoint cap     |
 
-Webhook tables are in migration `00057`; finished deliveries are purged with
+Webhook tables are in migration `00058`; finished deliveries are purged with
 the event retention, dead letters after 30 days, by one replica at a time.
 
 ## What comes next

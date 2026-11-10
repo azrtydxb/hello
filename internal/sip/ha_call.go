@@ -208,7 +208,7 @@ func (c *call) haSoloRefresh(sdp string) {
 // restart: the voicemail application, or an announcement destination's
 // playback. Anything else is a solo call about to end on its own.
 func haSoloPhase(phase string) bool {
-	return phase == haPhaseVoicemail || phase == haPhaseAnnouncement || phase == haPhaseIVR || phase == haPhaseQueue || phase == haPhaseConference
+	return phase == haPhaseVoicemail || phase == haPhaseAnnouncement || phase == haPhaseIVR || phase == haPhaseQueue || phase == haPhaseConference || phase == haPhaseDirectory
 }
 
 // noteSentCSeq records a CSeq this node sent on a dialog outside sipgo's
@@ -282,7 +282,7 @@ func (c *call) haState() (livestate.DialogState, bool) {
 		// A one-legged call answered by Hello: recoverable while its
 		// application runs (the taker restarts it from the beginning).
 		if !haSoloPhase(phase) || (phase == haPhaseVoicemail && vm == nil) ||
-			((phase == haPhaseAnnouncement || phase == haPhaseIVR || phase == haPhaseQueue) && relay == nil) ||
+			((phase == haPhaseAnnouncement || phase == haPhaseIVR || phase == haPhaseQueue || phase == haPhaseDirectory) && relay == nil) ||
 			(phase == haPhaseConference && !confLocal && viaRoom == "") {
 			return livestate.DialogState{}, false
 		}
@@ -341,7 +341,8 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 	caller, dest := c.callerNum, c.dialled
 	contact := contactURI(c.s)
 	c.mu.Unlock()
-	solo := hom.legs[1] == nil
+	legs := hom.pair()
+	solo := legs[1] == nil
 	// A voicemail call's media is its anchor session, not a relay.
 	voicemail := solo && phase == haPhaseVoicemail
 	// A conference participant's media is its mixer socket, not a relay.
@@ -349,12 +350,12 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 	if yielded || (relay == nil && !voicemail && !conference) || (solo && !haSoloPhase(phase)) {
 		return livestate.DialogState{}, false
 	}
-	off, ok := haOffer(hom.legs[0], hom.legs[1])
+	off, ok := haOffer(legs[0], legs[1])
 	if !ok {
 		return livestate.DialogState{}, false
 	}
 	st := livestate.DialogState{
-		CallID:      hom.legs[0].callID,
+		CallID:      legs[0].callID,
 		OwnerNode:   c.s.cfg.NodeID,
 		Correlation: c.id,
 		State:       c.haStateName(),
@@ -368,7 +369,7 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 	if relay != nil {
 		st.RelayPorts = [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)}
 	}
-	for i, l := range hom.legs {
+	for i, l := range legs {
 		if l == nil {
 			continue
 		}
@@ -397,9 +398,11 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 // one logical call with one CDR that starts where the call started.
 func (c *call) haContinuity(st *livestate.DialogState) {
 	st.OwnerIncarnation = c.s.cfg.Incarnation
+	st.Session = c.sessionSnapshot() // before c.mu: the session lock is never taken under it
 	c.mu.Lock()
 	st.StartedAt, st.RingAt = c.start, c.ringTime
 	st.Direction, st.Route, st.Trunk, st.Rewritten = c.direction, c.route, c.trunkName, c.rewritten
+	st.Door, st.Kind = c.doorCaller, c.kind
 	st.Trace = make([]string, 0, len(c.trace))
 	for _, step := range c.trace {
 		st.Trace = append(st.Trace, step.Text)
@@ -566,7 +569,7 @@ func (c *call) haYield(taker string) {
 		legs = append(legs, w.callID)
 	}
 	if hom := c.homedCall; hom != nil {
-		for _, l := range hom.legs {
+		for _, l := range hom.pair() {
 			if l != nil {
 				legs = append(legs, l.callID)
 			}
@@ -918,4 +921,5 @@ func (c *call) haArmMaxDuration(answeredAt, start time.Time) {
 	if !c.ended && c.maxTimer == nil {
 		c.maxTimer = time.AfterFunc(left, c.expire)
 	}
+	c.sessionArmHomed()
 }

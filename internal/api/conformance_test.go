@@ -46,11 +46,15 @@ var conformanceExempt = func() map[string]string {
 
 // conformanceBodies are request body forms the suite must send and the API
 // accept, as "operationId content-type" (spec S-2): both forms of the
-// voicemail PUT and the heard body.
+// voicemail PUT, the heard body and the JSON form of each upload or import.
 var conformanceBodies = []string{
 	"updateExtensionVoicemail application/json",
 	"updateExtensionVoicemail multipart/form-data",
 	"markVoicemailMessageHeard application/json",
+	"createAnnouncement application/json",
+	"replaceAnnouncement application/json",
+	"importPhones application/json",
+	"importPhonebook application/json",
 }
 
 // conformance validates every request the package suite sends through
@@ -203,9 +207,19 @@ func (c *conformance) checkRequest(op apispec.Operation, contentType string, sen
 	if mt == "" {
 		// The handlers read JSON (or their one documented form) whatever
 		// the header says; the suite's JSON client sends none.
-		if _, ok := content["application/json"]; ok || len(content) != 1 {
+		_, hasJSON := content["application/json"]
+		switch {
+		case hasJSON && len(content) == 2 && !json.Valid(sent):
+			// A JSON form next to one other (importPhones: text/csv): a body
+			// that is not JSON is the other form.
+			for _, k := range sortedKeys(content) {
+				if k != "application/json" {
+					mt = k
+				}
+			}
+		case hasJSON || len(content) != 1:
 			mt = "application/json"
-		} else {
+		default:
 			mt = sortedKeys(content)[0]
 		}
 	}
