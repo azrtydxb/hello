@@ -8,7 +8,7 @@ import (
 	"github.com/azrtydxb/hello/internal/rtcpxr"
 )
 
-func ptr(v float64) *float64 { return &v }
+func fptr(v float64) *float64 { return &v }
 
 // TestRTCPXRStoredOnMatchingCDR fails if a report is not returned with the
 // CDR whose caller leg or callee leg it names, if a report of another call
@@ -31,17 +31,17 @@ func TestRTCPXRStoredOnMatchingCDR(t *testing.T) {
 	}
 	// The callee's phone reports before the CDR could be read, and again
 	// with an interval report that must not replace its call-end report.
-	final := rtcpxr.Report{CallID: "leg-b", Final: true, MOSLQ: ptr(4.1), LossPct: ptr(0.5)}
+	final := rtcpxr.Report{CallID: "leg-b", Final: true, MOSLQ: fptr(4.1), LossPct: fptr(0.5)}
 	if err := st.RecordRTCPXR(ctx, "dev200", "200", final); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordRTCPXR(ctx, "dev200", "200", rtcpxr.Report{CallID: "leg-b", MOSLQ: ptr(2.0)}); err != nil {
+	if err := st.RecordRTCPXR(ctx, "dev200", "200", rtcpxr.Report{CallID: "leg-b", MOSLQ: fptr(2.0)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordRTCPXR(ctx, "dev100", "100", rtcpxr.Report{CallID: "leg-a", Final: true, JitterMs: ptr(9)}); err != nil {
+	if err := st.RecordRTCPXR(ctx, "dev100", "100", rtcpxr.Report{CallID: "leg-a", Final: true, JitterMs: fptr(9)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordRTCPXR(ctx, "dev999", "999", rtcpxr.Report{CallID: "leg-unrelated", Final: true, MOSLQ: ptr(1)}); err != nil {
+	if err := st.RecordRTCPXR(ctx, "dev999", "999", rtcpxr.Report{CallID: "leg-unrelated", Final: true, MOSLQ: fptr(1)}); err != nil {
 		t.Fatal(err)
 	}
 	c, _, err := st.GetCDR(ctx, mine)
