@@ -22,6 +22,12 @@ const (
 	KindWebchat = "webchat"
 
 	ProviderSIPTrunk = "sip_trunk"
+	ProviderTwilio   = "twilio"
+
+	// FirstContactOff and FirstContactAttested are the values of the
+	// first-contact setting (M-17).
+	FirstContactOff      = "off"
+	FirstContactAttested = "attested"
 )
 
 // Conversation states.
@@ -60,6 +66,9 @@ const (
 	// MaxBodyBytes is the longest text an agent can send in one go; it is
 	// split into parts the carrier path accepts.
 	MaxBodyBytes = 2000
+	// MaxCarrierBody is the longest text in characters a carrier takes in one
+	// message (Twilio's limit); the carrier segments it.
+	MaxCarrierBody = 1600
 	// MaxNoteBytes is the longest internal note.
 	MaxNoteBytes = 4000
 	// MaxPartBytes is the longest part of a split text: one SIP MESSAGE

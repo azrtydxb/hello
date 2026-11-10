@@ -146,7 +146,9 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		return fmt.Errorf("HELLO_PROV_ADDR: %w", err)
 	}
 	go runMailer(ctx, envSMTP(cfg), st, objs, log)
-	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, messaging.NewMetrics(metrics.Registry), log)
+	msgMetrics := messaging.NewMetrics(metrics.Registry)
+	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, msgMetrics, log)
+	go runCarrierWorkers(ctx, st, msgMetrics, log)
 	go runInboxNotifier(ctx, envSMTP(cfg), st, log)
 
 	// Scheduled and manual backups, and restore (spec pbx-gaps S-2 to S-4).

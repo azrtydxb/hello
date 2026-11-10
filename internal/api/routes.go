@@ -359,6 +359,7 @@ func (s *server) routes() []route {
 		{"PUT", "/api/v1/messaging/channels/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putMessagingChannel},
 		{"DELETE", "/api/v1/messaging/channels/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteMessagingChannel},
 		{"POST", "/api/v1/messaging/channels/{id}/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testMessagingChannel},
+		{"GET", "/api/v1/messaging/channels/{id}/numbers", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessagingChannelNumbers},
 		{"GET", "/api/v1/messaging/addresses", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessagingAddresses},
 		{"POST", "/api/v1/messaging/addresses", auth.ScopeAdmin, auth.RoleAdmin, false, s.createMessagingAddress},
 		{"GET", "/api/v1/messaging/addresses/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessagingAddress},
@@ -372,6 +373,7 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/inbox/erase", auth.ScopeAdmin, auth.RoleAdmin, false, s.eraseMessagingPeer},
 
 		{"GET", "/api/v1/inbox/conversations", auth.ScopeMessages, auth.RoleOperator, false, s.listInboxConversations},
+		{"POST", "/api/v1/inbox/conversations", auth.ScopeMessages, auth.RoleOperator, false, s.startInboxConversation},
 		{"POST", "/api/v1/inbox/conversations/bulk", auth.ScopeMessages, auth.RoleOperator, false, s.bulkInboxConversations},
 		{"GET", "/api/v1/inbox/conversations/{id}", auth.ScopeMessages, auth.RoleOperator, false, s.getInboxConversation},
 		{"GET", "/api/v1/inbox/conversations/{id}/messages", auth.ScopeMessages, auth.RoleOperator, false, s.listInboxMessages},

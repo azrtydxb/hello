@@ -14563,7 +14563,7 @@
       "post": {
         "operationId": "createMessagingChannel",
         "summary": "Add a messaging channel",
-        "description": "Adds a channel that reads customer texts from a SIP trunk with SMS over SIP turned on and sends replies through it. Add its numbers next. Admin only.",
+        "description": "Adds a channel. A sip_trunk channel reads customer texts from a SIP trunk with SMS over SIP turned on and sends replies through it. A twilio channel sends through a Twilio account: the credentials are checked against Twilio first (422 when refused, 502 when Twilio cannot be reached), then sealed. A Twilio number cannot receive texts while Hello has no public listener, so a conversation on it starts with a first-contact message. Add its numbers next. Admin only.",
         "tags": ["messaging"],
         "requestBody": {
           "required": true,
@@ -14598,8 +14598,14 @@
           "409": {
             "$ref": "#/components/responses/Conflict"
           },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/Carrier"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
@@ -14661,7 +14667,7 @@
       "put": {
         "operationId": "updateMessagingChannel",
         "summary": "Replace a messaging channel's settings",
-        "description": "Changes a channel's name, its switch and its trunk; its kind and provider stay. Turning it off stops new texts and replies, and the numbers keep their history.",
+        "description": "Changes a channel's name, its switch and its trunk; its kind and provider stay. Turning it off stops new texts and replies, and the numbers keep their history. For a Twilio channel, sending accountSid and authToken replaces the stored credentials after Twilio accepts them (422 when refused, 502 when unreachable); leaving them out keeps the stored ones.",
         "tags": ["messaging"],
         "parameters": [
           {
@@ -14704,8 +14710,14 @@
           "409": {
             "$ref": "#/components/responses/Conflict"
           },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/Carrier"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
@@ -14763,7 +14775,7 @@
       "post": {
         "operationId": "testMessagingChannel",
         "summary": "Check that a channel can work",
-        "description": "Checks that the channel is on, that its trunk exists, is enabled and has SMS over SIP turned on, and that the channel has an enabled number. It sends nothing.",
+        "description": "Checks that the channel can work, and sends nothing. A sip_trunk channel: the channel is on, its trunk exists, is enabled and has SMS over SIP turned on, and it has an enabled number. A Twilio channel: the channel is on, Twilio accepts the stored credentials and lists the numbers, and it has an enabled number.",
         "tags": ["messaging"],
         "parameters": [
           {
@@ -16150,6 +16162,64 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "post": {
+        "operationId": "startInboxConversation",
+        "summary": "Text a customer who has not texted first",
+        "description": "Starts a conversation with a customer and sends the first text, through a carrier number. It is off until an administrator sets firstContact to attested in the messaging settings (409). Every message needs consentAttestation true and a consentNote saying how the customer agreed; both are stored. One recipient and one message per request: there is no list form. A number that is not in international format is 400, one that opted out is 422, one that already has an open conversation on the number is 409 (reply there), and the per-agent and per-number limits answer 429. The conversation is assigned to the sender and the text is sent in the background; its delivery status is read from the carrier and shows on the message.",
+        "tags": ["inbox"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxStartInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The new conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -20781,6 +20851,70 @@
         "x-hello-role": "operator",
         "x-hello-mcp": true
       }
+    },
+    "/api/v1/messaging/channels/{id}/numbers": {
+      "get": {
+        "operationId": "listMessagingChannelNumbers",
+        "summary": "List the numbers of a carrier account",
+        "description": "Asks the carrier for the numbers its account owns, so an administrator can add them to the channel. Only for a carrier channel (409 for a SIP trunk channel, or when the stored credentials cannot be read). 422 when the carrier refuses the credentials, 502 when it cannot be reached. Admin only.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account's numbers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MessagingCarrierNumber"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/Carrier"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
     }
   },
   "components": {
@@ -20974,6 +21108,16 @@
             }
           }
         },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Carrier": {
+        "description": "The messaging carrier could not be reached or did not answer as expected (code provider_unreachable)",
         "content": {
           "application/json": {
             "schema": {
@@ -33737,6 +33881,8 @@
           "trunkId",
           "trunkName",
           "hasCredentials",
+          "accountHint",
+          "messagingService",
           "status",
           "statusDetail",
           "lastEventAt",
@@ -33756,7 +33902,7 @@
           },
           "provider": {
             "type": "string",
-            "description": "How texts reach Hello; sip_trunk is a SIP trunk that carries SMS as SIP MESSAGE."
+            "description": "How texts reach Hello: sip_trunk is a SIP trunk that carries SMS as SIP MESSAGE, twilio is a Twilio account reached over its web API (sending only: a Twilio number cannot receive texts while Hello has no public listener)."
           },
           "name": {
             "type": "string"
@@ -33767,14 +33913,22 @@
           "trunkId": {
             "type": ["integer", "null"],
             "format": "int64",
-            "description": "The SIP trunk of a sip_trunk channel; null when it was deleted."
+            "description": "The SIP trunk of a sip_trunk channel; null when it was deleted, and for a carrier channel."
           },
           "trunkName": {
             "type": "string"
           },
           "hasCredentials": {
             "type": "boolean",
-            "description": "Whether provider credentials are stored; they are never returned."
+            "description": "Whether carrier credentials are stored; they are never returned."
+          },
+          "accountHint": {
+            "type": "string",
+            "description": "The last four characters of the carrier account's SID, to tell accounts apart; empty for a SIP trunk channel. The token is never returned."
+          },
+          "messagingService": {
+            "type": "boolean",
+            "description": "Whether texts leave through the carrier's Messaging Service instead of the number they were received on."
           },
           "status": {
             "type": "string",
@@ -33812,8 +33966,8 @@
           },
           "provider": {
             "type": "string",
-            "description": "How texts reach Hello; only sip_trunk exists yet.",
-            "enum": ["sip_trunk"]
+            "description": "How texts reach Hello: sip_trunk or twilio.",
+            "enum": ["sip_trunk", "twilio"]
           },
           "name": {
             "type": "string",
@@ -33827,8 +33981,24 @@
           },
           "trunkId": {
             "type": "integer",
-            "description": "The SIP trunk the channel reads texts from and sends through; the trunk needs SMS over SIP turned on.",
+            "description": "The SIP trunk a sip_trunk channel reads texts from and sends through; the trunk needs SMS over SIP turned on. A Twilio channel takes none.",
             "format": "int64"
+          },
+          "accountSid": {
+            "type": "string",
+            "description": "A Twilio channel's account SID (AC and 32 hex digits). Required with authToken when creating a Twilio channel; sending any of the three credential fields on an update replaces them all, so send accountSid and authToken together.",
+            "pattern": "^AC[0-9a-fA-F]{32}$"
+          },
+          "authToken": {
+            "type": "string",
+            "description": "A Twilio channel's auth token. Write-only: it is checked against Twilio, sealed with HELLO_SECRET_KEY and never returned or logged.",
+            "maxLength": 128,
+            "writeOnly": true
+          },
+          "messagingServiceSid": {
+            "type": "string",
+            "description": "Optional Twilio Messaging Service SID (MG and 32 hex digits): texts leave through its sender pool instead of the number they were received on. Empty sends from the number.",
+            "pattern": "^(MG[0-9a-fA-F]{32})?$"
           }
         }
       },
@@ -33873,6 +34043,7 @@
           "optOutKeywords",
           "helpText",
           "optOutText",
+          "sendsPerMinute",
           "conversations",
           "createdAt"
         ],
@@ -33918,6 +34089,12 @@
             "type": "string",
             "description": "What Hello answers when a customer opts out; empty is the default sentence."
           },
+          "sendsPerMinute": {
+            "type": "integer",
+            "description": "The most carrier texts the number sends in one minute; the rest wait queued.",
+            "minimum": 1,
+            "maximum": 600
+          },
           "conversations": {
             "type": "integer"
           },
@@ -33938,7 +34115,7 @@
           },
           "address": {
             "type": "string",
-            "description": "The number customers text, at least 4 digits, optionally starting with +; required when creating, and not changed afterwards."
+            "description": "The number customers text, at least 4 digits, optionally starting with +; required when creating, and not changed afterwards. A number on a carrier channel must be in international format: + and 8 to 15 digits."
           },
           "label": {
             "type": "string",
@@ -33966,6 +34143,12 @@
             "type": "string",
             "description": "What Hello answers when a customer opts out, at most 480 bytes; empty is the default sentence.",
             "maxLength": 480
+          },
+          "sendsPerMinute": {
+            "type": "integer",
+            "description": "The most carrier texts the number sends in one minute, 1-600; 60 when created without it, and unchanged when left out.",
+            "minimum": 1,
+            "maximum": 600
           }
         }
       },
@@ -33994,6 +34177,23 @@
           "emailNotify": {
             "type": "boolean",
             "description": "Whether an agent with no inbox open is emailed when a customer text waits; the email never carries the text."
+          },
+          "firstContact": {
+            "type": "string",
+            "enum": ["off", "attested"],
+            "description": "Whether an agent may start a conversation with a number that has not texted first. off (default) forbids it; attested allows it, one message to one recipient at a time, with the sender confirming the customer's consent."
+          },
+          "firstContactPerUserHour": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "The most conversations one agent may start per hour (default 20)."
+          },
+          "firstContactPerAddressDay": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000,
+            "description": "The most conversations one number may start per 24 hours (default 200)."
           }
         }
       },
@@ -34525,7 +34725,7 @@
       },
       "InboxStatus": {
         "type": "object",
-        "required": ["enabled", "unread", "unassigned"],
+        "required": ["enabled", "unread", "unassigned", "senders"],
         "properties": {
           "enabled": {
             "type": "boolean",
@@ -34538,6 +34738,29 @@
           "unassigned": {
             "type": "integer",
             "description": "Active conversations nobody has taken; counted for supervisors only."
+          },
+          "senders": {
+            "type": "array",
+            "description": "Carrier numbers a supervisor may start a conversation from (POST /inbox/conversations); empty for anyone else and while first contact is off.",
+            "items": {
+              "type": "object",
+              "required": ["addressId", "address", "label", "channel"],
+              "properties": {
+                "addressId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "address": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "channel": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },
@@ -35328,6 +35551,66 @@
                 }
               }
             }
+          }
+        }
+      },
+      "MessagingCarrierNumber": {
+        "type": "object",
+        "required": ["number", "label", "sms", "mms", "voice"],
+        "properties": {
+          "number": {
+            "type": "string",
+            "description": "The number in international format."
+          },
+          "label": {
+            "type": "string",
+            "description": "The carrier's name for the number."
+          },
+          "sms": {
+            "type": "boolean"
+          },
+          "mms": {
+            "type": "boolean"
+          },
+          "voice": {
+            "type": "boolean"
+          }
+        }
+      },
+      "InboxStartInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "addressId",
+          "to",
+          "body",
+          "consentAttestation",
+          "consentNote"
+        ],
+        "properties": {
+          "addressId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The carrier number the text is sent from."
+          },
+          "to": {
+            "type": "string",
+            "description": "One customer number in international format: + and 8 to 15 digits."
+          },
+          "body": {
+            "type": "string",
+            "description": "The text, at most 1600 characters (and 2000 bytes).",
+            "minLength": 1
+          },
+          "consentAttestation": {
+            "type": "boolean",
+            "description": "Must be true: the sender confirms the customer agreed to be texted."
+          },
+          "consentNote": {
+            "type": "string",
+            "description": "How the customer agreed, 1-500 characters. Stored on the conversation.",
+            "minLength": 1,
+            "maxLength": 500
           }
         }
       }

@@ -12,3 +12,10 @@ func ConferencePINAAD(roomID int64, which string) string {
 // TOTPAAD is the additional data a user's TOTP secret is sealed under, so a
 // secret copied to another user's row does not open.
 func TOTPAAD(userID int64) string { return fmt.Sprintf("user:%d:totp", userID) }
+
+// MsgChannelAAD is the additional data a messaging channel's carrier
+// credentials are sealed under, so a value copied to another channel's row
+// does not open.
+func MsgChannelAAD(channelID int64) string {
+	return fmt.Sprintf("msg_channel:%d:credentials", channelID)
+}

@@ -2046,3 +2046,77 @@ so the VIP stage cannot sit in that file.
 - Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
+
+## Messaging item 2: outbound sending on Twilio (2026-11-10)
+
+Delivery item 2 of `.procoder/specs/messaging-channels.md`, on the inbox core
+(item 1, #211). Migration placeholder `00097_messaging_twilio.sql` (the merge
+captain renumbers it). Everything additive: no existing CHECK constraint
+changes, so `pg_temp.hello_check_values` is not needed.
+
+What is in: `internal/messaging/provider` (the interface and registry; only
+what works on the LAN: `Validate`, `Send`, `Status`, `Numbers`) and its Twilio
+adapter; the send, status-poll and settle workers (`messaging.Worker`, run on
+every control replica); sealed credentials (`secret.MsgChannelAAD`, the same
+`secret.Box` as trunk passwords); first contact (`POST /api/v1/inbox/conversations`,
+settings `firstContact` and two limits); the per-number throughput cap; the
+numbers route; the Inbox "Text a customer" dialog, the Twilio fields of the
+channel dialog and the first-contact settings.
+
+How inbound replies arrive without N1: **they do not.** A Twilio number cannot
+receive a text while there is no public listener (spec Default 6), and polling
+for inbound (`Reconcile`, N3) is not scheduled. So a Twilio conversation starts
+with a first-contact text and only the outbound side lives in the inbox. This
+is documented in `docs/inbox.md` and the channel dialog.
+
+Choices made by default (the spec leaves them open; the conservative option was
+taken):
+
+1. **First contact is a supervisor action only** (`POST /api/v1/inbox/conversations`,
+   operator and above, scope `messages`); the `user` role has no route to start
+   one (no `/me/inbox` form). Fewer people can send to a customer who has not
+   texted. The Inbox status carries `senders` for supervisors only.
+2. **The first-contact guard applies to every new outbound conversation**, even
+   to a number that texted before in a resolved conversation. A customer with
+   an **open** conversation on the number is `409 conversation_exists` (reply
+   there) rather than reused.
+3. **First contact only through a carrier number**; a SIP trunk number is
+   `409 channel_unavailable` (its texts have no web API, and the spec names
+   provider numbers as the case).
+4. **No idempotency key on first contact:** a double submit hits the open
+   conversation (`409`). One message, one recipient, one attestation.
+5. **A consent note is mandatory** (1-500 characters) besides the attestation
+   flag. It is stored on the conversation (`consent_note`); the audit row holds
+   ids only ("first_contact attested"), never the note or the number.
+6. **Credentials are replaced as a whole** (SID and token together, optionally
+   the Messaging Service SID), after Twilio accepts them. The token cannot be
+   changed alone, so a stored SID is never paired with an unchecked token.
+7. **Save is refused when the carrier is unreachable** (`502`), not stored
+   unvalidated: an administrator who cannot reach Twilio cannot add a channel.
+8. **A lost or 5xx answer is `unknown`, never retried.** A 429 from Twilio is a
+   definite refusal (`failed`, `rate_limited`). Failures that are not the
+   customer's (lost answers, 429) count toward `degraded` at five in a row; a
+   bad number (21211 and the like) does not.
+9. **Queued for an hour without a send becomes `failed` (`not_sent`)**, since it
+   never reached the carrier, rather than `unknown`.
+10. **Throughput cap default 60 texts a minute per number**, enforced when a
+    text is claimed (one advisory lock), so the cap holds across replicas.
+11. **Limits default as in the spec:** 20 first-contact texts per agent per
+    hour, 200 per number per 24 hours; the `429` carries `Retry-After: 600`.
+12. **Status polling schedule:** 5 s doubling to 5 min for the first hour, then
+    30 min, stopping at the final state, on `404`, after 48 hours, or while the
+    channel's credentials are invalid. No `StatusCallback` is sent (LAN-only).
+13. **Twilio's `21610` on send or on a status read** records an opt-out with
+    source `provider`, as if the customer had texted STOP.
+14. **Body limit 1600 characters** for a carrier text (Twilio's), on top of the
+    API's 2000 bytes; longer is `400` on `body`. Media is never sent (MMS is N1).
+15. **Erasing a customer does not call Twilio** (no provider-side `Redact`; that
+    is item 8). The report already says the carrier keeps its own logs.
+16. **MCP:** every new operation is excluded, category `private-data` (the
+    messaging configuration and message content are never exposed to an agent),
+    so no skill teaches them and the `docs/ai-access.md` doctable is unchanged.
+
+Not testable without a Twilio account (hardware/accounts list in the PR): a real
+send and delivery receipt, error code mapping against live Twilio, 10DLC and
+toll-free registration state, Messaging Service sends, what carriers do to an
+unregistered sender.
