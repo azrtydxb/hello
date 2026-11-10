@@ -154,6 +154,10 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 	}
 	d.Prov.CACertBase64 = pemBase64(d.Prov.CACertPEM)
 	d.BLF = PlaceBLF(d.Phone.Vendor, d.Phone.Model, d.BLF, d.Codes.PickupDirected)
+	d.Line.BLFListURI = ""
+	if len(d.BLF) > 0 && d.Line.Username != "" {
+		d.Line.BLFListURI = "sip:blf-" + d.Line.Username + "@" + d.Line.Domain
+	}
 	d.VMKey = nil
 	if !d.Line.NoVoicemail {
 		d.VMKey = PlaceVMKey(d.Phone.Vendor, d.Phone.Model, len(d.BLF), d.Line.VoicemailCode, d.Line.Label, d.Line.Domain)
@@ -531,6 +535,7 @@ func SampleData(full bool) RenderData {
 				{Channel: 26, Label: "Announcements", Transmit: 1, Subscribe: 1},
 			}})
 		d.Paging = DefaultPagingOptions()
+		d.Syslog = NewSyslogInfo("syslog.hello.example:5514", "info")
 		for i := range 12 {
 			n := strconv.Itoa(1002 + i)
 			d.BLF = append(d.BLF, BLFKey{Number: n, Label: "User " + n, URI: "sip:" + n + "@hello.example"})
