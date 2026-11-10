@@ -404,7 +404,8 @@ func (s *server) testMessagingChannel(w http.ResponseWriter, r *http.Request) {
 	add := func(name string, ok bool, detail string) { checks = append(checks, check{name, ok, detail}) }
 	add("channel", c.Enabled, map[bool]string{true: "enabled", false: "the channel is turned off"}[c.Enabled])
 	if c.Provider != messaging.ProviderSIPTrunk {
-		add("credentials", c.Status != "credentials_invalid" && c.HasCredentials, s.carrierCredentialCheck(r.Context(), is, c))
+		ok, detail := s.carrierCredentialCheck(r.Context(), is, c)
+		add("credentials", ok, detail)
 	} else if c.TrunkID == nil {
 		add("trunk", false, "the channel's trunk was deleted; pick another")
 	} else if t, err := s.Store.GetTrunk(r.Context(), *c.TrunkID); err != nil {
@@ -435,24 +436,24 @@ func (s *server) testMessagingChannel(w http.ResponseWriter, r *http.Request) {
 // carrierCredentialCheck asks the carrier whether the channel's stored
 // credentials work, and says so in words that hold no secret. It sends
 // nothing.
-func (s *server) carrierCredentialCheck(ctx context.Context, is InboxStore, c store.MsgChannel) string {
+func (s *server) carrierCredentialCheck(ctx context.Context, is InboxStore, c store.MsgChannel) (bool, string) {
 	cfg, err := is.ChannelProviderConfig(ctx, c.ID)
 	if err != nil {
-		return "the stored credentials cannot be read; enter them again"
+		return false, "the stored credentials cannot be read; enter them again"
 	}
 	p, err := provider.New(c.Provider, cfg)
 	if err != nil {
-		return "the stored credentials are not usable; enter them again"
+		return false, "the stored credentials are not usable; enter them again"
 	}
 	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	switch err := p.Validate(cctx); {
 	case err == nil:
-		return "the carrier accepts the credentials and the numbers can be listed"
+		return true, "the carrier accepts the credentials and the numbers can be listed"
 	case errors.Is(err, provider.ErrAuth):
-		return "the carrier refused the credentials; enter them again"
+		return false, "the carrier refused the credentials; enter them again"
 	default:
-		return "the carrier could not be checked just now"
+		return false, "the carrier could not be checked just now"
 	}
 }
 

@@ -156,6 +156,7 @@ var NonFlowResources = map[string]string{
 	"flow/canvases":                 "named views of the canvas that store only node positions, not call routing",
 	"messaging/channels":            "customer text channels of the messaging inbox, not call routing",
 	"messaging/addresses":           "numbers customers text in the messaging inbox, not call routing",
+	"inbox/conversations":           "customer text conversations of the messaging inbox, not call routing",
 }
 
 // NotDestinationEnums lists the OpenAPI enums that look like destination
