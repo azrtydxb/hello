@@ -1868,3 +1868,12 @@ so the VIP stage cannot sit in that file.
   sidecar), but go-live would be, so the go-live patch carries the preStop.
   deploy/kuvryn-sync/kw/resources.yaml itself is untouched; it needs the same
   preStop only if the VIP is wired into it directly.
+
+## Backup tools run from PATH only (2026-11-10)
+
+- `pg_dump` and `pg_restore` are run by their names from PATH. The
+  `HELLO_BACKUP_PG_DUMP` and `HELLO_BACKUP_PG_RESTORE` overrides are removed
+  (config, README, docs/backup.md).
+- Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
+  non-static command, and no supported allow exists for it. The overrides were
+  unused: kw does not set them (checked by the user).
