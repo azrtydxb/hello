@@ -1875,6 +1875,44 @@ Implementation notes (template route, no migration):
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
 
+## Item 26: PRACK/100rel and anonymous outbound (2026-11-09)
+
+- 100rel is negotiated hop by hop, not relayed: Hello offers `Supported: 100rel`
+  on every INVITE it originates and PRACKs any reliable 18x from a phone or
+  trunk. Toward the caller it sends reliable provisionals only when the INVITE
+  says `Require: 100rel`; `Supported` alone gets plain responses, as phones keep
+  100rel off (P272 = 0). The 2xx waits up to 64*T1 for the PRACK. A PRACK that
+  never arrives is traced and the call is answered anyway rather than failed.
+- Anonymous outbound is trunk-leg only. It triggers on the trunk policy
+  `always`, the extension flag, or a device request (Privacy id/user/header, or
+  From `anonymous`; `Privacy: none` cancels). The leg gets an anonymous From,
+  the trunk's asserted identity in PAI or PPI (trunk setting, default PAI) and
+  `Privacy: id` merged with the device's values. A device's own PAI/PPI is
+  never forwarded.
+- The spec has no feature code for per-call anonymity, so none was added: a
+  per-call request is the device's Privacy header or anonymous From.
+- The WP "Send Anonymous" setting is found in Grandstream's own templates
+  (config-template-10212026.zip, 2026-11-09 review): `P65` "Send Anonymous
+  (caller ID will be blocked if set to Yes). 0 - No, 1 - Yes. Default is 0" for
+  account 1, in `wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`,
+  `wp820_config_1.0.7.90` and `wp856_config_1.0.3.16` (also
+  `ht813_config_1.0.19.6`); account 2 is `P421`, account 3 `P521` (WP8x6,
+  WP856). It is deliberately not written: the extension flag
+  `anonymousOutbound` is applied by Hello on trunk legs only, so a phone sending
+  an anonymous From on every call, internal ones included, would add nothing the
+  flag does not already do and would blank the caller on internal calls. A site
+  that wants one phone always anonymous sets `P65 = 1` through the S-12 per-phone
+  override. `TestAnonymousKeyNotProvisioned` pins this. Related keys in the same
+  templates, left at their defaults: `P2338` Use Privacy Header (0 Default, 1
+  No, 2 Yes), `P2339` Use P-Preferred-Identity Header (0 Default, 1 No, 2 Yes),
+  `P29098` Use P-Asserted-Identity Header (0 No, 1 Yes; WP8x6 and WP856
+  templates only), `P129` Anonymous Call Rejection (0 No, 1 Yes; Hello rejects
+  anonymous callers itself, item A1) and `P272` Enable 100rel (0 No, 1 Yes,
+  default 0, confirmed as the key behind "phones keep 100rel off").
+- Migration 00051: `extensions.anonymous_outbound`, `trunks.anonymous_policy`,
+  `trunks.asserted_identity`, `trunks.identity_header`. Replaces and call
+  waiting of the same delivery-plan item are not in this PR.
+
 ## RTCP-XR collector (parity-rtcpxr, item 35, S-36) (2026-11-09)
 
 - Reports live in their own table `cdr_rtcpxr` (migration 00066), not in

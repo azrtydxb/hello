@@ -84,6 +84,16 @@ type Trunk struct {
 	// caller's order (names: PCMU, PCMA, G722, opus). Empty means the
 	// default, PCMU and PCMA: most carriers accept G.711 only.
 	Codecs []string
+	// AnonymousPolicy is AnonymousHonour (carry a device's privacy request
+	// to the carrier) or AnonymousAlways (every call out is anonymous);
+	// empty is honour.
+	AnonymousPolicy string
+	// AssertedIdentity is the number asserted for an anonymous call (empty:
+	// the call's caller ID) and IdentityHeader the header carrying it,
+	// IdentityPAI or IdentityPPI (empty: PAI).
+	AssertedIdentity string
+	IdentityHeader   string
+
 	// CallerPolicy screens inbound calls from this trunk: anonymous reject
 	// and a country restriction (pbx-gaps S-8). The zero value screens
 	// nothing.
@@ -110,6 +120,14 @@ func ValidSessionTimers(v string) bool {
 	}
 	return false
 }
+
+// Trunk anonymous-call policies and identity headers (spec S-19).
+const (
+	AnonymousHonour = "honour"
+	AnonymousAlways = "always"
+	IdentityPAI     = "pai"
+	IdentityPPI     = "ppi"
+)
 
 // OutboundRoute matches calls from extensions to external numbers.
 type OutboundRoute struct {

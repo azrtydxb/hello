@@ -87,6 +87,16 @@ created or none (400 with the same rows).
 `templateId`, `blf`, `enabled`, `groupId`, `pttChannelId`), `getPhone`,
 `listPhones`, `deletePhone` (its SIP device stays).
 
+## Phone "Send Anonymous"
+
+`updateExtension` (path `id`) accepts `phoneSendAnonymous`, off by default. On,
+provisioning writes the Grandstream "Send Anonymous" setting (P65, line 1) at
+the next resync, and the phone then hides its caller ID on every call it
+makes, internal calls included. Off writes nothing. It is not
+`anonymousOutbound`, which only makes the calls Hello places through a trunk
+anonymous and leaves internal caller ID alone. Ask which one the person means
+before changing either, then `resyncPhone` and check with `previewPhoneFile`.
+
 ## Push a change and check it
 
 1. `previewPhoneFile` (query `file`) renders what the phone would get,

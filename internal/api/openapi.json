@@ -23184,103 +23184,6 @@
           }
         }
       },
-      "VoicemailGroup": {
-        "type": "object",
-        "required": [
-          "id",
-          "number",
-          "name",
-          "enabled",
-          "maxSeconds",
-          "members",
-          "createdAt",
-          "updatedAt"
-        ],
-        "properties": {
-          "id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "number": {
-            "type": "string",
-            "description": "The dial number of the group."
-          },
-          "name": {
-            "type": "string"
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "maxSeconds": {
-            "type": "integer",
-            "description": "The longest message, in seconds."
-          },
-          "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PagingExtension"
-            }
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "VoicemailGroupInput": {
-        "type": "object",
-        "required": ["number", "name", "members"],
-        "additionalProperties": false,
-        "properties": {
-          "number": {
-            "type": "string",
-            "pattern": "^[0-9]{2,16}$",
-            "description": "Unique dial number, 2-16 digits. A member dials *63 plus this number to broadcast a message."
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64,
-            "description": "Unique display name, spoken in the prompt that asks for the message."
-          },
-          "enabled": {
-            "type": "boolean",
-            "description": "A disabled group takes no message. Default true."
-          },
-          "maxSeconds": {
-            "type": "integer",
-            "minimum": 10,
-            "maximum": 600,
-            "description": "The longest message, in seconds. Default 180."
-          },
-          "members": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 200,
-            "items": {
-              "type": "integer",
-              "format": "int64"
-            },
-            "description": "Extension ids, 1-200. Each must have a voicemail box."
-          }
-        }
-      },
-      "VoicemailGroupList": {
-        "type": "object",
-        "required": ["items"],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/VoicemailGroup"
-            }
-          }
-        }
-      },
       "PagingGroup": {
         "type": "object",
         "required": [
@@ -26109,6 +26012,8 @@
           "recordDefault",
           "allowIntercom",
           "callWaiting",
+          "anonymousOutbound",
+          "phoneSendAnonymous",
           "noAnswerRings",
           "directoryHidden",
           "kind",
@@ -26183,6 +26088,14 @@
           "callWaiting": {
             "type": "boolean",
             "description": "Call waiting. On (the default): a call to this extension while it is in a call rings its devices and the phone shows call waiting. Off: the caller gets the forwardBusy target, or 486 Busy Here without one; ring groups skip the extension while it is busy. Provisioned into the phone's own call-waiting setting, so a phone resync applies a change."
+          },
+          "anonymousOutbound": {
+            "type": "boolean",
+            "description": "Anonymous outbound calls. On: every call this extension places through a trunk is anonymous (RFC 3323/3325): the trunk leg carries Privacy: id, an anonymous From, and the trunk's asserted identity in P-Asserted-Identity (or P-Preferred-Identity, per the trunk). Off (the default): a call is anonymous only when the device asks (a Privacy header or an anonymous From) or the trunk's anonymousPolicy is always."
+          },
+          "phoneSendAnonymous": {
+            "type": "boolean",
+            "description": "Phone Send Anonymous (Grandstream P65, line 1). On: provisioning writes the phone's own Send Anonymous setting, so the phone hides its caller ID on every call it makes, internal calls included; applied at the phone's next resync. Off (the default): nothing is written and the phone keeps its own setting. Distinct from anonymousOutbound, which only makes the calls Hello places through a trunk anonymous and leaves internal caller ID alone."
           },
           "mohClassId": {
             "oneOf": [
@@ -26327,6 +26240,14 @@
           "callWaiting": {
             "type": "boolean",
             "description": "Call waiting. On (the default): a call to this extension while it is in a call rings its devices and the phone shows call waiting. Off: the caller gets the forwardBusy target, or 486 Busy Here without one; ring groups skip the extension while it is busy. Provisioned into the phone's own call-waiting setting, so a phone resync applies a change."
+          },
+          "anonymousOutbound": {
+            "type": "boolean",
+            "description": "Anonymous outbound calls. On: every call this extension places through a trunk is anonymous (RFC 3323/3325): the trunk leg carries Privacy: id, an anonymous From, and the trunk's asserted identity in P-Asserted-Identity (or P-Preferred-Identity, per the trunk). Off (the default): a call is anonymous only when the device asks (a Privacy header or an anonymous From) or the trunk's anonymousPolicy is always."
+          },
+          "phoneSendAnonymous": {
+            "type": "boolean",
+            "description": "Phone Send Anonymous (Grandstream P65, line 1). On: provisioning writes the phone's own Send Anonymous setting, so the phone hides its caller ID on every call it makes, internal calls included; applied at the phone's next resync. Off (the default): nothing is written and the phone keeps its own setting. Distinct from anonymousOutbound, which only makes the calls Hello places through a trunk anonymous and leaves internal caller ID alone."
           },
           "mohClassId": {
             "oneOf": [
@@ -27180,11 +27101,14 @@
           "internalDialing",
           "codecs",
           "messaging",
+          "anonymousPolicy",
+          "assertedIdentity",
+          "identityHeader",
+          "sessionTimers",
           "rejectAnonymous",
           "allowedCountryCodes",
           "unknownCallerAction",
-          "rejectCode",
-          "sessionTimers"
+          "rejectCode"
         ],
         "properties": {
           "id": {
@@ -27283,6 +27207,25 @@
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Off by default."
           },
+          "anonymousPolicy": {
+            "type": "string",
+            "enum": ["honour", "always"],
+            "description": "Anonymous calls through this trunk (RFC 3323/3325). honour (the default): a call is anonymous when the device asks for privacy (a Privacy header with id, user or header, or an anonymous From) or the calling extension has anonymousOutbound on; the privacy request is kept. always: every call through the trunk is anonymous."
+          },
+          "assertedIdentity": {
+            "type": "string",
+            "description": "The number the trunk asserts for an anonymous call, sent as sip:<number>@<trunk domain>. Empty: the call's caller ID. Empty or 2-20 digits with an optional leading +."
+          },
+          "identityHeader": {
+            "type": "string",
+            "enum": ["pai", "ppi"],
+            "description": "The header carrying the asserted identity of an anonymous call: pai (P-Asserted-Identity, the default) or ppi (P-Preferred-Identity, for carriers that assert the identity themselves)."
+          },
+          "sessionTimers": {
+            "type": "string",
+            "enum": ["default", "on", "off"],
+            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
+          },
           "rejectAnonymous": {
             "type": "boolean",
             "description": "Turn away inbound calls from a withheld caller (From user anonymous, Privacy: id, or no caller number) with rejectCode before routing. Off by default. Internal calls and calls from extensions are never checked."
@@ -27308,11 +27251,6 @@
             "enum": [603, 486],
             "default": 603,
             "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
-          },
-          "sessionTimers": {
-            "type": "string",
-            "enum": ["default", "on", "off"],
-            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
           }
         }
       },
@@ -27416,6 +27354,25 @@
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
           },
+          "anonymousPolicy": {
+            "type": "string",
+            "enum": ["honour", "always"],
+            "description": "Anonymous calls through this trunk (RFC 3323/3325). honour (the default): a call is anonymous when the device asks for privacy (a Privacy header with id, user or header, or an anonymous From) or the calling extension has anonymousOutbound on; the privacy request is kept. always: every call through the trunk is anonymous."
+          },
+          "assertedIdentity": {
+            "type": "string",
+            "description": "The number the trunk asserts for an anonymous call, sent as sip:<number>@<trunk domain>. Empty: the call's caller ID. Empty or 2-20 digits with an optional leading +."
+          },
+          "identityHeader": {
+            "type": "string",
+            "enum": ["pai", "ppi"],
+            "description": "The header carrying the asserted identity of an anonymous call: pai (P-Asserted-Identity, the default) or ppi (P-Preferred-Identity, for carriers that assert the identity themselves)."
+          },
+          "sessionTimers": {
+            "type": "string",
+            "enum": ["default", "on", "off"],
+            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
+          },
           "rejectAnonymous": {
             "type": "boolean",
             "description": "Turn away inbound calls from a withheld caller (From user anonymous, Privacy: id, or no caller number) with rejectCode before routing. Off by default. Internal calls and calls from extensions are never checked."
@@ -27441,11 +27398,6 @@
             "enum": [603, 486],
             "default": 603,
             "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
-          },
-          "sessionTimers": {
-            "type": "string",
-            "enum": ["default", "on", "off"],
-            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
           }
         }
       },
@@ -27549,6 +27501,25 @@
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
           },
+          "anonymousPolicy": {
+            "type": "string",
+            "enum": ["honour", "always"],
+            "description": "Anonymous calls through this trunk (RFC 3323/3325). honour (the default): a call is anonymous when the device asks for privacy (a Privacy header with id, user or header, or an anonymous From) or the calling extension has anonymousOutbound on; the privacy request is kept. always: every call through the trunk is anonymous."
+          },
+          "assertedIdentity": {
+            "type": "string",
+            "description": "The number the trunk asserts for an anonymous call, sent as sip:<number>@<trunk domain>. Empty: the call's caller ID. Empty or 2-20 digits with an optional leading +."
+          },
+          "identityHeader": {
+            "type": "string",
+            "enum": ["pai", "ppi"],
+            "description": "The header carrying the asserted identity of an anonymous call: pai (P-Asserted-Identity, the default) or ppi (P-Preferred-Identity, for carriers that assert the identity themselves)."
+          },
+          "sessionTimers": {
+            "type": "string",
+            "enum": ["default", "on", "off"],
+            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
+          },
           "rejectAnonymous": {
             "type": "boolean",
             "description": "Turn away inbound calls from a withheld caller (From user anonymous, Privacy: id, or no caller number) with rejectCode before routing. Off by default. Internal calls and calls from extensions are never checked."
@@ -27574,11 +27545,6 @@
             "enum": [603, 486],
             "default": 603,
             "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
-          },
-          "sessionTimers": {
-            "type": "string",
-            "enum": ["default", "on", "off"],
-            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
           }
         }
       },
@@ -28388,203 +28354,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TraceStep"
-            }
-          }
-        }
-      },
-      "BlocklistEntry": {
-        "type": "object",
-        "required": [
-          "id",
-          "pattern",
-          "match",
-          "action",
-          "trunkId",
-          "trunkName",
-          "reason",
-          "announcementId",
-          "enabled",
-          "createdAt",
-          "updatedAt"
-        ],
-        "properties": {
-          "id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "pattern": {
-            "type": "string",
-            "description": "The number as stored: a normalised phonebook key (E.164 with a leading +, or the digits when the country is unknown), with a trailing * on a prefix entry.",
-            "example": "+4122123456"
-          },
-          "match": {
-            "type": "string",
-            "enum": ["exact", "prefix"]
-          },
-          "action": {
-            "type": "string",
-            "enum": ["block", "allow"],
-            "description": "An allow entry always beats a block entry."
-          },
-          "trunkId": {
-            "type": ["integer", "null"],
-            "format": "int64",
-            "description": "The trunk the entry applies to; null is every trunk."
-          },
-          "trunkName": {
-            "type": "string",
-            "description": "The trunk's name; empty for a global entry."
-          },
-          "reason": {
-            "type": "string",
-            "maxLength": 120,
-            "description": "The administrators' note. Returned to admins only; empty for other roles."
-          },
-          "announcementId": {
-            "type": ["integer", "null"],
-            "format": "int64",
-            "description": "An announcement played to a blocked caller before the call ends; null plays none."
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "BlocklistEntryInput": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "pattern": {
-            "type": "string",
-            "maxLength": 40,
-            "description": "A number to match, in any usual spelling (+41 22 123 45 67, 0041221234567, 022 123 45 67 with HELLO_DIAL_COUNTRY_CODE set). For a prefix, a leading part such as +44 (a trailing * is allowed). Required.",
-            "example": "+44"
-          },
-          "match": {
-            "type": "string",
-            "enum": ["exact", "prefix"],
-            "default": "exact",
-            "description": "exact matches the whole number; prefix matches every number that starts with the pattern."
-          },
-          "action": {
-            "type": "string",
-            "enum": ["block", "allow"],
-            "default": "block",
-            "description": "block turns the call away; allow lets it through and beats every block entry."
-          },
-          "trunkId": {
-            "type": ["integer", "null"],
-            "format": "int64",
-            "description": "Limit the entry to one trunk; null or absent is every trunk."
-          },
-          "reason": {
-            "type": "string",
-            "maxLength": 120,
-            "description": "A note shown to admins only. On a replace, absent keeps the current note."
-          },
-          "announcementId": {
-            "type": ["integer", "null"],
-            "format": "int64",
-            "description": "Block entries only: an announcement to play before the call ends."
-          },
-          "enabled": {
-            "type": "boolean",
-            "default": true,
-            "description": "A disabled entry is kept but not applied."
-          }
-        }
-      },
-      "BlocklistPage": {
-        "type": "object",
-        "required": ["items", "next", "total"],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BlocklistEntry"
-            }
-          },
-          "next": {
-            "type": "string",
-            "description": "Pass as after for the next page; empty at the end."
-          },
-          "total": {
-            "type": "integer",
-            "description": "Entries matching the filter, over all pages."
-          }
-        }
-      },
-      "BlocklistImportResult": {
-        "type": "object",
-        "required": [
-          "ok",
-          "dryRun",
-          "rows",
-          "created",
-          "updated",
-          "errors",
-          "warnings"
-        ],
-        "properties": {
-          "ok": {
-            "type": "boolean",
-            "description": "Whether every row is valid (and, unless dry_run, was imported)."
-          },
-          "dryRun": {
-            "type": "boolean"
-          },
-          "rows": {
-            "type": "integer",
-            "description": "Data rows read."
-          },
-          "created": {
-            "type": "integer",
-            "description": "Entries added; 0 for a dry run or a refused import."
-          },
-          "updated": {
-            "type": "integer",
-            "description": "Existing entries (same number and scope) changed."
-          },
-          "errors": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": ["row", "column", "reason"],
-              "properties": {
-                "row": {
-                  "type": "integer",
-                  "description": "1 is the header row, the first entry is row 2."
-                },
-                "column": {
-                  "type": "string"
-                },
-                "reason": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "warnings": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": ["row", "reason"],
-              "properties": {
-                "row": {
-                  "type": "integer"
-                },
-                "reason": {
-                  "type": "string"
-                }
-              }
             }
           }
         }
@@ -33782,6 +33551,850 @@
           "expiresAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "WebhookEndpoint": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "url",
+          "events",
+          "extensions",
+          "enabled",
+          "allowPrivate",
+          "disabledReason",
+          "consecutiveFailures",
+          "previousSecretExpiresAt",
+          "lastSuccessAt",
+          "lastFailureAt",
+          "lastStatus",
+          "createdBy",
+          "createdAt",
+          "updatedAt",
+          "pending",
+          "dead"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "url": {
+            "type": "string",
+            "description": "Where deliveries are POSTed."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Event types (call.missed) or prefix patterns (call.*) the endpoint receives; empty is every type."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only events about these extensions; empty is every extension."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "allowPrivate": {
+            "type": "boolean",
+            "description": "The endpoint may use http and a private address inside HELLO_INTEGRATIONS_ALLOWED_CIDRS."
+          },
+          "disabledReason": {
+            "type": "string",
+            "enum": ["", "manual", "consecutive_failures", "endpoint_gone"],
+            "description": "Why the endpoint is off: switched off by hand, 50 failed attempts in a row, or the receiver answered 410."
+          },
+          "consecutiveFailures": {
+            "type": "integer"
+          },
+          "previousSecretExpiresAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "While set, the secret before the last rotation still signs; it stops then."
+          },
+          "lastSuccessAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastFailureAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastStatus": {
+            "type": ["integer", "null"],
+            "description": "The receiver's last HTTP status."
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pending": {
+            "type": "integer",
+            "description": "Deliveries waiting or retrying."
+          },
+          "dead": {
+            "type": "integer",
+            "description": "Dead letters."
+          }
+        }
+      },
+      "WebhookEndpointList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookEndpoint"
+            }
+          }
+        }
+      },
+      "WebhookWithSecret": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "url",
+          "events",
+          "extensions",
+          "enabled",
+          "allowPrivate",
+          "disabledReason",
+          "consecutiveFailures",
+          "previousSecretExpiresAt",
+          "lastSuccessAt",
+          "lastFailureAt",
+          "lastStatus",
+          "createdBy",
+          "createdAt",
+          "updatedAt",
+          "pending",
+          "dead",
+          "secret"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "url": {
+            "type": "string",
+            "description": "Where deliveries are POSTed."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Event types (call.missed) or prefix patterns (call.*) the endpoint receives; empty is every type."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only events about these extensions; empty is every extension."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "allowPrivate": {
+            "type": "boolean",
+            "description": "The endpoint may use http and a private address inside HELLO_INTEGRATIONS_ALLOWED_CIDRS."
+          },
+          "disabledReason": {
+            "type": "string",
+            "enum": ["", "manual", "consecutive_failures", "endpoint_gone"],
+            "description": "Why the endpoint is off: switched off by hand, 50 failed attempts in a row, or the receiver answered 410."
+          },
+          "consecutiveFailures": {
+            "type": "integer"
+          },
+          "previousSecretExpiresAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "While set, the secret before the last rotation still signs; it stops then."
+          },
+          "lastSuccessAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastFailureAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastStatus": {
+            "type": ["integer", "null"],
+            "description": "The receiver's last HTTP status."
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pending": {
+            "type": "integer",
+            "description": "Deliveries waiting or retrying."
+          },
+          "dead": {
+            "type": "integer",
+            "description": "Dead letters."
+          },
+          "secret": {
+            "type": ["string", "null"],
+            "description": "The signing secret (whsec_...). Shown once, at creation and at rotation; null when the endpoint already existed.",
+            "x-hello-secret": true
+          }
+        }
+      },
+      "WebhookCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "url"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "A label for the endpoint."
+          },
+          "url": {
+            "type": "string",
+            "description": "An https URL (http only with allowPrivate)."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Event types or prefix patterns (call.*); empty or absent is every type."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only events about these extensions; empty or absent is every extension."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Default true."
+          },
+          "allowPrivate": {
+            "type": "boolean",
+            "description": "Default false."
+          }
+        }
+      },
+      "WebhookUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "A label for the endpoint."
+          },
+          "url": {
+            "type": "string",
+            "description": "An https URL (http only with allowPrivate); changing it re-checks the address rules."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Replaces the event types and prefix patterns; empty is every type."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Replaces the extension filter; empty is every extension."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "false switches the endpoint off (reason manual); true switches it on and clears its failure count."
+          },
+          "allowPrivate": {
+            "type": "boolean",
+            "description": "Whether the endpoint may use http and a private address inside HELLO_INTEGRATIONS_ALLOWED_CIDRS."
+          }
+        }
+      },
+      "WebhookTestResult": {
+        "type": "object",
+        "required": [
+          "delivered",
+          "status",
+          "latencyMs",
+          "error",
+          "body",
+          "eventId"
+        ],
+        "properties": {
+          "delivered": {
+            "type": "boolean",
+            "description": "The receiver answered 2xx."
+          },
+          "status": {
+            "type": "integer",
+            "description": "The receiver's HTTP status; 0 when no response came."
+          },
+          "latencyMs": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string",
+            "description": "A short description of a transport failure (timeout, connection_error, blocked_address)."
+          },
+          "body": {
+            "type": "string",
+            "description": "The first kilobyte of the answer, when it is text."
+          },
+          "eventId": {
+            "type": "string"
+          }
+        }
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "required": [
+          "id",
+          "endpointId",
+          "eventId",
+          "eventType",
+          "status",
+          "attempts",
+          "nextAttemptAt",
+          "lastStatus",
+          "lastError",
+          "lastLatencyMs",
+          "deliveredAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "endpointId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "eventId": {
+            "type": "string",
+            "description": "The event's id: what Hello-Event-Id carries and receivers dedupe on."
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "retrying", "succeeded", "dead"]
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Every try, redeliveries included."
+          },
+          "nextAttemptAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When a pending or retrying delivery is next tried."
+          },
+          "lastStatus": {
+            "type": ["integer", "null"]
+          },
+          "lastError": {
+            "type": "string",
+            "description": "Short, secret-free: http 500, timeout, connection_error, blocked_address, redirect_not_followed, event_expired, secret_unreadable."
+          },
+          "lastLatencyMs": {
+            "type": ["integer", "null"]
+          },
+          "deliveredAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookAttempt": {
+        "type": "object",
+        "required": [
+          "attempt",
+          "deliveryId",
+          "at",
+          "status",
+          "error",
+          "latencyMs"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer"
+          },
+          "deliveryId": {
+            "type": "string",
+            "description": "The Hello-Delivery header of the attempt."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": ["integer", "null"]
+          },
+          "error": {
+            "type": "string"
+          },
+          "latencyMs": {
+            "type": "integer"
+          }
+        }
+      },
+      "WebhookDeliveryDetail": {
+        "type": "object",
+        "required": [
+          "id",
+          "endpointId",
+          "eventId",
+          "eventType",
+          "status",
+          "attempts",
+          "nextAttemptAt",
+          "lastStatus",
+          "lastError",
+          "lastLatencyMs",
+          "deliveredAt",
+          "createdAt",
+          "updatedAt",
+          "log",
+          "event"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "endpointId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "eventId": {
+            "type": "string",
+            "description": "The event's id: what Hello-Event-Id carries and receivers dedupe on."
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "retrying", "succeeded", "dead"]
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Every try, redeliveries included."
+          },
+          "nextAttemptAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When a pending or retrying delivery is next tried."
+          },
+          "lastStatus": {
+            "type": ["integer", "null"]
+          },
+          "lastError": {
+            "type": "string",
+            "description": "Short, secret-free: http 500, timeout, connection_error, blocked_address, redirect_not_followed, event_expired, secret_unreadable."
+          },
+          "lastLatencyMs": {
+            "type": ["integer", "null"]
+          },
+          "deliveredAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "log": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookAttempt"
+            }
+          },
+          "event": {
+            "type": ["object", "null"],
+            "description": "The event this delivery carries; null once it has been purged."
+          }
+        }
+      },
+      "WebhookDeliveryPage": {
+        "type": "object",
+        "required": ["items", "nextCursor"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookDelivery"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "Pass as before for the next page; empty when there is no more."
+          }
+        }
+      },
+      "WebhookRedelivered": {
+        "type": "object",
+        "required": ["redelivered"],
+        "properties": {
+          "redelivered": {
+            "type": "integer"
+          }
+        }
+      },
+      "VoicemailGroup": {
+        "type": "object",
+        "required": [
+          "id",
+          "number",
+          "name",
+          "enabled",
+          "maxSeconds",
+          "members",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "type": "string",
+            "description": "The dial number of the group."
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "maxSeconds": {
+            "type": "integer",
+            "description": "The longest message, in seconds."
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PagingExtension"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "VoicemailGroupInput": {
+        "type": "object",
+        "required": ["number", "name", "members"],
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string",
+            "pattern": "^[0-9]{2,16}$",
+            "description": "Unique dial number, 2-16 digits. A member dials *63 plus this number to broadcast a message."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Unique display name, spoken in the prompt that asks for the message."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "A disabled group takes no message. Default true."
+          },
+          "maxSeconds": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 600,
+            "description": "The longest message, in seconds. Default 180."
+          },
+          "members": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Extension ids, 1-200. Each must have a voicemail box."
+          }
+        }
+      },
+      "VoicemailGroupList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoicemailGroup"
+            }
+          }
+        }
+      },
+      "BlocklistEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "pattern",
+          "match",
+          "action",
+          "trunkId",
+          "trunkName",
+          "reason",
+          "announcementId",
+          "enabled",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "The number as stored: a normalised phonebook key (E.164 with a leading +, or the digits when the country is unknown), with a trailing * on a prefix entry.",
+            "example": "+4122123456"
+          },
+          "match": {
+            "type": "string",
+            "enum": ["exact", "prefix"]
+          },
+          "action": {
+            "type": "string",
+            "enum": ["block", "allow"],
+            "description": "An allow entry always beats a block entry."
+          },
+          "trunkId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The trunk the entry applies to; null is every trunk."
+          },
+          "trunkName": {
+            "type": "string",
+            "description": "The trunk's name; empty for a global entry."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "The administrators' note. Returned to admins only; empty for other roles."
+          },
+          "announcementId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "An announcement played to a blocked caller before the call ends; null plays none."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BlocklistEntryInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "A number to match, in any usual spelling (+41 22 123 45 67, 0041221234567, 022 123 45 67 with HELLO_DIAL_COUNTRY_CODE set). For a prefix, a leading part such as +44 (a trailing * is allowed). Required.",
+            "example": "+44"
+          },
+          "match": {
+            "type": "string",
+            "enum": ["exact", "prefix"],
+            "default": "exact",
+            "description": "exact matches the whole number; prefix matches every number that starts with the pattern."
+          },
+          "action": {
+            "type": "string",
+            "enum": ["block", "allow"],
+            "default": "block",
+            "description": "block turns the call away; allow lets it through and beats every block entry."
+          },
+          "trunkId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Limit the entry to one trunk; null or absent is every trunk."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "A note shown to admins only. On a replace, absent keeps the current note."
+          },
+          "announcementId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Block entries only: an announcement to play before the call ends."
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "A disabled entry is kept but not applied."
+          }
+        }
+      },
+      "BlocklistPage": {
+        "type": "object",
+        "required": ["items", "next", "total"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlocklistEntry"
+            }
+          },
+          "next": {
+            "type": "string",
+            "description": "Pass as after for the next page; empty at the end."
+          },
+          "total": {
+            "type": "integer",
+            "description": "Entries matching the filter, over all pages."
+          }
+        }
+      },
+      "BlocklistImportResult": {
+        "type": "object",
+        "required": [
+          "ok",
+          "dryRun",
+          "rows",
+          "created",
+          "updated",
+          "errors",
+          "warnings"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Whether every row is valid (and, unless dry_run, was imported)."
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "rows": {
+            "type": "integer",
+            "description": "Data rows read."
+          },
+          "created": {
+            "type": "integer",
+            "description": "Entries added; 0 for a dry run or a refused import."
+          },
+          "updated": {
+            "type": "integer",
+            "description": "Existing entries (same number and scope) changed."
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["row", "column", "reason"],
+              "properties": {
+                "row": {
+                  "type": "integer",
+                  "description": "1 is the header row, the first entry is row 2."
+                },
+                "column": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["row", "reason"],
+              "properties": {
+                "row": {
+                  "type": "integer"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },

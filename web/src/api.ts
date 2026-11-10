@@ -113,6 +113,18 @@ export interface Extension {
    * setting is switched off at the next resync.
    */
   callWaiting?: boolean;
+  /**
+   * Anonymous outbound; false by default. On: every trunk call from the
+   * extension carries Privacy: id, an anonymous From and the trunk's asserted
+   * identity.
+   */
+  anonymousOutbound?: boolean;
+  /**
+   * The phone's own "Send Anonymous" (Grandstream P65); false by default. On:
+   * the provisioned phone blanks its caller ID on every call, internal ones
+   * included. Not the trunk-only anonymousOutbound.
+   */
+  phoneSendAnonymous?: boolean;
   /** Rings before the no-answer forward (the phone's ring count); 0 = the system default. */
   noAnswerRings?: number;
   /** The extension's voicemail box, when it has one. */
@@ -322,6 +334,15 @@ export interface TrunkFields {
   internalDialing: InternalDialing;
   /** SMS over SIP: text messages may be sent and received through it. */
   messaging: boolean;
+  /**
+   * Anonymous calls: "honour" carries a device's privacy request (default),
+   * "always" makes every call through the trunk anonymous.
+   */
+  anonymousPolicy: "honour" | "always";
+  /** The number asserted for an anonymous call; empty uses the caller ID. */
+  assertedIdentity: string;
+  /** Header carrying it: P-Asserted-Identity (pai) or P-Preferred-Identity (ppi). */
+  identityHeader: "pai" | "ppi";
   /**
    * RFC 4028 session timers on the trunk's calls: "on" asks for and keeps
    * one, "off" never does, "default" follows Hello's own setting
@@ -825,6 +846,9 @@ export const updateExtension = (
     directoryHidden?: boolean;
     allowIntercom?: boolean;
     callWaiting?: boolean;
+    anonymousOutbound?: boolean;
+    phoneSendAnonymous?: boolean;
+
     kind?: "user" | "door";
     doorTargets?: DoorTargets;
     /** null clears the pick (the global default plays). */

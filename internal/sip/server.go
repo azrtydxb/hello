@@ -536,6 +536,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.handle(srv, sip.BYE, s.handleBye)
 	s.handle(srv, sip.CANCEL, s.handleStrayCancel)
 	s.handle(srv, sip.UPDATE, s.handleInDialog)
+	s.handle(srv, sip.PRACK, s.handlePrack)
 	s.handle(srv, sip.REFER, s.handleRefer)
 	s.handle(srv, sip.SUBSCRIBE, s.handleSubscribe)
 	s.handle(srv, sip.PUBLISH, s.handlePublish)
@@ -651,7 +652,7 @@ func waitListening(ctx context.Context, ua *sipgo.UserAgent, addr string) bool {
 	}
 }
 
-const allow = "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, UPDATE, REFER, SUBSCRIBE, PUBLISH, INFO, MESSAGE"
+const allow = "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, UPDATE, REFER, SUBSCRIBE, PUBLISH, INFO, MESSAGE, PRACK"
 
 func (s *Server) handle(srv *sipgo.Server, m sip.RequestMethod, h sipgo.RequestHandler) {
 	srv.OnRequest(m, s.wrap(h))

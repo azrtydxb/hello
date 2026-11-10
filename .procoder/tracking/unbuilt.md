@@ -24,7 +24,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 23  | SIP over TLS and sips (S-14)                                                  | done (#202)            |
 | 24  | SRTP SDES (S-15)                                                              | todo (after 23)        |
 | 25  | DTLS-SRTP and ICE-lite (S-16)                                                 | todo (after 24)        |
-| 26  | PRACK/100rel, anonymous outbound (Privacy), partial                           | todo                   |
+| 26  | PRACK/100rel, anonymous outbound (Privacy), partial                           | wip (#265)             |
 | 27  | Provisioning hardening (S-22, S-32), TR-069 off etc. (explicitly in spec)     | todo                   |
 | 28  | DSCP marking (S-21)                                                           | done (#231)            |
 | 29  | Phone backup/secondary servers (S-20), partial                                | todo                   |
