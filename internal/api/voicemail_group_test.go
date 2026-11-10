@@ -108,6 +108,10 @@ func TestVoicemailGroupCRUD(t *testing.T) {
 		t.Fatalf("replaced = %v", replaced)
 	}
 	c.must(http.StatusNotFound, "PUT", "/api/v1/voicemail-groups/987654", body("653", "X", m2))
+	if g := c.must(http.StatusOK, "GET", "/api/v1/voicemail-groups/"+id, nil).json(t); g["number"] != "650" || g["name"] != "Support" {
+		t.Fatalf("get = %v, want the replaced group", g)
+	}
+	c.must(http.StatusNotFound, "GET", "/api/v1/voicemail-groups/987654", nil)
 
 	// A menu that sends calls to the group pins it.
 	greet, err := e.st.CreateAnnouncement(context.Background(), "test", "greet", "ann/greet.wav", nil)
