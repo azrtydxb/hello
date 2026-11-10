@@ -193,6 +193,11 @@ kamailio:
     leaseDurationSeconds: 5
     renewDeadlineSeconds: 3
     retryPeriodSeconds: 1
+    # How long a stopping Kamailio keeps serving (and keeps its node's ports)
+    # after the VIP container has released the Lease: the time the other
+    # instance needs to take it, so the replacement pod cannot win it back
+    # before Kamailio is up. Keep above retryPeriodSeconds x 2.2.
+    handoffSeconds: 5
     resources:
       requests: { cpu: 10m, memory: 24Mi }
       limits: { memory: 96Mi }
