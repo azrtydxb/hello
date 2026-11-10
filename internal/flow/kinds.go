@@ -141,6 +141,7 @@ var NonFlowResources = map[string]string{
 	"backups":                       "backup archives of the database and audio, not call routing",
 	"service-accounts":              "API credentials, not call routing",
 	"webhooks":                      "outbound event receivers, not call routing",
+	"directory/connectors":          "company directory (AD/LDAP) sources that sync users, not call routing",
 	"service-accounts/{id}/secrets": "API credentials, not call routing",
 	"prov/templates":                "phone provisioning templates, not call routing",
 	"prov/firmware":                 "phone firmware files, not call routing",
