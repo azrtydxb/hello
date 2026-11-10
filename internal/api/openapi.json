@@ -1784,7 +1784,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "backup and restore stay in the console"
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
         }
       },
       "put": {
@@ -1832,7 +1833,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "backup and restore stay in the console"
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
         }
       }
     },
@@ -1878,7 +1880,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "backup and restore stay in the console"
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
         }
       },
       "post": {
@@ -1916,7 +1919,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "backup and restore stay in the console"
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
         }
       }
     },
@@ -1957,7 +1961,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "backup and restore stay in the console"
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
         }
       }
     },
@@ -2027,7 +2032,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "backup and restore stay in the console"
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
         }
       }
     },
