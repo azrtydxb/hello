@@ -1900,3 +1900,38 @@ so the VIP stage cannot sit in that file.
   `OnPacket` / `OnDTMF` set them under it. Seen in `TestQueueCallbackReservesAgent` under `-race`.
 - Fix: the receive loop reads each hook only under the lock, as #266 and #273 already do, so
   they rebase onto this cleanly. Regression test: `relay_hook_race_test.go`.
+
+## Kamailio HA flake: "graceful loss of the active instance" (2026-11-10)
+
+- Root cause: a real handover race, not kind timing. On a graceful delete the
+  vip container releases the Lease at once, but the replacement pod is created
+  immediately and scheduled the moment the old pod frees the node's ports
+  (hostNetwork), about 1 s later. Its kube-vip starts electing while its
+  Kamailio is still starting (the startup/liveness probes do not gate the
+  election). It races the survivor, whose acquire loop retries every 1 s
+  (jitter up to 2.2 s), and sometimes wins: the VIP lands on the freshly
+  started, not yet serving instance and stays there, since it is healthy.
+- Evidence (failed runs 42784203986 and 42782832256, both TestKamailioHAChart):
+  after the graceful subtest killed the holder on node X, the next subtest's
+  holder was X again (the replacement pod); the survivor never held the VIP in
+  the 60 s the test waits ("no single holder ... skipping [X]"). In passing runs
+  the survivor took it in 0.6-2.3 s. Graceful restarts of the active pod show
+  "VIP dark at most 3.4 s" in the rolling restart for the same reason.
+- Fix (production first): `lifecycle.preStop: sleep 5` on the kamailio container
+  (chart: `kamailio.vip.handoffSeconds`, default 5, only with the VIP; same in
+  deploy/kuvryn-sync/kamailio-vip/go-live.patch). The old pod keeps the node's
+  ports for 5 s after SIGTERM, so the replacement cannot start before the
+  survivor holds the Lease. Regression test: TestKamailioHandoffPreStop.
+- kw: not affected today (the VIP is not live, kamailio pods have no vip
+  sidecar), but go-live would be, so the go-live patch carries the preStop.
+  deploy/kuvryn-sync/kw/resources.yaml itself is untouched; it needs the same
+  preStop only if the VIP is wired into it directly.
+
+## Backup tools run from PATH only (2026-11-10)
+
+- `pg_dump` and `pg_restore` are run by their names from PATH. The
+  `HELLO_BACKUP_PG_DUMP` and `HELLO_BACKUP_PG_RESTORE` overrides are removed
+  (config, README, docs/backup.md).
+- Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
+  non-static command, and no supported allow exists for it. The overrides were
+  unused: kw does not set them (checked by the user).
