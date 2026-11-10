@@ -197,6 +197,7 @@ func (c *call) originateFor(target string, snap *snapshot.Snapshot) (*call, []*l
 	c2.dialled = target
 	c2.callerNum, c2.callerName, c2.callerDevice = c.callerNum, c.callerName, c.callerDevice
 	c2.direction, c2.dss = c.direction, c.dss
+	c2.doorCaller, c2.kind = c.doorCaller, c.kind
 	c2.callerDialogUp, c2.haShared = true, true
 	c2.events = make(chan legEvent, 16)
 	c2.setupDone = make(chan struct{})
@@ -302,6 +303,9 @@ func (c2 *call) awaitTransfer(from *call, w *leg, legs []*leg, kind, transfereeE
 					c2.maxTimer = time.AfterFunc(s.cfg.MaxCallDuration, c2.expire)
 					c2.mu.Unlock()
 				}
+				// The transferred call's dialogs keep their session timers
+				// (S-9); the original call's stop with it, below.
+				c2.sessionTransferred(from, ev.leg)
 				from.end(sip.StatusOK, cdr.SideCallee, kind+" transfer", ResultAnswered)
 				// The transferred call replicates from here on (incall-ha
 				// S-5): after from.end, whose record deletion shares the
@@ -381,10 +385,12 @@ func (c2 *call) handOver(from *call, l *leg) bool {
 		c2.addTrace("Transferred caller re-INVITE failed; media follows the old path")
 		return true
 	}
+	c2.noteSDP(sessCallee, aSDP) // the SDP last sent on each dialog, for a refresh
 	aAns, ok := reinviteA(from.dss, cSDP)
 	if !ok {
 		return true
 	}
+	c2.noteSDP(sessCaller, cSDP)
 	ackLate(l.session(), aAns)
 	c2.addTrace("Caller media handed to the transferred leg")
 	return true
@@ -570,11 +576,13 @@ func (c *call) bridge(other *call) bool {
 		if !ok {
 			return false
 		}
+		other.noteBridgeSDP(sessCallee, aSDP)
 		// 2. re-INVITE A (the original caller) with C's answer.
 		aAns, ok := reinviteA(other.dss, cSDP)
 		if !ok {
 			return false
 		}
+		other.noteBridgeSDP(sessCaller, cSDP)
 		// 3. C's ACK carries A's answer.
 		ackLate(wB.session(), aAns)
 	} else if !anchoredOK {
@@ -595,6 +603,8 @@ func (c *call) bridge(other *call) bool {
 	c3.connected = true
 	c3.answerTime = time.Now()
 	c3.mu.Unlock()
+	// The bridged call's dialogs keep the session timers they had (S-9).
+	c3.sessionBridged(other, c, wB)
 	if relay != nil {
 		// The bridged call keeps A's anchor: the relay moves from the
 		// original call (whose end must not close it) to the bridge.
@@ -796,11 +806,13 @@ func (c2 *call) handOverAnchored(from *call, l *leg) (handled, ok bool) {
 		return true, c2.refuseTransferSRTP(l, "the transfer target did not answer with SRTP")
 	}
 	haAim(relay, legCallee, cAns)
+	c2.noteSDP(sessCallee, cOffer)
 	neg := media.AnswerFor(off, targetAns)
 	c2.applyNegotiated(neg, "transfer", "")
 	aOffer := keepSecurity(relay, legCaller, neg).Build(host, relay.LegPort(legCaller), "sendrecv")
 	if aAns, ok := reinviteA(from.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
+		c2.noteSDP(sessCaller, aOffer)
 	}
 	c2.addTrace("Caller media handed to the transferred leg through the anchor")
 	return true, true
@@ -850,11 +862,13 @@ func (other *call) bridgeAnchored(wB *leg) (*media.Relay, bool) {
 		return relay, false
 	}
 	haAim(relay, legCallee, cAns)
+	other.noteBridgeSDP(sessCallee, cOffer) // the SDP last sent on C's dialog, for a refresh
 	neg := media.AnswerFor(off, targetAns)
 	other.applyNegotiated(neg, "transfer", "")
 	aOffer := keepSecurity(relay, legCaller, neg).Build(host, relay.LegPort(legCaller), "sendrecv")
 	if aAns, ok := reinviteA(other.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
+		other.noteBridgeSDP(sessCaller, aOffer)
 	}
 	return relay, true
 }

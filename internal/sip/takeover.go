@@ -80,15 +80,35 @@ func haLegFrom(d livestate.DialogLeg, uas bool) *haLeg {
 type homedCall struct {
 	takenFrom string
 	takenAt   time.Time
-	legs      [2]*haLeg
+	// mu guards legs: an IVR dial-out homes the callee leg after the call
+	// is published, while hang-up and replication read the pair. It is a
+	// leaf lock, taken inside call.mu where both are held.
+	mu   sync.Mutex
+	legs [2]*haLeg
 }
 
 // leg is the caller's (false) or callee's (true) homed leg.
 func (h *homedCall) leg(callee bool) *haLeg {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if callee {
 		return h.legs[1]
 	}
 	return h.legs[0]
+}
+
+// pair is a consistent snapshot of the caller and callee legs.
+func (h *homedCall) pair() [2]*haLeg {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.legs
+}
+
+// setCallee homes the callee leg.
+func (h *homedCall) setCallee(l *haLeg) {
+	h.mu.Lock()
+	h.legs[1] = l
+	h.mu.Unlock()
 }
 
 // useCSeq spends the leg's next CSeq value.
@@ -546,16 +566,18 @@ type haOfflineNode struct {
 // haOfflineSee remembers a node's OFFLINE state and when its takeovers
 // should be over; haOfflineCount marks it reaped; haOfflineForget clears it
 // when the node is back.
-func (s *Server) haOfflineSee(id string, active int) *haOfflineNode {
+// It returns a copy: haOfflineCount sets counted under haOfflineMu, so a
+// pointer read after the lock is released races with it.
+func (s *Server) haOfflineSee(id string, active int) haOfflineNode {
 	s.haOfflineMu.Lock()
 	defer s.haOfflineMu.Unlock()
 	if e, ok := s.haOffline[id]; ok {
-		return e
+		return *e
 	}
 	active = max(active, s.haLastActive[id])
 	e := &haOfflineNode{active: active, deadline: time.Now().Add(haReapDelay)}
 	s.haOffline[id] = e
-	return e
+	return *e
 }
 
 func (s *Server) haOfflineCount(id string) {
@@ -1158,6 +1180,7 @@ func (s *Server) haNewCall(st livestate.DialogState, from string, a, b *haLeg, t
 		start: orTime(st.StartedAt, orTime(st.AnsweredAt, takenAt)), ringTime: st.RingAt,
 		direction: orDefault(st.Direction, cdr.DirectionInternal), mediaMode: "anchored",
 		route: st.Route, trunkName: st.Trunk, rewritten: st.Rewritten,
+		doorCaller: st.Door, kind: st.Kind,
 		canceled: make(chan struct{}), stopHB: make(chan struct{}),
 		setupDone: make(chan struct{}), aborted: make(chan struct{}),
 		haStop: make(chan struct{}),
@@ -1170,7 +1193,9 @@ func (s *Server) haNewCall(st livestate.DialogState, from string, a, b *haLeg, t
 	}
 	c.connected = true
 	c.answerTime = orTime(st.AnsweredAt, takenAt)
+	c.ses.carry(st.Session)
 	c.homedCall = &homedCall{takenFrom: from, takenAt: takenAt, legs: [2]*haLeg{a, b}}
+	c.restoreEvents(st.Events)
 	if b != nil {
 		c.winner = &leg{c: c, callID: b.callID, binding: livestate.Binding{AOR: b.endpoint}}
 	}
