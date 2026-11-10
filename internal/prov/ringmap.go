@@ -52,6 +52,24 @@ var ringTones = func() map[Vendor][]RingTone {
 	}
 }()
 
+// CustomPrefix starts the tone id of a custom tone from the tone library
+// (S-43): custom:<name>.
+const CustomPrefix = "custom:"
+
+// CustomToneName returns the library name a tone id refers to.
+func CustomToneName(id string) (string, bool) {
+	name, ok := strings.CutPrefix(id, CustomPrefix)
+	return name, ok && ValidToneName(name)
+}
+
+// CustomRingSupported reports whether Hello delivers a custom tone to the
+// vendor's phones. Spec S-43 and the vendor table: Yealink (ringtone.url)
+// and Snom (custom_melody_url). Poly has saf.x for the file, but the spec
+// names no ringer value that plays it, Fanvil's key is "verify" and
+// Grandstream's format is not produced; none of the three references a
+// custom tone until the lab confirms its key.
+func CustomRingSupported(v Vendor) bool { return v == Yealink || v == Snom }
+
 // RingVendors lists the vendors that have a ring map, in display order.
 var RingVendors = []Vendor{Yealink, Poly, Grandstream, Snom, Fanvil}
 
@@ -107,6 +125,12 @@ func DefaultRingTone(v Vendor, slot int) string {
 
 // nativeTone is the value the vendor's tone key takes for a tone id.
 func nativeTone(v Vendor, id string) string {
+	if name, ok := CustomToneName(id); ok {
+		if v == Yealink {
+			return name + ".wav" // "custom file name" (verify)
+		}
+		return "Custom" // Snom alert_*_ring_sound (verify)
+	}
 	switch v {
 	case Yealink:
 		if n, ok := strings.CutPrefix(id, "bellcore"); ok {
@@ -125,6 +149,9 @@ func nativeTone(v Vendor, id string) string {
 // "" where the key has no value for it. Yealink's takes the sound file
 // (Ring1.wav), which the Bellcore ringers do not have a known name for.
 func lineTone(v Vendor, id string) string {
+	if _, ok := CustomToneName(id); ok && v == Yealink {
+		return "" // the line's ring_type takes a built-in ringer or a sound file of unknown name
+	}
 	if v == Yealink {
 		if strings.HasPrefix(id, "bellcore") {
 			return ""
@@ -167,6 +194,12 @@ type RingInfo struct {
 	// Bellcore is the five tones of Bellcore-dr1 to dr5, comma separated
 	// (Grandstream WP8x6); empty for other phones.
 	Bellcore string
+	// Custom is the library name of the one custom tone the phone is
+	// delivered (S-43), "" for none. Yealink (ringtone.url) and Snom
+	// (custom_melody_url) hold a single custom file, so the first custom
+	// tone in tag priority order is the one; a later tag that maps another
+	// custom tone plays its default tone instead.
+	Custom string
 }
 
 // NewRingInfo resolves the ring map of one phone. tags are in priority order
@@ -175,14 +208,27 @@ type RingInfo struct {
 // default for its Bellcore slot. Tags beyond the model's slot count are
 // dropped.
 func NewRingInfo(v Vendor, model string, tags []RingTag, tones map[string]string) RingInfo {
+	return NewRingInfoCustom(v, model, tags, tones, nil)
+}
+
+// NewRingInfoCustom is NewRingInfo with the tone library: customs holds the
+// names of the library's tones, which a tone id custom:<name> may refer to on
+// a vendor that CustomRingSupported.
+func NewRingInfoCustom(v Vendor, model string, tags []RingTag, tones map[string]string, customs map[string]bool) RingInfo {
 	var info RingInfo
 	slots := RingSlots(v, model)
 	if slots == 0 {
 		return info
 	}
 	toneOf := func(t RingTag) string {
-		if id, ok := tones[t.Name]; ok && ValidRingTone(v, id) {
-			return id
+		if id, ok := tones[t.Name]; ok {
+			if ValidRingTone(v, id) {
+				return id
+			}
+			if name, ok := CustomToneName(id); ok && customs[name] && CustomRingSupported(v) && (info.Custom == "" || info.Custom == name) {
+				info.Custom = name
+				return id
+			}
 		}
 		return DefaultRingTone(v, t.Slot)
 	}

@@ -34,7 +34,14 @@ const (
 	KindPage       = "page"
 	KindIntercom   = "intercom"
 	KindConference = "conference"
+	KindDoor       = "door"     // a door station's call or a call to a Door group (migration 00053)
 	KindCallback   = "callback" // a call Hello placed to a queue caller who asked for a callback (migration 00049)
+)
+
+// Call origins (migration 00057).
+const (
+	OriginPhone = "phone"
+	OriginAPI   = "api"
 )
 
 // Termination sides.
@@ -74,8 +81,18 @@ type Record struct {
 	RTPPackets  *int64
 	RTPLost     *int64
 	RTPJitterMs *float64
+	// CallerCodec and CalleeCodec are the audio codec each leg ended on, as
+	// "name/clock rate" ("PCMU/8000", "opus/48000"); empty (NULL) for a leg
+	// that had no media negotiated (migration 00055).
+	CallerCodec string
+	CalleeCodec string
 	// Kind is call (default), page or intercom.
 	Kind string
+	// Origin is phone (default: dialled at a phone) or api (a click-to-call
+	// request, spec integrations I-37); OriginClient names the OAuth client
+	// or token id behind an api call (migration 00057).
+	Origin       string
+	OriginClient string
 	// RingTag is the ring tag the call's device legs carried and RingRule
 	// what chose it (migration 00050); empty for a call that rang no
 	// internal device.
@@ -215,20 +232,20 @@ const insert = `WITH c AS (INSERT INTO cdrs (correlation_id, sip_call_id, source
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason,
     direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
-    rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule)
+    rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
 ON CONFLICT (correlation_id) DO NOTHING RETURNING id),
 p AS (INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
 SELECT c.id, l.ord, l.leg->>'extension', l.leg->>'device', l.leg->>'result'
-FROM c, jsonb_array_elements($28::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1),
+FROM c, jsonb_array_elements($32::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1),
 f AS (INSERT INTO cdr_legs (cdr_id, position, role, extension, trunk, result, target_kind)
 SELECT c.id, l.ord, 'follow_me', l.leg->>'extension', l.leg->>'trunk', l.leg->>'result', l.leg->>'kind'
-FROM c, jsonb_array_elements($30::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1)
+FROM c, jsonb_array_elements($34::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1)
 INSERT INTO cdr_queue_legs (cdr_id, position, event, queue, extension, wait_ms, result, at)
 SELECT c.id, l.ord, l.leg->>'event', l.leg->>'queue', l.leg->>'extension', (l.leg->>'waitMs')::bigint,
        l.leg->>'result', (l.leg->>'at')::timestamptz
-FROM c, jsonb_array_elements($29::jsonb) WITH ORDINALITY AS l(leg, ord)`
+FROM c, jsonb_array_elements($33::jsonb) WITH ORDINALITY AS l(leg, ord)`
 
 // Run writes queued records until ctx is cancelled, retrying each with
 // exponential backoff. After cancellation it tries to flush what is left for
@@ -329,11 +346,16 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	if err != nil {
 		return err
 	}
+	origin := r.Origin
+	if origin == "" {
+		origin = OriginPhone
+	}
 	_, err = w.db.Exec(wctx, insert, r.CorrelationID, r.SIPCallID, r.Source, r.Destination,
 		r.StartTime, nullTime(r.RingTime), nullTime(r.AnswerTime), r.EndTime, r.DurationMs, r.BillableMs,
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
-		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, r.RingTag, r.RingRule, string(lj), string(qj), string(fj))
+		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, r.RingTag, r.RingRule,
+		nullString(r.CallerCodec), nullString(r.CalleeCodec), origin, r.OriginClient, string(lj), string(qj), string(fj))
 	if err != nil {
 		return err
 	}
@@ -358,6 +380,13 @@ func (w *Writer) publish(ctx context.Context, r Record) {
 		e.Data.CDRID = id
 		w.Events.Emit(e)
 	}
+}
+
+func nullString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func nullTime(t time.Time) any {

@@ -578,3 +578,22 @@ var (
 	msgQuery = "SELECT " + prefixed("m.", messageCols) + " "
 	cdrQuery = "SELECT " + prefixed("c.", cdrCols) + " "
 )
+
+// AdminEmails lists the e-mail addresses of the enabled administrators, for
+// the notifications that go to all of them (a webhook endpoint switched off).
+func (s *Store) AdminEmails(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT email FROM users WHERE role = 'admin' AND enabled AND email <> '' ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

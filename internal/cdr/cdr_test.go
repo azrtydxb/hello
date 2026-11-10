@@ -184,6 +184,19 @@ func TestWriterPostgres(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT rtp_packets, rtp_lost, rtp_jitter_ms FROM cdrs WHERE correlation_id = 'corr-1'").Scan(&qp, &ql, &qj); err != nil || qp != nil || ql != nil || qj != nil {
 		t.Fatalf("unmeasured quality = %v %v %v, %v", qp, ql, qj, err)
 	}
+	var cc, ce *string
+	if err := pool.QueryRow(ctx, "SELECT caller_codec, callee_codec FROM cdrs WHERE correlation_id = 'corr-1'").Scan(&cc, &ce); err != nil || cc != nil || ce != nil {
+		t.Fatalf("codecs of a record without any = %v %v, %v, want NULL", cc, ce, err)
+	}
+	codec := Record{CorrelationID: "corr-codec", SIPCallID: "call-codec", StartTime: start, EndTime: start.Add(time.Second),
+		SIPNode: "sip-1", FinalStatus: 200, TerminationSide: SideCaller, CallerCodec: "opus/48000", CalleeCodec: "PCMU/8000"}
+	if err := w.write(ctx, codec); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT caller_codec, callee_codec FROM cdrs WHERE correlation_id = 'corr-codec'").Scan(&cc, &ce); err != nil ||
+		cc == nil || ce == nil || *cc != "opus/48000" || *ce != "PCMU/8000" {
+		t.Fatalf("stored codecs = %v %v, %v", cc, ce, err)
+	}
 	var dir string
 	if err := pool.QueryRow(ctx, "SELECT direction FROM cdrs WHERE correlation_id = 'corr-1'").Scan(&dir); err != nil || dir != "internal" {
 		t.Fatalf("default direction = %q, %v", dir, err)
@@ -237,8 +250,8 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 30 {
-		t.Fatalf("insert takes %d arguments, want 30", len(db.args))
+	if len(db.args) != 34 {
+		t.Fatalf("insert takes %d arguments, want 34", len(db.args))
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
@@ -281,7 +294,7 @@ func TestFollowMeLegsCDR(t *testing.T) {
 	if err := w.write(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if got := db.args[29]; got != "[]" {
+	if got := db.args[33]; got != "[]" {
 		t.Fatalf("follow-me legs = %v, want [] for a call with none", got)
 	}
 	r.FollowMeLegs = []FollowMeLeg{
@@ -292,10 +305,59 @@ func TestFollowMeLegsCDR(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got []FollowMeLeg
-	if err := json.Unmarshal([]byte(db.args[29].(string)), &got); err != nil || len(got) != 2 || got[1] != r.FollowMeLegs[1] {
-		t.Fatalf("follow-me legs argument = %v (%v), want %+v", db.args[29], err, r.FollowMeLegs)
+	if err := json.Unmarshal([]byte(db.args[33].(string)), &got); err != nil || len(got) != 2 || got[1] != r.FollowMeLegs[1] {
+		t.Fatalf("follow-me legs argument = %v (%v), want %+v", db.args[33], err, r.FollowMeLegs)
 	}
 	if !strings.Contains(insert, "INTO cdr_legs") || !strings.Contains(insert, "'follow_me'") {
 		t.Fatal("the insert does not write cdr_legs with the role follow_me")
+	}
+}
+
+// TestCDROrigin fails if a click-to-call's origin and client are not the
+// insert arguments after the codecs, or a record without an origin is not
+// stored as a call dialled at a phone.
+func TestCDROrigin(t *testing.T) {
+	db := &argsDB{}
+	w := NewWriter(db, newCounter(), discard)
+	now := time.Now()
+	r := Record{CorrelationID: "o", StartTime: now, EndTime: now}
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[29] != OriginPhone || db.args[30] != "" {
+		t.Fatalf("default origin = %v %v, want phone and no client", db.args[29], db.args[30])
+	}
+	r.Origin, r.OriginClient = OriginAPI, "token:7"
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[29] != OriginAPI || db.args[30] != "token:7" {
+		t.Fatalf("origin = %v %v, want api and token:7", db.args[29], db.args[30])
+	}
+}
+
+// TestCDRCodecColumns fails if the codec columns are not the two arguments
+// after the ring tag and rule (before the origin), are not NULL for a leg
+// without a codec, or carry anything but the record's strings.
+func TestCDRCodecColumns(t *testing.T) {
+	db := &argsDB{}
+	w := NewWriter(db, newCounter(), discard)
+	now := time.Now()
+	r := Record{CorrelationID: "c", StartTime: now, EndTime: now}
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if len(db.args) != 34 || db.args[27] != nil || db.args[28] != nil {
+		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 34", db.args[27], db.args[28], len(db.args))
+	}
+	r.CallerCodec, r.CalleeCodec = "opus/48000", "PCMU/8000"
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[27] != "opus/48000" || db.args[28] != "PCMU/8000" {
+		t.Fatalf("codecs = %#v, %#v", db.args[27], db.args[28])
+	}
+	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client)") || !strings.Contains(insert, "$30, $31)") {
+		t.Fatal("the insert does not name the codec and origin columns with $28 to $31")
 	}
 }
