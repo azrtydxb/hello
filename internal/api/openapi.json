@@ -25544,6 +25544,8 @@
                   "no_messaging_trunk",
                   "opted_out",
                   "not_agent",
+                  "not_chat",
+                  "no_email",
                   "conversation_state",
                   "channel_unavailable",
                   "validation_failed",

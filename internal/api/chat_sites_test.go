@@ -281,6 +281,7 @@ func TestChatInboxActionsAPI(t *testing.T) {
 		t.Fatalf("ingest: %+v %v", ing, err)
 	}
 	sms := ing.ConversationID
+	r.assign(sms, r.agentID)
 
 	t.Run("typing", func(t *testing.T) {
 		r.admin.must(http.StatusNoContent, "POST", idPath("/api/v1/inbox/conversations", live, "/typing"), nil)
@@ -292,6 +293,7 @@ func TestChatInboxActionsAPI(t *testing.T) {
 		r.agent.must(http.StatusForbidden, "POST", idPath("/api/v1/inbox/conversations", live, "/typing"), nil)
 		r.admin.must(http.StatusNotFound, "POST", "/api/v1/inbox/conversations/99999/typing", nil)
 		r.admin.must(http.StatusConflict, "POST", idPath("/api/v1/inbox/conversations", sms, "/typing"), nil)
+		r.agent.must(http.StatusConflict, "POST", idPath("/api/v1/me/inbox/conversations", sms, "/typing"), nil)
 		r.agent.must(http.StatusNotFound, "POST", idPath("/api/v1/me/inbox/conversations", noMail, "/typing"), nil)
 	})
 
@@ -304,11 +306,8 @@ func TestChatInboxActionsAPI(t *testing.T) {
 		r.viewer.must(http.StatusForbidden, "POST", idPath("/api/v1/me/inbox/conversations", live, "/block"), map[string]any{})
 		r.agent.must(http.StatusForbidden, "POST", idPath("/api/v1/inbox/conversations", live, "/block"), map[string]any{})
 		r.other.must(http.StatusNotFound, "POST", idPath("/api/v1/me/inbox/conversations", live, "/block"), map[string]any{})
-		r.agent.must(http.StatusConflict, "POST", idPath("/api/v1/me/inbox/conversations", func() int64 {
-			// An agent's own SMS conversation is not a chat.
-			r.assign(sms, r.agentID)
-			return sms
-		}(), "/block"), map[string]any{})
+		// An agent's own SMS conversation is not a chat.
+		r.agent.must(http.StatusConflict, "POST", idPath("/api/v1/me/inbox/conversations", sms, "/block"), map[string]any{})
 		blk := r.agent.must(http.StatusOK, "POST", idPath("/api/v1/me/inbox/conversations", live, "/block"), map[string]any{"hours": 1}).json(t)
 		if blk["id"] == nil {
 			t.Fatalf("block = %v", blk)
@@ -332,6 +331,8 @@ func TestChatInboxActionsAPI(t *testing.T) {
 		if len(r.sent) != 0 {
 			t.Fatalf("an email went out for a refused reply: %v", r.sent)
 		}
+		r.agent.must(http.StatusConflict, "POST", idPath("/api/v1/me/inbox/conversations", sms, "/email-reply"), map[string]any{"body": "x"})
+		r.agent.must(http.StatusConflict, "POST", idPath("/api/v1/me/inbox/conversations", live, "/email-reply"), map[string]any{"body": "x"})
 		got := r.agent.must(http.StatusCreated, "POST", mine, map[string]any{"body": "We will call you tomorrow.", "clientMsgId": "e1"}).json(t)
 		if got["status"] != "sent" || got["body"] != "We will call you tomorrow." {
 			t.Fatalf("reply = %v", got)
@@ -345,11 +346,18 @@ func TestChatInboxActionsAPI(t *testing.T) {
 		if len(r.sent) != 1 {
 			t.Fatalf("a retry sent %d emails", len(r.sent))
 		}
+		// The supervisor's form sends and retries the same way.
+		r.admin.must(http.StatusCreated, "POST", path, map[string]any{"body": "Anything else?", "clientMsgId": "e3"})
+		r.admin.must(http.StatusOK, "POST", path, map[string]any{"body": "Anything else?", "clientMsgId": "e3"})
+		if len(r.sent) != 2 {
+			t.Fatalf("emails = %d", len(r.sent))
+		}
 		// A mail failure is a 502 and the reply is kept as failed.
 		r.failMail = true
 		r.admin.must(http.StatusBadGateway, "POST", path, map[string]any{"body": "second", "clientMsgId": "e2"})
+		r.agent.must(http.StatusBadGateway, "POST", mine, map[string]any{"body": "third", "clientMsgId": "e4"})
 		r.failMail = false
-		if n := scalar(t, r.env, `SELECT count(*) FROM conversation_messages WHERE conversation_id = $1 AND status = 'failed'`, offline); n != 1 {
+		if n := scalar(t, r.env, `SELECT count(*) FROM conversation_messages WHERE conversation_id = $1 AND status = 'failed'`, offline); n != 2 {
 			t.Fatalf("failed replies = %d", n)
 		}
 		// The status says email works.
