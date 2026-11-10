@@ -81,8 +81,36 @@ type DialogState struct {
 	Direction string    `json:"direction,omitempty"`
 	Route     string    `json:"route,omitempty"`
 	Trunk     string    `json:"trunk,omitempty"`
-	Rewritten string    `json:"rewritten,omitempty"`
-	Trace     []string  `json:"trace,omitempty"`
+	// Door marks a call from a door station (spec S-45) and Kind is the CDR
+	// kind, so a taker keeps the trunk ban and the CDR kind door.
+	Door      bool     `json:"door,omitempty"`
+	Kind      string   `json:"kind,omitempty"`
+	Rewritten string   `json:"rewritten,omitempty"`
+	Trace     []string `json:"trace,omitempty"`
+	// Session is the call's RFC 4028 session-timer state, so a taker
+	// resumes the timers with the parameters the call negotiated instead
+	// of restarting every leg at its own default (nil from older nodes,
+	// and for a call with no session timer).
+	Session *DialogSession `json:"session,omitempty"`
+}
+
+// DialogSession is a call's negotiated session timers by dialog: index 0 is
+// the caller's dialog and 1 the callee's, whatever Legs holds (a parked call
+// replicates only the dialog of the party it kept). A nil entry means that
+// dialog has no timer.
+type DialogSession struct {
+	Legs [2]*SessionLeg `json:"legs"`
+}
+
+// SessionLeg is one dialog's session timer.
+type SessionLeg struct {
+	// IntervalSecs is the negotiated Session-Expires.
+	IntervalSecs int `json:"intervalSecs"`
+	// Local is true when the owner (Hello) refreshes the dialog, false when
+	// the phone does.
+	Local bool `json:"local"`
+	// Update is true when the phone lists UPDATE in Allow.
+	Update bool `json:"update,omitempty"`
 }
 
 // LegCallIDs are the Call-IDs of the dialogs the record carries.

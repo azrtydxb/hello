@@ -20,6 +20,7 @@ var (
 	nameRE = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	// A camelCase identifier: the documented convention for naming a tool.
 	camelRE  = regexp.MustCompile(`^[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*$`)
+	verbRE   = regexp.MustCompile(`^[a-z]+`)
 	inlineRE = regexp.MustCompile("`([^`\n]+)`")
 	linkRE   = regexp.MustCompile(`\]\(([^)\s]+)\)`)
 )
@@ -29,14 +30,24 @@ var (
 // those whose scope is secrets or session, which MCP never offers.
 func exposedTools(t *testing.T) map[string]bool {
 	t.Helper()
+	tools := map[string]bool{}
+	for id := range exposedPaths(t) {
+		tools[id] = true
+	}
+	return tools
+}
+
+// exposedPaths is exposedTools with the path of each operation.
+func exposedPaths(t *testing.T) map[string]string {
+	t.Helper()
 	var doc struct {
 		Paths map[string]map[string]json.RawMessage `json:"paths"`
 	}
 	if err := json.Unmarshal(api.OpenAPI(), &doc); err != nil {
 		t.Fatal(err)
 	}
-	tools := map[string]bool{}
-	for _, methods := range doc.Paths {
+	tools := map[string]string{}
+	for path, methods := range doc.Paths {
 		for _, raw := range methods {
 			var op struct {
 				ID    string          `json:"operationId"`
@@ -49,14 +60,23 @@ func exposedTools(t *testing.T) map[string]bool {
 			if bytes.HasPrefix(bytes.TrimSpace(op.MCP), []byte("{")) || op.Scope == "secrets" || op.Scope == "session" {
 				continue
 			}
-			tools[op.ID] = true
+			tools[op.ID] = path
 		}
 	}
 	return tools
 }
 
 // check returns every problem with the skills in fsys.
+//
+// A camelCase identifier in inline code is taken for a tool name when it
+// starts like one (list, get, create, ...: the first word of some operation
+// id), so a misspelt tool is caught while a body field such as extensionId
+// or dryRun may be written in code.
 func check(fsys fs.FS, tools map[string]bool) []string {
+	verbs := map[string]bool{}
+	for id := range tools {
+		verbs[verbRE.FindString(id)] = true
+	}
 	var problems []string
 	bad := func(format string, args ...any) {
 		problems = append(problems, fmt.Sprintf(format, args...))
@@ -118,7 +138,7 @@ func check(fsys fs.FS, tools map[string]bool) []string {
 				}
 			}
 			for _, c := range inlineRE.FindAllStringSubmatch(line, -1) {
-				if camelRE.MatchString(c[1]) && !tools[c[1]] {
+				if camelRE.MatchString(c[1]) && verbs[verbRE.FindString(c[1])] && !tools[c[1]] {
 					bad("%s: `%s` is not a tool the MCP server exposes", p, c[1])
 				}
 			}
@@ -164,7 +184,7 @@ func TestSkills(t *testing.T) {
 	for _, s := range list {
 		names = append(names, s.Name)
 	}
-	for _, want := range []string{"hello-routing", "hello-setup", "hello-troubleshoot"} {
+	for _, want := range []string{"hello-routing", "hello-setup", "hello-troubleshoot", "hello-ivr-and-hours", "hello-call-handling", "hello-phones", "hello-flow-graph"} {
 		if !slices.Contains(names, want) {
 			t.Errorf("skill %s is not embedded (have %v)", want, names)
 		}
@@ -203,3 +223,79 @@ func skill(name, body string) *fstest.MapFile {
 }
 
 func file(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
+
+// untaught are the tools no skill needs to name, each with the reason. Keep
+// this short: a tool an agent can call is a tool a skill should teach.
+var untaught = map[string]string{}
+
+// untaughtAreas are API areas (the path segment after /api/v1) that no skill
+// needs to cover, each with the reason.
+var untaughtAreas = map[string]string{}
+
+// skillText is every Markdown file of every embedded skill.
+func skillText(t *testing.T) string {
+	t.Helper()
+	var b strings.Builder
+	err := fs.WalkDir(skills.FS, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".md") {
+			return err
+		}
+		data, err := fs.ReadFile(skills.FS, p)
+		b.Write(data)
+		b.WriteByte('\n')
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+// mentioned reports whether the skills name a tool, as an inline-code
+// identifier (`name`) or a table cell, never as part of a longer word.
+func mentioned(text, tool string) bool {
+	re := regexp.MustCompile(`(^|[^A-Za-z0-9])` + regexp.QuoteMeta(tool) + `($|[^A-Za-z0-9])`)
+	return re.MatchString(text)
+}
+
+// TestSkillsTeachEveryTool is the drift guard of spec ai-external-access
+// S-17: it fails when an MCP tool (an operation not excluded) is named by
+// no skill, or when an API area (the first path segment after /api/v1) has
+// no tool any skill names. A new route that is not an MCP exclusion
+// therefore fails CI until a skill teaches it (or untaught says why not).
+func TestSkillsTeachEveryTool(t *testing.T) {
+	paths := exposedPaths(t)
+	text := skillText(t)
+	areas := map[string][]string{}
+	for id, path := range paths {
+		area, _, _ := strings.Cut(strings.TrimPrefix(path, "/api/v1/"), "/")
+		areas[area] = append(areas[area], id)
+		if !mentioned(text, id) {
+			if _, ok := untaught[id]; !ok {
+				t.Errorf("tool %s (%s) is named by no skill: teach it in a skill or add it to untaught with a reason", id, path)
+			}
+		}
+	}
+	for id, why := range untaught {
+		switch {
+		case why == "":
+			t.Errorf("untaught %s has no reason", id)
+		case paths[id] == "":
+			t.Errorf("untaught %s is not an MCP tool; remove it", id)
+		case mentioned(text, id):
+			t.Errorf("untaught %s is taught by a skill; remove it from untaught", id)
+		}
+	}
+	for area, ids := range areas {
+		covered := false
+		for _, id := range ids {
+			covered = covered || mentioned(text, id)
+		}
+		if _, ok := untaughtAreas[area]; !covered && !ok {
+			t.Errorf("API area /%s appears in no skill: write or extend a skill for it (tools %v)", area, ids)
+		}
+		if why, ok := untaughtAreas[area]; ok && (why == "" || covered) {
+			t.Errorf("untaughtAreas %s is stale or has no reason", area)
+		}
+	}
+}

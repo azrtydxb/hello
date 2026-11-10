@@ -526,6 +526,7 @@ func (c *call) parkRetrieved(offer media.AudioSDP, retriever, source string, tak
 	c.park = nil
 	lk.peer, lk.node, lk.callID = taker, takerNode, takerCallID
 	c.mu.Unlock()
+	c.mediaTouched() // the silence clock starts with the retrieved call
 	c.addTrace(fmt.Sprintf("Retrieved from slot %s by %s", pk.slot, retriever))
 	c.s.parkMetric("retrieve", "ok")
 	c.s.slotChanged(pk.slot)
@@ -748,6 +749,8 @@ func (c *call) parkReturnAnswered(rc *call, l *leg, pk *parkState, partyLeg, par
 	rc.maxTimer = time.AfterFunc(s.cfg.MaxCallDuration, rc.expire)
 	rc.mu.Unlock()
 	rc.addTrace("The parker answered the returned call")
+	rc.sessionReturned(l)
+	c.mediaTouched()
 	rc.publish()
 	c.mu.Lock()
 	c.park = nil
@@ -851,6 +854,14 @@ func (s *Server) linkedReinvite(c *call, req *sip.Request, tx sip.ServerTransact
 	c.mu.Lock()
 	lk := c.link
 	c.mu.Unlock()
+	// A refresh from the party (RFC 4028) restarts its dialog's session
+	// timer; a bodiless UPDATE that only refreshes is answered here.
+	if idx, ok := c.linkedPartyIdx(); ok {
+		var done bool
+		if tx, done = c.sessionIn(idx, req, tx); done {
+			return
+		}
+	}
 	body := req.Body()
 	dir := media.SDPDirection(body)
 	var ans []byte
@@ -870,6 +881,9 @@ func (s *Server) linkedReinvite(c *call, req *sip.Request, tx sip.ServerTransact
 	res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", ans)
 	if len(ans) > 0 {
 		res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+		if idx, ok := c.linkedPartyIdx(); ok {
+			c.noteSDP(idx, ans) // the last SDP given to the party, for a refresh
+		}
 	}
 	res.AppendHeader(sip.HeaderClone(&s.contact))
 	s.send(tx, res)
@@ -877,6 +891,7 @@ func (s *Server) linkedReinvite(c *call, req *sip.Request, tx sip.ServerTransact
 		return
 	}
 	held := dir == "sendonly" || dir == "inactive"
+	c.setLinkHeld(held)
 	c.mu.Lock()
 	changed := c.held != held
 	c.mu.Unlock()
@@ -932,6 +947,7 @@ func (c *call) holdParty(dir string) {
 	if lk == nil || ended {
 		return
 	}
+	c.setLinkHeld(dir == "sendonly" || dir == "inactive")
 	var body []byte
 	if owner := lk.relayOwner; owner != nil {
 		owner.mu.Lock()
@@ -950,6 +966,9 @@ func (c *call) holdParty(dir string) {
 	}
 	if len(body) == 0 {
 		return
+	}
+	if idx, found := c.linkedPartyIdx(); found {
+		c.noteSDP(idx, body)
 	}
 	ok := false
 	switch hom := c.homed(); {

@@ -10,14 +10,15 @@ later phases.
 
 ## What is emitted
 
-| Event                  | When                                                                                                                                   |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `call.ringing`         | An extension starts ringing. A call that rings several extensions (a ring group) yields one event per ringing extension.               |
-| `call.answered`        | An extension answered. The calling extension of an internal or outbound call gets one too.                                             |
-| `call.ended`           | The call ended, for each extension it involved.                                                                                        |
-| `call.missed`          | The call reached an extension and nobody answered. A call answered by another member of a ring group is not missed for the others.     |
-| `call.recording.ready` | A recording of the call was stored. It is stored after the call ends, so it follows `call.ended`. Carries `recordingId`, `durationMs`. |
-| `call.completed`       | The call detail record was stored. Carries `cdrId`; this is the point to log the call elsewhere.                                       |
+| Event                     | When                                                                                                                                   |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `call.ringing`            | An extension starts ringing. A call that rings several extensions (a ring group) yields one event per ringing extension.               |
+| `call.answered`           | An extension answered. The calling extension of an internal or outbound call gets one too.                                             |
+| `call.ended`              | The call ended, for each extension it involved.                                                                                        |
+| `call.missed`             | The call reached an extension and nobody answered. A call answered by another member of a ring group is not missed for the others.     |
+| `call.recording.ready`    | A recording of the call was stored. It is stored after the call ends, so it follows `call.ended`. Carries `recordingId`, `durationMs`. |
+| `call.completed`          | The call detail record was stored. Carries `cdrId`; this is the point to log the call elsewhere.                                       |
+| `call.originate.progress` | A click-to-call changed state ([click-to-call](click-to-call.md)). Carries `originateId`, `state` and, for a failure, `reason`.        |
 
 Pages, intercoms and conference legs do not produce call events.
 

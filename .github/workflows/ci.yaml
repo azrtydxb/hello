@@ -1,5 +1,5 @@
 # The shape mirrors kuvryn-scout: test jobs run in containers on the generic
-# ARC runners, and what lands on main is built and pushed to Nexus by the
+# ARC runners, and what lands on main is built and pushed to Kuvryn Ant by the
 # publish runners. Kuvryn Sync then deploys those images (deploy/kuvryn-sync/).
 name: ci
 
@@ -11,7 +11,7 @@ on:
   # Three tiers: the unit job goes on every pull request and push; the
   # integration tier — the database-backed suites, the race detector and the
   # HA soak — runs on the nightly cron, a manual dispatch, v* tags and any
-  # pull request that changes database-touching paths (db-changes); the
+  # pull request that changes database-touching paths (changes); the
   # full tier (kind-upgrade, lab) stays off the pull request path. Publish
   # stays on push to main and v* tags; bench stays dispatch-only.
   schedule:
@@ -25,14 +25,14 @@ permissions:
 
 # A newer push to a pull request supersedes the run in progress; on main
 # every commit runs to the end, because publish builds the image of that
-# commit and kind-upgrade seeds the build cache from it.
+# commit and writes the build cache from it.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Authoritative Kuvryn Ant (OKE); kw replicates oci-hosted and its nodes serve
-  # the old 192.168.10.131/azrtydxb/<image> names from that replica.
+  # Authoritative Kuvryn Ant (OKE); kw replicates oci-hosted and its nodes pull
+  # from that replica as ant.kw.watteel.lab/oci-hosted/<image>.
   REGISTRY: ant.azrty.com/oci-hosted
 
 jobs:
@@ -44,15 +44,15 @@ jobs:
     # when their HELLO_TEST_* variable is unset; `integration` sets them and
     # runs the same `go test ./...`.
     if: github.event_name != 'workflow_dispatch'
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     container:
       # The Go toolchain comes from the same base the Dockerfile builds
       # with, so CI and the image agree on the compiler.
       image: golang:1.27-bookworm
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+      - uses: actions/checkout@v7
+      - uses: azrtydxb/ant-setup-action@v1
       # Go refuses to stamp VCS info for a workspace owned by another uid.
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -62,10 +62,13 @@ jobs:
       # commit so main saves a fresh build cache on every push; a pull request
       # restores the newest one for its go.sum (or any, after a dependency
       # bump) and never saves, so it cannot overwrite what main relies on.
+      # Only the nightly run saves: a save on every push to main took ~6 min
+      # and held up publish, and the build cache is content-addressed, so a
+      # day-old cache costs a little recompilation, never a wrong build.
       # Go checks every cache entry against its inputs, so a stale entry costs
       # a recompile, never a wrong build.
       - name: Restore the Go caches
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@v6
         with:
           path: |
             /go/pkg/mod
@@ -74,39 +77,52 @@ jobs:
           restore-keys: |
             go-${{ runner.arch }}-golang1.27-${{ hashFiles('go.sum') }}-
             go-${{ runner.arch }}-golang1.27-
-      - run: go build ./...
+      # go vet type-checks every package and its tests, so a separate
+      # `go build ./...` would only compile the same code a second time.
       - run: go vet ./...
-      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0
       # Unit tier: hermetic tests only. The database-backed suites and the
       # race detector run in `integration`, off the PR and push-to-main path.
       - run: go test -timeout 10m ./...
       - name: Save the Go caches
-        if: github.event_name == 'push'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name == 'schedule'
+        uses: actions/cache/save@v6
         with:
           path: |
             /go/pkg/mod
             /root/.cache/go-build
           key: go-${{ runner.arch }}-golang1.27-${{ hashFiles('go.sum') }}-${{ github.sha }}
 
-  db-changes:
-    # Whether a pull request touches code the database-backed tests cover:
-    # migrations, the store and API, the integration suite, and every package
-    # with a HELLO_TEST_DATABASE_URL test. Only pull requests are filtered;
-    # the other events run the integration job unconditionally.
-    if: github.event_name == 'pull_request'
-    runs-on: arc-azrtydxb
+  changes:
+    # What a change touches, so the jobs it cannot affect can be skipped:
+    #  - db: code the database-backed tests cover (migrations, the store and
+    #    API, the integration suite, every package with a HELLO_TEST_DATABASE_URL
+    #    test). Pull requests only; the other events run `integration`
+    #    unconditionally.
+    #  - web: the web UI. Pull requests only.
+    #  - chart: the Helm chart and what test/deploy reads. Pull requests only.
+    #  - kind: the images, chart and code the rolling-upgrade test exercises.
+    #    Pushes to main only; the nightly cron and v* tags always run it.
+    # A skipped job reports as skipped, which satisfies a required check.
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/'))
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
     outputs:
       db: ${{ steps.filter.outputs.db }}
+      web: ${{ steps.filter.outputs.web }}
+      chart: ${{ steps.filter.outputs.chart }}
+      kind: ${{ steps.filter.outputs.kind }}
     steps:
+      # A push is diffed with git; a pull request through the API.
+      - if: github.event_name == 'push'
+        uses: actions/checkout@v7
       - id: filter
-        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             db:
@@ -120,21 +136,47 @@ jobs:
               - 'test/integration/**'
               - 'go.mod'
               - '.github/workflows/ci.yaml'
+            web:
+              - 'web/**'
+              - '.github/workflows/ci.yaml'
+            chart:
+              - 'deploy/**'
+              - 'test/deploy/**'
+              - 'docs/kubernetes.md'
+              - 'README.md'
+              - 'go.mod'
+              - 'go.sum'
+              - '.github/workflows/ci.yaml'
+            kind:
+              - 'Dockerfile'
+              - 'docker/**'
+              - 'deploy/**'
+              - 'cmd/**'
+              - 'migrations/**'
+              - 'internal/sip/**'
+              - 'internal/cluster/**'
+              - 'internal/lifecycle/**'
+              - 'internal/migrate/**'
+              - 'test/kindupgrade/**'
+              - 'test/sipua/**'
+              - 'go.mod'
+              - 'go.sum'
+              - '.github/workflows/ci.yaml'
 
   integration:
     # Integration tier: the database-backed suites (PostgreSQL, Valkey, MinIO)
     # plus the race detector and the HA soak. Runs on the nightly cron, a
     # manual dispatch, v* tags (the full tier) and any pull request that
-    # changes database-touching paths (see db-changes). The unit job skips
+    # changes database-touching paths (see changes). The unit job skips
     # these tests, so this job is what actually proves the database code works.
-    needs: db-changes
+    needs: changes
     if: >-
       !cancelled() && (
         github.event_name == 'schedule' ||
         github.event_name == 'workflow_dispatch' ||
         startsWith(github.ref, 'refs/tags/v') ||
-        (github.event_name == 'pull_request' && needs.db-changes.outputs.db == 'true'))
-    runs-on: arc-azrtydxb
+        (github.event_name == 'pull_request' && needs.changes.outputs.db == 'true'))
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     container:
       image: golang:1.27-bookworm
@@ -181,12 +223,12 @@ jobs:
           --health-cmd "curl -f http://localhost:9000/minio/health/live"
           --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+      - uses: actions/checkout@v7
+      - uses: azrtydxb/ant-setup-action@v1
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Restore the Go caches
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@v6
         with:
           path: |
             /go/pkg/mod
@@ -229,8 +271,9 @@ jobs:
           } >> "$GITHUB_ENV"
       # Everything with the services up: the database-backed tests run here
       # (the unit job skips them), and the race detector is affordable once a
-      # night rather than on every push.
-      - run: go test -timeout 30m ./...
+      # night rather than on every push. -race runs every test the plain run
+      # does, so one pass under the detector replaces the two passes this job
+      # used to make (about 7 minutes saved).
       - name: go test -race
         run: go test -race -timeout 30m ./...
       # A MinIO SlowDown cannot be diagnosed from the test output alone: keep
@@ -250,8 +293,14 @@ jobs:
         run: go test -race -count=3 -run 'TestTakeoverScenarioMatrix|TestBackgroundWorkDuringShutdown|TestTakeoverKeepsClaimUntilRecorded' ./internal/sip/
 
   web:
-    if: github.event_name != 'workflow_dispatch'
-    runs-on: arc-azrtydxb
+    # Pull requests that leave web/ alone skip it; the nightly run skips it
+    # too, because it would repeat the last push to main on the same lockfile.
+    needs: changes
+    if: >-
+      !cancelled() &&
+      github.event_name != 'workflow_dispatch' && github.event_name != 'schedule' &&
+      (github.event_name != 'pull_request' || needs.changes.result == 'failure' || needs.changes.outputs.web == 'true')
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     container:
       image: node:26-bookworm-slim
@@ -259,8 +308,8 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+      - uses: actions/checkout@v7
+      - uses: azrtydxb/ant-setup-action@v1
       # node:26 no longer bundles corepack, so pnpm comes from npm.
       - run: npm install -g pnpm@10
       - run: pnpm install --frozen-lockfile
@@ -275,7 +324,7 @@ jobs:
     # Valkey and seeds for minutes, so it runs only when dispatched:
     # gh workflow run ci.yaml --ref <branch>
     if: github.event_name == 'workflow_dispatch'
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     container:
       image: golang:1.27-bookworm
@@ -297,8 +346,8 @@ jobs:
         options: >-
           --health-cmd "valkey-cli ping" --health-interval 5s --health-retries 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+      - uses: actions/checkout@v7
+      - uses: azrtydxb/ant-setup-action@v1
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       # On the ARC kubernetes-mode runners the job container and its services
@@ -333,14 +382,16 @@ jobs:
     # container. The go job must be green first: the lab builds the same
     # images from the same source.
     # Integration tier: the compose lab is far too slow for the PR path, so it
-    # runs only on the nightly schedule and on manual dispatch.
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    # runs only on the nightly schedule and on manual dispatch. The go job is
+    # skipped on dispatch, which would skip this job too; so a dispatch runs
+    # lab regardless, while the schedule still requires go to be green.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && needs.go.result == 'success')) }}
     needs: [go]
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+      - uses: actions/checkout@v7
+      - uses: azrtydxb/ant-setup-action@v1
       # Evidence first: what the runner actually has decides whether this
       # job can work here at all.
       - name: Docker and compose on the runner
@@ -359,7 +410,7 @@ jobs:
             chmod +x "$HOME/.docker/cli-plugins/docker-compose"
             docker compose version
           }
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Lab and failure-injection tests
@@ -379,8 +430,13 @@ jobs:
     # The Helm chart (deploy/helm/hello) rendered and checked: lint, the
     # kubeconform schema check, and the test/deploy invariants. helm and
     # kubeconform are tools here, not services: nothing is installed into a
-    # cluster (kind-upgrade does that).
-    runs-on: arc-azrtydxb
+    # cluster (kind-upgrade does that). Skipped on pull requests that leave the
+    # chart alone and on the nightly run, which would repeat the last push.
+    needs: changes
+    if: >-
+      !cancelled() && github.event_name != 'schedule' &&
+      (github.event_name != 'pull_request' || needs.changes.result == 'failure' || needs.changes.outputs.chart == 'true')
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     container:
       image: golang:1.27-bookworm
@@ -390,8 +446,8 @@ jobs:
       # A missing helm must fail test/deploy here, not skip.
       HELLO_REQUIRE_HELM: "1"
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+      - uses: actions/checkout@v7
+      - uses: azrtydxb/ant-setup-action@v1
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Install helm and kubeconform
@@ -419,6 +475,51 @@ jobs:
       - name: Chart invariants and kubeconform
         run: go test -count=1 -v -run 'TestChart|TestKubernetesGuide' ./test/deploy/
 
+  kamailio-config:
+    # `kamailio -c` over deploy/kamailio/kamailio.cfg in the real image, with
+    # the lab's defaults and with the exact environment the kw kamailio
+    # Deployment sets (test/deploy TestKamailioConfigSyntax). The Kamailio
+    # config is the one thing no other PR-time job parses, so a cfg or env
+    # change Kamailio rejects would otherwise reach the nodes. Needs the
+    # runner's Docker daemon (as kind-upgrade does) to build and run the
+    # image; the build reads the shared cache and never writes it from a PR.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["ant.azrty.com"]
+      - id: ant-cache-kc
+        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+        with:
+          build-cache: "true"
+          cache-name: kamailio
+          cache-write: ${{ github.event_name == 'push' }}
+          sccache: "false"
+          go: "false"
+          npm: "false"
+          cargo: "false"
+          pip: "false"
+      - name: Build kamailio
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: docker/kamailio
+          load: true
+          tags: hello.local/kamailio:cfgcheck
+          cache-from: ${{ steps.ant-cache-kc.outputs.cache-from }}
+          cache-to: ${{ steps.ant-cache-kc.outputs.cache-to }}
+      - name: kamailio -c
+        env:
+          HELLO_KAMAILIO_IMAGE: hello.local/kamailio:cfgcheck
+          HELLO_REQUIRE_KAMAILIO: "1"
+        run: go test -count=1 -v -run 'TestKamailioConfigSyntax' ./test/deploy/
+
   kind-upgrade:
     # Rolling upgrade with an active call (docs/kubernetes.md, "Upgrades"):
     # builds the images from this commit, creates a kind cluster, installs
@@ -426,11 +527,18 @@ jobs:
     # then `helm upgrade`s Hello's pods and Kamailio and requires the call to
     # survive and hang up cleanly. Needs the runner's Docker daemon (as the
     # lab job does), kind, kubectl and helm on the runner itself.
-    # Full/integration tier: never on a pull request. Kept on push to main
-    # (not just the nightly cron and v* tags) because it seeds the shared
-    # build cache that publish and the nightly runs read.
-    if: github.event_name != 'pull_request'
-    runs-on: arc-azrtydxb
+    # Full/integration tier: never on a pull request. On push to main it runs
+    # only when the push touches what the upgrade test exercises (see the
+    # `kind` filter in `changes`); the nightly cron, dispatch and v* tags
+    # always run it. The shared build cache is written by publish.
+    needs: changes
+    if: >-
+      !cancelled() && github.event_name != 'pull_request' && (
+        github.event_name != 'push' ||
+        startsWith(github.ref, 'refs/tags/v') ||
+        needs.changes.result == 'failure' ||
+        needs.changes.outputs.kind == 'true')
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     env:
       KIND_VERSION: v0.30.0
@@ -438,8 +546,8 @@ jobs:
       HELM_VERSION: v4.1.1
       HELLO_KIND_PASSWORD: kind-admin-password
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Tools on the runner
@@ -461,31 +569,23 @@ jobs:
           tar -xzf "$d/helm.tgz" -C "$d" "linux-${a}/helm"
           install "$d/linux-${a}/helm" "$HOME/bin/helm"
           echo "$HOME/bin" >> "$GITHUB_PATH"
-      # The images build with BuildKit against a registry cache on the
-      # in-cluster Nexus rather than a plain docker build, which started cold
-      # on every ephemeral runner. Same buildkitd config as publish: BuildKit
-      # runs in its own container and does not inherit the host trust store,
-      # so both Nexus ports need the exemption (:443 the read-only group,
-      # :5000 the hosted repository that accepts the cache write), and base
-      # images come through the pull-through cache, not Docker Hub.
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # The images build with BuildKit against the Kuvryn Ant buildcache feed
+      # (below) rather than a plain docker build, which started cold on every
+      # ephemeral runner. Base images come through the Ant docker.io mirror.
+      - uses: docker/setup-buildx-action@v4
         with:
           buildkitd-config-inline: |
-            [registry."192.168.10.131"]
-              insecure = true
-            [registry."192.168.10.131:5000"]
-              insecure = true
             [registry."docker.io"]
               mirrors = ["ant.azrty.com"]
-      # Only a push to main writes the cache, so an untrusted pull request can
-      # never poison the layers main builds from.
-      # Kuvryn Ant buildcache feed (GitHub OIDC): cache-write is off outside push events.
+      # This job only reads the cache: publish writes it on push to main, so an
+      # untrusted pull request can never poison the layers main builds from.
+      # Kuvryn Ant buildcache feed (GitHub OIDC).
       - id: ant-cache-1
-        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+        uses: azrtydxb/ant-setup-action@v1
         with:
           build-cache: "true"
           cache-name: control
-          cache-write: ${{ github.event_name == 'push' }}
+          cache-write: "false"
           sccache: "false"
           go: "false"
           npm: "false"
@@ -494,7 +594,7 @@ jobs:
       # load: true puts each image in the runner's Docker daemon, where
       # `kind load` picks it up as it did after docker build.
       - name: Build hello-control
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: hello-control
@@ -503,18 +603,18 @@ jobs:
           cache-from: ${{ steps.ant-cache-1.outputs.cache-from }}
           cache-to: ${{ steps.ant-cache-1.outputs.cache-to }}
       - id: ant-cache-2
-        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+        uses: azrtydxb/ant-setup-action@v1
         with:
           build-cache: "true"
           cache-name: sip
-          cache-write: ${{ github.event_name == 'push' }}
+          cache-write: "false"
           sccache: "false"
           go: "false"
           npm: "false"
           cargo: "false"
           pip: "false"
       - name: Build hello-sip
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: hello-sip
@@ -523,18 +623,18 @@ jobs:
           cache-from: ${{ steps.ant-cache-2.outputs.cache-from }}
           cache-to: ${{ steps.ant-cache-2.outputs.cache-to }}
       - id: ant-cache-3
-        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+        uses: azrtydxb/ant-setup-action@v1
         with:
           build-cache: "true"
           cache-name: ui
-          cache-write: ${{ github.event_name == 'push' }}
+          cache-write: "false"
           sccache: "false"
           go: "false"
           npm: "false"
           cargo: "false"
           pip: "false"
       - name: Build hello-ui
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        uses: docker/build-push-action@v7
         with:
           context: web
           file: web/Dockerfile
@@ -543,18 +643,18 @@ jobs:
           cache-from: ${{ steps.ant-cache-3.outputs.cache-from }}
           cache-to: ${{ steps.ant-cache-3.outputs.cache-to }}
       - id: ant-cache-4
-        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+        uses: azrtydxb/ant-setup-action@v1
         with:
           build-cache: "true"
           cache-name: kamailio
-          cache-write: ${{ github.event_name == 'push' }}
+          cache-write: "false"
           sccache: "false"
           go: "false"
           npm: "false"
           cargo: "false"
           pip: "false"
       - name: Build kamailio
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        uses: docker/build-push-action@v7
         with:
           context: docker/kamailio
           load: true
@@ -595,7 +695,7 @@ jobs:
           # are kernel-wide, so they are raised from a privileged container
           # on the runner's Docker daemon; harmless if already high.
           docker run --rm --privileged alpine:3.22 sh -c 'sysctl fs.inotify.max_user_instances fs.inotify.max_user_watches; sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576' || echo "could not raise the inotify limits"
-          kind create cluster --name hello --config kind.yaml --wait 5m --retain || {
+          kind create cluster --name hello --config kind.yaml --wait 10m --retain || {
             docker ps -a
             for n in hello-control-plane hello-worker hello-worker2; do
               echo "=== $n"; docker logs "$n" 2>&1 | tail -40
@@ -604,6 +704,36 @@ jobs:
             tail -n 60 ./kind-logs/*/journal.log 2>/dev/null || true
             exit 1
           }
+          # `kind create --wait` only waits for the control plane's Ready
+          # condition. On a loaded runner the API server can still reset
+          # connections and the admin RBAC binding may not be served yet, which
+          # surfaced later as "cannot watch ..." from helm. Gate on both, with a
+          # deadline: a cluster that never gets there still fails the job here.
+          export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+          deadline=$((SECONDS + 300))
+          until kubectl get --raw='/readyz' >/dev/null 2>&1; do
+            [ $SECONDS -lt $deadline ] || { echo "API server never became ready"; kubectl get --raw='/readyz?verbose' || true; exit 1; }
+            sleep 3
+          done
+          kubectl wait --for=condition=Ready node --all --timeout=300s
+          # RBAC bootstrap: the admin must be able to do what helm --wait does
+          # (list+watch across the kinds the chart renders), and the system
+          # ClusterRoles must exist. Three consecutive passes, so one lucky
+          # answer between resets does not count.
+          rbac_ready() {
+            kubectl auth can-i '*' '*' >/dev/null 2>&1 || return 1
+            for r in pods statefulsets deployments poddisruptionbudgets.policy services; do
+              kubectl auth can-i watch "$r" --all-namespaces >/dev/null 2>&1 || return 1
+            done
+            kubectl get clusterrole cluster-admin >/dev/null 2>&1
+          }
+          ok=0
+          until [ $ok -ge 3 ]; do
+            if rbac_ready; then ok=$((ok + 1)); else ok=0; fi
+            [ $SECONDS -lt $deadline ] || { echo "RBAC never became ready"; kubectl auth can-i watch poddisruptionbudgets.policy --all-namespaces || true; exit 1; }
+            sleep 2
+          done
+          kubectl -n kube-system wait --for=condition=Available deployment/coredns --timeout=300s
           for i in hello-control hello-sip hello-ui kamailio; do
             kind load docker-image --name hello hello.local/$i:ci hello.local/$i:ci-upgrade
           done
@@ -629,24 +759,49 @@ jobs:
             --from-literal=minioSecretKey=kind-minio-pass \
             --from-literal=postgresUser=hello \
             --from-literal=postgresPassword=kind-pg-pass
-          helm install hello deploy/helm/hello -n hello \
-            -f deploy/helm/hello/values-eval.yaml \
-            --set global.imageRegistry=hello.local \
-            --set global.imageTag=ci \
-            --set global.sipDomain=hello.kind \
-            --set sip.hostNetwork=false \
-            --set sip.mediaAnchorHost=podIP \
-            --set sip.trustedProxies=10.0.0.0/8 \
-            --set kamailio.hostNetwork=false \
-            --set kamailio.service.type=NodePort \
-            --set kamailio.service.nodePort=30508 \
-            --set kamailio.publicHost="$edge" \
-            --set kamailio.publicPort=30508 \
-            --set kamailio.phonesPort=5060 \
-            --set-string kamailio.nodeSelector.hello-edge=true \
-            --set control.service.type=NodePort \
-            --set control.service.nodePort=30081 \
-            --wait --timeout 10m
+          # Retry only the install, only on the known transient control-plane
+          # errors (API server reset, RBAC not yet served, etcd timeout), at
+          # most twice more. Anything else, a chart or workload error included,
+          # fails at once and the retry never masks it.
+          transient='cannot watch resource|cannot list resource|connection reset by peer|connection refused|etcdserver: (request timed out|leader changed)|TLS handshake timeout|the server is currently unable to handle the request|unexpected EOF'
+          # The upgrade test's call is signalling only, held for minutes with
+          # no RTP: dead-media teardown (HELLO_MEDIA_DEAD_SECONDS, S-9) is off.
+          helm_args=(
+            -f deploy/helm/hello/values-eval.yaml
+            --set global.imageRegistry=hello.local
+            --set global.imageTag=ci
+            --set global.sipDomain=hello.kind
+            --set sip.hostNetwork=false
+            --set sip.mediaAnchorHost=podIP
+            --set sip.trustedProxies=10.0.0.0/8
+            --set 'sip.extraEnv[0].name=HELLO_MEDIA_DEAD_SECONDS'
+            --set-string 'sip.extraEnv[0].value=0'
+            --set kamailio.hostNetwork=false
+            --set kamailio.service.type=NodePort
+            --set kamailio.service.nodePort=30508
+            --set kamailio.publicHost="$edge"
+            --set kamailio.publicPort=30508
+            --set kamailio.phonesPort=5060
+            --set-string kamailio.nodeSelector.hello-edge=true
+            --set control.service.type=NodePort
+            --set control.service.nodePort=30081
+            --wait --timeout 15m
+          )
+          set -o pipefail
+          attempt=1
+          while :; do
+            if helm install hello deploy/helm/hello -n hello "${helm_args[@]}" 2>&1 | tee "$RUNNER_TEMP/helm-install.log"; then
+              break
+            fi
+            if [ "$attempt" -ge 3 ] || ! grep -qE "$transient" "$RUNNER_TEMP/helm-install.log"; then
+              echo "helm install failed (attempt $attempt); not retrying"
+              exit 1
+            fi
+            echo "::warning::helm install hit a transient API error (attempt $attempt of 3); retrying"
+            helm uninstall hello -n hello --wait --timeout 5m || true
+            sleep 15
+            attempt=$((attempt + 1))
+          done
           kubectl -n hello get pods -o wide
       - name: Follow the pod logs across the rollout
         run: |
@@ -694,12 +849,173 @@ jobs:
         if: always()
         run: kind delete cluster --name hello || true
 
+  kamailio-ha:
+    # The Kamailio pair's failover on kind (.procoder/specs/kamailio-ha.md,
+    # acceptance criteria): the kw edge manifests - two hostNetwork Kamailio,
+    # a kube-vip sidecar each, one VIP - applied to a kind cluster, with the
+    # test (test/kindha) playing the phones and the Hello nodes. It kills the
+    # active instance with calls up (by deleting its pod, and by freezing its
+    # node), requires the VIP to move, BYE from either side and a takeover
+    # re-INVITE to succeed through the survivor and a registered phone to be
+    # called without re-registering, then restarts both instances one at a time.
+    # It runs twice: against the kw manifests and against the Helm chart's pair.
+    # Full tier: on a pull request only when the change touches the edge (the
+    # first step decides); always on main, the nightly cron and dispatch.
+    # Starts after the unit jobs finish (whatever their result): a kind control
+    # plane is etcd on the runner's disk, and on a 4-core runner it
+    # times out requests (load average 10) while go, chart and web are running.
+    needs: [go, chart, web, kamailio-config]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 50
+    env:
+      KIND_VERSION: v0.30.0
+      KUBECTL_VERSION: v1.34.0
+      HELM_VERSION: v4.1.1
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: changed
+        name: Does the change touch the edge?
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if git diff --name-only "$BASE_SHA" HEAD | grep -E '^(deploy/kamailio/|docker/kamailio/|deploy/kuvryn-sync/kw/|deploy/kuvryn-sync/kamailio-vip/|deploy/helm/|test/kindha/|\.github/workflows/ci\.yaml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "the change does not touch the edge: skipping the failover test"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changed.outputs.run == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Tools on the runner
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          docker version
+          arch=$(uname -m); case $arch in
+            x86_64) a=amd64 ;;
+            aarch64|arm64) a=arm64 ;;
+            *) echo "unsupported arch $arch"; exit 1 ;;
+          esac
+          mkdir -p "$HOME/bin"
+          curl -fsSL "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${a}" -o "$HOME/bin/kind"
+          curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${a}/kubectl" -o "$HOME/bin/kubectl"
+          chmod +x "$HOME/bin/kind" "$HOME/bin/kubectl"
+          d=$(mktemp -d)
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${a}.tar.gz" -o "$d/helm.tgz"
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${a}.tar.gz.sha256sum" -o "$d/helm.sha"
+          echo "$(cut -d' ' -f1 "$d/helm.sha")  $d/helm.tgz" | sha256sum -c -
+          tar -xzf "$d/helm.tgz" -C "$d" "linux-${a}/helm"
+          install "$d/linux-${a}/helm" "$HOME/bin/helm"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - if: steps.changed.outputs.run == 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["ant.azrty.com"]
+      - id: ant-cache-ha
+        if: steps.changed.outputs.run == 'true'
+        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+        with:
+          build-cache: "true"
+          cache-name: kamailio
+          cache-write: ${{ github.event_name == 'push' }}
+          sccache: "false"
+          go: "false"
+          npm: "false"
+          cargo: "false"
+          pip: "false"
+      - name: Build kamailio
+        if: steps.changed.outputs.run == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: docker/kamailio
+          load: true
+          tags: hello.local/kamailio:ha
+          cache-from: ${{ steps.ant-cache-ha.outputs.cache-from }}
+          cache-to: ${{ steps.ant-cache-ha.outputs.cache-to }}
+      # Compile the test before the cluster exists, so the compiler does not
+      # compete with etcd for the runner's CPU while the cluster settles.
+      - name: Compile the failover test
+        if: steps.changed.outputs.run == 'true'
+        run: go test -c -o "$RUNNER_TEMP/kindha.test" ./test/kindha/
+      - name: Create the kind cluster
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          cat > kind.yaml <<'EOF'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+              # A throwaway cluster on a busy runner: etcd without fsync and
+              # with relaxed timeouts, or it times out requests under load.
+              kubeadmConfigPatches:
+                - |
+                  kind: ClusterConfiguration
+                  etcd:
+                    local:
+                      extraArgs:
+                        unsafe-no-fsync: "true"
+                        heartbeat-interval: "500"
+                        election-timeout: "5000"
+            - role: worker
+            - role: worker
+          EOF
+          # kind's kubelets need more inotify instances than the default 128.
+          docker run --rm --privileged alpine:3.22 sh -c 'sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576' || echo "could not raise the inotify limits"
+          nproc; free -m || true; uptime
+          kind create cluster --name kamailio-ha --config kind.yaml --wait 5m --retain || {
+            docker ps -a
+            kind export logs --name kamailio-ha ./kind-logs || true
+            tail -n 60 ./kind-logs/*/journal.log 2>/dev/null || true
+            exit 1
+          }
+          # kube-vip is a multi-arch index that `kind load` cannot import from
+          # the runner's single-platform copy; the nodes pull it from ghcr.io.
+          kind load docker-image --name kamailio-ha hello.local/kamailio:ha
+          kubectl get nodes -o wide
+      - name: Failover test
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          # The VIP: a free address of the kind network, far from the nodes'.
+          subnet=$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/' | head -1)
+          IFS=. read -r a b c _ <<< "${subnet%/*}"
+          if [ "${subnet#*/}" -le 16 ]; then vip="$a.$b.255.200"; else vip="$a.$b.$c.200"; fi
+          echo "kind network $subnet, VIP $vip"
+          export HELLO_KINDHA=1
+          export KINDHA_NODES=kamailio-ha-worker,kamailio-ha-worker2
+          export KINDHA_CONTROL=kamailio-ha-control-plane
+          export KINDHA_VIP="$vip"
+          export KINDHA_IMAGE=hello.local/kamailio:ha
+          export KINDHA_CONTEXT=kind-kamailio-ha
+          "$RUNNER_TEMP/kindha.test" -test.count=1 -test.timeout 40m -test.v
+      - name: Cluster state on failure
+        if: failure() && steps.changed.outputs.run == 'true'
+        run: |
+          kubectl -n hello get pods -o wide || true
+          kubectl -n hello get lease || true
+          kubectl -n hello get events --sort-by=.lastTimestamp | tail -40 || true
+          kubectl -n kube-system get pods -o wide || true
+          for p in $(kubectl -n hello get pods -o name); do
+            for c in wait-dispatcher kamailio vip; do
+              echo "=== $p $c"; kubectl -n hello logs "$p" -c "$c" --tail=100 || true
+            done
+          done
+      - name: Remove the cluster
+        if: always() && steps.changed.outputs.run == 'true'
+        run: kind delete cluster --name kamailio-ha || true
+
   publish:
     # Only what lands on main becomes an image; a pull request is tested and
     # nothing more.
     if: github.event_name == 'push'
     needs: [go, web]
-    runs-on: arc-azrtydxb
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     permissions:
       contents: read
@@ -739,22 +1055,20 @@ jobs:
               cache: kamailio,
             }
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The runner pod's BuildKit sidecar (linux/arm64, the kw nodes' arch),
-      # not a builder container on the runner's Docker daemon. Its config
-      # pulls base images through Kuvryn Ant's Docker Hub mirror. BuildKit
-      # pushes with the credentials of the docker login below.
-      - id: builder
-        uses: azrtydxb/.github/actions/setup-builder@a6fb8e66bd50b411a1f20b826567ef320aec469b # main
+      - uses: actions/checkout@v7
+      # A native arm64 runner (the kw nodes' arch), so the Dockerfiles build as
+      # they are: nothing is emulated. Buildx pushes with the credentials of
+      # the docker login below.
+      - uses: docker/setup-buildx-action@v4
       # Reads the build cache kind-upgrade writes on main (same cache names,
       # same arch); publish itself never writes it.
       - id: ant
-        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+        uses: azrtydxb/ant-setup-action@v1
         with:
           build-cache: "true"
           cache-name: ${{ matrix.image.cache }}
           arch-suffix: arm64
-          cache-write: "false"
+          cache-write: "true"
           sccache: "false"
           docker-login: "true"
           required: "true"
@@ -790,7 +1104,7 @@ jobs:
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
       - name: Build and push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.file }}
@@ -799,8 +1113,8 @@ jobs:
           # images; the other Dockerfiles declare no COMMIT arg.
           build-args: |
             COMMIT=${{ github.sha }}
-          builder: ${{ steps.builder.outputs.name }}
           platforms: linux/arm64
           push: true
           tags: ${{ steps.content.outputs.tags }}
           cache-from: ${{ steps.ant.outputs.cache-from }}
+          cache-to: ${{ steps.ant.outputs.cache-to }}
