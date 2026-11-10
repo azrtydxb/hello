@@ -289,6 +289,9 @@ type Config struct {
 	// Events is the call-event pipeline (stream, history, tickets); nil
 	// answers 503 on the event routes.
 	Events EventService
+	// Webhooks is the outbound webhook service (endpoints, deliveries,
+	// dead letters); nil answers 503 on the webhook routes.
+	Webhooks WebhookService
 	// Originate and OriginateLive carry click-to-call (spec integrations
 	// I-37): its requests and policy in PostgreSQL, its queue, live state
 	// and limit counters in Valkey; nil answers 503. OriginateLimits
