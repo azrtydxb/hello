@@ -34249,8 +34249,8 @@
           },
           "routeKind": {
             "type": "string",
-            "enum": ["inbox"],
-            "description": "Where a new conversation goes; inbox is the pool every operator sees."
+            "enum": ["inbox", "queue", "user", "extension", "ring_group"],
+            "description": "Where a new conversation goes: inbox is the pool every operator sees. Change it with the number's routing."
           },
           "enabled": {
             "type": "boolean"

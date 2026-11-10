@@ -164,6 +164,7 @@ var NonFlowResources = map[string]string{
 // overlaps fails TestCatalogueDrift until it is classified.
 var NotDestinationEnums = map[string]string{
 	"/components/schemas/MessageSend/properties/targetKind":                                "who a text message is addressed to, not where a call goes",
+	"/components/schemas/MessagingAddress/properties/routeKind":                            "where a customer text conversation is placed in the messaging inbox, not where a call goes",
 	"/components/schemas/MessagingRouting/properties/routeKind":                            "where a customer text conversation is placed in the messaging inbox, not where a call goes",
 	"/components/schemas/MessagingAfterHours/properties/routeKind":                         "where a customer text conversation is placed in the messaging inbox, not where a call goes",
 	"/components/schemas/MessagingRoutingInput/properties/routeKind":                       "where a customer text conversation is placed in the messaging inbox, not where a call goes",
