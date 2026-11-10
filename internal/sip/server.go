@@ -53,14 +53,32 @@ type Config struct {
 	RecountInterval time.Duration
 	// MaxCallDuration ends a connected call with BYE to both legs (4h).
 	MaxCallDuration time.Duration
+	// SessionExpires is the RFC 4028 interval Hello requests on legs to
+	// phones and applies when a phone's call names none (30m); 0 turns
+	// session timers off. SessionMinSE is the smallest interval accepted
+	// from a peer (90s). MediaDeadAfter ends an anchored call with no RTP in
+	// either direction for this long, unless held (60s); 0 turns it off.
+	// Unset (zero) in a Config means off: only the daemon's environment
+	// supplies the defaults.
+	SessionExpires time.Duration
+	SessionMinSE   time.Duration
+	// SessionTimersTrunks is what a trunk whose session-timers setting is
+	// "default" does: true requests and keeps a session timer on its calls.
+	SessionTimersTrunks bool
+	MediaDeadAfter      time.Duration
+	// SessionRefreshTimeout bounds one session refresh transaction (8s).
+	SessionRefreshTimeout time.Duration
 	// Server paging (spec P-12): PageMaxDuration ends a page (120s),
 	// PageAnswerTimeout gives up when no member answers (10s), PageFanout
 	// caps the legs of one page (200) and PageConcurrent the pages a node
 	// runs at once (5).
 	PageMaxDuration   time.Duration
 	PageAnswerTimeout time.Duration
-	PageFanout        int
-	PageConcurrent    int
+	// OriginateRing is how long a click-to-call rings the user's phone
+	// before it fails agent_no_answer (default 30s).
+	OriginateRing  time.Duration
+	PageFanout     int
+	PageConcurrent int
 	// PageMulticastIface and PageMulticastTTL are the interface and TTL of
 	// the multicast a paging group with a channel sends (iface "" is the
 	// system's choice; TTL 1 when unset).
@@ -118,6 +136,9 @@ type Config struct {
 	HATakeoverPoll    time.Duration
 	HATakeoverJitter  time.Duration
 
+	// CallbackInterval is how often this node sweeps the queues' callback
+	// requests; zero means every 3 s.
+	CallbackInterval time.Duration
 	// PromptLanguage is the language of the spoken voicemail prompts ("en",
 	// "nl"; empty is English) and Timezone the IANA zone message times are
 	// spoken in (empty is UTC).
@@ -186,6 +207,9 @@ type Deps struct {
 	// Queues is the call queues' shared state (Valkey); nil disables call
 	// queues (a call to a queue is refused with 503).
 	Queues queue.Store
+	// Callbacks is the queue callback requests (PostgreSQL); nil turns the
+	// callback offer off.
+	Callbacks queue.CallbackStore
 	// Messages is the SIP MESSAGE queue (PostgreSQL); nil answers every
 	// MESSAGE 503.
 	Messages MessageQueue
@@ -201,6 +225,9 @@ type Deps struct {
 	// Park is the shared call-park store (Valkey); nil disables call park,
 	// retrieve and cross-node pickup. A parked party hears music on hold.
 	Park ParkState
+	// Originates is the queue of click-to-call requests (spec integrations
+	// I-37); nil disables click-to-call on this node.
+	Originates Originates
 	// Events receives call events (ringing, answered, ended, missed,
 	// recording ready) for the event stream; nil emits none.
 	Events EventSink
@@ -266,6 +293,10 @@ type Server struct {
 	// this node sent per dialog Call-ID, so replicated CSeqs continue past
 	// it; entries go with the dialog's binding.
 	haSent sync.Map
+	// cbHold is the lowest place of a due callback request, per queue id
+	// (map[int64]int64, replaced by each sweep): a waiting call that entered
+	// later does not take an agent ahead of it (queue_callback.go).
+	cbHold atomic.Value
 	// haGone holds the dialog Call-IDs of calls this node yielded to a
 	// taker (the value is the taker): their in-dialog requests get 503 so
 	// the edge retries them on a survivor.
@@ -501,6 +532,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.subExpireLoop(rctx) })
 	s.bg.Go(func() { s.mwiPollLoop(rctx) })
 	s.bg.Go(func() { s.queueLoop(rctx) })
+	s.bg.Go(func() { s.callbackLoop(rctx) })
 	if s.deps.MailboxEvents != nil {
 		s.bg.Go(func() { s.deps.MailboxEvents.Watch(rctx, s.mailboxChanged) })
 	}
@@ -509,6 +541,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	}
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })
+	}
+	if s.deps.Originates != nil {
+		s.bg.Go(func() { s.originateLoop(rctx) })
 	}
 	if s.deps.Messages != nil {
 		s.bg.Go(func() { s.messageLoop(rctx) })
@@ -756,13 +791,17 @@ func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 		s.authFailed(tx, req, ip, "unknown or disabled device", false)
 		return snapshot.Device{}, false
 	}
-	switch s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256) {
+	verdict, check := s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256)
+	switch verdict {
 	case OK:
 		return s.checkReplay(req, tx, creds.Username, creds.Nonce, creds.Cnonce, creds.Nc, dev)
 	case Stale:
 		s.challenge(tx, req, true)
 	default:
-		s.authFailed(tx, req, ip, "bad credentials", true)
+		// Never log the response, HA1, nonce or cnonce.
+		s.authFailed(tx, req, ip, "bad credentials", true,
+			"check", check, "digest_uri", creds.URI, "request_uri", req.Recipient.String(),
+			"realm", creds.Realm, "algorithm", creds.Algorithm, "qop", creds.QOP, "username", creds.Username)
 	}
 	return snapshot.Device{}, false
 }
@@ -810,12 +849,13 @@ func (s *Server) challenge(tx sip.ServerTransaction, req *sip.Request, stale boo
 }
 
 // authFailed counts a failure for ip and answers 401 (rechallenge) or 403.
+// attrs are extra key/value pairs for the log line; they must not hold secrets.
 //
 // The 401/403 decision uses the count after this failure, so concurrent bad
 // attempts that all passed the precheck cannot all be rechallenged: within
 // one window at most AuthFailLimit failed attempts from an IP get a 401,
 // every later one 403.
-func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why string, rechallenge bool) {
+func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why string, rechallenge bool, attrs ...any) {
 	ctx, cancel := s.stateCtx()
 	n, err := s.deps.Throttle.RecordFailure(ctx, ip)
 	cancel()
@@ -824,7 +864,8 @@ func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why 
 		s.unavailable(tx, req)
 		return
 	}
-	s.log.Info("SIP authentication failed", "method", req.Method.String(), "source", s.clientSource(req), "reason", why)
+	attrs = append([]any{"method", req.Method.String(), "source", s.clientSource(req), "reason", why}, attrs...)
+	s.log.Info("SIP authentication failed", attrs...)
 	if rechallenge && n <= int64(s.cfg.AuthFailLimit) {
 		s.challenge(tx, req, false)
 		return
@@ -899,10 +940,15 @@ func (s *Server) recountRegistrations(ctx context.Context) {
 		return
 	}
 	n := 0
+	byTransport := map[string]int{"udp": 0, "tcp": 0, "tls": 0}
 	for _, b := range bs {
 		if b.ReceivedNode == s.cfg.NodeID {
 			n++
+			byTransport[normTransport(b.Transport)]++
 		}
+	}
+	for t, c := range byTransport {
+		s.m.RegistrationsByTransport.WithLabelValues(t).Set(float64(c))
 	}
 	s.m.Registrations.Set(float64(n))
 	s.registrations.Store(int64(n))

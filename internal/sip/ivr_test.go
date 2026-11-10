@@ -33,6 +33,25 @@ func ext(n string) snapshot.IVRDest { return snapshot.IVRDest{Kind: snapshot.IVR
 // audio given) and bad, and voicemail wiring.
 func ivrPBX(t *testing.T, greetSeconds int, menus ...snapshot.IVRMenu) (*testPBX, *fakeObjects) {
 	t.Helper()
+	return ivrPBXWith(t, greetSeconds, nil, menus...)
+}
+
+// ivrPBXWith is ivrPBX with extra snapshot setup, applied before the server
+// serves (changing a live snapshot races the INVITE handlers reading it).
+// ivrPBXWith is ivrPBX with extra snapshot setup, applied before the server
+// serves (changing a live snapshot races the INVITE handlers reading it).
+func ivrPBXWith(t *testing.T, greetSeconds int, extra func(*snapshot.Snapshot), menus ...snapshot.IVRMenu) (*testPBX, *fakeObjects) {
+	return ivrPBXFull(t, greetSeconds, extra, nil, menus...)
+}
+
+// ivrPBXOpts is ivrPBX with more PBX options (an event sink).
+func ivrPBXOpts(t *testing.T, greetSeconds int, opts []pbxOpt, menus ...snapshot.IVRMenu) (*testPBX, *fakeObjects) {
+	return ivrPBXFull(t, greetSeconds, nil, opts, menus...)
+}
+
+// ivrPBXFull is ivrPBXWith and ivrPBXOpts together.
+func ivrPBXFull(t *testing.T, greetSeconds int, extra func(*snapshot.Snapshot), opts []pbxOpt, menus ...snapshot.IVRMenu) (*testPBX, *fakeObjects) {
+	t.Helper()
 	objs := &fakeObjects{}
 	_ = objs.Put(context.Background(), "ann/greet.wav", media.EncodeWAV(make([]byte, 16000*greetSeconds), 8000))
 	_ = objs.Put(context.Background(), "ann/bad.wav", media.EncodeWAV(make([]byte, 3200), 8000))
@@ -40,9 +59,12 @@ func ivrPBX(t *testing.T, greetSeconds int, menus ...snapshot.IVRMenu) (*testPBX
 		s.WithAnnouncements(map[string]string{"greet": "ann/greet.wav", "bad": "ann/bad.wav", "late": "ann/bad.wav"})
 		s.WithIVRMenus(menus)
 		s.WithFeatureCodes([]snapshot.FeatureCode{{Code: "*88", Action: ActionIVR, Argument: menus[0].Name}})
+		if extra != nil {
+			extra(s)
+		}
 	}
-	pbx := startPBX(t, threeDevices(), shortRing(2*time.Second), withMedia(false),
-		withFeatures(feats), withVoicemail(newVMStore(), objs))
+	pbx := startPBX(t, threeDevices(), append([]pbxOpt{shortRing(2 * time.Second), withMedia(false),
+		withFeatures(feats), withVoicemail(newVMStore(), objs)}, opts...)...)
 	return pbx, objs
 }
 
@@ -314,10 +336,10 @@ func TestIVRFeatureCode(t *testing.T) {
 // TestIVRRingGroupFailure: a ring group whose members do not answer falls
 // to the IVR menu named as its failure destination.
 func TestIVRRingGroupFailure(t *testing.T) {
-	pbx, _ := ivrPBX(t, 1, ivrMenu("main", "", map[string]snapshot.IVRDest{"1": ext("300")}))
-	cur := pbx.snaps.p.Load()
-	cur.WithRingGroups([]snapshot.RingGroup{{ID: 1, Name: "700", Strategy: "ring-all", RingTimeout: 1, MemberDelay: 1,
-		FailureKind: "ivr", FailureTarget: "main"}}, [][]snapshot.RingGroupMember{{{ExtensionID: 9, Extension: "200", Position: 1}}})
+	pbx, _ := ivrPBXWith(t, 1, func(s *snapshot.Snapshot) {
+		s.WithRingGroups([]snapshot.RingGroup{{ID: 1, Name: "700", Strategy: "ring-all", RingTimeout: 1, MemberDelay: 1,
+			FailureKind: "ivr", FailureTarget: "main"}}, [][]snapshot.RingGroupMember{{{ExtensionID: 9, Extension: "200", Position: 1}}})
+	}, ivrMenu("main", "", map[string]snapshot.IVRDest{"1": ext("300")}))
 	a, b, c := registerABC(t, pbx)
 	b.setCallee(ringForever())
 	c.setCallee(answerAfter(nil))

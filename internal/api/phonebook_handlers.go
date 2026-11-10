@@ -5,13 +5,18 @@ package api
 // store never returns one to an administrator.
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/routing"
@@ -42,6 +47,7 @@ type PhonebookStore interface {
 	SetPhoneGroupBooks(ctx context.Context, actor string, id int64, bookIDs []int64) (phonebook.Group, error)
 	SetPhoneGroupMulticast(ctx context.Context, actor string, id int64, in []phonebook.MulticastInput, opts *phonebook.PagingOptions) (phonebook.Group, error)
 	SetPhoneGroupPTT(ctx context.Context, actor string, id int64, in phonebook.PTT) (phonebook.Group, error)
+	SetPhoneGroupLDAP(ctx context.Context, actor string, id int64, enabled bool) (phonebook.Group, error)
 }
 
 // Page sizes of the address-book lists.
@@ -342,6 +348,63 @@ func csvUpload(w http.ResponseWriter, r *http.Request) (io.Reader, bool) {
 	}
 }
 
+// phonebookImportJSON is the JSON form of the import: one object per row
+// with the CSV columns, which importSource turns into the CSV text that
+// phonebook.ParseCSV checks, so both forms share every rule. A row's number
+// in the result is its position in rows plus one (the header is line 1).
+type phonebookImportJSON struct {
+	Rows []map[string]string `json:"rows"`
+}
+
+// importSource is the CSV of an import: the uploaded file of a multipart
+// body (the console) or the rows of a JSON body (agents) rendered as CSV.
+// It answers 400 itself and reports false.
+func importSource(w http.ResponseWriter, r *http.Request) (io.Reader, bool) {
+	return rowsSource(w, r, phonebook.CSVColumns)
+}
+
+// rowsSource is importSource for any CSV with the given columns: a JSON body
+// of rows keyed by those columns, or the multipart upload.
+func rowsSource(w http.ResponseWriter, r *http.Request, columns []string) (io.Reader, bool) {
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		return csvUpload(w, r)
+	}
+	var in phonebookImportJSON
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, phonebook.MaxCSVBytes+64<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			badRequest(w, "the rows are larger than 2 MiB")
+		} else {
+			badRequest(w, "invalid JSON body: "+jsonProblem(err))
+		}
+		return nil, false
+	}
+	if len(in.Rows) == 0 {
+		badRequest(w, "rows has no rows")
+		return nil, false
+	}
+	var buf bytes.Buffer
+	cw := csv.NewWriter(&buf)
+	_ = cw.Write(columns)
+	for _, row := range in.Rows {
+		for k := range row {
+			if !slices.Contains(columns, k) {
+				badRequest(w, "unknown column "+strconv.Quote(truncateRunes(k, 30))+"; the columns are "+strings.Join(columns, ", "))
+				return nil, false
+			}
+		}
+		rec := make([]string, len(columns))
+		for i, c := range columns {
+			rec[i] = row[c]
+		}
+		_ = cw.Write(rec)
+	}
+	cw.Flush()
+	return &buf, true
+}
+
 func (s *server) importPhonebook(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok || s.booksDisabled(w) {
@@ -373,7 +436,7 @@ func (s *server) importPhonebook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "conflict", "the extensions book is computed from the extensions and cannot be imported into")
 		return
 	}
-	file, ok := csvUpload(w, r)
+	file, ok := importSource(w, r)
 	if !ok {
 		return
 	}

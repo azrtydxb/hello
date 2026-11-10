@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 import { errorMessage, type Cdr, type CdrPage } from "../api";
 import {
   cdrExportUrl,
+  codecSummary,
   getCdrCounts,
   listCdrPage,
   type CdrCounts,
@@ -28,12 +29,7 @@ export const PAGE_SIZE = 50;
 
 /** The tabs of Call history, also its ?tab= values. */
 export type HistoryTab =
-  | "all"
-  | "failed"
-  | "blocked"
-  | "inbound"
-  | "outbound"
-  | "internal";
+  "all" | "failed" | "blocked" | "inbound" | "outbound" | "internal";
 
 const TAB_IDS: readonly HistoryTab[] = [
   "all",
@@ -183,6 +179,12 @@ export function History() {
       label: "Trunk",
       mono: true,
       render: (c) => c.trunk || "—",
+    },
+    {
+      key: "codec",
+      label: "Codec",
+      mono: true,
+      render: (c) => codecSummary(c),
     },
     {
       key: "status",

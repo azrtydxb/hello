@@ -155,6 +155,30 @@ describe("CallDetail", () => {
     expect(await screen.findByText("not measured")).toBeVisible();
   });
 
+  it("shows the codec of each leg, or a dash when none was recorded", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/90": () =>
+        json({
+          ...BASE,
+          id: 90,
+          finalStatus: 200,
+          callerCodec: "opus/48000",
+          calleeCodec: "PCMU/8000",
+          trace: [],
+        }),
+      "GET /api/v1/cdrs/91": () =>
+        json({ ...BASE, id: 91, finalStatus: 200, trace: [] }),
+    });
+    const first = renderApp("/history/90");
+    expect(await screen.findByText("opus/48000")).toBeVisible();
+    expect(screen.getByText("PCMU/8000")).toBeVisible();
+    first.unmount();
+    renderApp("/history/91");
+    const label = await screen.findByText("Caller codec");
+    expect(label.nextElementSibling).toHaveTextContent("—");
+  });
+
   it("explains why a call could not load", async () => {
     mockApi({
       ...ME,

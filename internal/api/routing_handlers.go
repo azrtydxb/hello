@@ -101,6 +101,7 @@ type trunkBody struct {
 	AllowedCountryCodes *[]string `json:"allowedCountryCodes"`
 	UnknownCallerAction *string   `json:"unknownCallerAction"`
 	RejectCode          *int      `json:"rejectCode"`
+	SessionTimers       *string   `json:"sessionTimers"`
 }
 
 // dialingBody is an internalDialing request field (trunk plan contract 5).
@@ -160,6 +161,7 @@ func (b trunkBody) applyTo(in *store.TrunkInput) {
 	if b.AllowedCountryCodes != nil {
 		in.CallerPolicy.AllowedCountryCodes = routing.NormalizeCountryCodes(*b.AllowedCountryCodes)
 	}
+	setIf(&in.SessionTimers, b.SessionTimers)
 	if b.Codecs != nil {
 		// Canonical spelling; validateTrunk refuses what does not normalise.
 		if canon, why := routing.NormalizeCodecs(*b.Codecs); why == "" {
@@ -207,7 +209,8 @@ func (s *server) createTrunk(w http.ResponseWriter, r *http.Request) {
 	in := store.TrunkInput{RegisterExpires: 3600, OptionsInterval: 30, Enabled: true, SourceCIDRs: []string{},
 		InternalDialing: store.Dialing{Mode: "off", Patterns: []string{}},
 		Codecs:          slices.Clone(routing.DefaultTrunkCodecs),
-		CallerPolicy:    routing.CallerPolicy{UnknownCallerAction: routing.UnknownBlock, RejectCode: routing.RejectDecline}}
+		CallerPolicy:    routing.CallerPolicy{UnknownCallerAction: routing.UnknownBlock, RejectCode: routing.RejectDecline},
+		SessionTimers:   routing.SessionTimersDefault}
 	b.applyTo(&in)
 	if b.InternalDialing != nil {
 		d, f := dialingPolicy(b.InternalDialing)

@@ -388,7 +388,7 @@ func (s *server) importBlocklist(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "dry_run must be true or false")
 		return
 	}
-	file, ok := csvUpload(w, r)
+	file, ok := rowsSource(w, r, blocklistCSVColumns)
 	if !ok {
 		return
 	}

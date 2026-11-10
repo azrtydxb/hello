@@ -140,4 +140,76 @@ describe("Queues", () => {
     ).toBeVisible();
     expect(calls.some((c) => c.method === "POST")).toBe(false);
   });
+
+  it("saves the callback settings and the prompt language", async () => {
+    const calls = setup({
+      "GET /api/v1/queues": () => json({ items: [] }),
+      "POST /api/v1/queues": () => json(QUEUE, 201),
+    });
+    renderApp("/queues");
+    const [create] = await screen.findAllByRole("button", {
+      name: "New queue",
+    });
+    await waitFor(() => expect(create).toBeEnabled());
+    fireEvent.click(create!);
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "sales" },
+    });
+    fireEvent.click(
+      screen.getByLabelText("Offer a callback to callers who would wait long"),
+    );
+    fireEvent.change(screen.getByLabelText("Offer after (s)"), {
+      target: { value: "45" },
+    });
+    fireEvent.change(screen.getByLabelText("Callback key"), {
+      target: { value: "5" },
+    });
+    fireEvent.change(screen.getByLabelText("Prompt language"), {
+      target: { value: "nl" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create queue" }));
+    expect(await screen.findByText("Queue sales created.")).toBeVisible();
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
+      callbackEnabled: true,
+      callbackOfferAfterSeconds: 45,
+      callbackDigit: "5",
+      promptLanguage: "nl",
+    });
+  });
+
+  it("refuses a callback key that is the voicemail key", async () => {
+    const calls = setup({ "GET /api/v1/queues": () => json({ items: [] }) });
+    renderApp("/queues");
+    const [create] = await screen.findAllByRole("button", {
+      name: "New queue",
+    });
+    await waitFor(() => expect(create).toBeEnabled());
+    fireEvent.click(create!);
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "sales" },
+    });
+    fireEvent.change(screen.getByLabelText("Voicemail key"), {
+      target: { value: "2" },
+    });
+    fireEvent.click(
+      screen.getByLabelText("Offer a callback to callers who would wait long"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create queue" }));
+    expect(
+      await screen.findByText("Must differ from the voicemail key."),
+    ).toBeVisible();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("links a queue with callbacks on to its requests", async () => {
+    setup({
+      "GET /api/v1/queues": () =>
+        json({ items: [{ ...QUEUE, callbackEnabled: true }] }),
+    });
+    renderApp("/queues");
+    const link = await screen.findByRole("link", {
+      name: "Callbacks of queue sales",
+    });
+    expect(link).toHaveAttribute("href", "/queues/7/callbacks");
+  });
 });

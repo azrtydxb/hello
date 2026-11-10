@@ -88,6 +88,27 @@ type Trunk struct {
 	// and a country restriction (pbx-gaps S-8). The zero value screens
 	// nothing.
 	CallerPolicy CallerPolicy
+	// SessionTimers is the trunk's RFC 4028 setting: SessionTimersOn,
+	// SessionTimersOff, or SessionTimersDefault (also the empty value) to
+	// follow Hello's own setting.
+	SessionTimers string
+}
+
+// The values of a trunk's session-timer setting.
+const (
+	SessionTimersDefault = "default"
+	SessionTimersOn      = "on"
+	SessionTimersOff     = "off"
+)
+
+// ValidSessionTimers reports whether v is a session-timer setting; the empty
+// string counts as the default.
+func ValidSessionTimers(v string) bool {
+	switch v {
+	case "", SessionTimersDefault, SessionTimersOn, SessionTimersOff:
+		return true
+	}
+	return false
 }
 
 // OutboundRoute matches calls from extensions to external numbers.
@@ -120,7 +141,7 @@ type InboundRoute struct {
 	HeaderRegex     string
 	Schedule        *Schedule
 	CallerID        Transform
-	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition" | "ring_group" | "voicemail" | "announcement" | "paging"
+	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition" | "ring_group" | "voicemail" | "announcement" | "paging" | "directory"
 	Destination     string // empty for "internal" (the DID names the target); the menu name for "ivr", the room number for "conference", the queue name for "queue"
 	Enabled         bool
 	// MOHClassID is the music on hold class of calls the route delivers

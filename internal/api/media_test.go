@@ -8,6 +8,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/azrtydxb/hello/internal/media"
 )
@@ -118,6 +120,27 @@ func TestRecordingsListPaging(t *testing.T) {
 	}
 }
 
+// mustAudio GETs an audio route that reads the shared CI MinIO and wants 200.
+// The route answers 502 when the object store throttles the read (SlowDown),
+// which that service container does under load for longer than the client's
+// own retries; like retrySlowDown for the fixture's writes, the test asks
+// again for up to 90 s. Any other status, or a 502 that outlasts the
+// deadline, fails the test.
+func mustAudio(t *testing.T, c *client, path string) response {
+	t.Helper()
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		r := c.do("GET", path, nil)
+		if r.code == http.StatusOK {
+			return r
+		}
+		if r.code != http.StatusBadGateway || time.Now().After(deadline) {
+			t.Fatalf("GET %s = %d %s, want 200", path, r.code, r.body)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 // TestRecordingAudioAndDelete runs the presigned audio route and the delete
 // against a real MinIO (bucket hello-recordings). It fails if the audio
 // route hands out a URL for a recording that does not exist, or if deletion
@@ -134,7 +157,7 @@ func TestRecordingAudioAndDelete(t *testing.T) {
 	seedRecording(t, e, "corr-abc", object, 5100)
 
 	// The audio route streams the recording bucket's object, inline.
-	rec := c.must(http.StatusOK, "GET", "/api/v1/recordings/1/audio", nil)
+	rec := mustAudio(t, c, "/api/v1/recordings/1/audio")
 	if !bytes.Equal(rec.body, wav) || rec.header.Get("Content-Type") != "audio/wav" {
 		t.Fatalf("audio = %d bytes %q, want the recording", len(rec.body), rec.header.Get("Content-Type"))
 	}
@@ -142,7 +165,7 @@ func TestRecordingAudioAndDelete(t *testing.T) {
 		t.Fatalf("plain audio plays as a download: %q", cd)
 	}
 	// ?download=1 sends the same object as an attachment.
-	dl := c.must(http.StatusOK, "GET", "/api/v1/recordings/1/audio?download=1", nil)
+	dl := mustAudio(t, c, "/api/v1/recordings/1/audio?download=1")
 	if !strings.HasPrefix(dl.header.Get("Content-Disposition"), "attachment") || !bytes.Equal(dl.body, wav) {
 		t.Fatalf("download Content-Disposition %q, want an attachment", dl.header.Get("Content-Disposition"))
 	}
@@ -506,6 +529,13 @@ func (f *flakyObjects) PutAnnouncement(ctx context.Context, object string, r io.
 	return f.memObjects.PutAnnouncement(ctx, object, r, size)
 }
 
+func (f *flakyObjects) PutRingtone(ctx context.Context, object string, r io.Reader, size int64) error {
+	if f.broken.Load() {
+		return errObjectStoreDown
+	}
+	return f.memObjects.PutRingtone(ctx, object, r, size)
+}
+
 // TestObjectStoreFailures fails if a MinIO error on an upload (announcement
 // create and replace, voicemail greeting) or a playback (voicemail message,
 // recording, announcement) answers anything but 502 upstream, or if a
@@ -559,4 +589,39 @@ func TestObjectStoreFailures(t *testing.T) {
 	c.header.Del("Content-Type")
 	// An unknown extension has no box to change.
 	c.must(http.StatusNotFound, "PUT", "/api/v1/extensions/999999/voicemail", map[string]string{"email": ""})
+}
+
+// TestAnnouncementJSONUpload: the JSON form {name, audioBase64} stores the
+// same audio as the multipart form, with the same validation, so an agent
+// can upload and replace announcements. It fails if a duplicate name
+// overwrites, a non-WAV or oversize payload is stored, or the name changes.
+func TestAnnouncementJSONUpload(t *testing.T) {
+	objs := newMemObjects()
+	e := newPBXEnv(t, objs)
+	c := e.login()
+	c.header.Set("Content-Type", "application/json")
+	b64 := base64.StdEncoding.EncodeToString(wav)
+
+	created := c.must(http.StatusCreated, "POST", "/api/v1/announcements", map[string]any{"name": "welcome", "audioBase64": b64}).json(t)
+	if created["name"] != "welcome" || !objs.has("ann:ann/welcome.wav") {
+		t.Fatalf("created = %v, objects %v", created, objs.objs)
+	}
+	c.must(http.StatusConflict, "POST", "/api/v1/announcements", map[string]any{"name": "welcome", "audioBase64": b64})
+	c.must(http.StatusBadRequest, "POST", "/api/v1/announcements", map[string]any{"name": "bad name", "audioBase64": b64})
+	c.must(http.StatusBadRequest, "POST", "/api/v1/announcements", map[string]any{"name": "other", "audioBase64": base64.StdEncoding.EncodeToString([]byte("not audio"))})
+	c.must(http.StatusBadRequest, "POST", "/api/v1/announcements", map[string]any{"name": "other"})
+	c.must(http.StatusBadRequest, "POST", "/api/v1/announcements", map[string]any{"name": "other", "audioBase64": b64, "file": "x"})
+	if objs.has("ann:ann/other.wav") {
+		t.Fatal("a refused upload stored audio")
+	}
+
+	path := fmt.Sprintf("/api/v1/announcements/%v", created["id"])
+	longer := media.EncodeWAV(make([]byte, 3200), 8000)
+	c.must(http.StatusOK, "PUT", path, map[string]any{"audioBase64": base64.StdEncoding.EncodeToString(longer)})
+	if got := objs.objs["ann:ann/welcome.wav"]; len(got) <= len(wav) {
+		t.Fatalf("the audio was not replaced (%d bytes)", len(got))
+	}
+	c.must(http.StatusBadRequest, "PUT", path, map[string]any{"name": "renamed", "audioBase64": b64})
+	c.must(http.StatusBadRequest, "PUT", path, map[string]any{"audioBase64": base64.StdEncoding.EncodeToString([]byte("not audio"))})
+	c.must(http.StatusNotFound, "PUT", "/api/v1/announcements/999999", map[string]any{"audioBase64": b64})
 }

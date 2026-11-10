@@ -34,6 +34,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "My phone",
     items: [
       {
+        label: "Dial",
+        path: "/dial",
+        phase: 5,
+        icon: "phone-outgoing",
+        minRole: "user",
+      },
+      {
         label: "Address book",
         path: "/me/contacts",
         phase: 5,
@@ -125,6 +132,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         path: "/ring-groups",
         phase: 4,
         icon: "users-round",
+      },
+      {
+        label: "Ringing",
+        path: "/ringing",
+        phase: 5,
+        icon: "bell-electric",
       },
       { label: "Paging", path: "/paging", phase: 5, icon: "megaphone" },
       {
@@ -228,6 +241,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "admin",
       },
       {
+        label: "Webhooks",
+        path: "/integrations/webhooks",
+        phase: 5,
+        icon: "webhook",
+        minRole: "admin",
+      },
+      {
         label: "Events",
         path: "/integrations/events",
         phase: 5,
@@ -259,6 +279,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         path: "/settings/email",
         phase: 5,
         icon: "mail",
+        minRole: "admin",
+      },
+      {
+        label: "Backups",
+        path: "/settings/backups",
+        phase: 5,
+        icon: "archive",
         minRole: "admin",
       },
       { label: "AI access", path: "/ai", phase: 5, icon: "bot" },

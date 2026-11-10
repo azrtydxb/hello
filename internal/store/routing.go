@@ -59,8 +59,11 @@ type Trunk struct {
 	// CallerPolicy is the trunk's own screening of inbound calls (anonymous
 	// reject, country restriction); its fields are the trunk's own in JSON.
 	routing.CallerPolicy
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	// SessionTimers is the trunk's RFC 4028 setting: "default" (follow
+	// Hello's own), "on" or "off".
+	SessionTimers string    `json:"sessionTimers"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // TrunkInput is the writable part of a trunk, without its password.
@@ -81,6 +84,7 @@ type TrunkInput struct {
 	Codecs          []string
 	Messaging       bool
 	CallerPolicy    routing.CallerPolicy
+	SessionTimers   string
 }
 
 // Input returns t's writable fields.
@@ -94,6 +98,7 @@ func (t Trunk) Input() TrunkInput {
 		Codecs:          slices.Clone(t.Codecs),
 		Messaging:       t.Messaging,
 		CallerPolicy:    clonePolicy(t.CallerPolicy),
+		SessionTimers:   t.SessionTimers,
 	}
 }
 
@@ -123,7 +128,7 @@ type PasswordChange struct {
 
 const trunkCols = `id, name, mode, username, password_enc IS NOT NULL, realm, from_domain, register_expires,
 	options_interval, to_json(source_cidrs::text[]), max_calls, default_caller_id, enabled, to_json(internal_dialing),
-	to_json(codecs), messaging, reject_anonymous, to_json(allowed_country_codes), unknown_caller_action, reject_code,
+	to_json(codecs), messaging, reject_anonymous, to_json(allowed_country_codes), unknown_caller_action, reject_code, session_timers,
 	created_at, updated_at`
 
 func scanTrunk(r interface{ Scan(...any) error }) (Trunk, error) {
@@ -131,7 +136,7 @@ func scanTrunk(r interface{ Scan(...any) error }) (Trunk, error) {
 	var cidrs, dialing, codecs, countries []byte
 	if err := r.Scan(&t.ID, &t.Name, &t.Mode, &t.Username, &t.HasPassword, &t.Realm, &t.FromDomain, &t.RegisterExpires,
 		&t.OptionsInterval, &cidrs, &t.MaxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging,
-		&t.RejectAnonymous, &countries, &t.UnknownCallerAction, &t.RejectCode, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&t.RejectAnonymous, &countries, &t.UnknownCallerAction, &t.RejectCode, &t.SessionTimers, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return t, err
 	}
 	t.AllowedCountryCodes = []string{}
@@ -212,12 +217,12 @@ func listTrunks(ctx context.Context, q querier, where, lock string, args ...any)
 
 // ListTrunks returns every trunk ordered by id.
 func (s *Store) ListTrunks(ctx context.Context) ([]Trunk, error) {
-	return listTrunks(ctx, s.db, "", "")
+	return listTrunks(ctx, s.q(ctx), "", "")
 }
 
 // GetTrunk returns one trunk.
 func (s *Store) GetTrunk(ctx context.Context, id int64) (Trunk, error) {
-	return getTrunk(ctx, s.db, id, "")
+	return getTrunk(ctx, s.q(ctx), id, "")
 }
 
 func getTrunk(ctx context.Context, q querier, id int64, suffix string) (Trunk, error) {
@@ -252,6 +257,15 @@ func (s *Store) setPassword(ctx context.Context, tx *sql.Tx, id int64, password 
 	return err
 }
 
+// sessionTimersArg is the value stored for a trunk's session-timer setting:
+// an unset one is "default".
+func sessionTimersArg(v string) string {
+	if v == "" {
+		return routing.SessionTimersDefault
+	}
+	return v
+}
+
 func writeDestinations(ctx context.Context, tx *sql.Tx, id int64, ds []routing.Destination) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM trunk_destinations WHERE trunk_id = $1`, id); err != nil {
 		return err
@@ -273,13 +287,13 @@ func (s *Store) CreateTrunk(ctx context.Context, actor string, in TrunkInput, pa
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO trunks (name, mode, username, realm, from_domain, register_expires,
 				options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging,
-				reject_anonymous, allowed_country_codes, unknown_caller_action, reject_code)
+				reject_anonymous, allowed_country_codes, unknown_caller_action, reject_code, session_timers)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11, $12::jsonb, $13::jsonb, $14,
-				$15, $16::text[], $17, $18) RETURNING id`,
+				$15, $16::text[], $17, $18, $19) RETURNING id`,
 			in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires, in.OptionsInterval,
 			nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled, dialingArg(in.InternalDialing),
 			codecsArg(in.Codecs), in.Messaging, in.CallerPolicy.RejectAnonymous, nonNil(in.CallerPolicy.AllowedCountryCodes),
-			policyAction(in.CallerPolicy), policyCode(in.CallerPolicy)).Scan(&id); err != nil {
+			policyAction(in.CallerPolicy), policyCode(in.CallerPolicy), sessionTimersArg(in.SessionTimers)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := s.setPassword(ctx, tx, id, password); err != nil {
@@ -319,11 +333,11 @@ func (s *Store) UpdateTrunk(ctx context.Context, actor string, id int64, pw Pass
 				from_domain = $6, register_expires = $7, options_interval = $8, source_cidrs = $9::cidr[],
 				max_calls = $10, default_caller_id = $11, enabled = $12, internal_dialing = $13::jsonb,
 				codecs = $14::jsonb, messaging = $15, reject_anonymous = $16, allowed_country_codes = $17::text[],
-				unknown_caller_action = $18, reject_code = $19, updated_at = now()
+				unknown_caller_action = $18, reject_code = $19, session_timers = $20, updated_at = now()
 			WHERE id = $1`, id, in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires,
 			in.OptionsInterval, nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled,
 			dialingArg(in.InternalDialing), codecsArg(in.Codecs), in.Messaging, in.CallerPolicy.RejectAnonymous,
-			nonNil(in.CallerPolicy.AllowedCountryCodes), policyAction(in.CallerPolicy), policyCode(in.CallerPolicy)); err != nil {
+			nonNil(in.CallerPolicy.AllowedCountryCodes), policyAction(in.CallerPolicy), policyCode(in.CallerPolicy), sessionTimersArg(in.SessionTimers)); err != nil {
 			return id, err
 		}
 		if pw.Set {
@@ -498,12 +512,12 @@ func listOutbound(ctx context.Context, q querier, where, lock string, args ...an
 
 // ListOutboundRoutes returns every outbound route in position order.
 func (s *Store) ListOutboundRoutes(ctx context.Context) ([]OutboundRoute, error) {
-	return listOutbound(ctx, s.db, "", "")
+	return listOutbound(ctx, s.q(ctx), "", "")
 }
 
 // GetOutboundRoute returns one outbound route.
 func (s *Store) GetOutboundRoute(ctx context.Context, id int64) (OutboundRoute, error) {
-	return getOutbound(ctx, s.db, id, "")
+	return getOutbound(ctx, s.q(ctx), id, "")
 }
 
 func getOutbound(ctx context.Context, q querier, id int64, suffix string) (OutboundRoute, error) {
@@ -746,12 +760,12 @@ func listInbound(ctx context.Context, q querier, where, lock string, args ...any
 
 // ListInboundRoutes returns every inbound route in position order.
 func (s *Store) ListInboundRoutes(ctx context.Context) ([]InboundRoute, error) {
-	return listInbound(ctx, s.db, "", "")
+	return listInbound(ctx, s.q(ctx), "", "")
 }
 
 // GetInboundRoute returns one inbound route.
 func (s *Store) GetInboundRoute(ctx context.Context, id int64) (InboundRoute, error) {
-	return getInbound(ctx, s.db, id, "")
+	return getInbound(ctx, s.q(ctx), id, "")
 }
 
 func getInbound(ctx context.Context, q querier, id int64, suffix string) (InboundRoute, error) {
@@ -912,6 +926,9 @@ type RoutingSnapshot struct {
 // RoutingConfig loads the routing configuration in one read-only,
 // repeatable-read transaction, so it is consistent and writes nothing.
 func (s *Store) RoutingConfig(ctx context.Context) (RoutingSnapshot, error) {
+	if b := s.batchOf(ctx); b != nil {
+		return s.loadRouting(ctx, b.tx)
+	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return RoutingSnapshot{}, err
@@ -1082,7 +1099,7 @@ func routingTrunks(s *Store, trunks []Trunk, sealed map[int64][]byte, snap Routi
 			OptionsInterval: time.Duration(t.OptionsInterval) * time.Second,
 			MaxCalls:        t.MaxCalls, DefaultCallerID: t.DefaultCallerID, Enabled: t.Enabled, Destinations: t.Destinations,
 			InternalDialing: t.InternalDialing.dialing(),
-			Codecs:          slices.Clone(t.Codecs), Messaging: t.Messaging, CallerPolicy: clonePolicy(t.CallerPolicy),
+			Codecs:          slices.Clone(t.Codecs), Messaging: t.Messaging, CallerPolicy: clonePolicy(t.CallerPolicy), SessionTimers: t.SessionTimers,
 		}
 		if errs := routing.CompileDialing(rt.InternalDialing); len(errs) > 0 {
 			snap.Misconfigured[t.ID] = true
