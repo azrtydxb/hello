@@ -16,6 +16,8 @@ package kindha
 import (
 	"fmt"
 	"net"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -444,7 +446,19 @@ func runHA(t *testing.T, source string) {
 	t.Run("legacy node address flows", func(t *testing.T) {
 		l.flows(t, l.oldPhone, l.oldAddr, l.nodeIPs[l.nodes[0]], "node address")
 	})
-	t.Run("graceful loss of the active instance", func(t *testing.T) { l.failover(t, false) })
+	n := 1
+	if v := os.Getenv("KINDHA_STRESS"); v != "" {
+		n, _ = strconv.Atoi(v)
+	}
+	for i := 0; i < n; i++ {
+		t.Run(fmt.Sprintf("graceful loss of the active instance %d", i), func(t *testing.T) { l.failover(t, false) })
+		if t.Failed() {
+			return
+		}
+	}
+	if n > 1 {
+		return
+	}
 	t.Run("crash of the active instance", func(t *testing.T) { l.failover(t, true) })
 	t.Run("rolling restart", l.rolling)
 }

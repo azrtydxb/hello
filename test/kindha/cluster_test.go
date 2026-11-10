@@ -563,5 +563,9 @@ func (l *labEnv) diagnostics(t *testing.T) {
 		}
 		out, _ := tryRun("docker", "exec", n, "ip", "-4", "-o", "addr", "show", "dev", "eth0")
 		t.Logf("%s eth0: %s", n, out)
+		ct, _ := tryRun("docker", "exec", n, "sh", "-c", "grep -E '15060|5070' /proc/net/nf_conntrack; echo ---; iptables-save -t nat | grep -v -e KUBE-SVC -e KUBE-SEP -e KUBE-EXT")
+		t.Logf("%s conntrack and nat:\n%s", n, ct)
 	}
+	nb, _ := tryRun("sh", "-c", "ip neigh show; ip route get "+l.vip)
+	t.Logf("runner neighbours:\n%s", nb)
 }
