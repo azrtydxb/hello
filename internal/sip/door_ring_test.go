@@ -33,7 +33,9 @@ func newAudioSink(t *testing.T, p *phone) *audioSink {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	port := conn.LocalAddr().(*net.UDPAddr).Port
-	p.sdp = regexp.MustCompile(`m=audio \d+`).ReplaceAllString(p.sdp, "m=audio "+strconv.Itoa(port))
+	p.rewriteSDP(func(s string) string {
+		return regexp.MustCompile(`m=audio \d+`).ReplaceAllString(s, "m=audio "+strconv.Itoa(port))
+	})
 	s := &audioSink{conn: conn}
 	go func() {
 		buf := make([]byte, 2048)

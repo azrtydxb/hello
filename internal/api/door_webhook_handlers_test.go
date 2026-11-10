@@ -81,6 +81,11 @@ func (f *hookFake) UpdateDoorWebhook(_ context.Context, _ string, id int64, in s
 	if !ok {
 		return store.DoorWebhook{}, store.ErrNotFound
 	}
+	for other, o := range f.hooks {
+		if other != id && o.Name == in.Name {
+			return store.DoorWebhook{}, store.ErrConflict
+		}
+	}
 	h.Name, h.Action, h.RateLimit, h.Enabled = in.Name, in.Action, in.RateLimit, in.Enabled
 	return *h, nil
 }
@@ -220,6 +225,19 @@ func TestDoorWebhook(t *testing.T) {
 	})
 
 	t.Run("management answers", func(t *testing.T) {
+		// A rename onto another webhook's name is a conflict (the documented
+		// 409 of PUT /door/webhooks/{id}), and leaves the webhook as it was.
+		if r := acctCall(h, "carol", "POST", "/api/v1/door/webhooks", map[string]any{"name": "Side", "action": "ring_door"}); r.Code != http.StatusCreated {
+			t.Fatalf("create Side = %d %s", r.Code, r.Body)
+		}
+		gate := "/api/v1/door/webhooks/" + strconv.FormatInt(id, 10)
+		if r := acctCall(h, "carol", "PUT", gate, map[string]any{"name": "Side", "action": "ring_door", "rateLimit": 3}); r.Code != http.StatusConflict {
+			t.Errorf("PUT %s onto a taken name = %d %s, want 409", gate, r.Code, r.Body)
+		}
+		got := wantJSON(t, acctCall(h, "carol", "GET", gate, nil), http.StatusOK, "get after the refused rename")
+		if got["name"] != "Gate" {
+			t.Errorf("the refused rename changed the webhook: %v", got)
+		}
 		for _, c := range []struct {
 			method, path string
 			body         any
