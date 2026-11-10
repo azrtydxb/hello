@@ -20,7 +20,7 @@ voicemail greetings from text, [docs/voicemail.md](docs/voicemail.md) for the sp
 [docs/ai-agent.md](docs/ai-agent.md) for the in-product AI agent (assistant,
 findings and proposals). For the IVR / auto-attendant see
 [docs/ivr.md](docs/ivr.md), and for call queues [docs/queues.md](docs/queues.md). For time and date routing (schedules, holiday calendars, time conditions, the day/night toggle) see
-[docs/time-conditions.md](docs/time-conditions.md). For answering customers' text messages from the console see [docs/inbox.md](docs/inbox.md). For backups and restore see [docs/backup.md](docs/backup.md). For the call events that integrations read (live stream, history, scopes) see [docs/integrations.md](docs/integrations.md). To run Hello on Kubernetes (Helm chart, SIP
+[docs/time-conditions.md](docs/time-conditions.md). For a boss and assistant who share a line (ring modes, screening, the `*64` divert) see [docs/boss-secretary.md](docs/boss-secretary.md). For answering customers' text messages from the console see [docs/inbox.md](docs/inbox.md). For backups and restore see [docs/backup.md](docs/backup.md). For the call events that integrations read (live stream, history, scopes) see [docs/integrations.md](docs/integrations.md). To run Hello on Kubernetes (Helm chart, SIP
 networking, highly available state, rolling upgrades) see
 [docs/kubernetes.md](docs/kubernetes.md). For SIP over TLS and `sips:` see
 [docs/tls.md](docs/tls.md).
@@ -146,6 +146,7 @@ naming the key, if one is missing or malformed.
 | `HELLO_PROV_BOOK_REFRESH`                         | control | `15m`; how often phones with a refresh setting re-fetch their address book (at least `1m`)                                    |
 | `HELLO_PROV_PUSH_RATE`                            | sip     | `20`; check-sync pushes (resync, reboot) claimed per minute across the cluster                                                |
 | `HELLO_PROV_AUTO_RESYNC`                          | control | `false`; push a resync to a phone 30 s after a change to what its configuration renders from                                  |
+| `HELLO_PROV_RTCPXR`                               | control | `false`; provision Grandstream WP810/WP822/WP825 to publish RTCP-XR quality reports to the SIP server (docs/provisioning.md)  |
 | `HELLO_DIAL_INTL_PREFIX` / `_COUNTRY_CODE`        | control | `00` / unset; digits standing for `+`, and the country code a leading `0` belongs to (lookup keys)                            |
 | `HELLO_PROV_TIMEZONE` / `_NTP`                    | control | `UTC` / `pool.ntp.org`                                                                                                        |
 | `HELLO_VOICEMAIL_LANGUAGE`                        | both    | `en`; deployment language of the spoken voicemail prompts (`en`, `nl`); a box can set its own, docs/voicemail.md              |

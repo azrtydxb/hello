@@ -235,6 +235,19 @@ func validateTrunk(in *store.TrunkInput, hasPassword bool) fieldErrs {
 	if !callerIDRe.MatchString(in.DefaultCallerID) {
 		f.add("defaultCallerId", "must be empty or 2-20 digits with an optional leading +")
 	}
+	switch in.AnonymousPolicy {
+	case "", routing.AnonymousHonour, routing.AnonymousAlways:
+	default:
+		f.add("anonymousPolicy", `must be "honour" or "always"`)
+	}
+	switch in.IdentityHeader {
+	case "", routing.IdentityPAI, routing.IdentityPPI:
+	default:
+		f.add("identityHeader", `must be "pai" or "ppi"`)
+	}
+	if !callerIDRe.MatchString(in.AssertedIdentity) {
+		f.add("assertedIdentity", "must be empty or 2-20 digits with an optional leading +")
+	}
 	if len(in.SourceCIDRs) > 100 {
 		f.add("sourceCidrs", "at most 100 entries")
 	}

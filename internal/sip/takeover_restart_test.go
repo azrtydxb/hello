@@ -446,7 +446,13 @@ func TestReapCountsConnectedCallsOnly(t *testing.T) {
 			)
 			survivor.srv.takeoverPass(t.Context())
 			survivor.srv.takeoverPass(t.Context())
-			if z := survivor.metric(t, "hello_zombie_calls_total", nil); z != tc.want {
+			// The PBX's own takeover loop runs passes too (20ms poll), and a
+			// pass that finds the count claimed returns before it is added:
+			// wait for it, then check nothing counts it again.
+			zombies := func() float64 { return survivor.metric(t, "hello_zombie_calls_total", nil) }
+			eventually(t, "the zombies are counted", func() bool { return zombies() == tc.want })
+			time.Sleep(150 * time.Millisecond)
+			if z := zombies(); z != tc.want {
 				t.Fatalf("zombies = %v, want %v", z, tc.want)
 			}
 		})

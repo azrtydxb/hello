@@ -62,3 +62,43 @@ func TestAuthFailures(t *testing.T) {
 		t.Fatal("counter still present after ClearAuthFailures")
 	}
 }
+
+// TestSyslogLines fails if a phone's lines are not newest first, not capped
+// or left without a TTL, or if unknown sources are not indexed, bounded and
+// cleaned up with their lists.
+func TestSyslogLines(t *testing.T) {
+	s, ctx := store(t), context.Background()
+	for i := range SyslogPhoneCap + 3 {
+		l := SyslogLine{At: time.Unix(int64(i), 0).UTC(), Source: "10.0.0.7", Message: fmt.Sprint("line ", i)}
+		if err := s.AppendSyslogPhone(ctx, 5, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.SyslogPhoneLines(ctx, 5, 0)
+	if err != nil || len(got) != SyslogPhoneCap || got[0].Message != fmt.Sprint("line ", SyslogPhoneCap+2) {
+		t.Fatalf("lines = %d, %v", len(got), err)
+	}
+	if two, _ := s.SyslogPhoneLines(ctx, 5, 2); len(two) != 2 {
+		t.Fatalf("limit 2 returned %d", len(two))
+	}
+	ttl, err := s.c.Do(ctx, s.c.B().Pttl().Key(SyslogPhoneKey(5)).Build()).AsInt64()
+	if err != nil || ttl <= 0 || ttl > SyslogTTL.Milliseconds() {
+		t.Fatalf("ttl = %d, %v", ttl, err)
+	}
+	for i := range SyslogMaxUnknown + 5 {
+		ip := fmt.Sprintf("192.0.2.%d", i)
+		if err := s.AppendSyslogUnknown(ctx, SyslogLine{At: time.Unix(int64(i), 0).UTC(), Source: ip, Message: "x"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srcs, err := s.SyslogUnknownSources(ctx)
+	if err != nil || len(srcs) != SyslogMaxUnknown || srcs[0] != fmt.Sprintf("192.0.2.%d", SyslogMaxUnknown+4) {
+		t.Fatalf("sources = %d %v, %v", len(srcs), srcs[:1], err)
+	}
+	if old, _ := s.SyslogUnknownLines(ctx, "192.0.2.0", 0); len(old) != 0 {
+		t.Fatalf("an evicted source kept its lines: %v", old)
+	}
+	if kept, _ := s.SyslogUnknownLines(ctx, "192.0.2.204", 0); len(kept) != 1 {
+		t.Fatalf("newest source lines = %v", kept)
+	}
+}
