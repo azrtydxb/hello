@@ -36,8 +36,12 @@ type InboxAccess struct {
 
 // visible is the SQL condition for a conversation c the caller reaches; it
 // uses $1 (the user) and $2 (All).
+//
+// An unassigned conversation waiting in a text queue or ring group is also
+// reachable by the members of that queue or group (spec M-32).
 const visible = `($2::boolean OR c.assignee_user_id = $1 OR EXISTS (
-	SELECT 1 FROM conversation_messages vx WHERE vx.conversation_id = c.id AND vx.sender_user_id = $1 AND vx.kind = 'message'))`
+	SELECT 1 FROM conversation_messages vx WHERE vx.conversation_id = c.id AND vx.sender_user_id = $1 AND vx.kind = 'message')
+	OR (c.assignee_user_id IS NULL AND ` + poolMemberParam + `))`
 
 // Conversation is one customer on one of our numbers.
 type Conversation struct {
@@ -65,6 +69,8 @@ type Conversation struct {
 	FirstResponseAt *time.Time `json:"firstResponseAt"`
 	ResolvedAt      *time.Time `json:"resolvedAt"`
 	CreatedAt       time.Time  `json:"createdAt"`
+	QueueID         *int64     `json:"queueId"` // the text queue it is placed in; nil in the pool or with a person
+	QueueName       string     `json:"queueName"`
 }
 
 // ConvMessage is one line of a conversation.
@@ -93,9 +99,11 @@ const convSelect = `SELECT c.id, c.channel_id, ch.kind, ch.name, c.address_id, a
 	(SELECT count(*) FROM conversation_messages x WHERE x.conversation_id = c.id AND x.direction = 'in'
 		AND x.kind = 'message' AND x.id > coalesce(r.last_read_message_id, 0)),
 	EXISTS (SELECT 1 FROM sms_opt_outs o WHERE o.address_id = c.address_id AND o.peer_key = c.peer_key AND o.state = 'out'),
-	c.last_message_at, c.last_inbound_at, c.first_response_at, c.resolved_at, c.created_at
+	c.last_message_at, c.last_inbound_at, c.first_response_at, c.resolved_at, c.created_at,
+	c.queue_id, coalesce(qq.name, '')
 	FROM conversations c
 	JOIN msg_channels ch ON ch.id = c.channel_id
+	LEFT JOIN queues qq ON qq.id = c.queue_id
 	JOIN msg_addresses a ON a.id = c.address_id
 	LEFT JOIN users u ON u.id = c.assignee_user_id
 	LEFT JOIN conversation_messages m ON m.id = c.last_message_id
@@ -109,12 +117,16 @@ func scanConversation(r interface{ Scan(...any) error }) (Conversation, error) {
 		lastIn   sql.NullTime
 		first    sql.NullTime
 		resolved sql.NullTime
+		queueID  sql.NullInt64
 		tags     string
 	)
 	if err := r.Scan(&c.ID, &c.ChannelID, &c.ChannelKind, &c.ChannelName, &c.AddressID, &c.Address, &c.Peer, &c.PeerKind,
 		&c.PeerName, &c.PeerNameSource, &c.Status, &snoozed, &assignee, &c.AssigneeName, &c.Priority, &tags,
-		&c.Preview, &c.Unread, &c.OptedOut, &c.LastMessageAt, &lastIn, &first, &resolved, &c.CreatedAt); err != nil {
+		&c.Preview, &c.Unread, &c.OptedOut, &c.LastMessageAt, &lastIn, &first, &resolved, &c.CreatedAt, &queueID, &c.QueueName); err != nil {
 		return c, err
+	}
+	if queueID.Valid {
+		c.QueueID = &queueID.Int64
 	}
 	c.SnoozedUntil, c.LastInboundAt, c.FirstResponseAt, c.ResolvedAt = nullTime(snoozed), nullTime(lastIn), nullTime(first), nullTime(resolved)
 	if assignee.Valid {
@@ -163,7 +175,9 @@ type ConvFilter struct {
 	Status    string
 	Q         string
 	ChannelID int64
-	After     *ConvCursor
+	// QueueID limits the list to one text queue's conversations.
+	QueueID int64
+	After   *ConvCursor
 }
 
 // ListConversations returns a page of conversations, most recently active
@@ -190,6 +204,9 @@ func (s *Store) ListConversations(ctx context.Context, acc InboxAccess, f ConvFi
 	}
 	if f.ChannelID > 0 {
 		where = append(where, "c.channel_id = "+arg(f.ChannelID))
+	}
+	if f.QueueID > 0 {
+		where = append(where, "c.queue_id = "+arg(f.QueueID))
 	}
 	if q := strings.TrimSpace(f.Q); q != "" {
 		like, text := arg(escapeLike(q)), arg(q)
@@ -344,8 +361,10 @@ func emitConversationEvent(ctx context.Context, tx *sql.Tx, convID, msgID int64,
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO conversation_events (user_id, type, conversation_id, message_id)
-		SELECT u.id, $2, $1, $3::bigint FROM users u, (SELECT assignee_user_id AS a FROM conversations WHERE id = $1) c
-		WHERE u.enabled AND (u.id = c.a OR (c.a IS NULL AND u.role IN ('operator', 'admin')) OR u.id = ANY($4::bigint[]))`,
+		SELECT u.id, $2, $1, $3::bigint FROM users u,
+			(SELECT assignee_user_id AS a, queue_id, ring_group_id FROM conversations WHERE id = $1) c
+		WHERE u.enabled AND (u.id = c.a OR (c.a IS NULL AND (u.role IN ('operator', 'admin') OR `+poolMemberUser+`))
+			OR u.id = ANY($4::bigint[]))`,
 		convID, typ, msg, extra)
 	return err
 }

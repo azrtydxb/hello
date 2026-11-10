@@ -33,6 +33,7 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
+import { AgentAvailability } from "./inbox/AgentAvailability";
 import { Can } from "../role";
 import { usePolling } from "../usePolling";
 import { peerLabel, smsSegments } from "./inbox/sms";
@@ -715,6 +716,7 @@ function InboxView({ api, supervisor }: ViewProps) {
                   {c.assigneeUserId === null && c.status !== "resolved" && (
                     <Badge tone="warn">Unassigned</Badge>
                   )}
+                  {c.queueName && <Badge tone="neutral">{c.queueName}</Badge>}
                   {c.optedOut && <Badge tone="bad">Opted out</Badge>}
                 </span>
               </button>
@@ -757,6 +759,13 @@ function Shell({ api, supervisor }: ViewProps) {
             ? "Every customer text conversation. Reading one that is not yours is recorded in the audit log."
             : "The customer text conversations assigned to you, and those you answered."
         }
+        actions={
+          supervisor ? (
+            <LinkButton to="/inbox/queues" variant="secondary">
+              Text queues
+            </LinkButton>
+          ) : undefined
+        }
       />
       {status.status === "ready" && !status.data.enabled ? (
         <EmptyState
@@ -770,7 +779,10 @@ function Shell({ api, supervisor }: ViewProps) {
           }
         />
       ) : (
-        <InboxView api={api} supervisor={supervisor} />
+        <>
+          <AgentAvailability />
+          <InboxView api={api} supervisor={supervisor} />
+        </>
       )}
     </section>
   );

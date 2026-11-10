@@ -23,6 +23,7 @@ import (
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/router"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/oauth"
 	"github.com/azrtydxb/hello/internal/originate"
@@ -148,6 +149,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	go runMailer(ctx, envSMTP(cfg), st, objs, log)
 	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, messaging.NewMetrics(metrics.Registry), log)
 	go runInboxNotifier(ctx, envSMTP(cfg), st, log)
+	go runMessageRouter(ctx, st, routerLive{vk}, router.NewMetrics(metrics.Registry), log)
 
 	// Scheduled and manual backups, and restore (spec pbx-gaps S-2 to S-4).
 	// Every replica runs the scheduler; the run itself is taken under an

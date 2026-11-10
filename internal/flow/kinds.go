@@ -163,9 +163,16 @@ var NonFlowResources = map[string]string{
 // each with why. The key is the schema path of the enum. Anything else that
 // overlaps fails TestCatalogueDrift until it is classified.
 var NotDestinationEnums = map[string]string{
-	"/components/schemas/MessageSend/properties/targetKind": "who a text message is addressed to, not where a call goes",
+	"/components/schemas/MessageSend/properties/targetKind":                                "who a text message is addressed to, not where a call goes",
+	"/components/schemas/MessagingRouting/properties/routeKind":                            "where a customer text conversation is placed in the messaging inbox, not where a call goes",
+	"/components/schemas/MessagingAfterHours/properties/routeKind":                         "where a customer text conversation is placed in the messaging inbox, not where a call goes",
+	"/components/schemas/MessagingRoutingInput/properties/routeKind":                       "where a customer text conversation is placed in the messaging inbox, not where a call goes",
+	"/components/schemas/MessagingRoutingInput/properties/afterHours/properties/routeKind": "where a customer text conversation is placed in the messaging inbox, not where a call goes",
 }
 
 // NotDestinationConstraints is NotDestinationEnums for database CHECK
 // constraints, keyed by constraint name.
-var NotDestinationConstraints = map[string]string{}
+var NotDestinationConstraints = map[string]string{
+	"msg_addresses_route_kind_check":             "where a customer text conversation is placed in the messaging inbox, not where a call goes",
+	"msg_addresses_after_hours_route_kind_check": "where a customer text conversation is placed in the messaging inbox, not where a call goes",
+}

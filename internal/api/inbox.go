@@ -63,6 +63,11 @@ type InboxStore interface {
 	ListInboxEvents(ctx context.Context, userID, after int64, limit int) ([]store.InboxEvent, error)
 	LatestInboxEventID(ctx context.Context, userID int64) (int64, error)
 	TouchInboxPresence(ctx context.Context, userID int64) error
+
+	GetMsgRouting(ctx context.Context, addressID int64) (store.MsgRouting, error)
+	PutMsgRouting(ctx context.Context, actor string, addressID int64, in store.MsgRoutingInput) (store.MsgRouting, error)
+	GetTextQueueStatus(ctx context.Context) ([]store.TextQueueStatus, error)
+	UserTextAgent(ctx context.Context, userID int64) ([]store.TextAgentExt, error)
 }
 
 var _ InboxStore = (*store.Store)(nil)
@@ -761,6 +766,10 @@ func (s *server) listInboxConversationsCommon(w http.ResponseWriter, r *http.Req
 			return
 		}
 		f.ChannelID = n
+	}
+	var okQ bool
+	if f.QueueID, okQ = queueIDParam(w, q.Get("queueId")); !okQ {
+		return
 	}
 	if v := q.Get("cursor"); v != "" {
 		c, ok := store.ParseConvCursor(v)

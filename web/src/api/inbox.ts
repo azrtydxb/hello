@@ -27,6 +27,9 @@ export interface Conversation {
   snoozedUntil: string | null;
   assigneeUserId: number | null;
   assigneeName: string;
+  /** The text queue the conversation is placed in; null in the pool. */
+  queueId?: number | null;
+  queueName?: string;
   priority: "low" | "normal" | "high";
   tags: string[];
   preview: string;
@@ -63,6 +66,8 @@ export interface InboxMessage {
 
 export interface ConversationQuery {
   view?: "all" | "mine" | "unassigned";
+  /** Only the conversations placed in this text queue. */
+  queueId?: number;
   status?: StatusFilter;
   q?: string;
   cursor?: string;
@@ -200,7 +205,7 @@ export interface MessagingAddress {
   channelName: string;
   address: string;
   label: string;
-  routeKind: "inbox";
+  routeKind: "inbox" | "queue" | "user" | "extension" | "ring_group";
   enabled: boolean;
   optOutKeywords: string[];
   helpText: string;
