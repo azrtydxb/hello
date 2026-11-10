@@ -169,8 +169,8 @@ type Config struct {
 	Conferences map[string]string
 	// Named is the set of "<kind>:<target>" keys an inbound route of the
 	// unified kinds (NamedKinds) may name: "ring_group:<name>",
-	// "voicemail:<extension number>", "announcement:<name>" and
-	// "paging:<code>".
+	// "voicemail:<extension number>", "voicemail_group:<number>",
+	// "announcement:<name>" and "paging:<code>".
 	Named map[string]bool
 	// ResolvedIPs maps a trunk ID to the IPs its destination hostnames
 	// resolved to, for source validation. hello-sip fills it off the call
