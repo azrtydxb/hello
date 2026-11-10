@@ -1943,6 +1943,40 @@ Implementation notes (template route, no migration):
     WP810/822/825, WP820 and WP856 templates), which the lines of item 21 write.
     Speed dials replacing BLF on WP stay unbuilt as a feature.
 
+### Item 18: vCard phonebook slot (S-31), partial
+
+- Already on main: the model caps (WP822 500, WP8x6 1000) in `FormatForModel`,
+  truncation of the tail of the delivery order, and P330 = 3, P331 without a
+  scheme, P332 clamped to 5 to 720 (`BookRefreshFor`), P333 = 1.
+- Built: `pb/0.vcf` (vCard 3.0, RFC 2426, folded at 75 octets) for the WP816,
+  WP826 and WP836; `GET /api/v1/phones/{id}/directory` (delivered, capacity,
+  dropped) and the warning on the phone page.
+- Source for the vCard slot: the WP816/WP826/WP836 Administration Guide
+  (documentation.grandstream.com/knowledge-base/wp8x6-administration-guide/,
+  Phonebook: "Download vCard Phonebook", "Upload vCard Phonebook"). It names a
+  web page upload only, so the slot is unused by the template (spec: "unused by
+  default"). The vCard version the phone exports is not documented; 3.0 is the
+  widest-read form and is **verify** on a phone.
+- The two settings the Administration Guide names are in Grandstream's own
+  configuration templates (config-template-10212026.zip, 2026-11-09 review), so
+  they are written: `P333` "Remove Manually-edited Entries on Download" (0 No, 1
+  Yes, default 1) is in `wp8x6_config_1.0.3.39` and
+  `wp810_822_825_config_1.0.11.83` (confirmed; already written as 1);
+  `P8462` "Import Group Method" (0 Replace, 1 Append, default 0) is in
+  `wp8x6_config_1.0.3.39` only (newly found, written 0). `wp820_config_1.0.7.90`
+  and `wp856_config_1.0.3.16` have neither; they have `P1435` "Clear The Old
+  List" (0 No, 1 Clear all, 2 Keep Local Contacts, default 0) and `P1436`
+  "Replace Duplicate Items" (WP820 default 0, WP856 default 1: 0 No, 1 by name,
+  2 by number) in "Download Contacts". `P1435 = 1` is written for those two, the
+  same effect as `P333 = 1`, and `P333` is no longer written to a WP820, which
+  has no such key (corrected). `P1436` stays at its default.
+- Corrected: `P332` on the WP820 and WP856 takes only 0, 5, 30, 60, 120, 240,
+  360, 480 or 720 (both templates), not any value from 5 to 720; the WP820 now
+  gets the WP856's rounding (`BookRefreshForPhone`). `P330` is 3 for HTTPS in
+  every WP template, though the numbers 1 and 2 differ (WP8x6 1 HTTP, 2 TFTP;
+  WP856 1 TFTP, 2 HTTP). The firmware gate "1.0.3.24 and later" is not checked:
+  the page simply does not exist on older firmware.
+
 ## Item 26: PRACK/100rel and anonymous outbound (2026-11-09)
 
 - 100rel is negotiated hop by hop, not relayed: Hello offers `Supported: 100rel`

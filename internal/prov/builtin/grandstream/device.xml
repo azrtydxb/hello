@@ -299,12 +299,19 @@
 {{- /* Check-sync (spec S-5): P95030 = 0 so a plain check-sync re-provisions without a reboot (WP8x6 fw 1.0.3.20 and later) [R8x6 section 1]; P4428 = 0 authenticates the NOTIFY (ACC-16: the WP8x6 and WP856 templates say "Enable SIP NOTIFY Authentication. 0 - Yes, 1 - No" and the WP8xx one "Disable SIP NOTIFY Authentication. 0 - No, 1 - Yes"; 0 challenges in all three), which hello-sip answers from the device's HA1. */}}
     <P95030>0</P95030>
     <P4428>0</P4428>
+{{- /* Phonebook download (phone-feature-parity S-31), keys per Grandstream's own templates (2026-11-09 review). P330 = Enable Phonebook XML Download, 3 = HTTPS in every WP template (the WP856 numbers 1 TFTP, 2 HTTP, 3 HTTPS and the WP8x6 1 HTTP, 2 TFTP, 3 HTTPS); P331 = server path (host/path, no scheme); P332 = download interval in minutes (WP8x6 and WP810/822/825: 0 or 5 to 720; WP820 and WP856: only 0, 5, 30, 60, 120, 240, 360, 480, 720, see BookRefreshForPhone). What the download does to entries already in the phone: P333 = Remove Manually-edited Entries on Download (0 No, 1 Yes, default 1) is in wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83 and written 1, as Hello's directory is the source of truth; P8462 = Import Group Method (0 Replace, 1 Append, default 0) is in the WP8x6 template only and written 0, so a group in the downloaded XML replaces the phone's; the WP820 and WP856 templates have neither, but "Clear The Old List" P1435 (0 No, 1 Clear all, 2 Keep Local Contacts, default 0), which is written 1 for the same effect. P1436 (Replace Duplicate Items) stays at its default. */}}
 {{- with .Book}}
     <P330>3</P330>
     <P331>{{xml .HostPath}}</P331>
     <P332>{{.RefreshMinutes}}</P332>
-{{- if ne $.Phone.Family "856"}}
+{{- if and (ne $.Phone.Family "856") (ne $.Phone.WP "WP820")}}
     <P333>1</P333>
+{{- end}}
+{{- if eq $.Phone.WP "WP8x6"}}
+    <P8462>0</P8462>
+{{- end}}
+{{- if or (eq $.Phone.WP "WP820") (eq $.Phone.WP "WP856")}}
+    <P1435>1</P1435>
 {{- end}}
 {{- end}}
 {{- /* LDAP phonebook (pbx-gaps S-26): no template or guide in the references on hand lists the LDAP P-values for the WP8x6, WP856 or WP8xx, so P8020 to P8032 below are not confirmed on a phone (verify, needs hardware). They are written only to a phone in a group that turned LDAP on. */}}

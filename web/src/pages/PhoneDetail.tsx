@@ -59,6 +59,7 @@ import {
 import { PhoneLdap } from "./phones/PhoneLdap";
 import { PushLine, RebootDialog } from "./phones/push";
 import { hasPttKey, PttOverride } from "./phones/PttOverride";
+import { DirectoryFit } from "./phones/DirectoryFit";
 import { SettingOverrides } from "./phones/SettingOverrides";
 import "./phones/inventory.css";
 import { Can } from "../role";
@@ -304,6 +305,8 @@ export function PhoneDetail() {
                 }}
               />
             )}
+
+            <DirectoryFit phoneId={phone.id} />
 
             {(phone.vendor === "grandstream" || phone.vendor === "yealink") && (
               <SettingOverrides

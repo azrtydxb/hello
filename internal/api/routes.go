@@ -284,6 +284,7 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/phone-pushes", auth.ScopeRead, auth.RoleViewer, false, s.latestPhonePushes},
 		{"GET", "/api/v1/phones/{id}/settings", auth.ScopeRead, auth.RoleViewer, false, s.listSettings(prov.ScopePhone, "phone")},
 		{"PUT", "/api/v1/phones/{id}/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.putSettings(prov.ScopePhone, "phone")},
+		{"GET", "/api/v1/phones/{id}/directory", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneDirectory},
 		{"GET", "/api/v1/phones/{id}/preview", auth.ScopeRead, auth.RoleViewer, false, s.previewPhone},
 
 		{"GET", "/api/v1/onboarding/candidates", auth.ScopeWrite, auth.RoleOperator, false, s.listOnboarding},

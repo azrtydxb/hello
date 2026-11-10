@@ -16,7 +16,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 15  | Setting overrides and WP extras (S-12)                                        | wip (#259)             |
 | 16  | Doorbell webhook (S-48)                                                       | todo (after 13)        |
 | 17  | Door video preview (S-49)                                                     | todo (code), hw (test) |
-| 18  | vCard phonebook slot (S-31), partial                                          | todo                   |
+| 18  | vCard phonebook slot (S-31), partial                                          | wip (#261)             |
 | 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)    | done (#232)            |
 | 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                      | todo                   |
 | 21  | Multiple lines and account sharing (S-10, S-11)                               | todo                   |

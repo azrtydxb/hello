@@ -1020,6 +1020,21 @@ label to the name (`Tom Smith (mobile)`). Past 1,000 entries a Grandstream
 directory keeps the first 1,000 of the delivery order (extensions, company,
 group books), so earlier books win, and logs it.
 
+**Model capacity and the vCard file.** A Grandstream WP810, WP820, WP822 or WP825
+takes 500 contacts and every other Grandstream 1,000. Past that the books are cut
+from the end of the delivery order (extensions, company, then the group's named
+books), so the earlier books win. A phone's page shows a warning with the number
+of dropped contacts (`getPhoneDirectory`). The merged set is also served as a
+vCard 3.0 file at `/p/<token>/pb/0.vcf` for the WP816, WP826 and WP836, with
+the same cap. No template setting points a phone at it: the WP8x6
+Administration Guide gives the phone web page "Upload vCard Phonebook" and no
+provisioning key that fetches one. Download the file from the phone's
+provisioning URL and upload it there. What a phonebook download does to the
+entries already on the phone is written from Grandstream's own templates: Remove
+Manually-edited Entries on Download `P333 = 1` (WP8x6, WP810/822/825), Import
+Group Method `P8462 = 0`, Replace (WP8x6 only), and `P1435 = 1`, Clear The Old
+List (WP820 and WP856, which have neither of the first two).
+
 Grandstream WP810 and WP822 firmware (1.0.11.x) treats `P331` as a
 directory and appends `/phonebook.xml`, requesting
 `/p/<token>/pb/0.xml/phonebook.xml`; the WP836 uses it as the whole file

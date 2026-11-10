@@ -205,6 +205,11 @@ Books: the computed extensions book (read-only), the company book and up to
   company. Use it to explain why a name shows or does not.
 - Deliver a named book by adding it to a group with `setPhoneGroupBooks`,
   then resync.
+- `getPhoneDirectory` (path `id` of the phone) says how many contacts the
+  phone's books hold, how many its model takes (WP822 500, WP8x6 1000) and
+  how many are cut from the end of the delivery order (`dropped`). Check it
+  when a user says a contact is missing on a Grandstream handset; the fix is a
+  shorter book or a different order of books, not the phone.
 
 ## Ring tags
 

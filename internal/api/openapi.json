@@ -8976,6 +8976,49 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/phones/{id}/directory": {
+      "get": {
+        "operationId": "getPhoneDirectory",
+        "summary": "How a phone's address book fits its model",
+        "description": "Counts the contacts the phone's delivered books hold (duplicate numbers dropped), the contacts its model takes (a Grandstream WP822 takes 500, a WP8x6 1000; 0 is no limit) and how many are cut from the end of the delivery order, so the earlier books win. `vcard` is true for a Grandstream WP816, WP826 or WP836, which can also be given the directory as a vCard file at `pb/0.vcf` under its provisioning URL for the phone's own Upload vCard Phonebook page (no template setting fetches it).",
+        "tags": ["phones"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The directory fit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneDirectory"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/phones/{id}/preview": {
       "get": {
         "operationId": "previewPhoneFile",
@@ -34536,6 +34579,32 @@
             "items": {
               "$ref": "#/components/schemas/SettingOverrideInput"
             }
+          }
+        }
+      },
+      "PhoneDirectory": {
+        "type": "object",
+        "required": ["supported", "delivered", "capacity", "dropped", "vcard"],
+        "properties": {
+          "supported": {
+            "type": "boolean",
+            "description": "The phone's vendor has a directory format."
+          },
+          "delivered": {
+            "type": "integer",
+            "description": "Contacts the phone's books hold."
+          },
+          "capacity": {
+            "type": "integer",
+            "description": "Contacts the model takes; 0 is no limit."
+          },
+          "dropped": {
+            "type": "integer",
+            "description": "Contacts cut from the end of the delivery order."
+          },
+          "vcard": {
+            "type": "boolean",
+            "description": "The directory is also offered as a vCard file."
           }
         }
       },
