@@ -92,7 +92,7 @@ type TrunkInput struct {
 	// asserted for an anonymous call; IdentityHeader "pai" or "ppi". Empty
 	// policy and header mean the defaults.
 	AnonymousPolicy  string
-	CallerPolicy    routing.CallerPolicy
+	CallerPolicy     routing.CallerPolicy
 	AssertedIdentity string
 	IdentityHeader   string
 	SessionTimers    string
@@ -119,8 +119,8 @@ func (t Trunk) Input() TrunkInput {
 		Codecs:          slices.Clone(t.Codecs),
 		Messaging:       t.Messaging,
 		AnonymousPolicy: t.AnonymousPolicy, AssertedIdentity: t.AssertedIdentity, IdentityHeader: t.IdentityHeader,
-		CallerPolicy:    clonePolicy(t.CallerPolicy),
-		SessionTimers:   t.SessionTimers,
+		CallerPolicy:  clonePolicy(t.CallerPolicy),
+		SessionTimers: t.SessionTimers,
 	}
 }
 
