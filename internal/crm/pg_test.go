@@ -410,11 +410,12 @@ func TestPGUsersMappingsAndOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	annaID, err := st.CreateUser(ctx, "test", "anna", hash, auth.RoleUser)
+	// The first user is always an administrator, so the administrator comes first.
+	bossID, err := st.CreateUser(ctx, "test", "boss", hash, auth.RoleAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bossID, err := st.CreateUser(ctx, "test", "boss", hash, auth.RoleAdmin)
+	annaID, err := st.CreateUser(ctx, "test", "anna", hash, auth.RoleUser)
 	if err != nil {
 		t.Fatal(err)
 	}
