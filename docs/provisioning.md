@@ -1439,6 +1439,57 @@ group, and a change is pushed to the affected phones by the automatic resync.
 Page and intercom calls keep the auto-answer `Alert-Info` described under
 paging and intercom above.
 
+## Setting overrides (extra vendor keys)
+
+The built-in templates write the keys Hello needs. A key they do not write
+(a hotline number, a wallpaper, a power-save timer) can be set per phone group
+and per phone under **Phone groups** (edit a group) and **Phones** (the phone's
+page), or with `putPhoneGroupSettings` and `putPhoneSettings`.
+
+- **Order.** The template's value, then the group's, then the phone's: a key
+  the group sets replaces the template's, and a key the phone sets replaces the
+  group's. A key the template does not write is added.
+- **Formats.** A Grandstream P-value (`P71`) or a Yealink dotted key
+  (`features.text_message.enable`). Hello edits only these two formats, so a
+  Poly, Snom, Fanvil or generic phone takes no override (the API refuses a key
+  for them; a group may hold keys for both formats, and a phone applies those of
+  its own vendor). The override reaches the phone's own file only.
+- **Keys Hello owns** are refused with a 400: Grandstream `P2` (admin password),
+  `P3`, `P34`, `P35`, `P36`, `P47`, `P270`, `P271` (account 1), the active,
+  server, user, authentication ID, password, name and label keys of accounts 2
+  to 6 (`P401` to `P417`, `P501` to `P517`, `P601` to `P617`, `P1701` to `P1717`,
+  `P1801` to `P1817`), `P212`, `P237` (provisioning URL with the token) and
+  `P8433` (CA); Yealink `account.N`
+  identity and registrar keys, `static.auto_provision.server.*`,
+  `static.trusted_certificates.*` and `static.security.user_password`.
+- **Secrets.** Mark a value secret and it is sealed in the database (bound to the
+  phone or group and the key), reads back as `********` and is masked in the
+  preview. Send the mask, or no value, to keep the stored value.
+- **A resync applies a change.** Hello checks the key's format, not whether the
+  phone knows it: use only a key from the vendor's documentation or
+  configuration template.
+
+The spec names some one-off Grandstream WP keys for this. Hello does not give
+them a field of their own; these are the numbers and values in Grandstream's own
+configuration templates (`wp8x6_config_1.0.3.39`,
+`wp810_822_825_config_1.0.11.83`, `wp820_config_1.0.7.90`,
+`wp856_config_1.0.3.16`), and which models have them:
+
+| Setting                          | Key                                                                          | Values                                                                                                                   | Models                       |
+| -------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------- |
+| Speed dial key 0 account, number | `P23001`, `P23003`                                                           | account 0 or 1; number up to 64 characters, matching the dial plan                                                       | WP810/822/825                |
+| Speed dial keys 2 to 9           | `P23011`/`P23013`, then every five (`P23016`/`P23018` ... `P23046`/`P23048`) | as key 0                                                                                                                 | WP810/822/825                |
+| Multi-function button            | `P22258`, `P23051`, `P23053`                                                 | 0 PTT/Paging, 1 Mute, 2 SAFE/Panic, 3 Speed dial, 4 Disable; account; number                                             | WP820                        |
+| Off-hook auto dial, delay (s)    | `P71`, `P8388`                                                               | string; 0 to 30 (WP810/822/825) or 0 to 60 (WP820)                                                                       | WP810/820/822/825            |
+| Wallpaper                        | `P2916`, `P2917`                                                             | 0 Default, 1 Download, 2 Uploaded; server path                                                                           | WP810/820/822/825            |
+| VoWLAN target delay              | `P82281`                                                                     | 0 Low, 1 Medium, 2 High                                                                                                  | WP816/826/836, WP810/822/825 |
+| Wi-Fi power saving               | `P82269`                                                                     | WP8x6: 0 Generic, 1 Disabled, 2 U-APSD. WP810/822/825: 0 Optimum, 1 Relaxed Fast-PS, 2 Disable During Calling, 3 Disable | WP816/826/836, WP810/822/825 |
+| Wi-Fi band                       | `P25438`                                                                     | 0 5G and 2.4G, 1 2.4G, 2 5G (WP820: `P25420` 2.4G and `P25421` 5G, each 0 or 1)                                          | WP816/826/836 (WP820)        |
+| Side key                         | `P82317`                                                                     | WP8x6: 0 PTT/Paging, 2 Alarm, 4 None. WP856: 0 PTT, 1 Mute, 3 Speed Dial, 4 Disable, 5 Scan, 6 Open the app              | WP816/826/836, WP856         |
+
+The WP856's `P23001`/`P23003` are the account and user ID of an expansion key,
+not the handset speed dial. Check the model's template before you set a key.
+
 ## Security model and its limits
 
 What protects the phones' secrets:

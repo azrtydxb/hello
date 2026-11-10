@@ -59,6 +59,7 @@ import {
 import { PhoneLdap } from "./phones/PhoneLdap";
 import { PushLine, RebootDialog } from "./phones/push";
 import { hasPttKey, PttOverride } from "./phones/PttOverride";
+import { SettingOverrides } from "./phones/SettingOverrides";
 import "./phones/inventory.css";
 import { Can } from "../role";
 
@@ -301,6 +302,14 @@ export function PhoneDetail() {
                     "PTT channel saved. Resync the phone to apply it.",
                   );
                 }}
+              />
+            )}
+
+            {(phone.vendor === "grandstream" || phone.vendor === "yealink") && (
+              <SettingOverrides
+                scope="phones"
+                id={phone.id}
+                title="Setting overrides"
               />
             )}
 

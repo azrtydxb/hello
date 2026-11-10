@@ -100,7 +100,12 @@ func urlParts(s string) url.URL {
 func Render(ctx context.Context, t Template, file string, d RenderData) ([]byte, error) {
 	for _, f := range t.Files {
 		if strings.EqualFold(ExpandPattern(f.Pattern, d.Phone), file) {
-			return renderBody(ctx, f.Body, d, renderBudget)
+			out, err := renderBody(ctx, f.Body, d, renderBudget)
+			if err != nil || len(d.Overrides) == 0 || !strings.Contains(strings.ToLower(f.Pattern), "{mac}") {
+				return out, err
+			}
+			// Setting overrides (S-12) change the per-phone file only.
+			return ApplyOverrides(d.Phone.Vendor, out, d.Overrides)
 		}
 	}
 	return nil, ErrNoFile

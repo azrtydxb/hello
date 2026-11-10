@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -281,6 +282,8 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/phones/{id}/reboot", auth.ScopeWrite, auth.RoleOperator, false, s.pushPhone(store.PushReboot)},
 		{"GET", "/api/v1/phones/{id}/pushes", auth.ScopeRead, auth.RoleViewer, false, s.listPhonePushes},
 		{"GET", "/api/v1/phone-pushes", auth.ScopeRead, auth.RoleViewer, false, s.latestPhonePushes},
+		{"GET", "/api/v1/phones/{id}/settings", auth.ScopeRead, auth.RoleViewer, false, s.listSettings(prov.ScopePhone, "phone")},
+		{"PUT", "/api/v1/phones/{id}/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.putSettings(prov.ScopePhone, "phone")},
 		{"GET", "/api/v1/phones/{id}/preview", auth.ScopeRead, auth.RoleViewer, false, s.previewPhone},
 
 		{"GET", "/api/v1/onboarding/candidates", auth.ScopeWrite, auth.RoleOperator, false, s.listOnboarding},
@@ -405,6 +408,8 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/phone-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deletePhoneGroup},
 		{"POST", "/api/v1/phone-groups/{id}/resync", auth.ScopeWrite, auth.RoleOperator, false, s.pushBulk(store.PushResync, true)},
 		{"POST", "/api/v1/phone-groups/{id}/reboot", auth.ScopeWrite, auth.RoleOperator, false, s.pushBulk(store.PushReboot, true)},
+		{"GET", "/api/v1/phone-groups/{id}/settings", auth.ScopeRead, auth.RoleViewer, false, s.listSettings(prov.ScopeGroup, "phone group")},
+		{"PUT", "/api/v1/phone-groups/{id}/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.putSettings(prov.ScopeGroup, "phone group")},
 		{"PUT", "/api/v1/phone-groups/{id}/books", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupBooks},
 		{"PUT", "/api/v1/phone-groups/{id}/multicast", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupMulticast},
 		{"PUT", "/api/v1/phone-groups/{id}/ptt", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupPTT},

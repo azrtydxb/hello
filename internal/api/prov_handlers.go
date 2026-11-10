@@ -533,6 +533,12 @@ func (s *server) previewPhone(w http.ResponseWriter, r *http.Request) {
 func maskSecrets(d *prov.RenderData) {
 	d.Line.Password = mask
 	d.Phone.AdminPassword = mask
+	d.Overrides = slices.Clone(d.Overrides)
+	for i := range d.Overrides {
+		if d.Overrides[i].Secret {
+			d.Overrides[i].Value = mask
+		}
+	}
 	d.Prov.URL = tokenInPathRe.ReplaceAllString(d.Prov.URL, "/p/"+mask+"/")
 	if d.Book != nil {
 		b := *d.Book

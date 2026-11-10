@@ -128,6 +128,12 @@ type RenderData struct {
 	// Codecs is the HD voice codec plan: Opus first where the model has
 	// it, then G.722, PCMU and PCMA (see CodecInfo).
 	Codecs CodecInfo
+	// Overrides are the setting overrides of the phone's group and of the
+	// phone, resolved (see ResolveOverrides); Render applies them to the
+	// phone's own file after the template. Secret values are masked in
+	// previews.
+	Overrides []Override
+
 	// Ring is the ring map (phone-feature-parity S-44): the distinctive-ring
 	// rules that map each ring tag's Alert-Info to a tone, and the line's
 	// default tone (see RingInfo).
