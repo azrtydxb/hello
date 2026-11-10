@@ -115,6 +115,20 @@ export interface InboxApi {
   read(id: number): Promise<void>;
   /** Saves the customer's number as a contact and returns the renamed conversation. */
   addContact(id: number, contact: ContactInput): Promise<Conversation>;
+  /** The customer's most recent calls, newest first (an agent sees their own). */
+  calls(id: number, signal?: AbortSignal): Promise<{ items: InboxCall[] }>;
+}
+
+/** One call to or from the customer's number. */
+export interface InboxCall {
+  id: number;
+  startTime: string;
+  durationMs: number;
+  direction: string;
+  kind: string;
+  source: string;
+  destination: string;
+  answered: boolean;
 }
 
 /** The name an "Add to contacts" saves the customer under. */
@@ -146,6 +160,7 @@ function area(base: string): InboxApi {
     read: (id) => request("POST", at(id, "/read")),
     addContact: (id, contact) =>
       request("POST", at(id, "/contact"), { body: contact }),
+    calls: (id, signal) => request("GET", at(id, "/calls"), { signal }),
   };
 }
 

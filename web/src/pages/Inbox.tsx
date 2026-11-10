@@ -16,6 +16,7 @@ import {
   type ConversationStatus,
   type InboxAgent,
   type InboxApi,
+  type InboxCall,
   type InboxMessage,
   type StatusFilter,
 } from "../api/inbox";
@@ -158,6 +159,8 @@ function Thread({
   const [busy, setBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [tags, setTags] = useState(conversation.tags.join(", "));
+  const [calls, setCalls] = useState<InboxCall[] | null>(null);
+  const [callsFailed, setCallsFailed] = useState(false);
   const clientId = useRef(newClientId());
   const toast = useToast();
 
@@ -198,6 +201,24 @@ function Thread({
       });
     return () => controller.abort();
   }, [api, id, refreshKey, apply]);
+
+  // The customer's recent calls, for a number (a chat visitor has none).
+  const isPhone = conv.peerKind === "phone";
+  useEffect(() => {
+    if (!isPhone) return;
+    const controller = new AbortController();
+    api
+      .calls(id, controller.signal)
+      .then((r) => {
+        if (controller.signal.aborted) return;
+        setCalls(r.items);
+        setCallsFailed(false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCallsFailed(true);
+      });
+    return () => controller.abort();
+  }, [api, id, isPhone, refreshKey]);
 
   async function loadOlder() {
     try {
@@ -403,6 +424,25 @@ function Thread({
               }}
             />
           </dd>
+          {isPhone && (
+            <>
+              <dt className="az-caption">Call</dt>
+              <dd style={{ margin: 0 }}>
+                {/* The existing click-to-call page: it rings your phone first. */}
+                <LinkButton
+                  to={`/dial?n=${encodeURIComponent(conv.peer)}`}
+                  size="sm"
+                  icon="phone-outgoing"
+                >
+                  Call {conv.peer}
+                </LinkButton>
+              </dd>
+              <dt className="az-caption">Recent calls</dt>
+              <dd style={{ margin: 0 }}>
+                <RecentCalls calls={calls} failed={callsFailed} />
+              </dd>
+            </>
+          )}
           <dt className="az-caption">Assigned to</dt>
           <dd style={{ margin: 0 }}>
             {unassigned ? "Nobody" : conv.assigneeName}
@@ -527,6 +567,33 @@ function Thread({
       </div>
       {toast.node}
     </>
+  );
+}
+
+/** The customer's recent calls, newest first. */
+function RecentCalls({
+  calls,
+  failed,
+}: {
+  calls: InboxCall[] | null;
+  failed: boolean;
+}) {
+  if (failed) return <span className="az-caption">Calls unavailable.</span>;
+  if (calls === null) return <Spinner />;
+  if (calls.length === 0)
+    return <span className="az-caption">No recent calls.</span>;
+  return (
+    <ul style={{ margin: 0, paddingLeft: "1.1em" }} aria-label="Recent calls">
+      {calls.map((c) => (
+        <li key={c.id}>
+          {c.direction === "inbound" ? "Incoming" : "Outgoing"},{" "}
+          {c.answered
+            ? `${Math.max(1, Math.round(c.durationMs / 1000))} s`
+            : "not answered"}
+          , {formatTime(c.startTime)}
+        </li>
+      ))}
+    </ul>
   );
 }
 

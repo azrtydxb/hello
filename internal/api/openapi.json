@@ -15944,6 +15944,65 @@
         }
       }
     },
+    "/api/v1/me/inbox/conversations/{id}/calls": {
+      "get": {
+        "operationId": "listMyInboxConversationCalls",
+        "summary": "A customer's recent calls",
+        "description": "Lists the most recent calls to or from the conversation's number in which one of the caller's own extensions took part (the rule of the caller's own call history), newest first. A conversation with a chat visitor has no number and so no calls. Numbers match by their last nine digits, so a national and an international form are one number.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "description": "How many to return, 1-50; 10 when omitted."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The most recent calls, newest first. next is always empty.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfCallPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "the customer's number and call history are private: they are not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
     "/api/v1/me/inbox/conversations/{id}/contact": {
       "post": {
         "operationId": "addMyInboxContact",
@@ -16701,6 +16760,65 @@
         "x-hello-role": "operator",
         "x-hello-mcp": {
           "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/calls": {
+      "get": {
+        "operationId": "listInboxConversationCalls",
+        "summary": "A customer's recent calls",
+        "description": "Lists the most recent calls to or from the conversation's number, whoever took them, newest first. A conversation with a chat visitor has no number and so no calls. Numbers match by their last nine digits, so a national and an international form are one number.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "description": "How many to return, 1-50; 10 when omitted."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The most recent calls, newest first. next is always empty.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfCallPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "the customer's number and call history are private: they are not exposed to an agent",
           "category": "private-data"
         }
       }

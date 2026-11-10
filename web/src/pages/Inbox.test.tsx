@@ -129,6 +129,32 @@ function inbox(role: string, more: Routes = {}) {
         next: "",
       }),
     "POST /api/v1/inbox/conversations/7/read": () => noContent(),
+    "GET /api/v1/inbox/conversations/7/calls": () =>
+      json({
+        items: [
+          {
+            id: 40,
+            startTime: "2026-10-01T09:00:00Z",
+            durationMs: 65000,
+            direction: "inbound",
+            kind: "call",
+            source: "+32475123456",
+            destination: "101",
+            answered: true,
+          },
+          {
+            id: 39,
+            startTime: "2026-09-30T09:00:00Z",
+            durationMs: 0,
+            direction: "outbound",
+            kind: "call",
+            source: "101",
+            destination: "+32475123456",
+            answered: false,
+          },
+        ],
+        next: "",
+      }),
     ...more,
   });
 }
@@ -322,6 +348,70 @@ describe("Inbox", () => {
       });
     });
     expect(await screen.findByText("Carla Peeters")).toBeInTheDocument();
+  });
+
+  it("offers a call to the customer through click-to-call and lists recent calls", async () => {
+    inbox("operator");
+    await open();
+    const call = await screen.findByRole("link", {
+      name: "Call +32475123456",
+    });
+    expect(call).toHaveAttribute("href", "/dial?n=%2B32475123456");
+    const recent = await screen.findByRole("list", { name: "Recent calls" });
+    const rows = within(recent).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("Incoming, 65 s");
+    expect(rows[1]).toHaveTextContent("Outgoing, not answered");
+  });
+
+  it("says so when the customer has no recent calls", async () => {
+    inbox("operator", {
+      "GET /api/v1/inbox/conversations/7/calls": () =>
+        json({ items: [], next: "" }),
+    });
+    await open();
+    expect(await screen.findByText("No recent calls.")).toBeInTheDocument();
+  });
+
+  it("offers no call and asks for no calls for a chat visitor", async () => {
+    const visitor = conv({ peerKind: "visitor", peer: "+32475123456" });
+    const calls = inbox("operator", {
+      "GET /api/v1/inbox/conversations?view=all": () =>
+        json({ items: [visitor], next: "" }),
+      "GET /api/v1/inbox/conversations/7": () => json(visitor),
+    });
+    await open();
+    await screen.findByText("Details");
+    expect(screen.queryByRole("link", { name: /^Call / })).toBeNull();
+    expect(calls.some((c) => c.url.endsWith("/calls"))).toBe(false);
+  });
+
+  it("reads an agent's calls from their own route", async () => {
+    const calls = mockApi({
+      "GET /api/v1/auth/me": () => json({ username: "u", role: "user" }),
+      ...STATUS,
+      "GET /api/v1/me/inbox/conversations?view=all": () =>
+        json({
+          items: [conv({ assigneeUserId: 5, assigneeName: "u" })],
+          next: "",
+        }),
+      "GET /api/v1/me/inbox/conversations/7": () =>
+        json(conv({ assigneeUserId: 5, assigneeName: "u" })),
+      "GET /api/v1/me/inbox/conversations/7/messages": () =>
+        json({ items: [msg({ id: 1 })], next: "" }),
+      "GET /api/v1/me/inbox/conversations/7/calls": () =>
+        json({ items: [], next: "" }),
+    });
+    renderApp("/me/inbox");
+    const list = await screen.findByRole("list", { name: "Conversations" });
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /\+32475123456/ }),
+    );
+    expect(await screen.findByText("No recent calls.")).toBeInTheDocument();
+    expect(
+      calls.some((c) => c.url === "/api/v1/me/inbox/conversations/7/calls"),
+    ).toBe(true);
+    expect(calls.some((c) => c.url.startsWith("/api/v1/inbox/"))).toBe(false);
   });
 
   it("refreshes on a stream event and notifies without the text", async () => {

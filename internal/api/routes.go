@@ -383,6 +383,7 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/inbox/conversations/{id}/tags", auth.ScopeMessages, auth.RoleOperator, false, s.setInboxTags},
 		{"POST", "/api/v1/inbox/conversations/{id}/read", auth.ScopeMessages, auth.RoleOperator, false, s.readInboxConversation},
 		{"POST", "/api/v1/inbox/conversations/{id}/contact", auth.ScopeMessages, auth.RoleOperator, false, s.addInboxContact},
+		{"GET", "/api/v1/inbox/conversations/{id}/calls", auth.ScopeMessages, auth.RoleOperator, false, s.listInboxConversationCalls},
 		{"GET", "/api/v1/inbox/stats", auth.ScopeMessages, auth.RoleOperator, false, s.inboxStats},
 
 		{"GET", "/api/v1/me/inbox/status", auth.ScopeMessages, auth.RoleUser, false, s.myInboxStatus},
@@ -399,6 +400,7 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/me/inbox/conversations/{id}/tags", auth.ScopeMessages, auth.RoleUser, false, s.setMyInboxTags},
 		{"POST", "/api/v1/me/inbox/conversations/{id}/read", auth.ScopeMessages, auth.RoleUser, false, s.readMyInboxConversation},
 		{"POST", "/api/v1/me/inbox/conversations/{id}/contact", auth.ScopeMessages, auth.RoleUser, false, s.addMyInboxContact},
+		{"GET", "/api/v1/me/inbox/conversations/{id}/calls", auth.ScopeMessages, auth.RoleUser, false, s.listMyInboxConversationCalls},
 
 		{"GET", "/api/v1/phone-groups", auth.ScopeRead, auth.RoleViewer, false, s.listPhoneGroups},
 		{"POST", "/api/v1/phone-groups", auth.ScopeAdmin, auth.RoleAdmin, false, s.createPhoneGroup},

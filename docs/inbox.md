@@ -94,6 +94,14 @@ the number under a name: to your own contacts (a user an administrator has not
 linked to an extension has none), or, for an operator or administrator, to the
 company book.
 
+The details also show a **Call** button and the number's **recent calls**. The
+button opens the Dial page (click-to-call): Hello rings your own phone first and
+dials the customer when you answer. The list holds the latest calls to or from
+the number; a supervisor sees every such call, an agent only the calls their own
+extension took part in, as in their own call history. A chat visitor has neither.
+The numbers match by their last nine digits, so `0475 12 34 56` and
+`+32 475 12 34 56` are one customer.
+
 ## Desk phones
 
 A text can follow the conversation to the desk phone. Two switches must both be
@@ -202,6 +210,7 @@ The page also:
 | `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`              | operator, `messages`  |
 | `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream` | any agent, `messages` |
 | `POST .../conversations/{id}/contact` (add to contacts)              | as the area it is in  |
+| `GET .../conversations/{id}/calls` (the number's recent calls)       | as the area it is in  |
 
 Conversations list with `view` (`all`, `mine`, `unassigned`), `status`, `q`
 (number, name or text), `channelId`, and a cursor. Every operation is in

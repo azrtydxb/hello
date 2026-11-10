@@ -62,6 +62,7 @@ type InboxStore interface {
 	GetInboxStatus(ctx context.Context, acc store.InboxAccess) (store.InboxStatus, error)
 	GetInboxStats(ctx context.Context) (store.InboxStats, error)
 	AddConversationContact(ctx context.Context, acc store.InboxAccess, convID int64, book string, in phonebook.EntryInput) (store.Conversation, error)
+	ConversationCalls(ctx context.Context, acc store.InboxAccess, convID int64, limit int) ([]store.CDR, error)
 	ListInboxEvents(ctx context.Context, userID, after int64, limit int) ([]store.InboxEvent, error)
 	LatestInboxEventID(ctx context.Context, userID int64) (int64, error)
 	TouchInboxPresence(ctx context.Context, userID int64) error
@@ -1132,6 +1133,49 @@ func (s *server) addInboxContact(w http.ResponseWriter, r *http.Request) {
 }
 func (s *server) addMyInboxContact(w http.ResponseWriter, r *http.Request) {
 	s.addInboxContactCommon(w, r, false)
+}
+
+// maxInboxCalls is the most calls the conversation panel asks for.
+const maxInboxCalls = 50
+
+// inboxConversationCallsCommon is the peer's recent calls for the panel: the
+// same slim record as the caller's own call history.
+func (s *server) inboxConversationCallsCommon(w http.ResponseWriter, r *http.Request, all bool) {
+	is, acc, ok := s.inboxCaller(w, r, all, false)
+	if !ok {
+		return
+	}
+	id, ok := convID(w, r)
+	if !ok {
+		return
+	}
+	limit := 10
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > maxInboxCalls {
+			badRequest(w, "limit must be 1-50")
+			return
+		}
+		limit = n
+	}
+	cs, err := is.ConversationCalls(r.Context(), acc, id, limit)
+	if err != nil {
+		s.inboxError(w, "conversation", err)
+		return
+	}
+	out := make([]selfCall, len(cs))
+	for i, c := range cs {
+		out[i] = selfCall{ID: c.ID, StartTime: c.StartTime.UTC().Format("2006-01-02T15:04:05Z07:00"), DurationMs: c.DurationMs,
+			Direction: c.Direction, Kind: c.Kind, Source: c.Source, Destination: c.Destination, Answered: c.AnswerTime != nil}
+	}
+	writePage(w, out, 0)
+}
+
+func (s *server) listInboxConversationCalls(w http.ResponseWriter, r *http.Request) {
+	s.inboxConversationCallsCommon(w, r, true)
+}
+func (s *server) listMyInboxConversationCalls(w http.ResponseWriter, r *http.Request) {
+	s.inboxConversationCallsCommon(w, r, false)
 }
 
 func (s *server) readInboxConversationCommon(w http.ResponseWriter, r *http.Request, all bool) {

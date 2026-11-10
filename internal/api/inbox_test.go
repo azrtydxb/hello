@@ -531,6 +531,67 @@ func (s *scenario) run(t *testing.T) {
 		}
 	})
 
+	t.Run("calls", func(t *testing.T) {
+		callConv, callPeer := s.newConv("did you call me")
+		uid := r.operatorID(t)
+		if s.mine {
+			uid = s.self
+		}
+		var ext string
+		if err := r.db.QueryRowContext(context.Background(), `SELECT e.number FROM user_extensions ue JOIN extensions e ON e.id = ue.extension_id WHERE ue.user_id = $1`, uid).Scan(&ext); err != nil {
+			t.Fatal(err) // the contact case above linked one
+		}
+		// The same customer in national form, as a trunk may present them.
+		national := "0" + strings.TrimPrefix(callPeer, "+32")
+		insert := func(src, dst string, answered bool) int64 {
+			t.Helper()
+			var id int64
+			answer := "NULL"
+			if answered {
+				answer = "now()"
+			}
+			if err := r.db.QueryRowContext(context.Background(), `INSERT INTO cdrs (correlation_id, sip_call_id, source, destination, start_time, answer_time, end_time,
+				duration_ms, billable_ms, sip_node, final_status, termination_side, failure_reason, direction,
+				original_destination, rewritten_destination, route_name, trunk_name)
+				VALUES ($1, $1, $2, $3, now(), `+answer+`, now(), 1000, 0, 'sip-1', 200, 'system', '', 'inbound', $3, $3, '', '')
+				RETURNING id`, fmt.Sprintf("conv-calls-%d", inboxSeq.Add(1)), src, dst).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
+		mineIn := insert(callPeer, ext, true)
+		mineOut := insert(ext, national, false)
+		others := insert(callPeer, "7999", true) // another desk took it
+		insert("+3299999999", ext, true)         // another customer
+		ids := func(items []any) []float64 {
+			var out []float64
+			for _, it := range items {
+				out = append(out, it.(map[string]any)["id"].(float64))
+			}
+			return out
+		}
+		got := ids(listItems(t, c.must(http.StatusOK, "GET", s.path(callConv, "/calls"), nil)))
+		want := []float64{float64(mineOut), float64(mineIn)}
+		if !s.mine {
+			want = []float64{float64(others), float64(mineOut), float64(mineIn)}
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("calls = %v, want %v (an agent sees only calls of their own extension)", got, want)
+		}
+		one := listItems(t, c.must(http.StatusOK, "GET", s.path(callConv, "/calls?limit=1"), nil))
+		if len(one) != 1 {
+			t.Fatalf("limit=1 gave %d", len(one))
+		}
+		c.must(http.StatusBadRequest, "GET", s.path(callConv, "/calls?limit=0"), nil)
+		c.must(http.StatusBadRequest, "GET", s.path(callConv, "/calls?limit=51"), nil)
+		c.must(http.StatusBadRequest, "GET", s.path(callConv, "/calls?limit=x"), nil)
+		c.must(http.StatusNotFound, "GET", s.path(99999, "/calls"), nil)
+		quiet, _ := s.newConv("no calls from me")
+		if got := listItems(t, c.must(http.StatusOK, "GET", s.path(quiet, "/calls"), nil)); len(got) != 0 {
+			t.Fatalf("a customer with no calls shows %v", got)
+		}
+	})
+
 	t.Run("tags and read", func(t *testing.T) {
 		got := c.must(http.StatusOK, "POST", s.path(conv, "/tags"), map[string]any{"tags": []string{"Billing", "vip", "billing"}}).json(t)
 		if tags := got["tags"].([]any); len(tags) != 2 || tags[0] != "billing" || tags[1] != "vip" {
@@ -600,7 +661,7 @@ func TestInboxAPI(t *testing.T) {
 		r.assign(conv, r.agentID)
 		r.agent.must(http.StatusOK, "GET", idPath("/api/v1/me/inbox/conversations", conv, ""), nil)
 		for _, req := range [][3]string{
-			{"GET", "", ""}, {"GET", "/messages", ""}, {"POST", "/messages", `{"body":"x"}`}, {"POST", "/notes", `{"body":"x"}`},
+			{"GET", "", ""}, {"GET", "/messages", ""}, {"GET", "/calls", ""}, {"POST", "/messages", `{"body":"x"}`}, {"POST", "/notes", `{"body":"x"}`},
 			{"POST", "/claim", ""}, {"POST", "/assign", `{"userId":0}`}, {"POST", "/status", `{"status":"open"}`},
 			{"POST", "/tags", `{"tags":[]}`}, {"POST", "/read", ""},
 		} {
