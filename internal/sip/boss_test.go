@@ -156,13 +156,18 @@ func TestBossLinkOnlyOwnBoss(t *testing.T) {
 	pbx := startPBX(t, threeDevices(), shortRing(2*time.Second), bossOpts(links))
 	a, b, c, d := bossPhones(t, pbx)
 	b.setCallee(ringForever())
-	c.setCallee(answerAfter(nil))
+	// The assistant answers once 200's phone rings: an assistant who answers
+	// first leaves the boss's legs unstarted (see TestBossLinkAssistantAnswers).
+	assistantAnswers := make(chan struct{})
+	c.setCallee(answerAfter(assistantAnswers))
 	d.setCallee(ringForever())
-	r := waitCall(t, dial(t.Context(), a, "200"))
+	call := dial(t.Context(), a, "200")
+	waitReq(t, b.invites, "INVITE to 200")
+	close(assistantAnswers)
+	r := waitCall(t, call)
 	if r.err != nil {
 		t.Fatalf("call to 200: %v", r.err)
 	}
-	waitReq(t, b.invites, "INVITE to 200")
 	waitReq(t, c.invites, "INVITE to 300, the assistant of 200")
 	noReq(t, d.invites, 300*time.Millisecond, "INVITE to 210, which is the assistant of 300 only")
 	hangup(t, r.dcs)
