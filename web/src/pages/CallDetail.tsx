@@ -230,6 +230,8 @@ function Detail({ cdr }: { cdr: CallRecord }) {
     { label: "Billable", value: formatDuration(cdr.billableMs) },
     { label: "SIP node", value: cdr.sipNode || "—", mono: true },
     { label: "Media", value: cdr.mediaMode || "—" },
+    { label: "Caller codec", value: cdr.callerCodec || "—", mono: true },
+    { label: "Callee codec", value: cdr.calleeCodec || "—", mono: true },
     { label: "Call quality", value: qualityText(cdr) },
     ...(cdr.rtcpxr ?? []).map((q) => ({
       label: `Phone report (${q.final ? "call end" : "interval"})`,

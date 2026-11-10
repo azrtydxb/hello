@@ -12,6 +12,7 @@ export const EVENT_TYPES = [
   "call.missed",
   "call.recording.ready",
   "call.completed",
+  "call.originate.progress",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -39,6 +40,8 @@ export interface EventData {
   disposition?: string;
   reason?: string;
   originateId?: string;
+  /** The click-to-call state on call.originate.progress. */
+  state?: string;
   cdrId?: number;
   recordingId?: number;
 }

@@ -96,17 +96,33 @@ func TestKamailioConfigSyntax(t *testing.T) {
 // as written, a status.podIP field reference as a sample node address.
 func kwKamailioEnvs(t *testing.T) map[string]map[string]string {
 	t.Helper()
-	c := containerNamed(t, kwObject(t, "Deployment", "kamailio"), false, "kamailio")
-	env := map[string]string{}
-	for name, e := range envOf(c) {
-		switch {
-		case e["value"] != nil:
-			env[name] = str(e["value"])
-		case str(dig(e, "valueFrom", "fieldRef", "fieldPath")) == "status.podIP":
-			env[name] = "192.168.10.101"
-		default:
-			t.Fatalf("kamailio env %s: neither a literal nor status.podIP; teach kwKamailioEnvs", name)
+	envOfKw := func(vip bool) map[string]string {
+		c := containerNamed(t, kwObjectIn(t, vip, "Deployment", "kamailio"), false, "kamailio")
+		env := map[string]string{}
+		for name, e := range envOf(c) {
+			switch {
+			case e["value"] != nil:
+				env[name] = str(e["value"])
+			case str(dig(e, "valueFrom", "fieldRef", "fieldPath")) == "status.podIP":
+				env[name] = "192.168.10.101"
+			default:
+				t.Fatalf("kamailio env %s: neither a literal nor status.podIP; teach kwKamailioEnvs", name)
+			}
+		}
+		return env
+	}
+	withVIP := envOfKw(true)
+	// The same without the node-address sockets: the end state, once the last
+	// phone has moved to the VIP.
+	vipOnly := map[string]string{}
+	for k, v := range withVIP {
+		if k != "KAMAILIO_LEGACY_IP" {
+			vipOnly[k] = v
 		}
 	}
-	return map[string]map[string]string{"kw environment": env}
+	return map[string]map[string]string{
+		"kw environment":                            envOfKw(false),
+		"kw environment with the VIP":               withVIP,
+		"kw environment without the legacy sockets": vipOnly,
+	}
 }

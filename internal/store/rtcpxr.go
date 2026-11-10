@@ -13,7 +13,7 @@ import (
 // RTCPXRRetention is how long a phone's quality report is kept.
 const RTCPXRRetention = 90 * 24 * time.Hour
 
-// RTCPXRQuality is what a phone reported about one call (migration 00051):
+// RTCPXRQuality is what a phone reported about one call (migration 00066):
 // the phone's own receive-side view, shown beside the relay's figures. A nil
 // value was not in the report.
 type RTCPXRQuality struct {
