@@ -238,6 +238,11 @@ func validateTrunk(in *store.TrunkInput, hasPassword bool) fieldErrs {
 	if len(in.SourceCIDRs) > 100 {
 		f.add("sourceCidrs", "at most 100 entries")
 	}
+	var pol []routing.FieldError
+	routing.ValidateCallerPolicy(in.CallerPolicy, "", &pol)
+	for _, e := range pol {
+		f.add(strings.TrimPrefix(e.Path, "."), "%s", e.Message)
+	}
 	// nil is "not set" (the default applies); an empty list is refused.
 	if in.Codecs != nil {
 		if _, why := routing.NormalizeCodecs(in.Codecs); why != "" {
