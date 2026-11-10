@@ -23,6 +23,7 @@ import (
 	"github.com/azrtydxb/hello/internal/lifecycle"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/ops"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/secret"
@@ -170,7 +171,7 @@ func run(args []string) error {
 		SessionExpires: cfg.SessionExpires, SessionMinSE: cfg.SessionMinSE, SessionTimersTrunks: cfg.SessionTimersTrunks, MediaDeadAfter: cfg.MediaDeadAfter,
 		PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
 		PageMulticastIface: cfg.PageMulticastIface, PageMulticastTTL: cfg.PageMulticastTTL,
-		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax,
+		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax, Dialing: cfg.Dial,
 		MediaForceAnchor: cfg.MediaForceAnchor, MediaRecordingNotice: cfg.MediaRecordingNotice,
 		PromptLanguage: cfg.VoicePromptLanguage, Timezone: cfg.Timezone,
 		HADialogHeartbeat: cfg.MemberHeartbeat, HATakeoverEnabled: cfg.HATakeoverEnabled,
@@ -185,8 +186,9 @@ func run(args []string) error {
 		QualityReports: controlStore,
 		Messages:       messageQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "messages")},
 		Voicemails:     voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings, TimeConditions: timeConditions{st: controlStore},
-		Speech:     newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
-		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
+		Conversations: conversations{st: controlStore, dial: cfg.Dial, log: log.With("component", "inbox"), metrics: messaging.NewMetrics(metrics.Registry)},
+		Speech:        newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
+		Recordings:    controlStore, Media: media.NewMetrics(metrics.Registry),
 		HAState: live, Membership: members, PageTests: live, Originates: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Park: live,
 		Conferences: live, ConferenceAudit: controlStore,
 	})

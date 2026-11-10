@@ -122,9 +122,8 @@ verifies. An empty database needs nothing first: the restore creates the tables.
 
 ## Requirements and limits
 
-- The image carries `postgresql-client`; `pg_dump` and `pg_restore` must be at
-  least the PostgreSQL server's major version. Set `HELLO_BACKUP_PG_DUMP` and
-  `HELLO_BACKUP_PG_RESTORE` for other paths.
+- The image carries `postgresql-client`; `pg_dump` and `pg_restore` are run
+  from PATH and must be at least the PostgreSQL server's major version.
 - The dump and the archive are staged on disk before upload: `HELLO_BACKUP_TMP`
   (the chart mounts an emptyDir of `control.backup.stagingSize`, default 4Gi,
   there). Size it for the database dump plus its encrypted copy.

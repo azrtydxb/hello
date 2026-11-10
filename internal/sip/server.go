@@ -21,6 +21,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo"
@@ -109,6 +110,10 @@ type Config struct {
 	// TrustedProxies are the edge proxies (Kamailio) whose X-Hello-Client
 	// and Path headers are believed (plan contract 7).
 	TrustedProxies []netip.Prefix
+	// Dialing is the numbering context (HELLO_DIAL_INTL_PREFIX and
+	// HELLO_DIAL_COUNTRY_CODE) caller numbers are normalised in for the
+	// blocklist and the country restriction (pbx-gaps S-7, S-8).
+	Dialing phonebook.Dialing
 
 	// RTPPortMin and RTPPortMax bound the UDP port range anchored media
 	// sessions draw their relay sockets from (20000-21000 default,
@@ -211,6 +216,11 @@ type Deps struct {
 	// QualityReports stores the voice-quality reports phones publish
 	// (Event: vq-rtcpxr); nil answers them 503.
 	QualityReports QualityReports
+	// Conversations is the messaging inbox's gateway: a text a trunk
+	// delivers to one of its numbers becomes a conversation instead of
+	// going to an extension. nil leaves every trunk text to the extension
+	// route.
+	Conversations ConversationGateway
 	// Conferences is the shared conference state (room ownership, live state,
 	// control commands); nil keeps every room on this node alone.
 	Conferences Conferences
@@ -293,6 +303,9 @@ type Server struct {
 	// this node sent per dialog Call-ID, so replicated CSeqs continue past
 	// it; entries go with the dialog's binding.
 	haSent sync.Map
+	// uasAcks are the 2xx to INVITEs awaiting their ACK, retransmitted
+	// meanwhile (uas2xx.go).
+	uasAcks uasAcks
 	// cbHold is the lowest place of a due callback request, per queue id
 	// (map[int64]int64, replaced by each sweep): a waiting call that entered
 	// later does not take an agent ahead of it (queue_callback.go).
@@ -644,6 +657,9 @@ func (s *Server) handle(srv *sipgo.Server, m sip.RequestMethod, h sipgo.RequestH
 func (s *Server) wrap(h sipgo.RequestHandler) sipgo.RequestHandler {
 	return func(req *sip.Request, tx sip.ServerTransaction) {
 		s.m.request(req.Method.String())
+		if req.IsAck() {
+			s.noteAck(req)
+		}
 		defer func() {
 			if r := recover(); r != nil {
 				s.log.Error("SIP handler panic", "method", req.Method.String(), "panic", fmt.Sprint(r))
@@ -702,6 +718,7 @@ func (s *Server) send(tx sip.ServerTransaction, res *sip.Response) {
 		return
 	}
 	s.m.response(res.StatusCode)
+	s.retransmit2xx(tx, res)
 }
 
 func (s *Server) unavailable(tx sip.ServerTransaction, req *sip.Request) {
@@ -1021,6 +1038,7 @@ func (s *Server) unbind(callID string, c *call) {
 	if r, ok := s.dialogs[callID]; ok && r.c == c {
 		delete(s.dialogs, callID)
 		s.haSent.Delete(callID)
+		s.uasAcks.endDialog(callID)
 		if r.leg == nil {
 			delete(s.calls, c)
 		}

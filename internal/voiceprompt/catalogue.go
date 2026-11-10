@@ -101,6 +101,11 @@ const (
 	GreetBusyTail        Key = "greet.busy.tail"
 	GreetUnreachableTail Key = "greet.unreachable.tail"
 
+	// Voicemail groups (S-14): the prompt for a message left for the group,
+	// the one for a member's broadcast, and its confirmation.
+	GroupLeave     Key = "vmgroup.leave"
+	GroupBroadcast Key = "vmgroup.broadcast"
+	GroupSent      Key = "vmgroup.sent"
 	// Queue callback (pbx-gaps S-9). Spoken in the queue's language (S-20).
 	QueueCallbackOffer   Key = "queue.callback.offer"   // {digit}: the key that accepts
 	QueueCallbackConfirm Key = "queue.callback.confirm" // after the caller accepted; the call then ends
