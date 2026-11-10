@@ -112,17 +112,17 @@ naming the key, if one is missing or malformed.
 | `HELLO_BOOTSTRAP_ADMIN_PASSWORD`                  | control | unset; creates user `admin` when no user exists                                                                               |
 | `HELLO_SESSION_TTL`                               | control | `12h`                                                                                                                         |
 | `HELLO_EVENT_RETENTION_DAYS`                      | control | `7`; how long call events are stored, 1 to 30 (docs/integrations.md)                                                          |
-| `HELLO_INTEGRATIONS_ALLOWED_CIDRS`                | control | RFC 1918 ranges; the private ranges an allow-private webhook may reach, `none` for no private target (docs/integrations.md) |
+| `HELLO_INTEGRATIONS_ALLOWED_CIDRS`                | control | RFC 1918 ranges; the private ranges an allow-private webhook may reach, `none` for no private target (docs/integrations.md)   |
 | `HELLO_SIP_BIND_ADDR`                             | sip     | `0.0.0.0:5060`                                                                                                                |
 | `HELLO_SIP_ADVERTISED_ADDR`                       | sip     | the bind address, which must then be a specific IP                                                                            |
 | `HELLO_SIP_NONCE_SECRET`                          | sip     | required, at least 32 bytes, identical on every SIP node                                                                      |
 | `HELLO_SIP_REGISTER_MIN_EXPIRES` / `_MAX_EXPIRES` | sip     | `60s` / `1h`                                                                                                                  |
 | `HELLO_SIP_RING_TIMEOUT`                          | sip     | `30s`                                                                                                                         |
 | `HELLO_SIP_MAX_CALL_DURATION`                     | sip     | `4h`; a call with no BYE (phone gone) is cleared after this                                                                   |
-| `HELLO_SIP_SESSION_EXPIRES_SECONDS`               | sip     | `1800`; RFC 4028 Session-Expires Hello requests and applies on legs to phones; `0` turns session timers off                  |
+| `HELLO_SIP_SESSION_EXPIRES_SECONDS`               | sip     | `1800`; RFC 4028 Session-Expires Hello requests and applies on legs to phones; `0` turns session timers off                   |
 | `HELLO_SIP_SESSION_MIN_SE_SECONDS`                | sip     | `90`; the smallest interval accepted from a peer (`422` with Min-SE below it); must not exceed the setting above              |
 | `HELLO_SIP_SESSION_TIMERS_TRUNKS`                 | sip     | `false`; what a trunk set to "default" does: `true` requests and keeps a session timer on its calls                           |
-| `HELLO_MEDIA_DEAD_SECONDS`                        | sip     | `60`; an anchored call with no RTP in either direction for this long is ended unless held; `0` turns it off                  |
+| `HELLO_MEDIA_DEAD_SECONDS`                        | sip     | `60`; an anchored call with no RTP in either direction for this long is ended unless held; `0` turns it off                   |
 | `HELLO_PAGE_MAX_SECONDS`                          | sip     | `120`; a server page ends after this many seconds                                                                             |
 | `HELLO_DOOR_HANGUP_SECONDS`                       | sip     | `3`; a door call stays up this long after the door-open code was sent, when the station hangs up after open                   |
 | `HELLO_PAGE_CONCURRENT`                           | sip     | `5`; pages one node runs at once, beyond that the caller hears busy                                                           |
@@ -135,7 +135,6 @@ naming the key, if one is missing or malformed.
 | `HELLO_DRAIN_TIMEOUT`                             | sip     | `2h`; a draining node hangs up remaining calls after this                                                                     |
 | `HELLO_ROLLOUT_WAIT`                              | sip     | `0` (off); on SIGTERM, wait up to this long for the one-at-a-time restart token and a READY peer before draining (docs/ha.md) |
 | `HELLO_MEMBER_HEARTBEAT`                          | sip     | `1s`; how often the node refreshes its cluster membership in Valkey (at most 1.33s: a third of the 4s membership TTL)         |
-| `HELLO_BACKUP_PG_DUMP` / `HELLO_BACKUP_PG_RESTORE` | control | `pg_dump` / `pg_restore`; the PostgreSQL client programs backups run (docs/backup.md)                                         |
 | `HELLO_BACKUP_TMP`                                | control | the system temporary directory; where the dump and archive are staged before upload (the chart mounts an emptyDir)            |
 | `HELLO_PROV_PUBLIC_URL`                           | control | unset (off); the `https://` host phones reach; boot and CA URLs use its plain-HTTP form                                       |
 | `HELLO_PROV_ADDR`                                 | control | `:8083`; the provisioning listener                                                                                            |
