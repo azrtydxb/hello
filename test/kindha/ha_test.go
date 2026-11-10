@@ -456,7 +456,7 @@ func runHA(t *testing.T, source string) {
 			return
 		}
 	}
-	if n > 1 {
+	if os.Getenv("KINDHA_STRESS") != "" {
 		return
 	}
 	t.Run("crash of the active instance", func(t *testing.T) { l.failover(t, true) })

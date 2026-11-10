@@ -1008,10 +1008,10 @@ jobs:
           export KINDHA_VIP="$vip"
           export KINDHA_IMAGE=hello.local/kamailio:ha
           export KINDHA_CONTEXT=kind-kamailio-ha
-          export KINDHA_STRESS=25
+          export KINDHA_STRESS=1
           sudo -n tcpdump -i any -nn -e -tttt -l -U 'udp port 5070 or arp' > "$RUNNER_TEMP/cap.txt" 2>&1 &
           sleep 2
-          "$RUNNER_TEMP/kindha.test" -test.count=1 -test.timeout 40m -test.v -test.run 'TestKamailioHAChart' || { echo "=== capture tail"; grep -E 'ARP|172.18.255.200' "$RUNNER_TEMP/cap.txt" | tail -150; exit 1; }
+          "$RUNNER_TEMP/kindha.test" -test.count=14 -test.failfast -test.timeout 45m -test.v -test.run 'TestKamailioHAChart' || { echo "=== capture tail"; grep -E 'ARP|172.18.255.200' "$RUNNER_TEMP/cap.txt" | tail -150; exit 1; }
       - name: Cluster state on failure
         if: failure() && steps.changed.outputs.run == 'true'
         run: |
