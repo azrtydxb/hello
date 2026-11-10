@@ -1279,7 +1279,7 @@ func (c *call) byeA() {
 		c.orig.byeAgent()
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
+	ctx, cancel := c.s.timeoutUntilShutdown(byeTimeout)
 	defer cancel()
 	if err := c.dss.Bye(ctx); err != nil {
 		c.s.log.Debug("BYE to caller failed", "correlation_id", c.id, "error", err)
@@ -1770,7 +1770,7 @@ func (l *leg) bye() {
 		return
 	}
 	l.ack(nil, "")
-	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
+	ctx, cancel := l.c.s.timeoutUntilShutdown(byeTimeout)
 	defer cancel()
 	if err := dcs.Bye(ctx); err != nil {
 		l.c.s.log.Debug("BYE to fork failed", "error", err)

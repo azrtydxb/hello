@@ -101,12 +101,20 @@ func TestBossLinkAssistantAnswers(t *testing.T) {
 	pbx := startPBX(t, threeDevices(), shortRing(2*time.Second), bossOpts([]snapshot.BossLink{bossLink()}))
 	a, b, c, _ := bossPhones(t, pbx)
 	b.setCallee(ringForever())
-	c.setCallee(answerAfter(nil))
-	r := waitCall(t, dial(t.Context(), a, "200"))
+	// The assistant answers once the boss's phone is ringing. The PBX starts
+	// the boss's legs only if no leg has answered by then (bossRelease), so an
+	// assistant who answered at once, as a descheduled PBX goroutine lets
+	// happen on a loaded runner, would leave the boss never rung: correct for
+	// the call, but not what this test is about.
+	assistantAnswers := make(chan struct{})
+	c.setCallee(answerAfter(assistantAnswers))
+	call := dial(t.Context(), a, "200")
+	waitReq(t, b.invites, "INVITE to the boss")
+	close(assistantAnswers)
+	r := waitCall(t, call)
 	if r.err != nil {
 		t.Fatalf("call to the boss: %v", r.err)
 	}
-	waitReq(t, b.invites, "INVITE to the boss")
 	waitReq(t, c.invites, "INVITE to the assistant")
 	waitReq(t, b.cancels, "CANCEL to the boss's phone after the assistant answered")
 	hangup(t, r.dcs)
@@ -148,13 +156,18 @@ func TestBossLinkOnlyOwnBoss(t *testing.T) {
 	pbx := startPBX(t, threeDevices(), shortRing(2*time.Second), bossOpts(links))
 	a, b, c, d := bossPhones(t, pbx)
 	b.setCallee(ringForever())
-	c.setCallee(answerAfter(nil))
+	// The assistant answers once 200's phone rings: an assistant who answers
+	// first leaves the boss's legs unstarted (see TestBossLinkAssistantAnswers).
+	assistantAnswers := make(chan struct{})
+	c.setCallee(answerAfter(assistantAnswers))
 	d.setCallee(ringForever())
-	r := waitCall(t, dial(t.Context(), a, "200"))
+	call := dial(t.Context(), a, "200")
+	waitReq(t, b.invites, "INVITE to 200")
+	close(assistantAnswers)
+	r := waitCall(t, call)
 	if r.err != nil {
 		t.Fatalf("call to 200: %v", r.err)
 	}
-	waitReq(t, b.invites, "INVITE to 200")
 	waitReq(t, c.invites, "INVITE to 300, the assistant of 200")
 	noReq(t, d.invites, 300*time.Millisecond, "INVITE to 210, which is the assistant of 300 only")
 	hangup(t, r.dcs)
