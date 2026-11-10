@@ -526,7 +526,7 @@ func (r *Relay) recv(l *relayLeg) {
 		if dtmfPT != 0 && pkt.PayloadType == dtmfPT {
 			if ev, ok := ParseTelephoneEvent(pkt.Payload); ok {
 				ev.Sequence = pkt.Sequence
-				if code, deliver := l.filter.Observe(ev, pkt.Marker); deliver && r.onDTMF != nil {
+				if code, deliver := l.filter.Observe(ev, pkt.Marker); deliver {
 					r.mu.Lock()
 					h := r.onDTMF
 					r.mu.Unlock()
@@ -536,13 +536,13 @@ func (r *Relay) recv(l *relayLeg) {
 				}
 			}
 		}
-		if r.onPacket != nil {
-			r.mu.Lock()
-			h := r.onPacket
-			r.mu.Unlock()
-			if h != nil {
-				h(l.name, pkt)
-			}
+		// The hooks are read under the lock: a caller may set them after Start
+		// (a resumed call's relay), and an unlocked read races with that.
+		r.mu.Lock()
+		tap := r.onPacket
+		r.mu.Unlock()
+		if tap != nil {
+			tap(l.name, pkt)
 		}
 		if l.muted.Load() {
 			continue

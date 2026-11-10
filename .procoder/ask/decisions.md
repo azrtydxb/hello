@@ -969,6 +969,7 @@ forbidden_role` for another, `403 no_extension` with none); an operator or
   settings `update`. The OAuth client is the audit `via` automatically.
 - **Device**: the API takes the numeric device id and the queued request
   carries its SIP username; a device of another extension is a `400`.
+
 ## 2026-10-27 Phone feature parity item 19: firmware policy (S-26)
 
 - Already on main: `prov_firmware` and `prov_firmware_pins`, upload and pin API
@@ -1809,3 +1810,10 @@ so the VIP stage cannot sit in that file.
 - Fix: inject the membership through a `withMembership` pbxOpt at build time,
   as `withHA` and `withConferences` do. Rule: tests never mutate `srv.deps`
   once the node runs.
+
+## Relay hook data race (2026-11-10)
+
+- Root cause: `Relay.recv` tested `r.onPacket` / `r.onDTMF` for nil without `r.mu`, while
+  `OnPacket` / `OnDTMF` set them under it. Seen in `TestQueueCallbackReservesAgent` under `-race`.
+- Fix: the receive loop reads each hook only under the lock, as #266 and #273 already do, so
+  they rebase onto this cleanly. Regression test: `relay_hook_race_test.go`.
