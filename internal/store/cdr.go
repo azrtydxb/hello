@@ -43,6 +43,9 @@ type CDR struct {
 	CalleeCodec *string `json:"calleeCodec"`
 	// Kind is call, page or intercom (migration 00013).
 	Kind string `json:"kind"`
+	// AnsweredBy is the assistant's extension when a boss's call was answered
+	// by the assistant (migration 00065); empty otherwise.
+	AnsweredBy string `json:"answeredBy"`
 	// Origin is phone (dialled at a phone) or api (click-to-call), and
 	// OriginClient the OAuth client or token id behind an api call (migration
 	// 00057).
@@ -82,14 +85,14 @@ type PageLeg struct {
 const cdrCols = `id, correlation_id, sip_call_id, source, destination, start_time, ring_time, answer_time,
 	end_time, duration_ms, billable_ms, sip_node, media_mode, final_status, termination_side, failure_reason,
 	direction, original_destination, rewritten_destination, route_name, trunk_name,
-	rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client`
+	rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client, answered_by`
 
 func scanCDR(r interface{ Scan(...any) error }, extra ...any) (CDR, error) {
 	var c CDR
 	var ring, answer sql.NullTime
 	dest := append([]any{&c.ID, &c.CorrelationID, &c.SIPCallID, &c.Source, &c.Destination, &c.StartTime, &ring, &answer,
 		&c.EndTime, &c.DurationMs, &c.BillableMs, &c.SIPNode, &c.MediaMode, &c.FinalStatus, &c.TerminationSide, &c.FailureReason,
-		&c.Direction, &c.OriginalDestination, &c.RewrittenDestination, &c.Route, &c.Trunk, &c.RTPPackets, &c.RTPLost, &c.RTPJitterMs, &c.Kind, &c.RingTag, &c.RingRule, &c.CallerCodec, &c.CalleeCodec, &c.Origin, &c.OriginClient,
+		&c.Direction, &c.OriginalDestination, &c.RewrittenDestination, &c.Route, &c.Trunk, &c.RTPPackets, &c.RTPLost, &c.RTPJitterMs, &c.Kind, &c.RingTag, &c.RingRule, &c.CallerCodec, &c.CalleeCodec, &c.Origin, &c.OriginClient, &c.AnsweredBy,
 	}, extra...)
 	if err := r.Scan(dest...); err != nil {
 		return c, err

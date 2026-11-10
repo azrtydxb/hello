@@ -395,3 +395,34 @@ describe("CallDetail", () => {
     expect(within(card).getByText("Answered")).toBeVisible();
   });
 });
+
+it("names the assistant who answered a call to a boss", async () => {
+  mockApi({
+    ...ME,
+    "GET /api/v1/cdrs/90": () =>
+      json({
+        ...BASE,
+        id: 90,
+        finalStatus: 200,
+        answerTime: "2026-10-01T10:00:02Z",
+        answeredBy: "300",
+        failureReason: "",
+        trace: [{ n: 1, text: "Answered by assistant 300 for 200" }],
+      }),
+    "GET /api/v1/cdrs/91": () =>
+      json({
+        ...BASE,
+        id: 91,
+        finalStatus: 200,
+        answerTime: "2026-10-01T10:00:02Z",
+        failureReason: "",
+        trace: [{ n: 1, text: "Call established" }],
+      }),
+  });
+  const first = renderApp("/history/90");
+  expect(await screen.findByText("300 (assistant)")).toBeVisible();
+  first.unmount();
+  renderApp("/history/91");
+  expect(await screen.findByText("Call established")).toBeVisible();
+  expect(screen.queryByText("Answered by")).toBeNull();
+});

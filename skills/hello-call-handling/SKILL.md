@@ -141,6 +141,23 @@ within half a second; read `getConference` again to confirm. Ask before
   carries no customer text; conversations and messages are never exposed
   through MCP.
 
+## Boss and assistant
+
+A boss and an assistant can share a line.
+
+1. `listBossLinks` shows the links. A boss has at most one assistant, and an
+   assistant may serve several bosses.
+2. `putBossLinks` replaces the whole list: a link whose boss is not in the
+   list is removed. Send `ringMode` (`both` rings the boss's and the
+   assistant's devices together; `assistant_first` rings the assistant's
+   devices for 10 seconds, then both), `screening` (the assistant hears a prompt
+   naming the boss: 1 puts the call through, 2 sends it to the boss's
+   voicemail), and `outboundAsBoss` (the assistant presents the boss's caller
+   ID, for one boss only).
+3. `divertOn` silences the boss's own devices so that only the assistant
+   rings. The `*64` feature code toggles it from the boss's phone, and a
+   forward set on the boss still wins over the link.
+
 ## Presence, voicemail and recordings
 
 - `listPresence`: each device's live state: idle, ringing, on-call or dnd.

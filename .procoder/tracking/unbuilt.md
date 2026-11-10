@@ -150,7 +150,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | Dial-by-name                                  | done (#229, B3)       |
 | Voicemail groups                              | done (#220, A6)       |
 | Fax                                           | todo (spec done #199) |
-| Boss/secretary                                | todo (spec done #199) |
+| Boss/secretary                                | wip (#236, B2)        |
 | Multi-language prompts (Dutch option per box) | done (#208, A5)       |
 | Codec in call history                         | done (#206)           |
 | Phone LDAP directory                          | wip (#223, A7)        |

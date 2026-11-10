@@ -92,6 +92,8 @@ type Metrics struct {
 	// IVRTotal counts IVR menu events: entered, option, direct_dial,
 	// timeout, invalid, dial, dial_failed, connected and exit_<kind>.
 	IVRTotal *prometheus.CounterVec // event
+	// BossDivert counts *64 uses by result (on, off, no_link, failed).
+	BossDivert *prometheus.CounterVec // result
 	// DirectoryTotal counts dial-by-name searches by result (one, several,
 	// too_many, none, too_long, timeout, chosen, invalid_choice, connected,
 	// failed).
@@ -165,6 +167,9 @@ const (
 	// ForwardGroupFailover is a ring group handing the call to an extension
 	// or another group when nobody answered.
 	ForwardGroupFailover = "group_failover"
+	// ForwardBossScreen is an assistant sending a screened call to the boss's
+	// voicemail.
+	ForwardBossScreen = "boss_screen"
 )
 
 // Trunk attempt results for hello_trunk_calls_total.
@@ -289,6 +294,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.IVRTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_ivr_total", Help: "IVR menu events (entered, option, direct_dial, timeout, invalid, dial, dial_failed, connected, exit_<kind>).",
 	}, []string{"event"})
+	m.BossDivert = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_boss_divert_total", Help: "Boss divert (*64) uses by result (on, off, no_link, failed).",
+	}, []string{"result"})
 	m.DirectoryTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_directory_search_total", Help: "Dial-by-name searches by result (one, several, too_many, none, too_long, timeout, chosen, invalid_choice, connected, failed).",
 	}, []string{"result"})
@@ -335,7 +343,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailGroupDeliveries, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Originates, m.OriginateSetup, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags,
-		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.DirectoryTotal, m.TimeConditionTotal, m.BlockedCalls,
+		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.BossDivert, m.DirectoryTotal, m.TimeConditionTotal, m.BlockedCalls,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	m.Conf = newConfMetrics(reg)
