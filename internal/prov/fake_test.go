@@ -32,6 +32,7 @@ type fakeStore struct {
 	phones    map[int64]*fakePhone
 	templates []Template
 	firmware  map[string]Firmware
+	tones     map[string]Ringtone
 	fetches   []FetchRecord
 	outage    error // returned by every read when set
 	insertErr error
@@ -73,7 +74,7 @@ type fakePhone struct {
 func newFakeStore() *fakeStore {
 	u, _ := url.Parse("https://prov.hello.test")
 	return &fakeStore{now: time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC), grace: 7 * 24 * time.Hour, public: u,
-		phones: map[int64]*fakePhone{}, firmware: map[string]Firmware{}}
+		phones: map[int64]*fakePhone{}, firmware: map[string]Firmware{}, tones: map[string]Ringtone{}}
 }
 
 // addPhone adds an enabled, bound, armed phone and returns it with its
@@ -302,6 +303,19 @@ func (s *fakeStore) FirmwareByName(_ context.Context, v Vendor, name string) (Fi
 	return f, nil
 }
 
+func (s *fakeStore) RingtoneByName(_ context.Context, name string) (Ringtone, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.outage != nil {
+		return Ringtone{}, s.outage
+	}
+	t, ok := s.tones[name]
+	if !ok {
+		return Ringtone{}, ErrNotFound
+	}
+	return t, nil
+}
+
 func (s *fakeStore) InsertFetches(_ context.Context, rows []FetchRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -325,6 +339,10 @@ func (o fakeOpener) OpenFirmware(_ context.Context, key string) (io.ReadSeekClos
 		return nil, errors.New("minio: unavailable")
 	}
 	return nopSeekCloser{bytes.NewReader(b)}, nil
+}
+
+func (o fakeOpener) OpenRingtone(ctx context.Context, key string) (io.ReadSeekCloser, error) {
+	return o.OpenFirmware(ctx, key)
 }
 
 // env is a handler over a fake store, with its audit, metrics and logs.

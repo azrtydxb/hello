@@ -121,6 +121,14 @@ x-valkey: &valkey
 x-sentinel: &sentinel
   image: valkey/valkey:9-alpine
   user: valkey
+  # Sentinel resolves hostnames synchronously in its event loop. Once the
+  # primary stops, "valkey-1" is unknown to Docker's embedded DNS, and musl
+  # then appends the host's search domain and forwards that name upstream. On
+  # a GitHub-hosted runner (search domain *.cloudapp.net) the answer never
+  # comes: the lookup blocks 10 s, the loop stalls past the 2 s tilt trigger,
+  # and all three Sentinels stay in TILT (no failover). ndots:0 tries the bare
+  # service name as an absolute name first and gets NXDOMAIN at once.
+  dns_opt: ["ndots:0"]
   depends_on:
     valkey-1: { condition: service_healthy }
     valkey-2: { condition: service_healthy }

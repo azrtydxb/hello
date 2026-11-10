@@ -91,9 +91,17 @@ func TestKwKamailioWaitsForDispatcherNames(t *testing.T) {
 	}
 
 	list := find(t, kwManifests(t), "ConfigMap", "hello-kamailio").Data["dispatcher.list"]
-	inits, mains := kwKamailioPod(t)
+	inits, all := kwKamailioPod(t)
+	// The pod also runs kube-vip (the vip container); the config and the
+	// dispatcher wait concern the kamailio container.
+	var mains []kamailioContainer
+	for _, c := range all {
+		if c.Name == "kamailio" {
+			mains = append(mains, c)
+		}
+	}
 	if len(mains) != 1 {
-		t.Fatalf("kamailio Deployment has %d containers, want 1", len(mains))
+		t.Fatalf("kamailio Deployment has %d kamailio containers, want 1", len(mains))
 	}
 	var wait *kamailioContainer
 	for i := range inits {
