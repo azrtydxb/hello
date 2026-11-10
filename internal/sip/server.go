@@ -298,6 +298,9 @@ type Server struct {
 	// this node sent per dialog Call-ID, so replicated CSeqs continue past
 	// it; entries go with the dialog's binding.
 	haSent sync.Map
+	// uasAcks are the 2xx to INVITEs awaiting their ACK, retransmitted
+	// meanwhile (uas2xx.go).
+	uasAcks uasAcks
 	// cbHold is the lowest place of a due callback request, per queue id
 	// (map[int64]int64, replaced by each sweep): a waiting call that entered
 	// later does not take an agent ahead of it (queue_callback.go).
@@ -648,6 +651,9 @@ func (s *Server) handle(srv *sipgo.Server, m sip.RequestMethod, h sipgo.RequestH
 func (s *Server) wrap(h sipgo.RequestHandler) sipgo.RequestHandler {
 	return func(req *sip.Request, tx sip.ServerTransaction) {
 		s.m.request(req.Method.String())
+		if req.IsAck() {
+			s.noteAck(req)
+		}
 		defer func() {
 			if r := recover(); r != nil {
 				s.log.Error("SIP handler panic", "method", req.Method.String(), "panic", fmt.Sprint(r))
@@ -706,6 +712,7 @@ func (s *Server) send(tx sip.ServerTransaction, res *sip.Response) {
 		return
 	}
 	s.m.response(res.StatusCode)
+	s.retransmit2xx(tx, res)
 }
 
 func (s *Server) unavailable(tx sip.ServerTransaction, req *sip.Request) {
@@ -1025,6 +1032,7 @@ func (s *Server) unbind(callID string, c *call) {
 	if r, ok := s.dialogs[callID]; ok && r.c == c {
 		delete(s.dialogs, callID)
 		s.haSent.Delete(callID)
+		s.uasAcks.endDialog(callID)
 		if r.leg == nil {
 			delete(s.calls, c)
 		}
