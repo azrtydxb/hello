@@ -35,6 +35,8 @@ const (
 	CallMissed         = "call.missed"
 	CallRecordingReady = "call.recording.ready"
 	CallCompleted      = "call.completed"
+	// CallOriginateProgress is a state change of a click-to-call (spec I-37).
+	CallOriginateProgress = "call.originate.progress"
 )
 
 // TypeInfo describes one event type for the console, the documentation and
@@ -53,6 +55,7 @@ var Registry = []TypeInfo{
 	{CallMissed, "A call reached an extension and nobody answered (reason: no_answer, busy, dnd, cancelled or unreachable)."},
 	{CallRecordingReady, "A recording of the call was stored; carries recordingId and durationMs."},
 	{CallCompleted, "The call detail record was stored; carries cdrId."},
+	{CallOriginateProgress, "A click-to-call changed state (queued, ringing_agent, agent_answered, dialing_target, connected, ended or failed); carries originateId, state and, for a failure, reason."},
 }
 
 // KnownType reports whether t is a registered event type.
@@ -92,6 +95,8 @@ type Data struct {
 	// unreachable.
 	Reason      string `json:"reason,omitempty"`
 	OriginateID string `json:"originateId,omitempty"`
+	// State is the click-to-call state on call.originate.progress.
+	State       string `json:"state,omitempty"`
 	CDRID       int64  `json:"cdrId,omitempty"`
 	RecordingID int64  `json:"recordingId,omitempty"`
 }

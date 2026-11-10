@@ -34,6 +34,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "My phone",
     items: [
       {
+        label: "Dial",
+        path: "/dial",
+        phase: 5,
+        icon: "phone-outgoing",
+        minRole: "user",
+      },
+      {
         label: "Address book",
         path: "/me/contacts",
         phase: 5,
