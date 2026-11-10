@@ -1835,3 +1835,10 @@ so the VIP stage cannot sit in that file.
   not help.)
 - kw is not affected: sentinels and valkey are healthy there (ckquorum OK 3
   usable, primary valkey-1) and in-cluster DNS answers a missing pod fast.
+
+## Relay hook data race (2026-11-10)
+
+- Root cause: `Relay.recv` tested `r.onPacket` / `r.onDTMF` for nil without `r.mu`, while
+  `OnPacket` / `OnDTMF` set them under it. Seen in `TestQueueCallbackReservesAgent` under `-race`.
+- Fix: the receive loop reads each hook only under the lock, as #266 and #273 already do, so
+  they rebase onto this cleanly. Regression test: `relay_hook_race_test.go`.
