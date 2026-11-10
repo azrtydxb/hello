@@ -88,6 +88,12 @@ export interface Phone {
   lastFetchUa: string | null;
   lastFetchFile: string | null;
   firmwareSeen: string | null;
+  /** The version pinned for the model, "" for none. */
+  firmwarePinned: string;
+  /** The model's minimum firmware version, "" for none. */
+  firmwareMinimum: string;
+  /** firmwareSeen differs from the pin or is below the minimum. */
+  firmwareDrift: boolean;
   /** True while the phone's latest fetch was a render error. */
   renderError: boolean;
   createdAt: string;
@@ -184,6 +190,33 @@ export const revealAdminPassword = (phoneId: Id) =>
 /** POST /api/v1/phones/{id}/admin-password/rotate: 204; the phone picks it up next fetch. */
 export const rotateAdminPassword = (phoneId: Id) =>
   request<void>("POST", `/api/v1/phones/${seg(phoneId)}/admin-password/rotate`);
+
+// --- LDAP directory (pbx-gaps S-24 to S-26) ----------------------------------------
+
+/** GET /api/v1/phones/{id}/ldap: never carries the password. */
+export interface PhoneLdap {
+  served: boolean;
+  supported: boolean;
+  groupEnabled: boolean;
+  host: string;
+  port: number;
+  base: string;
+  bindDn: string;
+  passwordSet: boolean;
+  rotatedAt: string | null;
+  previousValid: boolean;
+  lastBindAt: string | null;
+}
+
+export const getPhoneLdap = (phoneId: Id, signal?: AbortSignal) =>
+  request<PhoneLdap>("GET", `/api/v1/phones/${seg(phoneId)}/ldap`, { signal });
+
+/** POST /api/v1/phones/{id}/ldap/password: the new password, shown once. */
+export const rotatePhoneLdapPassword = (phoneId: Id) =>
+  request<{ bindDn: string; password: string; resyncQueued: boolean }>(
+    "POST",
+    `/api/v1/phones/${seg(phoneId)}/ldap/password`,
+  );
 
 // --- check-sync pushes: resync and reboot ------------------------------------------
 
@@ -400,7 +433,10 @@ export const TEMPLATE_VARIABLES: readonly { name: string; doc: string }[] = [
   { name: ".Line.VoicemailCode", doc: "message key feature code" },
   { name: ".Server.Host", doc: "registrar host" },
   { name: ".Server.Port", doc: "registrar port" },
-  { name: ".Server.Transport", doc: "always udp" },
+  {
+    name: ".Server.Transport",
+    doc: "udp, or tls for a model HELLO_PROV_SIP_TLS_MODELS lists",
+  },
   { name: ".Server.Expiry", doc: "registration expiry, seconds" },
   {
     name: ".BLF",
@@ -455,6 +491,8 @@ export interface Firmware {
   uploadedAt: string;
   /** Pinned for its vendor and model glob. */
   pinned: boolean;
+  /** The pin's daily upgrade hour (Grandstream), null for any time. */
+  upgradeHour?: number | null;
 }
 
 /** One firmware pin: the version a vendor's model glob upgrades to. */
@@ -462,6 +500,77 @@ export interface FirmwarePin {
   vendor: string;
   modelGlob: string;
   firmwareId: Id;
+  /** Hour of the day, 0 to 23, a Grandstream phone upgrades in; omitted for any time. */
+  upgradeHour?: number;
+}
+
+/** A minimum (and documented recommended) firmware version for a vendor's model glob. */
+export interface FirmwareMinimum {
+  vendor: Vendor | string;
+  modelGlob: string;
+  /** "" when the rule only documents a recommended version. */
+  minVersion: string;
+  recommended: string;
+}
+
+export const listFirmwareMinimums = (signal?: AbortSignal) =>
+  list<FirmwareMinimum>("/api/v1/prov/firmware/minimums", signal);
+
+/** PUT /api/v1/prov/firmware/minimums: the full set of rules, replacing what is stored. */
+export const setFirmwareMinimums = (rules: FirmwareMinimum[]) =>
+  request<void>("PUT", "/api/v1/prov/firmware/minimums", { body: rules });
+
+/** Compares dotted firmware versions part by part; -1, 0 or 1. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.trim().split(".");
+  const pb = b.trim().split(".");
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? "0";
+    const y = pb[i] ?? "0";
+    if (/^\d+$/.test(x) && /^\d+$/.test(y)) {
+      const d = Number(x) - Number(y);
+      if (d !== 0) return d < 0 ? -1 : 1;
+    } else if (x !== y) {
+      return x < y ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+function globMatches(glob: string, text: string): boolean {
+  const re = glob
+    .replace(/[.+^${}()|\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  try {
+    return new RegExp(`^${re}$`).test(text);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The highest minimum of the rules a pin for modelGlob can reach (the rule's
+ * glob matches the pin's, or the other way round), "" for none. The server
+ * applies the same rule; this lets the page refuse before asking.
+ */
+export function minimumForPin(
+  rules: FirmwareMinimum[],
+  vendor: string,
+  modelGlob: string,
+): string {
+  let best = "";
+  for (const r of rules) {
+    if (r.vendor !== vendor || r.minVersion === "") continue;
+    const reach =
+      r.modelGlob === modelGlob ||
+      globMatches(r.modelGlob, modelGlob) ||
+      globMatches(modelGlob, r.modelGlob);
+    if (reach && (best === "" || compareVersions(r.minVersion, best) > 0)) {
+      best = r.minVersion;
+    }
+  }
+  return best;
 }
 
 /** The largest firmware file the server accepts (spec S-13). */

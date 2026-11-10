@@ -196,6 +196,9 @@ func (c *call) soloAnswer(phase, detail, what string) bool {
 	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", body)
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.NewHeader("Allow", allow))
+	for _, h := range c.sessionSolo(body) {
+		res.AppendHeader(h)
+	}
 	s.m.response(sip.StatusOK)
 	if err := c.dss.WriteResponse(res); err != nil {
 		if c.dss.LoadState() == sip.DialogStateEnded {
@@ -225,6 +228,7 @@ func (c *call) soloAnswer(phase, detail, what string) bool {
 		c.vmTag = tagParam(res.To())
 	}
 	c.mu.Unlock()
+	c.sessionArm()
 	if s.deps.HAState != nil {
 		// Replicated like a voicemail call: a taker re-INVITEs the caller
 		// onto its own relay and restarts the menu from its greeting.
@@ -346,6 +350,8 @@ func (c *call) ivrLeave(ctx context.Context, snap *snapshot.Snapshot, m snapshot
 		return c.ivrTimeCondition(ctx, snap, m, ex)
 	case snapshot.IVRMenuKind:
 		return d.Target, false
+	case snapshot.IVRDirectory:
+		return c.ivrDirectoryExit(ctx, snap, m)
 	case snapshot.IVRAnnouncement:
 		c.ivrAnnounce(ctx, snap, d.Target)
 		c.ivrHangup()
@@ -647,7 +653,12 @@ func (c *call) ivrPrompt(ctx context.Context, snap *snapshot.Snapshot, name stri
 // ivrPlay plays one announcement to the caller. With barge-in a key press
 // stops it and is returned. alive is false once the call has ended.
 func (c *call) ivrPlay(ctx context.Context, snap *snapshot.Snapshot, name string, barge bool) (digit byte, hit, alive bool) {
-	a := c.ivrPrompt(ctx, snap, name)
+	return c.ivrPlayAudio(ctx, c.ivrPrompt(ctx, snap, name), name, barge)
+}
+
+// ivrPlayAudio plays decoded audio like ivrPlay; label names it in logs.
+func (c *call) ivrPlayAudio(ctx context.Context, a ivrAudio, label string, barge bool) (digit byte, hit, alive bool) {
+	name := label
 	if len(a.pcm) == 0 {
 		return 0, false, ctx.Err() == nil
 	}
@@ -979,6 +990,10 @@ func (c *call) ivrRing(ctx context.Context, forks []ivrFork, hunt bool, total ti
 				continue
 			}
 			switch ev.kind {
+			case evRinging:
+				// The extension is ringing for an IVR destination, a queue
+				// agent or a ring group reached through a menu.
+				c.noteRinging(ev.leg.binding.Extension)
 			case evAnswered:
 				return ev.leg, false
 			case evFailed:
@@ -1050,10 +1065,17 @@ func (c *call) ivrConnect(w *leg, ext string) ivrResult {
 	c.haSolo, c.haPhase, c.haDetail = false, "", ""
 	c.mu.Unlock()
 	st.active.Store(false)
+	// The bridged call keeps the caller's timer (set when the application
+	// answered) and gets the destination's, with the media watch.
+	c.sessionBridgedTo(w, bres)
 	c.ivrFinishSetup()
 	c.addTrace("IVR: caller connected to " + orDefault(ext, "the destination"))
 	c.s.m.IVRTotal.WithLabelValues("connected").Inc()
 	c.publish()
+	// The extension that answered (a queue agent, a group member or the
+	// dialled extension) and the caller get call.answered; the destination
+	// may be a trunk, which has no extension.
+	c.noteAnswered(w.binding.Extension)
 	if snap := c.s.deps.Snapshots.Current(); snap != nil && ext != "" {
 		c.s.publishDeviceState(c.s.devicesOf(snap, ext), ext, StateOnCall)
 		if e, ok := snap.Extension(ext); ok && e.RecordDefault {
@@ -1338,10 +1360,18 @@ func (c *call) offerSDP() []byte {
 	if c.inv != nil {
 		return c.inv.Body()
 	}
-	if hom := c.homed(); hom != nil && hom.legs[0] != nil {
-		hom.legs[0].mu.Lock()
-		defer hom.legs[0].mu.Unlock()
-		return []byte(hom.legs[0].remoteSDP)
+	c.mu.Lock()
+	cbOffer := c.cbOffer
+	c.mu.Unlock()
+	if cbOffer != nil {
+		return cbOffer // a callback's own offer to the caller it rings (queue_callback.go)
+	}
+	if hom := c.homed(); hom != nil {
+		if l := hom.leg(false); l != nil {
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			return []byte(l.remoteSDP)
+		}
 	}
 	return nil
 }
@@ -1351,12 +1381,13 @@ func (c *call) offerSDP() []byte {
 // device name, so the caller's replicated contact stands in for it.
 func (c *call) isCallerContact(b livestate.Binding) bool {
 	hom := c.homed()
-	if hom == nil || hom.legs[0] == nil {
+	if hom == nil || hom.leg(false) == nil {
 		return false
 	}
-	hom.legs[0].mu.Lock()
-	target := trimAngle(hom.legs[0].remoteTarget)
-	hom.legs[0].mu.Unlock()
+	l := hom.leg(false)
+	l.mu.Lock()
+	target := trimAngle(l.remoteTarget)
+	l.mu.Unlock()
 	return target != "" && trimAngle(b.ContactURI) == target
 }
 
@@ -1399,8 +1430,6 @@ func (c *call) ivrHomeCallee(hom *homedCall, w *leg) bool {
 	if l == nil {
 		return false
 	}
-	c.mu.Lock()
-	hom.legs[1] = l
-	c.mu.Unlock()
+	hom.setCallee(l)
 	return true
 }

@@ -42,6 +42,8 @@ function setup(extra: Parameters<typeof mockApi>[0] = {}) {
     ...ME,
     "GET /api/v1/extensions": () => json({ items: [EXT100, EXT200] }),
     "GET /api/v1/ring-groups": () => json({ items: [] }),
+    "GET /api/v1/announcements": () =>
+      json({ items: [{ id: 1, name: "closed" }] }),
     ...extra,
   });
 }
@@ -110,6 +112,8 @@ describe("RingGroups", () => {
         failureTarget: "+97142000100",
         mohClassId: null,
         mohRingback: false,
+        ringTag: "",
+        isDoor: false,
         members: [
           {
             extensionId: 1,
@@ -120,6 +124,35 @@ describe("RingGroups", () => {
         ],
       },
     });
+  });
+
+  it("marks a group as the Door group and sends isDoor", async () => {
+    const calls = setup({
+      "POST /api/v1/ring-groups": () =>
+        json(
+          { ...GROUP, id: 7, name: "Door", ringTag: "doorbell", isDoor: true },
+          201,
+        ),
+    });
+    renderApp("/ring-groups");
+    const [create] = await screen.findAllByRole("button", {
+      name: "New ring group",
+    });
+    await waitFor(() => expect(create).toBeEnabled());
+    fireEvent.click(create!);
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Door" },
+    });
+    const pick = await screen.findByLabelText("Add member");
+    await waitFor(() => expect(pick).toBeEnabled());
+    fireEvent.change(pick, { target: { value: "ext:1" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
+    fireEvent.click(screen.getByRole("switch", { name: /Door group/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Create group" }));
+
+    expect(await screen.findByText("Ring group Door created.")).toBeVisible();
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.body).toMatchObject({ name: "Door", isDoor: true });
   });
 
   it.each([
@@ -134,6 +167,12 @@ describe("RingGroups", () => {
       label: "Ring group",
       choose: "Sales",
       card: "Ring group Sales",
+    },
+    {
+      kind: "announcement",
+      label: "Announcement",
+      choose: "closed",
+      card: "Announcement closed",
     },
   ])(
     "offers $kind as the failure destination and sends the chosen target",

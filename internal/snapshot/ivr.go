@@ -23,6 +23,9 @@ const (
 	IVRQueue        = "queue"
 	// IVRTimeCondition names a time condition (migration 00034).
 	IVRTimeCondition = "time_condition"
+	// IVRDirectory is the dial-by-name directory (migration 00048); it has
+	// no target.
+	IVRDirectory = "directory"
 )
 
 // IVRDest is where a menu option, timeout or invalid choice sends the call.
@@ -41,6 +44,7 @@ type IVRMenu struct {
 	Greeting, InvalidPrompt, TimeoutPrompt   string
 	DigitTimeout, InterDigitTimeout, Retries int
 	AllowDirectDial                          bool
+	PromptLanguage                           string // "" inherits the deployment language
 	Timeout, Invalid                         IVRDest
 	Options                                  map[string]IVRDest
 }
@@ -106,7 +110,7 @@ func (s *Snapshot) ExtensionPrefix(digits string) (exact, longer bool) {
 func loadIVRMenus(ctx context.Context, db Querier) ([]IVRMenu, error) {
 	rows, err := db.Query(ctx, `SELECT m.id, m.name, m.number, m.enabled, g.name, COALESCE(i.name, ''), COALESCE(t.name, ''),
 		m.digit_timeout, m.inter_digit_timeout, m.max_retries, m.allow_direct_dial,
-		m.timeout_kind, m.timeout_target, m.invalid_kind, m.invalid_target
+		m.timeout_kind, m.timeout_target, m.invalid_kind, m.invalid_target, COALESCE(m.prompt_language, '')
 		FROM ivr_menus m
 		JOIN announcements g ON g.id = m.greeting_id
 		LEFT JOIN announcements i ON i.id = m.invalid_prompt_id
@@ -120,7 +124,7 @@ func loadIVRMenus(ctx context.Context, db Querier) ([]IVRMenu, error) {
 		m := IVRMenu{Options: map[string]IVRDest{}}
 		if err := rows.Scan(&m.ID, &m.Name, &m.Number, &m.Enabled, &m.Greeting, &m.InvalidPrompt, &m.TimeoutPrompt,
 			&m.DigitTimeout, &m.InterDigitTimeout, &m.Retries, &m.AllowDirectDial,
-			&m.Timeout.Kind, &m.Timeout.Target, &m.Invalid.Kind, &m.Invalid.Target); err != nil {
+			&m.Timeout.Kind, &m.Timeout.Target, &m.Invalid.Kind, &m.Invalid.Target, &m.PromptLanguage); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan ivr menu: %w", err)
 		}
