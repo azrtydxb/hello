@@ -355,3 +355,33 @@ func encodeSnom(b *bytes.Buffer, recs []record, maxName int) {
 func encodeFanvil(b *bytes.Buffer, recs []record, maxName int) {
 	encodeFlat(b, "IPPhoneDirectory", recs, maxName)
 }
+
+// Contact is one directory record in the order the XML directories list
+// them, for the LDAP directory (spec pbx-gaps S-25).
+type Contact struct {
+	First   string             `json:"f,omitempty"`
+	Last    string             `json:"l,omitempty"`
+	Company string             `json:"c,omitempty"`
+	Numbers []phonebook.Number `json:"n"`
+}
+
+// Contacts merges books like RenderBooks does and returns the records in
+// the same order and with the same name fallback (an entry with no person
+// name is listed under its company), with no vendor capacity or name limit.
+func Contacts(books []Book) []Contact {
+	entries := Merge(books)
+	recs := make([]record, 0, len(entries))
+	for _, e := range entries {
+		r := record{first: clean(e.FirstName), last: clean(e.LastName), company: clean(e.Company), numbers: cleanNumbers(e.Numbers)}
+		if r.first == "" && r.last == "" {
+			r.last, r.company = r.company, ""
+		}
+		recs = append(recs, r)
+	}
+	sort.SliceStable(recs, func(i, j int) bool { return less(recs[i], recs[j]) })
+	out := make([]Contact, len(recs))
+	for i, r := range recs {
+		out[i] = Contact{First: r.first, Last: r.last, Company: r.company, Numbers: r.numbers}
+	}
+	return out
+}
