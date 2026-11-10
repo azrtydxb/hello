@@ -749,6 +749,11 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 		if c.BLF != nil {
 			b, _ := json.Marshal(nonNil(*c.BLF))
 			blfArg = string(b)
+			// hello-sip serves a phone's BLF keys as a resource list
+			// (S-35), so a changed list reaches it with the revision.
+			if !slices.Equal(nonNil(*c.BLF), nonNil(cur.BLF)) {
+				bumped = true
+			}
 		}
 		setTpl, tplArg := c.TemplateID != nil, any(nil)
 		if tpl != nil {

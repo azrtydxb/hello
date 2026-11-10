@@ -1875,6 +1875,34 @@ Implementation notes (template route, no migration):
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
 
+## Presence extensions (item 34, S-35)
+
+- Resource list URI: `sip:blf-<device username>@<domain>`. Its members are the BLF keys of the phone bound to that device (`phones.blf`), loaded into the snapshot (`WithBLFLists`); only that device may subscribe (`403` otherwise), and the phone must send `Supported: eventlist` (`421` with `Require: eventlist`). Editing a phone's BLF keys now bumps the configuration revision so the list reaches hello-sip. No migration.
+- Datagram limit: sipgo refuses UDP packets over 1300 bytes, so a list is one full-state NOTIFY plus partial ones (RFC 4662 `fullState="false"`), and a change sends only the changed resource. At about 600 body bytes a resource, that is one resource per NOTIFY. TCP/TLS toward Kamailio (#258) would allow bigger chunks; the budget constant stays until then.
+- PUBLISH event state lives in Valkey (`hello:pubpres:<ext>:<etag>`, the publication's lifetime as TTL), so both hello-sip nodes serve, refresh and remove it. Nodes learn of the other node's PUBLISH and REGISTER by a 5 s poll of the shared state (`presencePollInterval`), plus an immediate NOTIFY for changes handled locally. Kamailio needs no change: PUBLISH and SUBSCRIBE already go to any Hello node.
+- Several publications per extension are allowed (a desk phone and a softphone); the extension is "open" if any is open, the newest note wins. With none, it is "open" while a device is registered.
+- Grandstream keys, checked against Grandstream's own configuration templates
+  (config-template-10212026.zip, 2026-11-09 review). `P188` "PUBLISH for
+  Presence" (0 Disabled, 1 Enabled, default 0; account 2 `P488`, account 3
+  `P588` in the WP8x6) and `P2319` "SUBSCRIBE for Registration" (0 No, 1 Yes,
+  default 0; account 2 `P2419`, account 3 `P2519`) are in `wp8x6_config_1.0.3.39`
+  and `wp810_822_825_config_1.0.11.83` (confirmed), and in neither
+  `wp820_config_1.0.7.90` nor `wp856_config_1.0.3.16`. The spec keeps both off for
+  the WP phones [R8x6 section 4], so the template now writes `P188 = 0` and
+  `P2319 = 0` for the WP8x6 and WP810/822/825 (a phone someone switched on goes
+  back); a test asserts the rendered keys and that the WP820 and WP856, whose
+  templates lack them, get none. No WP template has an Eventlist BLF URI, a
+  Presence Eventlist URI or a PUBLISH-for-presence list key: not in the
+  templates, so `.Line.BLFListURI` is not written to a WP. The key exists only in
+  the GRP templates (`grp26xx_config_1.0.15.23`: `P134` Eventlist BLF URI,
+  `P26084` Presence Eventlist URI, `P2389` Auto Provision Eventlists, 0
+  Disabled, 1 BLF Eventlist, 2 Presence Eventlist; account 2 `P444`, `P26184`,
+  `P2489`); Hello's non-WP Grandstream BLF block writes per-key subscriptions
+  (`P323` and on), so switching to the list is a hardware decision and is not
+  written. Yealink, Snom, Fanvil and Poly keys were not in scope and stay unwritten.
+- The spec lists no UI or REST fields for S-35, so none were added.
+- PUBLISH for events other than presence answers `489`; `vq-rtcpxr` (S-36, item 35) is not served here.
+
 ## Kamailio HA: the VIP ships off, go-live is a separate step (2026-11-09)
 
 The user's deploy constraint: the PRs of kamailio-ha get merged ready, but the

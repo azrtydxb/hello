@@ -149,6 +149,10 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 	}
 	d.Prov.CACertBase64 = pemBase64(d.Prov.CACertPEM)
 	d.BLF = PlaceBLF(d.Phone.Vendor, d.Phone.Model, d.BLF, d.Codes.PickupDirected)
+	d.Line.BLFListURI = ""
+	if len(d.BLF) > 0 && d.Line.Username != "" {
+		d.Line.BLFListURI = "sip:blf-" + d.Line.Username + "@" + d.Line.Domain
+	}
 	d.VMKey = nil
 	if !d.Line.NoVoicemail {
 		d.VMKey = PlaceVMKey(d.Phone.Vendor, d.Phone.Model, len(d.BLF), d.Line.VoicemailCode, d.Line.Label, d.Line.Domain)
