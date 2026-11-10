@@ -85,7 +85,6 @@ func loadTrunks(ctx context.Context, db Querier, box *secret.Box, log *slog.Logg
 		)
 		if err := rows.Scan(&t.ID, &t.Name, &t.Mode, &t.Username, &sealed, &t.Realm, &t.FromDomain, &reg,
 			&opts, &t.SourceCIDRs, &maxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging,
-			&opts, &t.SourceCIDRs, &maxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging,
 			&t.AnonymousPolicy, &t.AssertedIdentity, &t.IdentityHeader, &t.CallerPolicy.RejectAnonymous, &t.CallerPolicy.AllowedCountryCodes, &t.CallerPolicy.UnknownCallerAction,
 			&rejectCode, &t.SessionTimers); err != nil {
 			return fmt.Errorf("snapshot: scan trunk: %w", err)
