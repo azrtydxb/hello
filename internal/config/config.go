@@ -108,6 +108,30 @@ type Control struct {
 	AIAgent AIAgent
 	// Syslog is the phone syslog sink (HELLO_SYSLOG_*).
 	Syslog Syslog
+	// Chat is the LAN chat widget listener (HELLO_MSG_CHAT_*).
+	Chat Chat
+}
+
+// Chat configures the LAN chat widget (spec messaging-channels M-28). The
+// listener serves only /chat/* and /healthz, and starts only when LANAddr is
+// set.
+type Chat struct {
+	// LANAddr (HELLO_MSG_CHAT_LAN_ADDR, default off) is where the listener
+	// binds, for example :8087.
+	LANAddr string
+	// Enabled (HELLO_MSG_CHAT_ENABLED, default true) is the global kill
+	// switch: false answers every /chat request with 503.
+	Enabled bool
+	// TrustedProxies (HELLO_MSG_CHAT_TRUSTED_PROXIES) may set
+	// X-Forwarded-For; without them every visitor behind the ingress shares
+	// its address and its limits.
+	TrustedProxies []netip.Prefix
+	// MaxInFlight (HELLO_MSG_CHAT_MAX_INFLIGHT, default 500) is the requests
+	// in flight per pod before the listener answers 503.
+	MaxInFlight int
+	// MaxStreams (HELLO_MSG_CHAT_MAX_STREAMS, default 2000) is the open
+	// visitor event streams per pod.
+	MaxStreams int
 }
 
 // Syslog configures the phone syslog sink (phone-feature-parity S-27). It is
@@ -547,7 +571,28 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	c.AI = r.ai()
 	c.AIAgent = r.aiAgent()
 	c.Syslog = r.syslog()
+	c.Chat = r.chat()
 	return c, r.err()
+}
+
+// chat reads the HELLO_MSG_CHAT_* settings.
+func (r *reader) chat() Chat {
+	c := Chat{
+		LANAddr:        r.getenv("HELLO_MSG_CHAT_LAN_ADDR"),
+		Enabled:        true,
+		TrustedProxies: r.prefixes("HELLO_MSG_CHAT_TRUSTED_PROXIES"),
+		MaxInFlight:    r.positiveInt("HELLO_MSG_CHAT_MAX_INFLIGHT", 500),
+		MaxStreams:     r.positiveInt("HELLO_MSG_CHAT_MAX_STREAMS", 2000),
+	}
+	switch r.getenv("HELLO_MSG_CHAT_ENABLED") {
+	case "", "true":
+	case "false":
+		c.Enabled = false
+	default:
+		r.fail("HELLO_MSG_CHAT_ENABLED", errors.New("must be true or false"))
+	}
+	r.hostPort("HELLO_MSG_CHAT_LAN_ADDR", c.LANAddr)
+	return c
 }
 
 // ai reads HELLO_PUBLIC_URL, HELLO_OAUTH_* and HELLO_MCP_ALLOWED_ORIGINS.

@@ -65,6 +65,9 @@ type Conversation struct {
 	FirstResponseAt *time.Time `json:"firstResponseAt"`
 	ResolvedAt      *time.Time `json:"resolvedAt"`
 	CreatedAt       time.Time  `json:"createdAt"`
+	// Chat is what an agent sees of a chat visitor; nil for any other
+	// conversation. Set when one conversation is read.
+	Chat *ChatInfo `json:"chat"`
 }
 
 // ConvMessage is one line of a conversation.
@@ -234,6 +237,11 @@ func (s *Store) GetConversation(ctx context.Context, acc InboxAccess, id int64) 
 		return c, mapErr(err)
 	}
 	s.auditSupervisorView(ctx, acc, c)
+	if c.ChannelKind == messaging.KindWebchat {
+		if c.Chat, err = s.chatInfo(ctx, c.ID); err != nil {
+			return c, err
+		}
+	}
 	return c, nil
 }
 
@@ -437,6 +445,18 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 			FROM msg_channels ch JOIN msg_addresses a ON a.channel_id = ch.id WHERE ch.id = $1 AND a.id = $2`,
 			c.ChannelID, c.AddressID).Scan(&provider, &kind, &chEnabled, &trunk, &address, &adEnabled); err != nil {
 			return err
+		}
+		if provider == messaging.ProviderChat {
+			// A live chat has no carrier: the reply is stored and the
+			// visitor's stream carries it.
+			m, err := s.chatAgentReply(ctx, tx, c, acc, in, chEnabled && adEnabled)
+			if err != nil {
+				return err
+			}
+			msg, created = m, true
+			sinkEvent = &messaging.Event{Type: "message.sent", ConversationID: c.ID, MessageID: m.ID, ChannelKind: kind,
+				Direction: messaging.DirOut, Status: m.Status}
+			return nil
 		}
 		if !chEnabled || !adEnabled || provider != messaging.ProviderSIPTrunk || !trunk.Valid {
 			return ErrChannelUnavailable
@@ -703,6 +723,9 @@ func (s *Store) SetConversationStatus(ctx context.Context, acc InboxAccess, conv
 		}
 		if status == messaging.StatusResolved {
 			ev = &messaging.Event{Type: "conversation.resolved", ConversationID: c.ID, Status: status}
+			if err := chatEvent(ctx, tx, c.ID, 0, "closed"); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -747,7 +770,11 @@ func (s *Store) MarkConversationRead(ctx context.Context, acc InboxAccess, convI
 			ON CONFLICT (user_id, conversation_id) DO UPDATE
 				SET last_read_message_id = GREATEST(conversation_reads.last_read_message_id, EXCLUDED.last_read_message_id), at = now()`,
 			acc.UserID, c.ID)
-		return err
+		if err != nil {
+			return err
+		}
+		// A chat visitor is shown their messages as read.
+		return chatEvent(ctx, tx, c.ID, 0, "read")
 	})
 }
 

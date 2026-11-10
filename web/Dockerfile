@@ -20,6 +20,7 @@ FROM nginxinc/nginx-unprivileged:alpine
 # search domains, so on Kubernetes HELLO_CONTROL_UPSTREAM must be the Service
 # FQDN (hello-control.<namespace>.svc.cluster.local).
 ENV HELLO_CONTROL_UPSTREAM=http://hello-control-1:8081 \
+    HELLO_CHAT_UPSTREAM=http://hello-control-1:8087 \
     HELLO_DNS_RESOLVER=127.0.0.11 \
     NGINX_ENVSUBST_FILTER=^HELLO_
 COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template

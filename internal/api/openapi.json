@@ -16034,6 +16034,685 @@
         }
       }
     },
+    "/api/v1/messaging/chat/sites": {
+      "get": {
+        "operationId": "listChatSites",
+        "summary": "List chat sites",
+        "description": "Lists the sites of the LAN chat widget with their settings and what deserves a second look. The Turnstile secret is never returned.",
+        "tags": ["messaging"],
+        "responses": {
+          "200": {
+            "description": "The sites",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSiteList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      },
+      "post": {
+        "operationId": "createChatSite",
+        "summary": "Add a chat site",
+        "description": "Adds a site: a channel of kind webchat with one address, and the widget's settings. The response carries the public site key the embed code names. Every setting has a default, so only the name is required.",
+        "tags": ["messaging"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatSiteInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSite"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/messaging/chat/sites/{id}": {
+      "get": {
+        "operationId": "getChatSite",
+        "summary": "One chat site",
+        "description": "Returns one chat site by id.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSite"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      },
+      "put": {
+        "operationId": "updateChatSite",
+        "summary": "Change a chat site",
+        "description": "Changes the settings a body names and keeps the rest; the site key never changes. Turning the site off stops new sessions and messages at once.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatSiteInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSite"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteChatSite",
+        "summary": "Delete a chat site",
+        "description": "Deletes a site that has no conversations, with its channel and address. A site with history is refused with 409: retention or an erase request removes the conversations first.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/messaging/chat/sites/{id}/blocks": {
+      "get": {
+        "operationId": "listChatBlocks",
+        "summary": "List a site's visitor blocks",
+        "description": "Lists the blocks of a site that still hold, newest first. A block names a visitor, and a block by the day's address hash lasts at most until 00:00 UTC.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The blocks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatBlockList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/messaging/chat/blocks/{id}": {
+      "delete": {
+        "operationId": "deleteChatBlock",
+        "summary": "Lift a visitor block",
+        "description": "Lifts one block, so the visitor or the address can chat again.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Lifted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/block": {
+      "post": {
+        "operationId": "blockChatVisitor",
+        "summary": "Block a chat visitor",
+        "description": "Blocks the visitor of a website chat for the hours given (24 by default, at most 720) and resolves the conversation. The block also covers their network address for the rest of the UTC day. The visitor is not told: they get a normal-looking closed chat.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatBlockInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The block",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatBlock"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/email-reply": {
+      "post": {
+        "operationId": "emailChatReply",
+        "summary": "Answer an offline chat by email",
+        "description": "Answers a chat that was left while nobody was available: the text is emailed to the address the visitor gave, with no link, and kept in the conversation, and the visitor sees it in the widget when they return. A retried client id sends nothing again. Needs email to be configured.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatEmailInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The earlier reply of this client id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The reply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/typing": {
+      "post": {
+        "operationId": "typeInChat",
+        "summary": "Show that an agent is typing",
+        "description": "Tells the visitor of a website chat that an agent is typing; at most one signal every three seconds reaches them. Anything but a website chat is refused with 409.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Signalled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/block": {
+      "post": {
+        "operationId": "blockChatVisitorMine",
+        "summary": "Block a chat visitor",
+        "description": "Blocks the visitor of a website chat for the hours given (24 by default, at most 720) and resolves the conversation. The block also covers their network address for the rest of the UTC day. The visitor is not told: they get a normal-looking closed chat.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatBlockInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The block",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatBlock"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/email-reply": {
+      "post": {
+        "operationId": "emailChatReplyMine",
+        "summary": "Answer an offline chat by email",
+        "description": "Answers a chat that was left while nobody was available: the text is emailed to the address the visitor gave, with no link, and kept in the conversation, and the visitor sees it in the widget when they return. A retried client id sends nothing again. Needs email to be configured.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatEmailInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The earlier reply of this client id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The reply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/typing": {
+      "post": {
+        "operationId": "typeInChatMine",
+        "summary": "Show that an agent is typing",
+        "description": "Tells the visitor of a website chat that an agent is typing; at most one signal every three seconds reaches them. Anything but a website chat is refused with 409.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Signalled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
     "/api/v1/inbox/stats": {
       "get": {
         "operationId": "getInboxStats",
@@ -34152,7 +34831,8 @@
           "lastInboundAt",
           "firstResponseAt",
           "resolvedAt",
-          "createdAt"
+          "createdAt",
+          "chat"
         ],
         "properties": {
           "id": {
@@ -34248,6 +34928,9 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "chat": {
+            "$ref": "#/components/schemas/ChatInfo"
           }
         }
       },
@@ -34523,9 +35206,412 @@
           }
         }
       },
+      "ChatHours": {
+        "type": "object",
+        "description": "A weekly schedule; empty means always open.",
+        "required": ["zone", "days"],
+        "additionalProperties": false,
+        "properties": {
+          "zone": {
+            "type": "string",
+            "description": "An IANA time zone such as Europe/Brussels; required when there are windows."
+          },
+          "days": {
+            "type": "array",
+            "maxItems": 28,
+            "description": "The opening windows.",
+            "items": {
+              "type": "object",
+              "required": ["day", "from", "to"],
+              "additionalProperties": false,
+              "properties": {
+                "day": {
+                  "type": "integer",
+                  "description": "0 is Sunday, 6 is Saturday.",
+                  "minimum": 0,
+                  "maximum": 6
+                },
+                "from": {
+                  "type": "string",
+                  "description": "Opening time, HH:MM."
+                },
+                "to": {
+                  "type": "string",
+                  "description": "Closing time, HH:MM, after the opening time."
+                }
+              }
+            }
+          }
+        }
+      },
+      "ChatSite": {
+        "type": "object",
+        "required": [
+          "id",
+          "channelId",
+          "addressId",
+          "name",
+          "enabled",
+          "siteKey",
+          "allowedOrigins",
+          "greeting",
+          "accent",
+          "position",
+          "collect",
+          "hours",
+          "offlineMode",
+          "privacyUrl",
+          "challenge",
+          "powBits",
+          "turnstileSiteKey",
+          "hasTurnstileSecret",
+          "stripLinks",
+          "maxOpenUnassigned",
+          "transcripts",
+          "retentionDays",
+          "conversations",
+          "createdAt",
+          "updatedAt",
+          "warnings"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The site's id.",
+            "format": "int64"
+          },
+          "channelId": {
+            "type": "integer",
+            "description": "The channel of kind webchat the site is.",
+            "format": "int64"
+          },
+          "addressId": {
+            "type": "integer",
+            "description": "The channel's one address, named by the site key.",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "description": "The site's name, shown in the widget's header and the inbox."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "The site's kill switch: off stops new sessions and messages at once."
+          },
+          "siteKey": {
+            "type": "string",
+            "description": "The public site key the embed code names: 96 random bits in hex, not a secret."
+          },
+          "allowedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The LAN origins that may frame the widget (frame-ancestors); none means no page can embed it yet."
+          },
+          "greeting": {
+            "type": "string",
+            "description": "The line the widget opens with."
+          },
+          "accent": {
+            "type": "string",
+            "description": "The widget's accent colour, #rrggbb."
+          },
+          "position": {
+            "type": "string",
+            "enum": ["left", "right"],
+            "description": "Which corner the widget sits in."
+          },
+          "collect": {
+            "type": "string",
+            "enum": ["off", "optional", "required"],
+            "description": "Whether the widget asks for a name and an email address before the first message."
+          },
+          "hours": {
+            "$ref": "#/components/schemas/ChatHours"
+          },
+          "offlineMode": {
+            "type": "string",
+            "enum": ["collect", "hidden"],
+            "description": "Outside the hours or with nobody available: collect a message and an email address, or hide the widget."
+          },
+          "privacyUrl": {
+            "type": "string",
+            "description": "The site's privacy policy, linked from the widget; empty for none."
+          },
+          "challenge": {
+            "type": "string",
+            "enum": ["pow", "turnstile", "none"],
+            "description": "What a new visitor must solve to open a session: a proof of work (default), a Cloudflare Turnstile check with the customer's own keys, or nothing."
+          },
+          "powBits": {
+            "type": "integer",
+            "description": "The proof of work's difficulty in bits, 14 to 22; it rises by one level for 15 minutes while a site is flooded."
+          },
+          "turnstileSiteKey": {
+            "type": "string",
+            "description": "The customer's Turnstile site key (public)."
+          },
+          "hasTurnstileSecret": {
+            "type": "boolean",
+            "description": "Whether a Turnstile secret key is stored; the key itself is never returned."
+          },
+          "stripLinks": {
+            "type": "boolean",
+            "description": "Whether links in a visitor's message are replaced by [link removed]."
+          },
+          "maxOpenUnassigned": {
+            "type": "integer",
+            "description": "How many live chats may wait unassigned before the widget switches to offline mode."
+          },
+          "transcripts": {
+            "type": "boolean",
+            "description": "Whether a visitor may email themselves a transcript at the end of a chat."
+          },
+          "retentionDays": {
+            "type": ["integer", "null"],
+            "description": "Days a finished chat is kept; null follows the messaging settings."
+          },
+          "conversations": {
+            "type": "integer",
+            "description": "How many conversations the site has."
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "When the site was added.",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "When the site last changed.",
+            "format": "date-time"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Settings that work but deserve a second look: a public-looking origin, no challenge, Turnstile on an isolated LAN."
+          }
+        }
+      },
+      "ChatSiteList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatSite"
+            }
+          }
+        }
+      },
+      "ChatSiteInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The site's name, 1 to 100 printable characters; required when creating."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "The site's kill switch: off stops new sessions and messages at once. Left as it is when omitted."
+          },
+          "allowedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The LAN origins that may frame the widget (frame-ancestors); none means no page can embed it yet. Left as it is when omitted."
+          },
+          "greeting": {
+            "type": "string",
+            "description": "The line the widget opens with. Left as it is when omitted."
+          },
+          "accent": {
+            "type": "string",
+            "description": "The widget's accent colour, #rrggbb. Left as it is when omitted."
+          },
+          "position": {
+            "type": "string",
+            "enum": ["left", "right"],
+            "description": "Which corner the widget sits in. Left as it is when omitted."
+          },
+          "collect": {
+            "type": "string",
+            "enum": ["off", "optional", "required"],
+            "description": "Whether the widget asks for a name and an email address before the first message. Left as it is when omitted."
+          },
+          "hours": {
+            "$ref": "#/components/schemas/ChatHours"
+          },
+          "offlineMode": {
+            "type": "string",
+            "enum": ["collect", "hidden"],
+            "description": "Outside the hours or with nobody available: collect a message and an email address, or hide the widget. Left as it is when omitted."
+          },
+          "privacyUrl": {
+            "type": "string",
+            "description": "The site's privacy policy, linked from the widget; empty for none. Left as it is when omitted."
+          },
+          "challenge": {
+            "type": "string",
+            "enum": ["pow", "turnstile", "none"],
+            "description": "What a new visitor must solve to open a session: a proof of work (default), a Cloudflare Turnstile check with the customer's own keys, or nothing. Left as it is when omitted."
+          },
+          "powBits": {
+            "type": "integer",
+            "description": "The proof of work's difficulty in bits, 14 to 22; it rises by one level for 15 minutes while a site is flooded. Left as it is when omitted."
+          },
+          "turnstileSiteKey": {
+            "type": "string",
+            "description": "The customer's Turnstile site key (public). Left as it is when omitted."
+          },
+          "stripLinks": {
+            "type": "boolean",
+            "description": "Whether links in a visitor's message are replaced by [link removed]. Left as it is when omitted."
+          },
+          "maxOpenUnassigned": {
+            "type": "integer",
+            "description": "How many live chats may wait unassigned before the widget switches to offline mode. Left as it is when omitted."
+          },
+          "transcripts": {
+            "type": "boolean",
+            "description": "Whether a visitor may email themselves a transcript at the end of a chat. Left as it is when omitted."
+          },
+          "turnstileSecret": {
+            "type": "string",
+            "description": "The customer's Turnstile secret key, sealed when stored and never returned; omitted keeps the stored one, an empty string removes it. Needed for the turnstile challenge.",
+            "maxLength": 200
+          },
+          "retentionDays": {
+            "type": "integer",
+            "description": "Days a finished chat is kept, 1 to 3650; 0 follows the messaging settings.",
+            "minimum": 0,
+            "maximum": 3650
+          }
+        }
+      },
+      "ChatBlock": {
+        "type": "object",
+        "required": ["id", "siteId", "visitorId", "byIp", "until", "createdAt"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The block's id.",
+            "format": "int64"
+          },
+          "siteId": {
+            "type": "integer",
+            "description": "The site it applies to.",
+            "format": "int64"
+          },
+          "visitorId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The visitor blocked; null for a block by address hash alone."
+          },
+          "byIp": {
+            "type": "boolean",
+            "description": "Whether the day's address hash is blocked too; it stops matching at 00:00 UTC."
+          },
+          "until": {
+            "type": "string",
+            "description": "When the block lapses.",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "When it was made.",
+            "format": "date-time"
+          }
+        }
+      },
+      "ChatBlockList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatBlock"
+            }
+          }
+        }
+      },
+      "ChatBlockInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "hours": {
+            "type": "integer",
+            "description": "How long the block holds, 1 to 720 hours; 24 when omitted.",
+            "minimum": 1,
+            "maximum": 720
+          }
+        }
+      },
+      "ChatEmailInput": {
+        "type": "object",
+        "required": ["body"],
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "The reply, 1 to 2000 bytes of text.",
+            "maxLength": 2000
+          },
+          "clientMsgId": {
+            "type": "string",
+            "description": "A client-chosen id, at most 64 printable characters; a retry with the same id sends nothing again.",
+            "maxLength": 64
+          }
+        }
+      },
+      "ChatInfo": {
+        "type": ["object", "null"],
+        "description": "What an agent sees of a chat visitor; null for a conversation that is not a website chat.",
+        "required": [
+          "siteId",
+          "offline",
+          "email",
+          "page",
+          "browser",
+          "blocked"
+        ],
+        "properties": {
+          "siteId": {
+            "type": "integer",
+            "description": "The chat site.",
+            "format": "int64"
+          },
+          "offline": {
+            "type": "boolean",
+            "description": "The chat was left while nobody was available."
+          },
+          "email": {
+            "type": "string",
+            "description": "The address the visitor gave, empty for none."
+          },
+          "page": {
+            "type": "string",
+            "description": "Hostname and path of the page the chat started on."
+          },
+          "browser": {
+            "type": "string",
+            "description": "A coarse browser family, nothing more."
+          },
+          "blocked": {
+            "type": "boolean",
+            "description": "Whether the visitor is blocked."
+          }
+        }
+      },
       "InboxStatus": {
         "type": "object",
-        "required": ["enabled", "unread", "unassigned"],
+        "required": ["enabled", "unread", "unassigned", "emailReply"],
         "properties": {
           "enabled": {
             "type": "boolean",
@@ -34538,6 +35624,10 @@
           "unassigned": {
             "type": "integer",
             "description": "Active conversations nobody has taken; counted for supervisors only."
+          },
+          "emailReply": {
+            "type": "boolean",
+            "description": "Whether email is configured, so an offline website chat can be answered by email."
           }
         }
       },

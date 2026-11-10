@@ -399,3 +399,248 @@ describe("Inbox", () => {
     ).toBe(true);
   });
 });
+
+describe("Inbox website chat", () => {
+  const chatConv = (over: Record<string, unknown> = {}) =>
+    conv({
+      channelKind: "webchat",
+      channelName: "Help desk",
+      address: "0123456789abcdef01234567",
+      peer: "visitor:12",
+      peerKind: "visitor",
+      peerName: "Vic",
+      peerNameSource: "visitor",
+      chat: {
+        siteId: 1,
+        offline: false,
+        email: "vic@example.com",
+        page: "intranet.lan/help",
+        browser: "firefox",
+        blocked: false,
+      },
+      ...over,
+    });
+
+  function chatInbox(
+    over: Record<string, unknown> = {},
+    more: Routes = {},
+    emailReply = true,
+    bodies: string[] = ["hello there"],
+  ) {
+    return inbox("operator", {
+      "GET /api/v1/me/inbox/status": () =>
+        json({ enabled: true, unread: 0, unassigned: 1, emailReply }),
+      "GET /api/v1/inbox/conversations?view=all": () =>
+        json({ items: [chatConv(over)], next: "" }),
+      "GET /api/v1/inbox/conversations/7": () => json(chatConv(over)),
+      "GET /api/v1/inbox/conversations/7/messages": () =>
+        json({
+          items: bodies.map((body, i) => msg({ id: i + 1, body })),
+          next: "",
+        }),
+      ...more,
+    });
+  }
+
+  async function openChat() {
+    renderApp("/inbox");
+    const list = await screen.findByRole("list", { name: "Conversations" });
+    fireEvent.click(await within(list).findByRole("button", { name: /Vic/ }));
+    return screen.findByRole("list", { name: "Messages" });
+  }
+
+  it("shows a visitor as a visitor, with what they gave", async () => {
+    chatInbox();
+    await openChat();
+    expect(
+      await screen.findByText("Website chat · Help desk"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("vic@example.com")).toBeInTheDocument();
+    expect(screen.getByText("intranet.lan/help")).toBeInTheDocument();
+    expect(screen.getByText("firefox")).toBeInTheDocument();
+    // A visitor has no number and a chat has no text-message count.
+    expect(screen.queryByText(/visitor:12/)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Reply to the customer"), {
+      target: { value: "Hi Vic" },
+    });
+    expect(screen.getByText("6 characters")).toBeInTheDocument();
+  });
+
+  it("renders a visitor's markup as text and asks before a link leaves Hello", async () => {
+    chatInbox({}, {}, true, [
+      '<img src=x onerror="document.title=1"> see https://example.com/page, thanks',
+    ]);
+    const thread = await openChat();
+    expect(thread.querySelector("img, script, b")).toBeNull();
+    const link = within(thread).getByRole("link", {
+      name: "https://example.com/page",
+    });
+    expect(link).toHaveAttribute("rel", "noopener noreferrer nofollow");
+    expect(link).toHaveAttribute("target", "_blank");
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    fireEvent.click(link);
+    // The first click on a host asks.
+    expect(
+      await screen.findByText("This link leaves Hello"),
+    ).toBeInTheDocument();
+    expect(open).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Open the link" }));
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith(
+        "https://example.com/page",
+        "_blank",
+        "noopener,noreferrer",
+      ),
+    );
+    // The same host again goes straight through.
+    fireEvent.click(link);
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("This link leaves Hello")).toBeNull();
+  });
+
+  it("never makes a link of a script address", async () => {
+    chatInbox({}, {}, true, ["click javascript:alert(1) or data:text/html,x"]);
+    const thread = await openChat();
+    expect(within(thread).queryByRole("link")).toBeNull();
+  });
+
+  it("blocks a visitor after a confirmation", async () => {
+    const calls = chatInbox(
+      {},
+      {
+        "POST /api/v1/inbox/conversations/7/block": () =>
+          json({
+            id: 1,
+            siteId: 1,
+            visitorId: 12,
+            byIp: true,
+            until: STAMP,
+            createdAt: STAMP,
+          }),
+      },
+    );
+    await openChat();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Block visitor" }),
+    );
+    expect(await screen.findByText("Block this visitor?")).toBeInTheDocument();
+    expect(calls.some((c) => c.url.endsWith("/block"))).toBe(false);
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Block visitor" }),
+    );
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith("/block"))?.body).toEqual({}),
+    );
+  });
+
+  it("offers no block for a text conversation", async () => {
+    inbox("operator");
+    await open();
+    expect(screen.queryByRole("button", { name: "Block visitor" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reply by email" })).toBeNull();
+  });
+
+  it("answers an offline chat by email, once, when email is set up", async () => {
+    const offline = {
+      chat: {
+        siteId: 1,
+        offline: true,
+        email: "vic@example.com",
+        page: "",
+        browser: "",
+        blocked: false,
+      },
+    };
+    const calls = chatInbox(offline, {
+      "POST /api/v1/inbox/conversations/7/email-reply": () =>
+        json(
+          msg({
+            id: 9,
+            direction: "out",
+            senderKind: "user",
+            body: "Call you tomorrow",
+            status: "sent",
+          }),
+          201,
+        ),
+    });
+    await openChat();
+    expect(
+      await screen.findByText("Left while nobody was available"),
+    ).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "Reply by email" });
+    expect(button).toBeDisabled(); // nothing written yet
+    fireEvent.change(screen.getByLabelText("Reply to the customer"), {
+      target: { value: "Call you tomorrow" },
+    });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() => {
+      const sent = calls.find((c) => c.url.endsWith("/email-reply"));
+      expect(sent?.body).toMatchObject({ body: "Call you tomorrow" });
+      expect((sent?.body as { clientMsgId: string }).clientMsgId).toBeTruthy();
+    });
+    expect(
+      calls.some(
+        (c) =>
+          c.url.endsWith("/conversations/7/messages") && c.method === "POST",
+      ),
+    ).toBe(false);
+  });
+
+  it("disables replying by email while email is not configured", async () => {
+    chatInbox(
+      {
+        chat: {
+          siteId: 1,
+          offline: true,
+          email: "vic@example.com",
+          page: "",
+          browser: "",
+          blocked: false,
+        },
+      },
+      {},
+      false,
+    );
+    await openChat();
+    fireEvent.change(await screen.findByLabelText("Reply to the customer"), {
+      target: { value: "Call you tomorrow" },
+    });
+    expect(
+      screen.getByRole("button", { name: "Reply by email" }),
+    ).toBeDisabled();
+  });
+
+  it("tells the visitor an agent is typing, at most every few seconds", async () => {
+    const calls = chatInbox(
+      {},
+      { "POST /api/v1/inbox/conversations/7/typing": () => noContent() },
+    );
+    await openChat();
+    const box = await screen.findByLabelText("Reply to the customer");
+    fireEvent.change(box, { target: { value: "H" } });
+    fireEvent.change(box, { target: { value: "Hi" } });
+    fireEvent.change(box, { target: { value: "Hi V" } });
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url.endsWith("/typing"))).toHaveLength(1),
+    );
+  });
+
+  it("shows that the visitor is typing without reloading the thread", async () => {
+    chatInbox();
+    await openChat();
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    act(() => {
+      FakeEventSource.instances[0]!.emit("typing", {
+        conversationId: 7,
+        messageId: 0,
+      });
+    });
+    expect(
+      await screen.findByText("The visitor is typing…"),
+    ).toBeInTheDocument();
+  });
+});

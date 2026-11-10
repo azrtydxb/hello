@@ -319,8 +319,16 @@ export function MessagingChannels() {
       listAddresses(controller.signal),
       listTrunks(controller.signal),
     ])
-      .then(([channels, addresses, trunks]) => {
-        setData({ channels, addresses, trunks });
+      .then(([all, addresses, trunks]) => {
+        // A website chat is set up on the Chat sites page, not here.
+        const chat = new Set(
+          all.filter((c) => c.kind === "webchat").map((c) => c.id),
+        );
+        setData({
+          channels: all.filter((c) => c.kind !== "webchat"),
+          addresses: addresses.filter((a) => !chat.has(a.channelId)),
+          trunks,
+        });
         setError(null);
       })
       .catch((err: unknown) => {

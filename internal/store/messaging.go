@@ -316,6 +316,13 @@ func (s *Store) CreateMsgAddress(ctx context.Context, actor string, in MsgAddres
 		if !ok {
 			return fieldError("channelId", "no such channel")
 		}
+		var chat bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM msg_channels WHERE id = $1 AND provider = 'chat')`, in.ChannelID).Scan(&chat); err != nil {
+			return err
+		}
+		if chat {
+			return fieldError("channelId", "a chat site has one address, managed with the site")
+		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO msg_addresses (channel_id, address, address_key, address_suffix, label, enabled, optout_keywords, help_text, optout_text)
 			VALUES ($1, $2, $3, $9, $4, $5, $6::text[], $7, $8) RETURNING id`,
@@ -586,6 +593,10 @@ func (s *Store) ErasePeer(ctx context.Context, actor, peerKey string) (EraseRepo
 		}
 		n, _ := res.RowsAffected()
 		rep.Conversations = int(n)
+		// A chat visitor's own record goes with their conversations.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM chat_visitors WHERE 'visitor:' || id::text = $1`, peerKey); err != nil {
+			return err
+		}
 		res, err = tx.ExecContext(ctx, `UPDATE sms_opt_outs SET peer_key = NULL, note = '' WHERE peer_hash = $1`, h)
 		if err != nil {
 			return err
@@ -659,7 +670,8 @@ func (s *Store) MaintainMessaging(ctx context.Context) (MessagingMaintenance, er
 			DELETE FROM conversations WHERE id IN (
 				SELECT c.id FROM conversations c JOIN msg_channels ch ON ch.id = c.channel_id
 				WHERE c.status IN ('resolved', 'spam')
-				  AND coalesce(c.resolved_at, c.last_message_at) < now() - make_interval(days => CASE WHEN ch.kind = 'webchat' THEN $1::int ELSE $2::int END)
+				  AND coalesce(c.resolved_at, c.last_message_at) < now() - make_interval(days => CASE WHEN ch.kind = 'webchat'
+					THEN coalesce((SELECT cs.retention_days FROM chat_sites cs WHERE cs.channel_id = ch.id), $1::int) ELSE $2::int END)
 				ORDER BY c.id LIMIT $3::int)`, set.RetentionChatDays, set.RetentionSMSDays, purgeBatch)
 		if err != nil {
 			return out, err
@@ -684,6 +696,11 @@ func (s *Store) MaintainMessaging(ctx context.Context) (MessagingMaintenance, er
 		n, _ := res.RowsAffected()
 		out.Events += n
 	}
+	chat, err := s.maintainChat(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.Events += chat
 	if out.Conversations > 0 {
 		err = s.tx(ctx, func(tx *sql.Tx) error {
 			return insertAudit(ctx, tx, "system", fmt.Sprintf("purge conversations=%d", out.Conversations), "messaging", "-")

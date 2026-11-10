@@ -12,3 +12,7 @@ func ConferencePINAAD(roomID int64, which string) string {
 // TOTPAAD is the additional data a user's TOTP secret is sealed under, so a
 // secret copied to another user's row does not open.
 func TOTPAAD(userID int64) string { return fmt.Sprintf("user:%d:totp", userID) }
+
+// ChatTurnstileAAD is the additional data a chat site's Turnstile secret key
+// is sealed under, so a value copied to another site's row does not open.
+func ChatTurnstileAAD(siteID int64) string { return fmt.Sprintf("chat_site:%d:turnstile", siteID) }

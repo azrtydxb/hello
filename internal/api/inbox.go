@@ -90,6 +90,10 @@ func (s *server) inboxError(w http.ResponseWriter, what string, err error) {
 		writeError(w, http.StatusConflict, "channel_unavailable", "the channel or number is disabled or cannot send")
 	case errors.Is(err, store.ErrConversationState):
 		writeError(w, http.StatusConflict, "conversation_state", "the conversation is not in a state that allows this")
+	case errors.Is(err, store.ErrNotChat):
+		writeError(w, http.StatusConflict, "not_chat", "the conversation is not a website chat")
+	case errors.Is(err, store.ErrChatNoEmail):
+		writeError(w, http.StatusConflict, "no_email", "the visitor left no email address, or the chat was live: there is nobody to email")
 	case errors.Is(err, store.ErrMessagesDisabled):
 		writeError(w, http.StatusConflict, "messaging_disabled", "text messaging is turned off")
 	case errors.Is(err, store.ErrNoExternalTrunk):
@@ -711,9 +715,12 @@ func (s *server) eraseMessagingPeer(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &b) {
 		return
 	}
-	key, kok := s.peerKey(b.Peer)
+	key, kok := chatPeerKey(b.Peer)
 	if !kok {
-		writeFields(w, fieldErrs{{Path: "peer", Message: "must be a phone number"}})
+		key, kok = s.peerKey(b.Peer)
+	}
+	if !kok {
+		writeFields(w, fieldErrs{{Path: "peer", Message: "must be a phone number or a chat visitor (visitor:<id>)"}})
 		return
 	}
 	rep, err := is.ErasePeer(r.Context(), actor(r).String(), key)
@@ -1201,7 +1208,17 @@ func (s *server) myInboxStatus(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "inbox status", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, st)
+	_, ready, err := s.emailSettings(r.Context())
+	if err != nil {
+		s.internal(w, "inbox status: email settings", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		store.InboxStatus
+		// EmailReply is whether SMTP is configured: an offline chat can only
+		// be answered by email then.
+		EmailReply bool `json:"emailReply"`
+	}{st, ready})
 }
 
 func (s *server) listMyInboxAgents(w http.ResponseWriter, r *http.Request) {

@@ -37,6 +37,22 @@ export interface Conversation {
   firstResponseAt: string | null;
   resolvedAt: string | null;
   createdAt: string;
+  /** What an agent sees of a website chat visitor; null for a text. */
+  chat?: ChatInfo | null;
+}
+
+/** The facts kept about a chat visitor (spec messaging-channels M-29). */
+export interface ChatInfo {
+  siteId: number;
+  /** The chat was left while nobody was available. */
+  offline: boolean;
+  /** The address the visitor gave, empty for none. */
+  email: string;
+  /** Hostname and path of the page the chat started on. */
+  page: string;
+  /** A coarse browser family, nothing more. */
+  browser: string;
+  blocked: boolean;
 }
 
 export type MessageState =
@@ -79,6 +95,8 @@ export interface InboxStatus {
   enabled: boolean;
   unread: number;
   unassigned: number;
+  /** Whether email is configured, so an offline chat can be answered by email. */
+  emailReply?: boolean;
 }
 
 function query(params: Record<string, string | number | undefined>): string {
@@ -113,6 +131,16 @@ export interface InboxApi {
   ): Promise<Conversation>;
   setTags(id: number, tags: string[]): Promise<Conversation>;
   read(id: number): Promise<void>;
+  /** Blocks the visitor of a website chat for `hours` (24 when omitted). */
+  block(id: number, hours?: number): Promise<ChatBlock>;
+  /** Answers an offline chat by email. */
+  emailReply(
+    id: number,
+    body: string,
+    clientMsgId: string,
+  ): Promise<InboxMessage>;
+  /** Tells the visitor an agent is typing. */
+  typing(id: number): Promise<void>;
 }
 
 function area(base: string): InboxApi {
@@ -133,6 +161,11 @@ function area(base: string): InboxApi {
       request("POST", at(id, "/status"), { body: { status, snoozedUntil } }),
     setTags: (id, tags) => request("POST", at(id, "/tags"), { body: { tags } }),
     read: (id) => request("POST", at(id, "/read")),
+    block: (id, hours) =>
+      request("POST", at(id, "/block"), { body: hours ? { hours } : {} }),
+    emailReply: (id, body, clientMsgId) =>
+      request("POST", at(id, "/email-reply"), { body: { body, clientMsgId } }),
+    typing: (id) => request("POST", at(id, "/typing")),
   };
 }
 
@@ -160,6 +193,7 @@ export const INBOX_EVENTS = [
   "message.in",
   "message.sent",
   "message.status",
+  "typing",
 ] as const;
 
 // --- administration ----------------------------------------------------------
@@ -304,3 +338,90 @@ export const reconsentOptOut = (id: Id, note: string) =>
 
 export const erasePeer = (peer: string) =>
   request<EraseReport>("POST", "/api/v1/inbox/erase", { body: { peer } });
+
+// --- website chat ------------------------------------------------------------
+
+export interface ChatHours {
+  zone: string;
+  /** 0 is Sunday. */
+  days: { day: number; from: string; to: string }[];
+}
+
+export interface ChatSite {
+  id: number;
+  channelId: number;
+  addressId: number;
+  name: string;
+  enabled: boolean;
+  siteKey: string;
+  allowedOrigins: string[];
+  greeting: string;
+  accent: string;
+  position: "left" | "right";
+  collect: "off" | "optional" | "required";
+  hours: ChatHours;
+  offlineMode: "collect" | "hidden";
+  privacyUrl: string;
+  challenge: "pow" | "turnstile" | "none";
+  powBits: number;
+  turnstileSiteKey: string;
+  hasTurnstileSecret: boolean;
+  stripLinks: boolean;
+  maxOpenUnassigned: number;
+  transcripts: boolean;
+  retentionDays: number | null;
+  conversations: number;
+  createdAt: string;
+  updatedAt: string;
+  warnings: string[];
+}
+
+/** What a create or replace sends; a field left out keeps its value. */
+export type ChatSiteInput = Partial<
+  Omit<
+    ChatSite,
+    | "id"
+    | "channelId"
+    | "addressId"
+    | "siteKey"
+    | "hasTurnstileSecret"
+    | "conversations"
+    | "createdAt"
+    | "updatedAt"
+    | "warnings"
+    | "retentionDays"
+  >
+> & {
+  /** Sealed when stored and never returned; "" removes it. */
+  turnstileSecret?: string;
+  /** 0 follows the messaging settings. */
+  retentionDays?: number;
+};
+
+export interface ChatBlock {
+  id: number;
+  siteId: number;
+  visitorId: number | null;
+  byIp: boolean;
+  until: string;
+  createdAt: string;
+}
+
+const CHAT = `${MESSAGING}/chat`;
+
+export const listChatSites = (signal?: AbortSignal) =>
+  itemsOf(request<{ items: ChatSite[] }>("GET", `${CHAT}/sites`, { signal }));
+export const createChatSite = (body: ChatSiteInput) =>
+  request<ChatSite>("POST", `${CHAT}/sites`, { body });
+export const updateChatSite = (id: Id, body: ChatSiteInput) =>
+  request<ChatSite>("PUT", `${CHAT}/sites/${id}`, { body });
+export const deleteChatSite = (id: Id) =>
+  request<void>("DELETE", `${CHAT}/sites/${id}`);
+export const listChatBlocks = (id: Id, signal?: AbortSignal) =>
+  itemsOf(
+    request<{ items: ChatBlock[] }>("GET", `${CHAT}/sites/${id}/blocks`, {
+      signal,
+    }),
+  );
+export const deleteChatBlock = (id: Id) =>
+  request<void>("DELETE", `${CHAT}/blocks/${id}`);

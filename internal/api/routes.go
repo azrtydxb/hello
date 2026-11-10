@@ -370,6 +370,23 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/messaging/optouts", auth.ScopeAdmin, auth.RoleAdmin, false, s.recordMessagingOptOut},
 		{"POST", "/api/v1/messaging/optouts/{id}/reconsent", auth.ScopeAdmin, auth.RoleAdmin, false, s.reconsentMessagingOptOut},
 		{"POST", "/api/v1/inbox/erase", auth.ScopeAdmin, auth.RoleAdmin, false, s.eraseMessagingPeer},
+		// The LAN chat widget (spec messaging-channels M-28): sites and their
+		// blocks are administrators'; an agent blocks a visitor, emails an
+		// offline chat and shows typing from the inbox. The widget's own
+		// endpoints are on the chat listener, not here.
+		{"GET", "/api/v1/messaging/chat/sites", auth.ScopeAdmin, auth.RoleAdmin, false, s.listChatSites},
+		{"POST", "/api/v1/messaging/chat/sites", auth.ScopeAdmin, auth.RoleAdmin, false, s.createChatSite},
+		{"GET", "/api/v1/messaging/chat/sites/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getChatSite},
+		{"PUT", "/api/v1/messaging/chat/sites/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putChatSite},
+		{"DELETE", "/api/v1/messaging/chat/sites/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteChatSite},
+		{"GET", "/api/v1/messaging/chat/sites/{id}/blocks", auth.ScopeAdmin, auth.RoleAdmin, false, s.listChatBlocks},
+		{"DELETE", "/api/v1/messaging/chat/blocks/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteChatBlock},
+		{"POST", "/api/v1/inbox/conversations/{id}/block", auth.ScopeMessages, auth.RoleOperator, false, s.blockChatVisitor},
+		{"POST", "/api/v1/inbox/conversations/{id}/email-reply", auth.ScopeMessages, auth.RoleOperator, false, s.emailChatReply},
+		{"POST", "/api/v1/inbox/conversations/{id}/typing", auth.ScopeMessages, auth.RoleOperator, false, s.chatTyping},
+		{"POST", "/api/v1/me/inbox/conversations/{id}/block", auth.ScopeMessages, auth.RoleUser, false, s.blockMyChatVisitor},
+		{"POST", "/api/v1/me/inbox/conversations/{id}/email-reply", auth.ScopeMessages, auth.RoleUser, false, s.emailMyChatReply},
+		{"POST", "/api/v1/me/inbox/conversations/{id}/typing", auth.ScopeMessages, auth.RoleUser, false, s.myChatTyping},
 
 		{"GET", "/api/v1/inbox/conversations", auth.ScopeMessages, auth.RoleOperator, false, s.listInboxConversations},
 		{"POST", "/api/v1/inbox/conversations/bulk", auth.ScopeMessages, auth.RoleOperator, false, s.bulkInboxConversations},
