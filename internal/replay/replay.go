@@ -39,6 +39,11 @@ type Request struct {
 	// ClientID is the OAuth client the replay is made for, carried in the
 	// replay marker (auth.Replay); empty for the assistant and apply.
 	ClientID string
+	// Inherit allows the replay inside another one (a batch replays its
+	// operations while it is itself replayed by the MCP server or by an
+	// applied proposal): the outer replay marker, and so its OAuth client,
+	// stays on the request.
+	Inherit bool
 	// RemoteAddr is the original caller's address, for the handler's
 	// rate limits and logs.
 	RemoteAddr string
@@ -58,10 +63,15 @@ type Result struct {
 // no external request can set it; ctx may carry an agent identity
 // (auth.WithAgent), which the API middleware honours.
 func Do(ctx context.Context, h http.Handler, r Request) (Result, error) {
-	if _, nested := auth.ReplayFrom(ctx); nested {
+	outer, nested := auth.ReplayFrom(ctx)
+	if nested && !r.Inherit {
 		return Result{}, ErrNested
 	}
-	ctx, cancel := context.WithTimeout(auth.WithReplay(ctx, auth.Replay{ClientID: r.ClientID}), Timeout)
+	marker := auth.Replay{ClientID: r.ClientID}
+	if nested {
+		marker = outer
+	}
+	ctx, cancel := context.WithTimeout(auth.WithReplay(ctx, marker), Timeout)
 	defer cancel()
 	target := "http://hello-control" + r.Path
 	if len(r.Query) > 0 {

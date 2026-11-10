@@ -1,5 +1,22 @@
 {{- if .Values.podDisruptionBudget.enabled }}
 {{- $full := include "hello.fullname" . }}
+{{- if gt (int .Values.kamailio.replicas) 1 }}
+# At most one Kamailio is voluntarily disrupted at a time (a node drain, an
+# eviction): the other keeps carrying the phones. A single Kamailio gets no
+# budget, since it would block every drain of its node forever.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $full }}-kamailio
+  labels:
+    {{- include "hello.labels" (dict "root" . "component" "edge") | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "hello.selectorLabels" (dict "root" . "component" "edge") | nindent 6 }}
+---
+{{- end }}
 {{- if gt (int .Values.sip.nodes) 1 }}
 # At most one hello-sip node is voluntarily disrupted at a time (a node
 # drain, an eviction): the other is the survivor the first hands its calls to.

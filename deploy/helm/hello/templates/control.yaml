@@ -102,6 +102,8 @@ spec:
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_BASE_URL" "key" "base-url" "optional" true) | nindent 12 }}
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_MODEL" "key" "model" "optional" true) | nindent 12 }}
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_API_KEY" "key" "api-key" "optional" true) | nindent 12 }}
+            - name: HELLO_BACKUP_TMP
+              value: /var/lib/hello-backup
             - name: HELLO_VOICEMAIL_LANGUAGE
               value: {{ .Values.global.voicemailLanguage | default "en" | quote }}
             {{- with .Values.global.publicUrl }}
@@ -116,7 +118,16 @@ spec:
             - name: HELLO_PROV_PUBLIC_URL
               value: {{ $prov.publicUrl | quote }}
             - name: HELLO_PROV_SIP_SERVER
-              value: {{ default (printf "%s:%v" (required "kamailio.publicHost is required" .Values.kamailio.publicHost) .Values.kamailio.publicPort) $prov.sipServer | quote }}
+              value: {{ default (printf "%s:%v" (include "hello.kamailioPublicHost" .) .Values.kamailio.publicPort) $prov.sipServer | quote }}
+            {{- if .Values.kamailio.tls.enabled }}
+            # Phones of the models in sipTlsModels register over TLS (S-14).
+            - name: HELLO_PROV_SIP_TLS_SERVER
+              value: {{ default (printf "%s:%v" (include "hello.kamailioPublicHost" .) .Values.kamailio.tls.publicPort) $prov.sipTlsServer | quote }}
+            {{- with $prov.sipTlsModels }}
+            - name: HELLO_PROV_SIP_TLS_MODELS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
             {{- with $prov.trustedProxies }}
             - name: HELLO_PROV_TRUSTED_PROXIES
               value: {{ . | quote }}
@@ -156,8 +167,9 @@ spec:
             {{- with .Values.control.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- if or (and $provOn $prov.caSecret) $ldapOn }}
           volumeMounts:
+            - name: backup-staging
+              mountPath: /var/lib/hello-backup
             {{- if and $provOn $prov.caSecret }}
             - name: prov-ca
               mountPath: /etc/hello/prov
@@ -168,7 +180,6 @@ spec:
               mountPath: /etc/hello/ldap
               readOnly: true
             {{- end }}
-          {{- end }}
           ports:
             - name: http
               containerPort: 8081
@@ -200,8 +211,10 @@ spec:
             {{- include "hello.containerSecurity" . | nindent 12 }}
           resources:
             {{- toYaml .Values.control.resources | nindent 12 }}
-      {{- if or (and $provOn $prov.caSecret) $ldapOn }}
       volumes:
+        - name: backup-staging
+          emptyDir:
+            sizeLimit: {{ .Values.control.backup.stagingSize | quote }}
         {{- if and $provOn $prov.caSecret }}
         - name: prov-ca
           secret:
@@ -220,7 +233,6 @@ spec:
               - key: tls.key
                 path: tls.key
         {{- end }}
-      {{- end }}
 ---
 apiVersion: v1
 kind: Service

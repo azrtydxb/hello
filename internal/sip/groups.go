@@ -133,6 +133,7 @@ func splitmix64(state *uint64) uint64 {
 // groups ring one member at a time; ring groups fork (staggered by delay).
 func (c *call) ringGroup(req *sip.Request, tx sip.ServerTransaction, snap *snapshot.Snapshot, g snapshot.RingGroup, members []snapshot.RingGroupMember) {
 	s := c.s
+	c.noteDoorGroup(g)
 	// A nil tx means the call has begun already (a failover from another
 	// group opens a new stage on it), as in the IVR, queue and time
 	// condition entries.
@@ -332,6 +333,9 @@ func (c *call) groupFail(snap *snapshot.Snapshot, g snapshot.RingGroup) {
 			return
 		}
 		c.hangupGroup(sip.StatusTemporarilyUnavailable, "failure queue unavailable")
+	case "directory":
+		c.addTrace(fmt.Sprintf("Group %s: dial-by-name directory", g.Name))
+		c.startDirectory(nil, snap)
 	case "time_condition":
 		c.addTrace(fmt.Sprintf("Group %s: time condition %q", g.Name, g.FailureTarget))
 		c.routeTimeCondition(nil, snap, g.FailureTarget)

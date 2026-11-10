@@ -56,7 +56,7 @@ func scanRecording(r interface{ Scan(...any) error }) (Recording, error) {
 func (s *Store) ListRecordings(ctx context.Context, extension string, before int64, limit int) ([]Recording, string, error) {
 	// One static query (as in ListCDRs): an empty extension keeps everything
 	// and a zero before starts at the newest.
-	rows, err := s.db.QueryContext(ctx, `SELECT `+recordingCols+recordingFrom+`
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+recordingCols+recordingFrom+`
 		WHERE ($1 = '' OR EXISTS (SELECT 1 FROM cdrs c
 			WHERE c.correlation_id = r.correlation_id AND (c.source = $1 OR c.destination = $1)))
 		AND ($2 = 0 OR r.id < $2)
@@ -91,7 +91,7 @@ func (s *Store) ListRecordings(ctx context.Context, extension string, before int
 // call (spec S-4).
 func (s *Store) InsertRecording(ctx context.Context, correlationID, object, initiatedBy string, durationMs int64) (int64, error) {
 	var id int64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.q(ctx).QueryRowContext(ctx, `
 		INSERT INTO recordings (correlation_id, minio_object, initiated_by, duration_ms)
 		VALUES ($1, $2, $3, $4) RETURNING id`,
 		correlationID, object, initiatedBy, durationMs).Scan(&id)
@@ -100,7 +100,7 @@ func (s *Store) InsertRecording(ctx context.Context, correlationID, object, init
 
 // GetRecording returns one recording.
 func (s *Store) GetRecording(ctx context.Context, id int64) (Recording, error) {
-	rec, err := scanRecording(s.db.QueryRowContext(ctx,
+	rec, err := scanRecording(s.q(ctx).QueryRowContext(ctx,
 		`SELECT `+recordingCols+recordingFrom+` WHERE r.id = $1`, id))
 	return rec, mapErr(err)
 }
@@ -161,7 +161,7 @@ func scanAnnouncement(r interface{ Scan(...any) error }) (Announcement, error) {
 
 // ListAnnouncements returns every announcement ordered by name.
 func (s *Store) ListAnnouncements(ctx context.Context) ([]Announcement, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+announcementCols+` FROM announcements ORDER BY name`)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+announcementCols+` FROM announcements ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +179,7 @@ func (s *Store) ListAnnouncements(ctx context.Context) ([]Announcement, error) {
 
 // GetAnnouncement returns one announcement.
 func (s *Store) GetAnnouncement(ctx context.Context, id int64) (Announcement, error) {
-	a, err := scanAnnouncement(s.db.QueryRowContext(ctx,
+	a, err := scanAnnouncement(s.q(ctx).QueryRowContext(ctx,
 		`SELECT `+announcementCols+` FROM announcements WHERE id = $1`, id))
 	return a, mapErr(err)
 }
@@ -187,7 +187,7 @@ func (s *Store) GetAnnouncement(ctx context.Context, id int64) (Announcement, er
 // AnnouncementByName returns the announcement with that name (ok=false when
 // there is none).
 func (s *Store) AnnouncementByName(ctx context.Context, name string) (Announcement, bool, error) {
-	a, err := scanAnnouncement(s.db.QueryRowContext(ctx,
+	a, err := scanAnnouncement(s.q(ctx).QueryRowContext(ctx,
 		`SELECT `+announcementCols+` FROM announcements WHERE name = $1`, name))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Announcement{}, false, nil

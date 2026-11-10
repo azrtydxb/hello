@@ -13,6 +13,18 @@
 {{- /* Text messages (SIP MESSAGE, RFC 3428): Snom documents no key to switch instant messages on that we could cite, so none is written; the phone shows a MESSAGE it receives as it does by default. Unverified on hardware (lab item). */}}
 {{- /* HD voice: codec_priority_list of identity 1 in order of preference (Snom Service Hub, codec_priority_list; D3xx/D7xx/D8xx): Opus (D7xx and D8xx), G.722, PCMU, PCMA, then telephone-event for DTMF. Another identity of a multi-line model has the same setting with its own idx. Unverified on hardware (verify). */}}
     <codec_priority_list idx="1" perm="R">{{if .Codecs.Opus}}opus,{{end}}g722,pcmu,pcma,telephone-event</codec_priority_list>
+{{- /* Ring map (phone-feature-parity S-44): alert_internal_ring_text, alert_external_ring_text and alert_group_ring_text are the Alert-Info texts of the three classes (Hello sends alert-internal, alert-external and alert-group to a Snom) and alert_*_ring_sound the tone, Ringer1 to Ringer10 or Silent (Snom Service Hub); ring_sound is the line's own tone, Hello's internal tone. Other tags have no Snom class. Unverified on hardware (verify). */}}
+{{- range .Ring.Rules}}
+    <alert_{{.Class}}_ring_text perm="R">{{xml .Text}}</alert_{{.Class}}_ring_text>
+    <alert_{{.Class}}_ring_sound perm="R">{{xml .Tone}}</alert_{{.Class}}_ring_sound>
+{{- end}}
+{{- with .Ring.Default}}
+    <ring_sound idx="1" perm="R">{{xml .}}</ring_sound>
+{{- end}}
+{{- /* Custom tone (phone-feature-parity S-43): custom_melody_url is the one custom melody the phone downloads, from Hello under the phone's token; a class whose sound is Custom plays it (Snom Service Hub, custom_melody_url). Unverified on hardware (verify). */}}
+{{- with .Ring.Custom}}
+    <custom_melody_url perm="R">{{xml $.Prov.URL}}ring/{{.}}.wav</custom_melody_url>
+{{- end}}
 {{- /* MWI (spec S-1): user_mailbox names the mailbox the phone ties MWI to and dials for voicemail (Snom Service Hub, user_mailbox, D-series); Snom documents no separate subscribe flag. Unverified on hardware (lab item 1). */}}
     <user_mailbox idx="1" perm="R">{{xml (or .Line.VoicemailCode "*97")}}</user_mailbox>
 {{- /* Call waiting (phone-feature-parity S-18): call_waiting per line is on (waiting tone), visual (no tone) or off; Hello writes on or off from the extension's flag. Key and values as in Snom's own settings reference and the Tancredi snom template. Unverified on hardware (verify, lab item 26). */}}
@@ -92,6 +104,10 @@
 {{- /* BLF keys are placed by Render (internal/prov/keycaps.go): fkey 0 is the account's line key, so BLF starts at idx 1, runs to the model's last key and on into expansion module 1 (UXM, 18 keys; Hub, "Function Key Index Ranges"); keys past that are dropped. Snom's BLF pickup is by key press with the Replaces header or a BroadWorks code, so no pickup value is written. */}}
 {{- range $i, $k := .BLF}}
     <fkey idx="{{$k.Slot}}" context="active" label="{{xml $k.Label}}" perm="R">blf {{xml $k.URI}}</fkey>
+{{- end}}
+{{- /* Transfer-to-voicemail key (Hello's *97<ext>): the first key after the BLF keys, none when they fill the phone. The fkey type "transfer" with the target URI is Snom's transfer function key (Service Hub, "Function Keys"); the value format is not checked on a phone (verify). */}}
+{{- with .VMKey}}
+    <fkey idx="{{.Slot}}" context="active" label="{{xml .Label}}" perm="R">transfer {{xml .URI}}</fkey>
 {{- end}}
   </functionKeys>
 </settings>

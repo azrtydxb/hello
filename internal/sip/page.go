@@ -218,7 +218,7 @@ func (c *call) extensionBindings(snap *snapshot.Snapshot, ext string) ([]livesta
 			return nil, err
 		}
 		for _, b := range bs {
-			if c.isCallerContact(b) {
+			if c.isCallerContact(b) || (c.secure && !bindingOnTLS(b)) {
 				continue
 			}
 			out = append(out, b)
@@ -247,6 +247,9 @@ func (c *call) handleIntercom(tx sip.ServerTransaction, arg string) {
 	switch {
 	case arg == "" || !ok:
 		deny(sip.StatusNotFound, "intercom target is not an extension", ResultNotFound)
+		return
+	case e.Door:
+		deny(sip.StatusForbidden, "a door station takes no intercom call", ResultFailed)
 		return
 	case arg == c.callerNum:
 		deny(sip.StatusBusyHere, "intercom to the caller's own extension", ResultBusy)

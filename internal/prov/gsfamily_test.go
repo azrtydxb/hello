@@ -145,3 +145,28 @@ func TestGrandstreamGenericKeepsBLF(t *testing.T) {
 		t.Errorf("BLF block missing:\n%s", got)
 	}
 }
+
+// TestHT813FXODisconnect: the HT813 gets the FXO disconnect supervision keys
+// (Grandstream ht813_config_1.0.19.6), any other Grandstream does not.
+func TestHT813FXODisconnect(t *testing.T) {
+	for _, c := range []struct {
+		model string
+		on    bool
+	}{{"HT813", true}, {"ht-813", true}, {"HT812", false}, {"GRP2614", false}, {"WP822", false}} {
+		d := gsFamilyData(c.model)
+		got, err := Render(context.Background(), builtinFor(t, Grandstream), "cfg"+d.Phone.MAC+".xml", d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, k := range []string{"<P893>1</P893>", "<P764>100</P764>", "<P28101>1</P28101>", "<P712>1</P712>", "<P841>f1=400@-32,c=375/375;</P841>"} {
+			if has := bytes.Contains(got, []byte(k)); has != c.on {
+				t.Errorf("%s: %s present = %v, want %v", c.model, k, has, c.on)
+			}
+		}
+		for _, k := range []string{"<P892>", "<P856>", "<P205>"} {
+			if bytes.Contains(got, []byte(k)) {
+				t.Errorf("%s: carries FXS-side key %s", c.model, k)
+			}
+		}
+	}
+}
