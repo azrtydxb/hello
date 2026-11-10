@@ -131,14 +131,7 @@ func (s *Service) rnd() float64 {
 	if s.Rand != nil {
 		return s.Rand()
 	}
-	return mrand.Float64()
-}
-
-func (s *Service) log() *slog.Logger {
-	if s.Log == nil {
-		return slog.New(slog.DiscardHandler)
-	}
-	return s.Log
+	return mrand.Float64() //nolint:gosec // G404: retry jitter spreads attempts; it is not a secret
 }
 
 // client is the HTTP client for an endpoint: one that refuses every private,

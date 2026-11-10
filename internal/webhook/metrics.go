@@ -40,12 +40,12 @@ func (m *Metrics) result(o Outcome) {
 	if m == nil {
 		return
 	}
-	switch {
-	case o == OutcomeSuccess:
+	switch o {
+	case OutcomeSuccess:
 		m.Deliveries.WithLabelValues("succeeded").Inc()
-	case o == OutcomeRetry:
+	case OutcomeRetry:
 		m.Deliveries.WithLabelValues("retried").Inc()
-	case o == OutcomeGone:
+	case OutcomeGone:
 		m.Deliveries.WithLabelValues("gone").Inc()
 	default:
 		m.Deliveries.WithLabelValues("dead").Inc()
