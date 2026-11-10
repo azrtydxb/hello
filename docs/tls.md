@@ -46,7 +46,7 @@ kamailio:
   image: { tag: <a build with kamailio-tls-modules> }
   tls:
     enabled: true
-    secretName: hello-sip-tls   # kubernetes.io/tls Secret from the Hello CA
+    secretName: hello-sip-tls # kubernetes.io/tls Secret from the Hello CA
 ```
 
 The Secret's certificate must name the address phones connect to (`publicHost`)

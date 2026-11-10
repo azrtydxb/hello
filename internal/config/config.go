@@ -41,9 +41,6 @@ type Common struct {
 
 // Backup holds the backup tool settings.
 type Backup struct {
-	// PGDump and PGRestore are the pg_dump and pg_restore binaries
-	// (HELLO_BACKUP_PG_DUMP, HELLO_BACKUP_PG_RESTORE).
-	PGDump, PGRestore string
 	// Tmp is the staging directory for the dump and the archive
 	// (HELLO_BACKUP_TMP); empty means the system temporary directory.
 	Tmp string
@@ -489,8 +486,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	if c.SessionTTL == 0 {
 		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
 	}
-	c.Backup = Backup{PGDump: r.optional("HELLO_BACKUP_PG_DUMP", "pg_dump"),
-		PGRestore: r.optional("HELLO_BACKUP_PG_RESTORE", "pg_restore"), Tmp: r.getenv("HELLO_BACKUP_TMP")}
+	c.Backup = Backup{Tmp: r.getenv("HELLO_BACKUP_TMP")}
 	c.Prov = r.prov()
 	c.LDAP = r.ldap()
 	c.Dial = r.dialing()
