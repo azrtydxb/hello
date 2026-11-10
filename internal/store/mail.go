@@ -299,7 +299,13 @@ func settleMessage(ctx context.Context, tx *sql.Tx, msg int64, remove *string) e
 		if _, err := tx.ExecContext(ctx, `DELETE FROM voicemail_messages WHERE id = $1`, msg); err != nil {
 			return err
 		}
-		*remove = object
+		// A copy delivered to a voicemail group shares the object: it goes
+		// only with its last row.
+		rel, err := releaseVoicemailObject(ctx, tx, object)
+		if err != nil {
+			return err
+		}
+		*remove = rel
 		if err := insertAudit(ctx, tx, "system:mailer", "delete-after-email", "voicemail_message", itoa(msg)); err != nil {
 			return err
 		}

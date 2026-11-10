@@ -322,7 +322,7 @@ func (t *Table) checkInboundDestination(errs *[]FieldError, p string, r InboundR
 		if !t.queues[r.Destination] {
 			addErr(errs, p+".destination", fmt.Sprintf("queue %s does not exist", quote(r.Destination)))
 		}
-	case "ring_group", "voicemail", "announcement", "paging":
+	case "ring_group", "voicemail", "announcement", "paging", "voicemail_group":
 		if !t.named[r.DestinationKind+":"+r.Destination] {
 			addErr(errs, p+".destination", fmt.Sprintf("%s %s does not exist", namedKindLabel[r.DestinationKind], quote(r.Destination)))
 		}
@@ -349,7 +349,7 @@ func (t *Table) checkInboundDestination(errs *[]FieldError, p string, r InboundR
 			addErr(errs, p+".destination", "must be a sip: or sips: URI without whitespace")
 		}
 	default:
-		addErr(errs, p+".destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "announcement", "paging" or "directory"`)
+		addErr(errs, p+".destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "voicemail_group", "announcement", "paging" or "directory"`)
 	}
 }
 
@@ -358,15 +358,16 @@ func (t *Table) checkInboundDestination(errs *[]FieldError, p string, r InboundR
 // is. The routing table checks they exist; hello-sip carries them out with
 // the destination dispatcher time conditions use.
 var NamedKinds = map[string]string{
-	"ring_group":   "ring group name",
-	"voicemail":    "extension number of the voicemail box",
-	"announcement": "announcement name",
-	"paging":       "paging group code",
+	"ring_group":      "ring group name",
+	"voicemail":       "extension number of the voicemail box",
+	"announcement":    "announcement name",
+	"paging":          "paging group code",
+	"voicemail_group": "number of the voicemail group",
 }
 
 var namedKindLabel = map[string]string{
 	"ring_group": "ring group", "voicemail": "voicemail box of extension",
-	"announcement": "announcement", "paging": "paging group",
+	"announcement": "announcement", "paging": "paging group", "voicemail_group": "voicemail group",
 }
 
 // failoverCodes validates a route's codes and returns the effective list:

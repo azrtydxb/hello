@@ -1053,7 +1053,8 @@ func (s *Store) loadRouting(ctx context.Context, q querier) (RoutingSnapshot, er
 	nrows, err := q.QueryContext(ctx, `SELECT 'ring_group', name FROM ring_groups
 		UNION ALL SELECT 'announcement', name FROM announcements
 		UNION ALL SELECT 'paging', code FROM paging_groups
-		UNION ALL SELECT 'voicemail', e.number FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id`)
+		UNION ALL SELECT 'voicemail', e.number FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id
+		UNION ALL SELECT 'voicemail_group', number FROM voicemail_groups`)
 	if err != nil {
 		return snap, err
 	}
