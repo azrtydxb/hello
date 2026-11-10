@@ -213,6 +213,9 @@ type Deps struct {
 	// Messages is the SIP MESSAGE queue (PostgreSQL); nil answers every
 	// MESSAGE 503.
 	Messages MessageQueue
+	// QualityReports stores the voice-quality reports phones publish
+	// (Event: vq-rtcpxr); nil answers them 503.
+	QualityReports QualityReports
 	// Conversations is the messaging inbox's gateway: a text a trunk
 	// delivers to one of its numbers becomes a conversation instead of
 	// going to an extension. nil leaves every trunk text to the extension
@@ -244,19 +247,21 @@ type Deps struct {
 
 // Server is one SIP node.
 type Server struct {
-	cfg     Config
-	deps    Deps
-	log     *slog.Logger
-	m       *Metrics
-	digest  *Digest
-	contact sip.ContactHeader
-	advHost string
-	advPort int
-	recount chan struct{}
-	ua      *sipgo.UserAgent
-	client  *sipgo.Client
-	uas     *sipgo.DialogUA // A legs: callers
-	uac     *sipgo.DialogUA // B legs: forks
+	cfg  Config
+	deps Deps
+	log  *slog.Logger
+	m    *Metrics
+	// rtcpxrRate bounds the quality reports per device (S-36).
+	rtcpxrRate reportWindow
+	digest     *Digest
+	contact    sip.ContactHeader
+	advHost    string
+	advPort    int
+	recount    chan struct{}
+	ua         *sipgo.UserAgent
+	client     *sipgo.Client
+	uas        *sipgo.DialogUA // A legs: callers
+	uac        *sipgo.DialogUA // B legs: forks
 	// uacElsewhere is uac with "Call completed elsewhere" on its CANCELs,
 	// for the ringing legs of a picked-up call.
 	uacElsewhere *sipgo.DialogUA

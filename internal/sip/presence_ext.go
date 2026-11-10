@@ -120,11 +120,11 @@ func cleanNote(n string) string {
 	return b.String()
 }
 
-// handlePublish serves PUBLISH Event: presence from a device of the
+// handlePresencePublish serves PUBLISH Event: presence from a device of the
 // extension it publishes for, digest-authenticated; another extension's
 // presence is 403. An initial publication gets a SIP-ETag; a refresh,
 // modification or removal quotes it in SIP-If-Match (412 when it is gone).
-func (s *Server) handlePublish(req *sip.Request, tx sip.ServerTransaction) {
+func (s *Server) handlePresencePublish(req *sip.Request, tx sip.ServerTransaction) {
 	snap := s.deps.Snapshots.Current()
 	if snap == nil {
 		s.unavailable(tx, req)

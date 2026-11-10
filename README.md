@@ -146,6 +146,7 @@ naming the key, if one is missing or malformed.
 | `HELLO_PROV_BOOK_REFRESH`                         | control | `15m`; how often phones with a refresh setting re-fetch their address book (at least `1m`)                                    |
 | `HELLO_PROV_PUSH_RATE`                            | sip     | `20`; check-sync pushes (resync, reboot) claimed per minute across the cluster                                                |
 | `HELLO_PROV_AUTO_RESYNC`                          | control | `false`; push a resync to a phone 30 s after a change to what its configuration renders from                                  |
+| `HELLO_PROV_RTCPXR`                               | control | `false`; provision Grandstream WP810/WP822/WP825 to publish RTCP-XR quality reports to the SIP server (docs/provisioning.md)  |
 | `HELLO_DIAL_INTL_PREFIX` / `_COUNTRY_CODE`        | control | `00` / unset; digits standing for `+`, and the country code a leading `0` belongs to (lookup keys)                            |
 | `HELLO_PROV_TIMEZONE` / `_NTP`                    | control | `UTC` / `pool.ntp.org`                                                                                                        |
 | `HELLO_VOICEMAIL_LANGUAGE`                        | both    | `en`; deployment language of the spoken voicemail prompts (`en`, `nl`); a box can set its own, docs/voicemail.md              |
