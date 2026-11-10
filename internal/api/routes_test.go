@@ -48,7 +48,7 @@ func TestRoutesTable(t *testing.T) {
 			return false
 		}
 		switch r.Pattern {
-		case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password":
+		case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password", "/api/v1/lookup/number":
 			return true
 		}
 		return strings.HasPrefix(r.Pattern, "/api/v1/me/") || strings.HasPrefix(r.Pattern, "/api/v1/events") ||

@@ -53,6 +53,7 @@
 | `updatePhonebook`               | admin | Rename a book.                                                     |
 | `deletePhonebook`               | admin | Delete a named book.                                               |
 | `lookupPhonebook`               | admin | Which entry names a caller.                                        |
+| `lookupNumber`                  | read  | The best contact name for a number (integrations).                 |
 | `listPhonebookEntries`          | read  | Entries of a book.                                                 |
 | `createPhonebookEntry`          | write | Add an entry.                                                      |
 | `updatePhonebookEntry`          | write | Replace an entry.                                                  |

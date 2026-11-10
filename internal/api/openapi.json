@@ -12935,6 +12935,56 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/lookup/number": {
+      "get": {
+        "operationId": "lookupNumber",
+        "summary": "Find the contact name for a phone number",
+        "description": "The best name Hello has for a number, for connectors and dialers. Reduces number to its lookup key and searches the extensions book and the company book, as the caller-name lookup does (GET /phonebooks/lookup without a callee: an exact match on the key wins, otherwise the last 9 digits when exactly one entry has them). When nothing there names it and the credential belongs to a user with a linked extension, that user's own personal contacts are searched too (never another user's, and never for a service account). \"result\" is match, ambiguous, none or unresolvable; a number nobody has is a 200 with result none.",
+        "tags": ["phonebooks"],
+        "parameters": [
+          {
+            "name": "number",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "The number as dialled or stored: +41 79 123 45 67, 0041791234567, 079 123 45 67 or a SIP URI."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The lookup result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhonebookLookup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/phonebooks/lookup": {
       "get": {
         "operationId": "lookupPhonebook",
@@ -30550,8 +30600,8 @@
           },
           "source": {
             "type": "string",
-            "enum": ["extensions", "named", "company"],
-            "description": "The kind of book that names the number."
+            "enum": ["extensions", "named", "company", "personal"],
+            "description": "The kind of book that names the number (personal only from GET /lookup/number, for a user's own contact)."
           },
           "book": {
             "type": "string",
