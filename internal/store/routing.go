@@ -56,6 +56,9 @@ type Trunk struct {
 	// Codecs is the audio codec allow-list offered to the trunk, in order.
 	Codecs    []string `json:"codecs"`
 	Messaging bool     `json:"messaging"`
+	// CallerPolicy is the trunk's own screening of inbound calls (anonymous
+	// reject, country restriction); its fields are the trunk's own in JSON.
+	routing.CallerPolicy
 	// SessionTimers is the trunk's RFC 4028 setting: "default" (follow
 	// Hello's own), "on" or "off".
 	SessionTimers string    `json:"sessionTimers"`
@@ -80,6 +83,7 @@ type TrunkInput struct {
 	InternalDialing Dialing
 	Codecs          []string
 	Messaging       bool
+	CallerPolicy    routing.CallerPolicy
 	SessionTimers   string
 }
 
@@ -93,8 +97,26 @@ func (t Trunk) Input() TrunkInput {
 		InternalDialing: Dialing{Mode: t.InternalDialing.Mode, Patterns: slices.Clone(t.InternalDialing.Patterns)},
 		Codecs:          slices.Clone(t.Codecs),
 		Messaging:       t.Messaging,
+		CallerPolicy:    clonePolicy(t.CallerPolicy),
 		SessionTimers:   t.SessionTimers,
 	}
+}
+
+// policyAction is the stored unknown-caller action: "block" when unset.
+func policyAction(p routing.CallerPolicy) string {
+	if p.UnknownCallerAction == "" {
+		return routing.UnknownBlock
+	}
+	return p.UnknownCallerAction
+}
+
+// policyCode is the stored reject code: 603 when unset.
+func policyCode(p routing.CallerPolicy) int { return p.Code() }
+
+// clonePolicy copies p so a caller may change its list.
+func clonePolicy(p routing.CallerPolicy) routing.CallerPolicy {
+	p.AllowedCountryCodes = slices.Clone(p.AllowedCountryCodes)
+	return p
 }
 
 // PasswordChange says what an update does to a trunk password: nothing
@@ -106,14 +128,20 @@ type PasswordChange struct {
 
 const trunkCols = `id, name, mode, username, password_enc IS NOT NULL, realm, from_domain, register_expires,
 	options_interval, to_json(source_cidrs::text[]), max_calls, default_caller_id, enabled, to_json(internal_dialing),
-	to_json(codecs), messaging, session_timers, created_at, updated_at`
+	to_json(codecs), messaging, reject_anonymous, to_json(allowed_country_codes), unknown_caller_action, reject_code, session_timers,
+	created_at, updated_at`
 
 func scanTrunk(r interface{ Scan(...any) error }) (Trunk, error) {
 	var t Trunk
-	var cidrs, dialing, codecs []byte
+	var cidrs, dialing, codecs, countries []byte
 	if err := r.Scan(&t.ID, &t.Name, &t.Mode, &t.Username, &t.HasPassword, &t.Realm, &t.FromDomain, &t.RegisterExpires,
-		&t.OptionsInterval, &cidrs, &t.MaxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging, &t.SessionTimers, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&t.OptionsInterval, &cidrs, &t.MaxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging,
+		&t.RejectAnonymous, &countries, &t.UnknownCallerAction, &t.RejectCode, &t.SessionTimers, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return t, err
+	}
+	t.AllowedCountryCodes = []string{}
+	if err := json.Unmarshal(countries, &t.AllowedCountryCodes); err != nil || t.AllowedCountryCodes == nil {
+		t.AllowedCountryCodes = []string{}
 	}
 	if err := json.Unmarshal(codecs, &t.Codecs); err != nil || len(t.Codecs) == 0 {
 		t.Codecs = slices.Clone(routing.DefaultTrunkCodecs)
@@ -258,11 +286,14 @@ func (s *Store) CreateTrunk(ctx context.Context, actor string, in TrunkInput, pa
 	err := s.configChange(ctx, actor, "create", "trunk", check, func(tx *sql.Tx) (int64, error) {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO trunks (name, mode, username, realm, from_domain, register_expires,
-				options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging, session_timers)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11, $12::jsonb, $13::jsonb, $14, $15) RETURNING id`,
+				options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging,
+				reject_anonymous, allowed_country_codes, unknown_caller_action, reject_code, session_timers)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11, $12::jsonb, $13::jsonb, $14,
+				$15, $16::text[], $17, $18, $19) RETURNING id`,
 			in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires, in.OptionsInterval,
 			nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled, dialingArg(in.InternalDialing),
-			codecsArg(in.Codecs), in.Messaging, sessionTimersArg(in.SessionTimers)).Scan(&id); err != nil {
+			codecsArg(in.Codecs), in.Messaging, in.CallerPolicy.RejectAnonymous, nonNil(in.CallerPolicy.AllowedCountryCodes),
+			policyAction(in.CallerPolicy), policyCode(in.CallerPolicy), sessionTimersArg(in.SessionTimers)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := s.setPassword(ctx, tx, id, password); err != nil {
@@ -301,10 +332,12 @@ func (s *Store) UpdateTrunk(ctx context.Context, actor string, id int64, pw Pass
 		if _, err := tx.ExecContext(ctx, `UPDATE trunks SET name = $2, mode = $3, username = $4, realm = $5,
 				from_domain = $6, register_expires = $7, options_interval = $8, source_cidrs = $9::cidr[],
 				max_calls = $10, default_caller_id = $11, enabled = $12, internal_dialing = $13::jsonb,
-				codecs = $14::jsonb, messaging = $15, session_timers = $16, updated_at = now()
+				codecs = $14::jsonb, messaging = $15, reject_anonymous = $16, allowed_country_codes = $17::text[],
+				unknown_caller_action = $18, reject_code = $19, session_timers = $20, updated_at = now()
 			WHERE id = $1`, id, in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires,
 			in.OptionsInterval, nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled,
-			dialingArg(in.InternalDialing), codecsArg(in.Codecs), in.Messaging, sessionTimersArg(in.SessionTimers)); err != nil {
+			dialingArg(in.InternalDialing), codecsArg(in.Codecs), in.Messaging, in.CallerPolicy.RejectAnonymous,
+			nonNil(in.CallerPolicy.AllowedCountryCodes), policyAction(in.CallerPolicy), policyCode(in.CallerPolicy), sessionTimersArg(in.SessionTimers)); err != nil {
 			return id, err
 		}
 		if pw.Set {
@@ -1020,7 +1053,8 @@ func (s *Store) loadRouting(ctx context.Context, q querier) (RoutingSnapshot, er
 	nrows, err := q.QueryContext(ctx, `SELECT 'ring_group', name FROM ring_groups
 		UNION ALL SELECT 'announcement', name FROM announcements
 		UNION ALL SELECT 'paging', code FROM paging_groups
-		UNION ALL SELECT 'voicemail', e.number FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id`)
+		UNION ALL SELECT 'voicemail', e.number FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id
+		UNION ALL SELECT 'voicemail_group', number FROM voicemail_groups`)
 	if err != nil {
 		return snap, err
 	}
@@ -1066,7 +1100,7 @@ func routingTrunks(s *Store, trunks []Trunk, sealed map[int64][]byte, snap Routi
 			OptionsInterval: time.Duration(t.OptionsInterval) * time.Second,
 			MaxCalls:        t.MaxCalls, DefaultCallerID: t.DefaultCallerID, Enabled: t.Enabled, Destinations: t.Destinations,
 			InternalDialing: t.InternalDialing.dialing(),
-			Codecs:          slices.Clone(t.Codecs), Messaging: t.Messaging, SessionTimers: t.SessionTimers,
+			Codecs:          slices.Clone(t.Codecs), Messaging: t.Messaging, CallerPolicy: clonePolicy(t.CallerPolicy), SessionTimers: t.SessionTimers,
 		}
 		if errs := routing.CompileDialing(rt.InternalDialing); len(errs) > 0 {
 			snap.Misconfigured[t.ID] = true

@@ -52,3 +52,26 @@ func TestSealOpen(t *testing.T) {
 		}
 	}
 }
+
+// TestMAC fails if the MAC differs between calls, is the same for another
+// purpose, another key or other data, or is not 32 bytes.
+func TestMAC(t *testing.T) {
+	k1 := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
+	k2 := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32))
+	b1, err := New(k1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, _ := New(k2)
+	a := b1.MAC("optout", "+32475123456")
+	if len(a) != 32 || !bytes.Equal(a, b1.MAC("optout", "+32475123456")) {
+		t.Fatal("the MAC is not stable")
+	}
+	for name, other := range map[string][]byte{
+		"purpose": b1.MAC("other", "+32475123456"), "key": b2.MAC("optout", "+32475123456"), "data": b1.MAC("optout", "+32475123457"),
+	} {
+		if bytes.Equal(a, other) {
+			t.Errorf("a different %s gives the same MAC", name)
+		}
+	}
+}

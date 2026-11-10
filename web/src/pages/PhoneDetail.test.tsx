@@ -250,20 +250,19 @@ describe("Phone detail", () => {
     });
     renderApp("/phones/5");
     const effective = await screen.findByTestId("phone-ptt-effective");
-    await waitFor(() =>
-      expect(effective).toHaveTextContent("224.0.1.116:5001"),
-    );
     const pick = screen.getByLabelText("PTT channel");
-    // The catalog loads after the first render, so wait for its options.
-    await waitFor(() =>
-      expect(
-        Array.from(pick.querySelectorAll("option")).map((o) => o.textContent),
-      ).toEqual([
-        "Group's channel (or the catalog default)",
-        "PTT (224.0.1.116:5001, PCMU)",
-        "Floor (224.0.1.117:5001, PCMU)",
-      ]),
-    );
+    // The effective address starts at the built-in default, which is the same
+    // 224.0.1.116:5001 as the first catalog channel, so it cannot tell that
+    // the catalog has loaded. Wait for the catalog options instead.
+    await within(pick).findByRole("option", { name: /^Floor \(/ });
+    expect(effective).toHaveTextContent("224.0.1.116:5001");
+    expect(
+      Array.from(pick.querySelectorAll("option")).map((o) => o.textContent),
+    ).toEqual([
+      "Group's channel (or the catalog default)",
+      "PTT (224.0.1.116:5001, PCMU)",
+      "Floor (224.0.1.117:5001, PCMU)",
+    ]);
     fireEvent.change(pick, { target: { value: "2" } });
     expect(effective).toHaveTextContent("224.0.1.117:5001");
     fireEvent.click(screen.getByRole("button", { name: "Save PTT channel" }));
