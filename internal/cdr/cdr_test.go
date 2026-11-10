@@ -320,8 +320,8 @@ func TestCDRCodecColumns(t *testing.T) {
 	if err := w.write(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 33 || db.args[27] != nil || db.args[28] != nil {
-		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 33", db.args[27], db.args[28], len(db.args))
+	if len(db.args) != 34 || db.args[27] != nil || db.args[28] != nil {
+		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 34", db.args[27], db.args[28], len(db.args))
 	}
 	r.CallerCodec, r.CalleeCodec = "opus/48000", "PCMU/8000"
 	if err := w.write(context.Background(), r); err != nil {
@@ -330,7 +330,7 @@ func TestCDRCodecColumns(t *testing.T) {
 	if db.args[27] != "opus/48000" || db.args[28] != "PCMU/8000" {
 		t.Fatalf("codecs = %#v, %#v", db.args[27], db.args[28])
 	}
-	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client)") || !strings.Contains(insert, "$30, $31)") {
+	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client, srtp)") || !strings.Contains(insert, "$31, $32)") {
 		t.Fatal("the insert does not name the codec and origin columns with $28 to $31")
 	}
 }
