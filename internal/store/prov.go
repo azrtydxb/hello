@@ -47,12 +47,18 @@ type ProvSettings struct {
 	// resolve by SRV; see config.Prov (S-20).
 	SIPBackupServers []string
 	SIPSRV           string
+	// SIPTCPModels is HELLO_PROV_SIP_TCP_MODELS: the phones
+	// prov.TLSModelMatch selects register over TCP with SIPServer (S-13).
+	// A model also in SIPTLSModels (with SIPTLSServer set) uses TLS.
+	SIPTCPModels []string
 	// Domain is HELLO_SIP_DOMAIN.
 	Domain string
 	Expiry time.Duration
 	Resync time.Duration
 	// DSCPSIP and DSCPRTP are the QoS values written to phones (S-21).
 	DSCPSIP, DSCPRTP int
+	// RTCPXR provisions the quality-report collector (HELLO_PROV_RTCPXR, S-36).
+	RTCPXR bool
 	// BookRefresh is HELLO_PROV_BOOK_REFRESH; zero means 15 minutes.
 	BookRefresh time.Duration
 	Timezone    string
@@ -61,6 +67,9 @@ type ProvSettings struct {
 	// CACertFile is HELLO_PROV_CA_CERT, read per render into
 	// ProvInfo.CACertPEM.
 	CACertFile string
+	// SyslogHost is HELLO_SYSLOG_HOST: the address phones send syslog to
+	// (UDP 514); empty leaves syslog out of every configuration.
+	SyslogHost string
 	// Deployment lists the vendors whose redirect credentials the
 	// deployment sets (they count as configured whatever is stored).
 	Deployment map[prov.Vendor]bool
@@ -91,6 +100,9 @@ func (p ProvSettings) server(v prov.Vendor, model string) prov.Server {
 		// records, so it needs the name and no port; the backup proxy is
 		// then the SRV set's job.
 		srv.DNSMode, srv.Host, srv.Port, srv.Backup = prov.DNSSRV, p.SIPSRV, 0, nil
+	}
+	if prov.TLSModelMatch(p.SIPTCPModels, v, model) {
+		srv.Transport = "tcp"
 	}
 	return srv
 }
@@ -130,7 +142,7 @@ func (p ProvSettings) plainBase() string {
 // info is the ProvInfo of a phone whose current token is token.
 func (p ProvSettings) info(token, mac string) prov.ProvInfo {
 	return prov.ProvInfo{URL: p.phoneBase(token), CAURL: p.CAURL(), ResyncSeconds: p.resyncSeconds(mac),
-		CACertPEM: prov.CACertPEM(p.CACertFile), DSCPSIP: p.DSCPSIP, DSCPRTP: p.DSCPRTP}
+		CACertPEM: prov.CACertPEM(p.CACertFile), DSCPSIP: p.DSCPSIP, DSCPRTP: p.DSCPRTP, RTCPXR: p.RTCPXR}
 }
 
 // CAURL is the plain-HTTP URL of Hello's provisioning CA.
@@ -761,6 +773,11 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 		if c.BLF != nil {
 			b, _ := json.Marshal(nonNil(*c.BLF))
 			blfArg = string(b)
+			// hello-sip serves a phone's BLF keys as a resource list
+			// (S-35), so a changed list reaches it with the revision.
+			if !slices.Equal(nonNil(*c.BLF), nonNil(cur.BLF)) {
+				bumped = true
+			}
 		}
 		setTpl, tplArg := c.TemplateID != nil, any(nil)
 		if tpl != nil {

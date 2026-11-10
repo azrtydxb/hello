@@ -500,9 +500,12 @@ func TestSIPMetrics(t *testing.T) {
 		})
 	}
 	for code, min := range map[string]float64{"200": 4, "401": 3, "180": 1} {
-		if v := pbx.metric(t, "hello_sip_responses_total", map[string]string{"code": code}); v < min {
-			t.Errorf("responses{%s} = %v, want >= %v", code, v, min)
-		}
+		// Server.send counts a response after tx.Respond returns, so the
+		// phone can already have the 401 (and carry on through the whole
+		// call) before the counter moves: wait for it.
+		eventually(t, "responses{"+code+"} >= "+fmt.Sprint(min), func() bool {
+			return pbx.metric(t, "hello_sip_responses_total", map[string]string{"code": code}) >= min
+		})
 	}
 	if v := pbx.metric(t, "hello_calls_total", map[string]string{"result": ResultAnswered}); v != 1 {
 		t.Errorf("calls{answered} = %v", v)

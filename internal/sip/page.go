@@ -451,7 +451,7 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 func (c *call) pageEarlyMedia(ps *pageState) {
 	body := ps.codec.Build(ps.host, ps.fan.CallerPort(), "sendrecv")
 	c.s.m.response(sip.StatusSessionInProgress)
-	err := c.dss.Respond(sip.StatusSessionInProgress, "Session Progress", body, sip.NewHeader("Content-Type", "application/sdp"))
+	err := c.respondProv(sip.StatusSessionInProgress, "Session Progress", body, sip.NewHeader("Content-Type", "application/sdp"))
 	if err != nil {
 		c.s.log.Debug("page early media failed", "correlation_id", c.id, "error", err)
 		return
@@ -596,6 +596,7 @@ func (c *call) pageAnswerCaller() {
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.NewHeader("Allow", allow))
 	c.s.m.response(sip.StatusOK)
+	c.settleReliable(true)
 	if err := c.dss.WriteResponse(res); err == nil {
 		c.mu.Lock()
 		if !c.ended {
