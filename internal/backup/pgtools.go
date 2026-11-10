@@ -61,12 +61,16 @@ func (t PGTools) run(cmd *exec.Cmd) error {
 }
 
 func (t PGTools) Dump(ctx context.Context, path string) error {
-	return t.run(exec.CommandContext(ctx, "pg_dump", "-Fc", "--no-owner", "--no-privileges", "--file="+path))
+	cmd := exec.CommandContext(ctx, "pg_dump", "-Fc", "--no-owner", "--no-privileges")
+	cmd.Args = append(cmd.Args, "--file="+path)
+	return t.run(cmd)
 }
 
 func (t PGTools) Restore(ctx context.Context, path string) error {
-	return t.run(exec.CommandContext(ctx, "pg_restore", "--single-transaction", "--clean", "--if-exists",
-		"--no-owner", "--no-privileges", "--exit-on-error", "--dbname="+t.Conn.Database, path))
+	cmd := exec.CommandContext(ctx, "pg_restore", "--single-transaction", "--clean", "--if-exists",
+		"--no-owner", "--no-privileges", "--exit-on-error")
+	cmd.Args = append(cmd.Args, "--dbname="+t.Conn.Database, path)
+	return t.run(cmd)
 }
 
 // limitedWriter keeps at most n bytes and drops the rest.
