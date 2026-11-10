@@ -8,6 +8,7 @@ import {
   listGroups,
   listMulticastChannels,
   setGroupBooks,
+  setGroupLdap,
   setGroupMulticast,
   setGroupPtt,
   updateGroup,
@@ -389,6 +390,7 @@ function GroupModal({
     group?.includeCompany ?? true,
   );
   const [bookIds, setBookIds] = useState<Id[]>(group?.bookIds ?? []);
+  const [ldap, setLdap] = useState(group?.ldapEnabled ?? false);
   const [pick, setPick] = useState("");
   const [channels, setChannels] = useState<MulticastInput[]>(
     channelInputs(group?.multicast),
@@ -475,6 +477,18 @@ function GroupModal({
           return;
         }
       }
+      if ((saved.ldapEnabled ?? false) !== ldap) {
+        try {
+          await setGroupLdap(saved.id, ldap);
+          saved = { ...saved, ldapEnabled: ldap };
+        } catch (err) {
+          setFormError(
+            `The group was saved, but its LDAP directory setting was not: ${errorMessage(err)}`,
+          );
+          setBusy(false);
+          return;
+        }
+      }
       onSaved(saved, group === null);
     } catch (err) {
       const { byKey, unmatched } = mapFieldErrors(fieldErrors(err), [
@@ -551,6 +565,14 @@ function GroupModal({
           labelPosition="end"
           checked={includeCompany}
           onChange={(e) => setIncludeCompany(e.target.checked)}
+        />
+
+        <Switch
+          label="LDAP directory"
+          hint="Phones query the delivered address books over LDAPS with their own bind DN and password (see docs/ldap.md)"
+          labelPosition="end"
+          checked={ldap}
+          onChange={(e) => setLdap(e.target.checked)}
         />
 
         <fieldset className="pb-numbers-editor">

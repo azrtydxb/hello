@@ -35,9 +35,11 @@ import { mapFieldErrors, type ErrorMap } from "../forms";
 import { Can } from "../role";
 import { moved } from "../useOrderedList";
 import { FormAlert } from "./callflow/ui";
+import { RingMap } from "./ringtags/RingMap";
+import { ToneLibrary } from "./ringtags/ToneLibrary";
 import { HHMM, HHMM_END, WEEK, useLoadedList } from "./timecond/shared";
 
-type Tab = "tags" | "rules" | "test";
+type Tab = "tags" | "rules" | "map" | "tones" | "test";
 
 /** The longest rule list the API takes. */
 const MAX_RULES = 100;
@@ -48,7 +50,8 @@ const TAG_NAME = /^[a-z0-9-]{1,32}$/;
  * Ring tags: the tag a call rings an internal phone with (internal, external,
  * ring group, page, door, alarm, emergency callback and your own), and the
  * ordered rules that pick one. Hello sends the tag to the phone as an
- * Alert-Info header, and the phone maps it to a tone.
+ * Alert-Info header, and the ring map (provisioned into the phone) maps it to
+ * a tone.
  */
 export function RingTags() {
   const [tab, setTab] = useState<Tab>("tags");
@@ -56,11 +59,11 @@ export function RingTags() {
     <section aria-labelledby="page-title">
       <PageHeader
         eyebrow="Call flow"
-        title="Ring tags"
+        title="Ringing"
         description="Tag calls so phones ring differently for a door, a customer or a colleague. A call's kind (page, alarm, door) comes first, then these rules in order, then the ring group's tag, then external for trunk calls and internal for the rest."
       />
       <Tabs<Tab>
-        aria-label="Ring tags, rules and test"
+        aria-label="Ringing: tags, rules, ring map, tones and test"
         className="cf-tabs"
         idPrefix="rt"
         value={tab}
@@ -68,6 +71,8 @@ export function RingTags() {
         items={[
           { id: "tags", label: "Tags" },
           { id: "rules", label: "Rules" },
+          { id: "map", label: "Ring map" },
+          { id: "tones", label: "Tones" },
           { id: "test", label: "Test a call" },
         ]}
       />
@@ -78,6 +83,8 @@ export function RingTags() {
       >
         {tab === "tags" && <Tags />}
         {tab === "rules" && <Rules />}
+        {tab === "map" && <RingMap />}
+        {tab === "tones" && <ToneLibrary />}
         {tab === "test" && <TestCall />}
       </div>
     </section>

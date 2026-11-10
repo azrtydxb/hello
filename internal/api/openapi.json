@@ -3,7 +3,7 @@
   "info": {
     "title": "Hello management API",
     "version": "v1",
-    "description": "hello-control REST API. Every route except version, openapi.json and auth/login requires the hello_session cookie or an `Authorization: Bearer <token>` header. Secrets (device SIP secrets, API tokens, trunk passwords) appear only in the response that creates them; trunk passwords never appear in any response."
+    "description": "hello-control REST API. Every route except version, openapi.json and auth/login requires the hello_session cookie or an `Authorization: Bearer <token>` header. Secrets (device SIP secrets, API tokens, trunk passwords) appear only in the response that creates them; trunk passwords never appear in any response. While a backup restore runs, every request that is not a read (GET, HEAD, OPTIONS) is refused with 503 and the error code `maintenance`, whatever its operation documents; retry after the Retry-After seconds."
   },
   "security": [
     {
@@ -2521,7 +2521,7 @@
       "get": {
         "operationId": "exportCDRs",
         "summary": "Call detail records as CSV, newest first",
-        "description": "Exports the filtered call records as a CSV download. The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe.",
+        "description": "Exports the filtered call records as a CSV download. The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe. The caller_codec and callee_codec columns are empty when no codec was negotiated.",
         "tags": ["history"],
         "parameters": [
           {
@@ -8020,7 +8020,9 @@
                         },
                         "blf": {
                           "type": "array",
-                          "items": { "type": "string" },
+                          "items": {
+                            "type": "string"
+                          },
                           "description": "Optional extension numbers shown as busy-lamp keys."
                         }
                       }
@@ -16140,6 +16142,1701 @@
           "category": "credentials"
         }
       }
+    },
+    "/api/v1/backups/settings": {
+      "get": {
+        "operationId": "getBackupSettings",
+        "summary": "Backup schedule and destination",
+        "description": "Admin only. Returns the backup schedule (a five-field cron expression, server time), whether scheduled backups are enabled, the destination (the bundled MinIO bucket hello-backups, or an external S3 service), how many archives are kept and the address a failure email goes to. The S3 credentials are never returned; s3KeysSet says whether they are stored.",
+        "tags": ["backups"],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupSettings"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
+        }
+      },
+      "put": {
+        "operationId": "putBackupSettings",
+        "summary": "Save the backup schedule and destination",
+        "description": "Admin only, audited. Saves the schedule and destination. The S3 access key and secret key are sealed in the database; omit both to keep the stored ones, send both to replace them, or send both empty to remove them. Changes apply from the next scheduler pass.",
+        "tags": ["backups"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupSettingsUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
+        }
+      }
+    },
+    "/api/v1/backups": {
+      "get": {
+        "operationId": "listBackups",
+        "summary": "Backup runs",
+        "description": "Admin only. Lists the newest 200 backup runs, scheduled and manual, with status, sizes and the stored archive key.",
+        "tags": ["backups"],
+        "responses": {
+          "200": {
+            "description": "Runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BackupRun"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
+        }
+      },
+      "post": {
+        "operationId": "createBackup",
+        "summary": "Run a backup now",
+        "description": "Admin only, audited. Starts a manual backup in the background and answers 202 with the run (status running). 409 backup_busy while another backup or a restore is running. Poll the list for the outcome.",
+        "tags": ["backups"],
+        "responses": {
+          "202": {
+            "description": "The run that was started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupRun"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
+        }
+      }
+    },
+    "/api/v1/backups/{id}": {
+      "delete": {
+        "operationId": "deleteBackup",
+        "summary": "Delete a backup",
+        "description": "Admin only, audited. Removes the archive from the destination and the run row. Stored objects no remaining archive references are removed by the next run. 409 backup_busy for a run still in progress.",
+        "tags": ["backups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
+        }
+      }
+    },
+    "/api/v1/backups/{id}/restore": {
+      "post": {
+        "operationId": "restoreBackup",
+        "summary": "Restore a backup",
+        "description": "Admin only, audited. With dry_run=true it verifies the manifest and every part hash and returns counts only, and writes nothing. Otherwise the body must carry confirm: \"RESTORE <id>\". A restore puts the API in maintenance (every write answers 503 maintenance) while it replaces the database in one transaction and restores missing or changed objects, never deleting one. It is refused with 409 schema_newer for an archive from a newer schema, 409 key_mismatch for another HELLO_SECRET_KEY and 409 backup_invalid when verification fails. SIP keeps running on its current snapshot, then rebuilds it.",
+        "tags": ["backups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Verify the archive and report counts without restoring."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupRestore"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The restore report (counts only)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupRestoreReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
+        }
+      }
+    },
+    "/api/v1/phones/{id}/ldap": {
+      "get": {
+        "operationId": "getPhoneLDAP",
+        "summary": "Get a phone's LDAP directory state",
+        "description": "Returns the phone's LDAP bind DN, whether a password is set, when it was last rotated, whether the previous password still binds and when the phone last bound. Never the password. Viewer.",
+        "tags": ["phones"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneLDAP"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phones/{id}/ldap/password": {
+      "post": {
+        "operationId": "rotatePhoneLDAPPassword",
+        "summary": "Rotate a phone's LDAP password",
+        "description": "Generates a new 32-character LDAP password for the phone and returns it once, with the bind DN. The phone is queued a check-sync so it takes the new password with its configuration; the old password keeps working until it has fetched it. Admin, secrets scope.",
+        "tags": ["phones"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The new password, shown once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneLDAPPassword"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "secrets-scoped: the password is shown only in the console",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/prov/firmware/minimums": {
+      "get": {
+        "operationId": "listFirmwareMinimums",
+        "summary": "Firmware minimum and recommended versions",
+        "description": "Lists the minimum firmware version per vendor and model glob. A pin below it is refused and never rendered. The recommended version is the documented lab build.",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "The rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirmwareMinimum"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putFirmwareMinimums",
+        "summary": "Replace every firmware minimum version rule",
+        "description": "Replaces every firmware minimum version rule.",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "The rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirmwareMinimum"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FirmwareMinimum"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/ldap": {
+      "get": {
+        "operationId": "getPhoneGroupLDAP",
+        "summary": "Get a phone group's LDAP directory setting",
+        "description": "Returns whether the group's phones are given the LDAP directory, whether this server serves LDAP at all, and where phones reach it. Viewer.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The setting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroupLDAP"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "setPhoneGroupLDAP",
+        "summary": "Turn a phone group's LDAP directory on or off",
+        "description": "Turns the read-only LDAP directory on or off for the group's phones. On, each phone of the group is given its LDAP bind DN and a generated password in its rendered configuration (LDAPS, the same delivered address books as the XML directory). Needs HELLO_LDAP_ENABLED on the server; turning it on without answers 409. Phones pick the change up at their next fetch. Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneGroupLDAPInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The setting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroupLDAP"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ring-map": {
+      "get": {
+        "operationId": "getRingMap",
+        "summary": "The ring map",
+        "description": "Returns the ring map that turns a ring tag into a tone on each vendor's phones: the vendors' built-in ringer lists, the default tone of every tag and vendor (the vendor's ringer for the tag's Bellcore slot), the global choices and the overrides of each phone group. A tag and vendor without a choice use the default, so nothing has to be configured.",
+        "tags": ["ring-tags"],
+        "responses": {
+          "200": {
+            "description": "The ring map",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingMapView"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putRingMap",
+        "summary": "Replace the global ring map",
+        "description": "Replaces the global choices as a whole. A change reaches the affected phones through the automatic resync (check-sync). The tone must be in the vendor's ringer list (silent only where the vendor has it), or custom:<name> of a tone in the library on a vendor whose customTones is true.",
+        "tags": ["ring-tags"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RingMapInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The choices after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingMapChoices"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ring-map/groups/{id}": {
+      "put": {
+        "operationId": "putRingMapGroup",
+        "summary": "Replace a phone group's ring map overrides",
+        "description": "Replaces the overrides of one phone group as a whole; an empty list removes them. An override wins over the global choice for the phones of the group.",
+        "tags": ["ring-tags"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The phone group id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RingMapInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The choices after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingMapChoices"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ringtones": {
+      "get": {
+        "operationId": "listRingtones",
+        "summary": "List the tone library",
+        "description": "Lists the uploaded custom tones the ring map can choose, with how many ring map choices use each.",
+        "tags": ["ring-tags"],
+        "responses": {
+          "200": {
+            "description": "Tones ordered by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingtoneList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createRingtone",
+        "summary": "Upload a custom tone",
+        "description": "Adds a WAV file to the tone library (bucket hello-ringtones). A phone downloads it under its token at /p/<token>/ring/<name>.wav. The bytes are checked: PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB, otherwise 400. A name the library has is 409. Hello provisions a custom tone to Yealink and Snom phones; the other vendors keep their built-in ringer.",
+        "tags": ["ring-tags"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "audioBase64"],
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+                    "description": "The tone's unique name; the ring map names it as custom:<name>."
+                  },
+                  "audioBase64": {
+                    "type": "string",
+                    "contentEncoding": "base64",
+                    "description": "Base64 of a WAV file with the same rules as the multipart file (PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB). The JSON request is at most 1 MiB."
+                  }
+                }
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "file"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+                    "description": "The tone's unique name; the ring map names it as custom:<name>."
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "WAV bytes: PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ringtone"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ringtones/{id}": {
+      "delete": {
+        "operationId": "deleteRingtone",
+        "summary": "Delete a custom tone",
+        "description": "Removes a tone and its audio. A tone a ring map choice uses is 409 and names the choice; change the choice first.",
+        "tags": ["ring-tags"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/calls/originate": {
+      "post": {
+        "operationId": "originateCall",
+        "summary": "Place a click-to-call",
+        "description": "Rings the caller's own phone first; when it is answered, dials the destination as if the extension had dialled it at the desk phone (internal extension, ring group or outbound route, with every class and permission check of the routing), and bridges the two. The call is never dialled to the destination before the phone answers. The extension defaults to the caller's single linked extension; a user credential may name only its own, an operator or administrator any, a service account any within its extensionScope. The caller ID is the one the routing presents for that extension; a callerId is honoured only if it is one of the numbers the routing allows the extension to present. Emergency numbers are refused. The destination is digits, +, * and # only (no SIP addresses). Replies 202 with the request id; poll GET /calls/originate/{id} or follow call.originate.progress events. The same idempotency key (body or Idempotency-Key header) from the same credential within 10 minutes returns the same request. Limits: per credential 10 per minute and 200 per day, per extension 1 call in setup and 30 per hour, per destination 3 per 10 minutes, 600 per hour in all (429 with Retry-After).",
+        "tags": ["calls"],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Same as the idempotencyKey field."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OriginateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted: the request is queued for a hello-sip node",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OriginateStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "calls",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "places phone calls",
+          "category": "disruptive-device"
+        }
+      }
+    },
+    "/api/v1/calls/originate/{id}": {
+      "get": {
+        "operationId": "getOriginate",
+        "summary": "State of a click-to-call",
+        "description": "The state of a request the caller started: queued, ringing_agent, agent_answered, dialing_target, connected, ended or failed (with a reason). Only the credential that started it, or an operator or administrator, can read it; anyone else gets 404.",
+        "tags": ["calls"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The originateId returned when the request was made."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OriginateStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "calls",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "belongs to click-to-call, which an AI agent may not place",
+          "category": "disruptive-device"
+        }
+      },
+      "delete": {
+        "operationId": "cancelOriginate",
+        "summary": "Hang up a click-to-call",
+        "description": "Stops the request wherever it is: cancels the ring of the phone, cancels the ring of the destination, or hangs up a connected call. Replies 202 with the state at that moment; the request ends asynchronously (read it or follow the events). 409 when the request is already over.",
+        "tags": ["calls"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The originateId returned when the request was made."
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Hang-up requested",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OriginateStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "calls",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "belongs to click-to-call, which an AI agent may not place",
+          "category": "disruptive-device"
+        }
+      }
+    },
+    "/api/v1/integrations/click-to-call": {
+      "get": {
+        "operationId": "getClickToCallSettings",
+        "summary": "Read the click-to-call policy",
+        "description": "Which destinations click-to-call may dial (the outbound routes decide, or only internal numbers and the listed country prefixes) and whether a request may ask the phone to answer by itself (off by default).",
+        "tags": ["calls"],
+        "responses": {
+          "200": {
+            "description": "The policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClickToCallSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "toll-fraud controls of click-to-call are set in the console only",
+          "category": "human-in-the-loop"
+        }
+      },
+      "put": {
+        "operationId": "putClickToCallSettings",
+        "summary": "Set the click-to-call policy",
+        "description": "Replaces the policy. Admin only, audited. With restricted, a destination that leaves through an outbound route must start with one of the country prefixes; internal numbers are always allowed.",
+        "tags": ["calls"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClickToCallSettings"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClickToCallSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "toll-fraud controls of click-to-call are set in the console only",
+          "category": "human-in-the-loop"
+        }
+      }
+    },
+    "/api/v1/webhooks": {
+      "get": {
+        "operationId": "listWebhooks",
+        "summary": "List webhook endpoints",
+        "description": "Lists the endpoints that receive call events, with their health and the number of deliveries waiting and dead. Administrators only.",
+        "tags": ["webhooks"],
+        "responses": {
+          "200": {
+            "description": "The endpoints",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
+        }
+      },
+      "post": {
+        "operationId": "createWebhook",
+        "summary": "Create a webhook endpoint",
+        "description": "Subscribes a receiver to call events. The URL must be https; an endpoint with allowPrivate may use http and a private address, but only inside the administrator's HELLO_INTEGRATIONS_ALLOWED_CIDRS (loopback, link-local and metadata addresses are never reachable). The response carries the signing secret, shown once; creating an endpoint needs the secrets scope. The call is idempotent on (url, events): repeating it returns the existing endpoint with 200 and a null secret, which is what a Zapier REST-hook subscription needs.",
+        "tags": ["webhooks"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The endpoint, with its signing secret (shown once)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookWithSecret"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "An endpoint with this URL and events already existed; its secret is not shown again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookWithSecret"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/webhooks/{id}": {
+      "get": {
+        "operationId": "getWebhook",
+        "summary": "Get a webhook endpoint",
+        "description": "Returns one endpoint. The signing secret is never returned.",
+        "tags": ["webhooks"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The endpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
+        }
+      },
+      "patch": {
+        "operationId": "updateWebhook",
+        "summary": "Change a webhook endpoint",
+        "description": "Changes the name, URL, filters or switches. Enabling an endpoint clears its failure count and disabled reason; disabling one records the reason manual. Events that arrived while it was off were not queued for it.",
+        "tags": ["webhooks"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The endpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteWebhook",
+        "summary": "Delete a webhook endpoint",
+        "description": "Deletes the endpoint with its deliveries and dead letters.",
+        "tags": ["webhooks"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/webhooks/{id}/rotate-secret": {
+      "post": {
+        "operationId": "rotateWebhookSecret",
+        "summary": "Rotate a webhook signing secret",
+        "description": "Replaces the signing secret and returns the new one, shown once. For 24 hours both the new and the previous secret sign every delivery (one v1= in the signature header each), so a receiver can switch without dropping events.",
+        "tags": ["webhooks"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The endpoint, with the new signing secret (shown once)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookWithSecret"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/webhooks/{id}/test": {
+      "post": {
+        "operationId": "testWebhook",
+        "summary": "Send a test event",
+        "description": "Sends a signed webhook.test event to the endpoint now and reports the receiver's status, the latency and the first kilobyte of its answer. The ping creates no delivery and does not count as a failure, and works on a disabled endpoint.",
+        "tags": ["webhooks"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the receiver answered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookTestResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/webhooks/{id}/deliveries": {
+      "get": {
+        "operationId": "listWebhookDeliveries",
+        "summary": "List the deliveries of an endpoint",
+        "description": "The delivery log: every event queued for the endpoint, newest first, with its state (pending, retrying, succeeded or dead), attempts, last status and last error. The dead ones are the dead-letter queue. Page with nextCursor passed as before.",
+        "tags": ["webhooks"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["pending", "retrying", "succeeded", "dead"]
+            },
+            "description": "Only deliveries in this state; dead lists the dead-letter queue."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Return deliveries with a smaller id than this (the previous page's nextCursor)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "description": "Page size, 1 to 500 (default 100)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of deliveries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/webhooks/{id}/deliveries/{deliveryId}": {
+      "get": {
+        "operationId": "getWebhookDelivery",
+        "summary": "Get a delivery with its attempt log",
+        "description": "One delivery with every attempt (time, status, error, latency, the Hello-Delivery id sent) and, while the event is still stored, the event it carries.",
+        "tags": ["webhooks"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "deliveryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Id of the delivery, as the delivery list returns it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The delivery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/webhooks/{id}/deliveries/redeliver-dead": {
+      "post": {
+        "operationId": "redeliverDeadWebhookDeliveries",
+        "summary": "Redeliver every dead letter of an endpoint",
+        "description": "Queues every dead delivery of the endpoint again, each with a fresh retry series and the same event id. A disabled endpoint receives them once it is enabled.",
+        "tags": ["webhooks"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How many were queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookRedelivered"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/webhooks/deliveries/{id}/redeliver": {
+      "post": {
+        "operationId": "redeliverWebhookDelivery",
+        "summary": "Redeliver one delivery",
+        "description": "Makes a delivery due now with a fresh retry series; the receiver gets the same event id again, in a new attempt. A delivery that is being sent right now answers 409.",
+        "tags": ["webhooks"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Id of the delivery, as the delivery list returns it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The delivery, queued again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDelivery"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
+        }
+      }
     }
   },
   "components": {
@@ -16255,7 +17952,7 @@
         }
       },
       "Unprocessable": {
-        "description": "A batch that is not valid: the errors name the operation, node and field (validation_failed)",
+        "description": "The request is well formed but refused: emergency_not_allowed, caller_id_not_allowed or route_denied",
         "content": {
           "application/json": {
             "schema": {
@@ -16690,6 +18387,15 @@
           },
           "firmwareSeen": {
             "type": "string"
+          },
+          "firmwarePinned": {
+            "type": "string"
+          },
+          "firmwareMinimum": {
+            "type": "string"
+          },
+          "firmwareDrift": {
+            "type": "boolean"
           },
           "id": {
             "type": "integer"
@@ -17333,6 +19039,9 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "upgradeHour": {
+            "type": ["integer", "null"]
           }
         }
       },
@@ -17348,6 +19057,11 @@
           },
           "firmwareId": {
             "type": "integer"
+          },
+          "upgradeHour": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "maximum": 23
           }
         }
       },
@@ -17554,7 +19268,9 @@
           },
           "languages": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "The languages a box can be set to."
           }
         }
@@ -17745,6 +19461,7 @@
           "failureKind",
           "failureTarget",
           "members",
+          "isDoor",
           "createdAt",
           "updatedAt"
         ],
@@ -17817,6 +19534,10 @@
           "ringTag": {
             "type": "string",
             "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
+          },
+          "isDoor": {
+            "type": "boolean",
+            "description": "Marks the Door group: a door station may call it, its calls have kind door and ring with the doorbell tag. A new Door group with no ringTag gets doorbell."
           },
           "failureTarget": {
             "type": "string"
@@ -17913,6 +19634,10 @@
           "ringTag": {
             "type": "string",
             "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
+          },
+          "isDoor": {
+            "type": "boolean",
+            "description": "Marks the Door group: a door station may call it, its calls have kind door and ring with the doorbell tag. A new Door group with no ringTag gets doorbell."
           },
           "failureTarget": {
             "type": "string",
@@ -18030,6 +19755,10 @@
           "ringTag": {
             "type": "string",
             "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
+          },
+          "isDoor": {
+            "type": "boolean",
+            "description": "Marks the Door group: a door station may call it, its calls have kind door and ring with the doorbell tag. A new Door group with no ringTag gets doorbell."
           },
           "failureTarget": {
             "type": "string",
@@ -18944,12 +20673,17 @@
         "type": "object",
         "required": ["node", "text"],
         "properties": {
-          "node": { "type": "string", "description": "A graph node id." },
+          "node": {
+            "type": "string",
+            "description": "A graph node id."
+          },
           "port": {
             "type": "string",
             "description": "The output port of the node the call leaves through; for a last step, the port it ends at."
           },
-          "text": { "type": "string" },
+          "text": {
+            "type": "string"
+          },
           "at": {
             "type": "string",
             "description": "On a time condition step, the instant that was evaluated."
@@ -18957,7 +20691,9 @@
           "branches": {
             "type": "array",
             "description": "The choices of an IVR menu traced without a key.",
-            "items": { "$ref": "#/components/schemas/FlowTraceBranch" }
+            "items": {
+              "$ref": "#/components/schemas/FlowTraceBranch"
+            }
           }
         }
       },
@@ -18965,11 +20701,17 @@
         "type": "object",
         "required": ["port", "label", "steps"],
         "properties": {
-          "port": { "type": "string" },
-          "label": { "type": "string" },
+          "port": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
           "steps": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+            "items": {
+              "$ref": "#/components/schemas/FlowTraceStep"
+            }
           }
         }
       },
@@ -18985,26 +20727,41 @@
           "routingTrace"
         ],
         "properties": {
-          "configRevision": { "type": "integer", "format": "int64" },
-          "at": { "type": "string" },
-          "from": { "type": "string" },
-          "number": { "type": "string" },
+          "configRevision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "at": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          },
           "outcome": {
             "type": "string",
             "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing."
           },
-          "route": { "type": "string" },
+          "route": {
+            "type": "string"
+          },
           "reason": {
             "type": "string",
             "description": "Why the call was rejected."
           },
           "steps": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+            "items": {
+              "$ref": "#/components/schemas/FlowTraceStep"
+            }
           },
           "routingTrace": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/TraceStep" }
+            "items": {
+              "$ref": "#/components/schemas/TraceStep"
+            }
           }
         }
       },
@@ -20045,7 +21802,15 @@
                   "rate_limited",
                   "too_large",
                   "messaging_disabled",
-                  "no_messaging_trunk"
+                  "no_messaging_trunk",
+                  "backup_busy",
+                  "backup_invalid",
+                  "key_mismatch",
+                  "schema_newer",
+                  "maintenance",
+                  "emergency_not_allowed",
+                  "caller_id_not_allowed",
+                  "route_denied"
                 ]
               },
               "message": {
@@ -20694,7 +22459,9 @@
           },
           "languages": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "The languages the box can be set to."
           }
         }
@@ -21033,7 +22800,9 @@
           "allowIntercom",
           "callWaiting",
           "noAnswerRings",
-          "directoryHidden"
+          "directoryHidden",
+          "kind",
+          "doorTargets"
         ],
         "properties": {
           "id": {
@@ -21058,6 +22827,14 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["user", "door"],
+            "description": "user (default) or door. A door station has no voicemail, joins no group, receives no pickup, page, intercom or MESSAGE, and may call only its doorTargets and the Door ring groups; any other destination is 403. Its calls carry the doorbell ring tag and CDR kind door. Turning an extension into a door station is refused while it is in a ring group, paging group, pickup group or queue; it then loses voicemail and intercom and is hidden from the extensions phonebook unless directoryHidden says otherwise."
+          },
+          "doorTargets": {
+            "$ref": "#/components/schemas/DoorTargets"
           },
           "externalNumber": {
             "type": "string",
@@ -21139,6 +22916,14 @@
             "example": "Reception",
             "description": "Display name shown as caller ID inside the PBX."
           },
+          "kind": {
+            "type": "string",
+            "enum": ["user", "door"],
+            "description": "user (default) or door. A door station has no voicemail, joins no group, receives no pickup, page, intercom or MESSAGE, and may call only its doorTargets and the Door ring groups; any other destination is 403. Its calls carry the doorbell ring tag and CDR kind door. Turning an extension into a door station is refused while it is in a ring group, paging group, pickup group or queue; it then loses voicemail and intercom and is hidden from the extensions phonebook unless directoryHidden says otherwise."
+          },
+          "doorTargets": {
+            "$ref": "#/components/schemas/DoorTargets"
+          },
           "externalNumber": {
             "type": "string",
             "pattern": "^(\\+?[0-9]{2,20})?$",
@@ -21163,6 +22948,14 @@
             "maxLength": 100,
             "example": "Reception",
             "description": "New display name."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["user", "door"],
+            "description": "user (default) or door. A door station has no voicemail, joins no group, receives no pickup, page, intercom or MESSAGE, and may call only its doorTargets and the Door ring groups; any other destination is 403. Its calls carry the doorbell ring tag and CDR kind door. Turning an extension into a door station is refused while it is in a ring group, paging group, pickup group or queue; it then loses voicemail and intercom and is hidden from the extensions phonebook unless directoryHidden says otherwise."
+          },
+          "doorTargets": {
+            "$ref": "#/components/schemas/DoorTargets"
           },
           "externalNumber": {
             "type": "string",
@@ -21802,10 +23595,27 @@
             "type": ["number", "null"],
             "description": "Larger of the two directions' interarrival jitter in ms; null when not measured."
           },
+          "callerCodec": {
+            "type": ["string", "null"],
+            "example": "opus/48000",
+            "description": "Audio codec the caller leg ended on, as name/clock rate (PCMU/8000, G722/8000, opus/48000); null when none was negotiated (a call that was not answered) and for records written before migration 00054. A re-INVITE that switches codec replaces it, so it is the last codec of the call."
+          },
+          "calleeCodec": {
+            "type": ["string", "null"],
+            "example": "PCMU/8000",
+            "description": "Audio codec the callee leg ended on, as callerCodec; null for a call Hello ends itself (voicemail, conference, IVR, queue), which has no callee leg."
+          },
           "kind": {
             "type": "string",
-            "enum": ["call", "page", "intercom", "conference", "callback"],
-            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or callback for a call Hello placed to a queue caller who asked to be called back."
+            "enum": [
+              "call",
+              "page",
+              "intercom",
+              "conference",
+              "door",
+              "callback"
+            ],
+            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or door for a door station or a Door group, or callback for a call Hello placed to a queue caller who asked to be called back."
           },
           "ringTag": {
             "type": "string",
@@ -21973,7 +23783,8 @@
           "destinations",
           "internalDialing",
           "codecs",
-          "messaging"
+          "messaging",
+          "sessionTimers"
         ],
         "properties": {
           "id": {
@@ -22071,6 +23882,11 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Off by default."
+          },
+          "sessionTimers": {
+            "type": "string",
+            "enum": ["default", "on", "off"],
+            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
           }
         }
       },
@@ -22173,6 +23989,11 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
+          },
+          "sessionTimers": {
+            "type": "string",
+            "enum": ["default", "on", "off"],
+            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
           }
         }
       },
@@ -22275,6 +24096,11 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
+          },
+          "sessionTimers": {
+            "type": "string",
+            "enum": ["default", "on", "off"],
+            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
           }
         }
       },
@@ -25779,6 +27605,10 @@
           "pagingOptions": {
             "$ref": "#/components/schemas/PagingOptions"
           },
+          "ldapEnabled": {
+            "type": "boolean",
+            "description": "The group's phones are given the LDAP directory (see PUT /phone-groups/{id}/ldap)."
+          },
           "phoneCount": {
             "type": "integer"
           },
@@ -27404,8 +29234,14 @@
           "expiresAt"
         ],
         "properties": {
-          "id": { "type": "integer", "format": "int64" },
-          "queueId": { "type": "integer", "format": "int64" },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "queueId": {
+            "type": "integer",
+            "format": "int64"
+          },
           "number": {
             "type": "string",
             "description": "The number to call back."
@@ -27434,7 +29270,10 @@
             "format": "int64",
             "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."
           },
-          "nextAttemptAt": { "type": "string", "format": "date-time" },
+          "nextAttemptAt": {
+            "type": "string",
+            "format": "date-time"
+          },
           "claimedBy": {
             "type": "string",
             "description": "The node working on it while dialling."
@@ -27452,9 +29291,18 @@
             "type": "string",
             "description": "The last attempt's outcome or the way the request ended."
           },
-          "createdAt": { "type": "string", "format": "date-time" },
-          "expiresAt": { "type": "string", "format": "date-time" },
-          "finishedAt": { "type": "string", "format": "date-time" }
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "QueueCallbackList": {
@@ -27887,6 +29735,1260 @@
           "expiresAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "FirmwareMinimum": {
+        "type": "object",
+        "required": ["vendor", "modelGlob"],
+        "properties": {
+          "vendor": {
+            "type": "string"
+          },
+          "modelGlob": {
+            "type": "string"
+          },
+          "minVersion": {
+            "type": "string"
+          },
+          "recommended": {
+            "type": "string"
+          }
+        }
+      },
+      "BackupSettings": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "cron",
+          "kind",
+          "bucket",
+          "s3Endpoint",
+          "s3Bucket",
+          "s3Region",
+          "s3PathStyle",
+          "s3KeysSet",
+          "keepCount",
+          "notifyEmail",
+          "updatedAt"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "cron": {
+            "type": "string",
+            "description": "Five-field cron expression in server time; the default 0 2 * * * is daily at 02:00."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["minio", "s3"]
+          },
+          "bucket": {
+            "type": "string",
+            "description": "The bucket archives go to for the minio destination."
+          },
+          "s3Endpoint": {
+            "type": "string"
+          },
+          "s3Bucket": {
+            "type": "string"
+          },
+          "s3Region": {
+            "type": "string"
+          },
+          "s3PathStyle": {
+            "type": "boolean"
+          },
+          "s3KeysSet": {
+            "type": "boolean",
+            "description": "Whether S3 credentials are stored. They are never returned."
+          },
+          "keepCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365
+          },
+          "notifyEmail": {
+            "type": "string",
+            "description": "Where the email goes when a scheduled backup fails twice; empty for none."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BackupSettingsUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["enabled", "cron", "kind", "keepCount"],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether scheduled backups run; manual backups are always possible."
+          },
+          "cron": {
+            "type": "string",
+            "description": "Five-field cron expression in server time, such as 0 2 * * * for daily at 02:00."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["minio", "s3"],
+            "description": "minio is the bundled bucket hello-backups; s3 is an external S3-compatible service."
+          },
+          "s3Endpoint": {
+            "type": "string",
+            "description": "https://host[:port] of the S3 service (kind s3)."
+          },
+          "s3Bucket": {
+            "type": "string",
+            "description": "The bucket archives go to (kind s3)."
+          },
+          "s3Region": {
+            "type": "string",
+            "description": "The S3 region; empty when the service has none."
+          },
+          "s3PathStyle": {
+            "type": "boolean",
+            "description": "Use path-style bucket addressing instead of virtual-hosted style."
+          },
+          "s3AccessKey": {
+            "type": "string",
+            "description": "Send with s3SecretKey to replace the stored credentials; both empty remove them; omit both to keep them."
+          },
+          "s3SecretKey": {
+            "type": "string",
+            "description": "The S3 secret key; write-only, sealed in the database and never returned."
+          },
+          "keepCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "description": "How many of the newest archives to keep."
+          },
+          "notifyEmail": {
+            "type": "string",
+            "description": "The address told when a scheduled backup fails twice; empty for none."
+          }
+        }
+      },
+      "BackupRun": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "attempt",
+          "startedAt",
+          "finishedAt",
+          "dbBytes",
+          "objectCount",
+          "objectBytes",
+          "archiveBytes",
+          "objectKey",
+          "errorClass"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["scheduled", "manual"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["running", "succeeded", "failed"]
+          },
+          "attempt": {
+            "type": "integer"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "dbBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "objectCount": {
+            "type": "integer"
+          },
+          "objectBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "archiveBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "objectKey": {
+            "type": "string"
+          },
+          "errorClass": {
+            "type": "string",
+            "description": "A short class (db_dump, storage, verify, source, settings, interrupted, ...) for a failed run; never a message with names or secrets."
+          }
+        }
+      },
+      "BackupRestore": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "type": "string",
+            "description": "RESTORE <id>; required unless dry_run=true."
+          }
+        }
+      },
+      "BackupRestoreReport": {
+        "type": "object",
+        "required": [
+          "dryRun",
+          "helloVersion",
+          "schemaVersion",
+          "createdAt",
+          "dbBytes",
+          "objects",
+          "objectBytes",
+          "objectsToRestore",
+          "objectsMissingInBackup"
+        ],
+        "properties": {
+          "dryRun": {
+            "type": "boolean"
+          },
+          "helloVersion": {
+            "type": "string"
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dbBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "objects": {
+            "type": "integer"
+          },
+          "objectBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "objectsToRestore": {
+            "type": "integer",
+            "description": "Live objects that are missing or differ from the backup."
+          },
+          "objectsMissingInBackup": {
+            "type": "integer",
+            "description": "Objects the archive lists that the backup store no longer holds; a restore refuses while this is not zero."
+          }
+        }
+      },
+      "DoorTargets": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "The extra destinations a door station may call besides every Door ring group: extension ids and ring group ids. A door station cannot list itself or another door station.",
+        "properties": {
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "maxItems": 50
+          },
+          "ringGroups": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "maxItems": 50
+          }
+        }
+      },
+      "PhoneGroupLDAP": {
+        "type": "object",
+        "required": ["enabled", "served", "host", "port", "base", "phoneCount"],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "The group's phones are given the LDAP directory."
+          },
+          "served": {
+            "type": "boolean",
+            "description": "This server serves LDAP (HELLO_LDAP_ENABLED and a public provisioning URL)."
+          },
+          "host": {
+            "type": "string",
+            "description": "Where phones reach the LDAPS listener; empty when not served."
+          },
+          "port": {
+            "type": "integer"
+          },
+          "base": {
+            "type": "string",
+            "description": "The base DN phones search (ou=phonebook under HELLO_LDAP_BASE)."
+          },
+          "phoneCount": {
+            "type": "integer"
+          }
+        }
+      },
+      "PhoneGroupLDAPInput": {
+        "type": "object",
+        "required": ["enabled"],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Give the group's phones the LDAP directory."
+          }
+        }
+      },
+      "PhoneLDAP": {
+        "type": "object",
+        "required": [
+          "served",
+          "supported",
+          "groupEnabled",
+          "host",
+          "port",
+          "base",
+          "bindDn",
+          "passwordSet",
+          "rotatedAt",
+          "previousValid",
+          "lastBindAt"
+        ],
+        "properties": {
+          "served": {
+            "type": "boolean"
+          },
+          "supported": {
+            "type": "boolean",
+            "description": "The phone's model has an LDAP client the built-in template writes keys for."
+          },
+          "groupEnabled": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "base": {
+            "type": "string"
+          },
+          "bindDn": {
+            "type": "string",
+            "description": "The phone's own bind DN, uid=<phone id>,ou=phones under the base."
+          },
+          "passwordSet": {
+            "type": "boolean"
+          },
+          "rotatedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "previousValid": {
+            "type": "boolean",
+            "description": "The password before the last rotation still binds, because the phone has not fetched its new configuration."
+          },
+          "lastBindAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the phone last bound (a minute's resolution). Null: the phone has not queried the directory."
+          }
+        }
+      },
+      "PhoneLDAPPassword": {
+        "type": "object",
+        "required": ["bindDn", "password", "resyncQueued"],
+        "properties": {
+          "bindDn": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The new password, shown once."
+          },
+          "resyncQueued": {
+            "type": "boolean",
+            "description": "A check-sync was queued so the phone takes the password."
+          }
+        }
+      },
+      "RingMapEntry": {
+        "type": "object",
+        "required": ["tag", "vendor", "tone"],
+        "additionalProperties": false,
+        "properties": {
+          "tag": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,32}$",
+            "description": "The ring tag."
+          },
+          "vendor": {
+            "type": "string",
+            "enum": ["yealink", "poly", "grandstream", "snom", "fanvil"]
+          },
+          "tone": {
+            "type": "string",
+            "description": "The id of a ringer in the vendor's list, or silent."
+          }
+        }
+      },
+      "RingMapGroup": {
+        "type": "object",
+        "required": ["groupId", "entries"],
+        "properties": {
+          "groupId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapEntry"
+            }
+          }
+        }
+      },
+      "RingMapChoices": {
+        "type": "object",
+        "required": ["global", "groups"],
+        "properties": {
+          "global": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapEntry"
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapGroup"
+            }
+          }
+        }
+      },
+      "Ringtone": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "sizeBytes",
+          "sha256",
+          "sampleRate",
+          "durationMs",
+          "createdAt",
+          "usedBy"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer"
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Hex SHA-256 of the WAV; the ETag a phone gets."
+          },
+          "sampleRate": {
+            "type": "integer",
+            "enum": [8000, 16000]
+          },
+          "durationMs": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "usedBy": {
+            "type": "integer",
+            "description": "How many ring map choices name the tone."
+          }
+        }
+      },
+      "RingtoneList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ringtone"
+            }
+          }
+        }
+      },
+      "RingMapView": {
+        "type": "object",
+        "required": ["vendors", "defaults", "global", "groups"],
+        "properties": {
+          "vendors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["vendor", "label", "slots", "tones", "customTones"],
+              "properties": {
+                "customTones": {
+                  "type": "boolean",
+                  "description": "Whether a tone of the library can be chosen for the vendor (Yealink and Snom): the tone id is custom:<name>."
+                },
+                "vendor": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "slots": {
+                  "type": "integer",
+                  "description": "The most tags the vendor's phones map to a tone (a Grandstream WP8x6 maps the five Bellcore slots; a model with no known key none)."
+                },
+                "tones": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "label", "silent"],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "silent": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "defaults": {
+            "description": "The tone every tag and vendor plays without a choice.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapEntry"
+            }
+          },
+          "global": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapEntry"
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapGroup"
+            }
+          }
+        }
+      },
+      "RingMapInput": {
+        "type": "object",
+        "required": ["entries"],
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "description": "The whole list of choices of the scope; a tag and vendor appear once.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapEntry"
+            }
+          }
+        }
+      },
+      "OriginateRequest": {
+        "type": "object",
+        "required": ["destination"],
+        "properties": {
+          "destination": {
+            "type": "string",
+            "pattern": "^[0-9+*#]{1,64}$",
+            "description": "What to dial: digits, +, * and #, at most 64. Never a SIP address."
+          },
+          "extension": {
+            "type": "string",
+            "pattern": "^[0-9]{2,10}$",
+            "description": "The extension whose phone rings first; defaults to the caller's single linked extension."
+          },
+          "deviceId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Ring only this device of the extension; by default every registered contact rings."
+          },
+          "callerId": {
+            "type": "string",
+            "description": "Must be a number the routing allows the extension to present; the presented number is otherwise the routing's own choice. Anonymous cannot be requested."
+          },
+          "autoAnswer": {
+            "type": "boolean",
+            "description": "Ask the phone to answer by itself. Refused (400) unless the administrator has enabled it."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The same key from the same credential within 10 minutes returns the same request."
+          }
+        }
+      },
+      "OriginateStatus": {
+        "type": "object",
+        "required": [
+          "originateId",
+          "state",
+          "extension",
+          "destination",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "originateId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "ringing_agent",
+              "agent_answered",
+              "dialing_target",
+              "connected",
+              "ended",
+              "failed"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why a request failed: no_registration, agent_no_answer, agent_busy, agent_dnd, target_busy, target_no_answer, route_denied, rate_limited, node_unavailable or cancelled.",
+            "enum": [
+              "no_registration",
+              "agent_no_answer",
+              "agent_busy",
+              "agent_dnd",
+              "target_busy",
+              "target_no_answer",
+              "route_denied",
+              "rate_limited",
+              "node_unavailable",
+              "cancelled"
+            ]
+          },
+          "extension": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "correlationId": {
+            "type": "string",
+            "description": "The CDR correlation id of the bridged call, once the destination is being dialled."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ClickToCallSettings": {
+        "type": "object",
+        "required": ["destinations", "countryPrefixes", "autoAnswerAllowed"],
+        "properties": {
+          "destinations": {
+            "type": "string",
+            "enum": ["inherit", "restricted"],
+            "description": "inherit: the outbound routes decide. restricted: internal numbers plus numbers that start with one of countryPrefixes."
+          },
+          "countryPrefixes": {
+            "type": "array",
+            "description": "Allowed number prefixes when destinations is restricted, for example +971 or 0097.",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "pattern": "^\\+?[0-9]{1,15}$"
+            }
+          },
+          "autoAnswerAllowed": {
+            "type": "boolean",
+            "description": "Whether a click-to-call may ask the phone to answer by itself."
+          }
+        }
+      },
+      "WebhookEndpoint": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "url",
+          "events",
+          "extensions",
+          "enabled",
+          "allowPrivate",
+          "disabledReason",
+          "consecutiveFailures",
+          "previousSecretExpiresAt",
+          "lastSuccessAt",
+          "lastFailureAt",
+          "lastStatus",
+          "createdBy",
+          "createdAt",
+          "updatedAt",
+          "pending",
+          "dead"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "url": {
+            "type": "string",
+            "description": "Where deliveries are POSTed."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Event types (call.missed) or prefix patterns (call.*) the endpoint receives; empty is every type."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only events about these extensions; empty is every extension."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "allowPrivate": {
+            "type": "boolean",
+            "description": "The endpoint may use http and a private address inside HELLO_INTEGRATIONS_ALLOWED_CIDRS."
+          },
+          "disabledReason": {
+            "type": "string",
+            "enum": ["", "manual", "consecutive_failures", "endpoint_gone"],
+            "description": "Why the endpoint is off: switched off by hand, 50 failed attempts in a row, or the receiver answered 410."
+          },
+          "consecutiveFailures": {
+            "type": "integer"
+          },
+          "previousSecretExpiresAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "While set, the secret before the last rotation still signs; it stops then."
+          },
+          "lastSuccessAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastFailureAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastStatus": {
+            "type": ["integer", "null"],
+            "description": "The receiver's last HTTP status."
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pending": {
+            "type": "integer",
+            "description": "Deliveries waiting or retrying."
+          },
+          "dead": {
+            "type": "integer",
+            "description": "Dead letters."
+          }
+        }
+      },
+      "WebhookEndpointList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookEndpoint"
+            }
+          }
+        }
+      },
+      "WebhookWithSecret": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "url",
+          "events",
+          "extensions",
+          "enabled",
+          "allowPrivate",
+          "disabledReason",
+          "consecutiveFailures",
+          "previousSecretExpiresAt",
+          "lastSuccessAt",
+          "lastFailureAt",
+          "lastStatus",
+          "createdBy",
+          "createdAt",
+          "updatedAt",
+          "pending",
+          "dead",
+          "secret"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "url": {
+            "type": "string",
+            "description": "Where deliveries are POSTed."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Event types (call.missed) or prefix patterns (call.*) the endpoint receives; empty is every type."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only events about these extensions; empty is every extension."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "allowPrivate": {
+            "type": "boolean",
+            "description": "The endpoint may use http and a private address inside HELLO_INTEGRATIONS_ALLOWED_CIDRS."
+          },
+          "disabledReason": {
+            "type": "string",
+            "enum": ["", "manual", "consecutive_failures", "endpoint_gone"],
+            "description": "Why the endpoint is off: switched off by hand, 50 failed attempts in a row, or the receiver answered 410."
+          },
+          "consecutiveFailures": {
+            "type": "integer"
+          },
+          "previousSecretExpiresAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "While set, the secret before the last rotation still signs; it stops then."
+          },
+          "lastSuccessAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastFailureAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastStatus": {
+            "type": ["integer", "null"],
+            "description": "The receiver's last HTTP status."
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pending": {
+            "type": "integer",
+            "description": "Deliveries waiting or retrying."
+          },
+          "dead": {
+            "type": "integer",
+            "description": "Dead letters."
+          },
+          "secret": {
+            "type": ["string", "null"],
+            "description": "The signing secret (whsec_...). Shown once, at creation and at rotation; null when the endpoint already existed.",
+            "x-hello-secret": true
+          }
+        }
+      },
+      "WebhookCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "url"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "A label for the endpoint."
+          },
+          "url": {
+            "type": "string",
+            "description": "An https URL (http only with allowPrivate)."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Event types or prefix patterns (call.*); empty or absent is every type."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only events about these extensions; empty or absent is every extension."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Default true."
+          },
+          "allowPrivate": {
+            "type": "boolean",
+            "description": "Default false."
+          }
+        }
+      },
+      "WebhookUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "A label for the endpoint."
+          },
+          "url": {
+            "type": "string",
+            "description": "An https URL (http only with allowPrivate); changing it re-checks the address rules."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Replaces the event types and prefix patterns; empty is every type."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Replaces the extension filter; empty is every extension."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "false switches the endpoint off (reason manual); true switches it on and clears its failure count."
+          },
+          "allowPrivate": {
+            "type": "boolean",
+            "description": "Whether the endpoint may use http and a private address inside HELLO_INTEGRATIONS_ALLOWED_CIDRS."
+          }
+        }
+      },
+      "WebhookTestResult": {
+        "type": "object",
+        "required": [
+          "delivered",
+          "status",
+          "latencyMs",
+          "error",
+          "body",
+          "eventId"
+        ],
+        "properties": {
+          "delivered": {
+            "type": "boolean",
+            "description": "The receiver answered 2xx."
+          },
+          "status": {
+            "type": "integer",
+            "description": "The receiver's HTTP status; 0 when no response came."
+          },
+          "latencyMs": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string",
+            "description": "A short description of a transport failure (timeout, connection_error, blocked_address)."
+          },
+          "body": {
+            "type": "string",
+            "description": "The first kilobyte of the answer, when it is text."
+          },
+          "eventId": {
+            "type": "string"
+          }
+        }
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "required": [
+          "id",
+          "endpointId",
+          "eventId",
+          "eventType",
+          "status",
+          "attempts",
+          "nextAttemptAt",
+          "lastStatus",
+          "lastError",
+          "lastLatencyMs",
+          "deliveredAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "endpointId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "eventId": {
+            "type": "string",
+            "description": "The event's id: what Hello-Event-Id carries and receivers dedupe on."
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "retrying", "succeeded", "dead"]
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Every try, redeliveries included."
+          },
+          "nextAttemptAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When a pending or retrying delivery is next tried."
+          },
+          "lastStatus": {
+            "type": ["integer", "null"]
+          },
+          "lastError": {
+            "type": "string",
+            "description": "Short, secret-free: http 500, timeout, connection_error, blocked_address, redirect_not_followed, event_expired, secret_unreadable."
+          },
+          "lastLatencyMs": {
+            "type": ["integer", "null"]
+          },
+          "deliveredAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookAttempt": {
+        "type": "object",
+        "required": [
+          "attempt",
+          "deliveryId",
+          "at",
+          "status",
+          "error",
+          "latencyMs"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer"
+          },
+          "deliveryId": {
+            "type": "string",
+            "description": "The Hello-Delivery header of the attempt."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": ["integer", "null"]
+          },
+          "error": {
+            "type": "string"
+          },
+          "latencyMs": {
+            "type": "integer"
+          }
+        }
+      },
+      "WebhookDeliveryDetail": {
+        "type": "object",
+        "required": [
+          "id",
+          "endpointId",
+          "eventId",
+          "eventType",
+          "status",
+          "attempts",
+          "nextAttemptAt",
+          "lastStatus",
+          "lastError",
+          "lastLatencyMs",
+          "deliveredAt",
+          "createdAt",
+          "updatedAt",
+          "log",
+          "event"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "endpointId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "eventId": {
+            "type": "string",
+            "description": "The event's id: what Hello-Event-Id carries and receivers dedupe on."
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "retrying", "succeeded", "dead"]
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Every try, redeliveries included."
+          },
+          "nextAttemptAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When a pending or retrying delivery is next tried."
+          },
+          "lastStatus": {
+            "type": ["integer", "null"]
+          },
+          "lastError": {
+            "type": "string",
+            "description": "Short, secret-free: http 500, timeout, connection_error, blocked_address, redirect_not_followed, event_expired, secret_unreadable."
+          },
+          "lastLatencyMs": {
+            "type": ["integer", "null"]
+          },
+          "deliveredAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "log": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookAttempt"
+            }
+          },
+          "event": {
+            "type": ["object", "null"],
+            "description": "The event this delivery carries; null once it has been purged."
+          }
+        }
+      },
+      "WebhookDeliveryPage": {
+        "type": "object",
+        "required": ["items", "nextCursor"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookDelivery"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "Pass as before for the next page; empty when there is no more."
+          }
+        }
+      },
+      "WebhookRedelivered": {
+        "type": "object",
+        "required": ["redelivered"],
+        "properties": {
+          "redelivered": {
+            "type": "integer"
           }
         }
       }
