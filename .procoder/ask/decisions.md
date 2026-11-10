@@ -1875,6 +1875,34 @@ Implementation notes (template route, no migration):
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
 
+## SIP over TCP is provisioned per model, on the UDP address (2026-11-09)
+
+Phone-feature-parity S-13 (delivery item 22). hello-sip already records the
+phone leg's transport (`X-Hello-Transport`, set by Kamailio) on the binding, and
+Kamailio already shares port 5060 between UDP and TCP, reuses the phone's
+connection for requests towards it (`phones_tcp` socket, alias with the
+protocol) and closes idle connections after an hour. What was missing was
+provisioning. `HELLO_PROV_SIP_TCP_MODELS` (same format as the TLS list, default
+none, so nothing changes until a model is listed) puts the listed models on
+transport TCP with `HELLO_PROV_SIP_SERVER`: Grandstream `P130 = 1`, Yealink
+`transport_type = 1`, Poly `TCPOnly`, Fanvil `SIP1 Transport = 1`; Snom has no
+confirmed key and stays UDP. A model in both lists uses TLS while the TLS server
+is set, and falls back to TCP when it is not. The setting is per model, not per
+device: a device that needs another transport has its model taken out of the
+list (per-device overrides belong to S-12). Helm: `control.prov.sipTcpModels`.
+Keys checked against Grandstream's own configuration templates
+(config-template-10212026.zip, 2026-11-09 review): `P130` "SIP Transport. 0 -
+UDP, 1 - TCP, 2 - TLS/TCP" is the same key with the same values in
+`wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`,
+`wp820_config_1.0.7.90`, `wp856_config_1.0.3.16` and `ht813_config_1.0.19.6`
+(confirmed). Account 2 is `P448` and account 3 `P548` in the WP8x6 (account 2 in
+the WP810/822/825 and WP820, accounts 2 to 6 in the WP856 at `P448`, `P548`,
+`P648`, `P1748`, `P1848`); lines 2 and up are item 21. Newly found and left at
+their defaults: `P2331` Use Actual Ephemeral Port in Contact with TCP/TLS
+(default 0) and `P60065` Enable TCP Keep-alive (default 1), in the same
+templates. The other vendors' keys remain from vendor notes, unconfirmed on
+hardware.
+
 ## Presence extensions (item 34, S-35)
 
 - Resource list URI: `sip:blf-<device username>@<domain>`. Its members are the BLF keys of the phone bound to that device (`phones.blf`), loaded into the snapshot (`WithBLFLists`); only that device may subscribe (`403` otherwise), and the phone must send `Supported: eventlist` (`421` with `Require: eventlist`). Editing a phone's BLF keys now bumps the configuration revision so the list reaches hello-sip. No migration.

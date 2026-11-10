@@ -42,6 +42,10 @@ type ProvSettings struct {
 	// register with SIPTLSServer over TLS (S-14).
 	SIPTLSServer string
 	SIPTLSModels []string
+	// SIPTCPModels is HELLO_PROV_SIP_TCP_MODELS: the phones
+	// prov.TLSModelMatch selects register over TCP with SIPServer (S-13).
+	// A model also in SIPTLSModels (with SIPTLSServer set) uses TLS.
+	SIPTCPModels []string
 	// Domain is HELLO_SIP_DOMAIN.
 	Domain string
 	Expiry time.Duration
@@ -80,6 +84,9 @@ func (p ProvSettings) server(v prov.Vendor, model string) prov.Server {
 		return srv
 	}
 	srv.Host, srv.Port = splitHostPort(p.SIPServer)
+	if prov.TLSModelMatch(p.SIPTCPModels, v, model) {
+		srv.Transport = "tcp"
+	}
 	return srv
 }
 
