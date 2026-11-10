@@ -312,7 +312,7 @@ func TestRenderInputsFirmwareAndFetches(t *testing.T) {
 		}
 		ids = append(ids, f.ID)
 	}
-	if _, err := st.PutFirmwarePins(ctx, "test", []FirmwarePin{{prov.Yealink, "T5*", ids[0]}, {prov.Yealink, "T54?", ids[1]}}); err != nil {
+	if _, err := st.PutFirmwarePins(ctx, "test", []FirmwarePin{{Vendor: prov.Yealink, ModelGlob: "T5*", FirmwareID: ids[0]}, {Vendor: prov.Yealink, ModelGlob: "T54?", FirmwareID: ids[1]}}); err != nil {
 		t.Fatal(err)
 	}
 	d, _, err := st.RenderInputs(ctx, c.Phone.ID)

@@ -28,7 +28,7 @@ function setup(extra: Parameters<typeof mockApi>[0] = {}) {
 describe("RingTags", () => {
   it("lists the tags with their Bellcore slot and marks the built-in ones", async () => {
     setup();
-    renderApp("/ring-tags");
+    renderApp("/ringing");
     const door = await screen.findByRole("listitem", {
       name: "Ring tag doorbell",
     });
@@ -47,7 +47,7 @@ describe("RingTags", () => {
     const calls = setup({
       "POST /api/v1/ring-tags": () => json(tag("late-shift", 3, false), 201),
     });
-    renderApp("/ring-tags");
+    renderApp("/ringing");
     const create = await screen.findByRole("button", { name: "New ring tag" });
     await waitFor(() => expect(create).toBeEnabled());
     fireEvent.click(create);
@@ -83,7 +83,7 @@ describe("RingTags", () => {
       "DELETE /api/v1/ring-tags/vip": () =>
         apiError(409, "conflict", "ring tag vip is used by rule 1"),
     });
-    renderApp("/ring-tags");
+    renderApp("/ringing");
     fireEvent.click(
       await screen.findByRole("button", { name: "Delete ring tag vip" }),
     );
@@ -99,7 +99,7 @@ describe("RingTags", () => {
         json({ items: [tag("internal", 1), tag("spare", 1, false)] }),
       "DELETE /api/v1/ring-tags/spare": () => noContent(),
     });
-    renderApp("/ring-tags");
+    renderApp("/ringing");
     fireEvent.click(
       await screen.findByRole("button", { name: "Delete ring tag spare" }),
     );
@@ -127,7 +127,7 @@ describe("RingTags", () => {
           ],
         }),
     });
-    renderApp("/ring-tags");
+    renderApp("/ringing");
     fireEvent.click(await screen.findByRole("tab", { name: "Rules" }));
     const add = await screen.findByRole("button", { name: "Add rule" });
     fireEvent.click(add);
@@ -175,7 +175,7 @@ describe("RingTags", () => {
       "PUT /api/v1/ring-rules": () =>
         json({ items: [rule(1, "second", "200"), rule(2, "first", "100")] }),
     });
-    renderApp("/ring-tags");
+    renderApp("/ringing");
     fireEvent.click(await screen.findByRole("tab", { name: "Rules" }));
     fireEvent.click(
       await screen.findByRole("button", { name: "Move rule 2 up" }),
@@ -201,7 +201,7 @@ describe("RingTags", () => {
           alertInfo: "<http://127.0.0.1/Bellcore-dr5>;info=hello-alarm",
         }),
     });
-    renderApp("/ring-tags");
+    renderApp("/ringing");
     fireEvent.click(await screen.findByRole("tab", { name: "Test a call" }));
     fireEvent.change(await screen.findByLabelText("Kind of call"), {
       target: { value: "alarm" },

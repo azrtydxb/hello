@@ -598,6 +598,7 @@ type ringGroupBody struct {
 	MOHClassID    nullable[int64]      `json:"mohClassId"`
 	MOHRingback   *bool                `json:"mohRingback"`
 	RingTag       *string              `json:"ringTag"`
+	IsDoor        *bool                `json:"isDoor"`
 }
 
 type ringGroupMemberIn struct {
@@ -644,6 +645,9 @@ func (b ringGroupBody) toInput(base store.RingGroupInput) (store.RingGroupInput,
 	}
 	if b.RingTag != nil {
 		base.RingTag = *b.RingTag
+	}
+	if b.IsDoor != nil {
+		base.IsDoor = *b.IsDoor
 	}
 	if b.Members != nil {
 		base.Members = make([]store.RingGroupMember, 0, len(*b.Members))
@@ -815,7 +819,7 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 		Name: current.Name, Strategy: current.Strategy, Hunt: current.Hunt,
 		RingTimeout: current.RingTimeout, MemberDelay: current.MemberDelay, IgnoreDND: current.IgnoreDND,
 		FailureKind: current.FailureKind, FailureTarget: current.FailureTarget, Members: current.Members,
-		MOHClassID: current.MOHClassID, MOHRingback: current.MOHRingback, RingTag: current.RingTag,
+		MOHClassID: current.MOHClassID, MOHRingback: current.MOHRingback, RingTag: current.RingTag, IsDoor: current.IsDoor,
 	}
 	in, _ := b.toInput(base)
 	// The store checks that an IVR or time condition failure destination

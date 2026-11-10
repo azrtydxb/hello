@@ -121,3 +121,16 @@ func BuildTest(from, to string, now time.Time) ([]byte, error) {
 	buf.WriteString("This is a test email from your Hello PBX. Voicemail notifications will be sent the same way.\r\n")
 	return buf.Bytes(), nil
 }
+
+// BuildNotice renders a short plain-text notice (such as the backup failure
+// alert). The subject and body must not contain secrets.
+func BuildNotice(from, to, subject, body string, now time.Time) ([]byte, error) {
+	if from == "" || strings.ContainsAny(from+to+subject, "\r\n") {
+		return nil, errors.New("mailer: bad address or subject")
+	}
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMIME-Version: 1.0\r\n", from, to, subject, now.Format(time.RFC1123Z))
+	buf.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
+	buf.WriteString(body)
+	return buf.Bytes(), nil
+}

@@ -61,7 +61,10 @@ type Config struct {
 	// supplies the defaults.
 	SessionExpires time.Duration
 	SessionMinSE   time.Duration
-	MediaDeadAfter time.Duration
+	// SessionTimersTrunks is what a trunk whose session-timers setting is
+	// "default" does: true requests and keeps a session timer on its calls.
+	SessionTimersTrunks bool
+	MediaDeadAfter      time.Duration
 	// SessionRefreshTimeout bounds one session refresh transaction (8s).
 	SessionRefreshTimeout time.Duration
 	// Server paging (spec P-12): PageMaxDuration ends a page (120s),
@@ -70,8 +73,11 @@ type Config struct {
 	// runs at once (5).
 	PageMaxDuration   time.Duration
 	PageAnswerTimeout time.Duration
-	PageFanout        int
-	PageConcurrent    int
+	// OriginateRing is how long a click-to-call rings the user's phone
+	// before it fails agent_no_answer (default 30s).
+	OriginateRing  time.Duration
+	PageFanout     int
+	PageConcurrent int
 	// PageMulticastIface and PageMulticastTTL are the interface and TTL of
 	// the multicast a paging group with a channel sends (iface "" is the
 	// system's choice; TTL 1 when unset).
@@ -217,6 +223,10 @@ type Deps struct {
 	// Published is the shared event state of PUBLISHed presence (Valkey);
 	// nil answers PUBLISH 503 (S-35).
 	Published PublishedPresence
+
+	// Originates is the queue of click-to-call requests (spec integrations
+	// I-37); nil disables click-to-call on this node.
+	Originates Originates
 	// Events receives call events (ringing, answered, ended, missed,
 	// recording ready) for the event stream; nil emits none.
 	Events EventSink
@@ -532,6 +542,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	}
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })
+	}
+	if s.deps.Originates != nil {
+		s.bg.Go(func() { s.originateLoop(rctx) })
 	}
 	if s.deps.Messages != nil {
 		s.bg.Go(func() { s.messageLoop(rctx) })

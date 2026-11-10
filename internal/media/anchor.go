@@ -130,12 +130,12 @@ func bindRTP() (*net.UDPConn, error) {
 			break
 		}
 		p := lo + int(binary.BigEndian.Uint16(b[:]))%(hi-lo+1)
-		if c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: p}); err == nil {
+		if c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: p}); err == nil {
 			markRTP(c)
 			return c, nil
 		}
 	}
-	c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 	if err == nil {
 		markRTP(c)
 	}
