@@ -111,7 +111,12 @@ describe("Dial", () => {
           status: 200,
           headers: { "Content-Type": "text/event-stream" },
         }),
-      "GET /api/v1/calls/originate/orig_1": () => json(status("connected")),
+      // The read on open sees the request still queued; the read after the
+      // stream drops sees it connected, later than the event.
+      "GET /api/v1/calls/originate/orig_1": [
+        () => json(status("queued")),
+        () => json(status("connected", { updatedAt: "2026-10-27T10:00:03Z" })),
+      ],
     });
     renderApp("/dial?n=0501234567");
     fireEvent.click(
@@ -149,6 +154,59 @@ describe("Dial", () => {
     expect(
       await screen.findByText("Connected.", {}, { timeout: 4000 }),
     ).toBeInTheDocument();
+  });
+
+  it("does not let a read that was in flight roll back a newer event", async () => {
+    const enc = new TextEncoder();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let ctl!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        ctl = c;
+      },
+    });
+    mockApi({
+      ...ALICE,
+      "POST /api/v1/calls/originate": () => json(status("queued"), 202),
+      "GET /api/v1/events/stream?types=call.originate.progress": () =>
+        new Response(body, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+      // The read on open is answered only after the event has been handled,
+      // and it describes the older state.
+      "GET /api/v1/calls/originate/orig_1": () =>
+        gate.then(() => json(status("queued"))),
+    });
+    renderApp("/dial?n=0501234567");
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Call 0501234567/ }),
+    );
+    await screen.findByText("Getting a line…");
+    const event = {
+      apiVersion: "1",
+      id: "evt_1",
+      type: "call.originate.progress",
+      createdAt: "2026-10-27T10:00:02Z",
+      data: {
+        callId: "orig_1",
+        originateId: "orig_1",
+        state: "ringing_agent",
+        from: {},
+        to: {},
+      },
+    };
+    ctl.enqueue(
+      enc.encode(
+        `id: 1-0\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+      ),
+    );
+    await screen.findByText(/Your phone is ringing/);
+    release();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByText(/Your phone is ringing/)).toBeInTheDocument();
+    ctl.close();
   });
 
   it("says why a call failed", async () => {

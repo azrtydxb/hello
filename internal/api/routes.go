@@ -408,6 +408,9 @@ func (s *server) routes() []route {
 		{"PUT", "/api/v1/phone-groups/{id}/books", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupBooks},
 		{"PUT", "/api/v1/phone-groups/{id}/multicast", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupMulticast},
 		{"PUT", "/api/v1/phone-groups/{id}/ptt", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupPTT},
+		{"PUT", "/api/v1/phone-groups/{id}/syslog", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupSyslog},
+		{"GET", "/api/v1/phones/{id}/syslog", auth.ScopeRead, auth.RoleViewer, false, s.phoneSyslog},
+		{"GET", "/api/v1/syslog/unknown", auth.ScopeRead, auth.RoleViewer, false, s.unknownSyslog},
 		{"GET", "/api/v1/phone-groups/{id}/ldap", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneGroupLDAP},
 		{"PUT", "/api/v1/phone-groups/{id}/ldap", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupLDAP},
 
