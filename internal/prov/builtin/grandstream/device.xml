@@ -41,6 +41,18 @@
 {{- /* QoS marking (phone-feature-parity S-21): P1558 = Layer 3 QoS for SIP (DSCP), P1559 = Layer 3 QoS for audio (DSCP) [R8x6 TPL]; the same values hello-sip marks its own sockets with (HELLO_DSCP_SIP 26, HELLO_DSCP_RTP 46). UNVERIFIED on hardware. */}}
     <P1558>{{.Prov.DSCPSIP}}</P1558>
     <P1559>{{.Prov.DSCPRTP}}</P1559>
+{{- /* RTCP-XR voice-quality reports (phone-feature-parity S-36), only when HELLO_PROV_RTCPXR is on (off, the phone keeps its default, an empty collector = no reports). Keys, account 1, from Grandstream's own configuration templates: P26093 VQ RTCP-XR Collector Name, P26094 Collector Address, P26095 Collector Port (default 5060) in wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83 and wp856_config_1.0.3.16; P60087 Collector Address Selection (0 Manual, 1 Auto; Auto uses the registered SIP server when no address is set) in wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83 only; P8489 VQ RTCP-XR Session Report (0 Disabled, 1 Enabled, default 0; the call-end report Hello stores) in the same two. The WP856 template has no Address Selection and no Session Report key, so the WP856 gets the collector address spelled out (the SIP server host) and no P8489; the WP820 template has no RTCP-XR key at all and gets none. P8490 Interval Report stays at its default (off): the collector keeps the call-end report. Account 2 is P26193, P60187, P26194, P26195 (same templates). The phone's PUBLISH goes to the SIP server, which is Hello's collector. Behaviour not yet seen on a phone (verify: that the phone reports with Auto and an empty address, and that the WP856 reports with the address set). */}}
+{{- if and .Prov.RTCPXR (or (eq .Phone.WP "WP8x6") (eq .Phone.WP "WP8xx") (eq .Phone.WP "WP856"))}}
+    <P26093>{{xml .Server.Host}}</P26093>
+{{- if eq .Phone.WP "WP856"}}
+    <P26094>{{xml .Server.Host}}</P26094>
+{{- else}}
+    <P60087>1</P60087>
+    <P26094></P26094>
+    <P8489>1</P8489>
+{{- end}}
+    <P26095>{{.Server.Port}}</P26095>
+{{- end}}
 {{- /* Presence (phone-feature-parity S-35): the WP phones gain nothing from PUBLISH for Presence or from SUBSCRIBE for Registration [R8x6 section 4], so both stay off and are written so that a phone someone switched on goes back. P188 = PUBLISH for Presence (0 Disabled, 1 Enabled; account 2 is P488) and P2319 = SUBSCRIBE for Registration (0 No, 1 Yes, the reg event of RFC 3680; account 2 is P2419), account 1, in Grandstream's wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83. The WP820 and WP856 templates have neither key. No WP template has an Eventlist BLF URI or a Presence Eventlist URI key (those exist only in the GRP and GXP templates: P134, P26084 and P2389 "Auto Provision Eventlists" in grp26xx_config_1.0.15.23), so Line.BLFListURI is not written to a WP. */}}
 {{- if or (eq .Phone.WP "WP8x6") (eq .Phone.WP "WP8xx")}}
     <P188>0</P188>
