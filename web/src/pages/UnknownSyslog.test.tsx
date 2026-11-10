@@ -26,7 +26,7 @@ describe("Unknown syslog", () => {
     const list = await screen.findByRole("list", { name: "Unknown senders" });
     expect(within(list).getByText("198.51.100.4")).toBeInTheDocument();
     fireEvent.click(
-      within(list).getAllByRole("button", { name: "Show lines" })[0],
+      within(list).getAllByRole("button", { name: "Show lines" })[0]!,
     );
     const table = await screen.findByRole("table", {
       name: "Syslog from 192.0.2.9",

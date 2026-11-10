@@ -62,6 +62,8 @@ export interface Group {
   pagingOptions?: PagingOptions;
   /** Whether the group's phones send their log to Hello's syslog sink. */
   syslog?: Syslog;
+  /** The group's phones are given the LDAP directory. */
+  ldapEnabled?: boolean;
   phoneCount: number;
   createdAt: string;
   updatedAt: string;
@@ -438,6 +440,26 @@ export interface Syslog {
 export const setGroupSyslog = (groupId: Id, syslog: Syslog) =>
   request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/syslog`, {
     body: { enabled: syslog.enabled, level: syslog.level },
+  });
+
+/** GET|PUT /api/v1/phone-groups/{id}/ldap (pbx-gaps S-26). */
+export interface GroupLdap {
+  enabled: boolean;
+  served: boolean;
+  host: string;
+  port: number;
+  base: string;
+  phoneCount: number;
+}
+
+export const getGroupLdap = (groupId: Id, signal?: AbortSignal) =>
+  request<GroupLdap>("GET", `/api/v1/phone-groups/${seg(groupId)}/ldap`, {
+    signal,
+  });
+
+export const setGroupLdap = (groupId: Id, enabled: boolean) =>
+  request<GroupLdap>("PUT", `/api/v1/phone-groups/${seg(groupId)}/ldap`, {
+    body: { enabled },
   });
 
 /** PUT /api/v1/phone-groups/{id}/ptt: replaces the group's push-to-talk settings. */

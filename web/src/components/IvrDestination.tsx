@@ -1,6 +1,7 @@
 import {
   IVR_DESTINATION_KINDS,
   IVR_DESTINATION_LABEL,
+  hasNoTarget,
   type Announcement,
   type Extension,
   type IvrDestination,
@@ -148,7 +149,7 @@ export function DestinationPicker({
           onChange({ kind: e.target.value as IvrDestinationKind, target: "" })
         }
       />
-      {value.kind === "hangup" ? (
+      {hasNoTarget(value.kind) ? (
         <span />
       ) : value.kind === "queue" ? (
         <QueueSelect

@@ -97,3 +97,9 @@ func (q pushQueue) Claim(ctx context.Context, node string, perMinute int) ([]sip
 func (q pushQueue) Finish(ctx context.Context, id int64, r sip.PushResult) error {
 	return q.st.FinishPush(ctx, id, r.Status, r.Detail, r.Contacts)
 }
+
+// DeviceSecret opens a device's sealed SIP password so a check-sync NOTIFY
+// can answer a phone's challenge in the phone's own realm.
+func (q pushQueue) DeviceSecret(ctx context.Context, username string) (string, error) {
+	return q.st.DeviceSecret(ctx, username)
+}

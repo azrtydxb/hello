@@ -288,10 +288,10 @@ func TestIVRGroupFailover(t *testing.T) {
 		return snapshot.RingGroup{Name: name, Strategy: "ring-all", RingTimeout: 1, MemberDelay: 1, FailureKind: kind, FailureTarget: target}
 	}
 	run := func(t *testing.T, groups []snapshot.RingGroup, members [][]snapshot.RingGroupMember) (*testPBX, *phone, *phone, *phone, callResult) {
-		pbx, _ := ivrPBX(t, 1, ivrMenu("main", "800", map[string]snapshot.IVRDest{
-			"1": {Kind: snapshot.IVRRingGroup, Target: "700"},
-		}))
-		pbx.snaps.p.Load().WithRingGroups(groups, members)
+		pbx, _ := ivrPBXWith(t, 1, func(s *snapshot.Snapshot) { s.WithRingGroups(groups, members) },
+			ivrMenu("main", "800", map[string]snapshot.IVRDest{
+				"1": {Kind: snapshot.IVRRingGroup, Target: "700"},
+			}))
 		a, b, c := registerABC(t, pbx)
 		b.setCallee(ringForever())
 		r := waitCall(t, dial(t.Context(), a, "800"))

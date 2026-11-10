@@ -174,10 +174,13 @@ type Group struct {
 	PTT           PTT                `json:"ptt"`
 	// Syslog is whether the group's phones send their log to Hello's syslog
 	// sink (phone-feature-parity S-27).
-	Syslog     Syslog    `json:"syslog"`
-	PhoneCount int       `json:"phoneCount"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	Syslog Syslog `json:"syslog"`
+	// LDAPEnabled turns the phone LDAP directory on for the group's phones
+	// (spec pbx-gaps S-26).
+	LDAPEnabled bool      `json:"ldapEnabled"`
+	PhoneCount  int       `json:"phoneCount"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // Syslog is a phone group's syslog setting: off by default, Level one of
