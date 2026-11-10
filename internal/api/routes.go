@@ -153,6 +153,9 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/ring-map", auth.ScopeRead, auth.RoleViewer, false, s.getRingMap},
 		{"PUT", "/api/v1/ring-map", auth.ScopeWrite, auth.RoleOperator, false, s.putRingMap},
 		{"PUT", "/api/v1/ring-map/groups/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.putRingMapGroup},
+		{"GET", "/api/v1/ringtones", auth.ScopeRead, auth.RoleViewer, false, s.listRingtones},
+		{"POST", "/api/v1/ringtones", auth.ScopeWrite, auth.RoleOperator, false, s.createRingtone},
+		{"DELETE", "/api/v1/ringtones/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteRingtone},
 		{"GET", "/api/v1/time-conditions", auth.ScopeRead, auth.RoleViewer, false, s.listTimeConditions},
 		{"POST", "/api/v1/time-conditions", auth.ScopeWrite, auth.RoleOperator, false, s.createTimeCondition},
 		{"GET", "/api/v1/time-conditions/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getTimeCondition},
@@ -347,6 +350,8 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/prov/firmware", auth.ScopeRead, auth.RoleViewer, false, s.listFirmware},
 		{"POST", "/api/v1/prov/firmware", auth.ScopeWrite, auth.RoleOperator, false, s.uploadFirmware},
 		{"PUT", "/api/v1/prov/firmware/pins", auth.ScopeWrite, auth.RoleOperator, false, s.putFirmwarePins},
+		{"GET", "/api/v1/prov/firmware/minimums", auth.ScopeRead, auth.RoleViewer, false, s.listFirmwareMinimums},
+		{"PUT", "/api/v1/prov/firmware/minimums", auth.ScopeWrite, auth.RoleOperator, false, s.putFirmwareMinimums},
 		{"DELETE", "/api/v1/prov/firmware/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteFirmware},
 
 		{"GET", "/api/v1/prov/redirect", auth.ScopeAdmin, auth.RoleAdmin, false, s.listRedirect},

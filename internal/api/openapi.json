@@ -2521,7 +2521,7 @@
       "get": {
         "operationId": "exportCDRs",
         "summary": "Call detail records as CSV, newest first",
-        "description": "Exports the filtered call records as a CSV download. The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe.",
+        "description": "Exports the filtered call records as a CSV download. The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe. The caller_codec and callee_codec columns are empty when no codec was negotiated.",
         "tags": ["history"],
         "parameters": [
           {
@@ -9401,6 +9401,108 @@
         }
       }
     },
+    "/api/v1/prov/firmware/minimums": {
+      "get": {
+        "operationId": "listFirmwareMinimums",
+        "summary": "Firmware minimum and recommended versions",
+        "description": "Lists the minimum firmware version per vendor and model glob. A pin below it is refused and never rendered. The recommended version is the documented lab build.",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "The rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirmwareMinimum"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putFirmwareMinimums",
+        "summary": "Replace every firmware minimum version rule",
+        "description": "Replaces every firmware minimum version rule.",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "The rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirmwareMinimum"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FirmwareMinimum"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/prov/firmware/pins": {
       "put": {
         "operationId": "putFirmwarePins",
@@ -14942,7 +15044,7 @@
       "put": {
         "operationId": "putRingMap",
         "summary": "Replace the global ring map",
-        "description": "Replaces the global choices as a whole. A change reaches the affected phones through the automatic resync (check-sync). The tone must be in the vendor's ringer list (silent only where the vendor has it).",
+        "description": "Replaces the global choices as a whole. A change reaches the affected phones through the automatic resync (check-sync). The tone must be in the vendor's ringer list (silent only where the vendor has it), or custom:<name> of a tone in the library on a vendor whose customTones is true.",
         "tags": ["ring-tags"],
         "requestBody": {
           "required": true,
@@ -15033,6 +15135,158 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ringtones": {
+      "get": {
+        "operationId": "listRingtones",
+        "summary": "List the tone library",
+        "description": "Lists the uploaded custom tones the ring map can choose, with how many ring map choices use each.",
+        "tags": ["ring-tags"],
+        "responses": {
+          "200": {
+            "description": "Tones ordered by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingtoneList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createRingtone",
+        "summary": "Upload a custom tone",
+        "description": "Adds a WAV file to the tone library (bucket hello-ringtones). A phone downloads it under its token at /p/<token>/ring/<name>.wav. The bytes are checked: PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB, otherwise 400. A name the library has is 409. Hello provisions a custom tone to Yealink and Snom phones; the other vendors keep their built-in ringer.",
+        "tags": ["ring-tags"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "audioBase64"],
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+                    "description": "The tone's unique name; the ring map names it as custom:<name>."
+                  },
+                  "audioBase64": {
+                    "type": "string",
+                    "contentEncoding": "base64",
+                    "description": "Base64 of a WAV file with the same rules as the multipart file (PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB). The JSON request is at most 1 MiB."
+                  }
+                }
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "file"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+                    "description": "The tone's unique name; the ring map names it as custom:<name>."
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "WAV bytes: PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ringtone"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ringtones/{id}": {
+      "delete": {
+        "operationId": "deleteRingtone",
+        "summary": "Delete a custom tone",
+        "description": "Removes a tone and its audio. A tone a ring map choice uses is 409 and names the choice; change the choice first.",
+        "tags": ["ring-tags"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -16642,6 +16896,15 @@
           "firmwareSeen": {
             "type": "string"
           },
+          "firmwarePinned": {
+            "type": "string"
+          },
+          "firmwareMinimum": {
+            "type": "string"
+          },
+          "firmwareDrift": {
+            "type": "boolean"
+          },
           "id": {
             "type": "integer"
           },
@@ -17284,6 +17547,9 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "upgradeHour": {
+            "type": ["integer", "null"]
           }
         }
       },
@@ -17299,6 +17565,29 @@
           },
           "firmwareId": {
             "type": "integer"
+          },
+          "upgradeHour": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "maximum": 23
+          }
+        }
+      },
+      "FirmwareMinimum": {
+        "type": "object",
+        "required": ["vendor", "modelGlob"],
+        "properties": {
+          "vendor": {
+            "type": "string"
+          },
+          "modelGlob": {
+            "type": "string"
+          },
+          "minVersion": {
+            "type": "string"
+          },
+          "recommended": {
+            "type": "string"
           }
         }
       },
@@ -17696,6 +17985,7 @@
           "failureKind",
           "failureTarget",
           "members",
+          "isDoor",
           "createdAt",
           "updatedAt"
         ],
@@ -17768,6 +18058,10 @@
           "ringTag": {
             "type": "string",
             "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
+          },
+          "isDoor": {
+            "type": "boolean",
+            "description": "Marks the Door group: a door station may call it, its calls have kind door and ring with the doorbell tag. A new Door group with no ringTag gets doorbell."
           },
           "failureTarget": {
             "type": "string"
@@ -17864,6 +18158,10 @@
           "ringTag": {
             "type": "string",
             "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
+          },
+          "isDoor": {
+            "type": "boolean",
+            "description": "Marks the Door group: a door station may call it, its calls have kind door and ring with the doorbell tag. A new Door group with no ringTag gets doorbell."
           },
           "failureTarget": {
             "type": "string",
@@ -17981,6 +18279,10 @@
           "ringTag": {
             "type": "string",
             "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
+          },
+          "isDoor": {
+            "type": "boolean",
+            "description": "Marks the Door group: a door station may call it, its calls have kind door and ring with the doorbell tag. A new Door group with no ringTag gets doorbell."
           },
           "failureTarget": {
             "type": "string",
@@ -21035,7 +21337,9 @@
           "allowIntercom",
           "callWaiting",
           "noAnswerRings",
-          "directoryHidden"
+          "directoryHidden",
+          "kind",
+          "doorTargets"
         ],
         "properties": {
           "id": {
@@ -21060,6 +21364,14 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["user", "door"],
+            "description": "user (default) or door. A door station has no voicemail, joins no group, receives no pickup, page, intercom or MESSAGE, and may call only its doorTargets and the Door ring groups; any other destination is 403. Its calls carry the doorbell ring tag and CDR kind door. Turning an extension into a door station is refused while it is in a ring group, paging group, pickup group or queue; it then loses voicemail and intercom and is hidden from the extensions phonebook unless directoryHidden says otherwise."
+          },
+          "doorTargets": {
+            "$ref": "#/components/schemas/DoorTargets"
           },
           "externalNumber": {
             "type": "string",
@@ -21123,6 +21435,23 @@
           }
         }
       },
+      "DoorTargets": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "The extra destinations a door station may call besides every Door ring group: extension ids and ring group ids. A door station cannot list itself or another door station.",
+        "properties": {
+          "extensions": {
+            "type": "array",
+            "items": { "type": "integer", "format": "int64" },
+            "maxItems": 50
+          },
+          "ringGroups": {
+            "type": "array",
+            "items": { "type": "integer", "format": "int64" },
+            "maxItems": 50
+          }
+        }
+      },
       "ExtensionCreate": {
         "type": "object",
         "additionalProperties": false,
@@ -21140,6 +21469,14 @@
             "maxLength": 100,
             "example": "Reception",
             "description": "Display name shown as caller ID inside the PBX."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["user", "door"],
+            "description": "user (default) or door. A door station has no voicemail, joins no group, receives no pickup, page, intercom or MESSAGE, and may call only its doorTargets and the Door ring groups; any other destination is 403. Its calls carry the doorbell ring tag and CDR kind door. Turning an extension into a door station is refused while it is in a ring group, paging group, pickup group or queue; it then loses voicemail and intercom and is hidden from the extensions phonebook unless directoryHidden says otherwise."
+          },
+          "doorTargets": {
+            "$ref": "#/components/schemas/DoorTargets"
           },
           "externalNumber": {
             "type": "string",
@@ -21165,6 +21502,14 @@
             "maxLength": 100,
             "example": "Reception",
             "description": "New display name."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["user", "door"],
+            "description": "user (default) or door. A door station has no voicemail, joins no group, receives no pickup, page, intercom or MESSAGE, and may call only its doorTargets and the Door ring groups; any other destination is 403. Its calls carry the doorbell ring tag and CDR kind door. Turning an extension into a door station is refused while it is in a ring group, paging group, pickup group or queue; it then loses voicemail and intercom and is hidden from the extensions phonebook unless directoryHidden says otherwise."
+          },
+          "doorTargets": {
+            "$ref": "#/components/schemas/DoorTargets"
           },
           "externalNumber": {
             "type": "string",
@@ -21804,10 +22149,20 @@
             "type": ["number", "null"],
             "description": "Larger of the two directions' interarrival jitter in ms; null when not measured."
           },
+          "callerCodec": {
+            "type": ["string", "null"],
+            "example": "opus/48000",
+            "description": "Audio codec the caller leg ended on, as name/clock rate (PCMU/8000, G722/8000, opus/48000); null when none was negotiated (a call that was not answered) and for records written before migration 00054. A re-INVITE that switches codec replaces it, so it is the last codec of the call."
+          },
+          "calleeCodec": {
+            "type": ["string", "null"],
+            "example": "PCMU/8000",
+            "description": "Audio codec the callee leg ended on, as callerCodec; null for a call Hello ends itself (voicemail, conference, IVR, queue), which has no callee leg."
+          },
           "kind": {
             "type": "string",
-            "enum": ["call", "page", "intercom", "conference", "callback"],
-            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or callback for a call Hello placed to a queue caller who asked to be called back."
+            "enum": ["call", "page", "intercom", "conference", "door", "callback"],
+            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or door for a door station or a Door group, or callback for a call Hello placed to a queue caller who asked to be called back."
           },
           "ringTag": {
             "type": "string",
@@ -21975,7 +22330,8 @@
           "destinations",
           "internalDialing",
           "codecs",
-          "messaging"
+          "messaging",
+          "sessionTimers"
         ],
         "properties": {
           "id": {
@@ -22073,6 +22429,11 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Off by default."
+          },
+          "sessionTimers": {
+            "type": "string",
+            "enum": ["default", "on", "off"],
+            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
           }
         }
       },
@@ -22175,6 +22536,11 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
+          },
+          "sessionTimers": {
+            "type": "string",
+            "enum": ["default", "on", "off"],
+            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
           }
         }
       },
@@ -22277,6 +22643,11 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
+          },
+          "sessionTimers": {
+            "type": "string",
+            "enum": ["default", "on", "off"],
+            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
           }
         }
       },
@@ -26531,6 +26902,47 @@
           }
         }
       },
+      "Ringtone": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "sizeBytes",
+          "sha256",
+          "sampleRate",
+          "durationMs",
+          "createdAt",
+          "usedBy"
+        ],
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "name": { "type": "string" },
+          "sizeBytes": { "type": "integer" },
+          "sha256": {
+            "type": "string",
+            "description": "Hex SHA-256 of the WAV; the ETag a phone gets."
+          },
+          "sampleRate": { "type": "integer", "enum": [8000, 16000] },
+          "durationMs": { "type": "integer" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "usedBy": {
+            "type": "integer",
+            "description": "How many ring map choices name the tone."
+          }
+        }
+      },
+      "RingtoneList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ringtone"
+            }
+          }
+        }
+      },
       "RingMapView": {
         "type": "object",
         "required": ["vendors", "defaults", "global", "groups"],
@@ -26539,8 +26951,12 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["vendor", "label", "slots", "tones"],
+              "required": ["vendor", "label", "slots", "tones", "customTones"],
               "properties": {
+                "customTones": {
+                  "type": "boolean",
+                  "description": "Whether a tone of the library can be chosen for the vendor (Yealink and Snom): the tone id is custom:<name>."
+                },
                 "vendor": {
                   "type": "string"
                 },
