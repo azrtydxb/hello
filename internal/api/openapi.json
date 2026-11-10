@@ -17737,7 +17737,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "the door-open code is set only in the console"
+          "exclude": "the door-open code is set only in the console",
+          "category": "credentials"
         }
       }
     },
@@ -17774,7 +17775,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "extension self-service belongs to the signed-in user in the console"
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
         }
       }
     },
@@ -17841,7 +17843,8 @@
         "x-hello-scope": "write",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "physical access: only the user who answered the door call opens it, from the console"
+          "exclude": "physical access: only the user who answered the door call opens it, from the console",
+          "category": "human-in-the-loop"
         }
       }
     }
