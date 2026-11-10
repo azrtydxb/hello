@@ -43,6 +43,7 @@ func (v voicemails) Box(ctx context.Context, extension string) (sip.VoicemailBox
 		UnreachableObject: b.UnreachableObject,
 		BusyObject:        b.BusyObject,
 		NameObject:        b.NameObject,
+		PromptLanguage:    b.PromptLanguage,
 	}, true, nil
 }
 

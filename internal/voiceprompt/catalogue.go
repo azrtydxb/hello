@@ -104,6 +104,22 @@ const (
 	// Boss and secretary: what the assistant hears when a screened call for
 	// the boss is answered ({who} is the boss).
 	BossScreen Key = "boss.screen"
+	// Queue callback (pbx-gaps S-9). Spoken in the queue's language (S-20).
+	QueueCallbackOffer   Key = "queue.callback.offer"   // {digit}: the key that accepts
+	QueueCallbackConfirm Key = "queue.callback.confirm" // after the caller accepted; the call then ends
+	QueueCallbackFull    Key = "queue.callback.full"    // the request could not be taken
+	QueueCallbackWelcome Key = "queue.callback.welcome" // when the called-back caller answers
+	WordStar             Key = "word.star"
+	WordPound            Key = "word.pound"
+	// Dial-by-name directory (pbx-gaps S-13). DirectoryOne speaks one choice
+	// ("For {name}, press {digit}"), DirectoryConnecting the hand-over.
+	DirectoryEnter      Key = "directory.enter"
+	DirectoryConnecting Key = "directory.connecting"
+	DirectoryOne        Key = "directory.one"
+	DirectoryChoose     Key = "directory.choose"
+	DirectoryMore       Key = "directory.more"
+	DirectoryNone       Key = "directory.none"
+	DirectoryTooLong    Key = "directory.toolong"
 )
 
 // tables holds the language tables. Add a language here and in its own file.
@@ -133,6 +149,41 @@ func Parse(s string) Lang {
 		return Lang(s)
 	}
 	return Default
+}
+
+// Valid reports whether s names a language with a complete table. Unlike
+// Parse it does not fold an unknown value to Default, so a setting that
+// names no language can be refused.
+func Valid(s string) bool {
+	_, ok := tables[Lang(strings.ToLower(strings.TrimSpace(s)))]
+	return ok
+}
+
+// Resolve picks the language a voicemail box speaks (S-20). box is the box's
+// own setting ("" inherits): a language with a table is used, an unknown one
+// (a language a later release dropped) is spoken in English. An empty box
+// setting takes global, the deployment language, and Parse folds an unknown
+// or empty global to English.
+func Resolve(box, global string) Lang {
+	if strings.TrimSpace(box) == "" {
+		return Parse(global)
+	}
+	if Valid(box) {
+		return Parse(box)
+	}
+	return Default
+}
+
+// CallbackOffer words the offer of a callback for the key digit: a digit is
+// spoken as itself, '*' and '#' by their names in the language.
+func CallbackOffer(l Lang, digit string) string {
+	switch digit {
+	case "*":
+		digit = Text(l, WordStar, nil)
+	case "#":
+		digit = Text(l, WordPound, nil)
+	}
+	return Text(l, QueueCallbackOffer, Vars{"digit": digit})
 }
 
 // template returns the raw template, falling back to English; ok is false

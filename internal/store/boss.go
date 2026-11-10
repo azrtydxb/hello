@@ -16,7 +16,7 @@ import (
 // MaxBossLinks bounds the link list.
 const MaxBossLinks = 500
 
-// ActionBossDivert is the feature-code action of *64 (migration 00064).
+// ActionBossDivert is the feature-code action of *64 (migration 00065).
 const ActionBossDivert = "boss_divert"
 
 // Ring modes of a boss link.

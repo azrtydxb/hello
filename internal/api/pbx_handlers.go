@@ -18,7 +18,9 @@ import (
 
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/azrtydxb/hello/internal/ringtag"
 	"github.com/azrtydxb/hello/internal/store"
+	"github.com/azrtydxb/hello/internal/voiceprompt"
 )
 
 // Phase 4 field validation, in the same shape as the Phase 2 route
@@ -44,7 +46,7 @@ var (
 		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr",
 		"call_waiting_on", "call_waiting_off",
 		"park", "park_retrieve", "pickup_group", "pickup_directed", "time_condition", "tc_override",
-		"queue_login", "queue_logout", "queue_pause", "queue_unpause", "boss_divert"}
+		"queue_login", "queue_logout", "queue_pause", "queue_unpause", "boss_divert", "directory"}
 )
 
 // voicemailLimits bound greeting uploads.
@@ -127,7 +129,8 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 		}
 	case self:
 		var in struct {
-			PIN *string `json:"pin"`
+			PIN            *string `json:"pin"`
+			PromptLanguage *string `json:"promptLanguage"`
 		}
 		if !decode(w, r, &in) {
 			return
@@ -135,14 +138,17 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 		if in.PIN != nil && *in.PIN != "" {
 			change.Password = in.PIN
 		}
+		change.PromptLanguage = in.PromptLanguage
 	default:
 		var in struct {
-			Password *string `json:"password"`
-			Email    *string `json:"email"`
+			Password       *string `json:"password"`
+			Email          *string `json:"email"`
+			PromptLanguage *string `json:"promptLanguage"`
 		}
 		if !decode(w, r, &in) {
 			return
 		}
+		change.PromptLanguage = in.PromptLanguage
 		if in.Password != nil && *in.Password != "" {
 			change.Password = in.Password
 		}
@@ -158,6 +164,10 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 	}
 	if change.Email != nil && *change.Email != "" && !emailRe.MatchString(*change.Email) {
 		f.add("email", "must be an email address or empty")
+	}
+	if change.PromptLanguage != nil {
+		*change.PromptLanguage = strings.ToLower(strings.TrimSpace(*change.PromptLanguage))
+		checkPromptLanguage(&f, "promptLanguage", *change.PromptLanguage)
 	}
 	if len(f) > 0 {
 		writeFields(w, f)
@@ -190,8 +200,8 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 			change.Name = &object
 		}
 	}
-	if change.Email == nil && change.Password == nil && len(uploads) == 0 {
-		badRequest(w, "password, email, greeting, busy, unreachable or name is required")
+	if change.Email == nil && change.Password == nil && change.PromptLanguage == nil && len(uploads) == 0 {
+		badRequest(w, "password, email, promptLanguage, greeting, busy, unreachable or name is required")
 		return
 	}
 	// The previous greetings, so they can go once the row names the new ones.
@@ -208,6 +218,9 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 		s.configError(w, "voicemail box", err)
 		return
 	}
+	if change.PromptLanguage != nil && *change.PromptLanguage != "" {
+		s.prewarmLanguages()
+	}
 	// Best effort: a stale object left behind is harmless.
 	if s.Objects != nil {
 		for _, object := range replaced {
@@ -223,6 +236,96 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 		return
 	}
 	writeJSON(w, http.StatusOK, s.boxView(r.Context(), b))
+}
+
+// checkPromptLanguage refuses a language with no complete prompt table. ""
+// is allowed: it clears the box language so the box inherits (S-20).
+func checkPromptLanguage(f *fieldErrs, path, v string) {
+	if v != "" && !voiceprompt.Valid(v) {
+		langs := voiceprompt.Languages()
+		names := make([]string, len(langs))
+		for i, l := range langs {
+			names[i] = string(l)
+		}
+		f.add(path, "must be empty (inherit) or one of %s", strings.Join(names, ", "))
+	}
+}
+
+// boxLanguageView is a box's language setting as the API sends it.
+type boxLanguageView struct {
+	// PromptLanguage is the box's own setting; "" inherits.
+	PromptLanguage string `json:"promptLanguage"`
+	// Effective is the language callers hear for this box today.
+	Effective string `json:"effective"`
+	// Languages are the languages a box can be set to.
+	Languages []string `json:"languages"`
+}
+
+func (s *server) boxLanguage(b store.VoicemailBox) boxLanguageView {
+	v := boxLanguageView{
+		PromptLanguage: b.PromptLanguage,
+		Effective:      string(voiceprompt.Resolve(b.PromptLanguage, s.PromptLanguage)),
+		Languages:      []string{},
+	}
+	for _, l := range voiceprompt.Languages() {
+		v.Languages = append(v.Languages, string(l))
+	}
+	return v
+}
+
+// getBoxLanguage is GET /api/v1/voicemail/boxes/{id}/language, {id} being a
+// voicemail box id.
+func (s *server) getBoxLanguage(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	b, err := s.Store.GetVoicemailBoxByID(r.Context(), id)
+	if err != nil {
+		s.configError(w, "voicemail box", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.boxLanguage(b))
+}
+
+// putBoxLanguage is PUT /api/v1/voicemail/boxes/{id}/language.
+func (s *server) putBoxLanguage(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		PromptLanguage *string `json:"promptLanguage"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	var f fieldErrs
+	if in.PromptLanguage == nil {
+		f.add("promptLanguage", "is required (empty inherits the deployment language)")
+	} else {
+		*in.PromptLanguage = strings.ToLower(strings.TrimSpace(*in.PromptLanguage))
+		checkPromptLanguage(&f, "promptLanguage", *in.PromptLanguage)
+	}
+	if len(f) > 0 {
+		writeFields(w, f)
+		return
+	}
+	cur, err := s.Store.GetVoicemailBoxByID(r.Context(), id)
+	if err != nil {
+		s.configError(w, "voicemail box", err)
+		return
+	}
+	b, err := s.Store.UpdateVoicemailBox(r.Context(), actor(r).String(), cur.ExtensionID,
+		store.VoicemailBoxChange{PromptLanguage: in.PromptLanguage}, s.check())
+	if err != nil {
+		s.configError(w, "voicemail box", err)
+		return
+	}
+	if b.PromptLanguage != "" {
+		s.prewarmLanguages()
+	}
+	writeJSON(w, http.StatusOK, s.boxLanguage(b))
 }
 
 // greetingSlots are the audio slots of a box: the general greeting (also the
@@ -494,6 +597,8 @@ type ringGroupBody struct {
 	Members       *[]ringGroupMemberIn `json:"members"`
 	MOHClassID    nullable[int64]      `json:"mohClassId"`
 	MOHRingback   *bool                `json:"mohRingback"`
+	RingTag       *string              `json:"ringTag"`
+	IsDoor        *bool                `json:"isDoor"`
 }
 
 type ringGroupMemberIn struct {
@@ -538,6 +643,12 @@ func (b ringGroupBody) toInput(base store.RingGroupInput) (store.RingGroupInput,
 	if b.MOHRingback != nil {
 		base.MOHRingback = *b.MOHRingback
 	}
+	if b.RingTag != nil {
+		base.RingTag = *b.RingTag
+	}
+	if b.IsDoor != nil {
+		base.IsDoor = *b.IsDoor
+	}
 	if b.Members != nil {
 		base.Members = make([]store.RingGroupMember, 0, len(*b.Members))
 		for _, m := range *b.Members {
@@ -565,6 +676,9 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 	}
 	if !slices.Contains(strategies, in.Strategy) {
 		f.add("strategy", `must be one of ring-all, sequential, round-robin, longest-idle, weighted`)
+	}
+	if in.RingTag != "" && !ringtag.ValidName(in.RingTag) {
+		f.add("ringTag", "must be a ring tag name of 1-32 of a-z 0-9 -")
 	}
 	if in.RingTimeout < 5 || in.RingTimeout > 300 {
 		f.add("ringTimeout", "must be 5-300 seconds")
@@ -601,6 +715,10 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 		if !usernameRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be the name of a time condition")
 		}
+	case "directory":
+		if in.FailureTarget != "" {
+			f.add("failureTarget", `must be empty when failureKind is "directory"`)
+		}
 	case "extension":
 		if !numberRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be an extension number")
@@ -612,7 +730,7 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 			f.add("failureTarget", "a ring group cannot fail over to itself")
 		}
 	default:
-		f.add("failureKind", `must be "none", "voicemail", "external", "announcement", "ivr", "queue", "time_condition", "extension" or "ring_group"`)
+		f.add("failureKind", `must be "none", "voicemail", "external", "announcement", "ivr", "queue", "time_condition", "directory", "extension" or "ring_group"`)
 	}
 	if len(in.Members) == 0 || len(in.Members) > 50 {
 		f.add("members", "must have 1-50 members")
@@ -701,7 +819,7 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 		Name: current.Name, Strategy: current.Strategy, Hunt: current.Hunt,
 		RingTimeout: current.RingTimeout, MemberDelay: current.MemberDelay, IgnoreDND: current.IgnoreDND,
 		FailureKind: current.FailureKind, FailureTarget: current.FailureTarget, Members: current.Members,
-		MOHClassID: current.MOHClassID, MOHRingback: current.MOHRingback,
+		MOHClassID: current.MOHClassID, MOHRingback: current.MOHRingback, RingTag: current.RingTag, IsDoor: current.IsDoor,
 	}
 	in, _ := b.toInput(base)
 	// The store checks that an IVR or time condition failure destination

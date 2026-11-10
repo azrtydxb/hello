@@ -271,6 +271,9 @@ func TestAlwaysAnchorPolicy(t *testing.T) {
 	if !strings.Contains(traceText(cd.Trace), "Media anchored (policy)") {
 		t.Fatalf("CDR trace lacks the policy anchor step: %s", traceText(cd.Trace))
 	}
+	if cd.CallerCodec != "PCMU/8000" || cd.CalleeCodec != "PCMU/8000" {
+		t.Fatalf("CDR codecs = %q / %q, want PCMU/8000 on both legs", cd.CallerCodec, cd.CalleeCodec)
+	}
 }
 
 // TestRecordingPauseOnHold fails if recording captures hold silence: a

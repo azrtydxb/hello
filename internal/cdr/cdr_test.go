@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -183,6 +184,19 @@ func TestWriterPostgres(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT rtp_packets, rtp_lost, rtp_jitter_ms FROM cdrs WHERE correlation_id = 'corr-1'").Scan(&qp, &ql, &qj); err != nil || qp != nil || ql != nil || qj != nil {
 		t.Fatalf("unmeasured quality = %v %v %v, %v", qp, ql, qj, err)
 	}
+	var cc, ce *string
+	if err := pool.QueryRow(ctx, "SELECT caller_codec, callee_codec FROM cdrs WHERE correlation_id = 'corr-1'").Scan(&cc, &ce); err != nil || cc != nil || ce != nil {
+		t.Fatalf("codecs of a record without any = %v %v, %v, want NULL", cc, ce, err)
+	}
+	codec := Record{CorrelationID: "corr-codec", SIPCallID: "call-codec", StartTime: start, EndTime: start.Add(time.Second),
+		SIPNode: "sip-1", FinalStatus: 200, TerminationSide: SideCaller, CallerCodec: "opus/48000", CalleeCodec: "PCMU/8000"}
+	if err := w.write(ctx, codec); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT caller_codec, callee_codec FROM cdrs WHERE correlation_id = 'corr-codec'").Scan(&cc, &ce); err != nil ||
+		cc == nil || ce == nil || *cc != "opus/48000" || *ce != "PCMU/8000" {
+		t.Fatalf("stored codecs = %v %v, %v", cc, ce, err)
+	}
 	var dir string
 	if err := pool.QueryRow(ctx, "SELECT direction FROM cdrs WHERE correlation_id = 'corr-1'").Scan(&dir); err != nil || dir != "internal" {
 		t.Fatalf("default direction = %q, %v", dir, err)
@@ -220,7 +234,7 @@ func TestWriterPostgres(t *testing.T) {
 type argsDB struct{ args []any }
 
 // TestAnsweredByCDR fails if the assistant's extension is not the insert's
-// last argument (the answered_by column of migration 00064).
+// answered_by argument (the column after origin_client, migration 00065).
 func TestAnsweredByCDR(t *testing.T) {
 	db := &argsDB{}
 	w := NewWriter(db, newCounter(), discard)
@@ -228,7 +242,7 @@ func TestAnsweredByCDR(t *testing.T) {
 	if err := w.write(context.Background(), Record{CorrelationID: "b", StartTime: now, EndTime: now, AnsweredBy: "300"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := db.args[len(db.args)-1]; got != "300" {
+	if got := db.args[31]; got != "300" {
 		t.Fatalf("last insert argument = %#v, want the assistant's extension", got)
 	}
 }
@@ -250,8 +264,8 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 28 {
-		t.Fatalf("insert takes %d arguments, want 28", len(db.args))
+	if len(db.args) != 34 {
+		t.Fatalf("insert takes %d arguments, want 34", len(db.args))
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
@@ -267,8 +281,67 @@ func TestCallQualityCDR(t *testing.T) {
 	if db.args[24] != "call" {
 		t.Fatalf("kind = %v, want the default call", db.args[24])
 	}
+	if db.args[25] != "" || db.args[26] != "" {
+		t.Fatalf("ring tag = %v (%v), want empty for a call that rang no device", db.args[25], db.args[26])
+	}
+	base.RingTag, base.RingRule = "vip", "rule:1 boss"
+	if err := w.write(context.Background(), base); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[25] != "vip" || db.args[26] != "rule:1 boss" {
+		t.Fatalf("ring tag = %v (%v), want vip (rule:1 boss)", db.args[25], db.args[26])
+	}
 	gp, gl, gj := db.args[21].(*int64), db.args[22].(*int64), db.args[23].(*float64)
 	if *gp != 1000 || *gl != 12 || *gj != 37.5 {
 		t.Fatalf("quality = %d, %d, %v", *gp, *gl, *gj)
+	}
+}
+
+// TestCDROrigin fails if a click-to-call's origin and client are not the
+// insert arguments after the codecs, or a record without an origin is not
+// stored as a call dialled at a phone.
+func TestCDROrigin(t *testing.T) {
+	db := &argsDB{}
+	w := NewWriter(db, newCounter(), discard)
+	now := time.Now()
+	r := Record{CorrelationID: "o", StartTime: now, EndTime: now}
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[29] != OriginPhone || db.args[30] != "" {
+		t.Fatalf("default origin = %v %v, want phone and no client", db.args[29], db.args[30])
+	}
+	r.Origin, r.OriginClient = OriginAPI, "token:7"
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[29] != OriginAPI || db.args[30] != "token:7" {
+		t.Fatalf("origin = %v %v, want api and token:7", db.args[29], db.args[30])
+	}
+}
+
+// TestCDRCodecColumns fails if the codec columns are not the two arguments
+// after the ring tag and rule (before the origin), are not NULL for a leg
+// without a codec, or carry anything but the record's strings.
+func TestCDRCodecColumns(t *testing.T) {
+	db := &argsDB{}
+	w := NewWriter(db, newCounter(), discard)
+	now := time.Now()
+	r := Record{CorrelationID: "c", StartTime: now, EndTime: now}
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if len(db.args) != 34 || db.args[27] != nil || db.args[28] != nil {
+		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 34", db.args[27], db.args[28], len(db.args))
+	}
+	r.CallerCodec, r.CalleeCodec = "opus/48000", "PCMU/8000"
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[27] != "opus/48000" || db.args[28] != "PCMU/8000" {
+		t.Fatalf("codecs = %#v, %#v", db.args[27], db.args[28])
+	}
+	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client, answered_by)") || !strings.Contains(insert, "$30, $31, $32)") {
+		t.Fatal("the insert does not name the codec, origin and answered_by columns with $28 to $32")
 	}
 }
