@@ -8754,7 +8754,8 @@
         "x-hello-scope": "secrets",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "secrets-scoped: the password is shown only in the console"
+          "exclude": "secrets-scoped: the password is shown only in the console",
+          "category": "credentials"
         }
       }
     },
@@ -27652,7 +27653,19 @@
       },
       "PhoneLDAP": {
         "type": "object",
-        "required": ["served", "supported", "groupEnabled", "host", "port", "base", "bindDn", "passwordSet", "rotatedAt", "previousValid", "lastBindAt"],
+        "required": [
+          "served",
+          "supported",
+          "groupEnabled",
+          "host",
+          "port",
+          "base",
+          "bindDn",
+          "passwordSet",
+          "rotatedAt",
+          "previousValid",
+          "lastBindAt"
+        ],
         "properties": {
           "served": {
             "type": "boolean"
