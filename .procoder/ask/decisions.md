@@ -2046,3 +2046,75 @@ so the VIP stage cannot sit in that file.
 - Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
+
+## Integrations P8: directory engine and AD/LDAP sync (2026-11-10)
+
+Built from spec `integrations.md` I-1 to I-10 and I-12 to I-19 (range
+auto-provisioning I-11 stays P12; the Google, Entra, SCIM and OIDC connectors
+build on the same `Driver` and `Store` later). The spec left the points below
+open; each was **chosen by default (the conservative option)**, not by the
+user.
+
+- **Scheduling starts only after a manual apply.** A connector never changes
+  users on its first, unreviewed run: the scheduler skips a connector until one
+  `apply` run (a reviewed preview applied, or "Run now") has succeeded. New
+  connectors are created disabled.
+- **Mass-deprovision threshold.** "More than 20 percent of linked users
+  (minimum 5)" is read as: the run halts when it would disable more than
+  `max(5, 20 percent of the enabled linked users)`. A small install (under 25
+  users) is therefore only guarded by the empty-result guard below 6
+  disables. The empty-result guard is `needs_confirmation` with code
+  `empty_result` (not a hard failure), so an administrator can confirm a
+  genuine emptying.
+- **A created directory user has no usable password and no new login method.**
+  The spec's SSO-only rule for synced users needs the later SSO phase. In P8
+  the sync stores the marker `!` as the password hash (it never matches, "an
+  empty or unknown hash never matches") and keeps `auth_method = 'local'`: the
+  `users_auth_method_check` constraint is left alone, so the later phase adds its
+  own value. A local user an administrator _adopts_ keeps its password, so
+  adopting never locks anyone out; the later phase flips adopted users.
+- **Adoption needs a decision.** Matching is by email, then username (a
+  username match whose email differs is the `username_collision` conflict).
+  Adopt rows are applied only when listed in the apply body (`adopt` /
+  `adoptAll`); otherwise they stay `adopt_not_confirmed`. A local admin is
+  skipped (`local_admin_not_adopted`).
+- **Only `extension_linked` can be overridden**, by moving the extension from
+  its current user, on the administrator's explicit decision (audited). Every
+  other conflict reason is not overridable.
+- **An empty or missing extension value never unlinks.** A user whose mapped
+  extension is empty keeps the link it has; one with no extension value is
+  created without a link (not a conflict). Auto-create is P12.
+- **Disabling is allowed on a managed user, enabling is not.** An
+  administrator may disable a directory user by hand (the safe direction);
+  re-enabling, and every other managed field, is `409 managed_by_directory`.
+  A directory user has no local password: setting one is refused too.
+- **Deleting a connector with linked users is refused** (`409
+connector_in_use`) unless `release=true`, which turns the users into local
+  users (keeping their rows, no password) and the ring-group rows into manual
+  ones.
+- **Reads are admin, not operator.** The spec lists runs and changes as
+  "operator"; the route table ties role to scope (a read scope is viewer), and
+  runs name users, so every directory route is scope `admin`, role admin. The
+  MCP tools are the five read operations; the writes, the test, the sync and
+  the apply and confirm are excluded (credentials, human-in-the-loop).
+- **Full runs only.** The connector reads the whole directory every run. The
+  incremental read (`whenChanged`, `users/delta`) of I-12 is not built: it
+  saves time on very large forests only, and absence detection needs a full
+  read anyway. `directory_sync_runs.delta_token` is reserved.
+- **Stable id.** AD `objectGUID` in its canonical string form, else
+  `entryUUID`, else `nsUniqueId`; an entry with none fails the run
+  (`bad_filter`) instead of being skipped, because a skipped user would read as
+  absent and be disabled.
+- **LDAP servers must be reachable through the SSRF-safe dialer**: public, or in
+  `HELLO_INTEGRATIONS_ALLOWED_CIDRS` (RFC 1918 by default). Loopback and
+  link-local never are.
+- **A failed connection test is a 200** with `ok: false` and a classified
+  code, so the console can show it; a failed run is a run row, not an API
+  error.
+- Devices a sync switches off are marked (`devices.disabled_by_directory`) so
+  that only those come back when the user does. Applying is per user, in its
+  own transaction under the configuration lock when it touches ring groups or
+  devices, so one bad row becomes an `error` row and the run goes on.
+- Live tests against a real Active Directory (certificate chains, paging at
+  1000, nested groups, `userAccountControl` flags) are on the PR's
+  hardware-and-accounts list; the suite uses an in-process LDAP server.

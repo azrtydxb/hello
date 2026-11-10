@@ -76,6 +76,10 @@ type Control struct {
 	// RFC 1918 ranges by default, "none" for no private target at all).
 	// Loopback, link-local and metadata addresses are never allowed.
 	IntegrationsAllowedCIDRs []netip.Prefix
+	// DirectoryAllowPlaintextLDAP lets an LDAP directory connector use ldap://
+	// without StartTLS (HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP, lab only, off by
+	// default; every use logs a warning). Certificate verification stays on.
+	DirectoryAllowPlaintextLDAP bool
 	// MinIO (voicemail audio) and SMTP (voicemail email). SMTP is optional:
 	// an empty SmtpHost disables the mailer.
 	MinioEndpoint      string
@@ -522,6 +526,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
 	}
 	c.IntegrationsAllowedCIDRs = r.allowedCIDRs("HELLO_INTEGRATIONS_ALLOWED_CIDRS")
+	c.DirectoryAllowPlaintextLDAP = r.boolean("HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP")
 	c.Database = r.database(c.DatabaseURL)
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
 	c.SecretKey = r.secretKey()

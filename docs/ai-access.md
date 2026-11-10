@@ -252,6 +252,11 @@ current.
 | `listAuthFailures`              | read     | `GET /api/v1/diagnostics/auth-failures`                    | Source IPs with failed authentications                                                                                                   |
 | `clearAuthFailures`             | write    | `DELETE /api/v1/diagnostics/auth-failures/{ip}`            | Unblock a source IP                                                                                                                      |
 | `getDeviceDiagnostics`          | read     | `GET /api/v1/diagnostics/devices/{id}`                     | Why a device is or is not registered                                                                                                     |
+| `listDirectoryConnectors`       | admin    | `GET /api/v1/directory/connectors`                         | List directory connectors                                                                                                                |
+| `getDirectoryConnector`         | admin    | `GET /api/v1/directory/connectors/{id}`                    | Get a directory connector                                                                                                                |
+| `listDirectoryRuns`             | admin    | `GET /api/v1/directory/connectors/{id}/runs`               | List directory sync runs                                                                                                                 |
+| `getDirectoryRun`               | admin    | `GET /api/v1/directory/runs/{id}`                          | Get a directory sync run                                                                                                                 |
+| `listDirectoryChanges`          | admin    | `GET /api/v1/directory/runs/{id}/changes`                  | List the changes of a sync run                                                                                                           |
 | `listEvents`                    | events   | `GET /api/v1/events`                                       | Call event history                                                                                                                       |
 | `listExtensions`                | read     | `GET /api/v1/extensions`                                   | Every extension, ordered by number                                                                                                       |
 | `createExtension`               | write    | `POST /api/v1/extensions`                                  | Create an extension                                                                                                                      |
@@ -479,7 +484,8 @@ conditions, announcements, music on hold), `hello-call-handling` (queues and
 agents, conferences, park and pickup, paging and multicast, messaging,
 presence, voicemail messages, recordings), `hello-phones` (provisioning,
 bulk import, onboarding, phone groups, firmware, phonebooks),
-`hello-flow-graph` (read and verify the call flow) and `hello-troubleshoot`
+`hello-flow-graph` (read and verify the call flow), `hello-directory`
+(read directory sync runs, previews and conflicts) and `hello-troubleshoot`
 (a call that failed, a phone that does not register, cluster and AI
 findings). Download them under **AI access → Agent skills**, or with
 `GET /api/v1/skills/{name}/download` (a zip), and unpack each into:

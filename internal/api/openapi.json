@@ -1053,7 +1053,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The change would leave no admin (last_admin), disable the caller (self_disable) or take an extension another user has",
+            "description": "The change would leave no admin (last_admin), disable the caller (self_disable), take an extension another user has, or touch a field the user's directory connector manages (managed_by_directory; a directory user also has no local password)",
             "content": {
               "application/json": {
                 "schema": {
@@ -20781,6 +20781,717 @@
         "x-hello-role": "operator",
         "x-hello-mcp": true
       }
+    },
+    "/api/v1/directory/connectors": {
+      "get": {
+        "operationId": "listDirectoryConnectors",
+        "summary": "List directory connectors",
+        "description": "Lists the directory connectors (AD/LDAP) with their status and the number of users each manages. Administrators only. The bind password is never returned (hasCredential says whether one is set).",
+        "tags": ["directory"],
+        "responses": {
+          "200": {
+            "description": "The connectors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryConnectorList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createDirectoryConnector",
+        "summary": "Create a directory connector",
+        "description": "Creates a connector, disabled unless enabled is true and a bind password is given. Plain ldap:// without StartTLS is refused (400 tls_required); the filter is parsed on save; certificate verification is always on. Range auto-provisioning cannot be enabled yet. Setting bindPassword needs the secrets scope.",
+        "tags": ["directory"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectoryConnectorCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The connector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryConnector"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Connector setup stays in the console: it carries the bind password and changes how users are managed.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/directory/connectors/{id}": {
+      "get": {
+        "operationId": "getDirectoryConnector",
+        "summary": "Get a directory connector",
+        "description": "Returns one connector. The bind password is never returned.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The connector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryConnector"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "patch": {
+        "operationId": "updateDirectoryConnector",
+        "summary": "Change a directory connector",
+        "description": "Changes the settings. Changing the host or the bind DN requires bindPassword again (400), so a stored password cannot be redirected. Setting bindPassword needs the secrets scope.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectoryConnectorUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The connector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryConnector"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Connector setup stays in the console: it carries the bind password and changes how users are managed.",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteDirectoryConnector",
+        "summary": "Delete a directory connector",
+        "description": "Deletes the connector with its runs. While users are linked to it the answer is 409 connector_in_use; release=true turns them into local users first (they keep their rows, lose the field locks and have no password until one is set).",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "release",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Turn the connector's users into local users instead of refusing."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Users are still linked (connector_in_use)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Connector setup stays in the console: it carries the bind password and changes how users are managed.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/directory/connectors/{id}/test": {
+      "post": {
+        "operationId": "testDirectoryConnector",
+        "summary": "Test a directory connector",
+        "description": "Connects with the stored bind password, verifies the server certificate, binds and reads one page: the answer lists the certificate subject and expiry, the number of users the first page matched, a sample of up to 20 users with their raw and mapped values, and up to 50 groups. A failure is a 200 with ok false and a classified, scrubbed errorCode. Writes an audit row and no data.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The test result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryTestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "The test contacts the customer's directory with the stored bind password.",
+          "category": "credentials"
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectoryTestRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/directory/connectors/{id}/sync": {
+      "post": {
+        "operationId": "syncDirectoryConnector",
+        "summary": "Start a directory sync run",
+        "description": "Queues a run, which the replica holding the connector's lock picks up; poll the run. dryRun (the default) makes a preview that writes only run rows. dryRun false queues a run that applies, unless it would disable more than 20 percent of the linked users (and more than 5) or the source returned no users, when it halts as needs_confirmation and applies nothing.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The queued run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The connector is disabled (connector_disabled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "A sync run, an apply or a confirmation changes, disables or adopts users; a person reviews the preview and decides.",
+          "category": "human-in-the-loop"
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectorySyncRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/directory/connectors/{id}/runs": {
+      "get": {
+        "operationId": "listDirectoryRuns",
+        "summary": "List directory sync runs",
+        "description": "Lists a connector's runs, newest first.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "description": "Most runs to return (default 50)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryRunList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/directory/runs/{id}": {
+      "get": {
+        "operationId": "getDirectoryRun",
+        "summary": "Get a directory sync run",
+        "description": "Returns one run with its counts and status.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryRun"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/directory/runs/{id}/changes": {
+      "get": {
+        "operationId": "listDirectoryChanges",
+        "summary": "List the changes of a sync run",
+        "description": "The rows of a run: what the sync does (a preview) or did (an apply) to each user, with field-level before and after and the reason. Filter by action; page with after and nextAfter. Retained 90 days.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "create",
+                "update",
+                "link",
+                "adopt",
+                "disable",
+                "enable",
+                "conflict",
+                "skip",
+                "error"
+              ]
+            },
+            "description": "Only rows of this action."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "Only rows after this change id."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "description": "Most rows to return (default 200)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The changes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryChangeList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/directory/runs/{id}/apply": {
+      "post": {
+        "operationId": "applyDirectoryRun",
+        "summary": "Apply a directory sync preview",
+        "description": "Applies a preview: it re-reads the source and answers 409 stale_preview with a fresh preview when the preview is older than 15 minutes or the diff hash differs. Adoptions and conflict overrides apply only when listed in the body. Conflicted users stay unchanged; a change that fails becomes an error row and the run goes on. The run halts as needs_confirmation when the mass-deprovision guard trips.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run, now applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The run is not in the right state (not_applicable), another run is in progress (busy), the connector is disabled (connector_disabled), or the preview is out of date (stale_preview: older than 15 minutes or the source changed; the body carries the fresh preview)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DirectoryStalePreview"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "A sync run, an apply or a confirmation changes, disables or adopts users; a person reviews the preview and decides.",
+          "category": "human-in-the-loop"
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectoryDecisions"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/directory/runs/{id}/confirm": {
+      "post": {
+        "operationId": "confirmDirectoryRun",
+        "summary": "Confirm a halted directory sync run",
+        "description": "Applies a run the mass-deprovision or empty-result guard halted (needs_confirmation), after an administrator reviewed its changes. Audited. Answers 409 stale_preview with a fresh preview when the source changed since.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run, now applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The run is not in the right state (not_applicable), another run is in progress (busy), the connector is disabled (connector_disabled), or the preview is out of date (stale_preview: older than 15 minutes or the source changed; the body carries the fresh preview)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DirectoryStalePreview"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "A sync run, an apply or a confirmation changes, disables or adopts users; a person reviews the preview and decides.",
+          "category": "human-in-the-loop"
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectoryDecisions"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -24877,7 +25588,14 @@
                   "maintenance",
                   "emergency_not_allowed",
                   "caller_id_not_allowed",
-                  "route_denied"
+                  "route_denied",
+                  "tls_required",
+                  "managed_by_directory",
+                  "connector_in_use",
+                  "connector_disabled",
+                  "busy",
+                  "not_applicable",
+                  "stale_preview"
                 ]
               },
               "message": {
@@ -25167,7 +25885,9 @@
           "voicemailEmail",
           "totpEnabled",
           "totpRequired",
-          "createdAt"
+          "createdAt",
+          "managedBy",
+          "disabledAt"
         ],
         "properties": {
           "id": {
@@ -25225,6 +25945,39 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "managedBy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "connectorId": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "connector": {
+                    "type": "string"
+                  },
+                  "fields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The managed fields: username, email, displayName, extension, role, enabled."
+                  }
+                },
+                "required": ["connectorId", "connector", "fields"]
+              }
+            ],
+            "description": "Set when a directory connector manages this user: its mapped fields are read-only (409 managed_by_directory)."
+          },
+          "disabledAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When directory sync disabled the user; null otherwise."
           }
         }
       },
@@ -35330,6 +36083,798 @@
             }
           }
         }
+      },
+      "DirectoryTransform": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["digits", "last", "regex"]
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32,
+            "description": "For last: how many trailing characters to keep."
+          },
+          "pattern": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "For regex: a pattern with exactly one capture group."
+          }
+        },
+        "required": ["kind"],
+        "description": "One transform step of an attribute mapping: digits strips every non-digit, last keeps the last n characters, regex keeps the first capture group (no match counts as empty)."
+      },
+      "DirectoryAttrMap": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string"
+            },
+            "description": "Source attributes in order; the first non-empty value wins."
+          },
+          "transforms": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "$ref": "#/components/schemas/DirectoryTransform"
+            }
+          }
+        },
+        "description": "Where a Hello field comes from. Empty sources means the field is not mapped (and so not managed)."
+      },
+      "DirectoryActiveMap": {
+        "type": "object",
+        "properties": {
+          "attribute": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["", "always", "uac", "bool", "bool_inverted"],
+            "description": "always: every user is active; uac: userAccountControl bit 2 set means disabled; bool: the attribute reads true or false; bool_inverted: true means disabled. A missing or unreadable value reads as active."
+          }
+        }
+      },
+      "DirectoryMappings": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "$ref": "#/components/schemas/DirectoryAttrMap"
+          },
+          "email": {
+            "$ref": "#/components/schemas/DirectoryAttrMap"
+          },
+          "displayName": {
+            "$ref": "#/components/schemas/DirectoryAttrMap"
+          },
+          "extension": {
+            "$ref": "#/components/schemas/DirectoryAttrMap"
+          },
+          "active": {
+            "$ref": "#/components/schemas/DirectoryActiveMap"
+          }
+        },
+        "description": "Attribute mappings. The fields with a mapping are the managed fields: read-only on the user (409 managed_by_directory). An extension value must match ^[0-9]{2,10}$ or the user is a conflict (extension_invalid)."
+      },
+      "DirectoryGroupRules": {
+        "type": "object",
+        "properties": {
+          "roles": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "properties": {
+                "groupId": {
+                  "type": "string"
+                },
+                "groupName": {
+                  "type": "string"
+                },
+                "role": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              },
+              "required": ["groupId", "role"]
+            },
+            "description": "Members of the source group get the role; the highest matching rule wins, user when none matches. An admin rule applies only when options.allowAdminFromDirectory is on."
+          },
+          "ringGroups": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "properties": {
+                "groupId": {
+                  "type": "string"
+                },
+                "groupName": {
+                  "type": "string"
+                },
+                "ringGroupId": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "required": ["groupId", "ringGroupId"]
+            },
+            "description": "Members of the source group have their extension added to the ring group. Sync removes only rows it added."
+          }
+        },
+        "description": "Group rules, matched on the group's stable id; the name is for display."
+      },
+      "DirectoryOptions": {
+        "type": "object",
+        "properties": {
+          "absenceRuns": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "Consecutive complete runs a user may be absent from before it is disabled (default 2; 0 means the default)."
+          },
+          "disableDevices": {
+            "type": ["boolean", "null"],
+            "description": "Disable a disabled user's devices (default on)."
+          },
+          "allowAdminFromDirectory": {
+            "type": "boolean",
+            "description": "Let a group rule grant admin. Off by default."
+          },
+          "runTimeoutMinutes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 240,
+            "description": "Run timeout (default 15; 0 means the default)."
+          },
+          "userCap": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 200000,
+            "description": "Most users a run may read before it fails user_cap_exceeded (default 20000; 0 means the default)."
+          }
+        },
+        "description": "Engine settings every connector kind shares: the absence rule, device handling, the admin switch and the run limits."
+      },
+      "DirectoryLDAPConfig": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "ldaps://host[:636], or ldap://host[:389] with StartTLS. Plain ldap:// without StartTLS is refused (400 tls_required)."
+          },
+          "startTls": {
+            "type": "boolean",
+            "description": "On for ldap:// and not switchable off outside the lab environment switch."
+          },
+          "bindDn": {
+            "type": "string"
+          },
+          "baseDn": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": ["subtree", "onelevel", "base"]
+          },
+          "userFilter": {
+            "type": "string",
+            "description": "Default (&(objectCategory=person)(objectClass=user)); parsed on save."
+          },
+          "groupBaseDn": {
+            "type": "string"
+          },
+          "groupFilter": {
+            "type": "string"
+          },
+          "caCertPem": {
+            "type": "string",
+            "description": "A PEM bundle of the CA certificates to trust (public certificates, not a secret). Certificate verification is always on."
+          },
+          "serverName": {
+            "type": "string",
+            "description": "The name to verify the server certificate against, when it differs from the host."
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 5000
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "nestedGroups": {
+            "type": "boolean",
+            "description": "Resolve nested membership with the in-chain matching rule; slow on a large forest."
+          },
+          "ldapBindLogin": {
+            "type": "boolean",
+            "description": "Reserved for signing in by an LDAP bind."
+          }
+        },
+        "required": ["url", "bindDn", "baseDn"],
+        "description": "Config of an ldap connector. The bind password is not part of it."
+      },
+      "DirectoryConnector": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["ldap"]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["authoritative", "create_only", "link_only"],
+            "description": "authoritative: the directory overwrites mapped fields on every run; create_only: it seeds a field once and Hello owns it after; link_only: never creates users, links existing local users by email then username and manages them."
+          },
+          "scheduleMinutes": {
+            "type": "integer",
+            "description": "0 is manual only, otherwise 5 to 10080. A schedule starts only after an administrator has applied a run by hand."
+          },
+          "config": {
+            "$ref": "#/components/schemas/DirectoryLDAPConfig"
+          },
+          "mappings": {
+            "$ref": "#/components/schemas/DirectoryMappings"
+          },
+          "groupRules": {
+            "$ref": "#/components/schemas/DirectoryGroupRules"
+          },
+          "options": {
+            "$ref": "#/components/schemas/DirectoryOptions"
+          },
+          "autoProvision": {
+            "type": "object",
+            "description": "Reserved for range auto-provisioning; it cannot be enabled yet."
+          },
+          "hasCredential": {
+            "type": "boolean",
+            "description": "A bind password is stored. It is write-only and never returned."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["new", "ok", "failing"]
+          },
+          "lastRunAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastSuccessAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastErrorCode": {
+            "type": "string",
+            "description": "auth_failed, tls_untrusted, unreachable, timeout, quota, bad_filter, user_cap_exceeded or internal; empty after a success."
+          },
+          "lastErrorDetail": {
+            "type": "string"
+          },
+          "consecutiveFailures": {
+            "type": "integer"
+          },
+          "linkedUsers": {
+            "type": "integer",
+            "description": "Users this connector manages."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "enabled",
+          "mode",
+          "scheduleMinutes",
+          "config",
+          "mappings",
+          "groupRules",
+          "options",
+          "autoProvision",
+          "hasCredential",
+          "status",
+          "lastRunAt",
+          "lastSuccessAt",
+          "lastErrorCode",
+          "lastErrorDetail",
+          "consecutiveFailures",
+          "linkedUsers",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "DirectoryConnectorList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectoryConnector"
+            }
+          }
+        },
+        "required": ["items"]
+      },
+      "DirectoryConnectorCreate": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["ldap"],
+            "description": "The connector kind."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "A unique name (case-insensitive)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Default false; enabling needs a bind password."
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["authoritative", "create_only", "link_only"],
+            "description": "authoritative: the directory overwrites mapped fields on every run; create_only: it seeds a field once and Hello owns it after; link_only: never creates users, links existing local users by email then username and manages them."
+          },
+          "scheduleMinutes": {
+            "type": "integer",
+            "description": "0 is manual only, otherwise 5 to 10080. A schedule starts only after an administrator has applied a run by hand."
+          },
+          "config": {
+            "$ref": "#/components/schemas/DirectoryLDAPConfig"
+          },
+          "mappings": {
+            "$ref": "#/components/schemas/DirectoryMappings"
+          },
+          "groupRules": {
+            "$ref": "#/components/schemas/DirectoryGroupRules"
+          },
+          "options": {
+            "$ref": "#/components/schemas/DirectoryOptions"
+          },
+          "autoProvision": {
+            "type": "object",
+            "description": "Reserved for range auto-provisioning; it cannot be enabled yet."
+          },
+          "bindPassword": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The bind password, sealed at rest and never returned. Needs the secrets scope."
+          }
+        },
+        "required": ["kind", "name"]
+      },
+      "DirectoryConnectorUpdate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "A unique name (case-insensitive)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Switch the connector on or off; off stops every job. Enabling needs a bind password."
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["authoritative", "create_only", "link_only"],
+            "description": "authoritative: the directory overwrites mapped fields on every run; create_only: it seeds a field once and Hello owns it after; link_only: never creates users, links existing local users by email then username and manages them."
+          },
+          "scheduleMinutes": {
+            "type": "integer",
+            "description": "0 is manual only, otherwise 5 to 10080. A schedule starts only after an administrator has applied a run by hand."
+          },
+          "config": {
+            "$ref": "#/components/schemas/DirectoryLDAPConfig"
+          },
+          "mappings": {
+            "$ref": "#/components/schemas/DirectoryMappings"
+          },
+          "groupRules": {
+            "$ref": "#/components/schemas/DirectoryGroupRules"
+          },
+          "options": {
+            "$ref": "#/components/schemas/DirectoryOptions"
+          },
+          "autoProvision": {
+            "type": "object",
+            "description": "Reserved for range auto-provisioning; it cannot be enabled yet."
+          },
+          "bindPassword": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Replaces the stored password. Needs the secrets scope. Required again when the host or the bind DN changes, so a stored password cannot be redirected to another server."
+          }
+        }
+      },
+      "DirectorySourceGroup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "name"]
+      },
+      "DirectoryTestRequest": {
+        "type": "object",
+        "properties": {
+          "mappings": {
+            "$ref": "#/components/schemas/DirectoryMappings"
+          }
+        },
+        "description": "Optional mappings to preview on the sample instead of the stored ones."
+      },
+      "DirectorySampleRow": {
+        "type": "object",
+        "properties": {
+          "externalId": {
+            "type": "string"
+          },
+          "raw": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "The raw attribute values."
+          },
+          "mapped": {
+            "type": "object",
+            "properties": {
+              "username": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "extension": {
+                "type": "string"
+              },
+              "extensionError": {
+                "type": "string"
+              },
+              "active": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "username",
+              "email",
+              "displayName",
+              "extension",
+              "active"
+            ]
+          }
+        },
+        "required": ["externalId", "raw", "mapped"]
+      },
+      "DirectoryTestResult": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "errorCode": {
+            "type": "string",
+            "description": "auth_failed, tls_untrusted, unreachable, timeout, quota, bad_filter or internal; empty when ok."
+          },
+          "errorDetail": {
+            "type": "string"
+          },
+          "serverCertSubject": {
+            "type": "string"
+          },
+          "serverCertExpires": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "matchedUsers": {
+            "type": "integer",
+            "description": "Users the first page matched."
+          },
+          "sample": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectorySampleRow"
+            },
+            "description": "Up to 20 users with their raw and mapped values."
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectorySourceGroup"
+            },
+            "description": "Up to 50 groups under the group base."
+          }
+        },
+        "required": [
+          "ok",
+          "errorCode",
+          "errorDetail",
+          "serverCertSubject",
+          "serverCertExpires",
+          "matchedUsers",
+          "sample",
+          "groups"
+        ]
+      },
+      "DirectorySyncRequest": {
+        "type": "object",
+        "properties": {
+          "dryRun": {
+            "type": "boolean",
+            "description": "Default true: a preview that changes nothing. false queues a run that applies, subject to the guards."
+          }
+        }
+      },
+      "DirectoryRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "connectorId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["preview", "apply", "scheduled", "scim"]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "preview",
+              "succeeded",
+              "failed",
+              "needs_confirmation",
+              "stale"
+            ]
+          },
+          "requestedBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "replica": {
+            "type": "string"
+          },
+          "counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Rows by action (create, update, adopt, disable, enable, conflict, skip, error), plus users (read from the source), linked and conflicts."
+          },
+          "diffHash": {
+            "type": "string"
+          },
+          "errorCode": {
+            "type": "string",
+            "description": "For failed: the classified code. For needs_confirmation: needs_confirmation (more than 20 percent of linked users, and more than 5, would be disabled) or empty_result."
+          },
+          "errorDetail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "connectorId",
+          "kind",
+          "status",
+          "requestedBy",
+          "createdAt",
+          "startedAt",
+          "finishedAt",
+          "replica",
+          "counts",
+          "diffHash",
+          "errorCode",
+          "errorDetail"
+        ]
+      },
+      "DirectoryRunList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectoryRun"
+            }
+          }
+        },
+        "required": ["items"]
+      },
+      "DirectoryChange": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "runId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "update",
+              "link",
+              "adopt",
+              "disable",
+              "enable",
+              "conflict",
+              "skip",
+              "error"
+            ]
+          },
+          "userId": {
+            "type": ["integer", "null"],
+            "format": "int64"
+          },
+          "externalId": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "fieldDiffs": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "string"
+                },
+                "after": {
+                  "type": "string"
+                }
+              },
+              "required": ["before", "after"]
+            },
+            "description": "Field-level before and after. Never a secret."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why: for conflicts extension_linked, extension_kind, duplicate_extension, email_in_use, username_collision, claimed_by_other_connector, extension_invalid, extension_missing, username_invalid or last_admin; for skips inactive_in_source, absent_pending, link_only_no_match or local_admin_not_adopted; for adopt adopt_not_confirmed or confirmed; for disable inactive_in_source or absent_from_source; for error last_admin, not_found, invalid or apply_failed."
+          },
+          "overridable": {
+            "type": "boolean",
+            "description": "A conflict an administrator may override on apply (extension_linked)."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "runId",
+          "action",
+          "userId",
+          "externalId",
+          "username",
+          "fieldDiffs",
+          "reason",
+          "overridable",
+          "createdAt"
+        ]
+      },
+      "DirectoryChangeList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectoryChange"
+            }
+          },
+          "nextAfter": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Pass as after to read the next page; null at the end."
+          }
+        },
+        "required": ["items", "nextAfter"]
+      },
+      "DirectoryDecisions": {
+        "type": "object",
+        "properties": {
+          "adopt": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "External ids of the adoptions to confirm: local users matched by email, then username, that the connector would take over."
+          },
+          "adoptAll": {
+            "type": "boolean",
+            "description": "Confirm every adoption in the run."
+          },
+          "override": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "External ids of conflicts to override. Only extension_linked can be overridden: the extension moves from its current user."
+          }
+        },
+        "description": "An administrator's choices on an apply; audited."
+      },
+      "DirectoryStalePreview": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["code", "message"]
+          },
+          "run": {
+            "$ref": "#/components/schemas/DirectoryRun"
+          }
+        },
+        "required": ["error", "run"],
+        "description": "The 409 stale_preview answer: the fresh preview to review."
       }
     }
   }
