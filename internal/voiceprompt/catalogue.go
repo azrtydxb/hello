@@ -101,6 +101,9 @@ const (
 	GreetBusyTail        Key = "greet.busy.tail"
 	GreetUnreachableTail Key = "greet.unreachable.tail"
 
+	// Boss and secretary: what the assistant hears when a screened call for
+	// the boss is answered ({who} is the boss).
+	BossScreen Key = "boss.screen"
 	// Voicemail groups (S-14): the prompt for a message left for the group,
 	// the one for a member's broadcast, and its confirmation.
 	GroupLeave     Key = "vmgroup.leave"

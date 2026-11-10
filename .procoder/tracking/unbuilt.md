@@ -32,7 +32,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 31  | Wi-Fi profiles and roaming (S-23, S-24)                                       | todo                   |
 | 34  | Presence: reg event, PUBLISH, eventlist (S-35)                                | wip (#268)             |
 | 35  | RTCP-XR collector (S-36)                                                      | todo                   |
-| 36  | Syslog sink (S-27)                                                            | wip (parity-syslog)    |
+| 36  | Syslog sink (S-27)                                                            | done (#235)            |
 | 37  | SCEP and 802.1X (S-25)                                                        | todo                   |
 
 ## integrations
@@ -88,17 +88,17 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 ## messaging-channels
 
-| #     | Item                                                         | Status                |
-| ----- | ------------------------------------------------------------ | --------------------- |
-| 1     | Inbox core                                                   | wip (messaging-inbox) |
-| 2     | Twilio sending                                               | todo                  |
-| 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | todo                  |
-| 4     | LAN chat widget                                              | todo                  |
-| 5     | Message routing and ACD                                      | todo                  |
-| 6     | Telnyx, sender registration                                  | todo                  |
-| 7     | AI triage, drafts, auto-reply                                | todo                  |
-| 8     | Integrations, reporting, DSAR export, redact                 | todo                  |
-| N1-N3 | Public listener, WhatsApp, polling                           | not now               |
+| #     | Item                                                         | Status      |
+| ----- | ------------------------------------------------------------ | ----------- |
+| 1     | Inbox core                                                   | done (#211) |
+| 2     | Twilio sending                                               | todo        |
+| 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | todo        |
+| 4     | LAN chat widget                                              | todo        |
+| 5     | Message routing and ACD                                      | todo        |
+| 6     | Telnyx, sender registration                                  | todo        |
+| 7     | AI triage, drafts, auto-reply                                | todo        |
+| 8     | Integrations, reporting, DSAR export, redact                 | todo        |
+| N1-N3 | Public listener, WhatsApp, polling                           | not now     |
 
 ## clients-webrtc-mobile-video
 
@@ -150,7 +150,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | Dial-by-name                                  | done (#229, B3)       |
 | Voicemail groups                              | done (#220, A6)       |
 | Fax                                           | todo (spec done #199) |
-| Boss/secretary                                | todo (spec done #199) |
+| Boss/secretary                                | done (#236, B2)       |
 | Multi-language prompts (Dutch option per box) | done (#208, A5)       |
 | Codec in call history                         | done (#206)           |
 | Phone LDAP directory                          | wip (#223, A7)        |
@@ -159,7 +159,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                                                                                      | Status                |
 | --------------------------------------------------------------------------------------------------------- | --------------------- |
-| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-30d7c95)    |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-f1d7e1e)    |
 | MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
 | Transfer-to-voicemail phone key                                                                           | done (#200)           |

@@ -873,6 +873,127 @@ another group) is lifted: the ring state machine can open a new ring stage.
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
 
+## Boss and secretary (pbx-gaps B2, S-18, S-19) (2026-10-27)
+
+Built to the spec (D16): one assistant per boss, an assistant for many bosses,
+both sets of phones ring and the first answer wins, the boss's forward always
+wins over the link. The choices the spec left open:
+
+- Table `boss_links` and column `cdrs.answered_by`, migration `00065` (the
+  merge captain renumbers it). `*64` is a new feature-code action
+  `boss_divert` (CHECK widened additively through `pg_temp.hello_check_values`),
+  seeded for an existing install only when the code is free, and in
+  `DefaultFeatureCodes` for a fresh one. The spec's S-1 also lists `*74` and
+  `*75` for follow-me; they are the park codes in the defaults today, so that
+  clash is for the follow-me item to settle, not this one.
+- API: `GET|PUT /api/v1/boss-links`, a whole-list replace like the feature
+  codes (the spec names GET and PUT only). Viewers read, operators write. An
+  assistant may carry `outboundAsBoss` on one link only: with two bosses the
+  caller ID to present would be a guess, so the API refuses it, and the
+  snapshot ignores the flag if it ever finds two.
+- Runtime data rides the snapshot (`snapshot.BossLink`, enabled links only,
+  `divert_on` included). The hook is in `ringExtension`, after forward always
+  and before DND, so a boss reached by a forward, an IVR option or a
+  direct dial rings the same way. Not covered: a boss that is a ring group
+  member, a queue agent or a transfer target rings as a plain extension.
+- DND on the boss, the divert and "busy with call waiting off" silence only the
+  boss's own legs; the assistant still rings. With no registered assistant
+  device the link does not apply and the boss rings as usual, so a call is
+  never lost for want of an assistant. The assistant's own forwarding and DND
+  are not consulted: the link rings the assistant's devices.
+- `assistant_first` starts the boss's legs after `bossAssistantLead` (10 s) or
+  when a screened call is put through. The pending count includes the delayed
+  legs, so a busy assistant does not end the call before the boss has rung;
+  the cost is that the boss rings after the full 10 s even if the assistant
+  declines at once.
+- A call from the assistant to the boss (or the boss to itself) skips the link,
+  so the assistant's other desk phone is not rung for the assistant's own call.
+- Screening is a gate on the assistant's leg, before the leg can claim the call
+  (`screenLeg`, in `leg.drive`): the leg is acknowledged, the relay's callee leg
+  points at it, both legs are muted against each other, and the prompt plays to
+  the assistant while the caller keeps hearing ringback. 1 releases the boss's
+  legs and drops the assistant; 2 sends the caller to the boss's box
+  (`evScreenMessage`, handled by the setup loop so it is the only goroutine
+  that answers the caller); no key after two rounds of the prompt, or the
+  assistant hanging up, is no choice. The assistant never speaks to the caller
+  on a screened call. That is what the spec says ("1 connects to the boss"); the
+  assistant who wants to talk first uses the ordinary call, with screening off.
+  Keys come from RFC 2833 (the relay's DTMF hook) and from SIP INFO (the
+  screened leg's dialog is matched while it is being screened, `matchDialog`).
+  Screening needs the anchor and an early offer; otherwise the answer is an
+  ordinary one and the trace says so. The prompt is `boss.screen` in both
+  language tables, spoken through the voicemail speaker, a tone when none is
+  configured. Only one device of the assistant is screened at a time; another
+  that answers meanwhile is dropped.
+- IVR: a menu option that dials the boss rings the assistant too, and screening
+  is offered there as on a direct call. A menu's call always rings both sets of
+  phones at once (the ring mode does not apply), so putting a screened call
+  through has nothing to release; 2 goes to the boss's box through the menu's
+  voicemail exit.
+- Transfer: a call transferred to a boss rings the assistant's phones as well
+  (no screening, no `answered_by`, the boss's own DND and divert are not applied
+  to the transfer's legs, which is how transfers treat DND today).
+- Early decline: with `assistant_first`, once every assistant leg has ended
+  without taking the call (486, 603, unreachable, hang-up, no screening choice)
+  the boss's legs start at once (`bossAssistantFailed`), not after the 10 s.
+- Not built, and why: a boss who is a ring-group member or a queue agent rings
+  as an ordinary extension. S-18 and D16 define the link for "calls to the boss";
+  a call to a group or queue is a call to the group or queue, and no spec line
+  asks for the link there. The spec excludes: "Two or more assistants on one boss,
+  and a boss-side call-screening queue" (pbx-gaps.md, Out of scope, line 287).
+- CDR: `answered_by` is the assistant's extension when the assistant answered,
+  empty otherwise (not filled with the answering extension of every call). The
+  trace reads "Answered by assistant 300 for 200" (extension numbers, no names).
+  A screened call the assistant sent to voicemail or through has no
+  `answered_by`: the assistant never took it.
+- `*64`: dialled as a call from the boss's own phone, or inside a call, it flips
+  `divert_on` of the boss's link (computed from the snapshot, written through
+  the settings sink with the audited `ApplyFeatureUpdate`, one transaction with
+  the revision bump). Two presses before the snapshot reloads send the same
+  value; the phone hears the 200. From an extension that is no boss it is 404.
+  Metric `hello_boss_divert_total{result}` (on, off, no_link, failed). The
+  screening choices are logged with the two extension numbers only, and are in
+  the call trace.
+- Calling out as the boss: `routing.Call.CallerIDExtension` selects the
+  extension whose external number and caller-ID rule the outbound decision
+  uses; the route is still matched for the assistant's own extension, so the
+  flag grants no dialling rights.
+- Not done here: the boss's BLF
+  does not show the divert; no second assistant per boss (the spec's out of
+  scope).
+
+## Syslog sink (S-27, item 36) (2026-10-27)
+
+- **Where.** In hello-control (package `internal/syslogsink`), not a sidecar: it needs the phone table
+  and Valkey, both already there. Off unless `HELLO_SYSLOG_UDP_ADDR` or `HELLO_SYSLOG_TLS_ADDR` is set.
+  The pod binds 5514 and 6514 (non-root); Services map them to 514 and 6514.
+- **Storage.** Valkey lists in `internal/livestate/syslog.go` (it owns a test database; every Valkey
+  test database is taken): `hello:syslog:phone:<id>` capped 10000 with a 24 h TTL; unknown sources
+  under `hello:syslog:ip:<ip>` capped 1000, indexed in a sorted set bounded to 200 addresses whose
+  evicted lists are deleted in the same script.
+- **Attribution.** By source IP = `phones.last_fetch_ip`. An address two phones share is treated as
+  unknown rather than guessed. Syslog carries no reliable phone identity otherwise.
+- **Rate cap.** Token bucket per phone (per address for unknown), default 20/s burst 200; drops are
+  reported by one stored notice line instead of a counter key.
+- **Redaction.** There was no shared line redactor, so `syslogsink.Redact` combines the Authorization
+  header, credential key/value, provisioning-path and 52+ char token rules (same token shape as
+  `prov.RedactPath`), plus URL passwords. It runs before truncation and storage.
+- **Config.** Group setting in two columns on `phone_groups` (migration 00064), default off, level
+  default info; `PUT /api/v1/phone-groups/{id}/syslog` (admin). Template change is Grandstream only
+  (P207/P208, as the spec says [R8x6 TPL]); other vendors are not touched. Off is written explicitly
+  (P207 empty, P208 0) so disabling reaches phones. P208 mapping debug 1, info 2, warning 3, error 4
+  is read from the template and UNVERIFIED on hardware, as is a `host:port` in P207 (kw needs it: the
+  NodePort is 30514).
+- **kw manifest.** UDP only (no TLS cert on kw yet): `hello-syslog` NodePort 30514, traffic policy
+  Local to keep the phone address; works only on a node with a hello-control pod. Not deployed.
+- **API/UI.** `GET /api/v1/phones/{id}/syslog`, `GET /api/v1/syslog/unknown`; Syslog tab on
+  PhoneDetail, toggle and level in the phone group editor. No UI for unknown sources.
+- **Follow-ups (built).** Counters received/dropped/unmatched; a minimum-level filter on the tab (a
+  line without a priority always shows); Phones > Unknown syslog page; Yealink, Poly and snom keys
+  (all marked verify; Poly has no port so it needs UDP 514; the level scales are mapped from the guides:
+  Yealink debug and info 6, warning 4, error 3; Poly 0, 1, 4, 5). Fanvil has no documented syslog keys, so
+  none. Migration number: 00065 went to PR #236 (boss links), so this one is 00064.
+
 ## Messaging inbox core (2026-10-26)
 
 Delivery item 1 of `.procoder/specs/messaging-channels.md`, built LAN-only on the

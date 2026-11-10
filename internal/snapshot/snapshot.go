@@ -231,6 +231,8 @@ type Snapshot struct {
 	// groups (migration 00032).
 	parkLots []ParkLot
 	pickups  []PickupGroup
+	// bosses maps a boss extension number to its enabled link (migration 00065).
+	bosses map[string]BossLink
 	// mohs maps a music on hold class ID to its playlist; mohDefault is the
 	// global default class (0 when none is set).
 	mohs       map[int64]MOHClass
@@ -655,6 +657,10 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	bosses, err := loadBossLinks(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	rtags, err := loadRingTags(ctx, db)
 	if err != nil {
 		return nil, err
@@ -668,7 +674,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	}
 	return New(rev, domain, devices).WithExtensions(bare...).WithQueues(queues).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithVoicemailGroups(vmgs).WithRingTags(rtags).WithBLFLists(blf), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithVoicemailGroups(vmgs).WithRingTags(rtags).WithBLFLists(blf).WithBossLinks(bosses), nil
 }
 
 // loadMOHClasses reads the music on hold classes with their playlists
