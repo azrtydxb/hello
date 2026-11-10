@@ -233,6 +233,10 @@ type Deps struct {
 	// Park is the shared call-park store (Valkey); nil disables call park,
 	// retrieve and cross-node pickup. A parked party hears music on hold.
 	Park ParkState
+	// Published is the shared event state of PUBLISHed presence (Valkey);
+	// nil answers PUBLISH 503 (S-35).
+	Published PublishedPresence
+
 	// Originates is the queue of click-to-call requests (spec integrations
 	// I-37); nil disables click-to-call on this node.
 	Originates Originates
@@ -534,9 +538,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.handle(srv, sip.UPDATE, s.handleInDialog)
 	s.handle(srv, sip.REFER, s.handleRefer)
 	s.handle(srv, sip.SUBSCRIBE, s.handleSubscribe)
+	s.handle(srv, sip.PUBLISH, s.handlePublish)
 	s.handle(srv, sip.INFO, s.handleInfo)
 	s.handle(srv, sip.MESSAGE, s.handleMessage)
-	s.handle(srv, sip.PUBLISH, s.handlePublish)
 	srv.OnNoRoute(s.wrap(s.handleNotAllowed))
 
 	rctx, stop := context.WithCancel(ctx)
@@ -545,6 +549,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.peerLoop(rctx) })
 	s.bg.Go(func() { s.subExpireLoop(rctx) })
 	s.bg.Go(func() { s.mwiPollLoop(rctx) })
+	s.bg.Go(func() { s.presencePollLoop(rctx) })
 	s.bg.Go(func() { s.queueLoop(rctx) })
 	s.bg.Go(func() { s.callbackLoop(rctx) })
 	if s.deps.MailboxEvents != nil {
@@ -646,7 +651,7 @@ func waitListening(ctx context.Context, ua *sipgo.UserAgent, addr string) bool {
 	}
 }
 
-const allow = "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, UPDATE, REFER, SUBSCRIBE, INFO, MESSAGE, PUBLISH"
+const allow = "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, UPDATE, REFER, SUBSCRIBE, PUBLISH, INFO, MESSAGE"
 
 func (s *Server) handle(srv *sipgo.Server, m sip.RequestMethod, h sipgo.RequestHandler) {
 	srv.OnRequest(m, s.wrap(h))

@@ -10,12 +10,14 @@
     <P36>{{xml .Line.AuthName}}</P36>
     <P34>{{xml .Line.Password}}</P34>
     <P3>{{xml .Line.DisplayName}}</P3>
-{{- /* SIP transport (phone-feature-parity S-14): P130 = SIP Transport, 0 UDP, 1 TCP, 2 TLS (wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83). Server.Transport is "tls" only for a model HELLO_PROV_SIP_TLS_MODELS lists while HELLO_PROV_SIP_TLS_SERVER is set, so a model that fails its TLS lab run is switched back by removing it there. With TLS: P2329 = 1 writes the sips scheme when the transport is TLS, and P22293/P22294 are the minimum and maximum TLS version of the WP822 release notes (12 = TLS 1.2, 99 = no upper limit). The keys of P2329, P22293 and P22294 are taken from the vendor notes, not confirmed on a phone (verify, lab item 10). The Hello CA the server certificate chains to is installed through P8433 (CA URL above). */}}
+{{- /* SIP transport (phone-feature-parity S-13, S-14): P130 = SIP Transport, 0 UDP, 1 TCP, 2 TLS/TCP, account 1, same key and values in Grandstream's wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83, wp820_config_1.0.7.90, wp856_config_1.0.3.16 and ht813_config_1.0.19.6. Server.Transport is "tcp" for a model HELLO_PROV_SIP_TCP_MODELS lists (P130 = 1, no TLS-only keys; S-13). P2331 (Use Actual Ephemeral Port in Contact with TCP/TLS, default 0) and P60065 (Enable TCP Keep-alive, default 1) are in the same templates and stay at their defaults: the Contact keeps the listening port and Kamailio reuses the connection (phones_tcp alias). Server.Transport is "tls" only for a model HELLO_PROV_SIP_TLS_MODELS lists while HELLO_PROV_SIP_TLS_SERVER is set, so a model that fails its TLS lab run is switched back by removing it there. With TLS: P2329 = 1 writes the sips scheme (SIP URI Scheme when using TLS, 0 sip, 1 sips; in all five templates, default 1 in the WP8x6 and WP810/822/825 and 0 in the WP820 and WP856, hence written), and P22293/P22294 are the Minimum and Maximum TLS Version (10 to 13 = TLS 1.0 to 1.3, 99 = no upper limit; written as 12 and 99; the wp8x6_config_1.0.3.39 template lists P22293 and P22294 a second time as the DTLS versions, a duplicate in Grandstream's template). Not confirmed on a phone (verify, lab item 10). The Hello CA the server certificate chains to is installed through P8433 (CA URL above). */}}
 {{- if eq .Server.Transport "tls"}}
     <P130>2</P130>
     <P2329>1</P2329>
     <P22293>12</P22293>
     <P22294>99</P22294>
+{{- else if eq .Server.Transport "tcp"}}
+    <P130>1</P130>
 {{- else}}
     <P130>0</P130>
 {{- end}}
@@ -50,6 +52,11 @@
     <P8489>1</P8489>
 {{- end}}
     <P26095>{{.Server.Port}}</P26095>
+{{- end}}
+{{- /* Presence (phone-feature-parity S-35): the WP phones gain nothing from PUBLISH for Presence or from SUBSCRIBE for Registration [R8x6 section 4], so both stay off and are written so that a phone someone switched on goes back. P188 = PUBLISH for Presence (0 Disabled, 1 Enabled; account 2 is P488) and P2319 = SUBSCRIBE for Registration (0 No, 1 Yes, the reg event of RFC 3680; account 2 is P2419), account 1, in Grandstream's wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83. The WP820 and WP856 templates have neither key. No WP template has an Eventlist BLF URI or a Presence Eventlist URI key (those exist only in the GRP and GXP templates: P134, P26084 and P2389 "Auto Provision Eventlists" in grp26xx_config_1.0.15.23), so Line.BLFListURI is not written to a WP. */}}
+{{- if or (eq .Phone.WP "WP8x6") (eq .Phone.WP "WP8xx")}}
+    <P188>0</P188>
+    <P2319>0</P2319>
 {{- end}}
 {{- /* MWI (spec S-1): P99 = Subscribe for MWI [R8x6 TPL, R8x6 section 5; WP822 same key]; P33 = voicemail access number, defaulting to Hello's voicemail feature code. */}}
     <P99>1</P99>
@@ -128,6 +135,14 @@
 {{- end}}
 {{- if eq .Phone.Family "856"}}
     <P6760>2</P6760>
+{{- end}}
+{{- /* Syslog (phone-feature-parity S-27): P207 = Syslog Server, P208 = Syslog Level (0 None, 1 Debug, 2 Info, 3 Warning, 4 Error) [R8x6 TPL]; the same keys on the other Grandstream families. Off by default and written explicitly off so turning a group's syslog off reaches phones that had it on. The server is Hello's sink, UDP; a host:port is written as configured (UNVERIFIED on hardware, verify). */}}
+{{- if .Syslog}}
+    <P207>{{xml .Syslog.Address}}</P207>
+    <P208>{{.Syslog.Level}}</P208>
+{{- else}}
+    <P207></P207>
+    <P208>0</P208>
 {{- end}}
 {{- /* Emergency numbers from Hello's emergency routes (CALL-47): P8385 on the WP8x6, P25675 on the WP856; the WP8xx template has none. Call park and retrieve codes (CALL-16): P60069 and P2336 on the WP8x6 and WP856. */}}
 {{- if .Emergency}}

@@ -90,7 +90,7 @@ func TestRTCPXRCollector(t *testing.T) {
 		"bad range":  {"vq-rtcpxr", rtcpxr.ContentType, strings.Replace(xrBody, "NLR=1.0", "NLR=400", 1), 400},
 		"wrong type": {"vq-rtcpxr", "text/plain", xrBody, 415},
 		"no type":    {"vq-rtcpxr", "", xrBody, 415},
-		"other evt":  {"presence", rtcpxr.ContentType, xrBody, 489},
+		"other evt":  {"presence", rtcpxr.ContentType, xrBody, 403}, // routed to presence: not the own feature extension
 	} {
 		res := a.authDo(a.publishReq(c.event, c.ct, c.body), AlgSHA256, a.pass)
 		if res.StatusCode != c.want {

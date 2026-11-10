@@ -106,8 +106,18 @@ func (w *reportWindow) allow(device string, now time.Time) bool {
 	return w.n[device] <= rtcpxrPerMinute
 }
 
-// handlePublish serves a PUBLISH. Only Event: vq-rtcpxr is accepted here.
+// handlePublish is the one PUBLISH route: Event: vq-rtcpxr goes to the RTCP-XR
+// collector, every other event to the presence publisher.
 func (s *Server) handlePublish(req *sip.Request, tx sip.ServerTransaction) {
+	if eventOf(req) == rtcpxr.Event {
+		s.handleRTCPXRPublish(req, tx)
+		return
+	}
+	s.handlePresencePublish(req, tx)
+}
+
+// handleRTCPXRPublish serves a PUBLISH with Event: vq-rtcpxr.
+func (s *Server) handleRTCPXRPublish(req *sip.Request, tx sip.ServerTransaction) {
 	count := func(result string) { s.m.RTCPXR.Reports.WithLabelValues(result).Inc() }
 	if s.refuseIfNotReady(req, tx) {
 		count(rxUnavailable)

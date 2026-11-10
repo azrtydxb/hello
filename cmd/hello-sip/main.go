@@ -185,11 +185,11 @@ func run(args []string) error {
 		Pushes:         pushQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "checksync")},
 		QualityReports: controlStore,
 		Messages:       messageQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "messages")},
+		Conversations:  conversations{st: controlStore, dial: cfg.Dial, log: log.With("component", "inbox"), metrics: messaging.NewMetrics(metrics.Registry)},
 		Voicemails:     voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings, TimeConditions: timeConditions{st: controlStore},
-		Conversations: conversations{st: controlStore, dial: cfg.Dial, log: log.With("component", "inbox"), metrics: messaging.NewMetrics(metrics.Registry)},
-		Speech:        newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
-		Recordings:    controlStore, Media: media.NewMetrics(metrics.Registry),
-		HAState: live, Membership: members, PageTests: live, Originates: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Park: live,
+		Speech:     newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
+		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
+		HAState: live, Membership: members, PageTests: live, Originates: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Park: live, Published: live,
 		Conferences: live, ConferenceAudit: controlStore,
 	})
 	if err != nil {

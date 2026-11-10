@@ -134,7 +134,7 @@ func (t *Table) fromExtension(d *Decision, c Call, usable TrunkUsability) {
 		return
 	}
 	d.Trace.Add(fmt.Sprintf("Internal extension lookup %s -> no match", quote(c.Number)))
-	t.outboundRoute(d, c.Number, outboundSource{ext: c.FromExtension}, c, usable)
+	t.outboundRoute(d, c.Number, outboundSource{ext: c.FromExtension, idExt: c.CallerIDExtension}, c, usable)
 }
 
 // outboundSource is who an outbound call is from: an extension, or (for an
@@ -143,7 +143,10 @@ func (t *Table) fromExtension(d *Decision, c Call, usable TrunkUsability) {
 // outbound once; a second pass is an invariant break (spec S-3), rejected
 // 403.
 type outboundSource struct {
-	ext      string
+	ext string
+	// idExt, when set, is the extension whose caller-ID rule applies in
+	// place of ext's (boss and secretary).
+	idExt    string
 	trunk    *Trunk
 	callerID string
 	hopped   bool
@@ -291,13 +294,17 @@ func (t *Table) candidates(d *Decision, r *compiledOutbound, number string, src 
 // extension's numbers. failed is the failure sentence when the rewrite is
 // not a number.
 func (t *Table) outboundCallerID(tr *Trace, r *compiledOutbound, src outboundSource, first *Trunk) (cid, failed string) {
-	switch ext := t.extensions[src.ext]; {
+	idExt := src.ext
+	if src.idExt != "" {
+		idExt = src.idExt
+	}
+	switch ext := t.extensions[idExt]; {
 	case src.trunk != nil && src.callerID != "":
 		cid = src.callerID
 		tr.Add(fmt.Sprintf("Caller ID %s (inbound caller ID)", show(cid)))
 	case src.trunk == nil && ext != "":
 		cid = ext
-		tr.Add(fmt.Sprintf("Caller ID %s (external number of extension %s)", show(cid), show(src.ext)))
+		tr.Add(fmt.Sprintf("Caller ID %s (external number of extension %s)", show(cid), show(idExt)))
 	case first.DefaultCallerID != "":
 		cid = first.DefaultCallerID
 		tr.Add(fmt.Sprintf("Caller ID %s (default caller ID of trunk %s)", show(cid), first.Name))

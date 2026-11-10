@@ -233,6 +233,20 @@ func TestWriterPostgres(t *testing.T) {
 
 type argsDB struct{ args []any }
 
+// TestAnsweredByCDR fails if the assistant's extension is not the insert's
+// answered_by argument (the column after peer_call_id, migration 00065).
+func TestAnsweredByCDR(t *testing.T) {
+	db := &argsDB{}
+	w := NewWriter(db, newCounter(), discard)
+	now := time.Now()
+	if err := w.write(context.Background(), Record{CorrelationID: "b", StartTime: now, EndTime: now, AnsweredBy: "300"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := db.args[32]; got != "300" {
+		t.Fatalf("last insert argument = %#v, want the assistant's extension", got)
+	}
+}
+
 func (a *argsDB) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
 	a.args = args
 	return pgconn.NewCommandTag("INSERT 0 1"), nil
@@ -250,8 +264,8 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 34 {
-		t.Fatalf("insert takes %d arguments, want 34", len(db.args))
+	if len(db.args) != 35 {
+		t.Fatalf("insert takes %d arguments, want 35", len(db.args))
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
@@ -335,8 +349,8 @@ func TestCDRCodecColumns(t *testing.T) {
 	if err := w.write(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 34 || db.args[27] != nil || db.args[28] != nil {
-		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 34", db.args[27], db.args[28], len(db.args))
+	if len(db.args) != 35 || db.args[27] != nil || db.args[28] != nil {
+		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 35", db.args[27], db.args[28], len(db.args))
 	}
 	r.CallerCodec, r.CalleeCodec = "opus/48000", "PCMU/8000"
 	if err := w.write(context.Background(), r); err != nil {
@@ -345,7 +359,7 @@ func TestCDRCodecColumns(t *testing.T) {
 	if db.args[27] != "opus/48000" || db.args[28] != "PCMU/8000" {
 		t.Fatalf("codecs = %#v, %#v", db.args[27], db.args[28])
 	}
-	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client, peer_call_id)") || !strings.Contains(insert, "$31, $32)") {
-		t.Fatal("the insert does not name the codec, origin and peer call id columns with $28 to $32")
+	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client, peer_call_id, answered_by)") || !strings.Contains(insert, "$32, $33)") {
+		t.Fatal("the insert does not name the codec, origin, peer call id and answered_by columns with $28 to $33")
 	}
 }
