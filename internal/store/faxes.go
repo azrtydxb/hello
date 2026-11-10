@@ -1,6 +1,6 @@
 package store
 
-// Faxes (migration 00052, pbx-gaps S-15 to S-17): the fax destinations an
+// Faxes (migration 00076, pbx-gaps S-15 to S-17): the fax destinations an
 // administrator configures, and the fax rows hello-sip writes as calls come
 // and go. Destinations are configuration (audited, they bump the revision so
 // hello-sip sees them); fax rows change at call rate and are not.

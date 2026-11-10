@@ -97,6 +97,7 @@ type trunkBody struct {
 	InternalDialing *dialingBody           `json:"internalDialing"`
 	Messaging       *bool                  `json:"messaging"`
 	Codecs          *[]string              `json:"codecs"`
+	SessionTimers   *string                `json:"sessionTimers"`
 	FaxMode         *string                `json:"faxMode"`
 }
 
@@ -151,6 +152,7 @@ func (b trunkBody) applyTo(in *store.TrunkInput) {
 	setIf(&in.Enabled, b.Enabled)
 	setIf(&in.Destinations, b.Destinations)
 	setIf(&in.Messaging, b.Messaging)
+	setIf(&in.SessionTimers, b.SessionTimers)
 	setIf(&in.FaxMode, b.FaxMode)
 	if b.Codecs != nil {
 		// Canonical spelling; validateTrunk refuses what does not normalise.
@@ -198,7 +200,7 @@ func (s *server) createTrunk(w http.ResponseWriter, r *http.Request) {
 	}
 	in := store.TrunkInput{RegisterExpires: 3600, OptionsInterval: 30, Enabled: true, SourceCIDRs: []string{},
 		InternalDialing: store.Dialing{Mode: "off", Patterns: []string{}},
-		Codecs:          slices.Clone(routing.DefaultTrunkCodecs), FaxMode: fax.ModePassthrough}
+		Codecs:          slices.Clone(routing.DefaultTrunkCodecs), SessionTimers: routing.SessionTimersDefault, FaxMode: fax.ModePassthrough}
 	b.applyTo(&in)
 	if b.InternalDialing != nil {
 		d, f := dialingPolicy(b.InternalDialing)

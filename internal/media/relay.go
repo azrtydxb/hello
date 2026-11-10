@@ -216,7 +216,7 @@ func (r *Relay) AddLeg(name string) (int, error) {
 		if r.used[p] {
 			continue
 		}
-		c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: p})
+		c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: p})
 		if err != nil {
 			lastErr = err
 			continue
@@ -548,14 +548,13 @@ func (r *Relay) recv(l *relayLeg) {
 				}
 			}
 		}
-		// The handler is read under the lock: a tap can be installed while
-		// the relay already runs (a queue callback's caller answers after the
-		// relay started).
+		// The hooks are read under the lock: a caller may set them after Start
+		// (a resumed call's relay), and an unlocked read races with that.
 		r.mu.Lock()
-		h := r.onPacket
+		tap := r.onPacket
 		r.mu.Unlock()
-		if h != nil {
-			h(l.name, pkt)
+		if tap != nil {
+			tap(l.name, pkt)
 		}
 		if l.muted.Load() {
 			continue

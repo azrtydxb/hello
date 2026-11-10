@@ -101,6 +101,9 @@ func TestCDRFiltersCountsConcurrencyExport(t *testing.T) {
 	}
 	failover := `[{"n":1,"text":"carrier-primary (10.0.0.5:5060) -> 503 Service Unavailable"},{"n":2,"text":"Failover permitted for 503"},{"n":3,"text":"carrier-backup -> 200 OK"}]`
 	okOut := insert("c-out-ok", "outbound", 200, failover)
+	if _, err := p.db.Exec(`UPDATE cdrs SET caller_codec = 'opus/48000', callee_codec = 'PCMU/8000' WHERE id = $1`, okOut); err != nil {
+		t.Fatal(err)
+	}
 	insert("c-out-fail", "outbound", 503, `[]`)
 	insert("c-in-ok", "inbound", 200, `[]`)
 	insert("c-int-fail", "internal", 480, `[]`)
@@ -158,8 +161,31 @@ func TestCDRFiltersCountsConcurrencyExport(t *testing.T) {
 	if err != nil || len(rows) != 3 || rows[0][0] != "id" || rows[1][5] != "'=1+1" || rows[1][7] != "+971501234567" {
 		t.Fatalf("export = %q (%v)", exp.body, err)
 	}
+	// The codec columns close the row: set on the answered call, empty on the other.
+	if h := rows[0][len(rows[0])-2:]; h[0] != "caller_codec" || h[1] != "callee_codec" {
+		t.Fatalf("export header ends %v, want the codec columns", h)
+	}
+	if g := rows[2][len(rows[2])-2:]; g[0] != "opus/48000" || g[1] != "PCMU/8000" {
+		t.Fatalf("export codecs of c-out-ok = %v", g)
+	}
+	if g := rows[1][len(rows[1])-2:]; g[0] != "" || g[1] != "" {
+		t.Fatalf("export codecs of c-out-fail = %v, want empty", g)
+	}
+	for _, it := range c.must(http.StatusOK, "GET", "/api/v1/cdrs?direction=outbound", nil).json(t)["items"].([]any) {
+		m := it.(map[string]any)
+		want := any(nil)
+		if m["correlationId"] == "c-out-ok" {
+			want = "opus/48000"
+		}
+		if m["callerCodec"] != want {
+			t.Errorf("list callerCodec of %v = %v, want %v", m["correlationId"], m["callerCodec"], want)
+		}
+	}
 
 	if d := c.must(http.StatusOK, "GET", "/api/v1/cdrs/"+okOut, nil).json(t); d["note"] != "carrier-primary (10.0.0.5:5060) -> 503 Service Unavailable; failed over to carrier-backup." || d["explanation"] != "" {
 		t.Fatalf("failover CDR detail = %v", d)
+	}
+	if d := c.must(http.StatusOK, "GET", "/api/v1/cdrs/"+okOut, nil).json(t); d["callerCodec"] != "opus/48000" || d["calleeCodec"] != "PCMU/8000" {
+		t.Fatalf("CDR detail codecs = %v / %v", d["callerCodec"], d["calleeCodec"])
 	}
 }

@@ -87,6 +87,27 @@ type Trunk struct {
 	// FaxMode is how the trunk carries a fax (pbx-gaps S-16): "passthrough"
 	// (G.711, the default; empty reads as passthrough), "t38" or "off".
 	FaxMode string
+	// SessionTimers is the trunk's RFC 4028 setting: SessionTimersOn,
+	// SessionTimersOff, or SessionTimersDefault (also the empty value) to
+	// follow Hello's own setting.
+	SessionTimers string
+}
+
+// The values of a trunk's session-timer setting.
+const (
+	SessionTimersDefault = "default"
+	SessionTimersOn      = "on"
+	SessionTimersOff     = "off"
+)
+
+// ValidSessionTimers reports whether v is a session-timer setting; the empty
+// string counts as the default.
+func ValidSessionTimers(v string) bool {
+	switch v {
+	case "", SessionTimersDefault, SessionTimersOn, SessionTimersOff:
+		return true
+	}
+	return false
 }
 
 // OutboundRoute matches calls from extensions to external numbers.

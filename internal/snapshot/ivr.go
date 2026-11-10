@@ -26,7 +26,7 @@ const (
 	// IVRDirectory is the dial-by-name directory (migration 00048); it has
 	// no target.
 	IVRDirectory = "directory"
-	// IVRFax names a fax destination (migration 00052).
+	// IVRFax names a fax destination (migration 00076).
 	IVRFax = "fax"
 )
 

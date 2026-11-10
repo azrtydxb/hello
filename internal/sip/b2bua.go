@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
@@ -76,6 +77,9 @@ type call struct {
 	gfDepth  int
 	gfChain  []string
 	stageSeq int // the current forwarding stage; legs carry the stage they belong to
+	// orig is the click-to-call this call carries (originate.go); nil for
+	// every other call.
+	orig *originated
 	// invTx is the caller INVITE's server transaction, kept so a
 	// callee-less answer (voicemail) can respond without sipgo's dialog
 	// ACK-wait; vmTag is the To tag that answer carries.
@@ -93,8 +97,12 @@ type call struct {
 	route     string
 	rewritten string
 	trunkName string
-	trace     routing.Trace
-	slots     []heldSlot // trunk call slots held, released when the attempt ends
+	// inTrunk is the trunk an inbound trunk call came from (nil for a call
+	// from a phone); its session-timers setting decides the caller dialog's
+	// timer.
+	inTrunk *routing.Trunk
+	trace   routing.Trace
+	slots   []heldSlot // trunk call slots held, released when the attempt ends
 
 	// Phase 4 call-flow state. stages carries the forwarding/DND context of
 	// the extension being rung (nil for a plain call); mediaMode is the CDR's
@@ -166,6 +174,9 @@ type call struct {
 	// intercom call only, spec P-16). page is the state of a server page.
 	kind       string
 	autoAnswer bool
+	// doorCaller marks a call from a door station (spec S-45): it may not
+	// use a trunk. Guarded by mu.
+	doorCaller bool
 	page       *pageState
 
 	// park is the parking of a held call (spec S-6); link joins a parked,
@@ -233,6 +244,14 @@ type call struct {
 	// (sessiontimer.go).
 	ses sessionState
 
+	// rawCaller marks a caller dialog Hello answered through the raw
+	// transaction (answerSelf: a retriever or a picker), where sipgo has no
+	// confirmed dialog to send a session refresh on. linkHeld is the hold of
+	// a linked call's pair as the party and its peer signalled it (guarded
+	// by mu); the dead-media watch leaves a held pair alone.
+	rawCaller bool
+	linkHeld  bool
+
 	// IVR state (ivr.go). ivr is the menu session, ivrCancel stops its
 	// flow with the call, ivrAnswered is when the menu answered (billing
 	// starts there), vmExt names the voicemail box a menu hands the call to
@@ -267,7 +286,7 @@ type call struct {
 	cbDone  bool
 	cbOffer []byte
 	// Fax (fax.go), guarded by mu: faxMode is the source trunk's fax mode
-	// (migration 00052) and fx the call's fax session, nil on any other call.
+	// (migration 00076) and fx the call's fax session, nil on any other call.
 	faxMode string
 	fx      *faxCall
 	faxNote string // the fax result, the CDR's reason on a call that ends normally
@@ -285,6 +304,16 @@ type call struct {
 	ringedExts  []string
 	answeredExt string
 	evSubjects  []string
+	// evMu orders the sequence numbers of the call's events with their
+	// hand-off to the sink; evSeq is the last number used (events.go).
+	// evLegacy marks a call taken over from a node that did not replicate
+	// its event state: it is never reported missed.
+	evMu     sync.Mutex
+	evSeq    atomic.Int64
+	evLegacy bool
+	// evCaller is the calling extension of a taken-over call, whose caller
+	// device the taker does not know.
+	evCaller string
 }
 
 // callStages is the forwarding/DND context of the extension a call is
@@ -428,6 +457,19 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	c := s.newCall(req)
 	c.callerNum, c.callerName, c.callerDevice = dev.Extension, dev.ExtensionName, dev.Username
+	s.routeCaller(c, req, tx, snap, dev)
+}
+
+// routeCaller carries an authenticated caller's INVITE to what it dialled:
+// the special numbers first, then routing. It is the part of handleInvite a
+// click-to-call (originate.go) shares, whose caller is a phone that has
+// already answered our own INVITE.
+func (s *Server) routeCaller(c *call, req *sip.Request, tx sip.ServerTransaction, snap *snapshot.Snapshot, dev snapshot.Device) {
+	// A door station reaches its targets only (spec S-45).
+	if snap.IsDoor(dev.Extension) {
+		c.doorCall(req, tx, snap)
+		return
+	}
 	// A paging group's code (Phase E, spec P-12) pages its members; the
 	// store keeps page codes from colliding with feature codes.
 	if g, ok := snap.PagingGroup(c.dialled); ok {
@@ -656,6 +698,9 @@ func (c *call) begin(req *sip.Request, tx sip.ServerTransaction) bool {
 	if err != nil {
 		s.respond(tx, req, sip.StatusBadRequest, "Bad Request")
 		return false
+	}
+	if ot, ok := tx.(*originateTx); ok {
+		ot.attach(dss) // the phone's dialog identifiers, not ours
 	}
 	c.dss = dss
 	c.mu.Lock()
@@ -1193,6 +1238,12 @@ func (c *call) endBoth(reason string) {
 }
 
 func (c *call) byeA() {
+	if c.orig != nil {
+		// A click-to-call's phone is reached through the dialog our own
+		// INVITE made, with its route set.
+		c.orig.byeAgent()
+		return
+	}
 	if c.dss == nil {
 		return // a call Hello placed has no caller dialog
 	}
@@ -1344,6 +1395,9 @@ func (c *call) record(status int, side, reason, result string) {
 	c.mu.Lock()
 	r.QueueLegs = append([]cdr.QueueLeg(nil), c.qLegs...)
 	c.mu.Unlock()
+	if !answer.IsZero() {
+		r.CallerCodec, r.CalleeCodec = c.legCodecNames()
+	}
 	r.Events = c.endEvents(result, reason, end, answer, r.DurationMs, r.BillableMs)
 	c.s.m.Calls.WithLabelValues(result).Inc()
 	if c.groupName != "" {
@@ -1366,6 +1420,10 @@ func (c *call) record(status int, side, reason, result string) {
 	c.mu.Unlock()
 	if peer {
 		return // the node that reached the caller writes the participation's CDR
+	}
+	if c.orig != nil {
+		r.Origin, r.OriginClient = cdr.OriginAPI, c.orig.rq.Client
+		defer c.orig.callEnded(result)
 	}
 	c.s.deps.CDRs.Enqueue(r)
 }
@@ -1890,6 +1948,12 @@ func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 	w, connected := c.winner, c.connected
 	c.mu.Unlock()
 	switch {
+	case !connected && ref.leg == nil && c.orig != nil && c.dss != nil:
+		// The phone a click-to-call rang first hung up while the
+		// destination still rings: the caller's CANCEL.
+		_ = c.dss.ReadBye(req, tx)
+		s.m.response(sip.StatusOK)
+		c.orig.agentHungUp()
 	case !connected || (w == nil && ref.leg != nil):
 		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
 	case ref.leg == nil:
@@ -1934,6 +1998,9 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		// A page is one-way by construction: no hold, no renegotiation.
 		s.respond(tx, req, sip.StatusNotAcceptableHere, "Not Acceptable Here")
 		return
+	}
+	if ref.leg == nil && c.soloInDialog(req, tx) {
+		return // a refresh or a roam on an application's dialog: answered here
 	}
 	c.mu.Lock()
 	w, connected := c.winner, c.connected

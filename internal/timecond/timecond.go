@@ -61,7 +61,7 @@ const (
 	KindTimeCondition = "time_condition"
 	// KindDirectory is the dial-by-name directory; it has no target.
 	KindDirectory = "directory"
-	// KindFax is a fax destination (migration 00052); its target is the
+	// KindFax is a fax destination (migration 00076); its target is the
 	// destination's name. Only inbound routes and IVR keys carry it.
 	KindFax = "fax"
 )

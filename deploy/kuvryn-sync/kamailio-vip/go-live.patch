@@ -1,0 +1,275 @@
+diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resources.yaml
+index d4840ac..3f6ea05 100644
+--- a/deploy/kuvryn-sync/kw/resources.yaml
++++ b/deploy/kuvryn-sync/kw/resources.yaml
+@@ -1055,6 +1055,15 @@ spec:
+       hostNetwork: true
+       # Keep cluster DNS (the dispatcher's hello-sip-N Service names).
+       dnsPolicy: ClusterFirstWithHostNet
++      serviceAccountName: kamailio-vip
++      automountServiceAccountToken: false
++      hostAliases:
++        # kube-vip reaches the API server as "kubernetes", the local one on
++        # these control-plane nodes, as on kube-system/kube-vip-ds: it must
++        # not depend on a VIP to take a VIP.
++        - ip: 127.0.0.1
++          hostnames:
++            - kubernetes
+       affinity:
+         # Only the two nodes phones may reach Kamailio on: master-11
+         # (192.168.10.101, the address every phone is provisioned with) and
+@@ -1151,17 +1160,24 @@ spec:
+           env:
+             - name: KAMAILIO_LISTEN_IP
+               # The pod IP, i.e. its node's address (hostNetwork): the
+-              # "hello" socket (5070) carries it to hello nodes, and the
+-              # phones sockets bind it at KAMAILIO_PHONES_PORT.
++              # dispatcher's probe socket and the metrics socket bind it.
+               valueFrom:
+                 fieldRef:
+                   fieldPath: status.podIP
+             - name: KAMAILIO_PUBLIC_HOST
+-              # Where phones reach this Kamailio: its own node's address,
+-              # which the pod binds directly (master-11 is 192.168.10.101, the
+-              # address the phones are provisioned with; master-12 is
+-              # 192.168.10.102, reached by a test phone only). The VIP
+-              # phases replace this with one shared address.
++              # Where phones reach Kamailio: the VIP (kube-vip below holds it
++              # on the node whose Kamailio is healthy). Advertised in Via,
++              # Path and Record-Route, so it survives either instance.
++              value: 192.168.10.109
++            - name: KAMAILIO_EDGE_VIP
++              # The same address: the phones and hello sockets bind it
++              # (ip_free_bind, so a node that does not hold it yet can bind).
++              value: 192.168.10.109
++            - name: KAMAILIO_LEGACY_IP
++              # This node's own address: the phones provisioned before the
++              # VIP use it (192.168.10.101 is on master-11). Served by the
++              # phones_legacy and hello_legacy sockets exactly as before,
++              # until the last phone has moved; then this variable goes.
+               valueFrom:
+                 fieldRef:
+                   fieldPath: status.podIP
+@@ -1196,6 +1212,16 @@ spec:
+             - name: metrics
+               containerPort: 9071
+               protocol: TCP
++          lifecycle:
++            # Keep serving, and keep this node's ports, for 5s after SIGTERM:
++            # the vip container releases the Lease at once and the other
++            # instance takes it within ~2s. The replacement pod (scheduled
++            # the moment the ports are free) cannot win it back before its
++            # Kamailio is up, so the VIP never lands on an instance that is
++            # still starting.
++            preStop:
++              exec:
++                command: ["sleep", "5"]
+           readinessProbe:
+             httpGet:
+               path: /healthz
+@@ -1225,6 +1251,92 @@ spec:
+               memory: 32Mi
+             limits:
+               memory: 128Mi
++        # kube-vip, the mechanism that already holds the API server's VIP on
++        # this cluster (kube-system/kube-vip-ds, same image), here for the
++        # phones' VIP in ARP mode. Both pods run it and elect one holder with
++        # a Lease; the holder adds 192.168.10.109 to bond0 and announces it,
++        # and a loser, a crash, a node loss or a rollout moves it. It is a
++        # sidecar, not a DaemonSet, so the VIP follows this pod's health:
++        # the liveness probe below asks the Kamailio next to it, and when
++        # that stops answering kubelet restarts this container, which
++        # releases the VIP (SIGTERM drops the Lease and the address) for the
++        # other instance.
++        - name: vip
++          image: ghcr.io/kube-vip/kube-vip:v1.2.3
++          imagePullPolicy: IfNotPresent
++          args:
++            - manager
++          env:
++            - name: vip_arp
++              value: "true"
++            - name: address
++              value: 192.168.10.109
++            - name: vip_interface
++              value: bond0
++            - name: vip_subnet
++              value: "32"
++            - name: vip_cidr
++              value: "32"
++            # kube-vip's own election, in its control-plane mode as on the
++            # API server's DaemonSet, but on its own Lease (in this
++            # namespace) and with no load balancer and no Service handling.
++            - name: cp_enable
++              value: "true"
++            - name: cp_namespace
++              value: hello
++            - name: vip_namespace
++              value: hello
++            - name: svc_enable
++              value: "false"
++            - name: svc_election
++              value: "false"
++            - name: vip_leaderelection
++              value: "true"
++            - name: vip_leasename
++              value: kamailio-vip
++            # A crashed holder's Lease expires after 5s; a healthy one renews
++            # every second.
++            - name: vip_leaseduration
++              value: "5"
++            - name: vip_renewdeadline
++              value: "3"
++            - name: vip_retryperiod
++              value: "1"
++            - name: vip_nodename
++              valueFrom:
++                fieldRef:
++                  fieldPath: spec.nodeName
++          securityContext:
++            capabilities:
++              add:
++                - NET_ADMIN
++                - NET_RAW
++          startupProbe:
++            # Kamailio's metrics port (KAMAILIO_METRICS_PORT), on the pod IP.
++            httpGet:
++              path: /healthz
++              port: 9071
++            periodSeconds: 2
++            failureThreshold: 30
++          livenessProbe:
++            # Hand the VIP over within about 6s of Kamailio going quiet, long
++            # before Kamailio's own (20s x 3) liveness would restart it.
++            httpGet:
++              path: /healthz
++              port: 9071
++            periodSeconds: 2
++            timeoutSeconds: 1
++            failureThreshold: 3
++          volumeMounts:
++            - name: vip-api
++              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
++              readOnly: true
++          resources:
++            requests:
++              cpu: 10m
++              memory: 24Mi
++            limits:
++              memory: 96Mi
+       volumes:
+         - name: config
+           configMap:
+@@ -1232,6 +1344,25 @@ spec:
+             defaultMode: 420
+         - name: run
+           emptyDir: {}
++        # The API credentials of kamailio-vip, for the vip container only
++        # (automountServiceAccountToken is off, so kamailio gets none).
++        - name: vip-api
++          projected:
++            defaultMode: 420
++            sources:
++              - serviceAccountToken:
++                  path: token
++                  expirationSeconds: 3600
++              - configMap:
++                  name: kube-root-ca.crt
++                  items:
++                    - key: ca.crt
++                      path: ca.crt
++              - downwardAPI:
++                  items:
++                    - path: namespace
++                      fieldRef:
++                        fieldPath: metadata.namespace
+         - name: tls
+           secret:
+             secretName: hello-sip-tls
+@@ -1290,9 +1421,9 @@ metadata:
+     app.kubernetes.io/component: edge
+     app.kubernetes.io/managed-by: kuvryn-sync
+ spec:
+-  # In-cluster only (metrics). Phones reach a hostNetwork pod directly at its
+-  # node address (192.168.10.101:30508 for every provisioned phone); a
+-  # NodePort would SNAT them (and hold the port).
++  # In-cluster only (metrics). Phones reach a hostNetwork pod directly, at
++  # the VIP 192.168.10.109:30508 (or 192.168.10.101:30508 for a phone not yet
++  # re-provisioned); a NodePort would SNAT them (and hold the port).
+   type: ClusterIP
+   selector:
+     app.kubernetes.io/name: hello
+@@ -1327,6 +1458,55 @@ spec:
+       app.kubernetes.io/instance: hello
+       app.kubernetes.io/component: edge
+ ---
++# kube-vip's identity: it elects the VIP holder with one Lease in this
++# namespace and needs nothing else. Needs the deployer Role extended once
++# (deploy/kuvryn-sync/rbac-kamailio-ha.yaml).
++apiVersion: v1
++kind: ServiceAccount
++metadata:
++  name: kamailio-vip
++  namespace: hello
++  labels:
++    app.kubernetes.io/name: hello
++    app.kubernetes.io/instance: hello
++    app.kubernetes.io/component: edge
++    app.kubernetes.io/managed-by: kuvryn-sync
++automountServiceAccountToken: false
++---
++apiVersion: rbac.authorization.k8s.io/v1
++kind: Role
++metadata:
++  name: kamailio-vip
++  namespace: hello
++  labels:
++    app.kubernetes.io/name: hello
++    app.kubernetes.io/instance: hello
++    app.kubernetes.io/component: edge
++    app.kubernetes.io/managed-by: kuvryn-sync
++rules:
++  - apiGroups: ["coordination.k8s.io"]
++    resources: ["leases"]
++    verbs: ["get", "list", "watch", "create", "update", "patch"]
++---
++apiVersion: rbac.authorization.k8s.io/v1
++kind: RoleBinding
++metadata:
++  name: kamailio-vip
++  namespace: hello
++  labels:
++    app.kubernetes.io/name: hello
++    app.kubernetes.io/instance: hello
++    app.kubernetes.io/component: edge
++    app.kubernetes.io/managed-by: kuvryn-sync
++subjects:
++  - kind: ServiceAccount
++    name: kamailio-vip
++    namespace: hello
++roleRef:
++  apiGroup: rbac.authorization.k8s.io
++  kind: Role
++  name: kamailio-vip
++---
+ apiVersion: apps/v1
+ kind: Deployment
+ metadata:
+@@ -1951,10 +2131,13 @@ spec:
+             - name: HELLO_PROV_PUBLIC_URL
+               value: https://prov.hello.kw.watteel.lab
+             - name: HELLO_PROV_SIP_SERVER
+-              # Where provisioned phones register: Kamailio on master-11's
+-              # address, as KAMAILIO_PUBLIC_HOST/PORT advertise it. The VIP
+-              # go-live (deploy/kuvryn-sync/kamailio-vip) points it at the VIP.
+-              value: 192.168.10.101:30508
++              # Where provisioned phones register: Kamailio's VIP, as
++              # KAMAILIO_PUBLIC_HOST/PORT advertise it. A phone moves to it
++              # at its next fetch (Resync on the Phones page, or its
++              # periodic re-check); until then it keeps working through
++              # 192.168.10.101, which Kamailio still serves
++              # (KAMAILIO_LEGACY_IP). docs/ha.md, "Moving phones to the VIP".
++              value: 192.168.10.109:30508
+             - name: HELLO_PROV_TRUSTED_PROXIES
+               # kw's pod CIDR: ingress-nginx's X-Forwarded-Proto/-For are
+               # believed from there only (HTTPS check, per-IP limits).
