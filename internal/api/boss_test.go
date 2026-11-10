@@ -34,6 +34,9 @@ func TestBossLinks(t *testing.T) {
 		return m
 	}
 	put := func(want int, items ...map[string]any) response {
+		if items == nil {
+			items = []map[string]any{}
+		}
 		return c.must(want, "PUT", "/api/v1/boss-links", map[string]any{"items": items})
 	}
 
