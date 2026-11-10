@@ -1803,3 +1803,14 @@ Built on #280 (choices the decision left open):
   "by the assistant for <user>".
 - **No new API status codes.** The refusals are the existing
   `403 forbidden_role` and `403 insufficient_scope`.
+
+## Conference two-node test raced on srv.deps (2026-11-10)
+
+- Root cause: not production code. `TestConferenceTwoNodes` assigned
+  `p.srv.deps.Membership` after `startPBX` had already started the servers, so
+  the test goroutine wrote `s.deps` while sipgo handler goroutines (`confMember`
+  via `confResolve`) and `confWatchPeer` read it. Seen under `-race` in the
+  integration job. The server never writes `deps` after construction.
+- Fix: inject the membership through a `withMembership` pbxOpt at build time,
+  as `withHA` and `withConferences` do. Rule: tests never mutate `srv.deps`
+  once the node runs.
