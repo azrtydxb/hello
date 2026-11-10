@@ -1702,3 +1702,14 @@ so the VIP stage cannot sit in that file.
 - Answer (user): the AI may apply. Give the assistant a write tool that applies its batch,
   audited and revertible, in line with the earlier AI-access decision. Operators still see
   and can revert every applied batch.
+
+## Conference two-node test raced on srv.deps (2026-11-10)
+
+- Root cause: not production code. `TestConferenceTwoNodes` assigned
+  `p.srv.deps.Membership` after `startPBX` had already started the servers, so
+  the test goroutine wrote `s.deps` while sipgo handler goroutines (`confMember`
+  via `confResolve`) and `confWatchPeer` read it. Seen under `-race` in the
+  integration job. The server never writes `deps` after construction.
+- Fix: inject the membership through a `withMembership` pbxOpt at build time,
+  as `withHA` and `withConferences` do. Rule: tests never mutate `srv.deps`
+  once the node runs.
