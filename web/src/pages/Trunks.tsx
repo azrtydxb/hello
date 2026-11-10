@@ -91,6 +91,8 @@ interface TrunkDraft {
   destinations: DestinationDraft[];
   /** SMS over SIP (SIP MESSAGE) through this trunk. */
   messaging: boolean;
+  /** RFC 4028 session timers on the trunk's calls. */
+  sessionTimers: SessionTimers;
   /** What the trunk may dial in the extension namespace. */
   dialingMode: DialingMode;
   /** The patterns, one per line; used only in mode "patterns". */
@@ -100,6 +102,14 @@ interface TrunkDraft {
   /** The codecs offered to the trunk, as codecs[]. */
   codecs: string[];
 }
+
+type SessionTimers = "default" | "on" | "off";
+
+const SESSION_TIMERS_LABEL: Record<SessionTimers, string> = {
+  default: "Default",
+  on: "On",
+  off: "Off",
+};
 
 /** The codecs a trunk may be offered, in the order they are stored. */
 const TRUNK_CODECS: { name: string; label: string; hint: string }[] = [
@@ -148,6 +158,7 @@ const NEW_TRUNK: TrunkDraft = {
   enabled: true,
   destinations: [NEW_DESTINATION],
   messaging: false,
+  sessionTimers: "default",
   dialingMode: "off",
   dialingPatterns: "",
   dialingConfirm: false,
@@ -175,6 +186,10 @@ function toDraft(t: Trunk): TrunkDraft {
       weight: String(d.weight),
     })),
     messaging: t.messaging === true,
+    sessionTimers:
+      t.sessionTimers === "on" || t.sessionTimers === "off"
+        ? t.sessionTimers
+        : "default",
     dialingMode:
       dialing?.mode === "patterns" || dialing?.mode === "all"
         ? dialing.mode
@@ -266,6 +281,7 @@ function toInput(d: TrunkDraft): TrunkInput {
     })),
     internalDialing: toDialingInput(d),
     messaging: d.messaging,
+    sessionTimers: d.sessionTimers,
     codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
   };
 }
@@ -307,6 +323,7 @@ function knownKeys(d: TrunkDraft): string[] {
     "internalDialing.patterns",
     "internalDialing.confirm",
     "messaging",
+    "sessionTimers",
     ...d.destinations.flatMap((_, i) => [
       `destinations[${i}]`,
       ...["host", "port", "priority", "weight"].map(
@@ -559,6 +576,10 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          {
+            label: "Session timers",
+            value: SESSION_TIMERS_LABEL[t.sessionTimers ?? "default"],
+          },
           { label: "Password", value: password },
         ]
       : [
@@ -579,6 +600,10 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          {
+            label: "Session timers",
+            value: SESSION_TIMERS_LABEL[t.sessionTimers ?? "default"],
+          },
           { label: "Password", value: password },
         ];
 
@@ -938,6 +963,26 @@ function TrunkDrawer({
             >
               {errors.sourceCidrs ??
                 "One per line, e.g. 203.0.113.0/24. Calls from these addresses are accepted as this trunk."}
+            </span>
+          </div>
+          <div className="cf-field-group">
+            <span className="az-field__label">Session timers</span>
+            <SegmentedControl<SessionTimers>
+              aria-label="Session timers"
+              block
+              value={draft.sessionTimers}
+              onChange={(m) => set("sessionTimers", m)}
+              options={[
+                { value: "default", label: "Default" },
+                { value: "on", label: "On" },
+                { value: "off", label: "Off" },
+              ]}
+            />
+            <span className="az-field__hint">
+              Refresh the trunk's calls (RFC 4028) so a call whose far end
+              vanished is cleared within one interval. On asks the carrier for a
+              timer on every call; Off never does; Default follows the PBX-wide
+              setting.
             </span>
           </div>
           <Switch
