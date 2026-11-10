@@ -15,6 +15,7 @@ export type Scope =
   | "calls"
   | "events"
   | "recordings"
+  | "messages"
   | "session";
 
 /** The scopes a credential can hold, weakest first. */
@@ -26,6 +27,7 @@ export const SCOPES: readonly Scope[] = [
   "calls",
   "events",
   "recordings",
+  "messages",
 ];
 
 /** The integration scopes (spec integrations I-31). */
@@ -49,6 +51,8 @@ export const SCOPE_TEXT: Record<Scope, string> = {
   events:
     "Receive live call events (ringing, answered, ended, missed) for the extensions you may see.",
   recordings: "Create and revoke expiring links to call recordings.",
+  messages:
+    "Read and answer customer text conversations in the messaging inbox, for the conversations you may see.",
   session: "Approve or deny access requests in the console.",
 };
 
@@ -65,7 +69,9 @@ export function grantableScopes(role: Role): readonly Scope[] {
     case "admin":
       return SCOPES;
     case "operator":
-      return ["read", "write", "calls", "events", "recordings"];
+      return ["read", "write", "calls", "events", "recordings", "messages"];
+    case "user":
+      return ["read", "write", "messages"];
     default:
       return ["read", "events"];
   }

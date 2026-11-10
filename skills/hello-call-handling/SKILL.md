@@ -136,6 +136,10 @@ within half a second; read `getConference` again to confirm. Ask before
   messaging on). It answers 202 and is queued; an unregistered recipient gets it
   when the phone registers, until the TTL ends. Message contents of other
   people are never readable through MCP.
+- `getInboxStats` for the customer inbox's load: the conversations by state,
+  the unassigned pool, and how long the longest-waiting one has waited. It
+  carries no customer text; conversations and messages are never exposed
+  through MCP.
 
 ## Boss and assistant
 
