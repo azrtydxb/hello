@@ -202,6 +202,17 @@ The tone library holds WAV files a ring map choice can play as `custom:<name>`
 - `deleteRingtone` (`/ringtones/{id}`) removes a tone; a tone a ring map choice
   still uses is refused.
 
+## Firmware minimums
+
+Each vendor and model glob has a minimum firmware version. A pin below the
+minimum is refused and never rendered to a phone, and the phone list shows a
+drift badge when a phone runs below its minimum.
+
+- `listFirmwareMinimums` (`/prov/firmware/minimums`) lists the rules with the
+  recommended version (the documented lab build).
+- `putFirmwareMinimums` replaces every rule at once: send the whole list, since
+  any rule left out is removed. Say which rules you changed before you send it.
+
 ## References
 
 - [Tools](references/tools.md) - every tool with its scope.

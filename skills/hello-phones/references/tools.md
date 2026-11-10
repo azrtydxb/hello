@@ -69,3 +69,5 @@
 | `listRingtones`                 | read  | The tone library and each tone's use.                     |
 | `createRingtone`                | write | Add a WAV tone to the library.                            |
 | `deleteRingtone`                | write | Delete a tone no ring map choice uses.                    |
+| `listFirmwareMinimums`          | read  | Minimum and recommended firmware per vendor.              |
+| `putFirmwareMinimums`           | write | Replace every firmware minimum rule.                      |
