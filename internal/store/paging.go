@@ -152,12 +152,12 @@ func listPagingGroups(ctx context.Context, q querier, where string, args ...any)
 
 // ListPagingGroups returns every paging group.
 func (s *Store) ListPagingGroups(ctx context.Context) ([]PagingGroup, error) {
-	return listPagingGroups(ctx, s.db, "")
+	return listPagingGroups(ctx, s.q(ctx), "")
 }
 
 // GetPagingGroup returns one paging group.
 func (s *Store) GetPagingGroup(ctx context.Context, id int64) (PagingGroup, error) {
-	gs, err := listPagingGroups(ctx, s.db, ` WHERE g.id = $1`, id)
+	gs, err := listPagingGroups(ctx, s.q(ctx), ` WHERE g.id = $1`, id)
 	if err != nil {
 		return PagingGroup{}, err
 	}
@@ -226,6 +226,9 @@ func writePagingLists(ctx context.Context, tx *sql.Tx, id int64, in PagingGroupI
 		if _, err := tx.ExecContext(ctx, q, id); err != nil {
 			return err
 		}
+	}
+	if err := checkNoDoor(ctx, tx, "members", in.Members); err != nil {
+		return err
 	}
 	for i, ext := range in.Members {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO paging_group_members (group_id, extension_id, position)

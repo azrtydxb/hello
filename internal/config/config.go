@@ -22,6 +22,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/phonebook"
+	"github.com/azrtydxb/hello/internal/safehttp"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/jackc/pgx/v5"
@@ -73,6 +74,11 @@ type Control struct {
 	// EventRetentionDays is how long call events stay in the database
 	// (HELLO_EVENT_RETENTION_DAYS, 1 to 30, default 7).
 	EventRetentionDays int
+	// IntegrationsAllowedCIDRs are the private ranges an outbound webhook
+	// marked allowPrivate may reach (HELLO_INTEGRATIONS_ALLOWED_CIDRS; the
+	// RFC 1918 ranges by default, "none" for no private target at all).
+	// Loopback, link-local and metadata addresses are never allowed.
+	IntegrationsAllowedCIDRs []netip.Prefix
 	// MinIO (voicemail audio) and SMTP (voicemail email). SMTP is optional:
 	// an empty SmtpHost disables the mailer.
 	MinioEndpoint      string
@@ -204,6 +210,20 @@ type Prov struct {
 	// SIPServer (HELLO_PROV_SIP_SERVER, default HELLO_SIP_ADVERTISED_ADDR)
 	// is the host:port rendered configs register with.
 	SIPServer string
+	// SIPTLSServer (HELLO_PROV_SIP_TLS_SERVER, host:port) is the SIP-over-TLS
+	// address rendered configs register with for the models SIPTLSModels
+	// selects; empty keeps every phone on UDP (phone-feature-parity S-14).
+	SIPTLSServer string
+	// SIPTLSModels (HELLO_PROV_SIP_TLS_MODELS, comma separated, default
+	// "grandstream:WP") are the vendors ("grandstream") or vendor model
+	// prefixes ("grandstream:WP8") provisioned for TLS once SIPTLSServer is
+	// set. Taking a model out switches it back to UDP at its next resync.
+	SIPTLSModels []string
+	// DSCPSIP and DSCPRTP (HELLO_DSCP_SIP, HELLO_DSCP_RTP; defaults 26 and
+	// 46) are the QoS values rendered configs carry, the same ones hello-sip
+	// marks its sockets with (spec phone-feature-parity S-21).
+	DSCPSIP int
+	DSCPRTP int
 	// RegisterExpiry is the registration expiry rendered configs carry:
 	// HELLO_SIP_REGISTER_MAX_EXPIRES (default 1h), the same value hello-sip
 	// caps registrations at, so it is always inside its window.
@@ -319,6 +339,23 @@ type SIP struct {
 	// MaxCallDuration ends a connected call that has run this long (both
 	// legs get BYE), so a call whose phones vanished without BYE is cleared.
 	MaxCallDuration time.Duration
+	// SessionExpires (HELLO_SIP_SESSION_EXPIRES_SECONDS, default 1800; 0
+	// turns session timers off) is the RFC 4028 Session-Expires Hello
+	// requests and applies on legs to phones; SessionMinSE
+	// (HELLO_SIP_SESSION_MIN_SE_SECONDS, default 90) is the smallest
+	// interval it accepts from a peer (422 below it).
+	SessionExpires time.Duration
+	SessionMinSE   time.Duration
+	// SessionTimersTrunks (HELLO_SIP_SESSION_TIMERS_TRUNKS, default false) is
+	// what a trunk whose session-timers setting is "default" does: false
+	// leaves its calls without a session timer unless the carrier asks for
+	// one, true requests and keeps one. A trunk set to "on" or "off" ignores
+	// it; SessionExpires 0 turns session timers off for every trunk.
+	SessionTimersTrunks bool
+	// MediaDeadAfter (HELLO_MEDIA_DEAD_SECONDS, default 60; 0 turns it off)
+	// ends an anchored call that carried no RTP in either direction for this
+	// long, unless it is on hold.
+	MediaDeadAfter time.Duration
 	// Server paging (phonebooks-ptt spec P-12): a page ends after
 	// PageMaxDuration (HELLO_PAGE_MAX_SECONDS, 120 s); a node runs at most
 	// PageConcurrent pages (HELLO_PAGE_CONCURRENT, 5) of at most PageFanout
@@ -338,6 +375,11 @@ type SIP struct {
 	// their relay sockets from.
 	RTPPortMin int
 	RTPPortMax int
+	// DSCPSIP (HELLO_DSCP_SIP, default 26, CS3) marks the SIP socket and
+	// DSCPRTP (HELLO_DSCP_RTP, default 46, EF) the relay RTP sockets; 0 to
+	// 63 (spec phone-feature-parity S-21).
+	DSCPSIP int
+	DSCPRTP int
 	// MediaForceAnchor (HELLO_MEDIA_FORCE_ANCHOR, default false) anchors
 	// every call's media regardless of the per-call triggers (spec S-1d).
 	MediaForceAnchor bool
@@ -404,6 +446,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	if c.EventRetentionDays > 30 {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
 	}
+	c.IntegrationsAllowedCIDRs = r.allowedCIDRs("HELLO_INTEGRATIONS_ALLOWED_CIDRS")
 	c.Database = r.database(c.DatabaseURL)
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
 	c.SecretKey = r.secretKey()
@@ -586,8 +629,12 @@ func (r *reader) prov() Prov {
 	p := Prov{
 		Addr:               r.optional("HELLO_PROV_ADDR", ":8083"),
 		SIPServer:          r.optional("HELLO_PROV_SIP_SERVER", r.getenv("HELLO_SIP_ADVERTISED_ADDR")),
+		SIPTLSServer:       r.getenv("HELLO_PROV_SIP_TLS_SERVER"),
+		SIPTLSModels:       r.tlsModels("HELLO_PROV_SIP_TLS_MODELS", "grandstream:WP"),
 		TrustedProxies:     r.prefixes("HELLO_PROV_TRUSTED_PROXIES"),
 		TokenGrace:         r.days("HELLO_PROV_TOKEN_GRACE", 7*24*time.Hour),
+		DSCPSIP:            r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP),
+		DSCPRTP:            r.dscp("HELLO_DSCP_RTP", DefaultDSCPRTP),
 		Resync:             r.days("HELLO_PROV_RESYNC", 24*time.Hour),
 		BookRefresh:        r.days("HELLO_PROV_BOOK_REFRESH", 15*time.Minute),
 		Timezone:           r.optional("HELLO_PROV_TIMEZONE", "UTC"),
@@ -621,6 +668,15 @@ func (r *reader) prov() Prov {
 		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must be an address phones can reach, not unspecified"))
 	} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must end in a port number"))
+	}
+	if p.SIPTLSServer != "" {
+		if host, port, err := net.SplitHostPort(p.SIPTLSServer); err != nil {
+			r.fail("HELLO_PROV_SIP_TLS_SERVER", err)
+		} else if unspecified(host) {
+			r.fail("HELLO_PROV_SIP_TLS_SERVER", errors.New("must be an address phones can reach, not unspecified"))
+		} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			r.fail("HELLO_PROV_SIP_TLS_SERVER", errors.New("must end in a port number"))
+		}
 	}
 	for key, d := range map[string]time.Duration{"HELLO_PROV_TOKEN_GRACE": p.TokenGrace, "HELLO_PROV_AUDIT_RETENTION": p.AuditRetention} {
 		if d == 0 {
@@ -763,12 +819,21 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	}
 	c.Dial = r.dialing()
 	c.PageMaxDuration = time.Duration(r.positiveInt("HELLO_PAGE_MAX_SECONDS", 120)) * time.Second
+	c.SessionExpires = time.Duration(r.seconds("HELLO_SIP_SESSION_EXPIRES_SECONDS", 1800)) * time.Second
+	c.SessionMinSE = time.Duration(r.seconds("HELLO_SIP_SESSION_MIN_SE_SECONDS", 90)) * time.Second
+	c.MediaDeadAfter = time.Duration(r.seconds("HELLO_MEDIA_DEAD_SECONDS", 60)) * time.Second
+	c.SessionTimersTrunks = r.boolean("HELLO_SIP_SESSION_TIMERS_TRUNKS")
+	if c.SessionExpires > 0 && c.SessionMinSE > c.SessionExpires {
+		r.fail("HELLO_SIP_SESSION_MIN_SE_SECONDS", errors.New("must not exceed HELLO_SIP_SESSION_EXPIRES_SECONDS"))
+	}
 	c.PageConcurrent = r.positiveInt("HELLO_PAGE_CONCURRENT", 5)
 	c.PageFanout = r.positiveInt("HELLO_PAGE_FANOUT", 200)
 	c.PageMulticastIface = r.getenv("HELLO_PAGE_MULTICAST_IFACE")
 	c.PageMulticastTTL = r.positiveInt("HELLO_PAGE_MULTICAST_TTL", 1)
 	c.RTPPortMin = r.port("HELLO_RTP_PORT_MIN", 20000)
 	c.RTPPortMax = r.port("HELLO_RTP_PORT_MAX", 21000)
+	c.DSCPSIP = r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP)
+	c.DSCPRTP = r.dscp("HELLO_DSCP_RTP", DefaultDSCPRTP)
 	c.MediaForceAnchor = r.getenv("HELLO_MEDIA_FORCE_ANCHOR") == "true"
 	c.MediaRecordingNotice = r.getenv("HELLO_MEDIA_RECORDING_NOTICE") != "false"
 	c.MediaAnchorHost = r.optional("HELLO_MEDIA_ANCHOR_HOST", "")
@@ -932,6 +997,30 @@ func (r *reader) valkey() (addr string, sentinels []string, master string) {
 	return addr, sentinels, master
 }
 
+// defaultAllowedCIDRs are the private ranges webhooks may reach unless the
+// administrator says otherwise: RFC 1918 only.
+const defaultAllowedCIDRs = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+// allowedCIDRs reads the private ranges outbound integrations may reach: a
+// comma-separated list inside the private ranges, "none" for no range, the
+// RFC 1918 ranges when unset. A range that overlaps loopback, link-local or
+// multicast space (the cloud metadata address) is refused at start-up.
+func (r *reader) allowedCIDRs(key string) []netip.Prefix {
+	v := strings.TrimSpace(r.getenv(key))
+	switch strings.ToLower(v) {
+	case "none":
+		return nil
+	case "":
+		v = defaultAllowedCIDRs
+	}
+	out, err := safehttp.ParseAllow(v)
+	if err != nil {
+		r.fail(key, err)
+		return nil
+	}
+	return out
+}
+
 // prefixes reads a comma-separated CIDR list.
 func (r *reader) prefixes(key string) []netip.Prefix {
 	v := r.getenv(key)
@@ -1019,6 +1108,27 @@ func (r *reader) port(key string, def int) int {
 	return n
 }
 
+// Default DSCP values (spec phone-feature-parity S-21): SIP signalling CS3,
+// RTP EF.
+const (
+	DefaultDSCPSIP = 26
+	DefaultDSCPRTP = 46
+)
+
+// dscp reads a DSCP value, 0 to 63.
+func (r *reader) dscp(key string, def int) int {
+	v := r.getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n > 63 {
+		r.fail(key, errors.New("must be a DSCP value from 0 to 63"))
+		return def
+	}
+	return n
+}
+
 func (r *reader) positiveInt(key string, def int) int {
 	v := r.getenv(key)
 	if v == "" {
@@ -1027,6 +1137,20 @@ func (r *reader) positiveInt(key string, def int) int {
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
 		r.fail(key, errors.New("must be a positive integer"))
+	}
+	return n
+}
+
+// seconds reads a whole number of seconds, 0 included (the setting is off).
+func (r *reader) seconds(key string, def int) int {
+	v := r.getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n > 86400 {
+		r.fail(key, errors.New("must be a whole number of seconds from 0 to 86400"))
+		return def
 	}
 	return n
 }

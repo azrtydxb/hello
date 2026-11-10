@@ -39,6 +39,7 @@ const MENU = {
   interDigitTimeout: 3,
   maxRetries: 3,
   allowDirectDial: true,
+  promptLanguage: "",
   timeout: { kind: "hangup", target: "" },
   invalid: { kind: "extension", target: "100" },
   options: [{ digit: "1", kind: "extension", target: "200" }],
@@ -105,10 +106,47 @@ describe("Ivr", () => {
         interDigitTimeout: 3,
         maxRetries: 3,
         allowDirectDial: false,
+        promptLanguage: "",
         timeout: { kind: "hangup", target: "" },
         invalid: { kind: "hangup", target: "" },
         options: [{ digit: "1", kind: "extension", target: "200" }],
       },
+    });
+  });
+
+  it("sends a key to the dial-by-name directory with the menu's language", async () => {
+    const calls = setup({
+      "POST /api/v1/ivr-menus": () => json(MENU, 201),
+    });
+    renderApp("/ivr");
+    const [create] = await screen.findAllByRole("button", {
+      name: "New IVR menu",
+    });
+    await waitFor(() => expect(create).toBeEnabled());
+    fireEvent.click(create!);
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "main" },
+    });
+    const greeting = screen.getByLabelText("Greeting");
+    await waitFor(() =>
+      expect(greeting.querySelectorAll("option").length).toBe(3),
+    );
+    fireEvent.change(greeting, { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Prompt language"), {
+      target: { value: "nl" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add key" }));
+    fireEvent.change(screen.getByLabelText("Goes to"), {
+      target: { value: "directory" },
+    });
+    // The directory names nothing, so no target is asked for.
+    expect(screen.queryByLabelText("Target")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create menu" }));
+    expect(await screen.findByText("IVR menu main created.")).toBeVisible();
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.body).toMatchObject({
+      promptLanguage: "nl",
+      options: [{ digit: "1", kind: "directory", target: "" }],
     });
   });
 

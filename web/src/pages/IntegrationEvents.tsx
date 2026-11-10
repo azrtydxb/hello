@@ -37,6 +37,7 @@ const TONES: Record<string, BadgeTone> = {
   "call.missed": "warn",
   "call.recording.ready": "outline",
   "call.completed": "outline",
+  "call.originate.progress": "info",
 };
 
 function party(p: { number?: string; name?: string; extension?: string }) {
@@ -48,6 +49,7 @@ function details(e: EventEntry): string {
   const d = e.data;
   const parts: string[] = [];
   if (d.direction) parts.push(d.direction);
+  if (d.state) parts.push(d.state);
   if (d.reason) parts.push(`reason ${d.reason}`);
   if (d.disposition) parts.push(d.disposition);
   if (d.durationMs) parts.push(formatDuration(d.durationMs));
