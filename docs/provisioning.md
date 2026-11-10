@@ -9,7 +9,12 @@ per-setting path stays in [phones.md](phones.md).
 
 Values below are kw's: provisioning is published at
 `https://prov.hello.kw.watteel.lab` (`HELLO_PROV_PUBLIC_URL`), and phones
-register with Kamailio at `192.168.10.101:30508`. The console's
+register with Kamailio at `192.168.10.101:30508` (`HELLO_PROV_SIP_SERVER`).
+The virtual IP `192.168.10.109:30508` replaces it when the VIP go-live
+(`deploy/kuvryn-sync/kamailio-vip`) is applied; phones provisioned before it
+keep using the node address until they re-fetch, see
+[Moving phones to a new Kamailio address](#moving-phones-to-a-new-kamailio-address).
+The console's
 **Phones → Settings** shows the same values for any deployment, computed by
 `GET /api/v1/prov/settings`.
 
@@ -299,6 +304,26 @@ Upgrade and Provisioning) and are unconfirmed on a phone, so verify them.
 The phone also asks for `ring<N>.bin` and `ring<N>.ogg` in that directory;
 Hello answers those with an empty `404` (`not_found`, no block counted).
 
+Firmware policy (spec S-26). A _minimum version_ per vendor and model glob
+(`PUT /api/v1/prov/firmware/minimums`, the "Minimum versions" card on the
+Firmware page) is a floor: a pin below it is refused with `400`, and a stored
+pin that sits below the minimum of the phone's model is not rendered, so the
+phone gets no firmware setting. A pin's glob that can reach a floored model
+(`WP8*` reaches the WP822) is checked against that floor. The seeded rules
+are the WP822 floor 1.0.11.22 with the lab build 1.0.11.78 recommended, and
+the lab build 1.0.3.39 recommended for the WP8x6 (WP816, WP826, WP836 and
+WP856); the recommended version is documentation for the admin, never
+rendered, and Hello ships no vendor firmware. Phones and PhoneDetail show the
+firmware seen in the User-Agent with a "Drift" badge when it differs from the
+pin or is below the minimum (`firmwarePinned`, `firmwareMinimum` and
+`firmwareDrift` on the phone). A pin may carry an upgrade hour (0 to 23).
+On a Grandstream WP8x6 or WP8xx it renders P194 = 2 (daily) with the hour in
+P285, and P238 = 1 so a reboot does not upgrade outside the window; without
+an hour P194 = 1 and P238 = 0 as above. Configuration changes then reach the
+phone by check-sync or at that hour. P285 and the P194 = 2 value come from
+Grandstream's general Automatic Upgrade settings and are unconfirmed on a
+WP; the WP856 (P22296) and other vendors ignore the hour.
+
 Config server: P237 (Config Server Path) is likewise `host/p/<token>`, no
 scheme and no trailing slash, and P212 (Config Upgrade Via) is `2` for the
 HTTPS device path (`1` if Hello is ever served over HTTP). The SIP device
@@ -375,6 +400,32 @@ five pages). A model not in the table keeps every key, from the vendor's
 first free key, as before; Poly has no table (no limit could be cited) and
 keeps its unlimited attendant list.
 
+### Transfer-to-voicemail key
+
+`*97<ext>` leaves a message in extension `<ext>`'s mailbox, and is what a
+phone's transfer-to-voicemail key dials. Hello provisions one such key on each
+phone: it transfers the call in progress to `*97` followed by the phone's own
+extension (so "send this caller to my voicemail"). The key is written when the
+PBX has the voicemail feature code and the extension has voicemail switched on.
+
+| Vendor  | Key                                                                                                                                           |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink | `linekey.N.type = 3` (Transfer), `.value = *97<ext>`, `.label = To voicemail`; `expansion_module.M.key.K.*` the same on an EXP50 key (verify) |
+| Snom    | `<fkey idx="N" context="active">transfer sip:*97<ext>@<domain></fkey>` (verify)                                                               |
+| Fanvil  | a memory key, `FkeyN Type :1`, `Value :*97<ext>@1/f` (the BLF keys' `/b` suffix replaced by speed dial) (verify)                              |
+| Poly    | an enhanced feature key macro `$FTransfer$$Cpause2$*97<ext>$Tinvite$` (`efk.efklist.1.*`) on `softkey.1`, active-call context (verify)        |
+
+The key takes the first key a phone has left after its BLF keys
+(`PlaceVMKey` in `internal/prov/keycaps.go`), so it never displaces a BLF key
+and a phone whose keys the BLF keys fill gets none. Yealink, Snom and Fanvil
+get it only on a model in the capability table above, as BLF keys are only
+counted there; Poly has no table and always has softkeys. Grandstream gets no
+key: a WP has no key block in its template, and the P323 block of the other
+models is unverified and runs into the phonebook keys P330 to P333 past two
+BLF keys. None of these keys has been checked on a phone; the key types, the
+Fanvil `/f` suffix and the Poly macro and softkey slot are the first things to
+verify.
+
 ### HD voice codec order
 
 Every built-in template puts Opus first on the models that have it, then
@@ -386,13 +437,13 @@ that both do G.722 talk wideband and anything else falls back to G.711 (see
 account Hello provisions); another account of a multi-account model takes
 the same keys with its own number:
 
-| Vendor      | Keys                                                                                                                                                                                                                |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.N.codec.opus.enable` and `.priority = 1` (models without Opus: `g722` at 1), then `g722`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0`                |
-| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 123 (Opus, models that have it), 9 (G.722), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...) |
-| Snom        | `codec_priority_list idx="N"` = `opus,g722,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                              |
-| Fanvil      | `SIPN Voice Codec Map` = `opus,G722,G711U,G711A`                                                                                                                                                                    |
-| Poly        | `voice.codecPref.Opus="1"`, `.G722="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                    |
+| Vendor      | Keys                                                                                                                                                                                                                                    |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.N.codec.opus.enable` and `.priority = 1` (models without Opus: `g722` at 1), then `g722`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0` |
+| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 123 (Opus, models that have it), 9 (G.722), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...)                     |
+| Snom        | `codec_priority_list idx="N"` = `opus,g722,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                                                  |
+| Fanvil      | `SIPN Voice Codec Map` = `opus,G722,G711U,G711A`                                                                                                                                                                                        |
+| Poly        | `voice.codecPref.Opus="1"`, `.G722="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                                        |
 
 Opus is listed only for models known to support it (`internal/prov/codecs.go`);
 an unknown model gets G.722, PCMU and PCMA. The keys are from the vendors'
@@ -595,8 +646,11 @@ on the phone, and the Grandstream template does not enable "Allow SIP Reset".
 Grandstream phones challenge the `NOTIFY` with digest when `P4428 = 1`
 (NOTIFY authentication), which the template writes; Hello answers the
 challenge with the device's stored digest hash, preferring SHA-256, only in
-the device's own realm (a challenge in any other realm is not answered and the
-push reports `auth_failed`). The template also writes `P95030 = 0`, so a plain
+the device's own realm. A phone usually challenges in a realm of its own (a
+Grandstream uses its SIP server, `host:port`), which the stored hash cannot
+answer; hello-sip then opens the device's sealed password and hashes it for
+the realm the phone named. Without a password a challenge in another realm is
+not answered and the push reports `auth_failed`. The template also writes `P95030 = 0`, so a plain
 check-sync re-provisions without a reboot (WP8x6, firmware 1.0.3.20 and
 later).
 
@@ -651,6 +705,35 @@ burst of edits pushes once; pushes still go out at `HELLO_PROV_PUSH_RATE`. A
 phone seen for the first time is only recorded. Automatic pushes show as
 "(automatic)" and are audited as `auto_resync` by `system`.
 
+## Moving phones to a new Kamailio address
+
+The proxy address a phone registers with (`HELLO_PROV_SIP_SERVER`) is part of
+the configuration Hello renders, so moving phones to another one (kw moves
+from the node address `192.168.10.101:30508` to the virtual IP
+`192.168.10.109:30508`, [docs/ha.md](ha.md)) is a re-provision
+and needs no visit to a phone:
+
+1. Change `HELLO_PROV_SIP_SERVER` and deploy. The old address must still be
+   served by Kamailio (kw: `KAMAILIO_LEGACY_IP`), so phones that have not
+   fetched yet keep working. Nothing is pushed by the deploy itself.
+2. Push a resync: **Phones → Resync all**, or `POST /api/v1/phones/resync`
+   (see above; the push rate means a large site takes a while). Each phone
+   re-fetches, registers at the new address, and its registration there
+   replaces the old one (same contact). A phone that is off or unregistered
+   moves at its next periodic re-check (`HELLO_PROV_RESYNC`, default 24 h) or
+   when it next boots.
+3. Watch the old address drain. Kamailio counts the requests each socket
+   carries (`kamailio_edge_requests_total{socket=...}`): the node-address
+   sockets are `phones_legacy`, `phones_legacy_tcp` and `hello_legacy`. When
+   `increase(kamailio_edge_requests_total{socket=~".*legacy.*"}[24h])` is
+   zero, no phone uses the old address (phones send keep-alives, so a phone
+   that still does shows up within a minute).
+4. Retire the old address: remove `KAMAILIO_LEGACY_IP` from Kamailio's
+   environment. The pair restarts one instance at a time and the legacy
+   sockets are gone. Phones that were off for the whole drain and still
+   point at the old address are unreachable until they are re-provisioned by
+   hand or reboot into the new configuration, so check the counter first.
+
 ## Redirect services
 
 A vendor redirect service sends a factory-new phone to Hello from anywhere
@@ -688,7 +771,7 @@ Templates see only these values:
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                                                                                                 |
 | `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`                                                                                |
-| `.Server`   | `Host`, `Port`, `Transport` (`udp`), `Expiry` (seconds)                                                                                                              |
+| `.Server`   | `Host`, `Port`, `Transport` (`udp` or `tls`), `Expiry` (seconds)                                                                                                     |
 | `.BLF`      | a list of `Number`, `Label`, `URI`, placed on the model's keys: `Slot`, `Module`, `Page`, `Section`, `PageStart`, `Pickup`                                           |
 | `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `CACertBase64`, `ResyncSeconds`                                                                                          |
 | `.Codes`    | the PBX's star codes: `DNDOn`, `DNDOff`, `ForwardOn`, `ForwardOff`, `ForwardBusyOn`/`Off`, `ForwardNoAnswerOn`/`Off`, `PickupDirected` (empty when the PBX has none) |
@@ -776,7 +859,8 @@ The token in the per-device URL is the phone's credential.
 Hello keeps the contact data that phones show as a directory, and serves it
 to each phone in its vendor's remote phonebook XML over the provisioning
 endpoint, with the phone's own token. Manage it under **Phonebooks** and
-**Phones > Groups** in the console, or through the API below.
+**Phones > Groups** in the console, or through the API below. Phones can also
+search the same books over LDAPS; see [Phone LDAP directory](ldap.md).
 
 - **Books.** The **company** book and the **extensions** book exist once.
   The extensions book is computed from the extensions (name and number) and
@@ -1152,6 +1236,21 @@ the extension's page in the console or `PATCH /api/v1/extensions/{id}`).
   (`P347` and its gain `P1555`, left at their defaults); the lab check
   listens for it with the flag on and expects silence with it off.
 
+## Keep-alive on Wi-Fi handsets
+
+A handset that sleeps loses its NAT mapping and its registration unless it
+pings. The built-in Grandstream template writes the phone's own keep-alive for
+the WP families; the call-side half (session timers, dead-media teardown,
+roaming) is in [phones.md](phones.md#roaming-keep-alive-and-dead-calls).
+
+| Family            | Setting written                        | Status                                                                                               |
+| ----------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| WP816/826/836     | `P2397 = 1` (SIP OPTIONS keep-alive)   | key from the WP8x6 template; the interval (30 s) and max-tries keys are left at the default (verify) |
+| WP810/820/822/825 | `P84989 = 0` (RFC 5626 keep-alive off) | from the WP822 release notes; verify on a phone's exported XML                                       |
+
+The WP856 template has neither key and gets none. Other vendors' keep-alive
+keys are not written yet (verify per vendor).
+
 ## Call park and call pickup
 
 Hello parks a call so any phone can pick it up, and lets a phone answer a
@@ -1264,12 +1363,13 @@ do not log the call as missed.
 Hello tags every call to an internal phone (internal, external, ring group,
 page, door, alarm and your own tags) and sends the tag in an `Alert-Info` header
 of the form `<http://127.0.0.1/Bellcore-drN>;info=hello-<tag>`. Which tag a call
-gets, the rules and the header are in [ring-tags.md](ring-tags.md). The
-provisioned templates do not yet map a tag to a tone: until the ring map ships,
-set the phone's distinctive-ring rule by hand (match `hello-<tag>` in the
-Alert-Info text, or `Bellcore-drN` where the phone maps only the five Bellcore
-rings). Page and intercom calls keep the auto-answer `Alert-Info` described
-under paging and intercom above.
+gets, the rules and the header are in [ring-tags.md](ring-tags.md). The built-in
+templates map each tag to a tone through the ring map (Ringing page, tab Ring
+map): the vendor's distinctive-ring rules and the line's own ring tone are
+written into every phone's configuration, with an optional override per phone
+group, and a change is pushed to the affected phones by the automatic resync.
+Page and intercom calls keep the auto-answer `Alert-Info` described under
+paging and intercom above.
 
 ## Security model and its limits
 

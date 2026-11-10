@@ -22,6 +22,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/phonebook"
+	"github.com/azrtydxb/hello/internal/safehttp"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/jackc/pgx/v5"
@@ -36,6 +37,16 @@ type Common struct {
 	// DrainDelay is how long a node keeps serving with /readyz failing after
 	// shutdown begins, so load balancers stop routing to it first.
 	DrainDelay time.Duration
+}
+
+// Backup holds the backup tool settings.
+type Backup struct {
+	// PGDump and PGRestore are the pg_dump and pg_restore binaries
+	// (HELLO_BACKUP_PG_DUMP, HELLO_BACKUP_PG_RESTORE).
+	PGDump, PGRestore string
+	// Tmp is the staging directory for the dump and the archive
+	// (HELLO_BACKUP_TMP); empty means the system temporary directory.
+	Tmp string
 }
 
 // Control is hello-control's configuration.
@@ -63,6 +74,11 @@ type Control struct {
 	// EventRetentionDays is how long call events stay in the database
 	// (HELLO_EVENT_RETENTION_DAYS, 1 to 30, default 7).
 	EventRetentionDays int
+	// IntegrationsAllowedCIDRs are the private ranges an outbound webhook
+	// marked allowPrivate may reach (HELLO_INTEGRATIONS_ALLOWED_CIDRS; the
+	// RFC 1918 ranges by default, "none" for no private target at all).
+	// Loopback, link-local and metadata addresses are never allowed.
+	IntegrationsAllowedCIDRs []netip.Prefix
 	// MinIO (voicemail audio) and SMTP (voicemail email). SMTP is optional:
 	// an empty SmtpHost disables the mailer.
 	MinioEndpoint      string
@@ -76,8 +92,13 @@ type Control struct {
 	// SecretKey (HELLO_SECRET_KEY) seals trunk passwords; identical on every
 	// hello-control and hello-sip.
 	SecretKey string
+	// Backup is where the PostgreSQL client programs and the staging
+	// directory of backups are (HELLO_BACKUP_*, spec pbx-gaps S-2).
+	Backup Backup
 	// Prov is the phone provisioning listener (HELLO_PROV_*).
 	Prov Prov
+	// LDAP is the phone directory listener (HELLO_LDAP_*, spec pbx-gaps S-24).
+	LDAP LDAP
 	// Dial is the numbering context of the address books (HELLO_DIAL_*,
 	// spec P-8): how a stored or dialled number reduces to a lookup key.
 	Dial phonebook.Dialing
@@ -191,6 +212,20 @@ type Prov struct {
 	// SIPServer (HELLO_PROV_SIP_SERVER, default HELLO_SIP_ADVERTISED_ADDR)
 	// is the host:port rendered configs register with.
 	SIPServer string
+	// SIPTLSServer (HELLO_PROV_SIP_TLS_SERVER, host:port) is the SIP-over-TLS
+	// address rendered configs register with for the models SIPTLSModels
+	// selects; empty keeps every phone on UDP (phone-feature-parity S-14).
+	SIPTLSServer string
+	// SIPTLSModels (HELLO_PROV_SIP_TLS_MODELS, comma separated, default
+	// "grandstream:WP") are the vendors ("grandstream") or vendor model
+	// prefixes ("grandstream:WP8") provisioned for TLS once SIPTLSServer is
+	// set. Taking a model out switches it back to UDP at its next resync.
+	SIPTLSModels []string
+	// DSCPSIP and DSCPRTP (HELLO_DSCP_SIP, HELLO_DSCP_RTP; defaults 26 and
+	// 46) are the QoS values rendered configs carry, the same ones hello-sip
+	// marks its sockets with (spec phone-feature-parity S-21).
+	DSCPSIP int
+	DSCPRTP int
 	// RegisterExpiry is the registration expiry rendered configs carry:
 	// HELLO_SIP_REGISTER_MAX_EXPIRES (default 1h), the same value hello-sip
 	// caps registrations at, so it is always inside its window.
@@ -234,6 +269,29 @@ type Prov struct {
 	AutoResync bool
 	// Redirect holds vendor redirect credentials set by the deployment.
 	Redirect ProvRedirect
+}
+
+// LDAP is the read-only phone directory (spec pbx-gaps S-24): LDAPS on Addr,
+// optionally StartTLS on StartTLSAddr. Plain LDAP is never served.
+type LDAP struct {
+	// Enabled (HELLO_LDAP_ENABLED, default false) turns the listener on.
+	Enabled bool
+	// Addr (HELLO_LDAP_ADDR, default :636) is the LDAPS listener.
+	Addr string
+	// StartTLSAddr (HELLO_LDAP_STARTTLS_ADDR, default unset) is an optional
+	// listener that offers StartTLS and refuses everything else until it.
+	StartTLSAddr string
+	// Base (HELLO_LDAP_BASE, default dc=hello,dc=local) is the base DN.
+	Base string
+	// Anon (HELLO_LDAP_ANON, default false) allows an anonymous bind, which
+	// sees the extensions and company books only.
+	Anon bool
+	// TLSCert and TLSKey (HELLO_LDAP_TLS_CERT, HELLO_LDAP_TLS_KEY) are the
+	// server certificate pair, required when LDAP is enabled.
+	TLSCert, TLSKey string
+	// PublicPort (HELLO_LDAP_PUBLIC_PORT, default 636) is the port phones are
+	// given: the Service's, which can differ from the listener's.
+	PublicPort int
 }
 
 // Enabled reports whether hello-control serves provisioning.
@@ -306,6 +364,23 @@ type SIP struct {
 	// MaxCallDuration ends a connected call that has run this long (both
 	// legs get BYE), so a call whose phones vanished without BYE is cleared.
 	MaxCallDuration time.Duration
+	// SessionExpires (HELLO_SIP_SESSION_EXPIRES_SECONDS, default 1800; 0
+	// turns session timers off) is the RFC 4028 Session-Expires Hello
+	// requests and applies on legs to phones; SessionMinSE
+	// (HELLO_SIP_SESSION_MIN_SE_SECONDS, default 90) is the smallest
+	// interval it accepts from a peer (422 below it).
+	SessionExpires time.Duration
+	SessionMinSE   time.Duration
+	// SessionTimersTrunks (HELLO_SIP_SESSION_TIMERS_TRUNKS, default false) is
+	// what a trunk whose session-timers setting is "default" does: false
+	// leaves its calls without a session timer unless the carrier asks for
+	// one, true requests and keeps one. A trunk set to "on" or "off" ignores
+	// it; SessionExpires 0 turns session timers off for every trunk.
+	SessionTimersTrunks bool
+	// MediaDeadAfter (HELLO_MEDIA_DEAD_SECONDS, default 60; 0 turns it off)
+	// ends an anchored call that carried no RTP in either direction for this
+	// long, unless it is on hold.
+	MediaDeadAfter time.Duration
 	// Server paging (phonebooks-ptt spec P-12): a page ends after
 	// PageMaxDuration (HELLO_PAGE_MAX_SECONDS, 120 s); a node runs at most
 	// PageConcurrent pages (HELLO_PAGE_CONCURRENT, 5) of at most PageFanout
@@ -329,6 +404,11 @@ type SIP struct {
 	// their relay sockets from.
 	RTPPortMin int
 	RTPPortMax int
+	// DSCPSIP (HELLO_DSCP_SIP, default 26, CS3) marks the SIP socket and
+	// DSCPRTP (HELLO_DSCP_RTP, default 46, EF) the relay RTP sockets; 0 to
+	// 63 (spec phone-feature-parity S-21).
+	DSCPSIP int
+	DSCPRTP int
 	// MediaForceAnchor (HELLO_MEDIA_FORCE_ANCHOR, default false) anchors
 	// every call's media regardless of the per-call triggers (spec S-1d).
 	MediaForceAnchor bool
@@ -395,6 +475,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	if c.EventRetentionDays > 30 {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
 	}
+	c.IntegrationsAllowedCIDRs = r.allowedCIDRs("HELLO_INTEGRATIONS_ALLOWED_CIDRS")
 	c.Database = r.database(c.DatabaseURL)
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
 	c.SecretKey = r.secretKey()
@@ -409,7 +490,10 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	if c.SessionTTL == 0 {
 		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
 	}
+	c.Backup = Backup{PGDump: r.optional("HELLO_BACKUP_PG_DUMP", "pg_dump"),
+		PGRestore: r.optional("HELLO_BACKUP_PG_RESTORE", "pg_restore"), Tmp: r.getenv("HELLO_BACKUP_TMP")}
 	c.Prov = r.prov()
+	c.LDAP = r.ldap()
 	c.Dial = r.dialing()
 	c.VoicePromptLanguage = r.optional("HELLO_VOICEMAIL_LANGUAGE", "en")
 	c.AI = r.ai()
@@ -570,13 +654,50 @@ func (r *reader) dialing() phonebook.Dialing {
 	return d
 }
 
+// ldapBaseRe is the shape of the base DN: dc=, o= or ou= components.
+var ldapBaseRe = regexp.MustCompile(`^(?:(?:dc|o|ou)=[A-Za-z0-9][A-Za-z0-9 _.-]{0,62})(?:,(?:dc|o|ou)=[A-Za-z0-9][A-Za-z0-9 _.-]{0,62}){0,7}$`)
+
+// ldap reads the HELLO_LDAP_* settings.
+func (r *reader) ldap() LDAP {
+	l := LDAP{
+		Enabled:      r.boolean("HELLO_LDAP_ENABLED"),
+		Addr:         r.optional("HELLO_LDAP_ADDR", ":636"),
+		StartTLSAddr: r.getenv("HELLO_LDAP_STARTTLS_ADDR"),
+		Base:         r.optional("HELLO_LDAP_BASE", "dc=hello,dc=local"),
+		Anon:         r.boolean("HELLO_LDAP_ANON"),
+		TLSCert:      r.getenv("HELLO_LDAP_TLS_CERT"),
+		TLSKey:       r.getenv("HELLO_LDAP_TLS_KEY"),
+		PublicPort:   r.port("HELLO_LDAP_PUBLIC_PORT", 636),
+	}
+	if !ldapBaseRe.MatchString(l.Base) {
+		r.fail("HELLO_LDAP_BASE", errors.New("must be a DN of dc=, o= or ou= components such as dc=hello,dc=local"))
+	}
+	r.hostPort("HELLO_LDAP_ADDR", l.Addr)
+	if l.StartTLSAddr != "" {
+		r.hostPort("HELLO_LDAP_STARTTLS_ADDR", l.StartTLSAddr)
+	}
+	if !l.Enabled {
+		return l
+	}
+	if l.TLSCert == "" || l.TLSKey == "" {
+		r.fail("HELLO_LDAP_TLS_CERT", errors.New("HELLO_LDAP_TLS_CERT and HELLO_LDAP_TLS_KEY are required when LDAP is enabled: plain LDAP is never served"))
+	} else if _, err := tls.LoadX509KeyPair(l.TLSCert, l.TLSKey); err != nil {
+		r.fail("HELLO_LDAP_TLS_CERT", errors.New("the certificate and key do not load as a pair"))
+	}
+	return l
+}
+
 // prov reads the HELLO_PROV_* settings.
 func (r *reader) prov() Prov {
 	p := Prov{
 		Addr:               r.optional("HELLO_PROV_ADDR", ":8083"),
 		SIPServer:          r.optional("HELLO_PROV_SIP_SERVER", r.getenv("HELLO_SIP_ADVERTISED_ADDR")),
+		SIPTLSServer:       r.getenv("HELLO_PROV_SIP_TLS_SERVER"),
+		SIPTLSModels:       r.tlsModels("HELLO_PROV_SIP_TLS_MODELS", "grandstream:WP"),
 		TrustedProxies:     r.prefixes("HELLO_PROV_TRUSTED_PROXIES"),
 		TokenGrace:         r.days("HELLO_PROV_TOKEN_GRACE", 7*24*time.Hour),
+		DSCPSIP:            r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP),
+		DSCPRTP:            r.dscp("HELLO_DSCP_RTP", DefaultDSCPRTP),
 		Resync:             r.days("HELLO_PROV_RESYNC", 24*time.Hour),
 		BookRefresh:        r.days("HELLO_PROV_BOOK_REFRESH", 15*time.Minute),
 		Timezone:           r.optional("HELLO_PROV_TIMEZONE", "UTC"),
@@ -610,6 +731,15 @@ func (r *reader) prov() Prov {
 		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must be an address phones can reach, not unspecified"))
 	} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must end in a port number"))
+	}
+	if p.SIPTLSServer != "" {
+		if host, port, err := net.SplitHostPort(p.SIPTLSServer); err != nil {
+			r.fail("HELLO_PROV_SIP_TLS_SERVER", err)
+		} else if unspecified(host) {
+			r.fail("HELLO_PROV_SIP_TLS_SERVER", errors.New("must be an address phones can reach, not unspecified"))
+		} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			r.fail("HELLO_PROV_SIP_TLS_SERVER", errors.New("must end in a port number"))
+		}
 	}
 	for key, d := range map[string]time.Duration{"HELLO_PROV_TOKEN_GRACE": p.TokenGrace, "HELLO_PROV_AUDIT_RETENTION": p.AuditRetention} {
 		if d == 0 {
@@ -753,12 +883,21 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.Dial = r.dialing()
 	c.PageMaxDuration = time.Duration(r.positiveInt("HELLO_PAGE_MAX_SECONDS", 120)) * time.Second
 	c.DoorHangup = time.Duration(r.positiveInt("HELLO_DOOR_HANGUP_SECONDS", 3)) * time.Second
+	c.SessionExpires = time.Duration(r.seconds("HELLO_SIP_SESSION_EXPIRES_SECONDS", 1800)) * time.Second
+	c.SessionMinSE = time.Duration(r.seconds("HELLO_SIP_SESSION_MIN_SE_SECONDS", 90)) * time.Second
+	c.MediaDeadAfter = time.Duration(r.seconds("HELLO_MEDIA_DEAD_SECONDS", 60)) * time.Second
+	c.SessionTimersTrunks = r.boolean("HELLO_SIP_SESSION_TIMERS_TRUNKS")
+	if c.SessionExpires > 0 && c.SessionMinSE > c.SessionExpires {
+		r.fail("HELLO_SIP_SESSION_MIN_SE_SECONDS", errors.New("must not exceed HELLO_SIP_SESSION_EXPIRES_SECONDS"))
+	}
 	c.PageConcurrent = r.positiveInt("HELLO_PAGE_CONCURRENT", 5)
 	c.PageFanout = r.positiveInt("HELLO_PAGE_FANOUT", 200)
 	c.PageMulticastIface = r.getenv("HELLO_PAGE_MULTICAST_IFACE")
 	c.PageMulticastTTL = r.positiveInt("HELLO_PAGE_MULTICAST_TTL", 1)
 	c.RTPPortMin = r.port("HELLO_RTP_PORT_MIN", 20000)
 	c.RTPPortMax = r.port("HELLO_RTP_PORT_MAX", 21000)
+	c.DSCPSIP = r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP)
+	c.DSCPRTP = r.dscp("HELLO_DSCP_RTP", DefaultDSCPRTP)
 	c.MediaForceAnchor = r.getenv("HELLO_MEDIA_FORCE_ANCHOR") == "true"
 	c.MediaRecordingNotice = r.getenv("HELLO_MEDIA_RECORDING_NOTICE") != "false"
 	c.MediaAnchorHost = r.optional("HELLO_MEDIA_ANCHOR_HOST", "")
@@ -922,6 +1061,30 @@ func (r *reader) valkey() (addr string, sentinels []string, master string) {
 	return addr, sentinels, master
 }
 
+// defaultAllowedCIDRs are the private ranges webhooks may reach unless the
+// administrator says otherwise: RFC 1918 only.
+const defaultAllowedCIDRs = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+// allowedCIDRs reads the private ranges outbound integrations may reach: a
+// comma-separated list inside the private ranges, "none" for no range, the
+// RFC 1918 ranges when unset. A range that overlaps loopback, link-local or
+// multicast space (the cloud metadata address) is refused at start-up.
+func (r *reader) allowedCIDRs(key string) []netip.Prefix {
+	v := strings.TrimSpace(r.getenv(key))
+	switch strings.ToLower(v) {
+	case "none":
+		return nil
+	case "":
+		v = defaultAllowedCIDRs
+	}
+	out, err := safehttp.ParseAllow(v)
+	if err != nil {
+		r.fail(key, err)
+		return nil
+	}
+	return out
+}
+
 // prefixes reads a comma-separated CIDR list.
 func (r *reader) prefixes(key string) []netip.Prefix {
 	v := r.getenv(key)
@@ -1009,6 +1172,27 @@ func (r *reader) port(key string, def int) int {
 	return n
 }
 
+// Default DSCP values (spec phone-feature-parity S-21): SIP signalling CS3,
+// RTP EF.
+const (
+	DefaultDSCPSIP = 26
+	DefaultDSCPRTP = 46
+)
+
+// dscp reads a DSCP value, 0 to 63.
+func (r *reader) dscp(key string, def int) int {
+	v := r.getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n > 63 {
+		r.fail(key, errors.New("must be a DSCP value from 0 to 63"))
+		return def
+	}
+	return n
+}
+
 func (r *reader) positiveInt(key string, def int) int {
 	v := r.getenv(key)
 	if v == "" {
@@ -1017,6 +1201,20 @@ func (r *reader) positiveInt(key string, def int) int {
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
 		r.fail(key, errors.New("must be a positive integer"))
+	}
+	return n
+}
+
+// seconds reads a whole number of seconds, 0 included (the setting is off).
+func (r *reader) seconds(key string, def int) int {
+	v := r.getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n > 86400 {
+		r.fail(key, errors.New("must be a whole number of seconds from 0 to 86400"))
+		return def
 	}
 	return n
 }

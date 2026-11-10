@@ -723,6 +723,53 @@ func TestRingGroupVoicemailFailureBox(t *testing.T) {
 	_ = pbx.nextCDR(t)
 }
 
+// TestForwardVoicemailBox fails if an extension that forwards on no answer
+// to a second extension, whose ring also goes unanswered, leaves the
+// message in the box of the originally dialled extension (210) instead of
+// the box of the extension that last rang (200).
+func TestForwardVoicemailBox(t *testing.T) {
+	vm := newVMStore()
+	vm.boxes["200"] = VoicemailBox{ID: 7, Extension: "200"}
+	vm.boxes["210"] = VoicemailBox{ID: 8, Extension: "210"} // the wrong box exists too
+	objs := &fakeObjects{}
+	pbx := startPBX(t, threeDevices(), shortRing(400*time.Millisecond),
+		withFeatures(forwardingSnapshot(
+			snapshot.Extension{Number: "210", ForwardNoAnswer: "200", VoicemailEnabled: true, VoicemailBoxID: 8},
+			snapshot.Extension{Number: "200", VoicemailEnabled: true, VoicemailBoxID: 7},
+		)), withVoicemail(vm, objs))
+	anchored(pbx)
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	b := newPhone(t, pbx, "b1", "pb1")
+	b.register(t)
+	b.setCallee(ringForever())
+	d := newPhone(t, pbx, "d1", "pd")
+	d.register(t)
+	d.setCallee(ringForever())
+	r := waitCall(t, dial(t.Context(), a, "210"))
+	if r.err != nil {
+		t.Fatalf("forwarded call: %v", r.err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		vm.mu.Lock()
+		got := append([]string(nil), vm.looked...)
+		vm.mu.Unlock()
+		if len(got) > 0 {
+			if got[0] != "200" {
+				t.Fatalf("voicemail opened box %q, want the forward target's box 200", got[0])
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("voicemail application never looked up a box")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	hangup(t, r.dcs)
+	_ = pbx.nextCDR(t)
+}
+
 // TestHuntGroup fails if two members ring at once, or if the hunt does not
 // advance to the next member on no-answer.
 func TestHuntGroup(t *testing.T) {
