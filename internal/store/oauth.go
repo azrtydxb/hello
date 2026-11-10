@@ -736,3 +736,16 @@ func extScopeArg(nums []string) any {
 	}
 	return "{" + strings.Join(nums, ",") + "}"
 }
+
+// UpsertPreregisteredClient creates or refreshes one of Hello's own apps (spec
+// integrations I-32). A row of another kind with the same id is left alone.
+func (s *Store) UpsertPreregisteredClient(ctx context.Context, c oauth.Client) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO oauth_clients (client_id, kind, name, client_uri, redirect_uris)
+		VALUES ($1, 'preregistered', $2, NULLIF($3, ''), $4::text[])
+		ON CONFLICT (client_id) DO UPDATE SET name = EXCLUDED.name, client_uri = EXCLUDED.client_uri,
+			redirect_uris = EXCLUDED.redirect_uris
+		WHERE oauth_clients.kind = 'preregistered'`,
+		c.ID, c.Name, c.ClientURI, nonNil(c.RedirectURIs))
+	return err
+}

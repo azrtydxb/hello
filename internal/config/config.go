@@ -22,6 +22,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/phonebook"
+	"github.com/azrtydxb/hello/internal/safehttp"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/jackc/pgx/v5"
@@ -36,6 +37,16 @@ type Common struct {
 	// DrainDelay is how long a node keeps serving with /readyz failing after
 	// shutdown begins, so load balancers stop routing to it first.
 	DrainDelay time.Duration
+}
+
+// Backup holds the backup tool settings.
+type Backup struct {
+	// PGDump and PGRestore are the pg_dump and pg_restore binaries
+	// (HELLO_BACKUP_PG_DUMP, HELLO_BACKUP_PG_RESTORE).
+	PGDump, PGRestore string
+	// Tmp is the staging directory for the dump and the archive
+	// (HELLO_BACKUP_TMP); empty means the system temporary directory.
+	Tmp string
 }
 
 // Control is hello-control's configuration.
@@ -63,6 +74,11 @@ type Control struct {
 	// EventRetentionDays is how long call events stay in the database
 	// (HELLO_EVENT_RETENTION_DAYS, 1 to 30, default 7).
 	EventRetentionDays int
+	// IntegrationsAllowedCIDRs are the private ranges an outbound webhook
+	// marked allowPrivate may reach (HELLO_INTEGRATIONS_ALLOWED_CIDRS; the
+	// RFC 1918 ranges by default, "none" for no private target at all).
+	// Loopback, link-local and metadata addresses are never allowed.
+	IntegrationsAllowedCIDRs []netip.Prefix
 	// MinIO (voicemail audio) and SMTP (voicemail email). SMTP is optional:
 	// an empty SmtpHost disables the mailer.
 	MinioEndpoint      string
@@ -76,8 +92,13 @@ type Control struct {
 	// SecretKey (HELLO_SECRET_KEY) seals trunk passwords; identical on every
 	// hello-control and hello-sip.
 	SecretKey string
+	// Backup is where the PostgreSQL client programs and the staging
+	// directory of backups are (HELLO_BACKUP_*, spec pbx-gaps S-2).
+	Backup Backup
 	// Prov is the phone provisioning listener (HELLO_PROV_*).
 	Prov Prov
+	// LDAP is the phone directory listener (HELLO_LDAP_*, spec pbx-gaps S-24).
+	LDAP LDAP
 	// Dial is the numbering context of the address books (HELLO_DIAL_*,
 	// spec P-8): how a stored or dialled number reduces to a lookup key.
 	Dial phonebook.Dialing
@@ -262,6 +283,29 @@ type Prov struct {
 	Redirect ProvRedirect
 }
 
+// LDAP is the read-only phone directory (spec pbx-gaps S-24): LDAPS on Addr,
+// optionally StartTLS on StartTLSAddr. Plain LDAP is never served.
+type LDAP struct {
+	// Enabled (HELLO_LDAP_ENABLED, default false) turns the listener on.
+	Enabled bool
+	// Addr (HELLO_LDAP_ADDR, default :636) is the LDAPS listener.
+	Addr string
+	// StartTLSAddr (HELLO_LDAP_STARTTLS_ADDR, default unset) is an optional
+	// listener that offers StartTLS and refuses everything else until it.
+	StartTLSAddr string
+	// Base (HELLO_LDAP_BASE, default dc=hello,dc=local) is the base DN.
+	Base string
+	// Anon (HELLO_LDAP_ANON, default false) allows an anonymous bind, which
+	// sees the extensions and company books only.
+	Anon bool
+	// TLSCert and TLSKey (HELLO_LDAP_TLS_CERT, HELLO_LDAP_TLS_KEY) are the
+	// server certificate pair, required when LDAP is enabled.
+	TLSCert, TLSKey string
+	// PublicPort (HELLO_LDAP_PUBLIC_PORT, default 636) is the port phones are
+	// given: the Service's, which can differ from the listener's.
+	PublicPort int
+}
+
 // Enabled reports whether hello-control serves provisioning.
 func (p Prov) Enabled() bool { return p.PublicURL != nil }
 
@@ -339,6 +383,12 @@ type SIP struct {
 	// interval it accepts from a peer (422 below it).
 	SessionExpires time.Duration
 	SessionMinSE   time.Duration
+	// SessionTimersTrunks (HELLO_SIP_SESSION_TIMERS_TRUNKS, default false) is
+	// what a trunk whose session-timers setting is "default" does: false
+	// leaves its calls without a session timer unless the carrier asks for
+	// one, true requests and keeps one. A trunk set to "on" or "off" ignores
+	// it; SessionExpires 0 turns session timers off for every trunk.
+	SessionTimersTrunks bool
 	// MediaDeadAfter (HELLO_MEDIA_DEAD_SECONDS, default 60; 0 turns it off)
 	// ends an anchored call that carried no RTP in either direction for this
 	// long, unless it is on hold.
@@ -433,6 +483,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	if c.EventRetentionDays > 30 {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
 	}
+	c.IntegrationsAllowedCIDRs = r.allowedCIDRs("HELLO_INTEGRATIONS_ALLOWED_CIDRS")
 	c.Database = r.database(c.DatabaseURL)
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
 	c.SecretKey = r.secretKey()
@@ -447,7 +498,10 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	if c.SessionTTL == 0 {
 		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
 	}
+	c.Backup = Backup{PGDump: r.optional("HELLO_BACKUP_PG_DUMP", "pg_dump"),
+		PGRestore: r.optional("HELLO_BACKUP_PG_RESTORE", "pg_restore"), Tmp: r.getenv("HELLO_BACKUP_TMP")}
 	c.Prov = r.prov()
+	c.LDAP = r.ldap()
 	c.Dial = r.dialing()
 	c.VoicePromptLanguage = r.optional("HELLO_VOICEMAIL_LANGUAGE", "en")
 	c.AI = r.ai()
@@ -606,6 +660,39 @@ func (r *reader) dialing() phonebook.Dialing {
 		r.fail("HELLO_DIAL_COUNTRY_CODE", errors.New("must be a country calling code of 1-3 digits such as 41 or +41"))
 	}
 	return d
+}
+
+// ldapBaseRe is the shape of the base DN: dc=, o= or ou= components.
+var ldapBaseRe = regexp.MustCompile(`^(?:(?:dc|o|ou)=[A-Za-z0-9][A-Za-z0-9 _.-]{0,62})(?:,(?:dc|o|ou)=[A-Za-z0-9][A-Za-z0-9 _.-]{0,62}){0,7}$`)
+
+// ldap reads the HELLO_LDAP_* settings.
+func (r *reader) ldap() LDAP {
+	l := LDAP{
+		Enabled:      r.boolean("HELLO_LDAP_ENABLED"),
+		Addr:         r.optional("HELLO_LDAP_ADDR", ":636"),
+		StartTLSAddr: r.getenv("HELLO_LDAP_STARTTLS_ADDR"),
+		Base:         r.optional("HELLO_LDAP_BASE", "dc=hello,dc=local"),
+		Anon:         r.boolean("HELLO_LDAP_ANON"),
+		TLSCert:      r.getenv("HELLO_LDAP_TLS_CERT"),
+		TLSKey:       r.getenv("HELLO_LDAP_TLS_KEY"),
+		PublicPort:   r.port("HELLO_LDAP_PUBLIC_PORT", 636),
+	}
+	if !ldapBaseRe.MatchString(l.Base) {
+		r.fail("HELLO_LDAP_BASE", errors.New("must be a DN of dc=, o= or ou= components such as dc=hello,dc=local"))
+	}
+	r.hostPort("HELLO_LDAP_ADDR", l.Addr)
+	if l.StartTLSAddr != "" {
+		r.hostPort("HELLO_LDAP_STARTTLS_ADDR", l.StartTLSAddr)
+	}
+	if !l.Enabled {
+		return l
+	}
+	if l.TLSCert == "" || l.TLSKey == "" {
+		r.fail("HELLO_LDAP_TLS_CERT", errors.New("HELLO_LDAP_TLS_CERT and HELLO_LDAP_TLS_KEY are required when LDAP is enabled: plain LDAP is never served"))
+	} else if _, err := tls.LoadX509KeyPair(l.TLSCert, l.TLSKey); err != nil {
+		r.fail("HELLO_LDAP_TLS_CERT", errors.New("the certificate and key do not load as a pair"))
+	}
+	return l
 }
 
 // prov reads the HELLO_PROV_* settings.
@@ -813,6 +900,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.SessionExpires = time.Duration(r.seconds("HELLO_SIP_SESSION_EXPIRES_SECONDS", 1800)) * time.Second
 	c.SessionMinSE = time.Duration(r.seconds("HELLO_SIP_SESSION_MIN_SE_SECONDS", 90)) * time.Second
 	c.MediaDeadAfter = time.Duration(r.seconds("HELLO_MEDIA_DEAD_SECONDS", 60)) * time.Second
+	c.SessionTimersTrunks = r.boolean("HELLO_SIP_SESSION_TIMERS_TRUNKS")
 	if c.SessionExpires > 0 && c.SessionMinSE > c.SessionExpires {
 		r.fail("HELLO_SIP_SESSION_MIN_SE_SECONDS", errors.New("must not exceed HELLO_SIP_SESSION_EXPIRES_SECONDS"))
 	}
@@ -985,6 +1073,30 @@ func (r *reader) valkey() (addr string, sentinels []string, master string) {
 		r.hostPort("HELLO_VALKEY_ADDR", addr)
 	}
 	return addr, sentinels, master
+}
+
+// defaultAllowedCIDRs are the private ranges webhooks may reach unless the
+// administrator says otherwise: RFC 1918 only.
+const defaultAllowedCIDRs = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+// allowedCIDRs reads the private ranges outbound integrations may reach: a
+// comma-separated list inside the private ranges, "none" for no range, the
+// RFC 1918 ranges when unset. A range that overlaps loopback, link-local or
+// multicast space (the cloud metadata address) is refused at start-up.
+func (r *reader) allowedCIDRs(key string) []netip.Prefix {
+	v := strings.TrimSpace(r.getenv(key))
+	switch strings.ToLower(v) {
+	case "none":
+		return nil
+	case "":
+		v = defaultAllowedCIDRs
+	}
+	out, err := safehttp.ParseAllow(v)
+	if err != nil {
+		r.fail(key, err)
+		return nil
+	}
+	return out
 }
 
 // prefixes reads a comma-separated CIDR list.

@@ -37,6 +37,7 @@ import {
   IntegrationsOverview,
 } from "./pages/Integrations";
 import { IntegrationEvents } from "./pages/IntegrationEvents";
+import { Webhooks } from "./pages/Webhooks";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
 import { AIProposalDetail } from "./pages/AIProposalDetail";
@@ -64,9 +65,11 @@ import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
 import { ProvSettings } from "./pages/ProvSettings";
 import { ProvTemplates } from "./pages/ProvTemplates";
+import { Dial } from "./pages/Dial";
 import { Placeholder } from "./pages/Placeholder";
 import { FlowCanvases } from "./pages/FlowCanvases";
 import { Users } from "./pages/Users";
+import { Backups } from "./pages/Backups";
 import { EmailSettings } from "./pages/EmailSettings";
 import { MyForwarding } from "./pages/myphone/MyForwarding";
 import { MyHistory } from "./pages/myphone/MyHistory";
@@ -108,6 +111,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/phones": Phones,
   "/onboarding": Onboarding,
   "/phonebooks": Phonebooks,
+  "/dial": Dial,
   "/me/contacts": MyContacts,
   "/me/messages": MyMessages,
   "/messages": Messages,
@@ -115,6 +119,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/me/forwarding": MyForwarding,
   "/me/history": MyHistory,
   "/me/profile": MyProfile,
+  "/settings/backups": Backups,
   "/settings/email": EmailSettings,
   "/registrations": Registrations,
   "/calls": Calls,
@@ -125,7 +130,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/diagnostics": Diagnostics,
   "/voicemail": Voicemail,
   "/ring-groups": RingGroups,
-  "/ring-tags": RingTags,
+  "/ringing": RingTags,
   "/paging": Paging,
   "/conferences": Conferences,
   "/ivr": Ivr,
@@ -148,6 +153,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/integrations": IntegrationsOverview,
   "/integrations/api-access": IntegrationsApiAccess,
   "/integrations/events": IntegrationEvents,
+  "/integrations/webhooks": Webhooks,
 };
 
 /** The canvas pulls in the graph library, so it loads on first use. */
