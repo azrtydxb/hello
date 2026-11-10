@@ -355,7 +355,6 @@
     <P332>15</P332>
     <P333>1</P333>
     <P8462>0</P8462>
-
     <P8020>prov.hello.example</P8020>
     <P8021>636</P8021>
     <P8022>ou=phonebook,dc=hello,dc=local</P8022>
