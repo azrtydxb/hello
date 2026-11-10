@@ -33,7 +33,7 @@ func verify(secret, header string, body []byte, now time.Time) error {
 		return errors.New("stale or missing timestamp")
 	}
 	mac := hmac.New(sha256.New, []byte(secret))
-	fmt.Fprintf(mac, "%d.", ts)
+	_, _ = fmt.Fprintf(mac, "%d.", ts)
 	mac.Write(body)
 	want := mac.Sum(nil)
 	for _, s := range sigs {

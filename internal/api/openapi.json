@@ -16186,7 +16186,7 @@
         "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "places phone calls",
-        "category": "disruptive-device"
+          "category": "disruptive-device"
         }
       }
     },
@@ -16238,7 +16238,7 @@
         "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "belongs to click-to-call, which an AI agent may not place",
-        "category": "disruptive-device"
+          "category": "disruptive-device"
         }
       },
       "delete": {
@@ -16291,7 +16291,7 @@
         "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "belongs to click-to-call, which an AI agent may not place",
-        "category": "disruptive-device"
+          "category": "disruptive-device"
         }
       }
     },
@@ -16329,7 +16329,7 @@
         "x-hello-role": "admin",
         "x-hello-mcp": {
           "exclude": "toll-fraud controls of click-to-call are set in the console only",
-        "category": "human-in-the-loop"
+          "category": "human-in-the-loop"
         }
       },
       "put": {
@@ -16378,7 +16378,7 @@
         "x-hello-role": "admin",
         "x-hello-mcp": {
           "exclude": "toll-fraud controls of click-to-call are set in the console only",
-        "category": "human-in-the-loop"
+          "category": "human-in-the-loop"
         }
       }
     },
@@ -16632,7 +16632,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets."
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
         }
       },
       "post": {
@@ -16690,7 +16691,8 @@
         "x-hello-scope": "secrets",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets."
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
         }
       }
     },
@@ -16735,7 +16737,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets."
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
         }
       },
       "patch": {
@@ -16791,7 +16794,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets."
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
         }
       },
       "delete": {
@@ -16827,7 +16831,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets."
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
         }
       }
     },
@@ -16872,7 +16877,8 @@
         "x-hello-scope": "secrets",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets."
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
         }
       }
     },
@@ -16917,7 +16923,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets."
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
         }
       }
     },
@@ -16992,7 +16999,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets."
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
         }
       }
     },
@@ -17048,7 +17056,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets."
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
         }
       }
     },
@@ -17093,7 +17102,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets."
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
         }
       }
     },
@@ -17149,7 +17159,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets."
+          "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
+          "category": "credentials"
         }
       }
     }
@@ -18601,9 +18612,19 @@
         "type": "object",
         "required": ["promptLanguage", "effective", "languages"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."},
-          "effective": {"type": "string", "description": "The language callers hear for this box now."},
-          "languages": {"type": "array", "items": {"type": "string"}, "description": "The languages a box can be set to."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."
+          },
+          "effective": {
+            "type": "string",
+            "description": "The language callers hear for this box now."
+          },
+          "languages": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The languages a box can be set to."
+          }
         }
       },
       "VoicemailBoxLanguageUpdate": {
@@ -18611,12 +18632,23 @@
         "additionalProperties": false,
         "required": ["promptLanguage"],
         "properties": {
-          "promptLanguage": {"type": "string", "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."}
+          "promptLanguage": {
+            "type": "string",
+            "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."
+          }
         }
       },
       "VoicemailBoxSummary": {
         "type": "object",
-        "required": ["id", "extensionId", "number", "name", "unheard", "total", "promptLanguage"],
+        "required": [
+          "id",
+          "extensionId",
+          "number",
+          "name",
+          "unheard",
+          "total",
+          "promptLanguage"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -19994,9 +20026,15 @@
         "required": ["node", "text"],
         "properties": {
           "node": { "type": "string", "description": "A graph node id." },
-          "port": { "type": "string", "description": "The output port of the node the call leaves through; for a last step, the port it ends at." },
+          "port": {
+            "type": "string",
+            "description": "The output port of the node the call leaves through; for a last step, the port it ends at."
+          },
           "text": { "type": "string" },
-          "at": { "type": "string", "description": "On a time condition step, the instant that was evaluated." },
+          "at": {
+            "type": "string",
+            "description": "On a time condition step, the instant that was evaluated."
+          },
           "branches": {
             "type": "array",
             "description": "The choices of an IVR menu traced without a key.",
@@ -20010,22 +20048,45 @@
         "properties": {
           "port": { "type": "string" },
           "label": { "type": "string" },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } }
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          }
         }
       },
       "FlowTrace": {
         "type": "object",
-        "required": ["configRevision", "at", "from", "number", "outcome", "steps", "routingTrace"],
+        "required": [
+          "configRevision",
+          "at",
+          "from",
+          "number",
+          "outcome",
+          "steps",
+          "routingTrace"
+        ],
         "properties": {
           "configRevision": { "type": "integer", "format": "int64" },
           "at": { "type": "string" },
           "from": { "type": "string" },
           "number": { "type": "string" },
-          "outcome": { "type": "string", "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing." },
+          "outcome": {
+            "type": "string",
+            "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing."
+          },
           "route": { "type": "string" },
-          "reason": { "type": "string", "description": "Why the call was rejected." },
-          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } },
-          "routingTrace": { "type": "array", "items": { "$ref": "#/components/schemas/TraceStep" } }
+          "reason": {
+            "type": "string",
+            "description": "Why the call was rejected."
+          },
+          "steps": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FlowTraceStep" }
+          },
+          "routingTrace": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TraceStep" }
+          }
         }
       },
       "FlowRevision": {
@@ -21717,7 +21778,7 @@
           },
           "languages": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": { "type": "string" },
             "description": "The languages the box can be set to."
           }
         }
@@ -22880,7 +22941,14 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["call", "page", "intercom", "conference", "door", "callback"],
+            "enum": [
+              "call",
+              "page",
+              "intercom",
+              "conference",
+              "door",
+              "callback"
+            ],
             "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or door for a door station or a Door group, or callback for a call Hello placed to a queue caller who asked to be called back."
           },
           "ringTag": {
@@ -28589,23 +28657,73 @@
       },
       "QueueCallback": {
         "type": "object",
-        "required": ["id", "queueId", "number", "callerName", "status", "attempts", "positionKey", "nextAttemptAt", "claimedBy", "agent", "result", "createdAt", "expiresAt"],
+        "required": [
+          "id",
+          "queueId",
+          "number",
+          "callerName",
+          "status",
+          "attempts",
+          "positionKey",
+          "nextAttemptAt",
+          "claimedBy",
+          "agent",
+          "result",
+          "createdAt",
+          "expiresAt"
+        ],
         "properties": {
-          "id": {"type": "integer", "format": "int64"},
-          "queueId": {"type": "integer", "format": "int64"},
-          "number": {"type": "string", "description": "The number to call back."},
-          "callerName": {"type": "string", "description": "From the shared name sources (phonebooks); empty when none."},
-          "status": {"type": "string", "enum": ["waiting", "dialling", "connected", "failed", "cancelled", "expired"]},
-          "attempts": {"type": "integer", "description": "Attempts made, at most 3."},
-          "positionKey": {"type": "integer", "format": "int64", "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."},
-          "nextAttemptAt": {"type": "string", "format": "date-time"},
-          "claimedBy": {"type": "string", "description": "The node working on it while dialling."},
-          "leaseUntil": {"type": "string", "format": "date-time", "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."},
-          "agent": {"type": "string", "description": "The agent it was connected to."},
-          "result": {"type": "string", "description": "The last attempt's outcome or the way the request ended."},
-          "createdAt": {"type": "string", "format": "date-time"},
-          "expiresAt": {"type": "string", "format": "date-time"},
-          "finishedAt": {"type": "string", "format": "date-time"}
+          "id": { "type": "integer", "format": "int64" },
+          "queueId": { "type": "integer", "format": "int64" },
+          "number": {
+            "type": "string",
+            "description": "The number to call back."
+          },
+          "callerName": {
+            "type": "string",
+            "description": "From the shared name sources (phonebooks); empty when none."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "dialling",
+              "connected",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Attempts made, at most 3."
+          },
+          "positionKey": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."
+          },
+          "nextAttemptAt": { "type": "string", "format": "date-time" },
+          "claimedBy": {
+            "type": "string",
+            "description": "The node working on it while dialling."
+          },
+          "leaseUntil": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."
+          },
+          "agent": {
+            "type": "string",
+            "description": "The agent it was connected to."
+          },
+          "result": {
+            "type": "string",
+            "description": "The last attempt's outcome or the way the request ended."
+          },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "finishedAt": { "type": "string", "format": "date-time" }
         }
       },
       "QueueCallbackList": {
@@ -29468,7 +29586,14 @@
       },
       "WebhookTestResult": {
         "type": "object",
-        "required": ["delivered", "status", "latencyMs", "error", "body", "eventId"],
+        "required": [
+          "delivered",
+          "status",
+          "latencyMs",
+          "error",
+          "body",
+          "eventId"
+        ],
         "properties": {
           "delivered": {
             "type": "boolean",
@@ -29566,7 +29691,14 @@
       },
       "WebhookAttempt": {
         "type": "object",
-        "required": ["attempt", "deliveryId", "at", "status", "error", "latencyMs"],
+        "required": [
+          "attempt",
+          "deliveryId",
+          "at",
+          "status",
+          "error",
+          "latencyMs"
+        ],
         "properties": {
           "attempt": {
             "type": "integer"
