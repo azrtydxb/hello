@@ -28,10 +28,12 @@ func portOf4(c *net.UDPConn) int { return c.LocalAddr().(*net.UDPAddr).Port }
 func videoPhone(t *testing.T, p *phone, dir string) (rtp, rtcp *net.UDPConn) {
 	t.Helper()
 	audio, rtp, rtcp := udpConn(t), udpConn(t), udpConn(t)
-	p.sdp = fmt.Sprintf("v=0\r\no=%s 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"+
-		"m=audio %d RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\n"+
-		"m=video %d RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 profile-level-id=42e01f;packetization-mode=1\r\n"+
-		"a=rtcp:%d\r\na=%s\r\n", p.user, portOf4(audio), portOf4(rtp), portOf4(rtcp), dir)
+	p.rewriteSDP(func(string) string {
+		return fmt.Sprintf("v=0\r\no=%s 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"+
+			"m=audio %d RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\n"+
+			"m=video %d RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 profile-level-id=42e01f;packetization-mode=1\r\n"+
+			"a=rtcp:%d\r\na=%s\r\n", p.user, portOf4(audio), portOf4(rtp), portOf4(rtcp), dir)
+	})
 	return rtp, rtcp
 }
 
@@ -108,7 +110,7 @@ func TestDoorVideoPassthrough(t *testing.T) {
 
 	t.Run("a callee without video gets none and the door is told", func(t *testing.T) {
 		videoPhone(t, door, "sendonly")
-		b.sdp = strings.Split(b.sdp, "m=video")[0] // audio only
+		b.rewriteSDP(func(s string) string { return strings.Split(s, "m=video")[0] }) // audio only
 		r := waitCall(t, dial(t.Context(), door, "800"))
 		if r.err != nil {
 			t.Fatalf("door call: %v", r.err)
@@ -147,7 +149,7 @@ func TestDoorVideoPassthrough(t *testing.T) {
 	})
 
 	t.Run("an audio-only door call stays audio-only", func(t *testing.T) {
-		door.sdp = strings.Split(door.sdp, "m=video")[0]
+		door.rewriteSDP(func(s string) string { return strings.Split(s, "m=video")[0] })
 		videoPhone(t, b, "recvonly")
 		r := waitCall(t, dial(t.Context(), door, "800"))
 		if r.err != nil {

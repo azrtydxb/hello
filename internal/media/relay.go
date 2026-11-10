@@ -247,7 +247,7 @@ func (r *Relay) addLegAt(name string, port int) (int, error) {
 	if r.used[port] {
 		return 0, fmt.Errorf("media: port %d is in use", port)
 	}
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: port})
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: port})
 	if err != nil {
 		return 0, fmt.Errorf("media: bind leg %q RTP socket: %w", name, err)
 	}

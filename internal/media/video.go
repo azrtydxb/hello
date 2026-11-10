@@ -263,7 +263,7 @@ func (v *VideoRelay) addLeg(i int, name string, minPort, maxPort int) error {
 		if taken {
 			continue
 		}
-		rc, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: p + 1})
+		rc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: p + 1})
 		if err != nil {
 			continue
 		}

@@ -136,3 +136,28 @@ func TestVideoRelay(t *testing.T) {
 		t.Errorf("RTCP door to phone: %v %x", err, buf[:n])
 	}
 }
+
+// TestVideoRelayBindsIPv4 fails if a video leg binds dual-stack. Every other RTP socket (anchor, relay legs, fan-out, conference
+// parties) is udp4; on BSD kernels a dual-stack bind succeeds on a port an
+// IPv4 socket already holds and IPv4 datagrams then go to the IPv4 socket, so
+// a video leg could share a port with an audio leg of another call and its
+// packets would arrive there. With udp4 the bind is refused on every kernel.
+func TestVideoRelayBindsIPv4(t *testing.T) {
+	hold := func() (*net.UDPConn, int) {
+		c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Close() })
+		return c, c.LocalAddr().(*net.UDPAddr).Port
+	}
+	_, port := hold()
+	r, err := NewRelay(30000, 31000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(r.Close)
+	if _, err := r.addLegAt("a", port); err == nil {
+		t.Errorf("a video leg bound port %d that an IPv4 socket already holds", port)
+	}
+}

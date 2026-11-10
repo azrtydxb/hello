@@ -484,7 +484,8 @@ type phone struct {
 	pass    string
 	addr    string
 	pbx     string
-	sdp     string
+	sdp     string // guarded by sdpMu once calls run: use sdpText and rewriteSDP
+	sdpMu   sync.Mutex
 	ua      *sipgo.UserAgent
 	srv     *sipgo.Server
 	cli     *sipgo.Client
@@ -698,7 +699,7 @@ func (p *phone) onReinvite(req *sip.Request, tx sip.ServerTransaction) {
 	p.mu.Lock()
 	body := req.Body()
 	if p.reinviteOwnSDP && len(body) > 0 {
-		body = []byte(p.sdp)
+		body = []byte(p.sdpText())
 	}
 	p.mu.Unlock()
 	res := sip.NewResponseFromRequest(req, 200, "OK", body)
@@ -767,7 +768,7 @@ func answerAfter(ch <-chan struct{}) calleeFn {
 				return
 			}
 		}
-		_ = dss.RespondSDP([]byte(p.sdp))
+		_ = dss.RespondSDP([]byte(p.sdpText()))
 	}
 }
 
@@ -787,7 +788,7 @@ func answerReporting(ch <-chan struct{}, answered chan<- bool) calleeFn {
 			answered <- false
 			return
 		}
-		err := dss.RespondSDP([]byte(p.sdp))
+		err := dss.RespondSDP([]byte(p.sdpText()))
 		answered <- !errors.Is(err, sip.ErrTransactionCanceled)
 	}
 }
@@ -806,7 +807,7 @@ func answerOnCancel() calleeFn {
 	return func(p *phone, req *sip.Request, tx sip.ServerTransaction, dss *sipgo.DialogServerSession) {
 		_ = dss.Respond(180, "Ringing", nil)
 		tx.OnCancel(func(*sip.Request) {
-			res := sip.NewResponseFromRequest(dss.InviteRequest, 200, "OK", []byte(p.sdp))
+			res := sip.NewResponseFromRequest(dss.InviteRequest, 200, "OK", []byte(p.sdpText()))
 			res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 			res.AppendHeader(sip.HeaderClone(&p.contact))
 			_ = p.srv.WriteResponse(res)
@@ -960,7 +961,7 @@ func (p *phone) inviteReq(ext string) *sip.Request {
 	req.AppendHeader(&callID)
 	req.AppendHeader(sip.NewHeader("Route", "<sip:"+p.pbx+";lr>"))
 	req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
-	req.SetBody([]byte(p.sdp))
+	req.SetBody([]byte(p.sdpText()))
 	return req
 }
 
@@ -1115,4 +1116,22 @@ func (p *phone) subscribeEvent(t *testing.T, ext, event string, expires int) *si
 	req.SetDestination(p.pbx)
 	res := p.authDo(req, AlgSHA256, p.pass)
 	return res
+}
+
+// sdpText returns the phone's current SDP. Callee goroutines of earlier
+// subtests may still be answering while a later subtest rewrites the SDP
+// (newRTPSink), so they must read it through here.
+func (p *phone) sdpText() string {
+	p.sdpMu.Lock()
+	defer p.sdpMu.Unlock()
+	return p.sdp
+}
+
+// rewriteSDP replaces the phone's SDP with fn of the current one and returns
+// the new text.
+func (p *phone) rewriteSDP(fn func(string) string) string {
+	p.sdpMu.Lock()
+	defer p.sdpMu.Unlock()
+	p.sdp = fn(p.sdp)
+	return p.sdp
 }
