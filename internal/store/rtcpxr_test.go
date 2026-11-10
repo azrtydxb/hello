@@ -24,8 +24,9 @@ func TestRTCPXRStoredOnMatchingCDR(t *testing.T) {
 		call string
 		peer string
 	}{{&mine, "c1", "leg-a", "leg-b"}, {&other, "c2", "leg-x", "leg-y"}} {
-		if err := db.QueryRowContext(ctx, `INSERT INTO cdrs (correlation_id, sip_call_id, peer_call_id, source, destination, start_time, end_time)
-			VALUES ($1, $2, $3, '100', '200', now(), now()) RETURNING id`, c.corr, c.call, c.peer).Scan(c.id); err != nil {
+		if err := db.QueryRowContext(ctx, `INSERT INTO cdrs (correlation_id, sip_call_id, peer_call_id, source, destination, start_time, end_time,
+			duration_ms, billable_ms, sip_node, final_status, termination_side)
+			VALUES ($1, $2, $3, '100', '200', now(), now(), 0, 0, 'hello-sip-1', 200, 'caller') RETURNING id`, c.corr, c.call, c.peer).Scan(c.id); err != nil {
 			t.Fatal(err)
 		}
 	}
