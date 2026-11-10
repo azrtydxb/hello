@@ -24,12 +24,12 @@ func TestDoorWebhookStore(t *testing.T) {
 	st = st.WithSecretBox(box)
 	ctx := context.Background()
 	member := mustExtension(t, st, "200")
-	door, err := st.CreateRingGroup(ctx, "t", RingGroupInput{Name: "800", Strategy: "ring-all", RingTimeout: 30, IsDoor: true,
+	door, err := st.CreateRingGroup(ctx, "t", RingGroupInput{Name: "800", Strategy: "ring-all", RingTimeout: 30, FailureKind: "none", IsDoor: true,
 		Members: []RingGroupMember{{ExtensionID: member.ID, Position: 1, Weight: 1}}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plain, err := st.CreateRingGroup(ctx, "t", RingGroupInput{Name: "810", Strategy: "ring-all", RingTimeout: 30,
+	plain, err := st.CreateRingGroup(ctx, "t", RingGroupInput{Name: "810", Strategy: "ring-all", RingTimeout: 30, FailureKind: "none",
 		Members: []RingGroupMember{{ExtensionID: member.ID, Position: 1, Weight: 1}}}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -116,6 +116,16 @@ func TestDoorWebhookStore(t *testing.T) {
 	}
 	if _, _, err := st.CreateDoorWebhook(ctx, "t", base); !errors.Is(err, ErrConflict) {
 		t.Errorf("a duplicate name: %v, want a conflict", err)
+	}
+	// A rename onto a taken name is the documented 409 of the update.
+	other := base
+	other.Name = "Side gate"
+	otherHook, _, err := st.CreateDoorWebhook(ctx, "t", other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateDoorWebhook(ctx, "t", otherHook.ID, base); !errors.Is(err, ErrConflict) {
+		t.Errorf("a renamed webhook onto a taken name: %v, want a conflict", err)
 	}
 
 	chime := DoorWebhookInput{Name: "Hall chime", Action: DoorActionChime, PagingGroupID: &page.ID, AnnouncementID: &ann.ID, RateLimit: 5, Enabled: true}

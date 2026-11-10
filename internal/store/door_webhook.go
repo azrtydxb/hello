@@ -256,7 +256,7 @@ func (s *Store) UpdateDoorWebhook(ctx context.Context, actor string, id int64, i
 		return insertAudit(ctx, tx, actor, "update", "door_webhook", fmt.Sprint(id))
 	})
 	if err != nil {
-		return DoorWebhook{}, err
+		return DoorWebhook{}, mapErr(err)
 	}
 	return s.GetDoorWebhook(ctx, id)
 }
