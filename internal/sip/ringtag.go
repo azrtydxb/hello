@@ -36,6 +36,9 @@ func (l *leg) addRingTag(req *sip.Request) {
 		Kind: c.kind, CallerNumber: c.callerNum, DID: c.dialled, CallerKind: ringtag.CallerExtension,
 		At: time.Now(),
 	}
+	if c.doorCaller {
+		in.CallerKind = ringtag.CallerDoor
+	}
 	if c.direction == cdr.DirectionInbound {
 		in.FromTrunk, in.Trunk, in.CallerKind = true, c.trunkName, ringtag.CallerTrunk
 	}
