@@ -4,7 +4,7 @@ Status: approved
 
 Source: `hello-pbx-spec.md`; extends `.procoder/specs/phone-auto-provisioning-service.md` (which listed phone-book provisioning as out of scope) and `.procoder/specs/pbx-features.md` (feature codes, ring groups). Decided 2026-10-25 (`.procoder/ask/decisions.md`, "Address books and PTT / paging / intercom"):
 
-- **address books for all five vendors** (Yealink, Poly, Grandstream, Snom, Fanvil), delivered as each vendor's native remote phonebook / directory XML over the existing provisioning HTTPS endpoint with the phone's existing credentials, pointed at from the provisioned config so the phone fetches and refreshes it periodically; no LDAP
+- **address books for all five vendors** (Yealink, Poly, Grandstream, Snom, Fanvil), delivered as each vendor's native remote phonebook / directory XML over the existing provisioning HTTPS endpoint with the phone's existing credentials, pointed at from the provisioned config so the phone fetches and refreshes it periodically; LDAP superseded for phones by pbx-gaps S-24 to S-26 (2026-10-26)
 - **book kinds, all four:** a shared company book (admin-managed, CSV import/export), an automatic extensions list, multiple named books assignable to phone groups, per-user personal contacts in a self-service UI
 - **server-side caller-name lookup** on inbound and internal calls (SIP display name, web UI, CDRs)
 - **PTT, all three:** (a) server paging groups with one-way auto-answer, cross-subnet; (b) provisioning of the phones' own multicast paging/PTT channels (LAN only); (c) 1-to-1 intercom with two-way auto-answer by prefix code or DSS key
@@ -93,7 +93,7 @@ Phones on Hello show only what a user types into them: no company directory, no 
 
 ## Out of scope
 
-- LDAP and LDAPS directories (decided: no LDAP), including Poly's `dir.corp.*`.
+- LDAP and LDAPS directories, including Poly's `dir.corp.*`: superseded by pbx-gaps S-24 to S-26 (2026-10-26).
 - A live phone-side search service (XML application); only fetched books.
 - Sync with Google, Microsoft 365 or CardDAV, and vCard import.
 - Contact photos, per-contact ringtones, favourites, contact groups inside a book.
