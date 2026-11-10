@@ -9,10 +9,8 @@ import (
 	"maps"
 	"net"
 	"net/http"
-	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -1474,7 +1472,6 @@ func TestValkeyFailover(t *testing.T) {
 	// window would have.
 	deadline := stopped.Add(300 * time.Second)
 	manual := false
-	probed := map[int]bool{}
 	var after string
 	for after == "" && time.Now().Before(deadline) {
 		if !manual && time.Since(stopped) >= 240*time.Second {
@@ -1483,12 +1480,6 @@ func TestValkeyFailover(t *testing.T) {
 				"SENTINEL", "failover", "hello").CombinedOutput()
 			t.Logf("manual SENTINEL failover hello on sentinel-1: err=%v out=%q", err, strings.TrimSpace(string(out)))
 			deadline = time.Now().Add(120 * time.Second)
-		}
-		for _, at := range []int{12, 40} {
-			if !probed[at] && time.Since(stopped) >= time.Duration(at)*time.Second {
-				probed[at] = true
-				sentinelStallProbe(t, at)
-			}
 		}
 		addr := sentinelMasterAddr("sentinel-1")
 		if addr == "" || addr == beforeAddr {
@@ -2036,39 +2027,4 @@ func kamailioMetric(t *testing.T, name string) float64 {
 		}
 	}
 	return sum
-}
-
-// sentinelStallProbe logs what could stall a Sentinel's event loop while the
-// primary is down: how long the stopped primary's name takes to resolve inside
-// a Sentinel (it resolves hostnames synchronously) and the host and container
-// load. Diagnostic only.
-func sentinelStallProbe(t *testing.T, at int) {
-	t.Helper()
-	load, _ := os.ReadFile("/proc/loadavg")
-	t.Logf("probe +%ds: host cpus=%d loadavg=%s", at, runtime.NumCPU(), strings.TrimSpace(string(load)))
-	out, err := compose("exec", "-T", "sentinel-1", "sh", "-c",
-		"time getent hosts valkey-1; echo getent-rc=$?; time getent hosts valkey-2; cat /proc/loadavg /etc/resolv.conf").CombinedOutput()
-	t.Logf("probe +%ds: sentinel-1 resolve err=%v\n%s", at, err, out)
-	if at != 12 {
-		return
-	}
-	// Candidate fixes, tried on the lab network with the stopped primary's
-	// name: a one-off container per variant.
-	variants := map[string][]string{
-		"default":          {},
-		"dns=127.0.0.1":    {"--dns", "127.0.0.1"},
-		"opts t1 a1":       {"--dns-option", "timeout:1", "--dns-option", "attempts:1"},
-		"opts ndots0 t1a1": {"--dns-option", "ndots:0", "--dns-option", "timeout:1", "--dns-option", "attempts:1"},
-	}
-	for name, extra := range variants {
-		args := append([]string{"run", "--rm", "--network", labProject() + "_state"}, extra...)
-		args = append(args, "--entrypoint", "sh", "valkey/valkey:9-alpine", "-c", "time getent hosts valkey-1; echo rc=$?")
-		o, e := exec.Command("docker", args...).CombinedOutput()
-		t.Logf("variant %q err=%v\n%s", name, e, o)
-	}
-	nw := labProject() + "_probeinternal"
-	_ = exec.Command("docker", "network", "create", "--internal", nw).Run()
-	o, e := exec.Command("docker", "run", "--rm", "--network", nw, "--entrypoint", "sh", "valkey/valkey:9-alpine", "-c", "time getent hosts valkey-1; echo rc=$?").CombinedOutput()
-	t.Logf("variant internal-network err=%v\n%s", e, o)
-	_ = exec.Command("docker", "network", "rm", nw).Run()
 }

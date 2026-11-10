@@ -1822,12 +1822,16 @@ so the VIP stage cannot sit in that file.
   nothing in hello-sip/hello-control or Kamailio HA (#201 landed after the first
   failure) is involved. The later failures in that run cascade from the
   still-stopped primary.
-- Mechanism (inferred from the log, to be confirmed by the lab dispatch):
-  Sentinel resolves `valkey-1` synchronously (resolve-hostnames). A stopped
-  container's name is unknown to Docker's embedded DNS, which forwards it to the
-  runner's upstream resolver; that is slow on the hosted runner and stalls the
-  Sentinel loop past the 2 s tilt trigger.
-- Fix: the lab `state` network is `internal`, so the lookup is answered NXDOMAIN
-  at once. Nodes keep outside access through `edge`.
+- Mechanism (confirmed on the hosted runner with probes in the lab): Sentinel
+  resolves `valkey-1` synchronously (resolve-hostnames). A stopped container's
+  name is unknown to Docker's embedded DNS; musl then adds the runner's search
+  domain (`*.cloudapp.net`) and the query is forwarded upstream and never
+  answered, so `getent hosts valkey-1` blocks 10 s. That stalls the Sentinel
+  loop past the 2 s tilt trigger, over and over. Measured in the same
+  container: default 10 s, `--dns 127.0.0.1` 10 s, an internal network 10 s,
+  `timeout:1 attempts:1` 2 s, `ndots:0` 0 s.
+- Fix: `dns_opt: ["ndots:0"]` on the lab Sentinels, so the bare service name
+  gets NXDOMAIN at once. (Making the `state` network internal was tried and did
+  not help.)
 - kw is not affected: sentinels and valkey are healthy there (ckquorum OK 3
   usable, primary valkey-1) and in-cluster DNS answers a missing pod fast.

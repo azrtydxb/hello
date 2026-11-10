@@ -424,7 +424,7 @@ jobs:
           # honest, matched addressing, and the direct-media pass-through
           # assertions stay about SIP signalling, not about Docker NAT.
           HELLO_LAB_CONTACT_HOST: 10.89.53.1
-        run: go test -count=1 -timeout 50m -v -run '^TestValkeyFailover$' ./test/integration/
+        run: go test -count=1 -timeout 50m -v ./test/integration/
 
   chart:
     # The Helm chart (deploy/helm/hello) rendered and checked: lint, the
