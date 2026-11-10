@@ -101,7 +101,7 @@ type trunkBody struct {
 	AssertedIdentity *string `json:"assertedIdentity"`
 	IdentityHeader   *string `json:"identityHeader"`
 
-	SessionTimers   *string                `json:"sessionTimers"`
+	SessionTimers *string `json:"sessionTimers"`
 }
 
 // dialingBody is an internalDialing request field (trunk plan contract 5).

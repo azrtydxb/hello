@@ -58,9 +58,9 @@ type Trunk struct {
 	Messaging bool     `json:"messaging"`
 	// AnonymousPolicy, AssertedIdentity and IdentityHeader are the trunk's
 	// anonymous-call handling (migration 00067, spec S-19).
-	AnonymousPolicy  string    `json:"anonymousPolicy"`
-	AssertedIdentity string    `json:"assertedIdentity"`
-	IdentityHeader   string    `json:"identityHeader"`
+	AnonymousPolicy  string `json:"anonymousPolicy"`
+	AssertedIdentity string `json:"assertedIdentity"`
+	IdentityHeader   string `json:"identityHeader"`
 	// SessionTimers is the trunk's RFC 4028 setting: "default" (follow
 	// Hello's own), "on" or "off".
 	SessionTimers string    `json:"sessionTimers"`
@@ -116,7 +116,7 @@ func (t Trunk) Input() TrunkInput {
 		Messaging:       t.Messaging,
 		AnonymousPolicy: t.AnonymousPolicy, AssertedIdentity: t.AssertedIdentity, IdentityHeader: t.IdentityHeader,
 
-		SessionTimers:   t.SessionTimers,
+		SessionTimers: t.SessionTimers,
 	}
 }
 
@@ -1097,7 +1097,7 @@ func routingTrunks(s *Store, trunks []Trunk, sealed map[int64][]byte, snap Routi
 			InternalDialing: t.InternalDialing.dialing(),
 			Codecs:          slices.Clone(t.Codecs), Messaging: t.Messaging,
 			AnonymousPolicy: t.AnonymousPolicy, AssertedIdentity: t.AssertedIdentity, IdentityHeader: t.IdentityHeader,
-			SessionTimers:   t.SessionTimers,
+			SessionTimers: t.SessionTimers,
 		}
 		if errs := routing.CompileDialing(rt.InternalDialing); len(errs) > 0 {
 			snap.Misconfigured[t.ID] = true
