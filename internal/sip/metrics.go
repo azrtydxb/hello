@@ -47,10 +47,11 @@ type Metrics struct {
 	// is incremented by the SMTP worker in hello-control through this shared
 	// registry. PresenceSubscriptions counts this node's live dialog
 	// subscriptions; HoldActive the calls currently held on this node.
-	VoicemailMessages *prometheus.CounterVec // result
-	VoicemailStorage  prometheus.Gauge
-	VoicemailEmail    *prometheus.CounterVec // result
-	Transfers         *prometheus.CounterVec // kind, result
+	VoicemailMessages        *prometheus.CounterVec // result
+	VoicemailGroupDeliveries *prometheus.CounterVec // result: delivered, partial, failed, refused
+	VoicemailStorage         prometheus.Gauge
+	VoicemailEmail           *prometheus.CounterVec // result
+	Transfers                *prometheus.CounterVec // kind, result
 	// Originates counts click-to-call requests by how they ended (spec
 	// integrations I-37): connected, or the failure reason. OriginateSetup is
 	// the time from taking a request to the target answering.
@@ -140,6 +141,14 @@ const (
 	VMDiscord = "discarded" // caller hung up, or under one second
 )
 
+// Voicemail group delivery results for hello_voicemail_group_deliveries_total.
+const (
+	VMGroupDelivered = "delivered"
+	VMGroupFailed    = "failed"
+	VMGroupRefused   = "refused" // a broadcast from a non-member, or a disabled or empty group
+	VMGroupDiscarded = "discarded"
+)
+
 // Forwarding kinds for hello_forwarded_calls_total.
 const (
 	ForwardAlways   = "always"
@@ -211,6 +220,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	})
 	m.VoicemailMessages = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_voicemail_messages_total", Help: "Voicemail messages by result (stored, failed, discarded).",
+	}, []string{"result"})
+	m.VoicemailGroupDeliveries = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_voicemail_group_deliveries_total", Help: "Voicemail group messages by result (delivered, failed, refused, discarded).",
 	}, []string{"result"})
 	m.VoicemailStorage = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hello_voicemail_storage_bytes", Help: "Voicemail audio bytes this node stored (cluster total lives in MinIO).",
@@ -314,7 +326,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	})
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
-		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Originates, m.OriginateSetup, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags,
+		m.VoicemailMessages, m.VoicemailGroupDeliveries, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Originates, m.OriginateSetup, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags,
 		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.DirectoryTotal, m.TimeConditionTotal,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
