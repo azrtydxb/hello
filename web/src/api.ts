@@ -324,7 +324,7 @@ export interface TrunkFields {
   assertedIdentity: string;
   /** Header carrying it: P-Asserted-Identity (pai) or P-Preferred-Identity (ppi). */
   identityHeader: "pai" | "ppi";
-
+  /**
    * RFC 4028 session timers on the trunk's calls: "on" asks for and keeps
    * one, "off" never does, "default" follows Hello's own setting
    * (HELLO_SIP_SESSION_TIMERS_TRUNKS).
