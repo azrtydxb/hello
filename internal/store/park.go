@@ -57,7 +57,7 @@ func scanParkLot(r interface{ Scan(...any) error }) (ParkLot, error) {
 
 // ListParkLots returns every lot in slot order.
 func (s *Store) ListParkLots(ctx context.Context) ([]ParkLot, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+parkLotCols+` FROM park_lots ORDER BY slot_start, id`)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+parkLotCols+` FROM park_lots ORDER BY slot_start, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ func (s *Store) ListParkLots(ctx context.Context) ([]ParkLot, error) {
 
 // GetParkLot returns one lot.
 func (s *Store) GetParkLot(ctx context.Context, id int64) (ParkLot, error) {
-	l, err := scanParkLot(s.db.QueryRowContext(ctx, `SELECT `+parkLotCols+` FROM park_lots WHERE id = $1`, id))
+	l, err := scanParkLot(s.q(ctx).QueryRowContext(ctx, `SELECT `+parkLotCols+` FROM park_lots WHERE id = $1`, id))
 	return l, mapErr(err)
 }
 

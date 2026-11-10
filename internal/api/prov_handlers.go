@@ -60,6 +60,8 @@ type ProvStore interface {
 	FirmwareByName(ctx context.Context, v prov.Vendor, filename string) (prov.Firmware, error)
 	ListFirmwarePins(ctx context.Context) ([]store.FirmwarePin, error)
 	PutFirmwarePins(ctx context.Context, actor string, pins []store.FirmwarePin) ([]store.FirmwarePin, error)
+	ListFirmwareMinimums(ctx context.Context) ([]prov.FirmwareMinimum, error)
+	PutFirmwareMinimums(ctx context.Context, actor string, rules []prov.FirmwareMinimum) ([]prov.FirmwareMinimum, error)
 
 	ListRedirectAccounts(ctx context.Context) (map[prov.Vendor]store.RedirectAccount, error)
 	PutRedirectAccount(ctx context.Context, actor string, v prov.Vendor, c store.RedirectAccountChange) error

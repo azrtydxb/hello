@@ -27,6 +27,7 @@ var StoredKinds = map[string]Reach{
 	"external":       {KindExternal, "call"},
 	"sip_uri":        {KindSIPURI, "call"},
 	"internal":       {KindInternalDID, "call"},
+	"directory":      {KindDirectory, "call"},
 }
 
 // NoDestination lists the stored values that mean "no edge": the call ends
@@ -65,6 +66,7 @@ var FeatureCodeTargets = map[string]string{
 	"announcement":   "announcement",
 	"ivr":            "ivr",
 	"time_condition": "time_condition",
+	"directory":      "directory",
 }
 
 // FeatureCodeNoTarget lists the other feature-code actions, each with why it
@@ -138,6 +140,8 @@ var NonFlowResources = map[string]string{
 	"prov/firmware":                 "phone firmware files, not call routing",
 	"phone-groups":                  "provisioning groups of phones (templates, multicast listening, PTT), not call routing",
 	"phonebooks":                    "directory data shown on phones, not call routing",
+	"ringtones":                     "custom tones phones download for the ring map, not call routing",
+	"ring-tags":                     "names the tone a phone plays, sent to it as Alert-Info; the tag a call gets does not change where it goes",
 	"phonebooks/{id}/entries":       "directory data shown on phones, not call routing",
 	"me/contacts":                   "a user's personal contacts, not call routing",
 	"calls/originate":               "click-to-call requests (a call placed on demand, not call routing)",

@@ -49,7 +49,7 @@ const fixture = `{
       },
       "put": {
         "operationId": "putThing", "x-hello-scope": "secrets", "x-hello-role": "admin",
-        "x-hello-mcp": {"exclude": "binary"},
+        "x-hello-mcp": {"exclude": "binary", "category": "binary-download"},
         "requestBody": {"content": {
           "application/json": {"schema": {"$ref": "#/components/schemas/Thing"}},
           "multipart/form-data": {"schema": {"type": "object"}}}},
@@ -162,6 +162,8 @@ func TestLoadRejects(t *testing.T) {
 		"unknown role":      op(`{"operationId":"a","x-hello-role":"owner"}`),
 		"mcp false":         op(`{"operationId":"a","x-hello-mcp":false}`),
 		"exclude no reason": op(`{"operationId":"a","x-hello-mcp":{}}`),
+		"no category":       op(`{"operationId":"a","x-hello-mcp":{"exclude":"x"}}`),
+		"body format":       op(`{"operationId":"a","x-hello-mcp":{"exclude":"multipart","category":"multipart"}}`),
 		"mcp string":        op(`{"operationId":"a","x-hello-mcp":"no"}`),
 	} {
 		if _, err := Load([]byte(doc)); err == nil {
