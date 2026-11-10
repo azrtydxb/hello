@@ -2,6 +2,7 @@
 // are shared with the form pages). The same drawer the page uses renders
 // here; instead of saving, it hands its body to the draft (`commit`).
 
+import { listVoicemailGroups, type VoicemailGroup } from "../../api/vmgroups";
 import { useEffect, useState } from "react";
 import {
   errorMessage,
@@ -47,6 +48,7 @@ interface Lists {
   announcements: Announcement[];
   pagingGroups: PagingGroup[];
   menus: IvrMenu[];
+  voicemailGroups: VoicemailGroup[];
   mohClasses: MOHClass[];
   timeConditions: TimeCondition[];
   schedules: { id: number | string; name: string }[];
@@ -60,6 +62,7 @@ const EMPTY: Lists = {
   announcements: [],
   pagingGroups: [],
   menus: [],
+  voicemailGroups: [],
   mohClasses: [],
   timeConditions: [],
   schedules: [],
@@ -80,6 +83,7 @@ function useLists(): Lists {
       soft(listAnnouncements(ctl.signal)),
       soft(listPagingGroups(ctl.signal)),
       soft(listIvrMenus(ctl.signal)),
+      soft(listVoicemailGroups(ctl.signal)),
       soft(listMOHClasses(ctl.signal)),
       soft(listTimeConditions(ctl.signal)),
       soft(listSchedules(ctl.signal)),
@@ -91,6 +95,7 @@ function useLists(): Lists {
         announcements,
         pagingGroups,
         menus,
+        voicemailGroups,
         mohClasses,
         timeConditions,
         schedules,
@@ -103,6 +108,7 @@ function useLists(): Lists {
           announcements,
           pagingGroups,
           menus,
+          voicemailGroups,
           mohClasses,
           timeConditions,
           schedules,
@@ -173,6 +179,7 @@ export function FormHost({
     announcements: lists.announcements,
     pagingGroups: lists.pagingGroups,
     menus: lists.menus,
+    voicemailGroups: lists.voicemailGroups,
     timeConditions: lists.timeConditions,
   };
   switch (node.kind) {
