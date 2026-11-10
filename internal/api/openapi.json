@@ -17683,7 +17683,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
-          "exclude": "door camera credentials and pictures are handled in the console"
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "credentials"
         }
       },
       "put": {
@@ -17739,7 +17740,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "door camera credentials and pictures are handled in the console"
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "credentials"
         }
       },
       "delete": {
@@ -17775,7 +17777,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "door camera credentials and pictures are handled in the console"
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "credentials"
         }
       }
     },
@@ -17850,7 +17853,8 @@
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
-          "exclude": "door camera credentials and pictures are handled in the console"
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "binary-download"
         }
       }
     }

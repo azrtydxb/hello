@@ -111,8 +111,6 @@ func TestDoorStationStore(t *testing.T) {
 	}
 }
 
-func ptr[T any](v T) *T { return &v }
-
 // TestDoorStationsFor fails if a phone's door systems miss a station that can
 // call its extension (through a Door group it belongs to, a direct target or a
 // listed group), list one that cannot, or are not ordered by number (spec
