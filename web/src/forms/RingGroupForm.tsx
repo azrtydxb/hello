@@ -36,6 +36,7 @@ import { mapFieldErrors, type ErrorMap } from "../forms";
 import { FormAlert } from "../pages/callflow/ui";
 import { Can } from "../role";
 import { MOHSelect } from "../pages/media/MohSelect";
+import { RingTagSelect } from "../pages/ringtags/RingTagSelect";
 
 export const FORM_ID = "group-form";
 
@@ -81,6 +82,8 @@ interface GroupDraft {
   failureTarget: string;
   mohClassId: Id | null;
   mohRingback: boolean;
+  ringTag: string;
+  isDoor: boolean;
   members: MemberDraft[];
 }
 
@@ -96,6 +99,8 @@ function groupDraft(group: RingGroup | null): GroupDraft {
     failureTarget: group?.failureTarget ?? "",
     mohClassId: group?.mohClassId ?? null,
     mohRingback: group?.mohRingback ?? false,
+    ringTag: group?.ringTag ?? "",
+    isDoor: group?.isDoor ?? false,
     members: (group?.members ?? [])
       .slice()
       .sort((a, b) => a.position - b.position)
@@ -122,6 +127,8 @@ function groupBody(d: GroupDraft): RingGroupFields {
         : d.failureTarget.trim(),
     mohClassId: d.mohClassId,
     mohRingback: d.mohRingback,
+    ringTag: d.ringTag,
+    isDoor: d.isDoor,
     members: d.members.map((m, i) => ({
       extensionId: m.extensionId,
       position: i + 1,
@@ -144,6 +151,8 @@ function groupKeys(d: GroupDraft): string[] {
     "failureTarget",
     "mohClassId",
     "mohRingback",
+    "ringTag",
+    "isDoor",
     "members",
     ...d.members.flatMap((_, i) => [
       `members[${i}]`,
@@ -429,6 +438,22 @@ export function RingGroupDrawer({
           labelPosition="end"
           checked={d.mohRingback}
           onChange={(e) => set("mohRingback", e.target.checked)}
+        />
+        <RingTagSelect
+          id={fid("ringTag")}
+          label="Ring tag"
+          hint="Chooses the ring tone on phones that map ring tags. Rules on the Ringing page can still override it."
+          emptyLabel="Default (ringgroup)"
+          value={d.ringTag}
+          error={errors.ringTag}
+          onChange={(v) => set("ringTag", v)}
+        />
+        <Switch
+          label="Door group"
+          hint="Door stations can call this group, and its calls ring as a doorbell (a new Door group gets the doorbell ring tag)"
+          labelPosition="end"
+          checked={d.isDoor}
+          onChange={(e) => set("isDoor", e.target.checked)}
         />
 
         <fieldset

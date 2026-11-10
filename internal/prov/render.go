@@ -138,6 +138,7 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 	d.Line.AccountLabel = AccountLabel(d.Line.Label, d.Line.DisplayName)
 	d.Phone.PTTCapable, d.Phone.WP = SupportsPTT(d.Phone.Vendor, d.Phone.Model), WPFamily(d.Phone.Vendor, d.Phone.Model)
 	d.Phone.CWInverted = d.Phone.Vendor == Grandstream && strings.HasPrefix(strings.ToUpper(strings.ReplaceAll(d.Phone.Model, " ", "")), "WP856")
+	d.Phone.FXO = HasFXOPort(d.Phone.Vendor, d.Phone.Model)
 	if d.Phone.Vendor == Grandstream {
 		d.Phone.Family = GrandstreamFamily(d.Phone.Model)
 		if d.Book != nil {
@@ -512,6 +513,7 @@ func SampleData(full bool) RenderData {
 		d.Line.PickupGroupCode, d.Line.PickupDirectedCode = "*40", "*41"
 		d.Firmware = &FirmwareInfo{URL: "https://prov.hello.example/p/sample/fw/firmware.rom", Dir: "https://prov.hello.example/p/sample/fw", Via: 2, Version: "1.2.3"}
 		d.Book = NewBookInfo("https://prov.hello.example/p/sample/", []string{"Extensions", "Company", "Warehouse"}, DefaultBookRefresh)
+		d.LDAP = NewLDAPInfo("prov.hello.example", 636, "dc=hello,dc=local", "uid=1,ou=phones,dc=hello,dc=local", "sample-ldap-password")
 		d.Multicast = NewMulticastInfo([]MulticastChannel{
 			{Label: "Warehouse", Address: "239.255.0.1", Port: 5004, Codec: "PCMU", Priority: 1},
 			{Label: "Office", Address: "239.255.0.2", Port: 5006, Codec: "PCMU", Priority: 2},

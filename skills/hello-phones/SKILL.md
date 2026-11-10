@@ -164,6 +164,55 @@ Books: the computed extensions book (read-only), the company book and up to
 - Deliver a named book by adding it to a group with `setPhoneGroupBooks`,
   then resync.
 
+## Ring tags
+
+A ring tag names a ring tone (Alert-Info) that a phone plays for a call. The
+built-in tags come with the server; custom tags are yours to add.
+
+- `listRingTags`, `getRingTag`; `createRingTag` and `putRingTag` (path `name`)
+  make a custom tag; `deleteRingTag` removes a custom one only.
+- `listRingRules` and `putRingRules` (replaces all rules) decide which tag a
+  call gets: by kind, by rule order, or the default.
+- `evaluateRingRules` (`/ring-rules/evaluate`) answers which tag a given call
+  would get. Use it to explain a ring before changing a rule.
+- A ring group can name its own tag (`ringTag`); the rules can still override it.
+
+## Ring map
+
+The ring map turns a ring tag into a tone on each vendor's phones.
+
+- `getRingMap` (`/ring-map`) shows the vendors' ringer lists, the default tone
+  of every tag and vendor, the global choices and each phone group's overrides.
+- `putRingMap` (`/ring-map`) replaces the global choices as a whole. The tone
+  must be in that vendor's ringer list (silent only where the vendor has it).
+  The change reaches the phones through the automatic resync.
+- `putRingMapGroup` (`/ring-map/groups/{id}`) replaces one phone group's
+  overrides; an empty list removes them. An override wins over the global choice
+  for that group's phones.
+
+## Custom tones
+
+The tone library holds WAV files a ring map choice can play as `custom:<name>`
+(Yealink and Snom phones; other vendors keep their built-in ringer).
+
+- `listRingtones` shows each tone and how many ring map choices use it.
+- `createRingtone` (`/ringtones`) adds one: `{ "name": "bell-2", "audioBase64":
+  "..." }` with PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB. A
+  taken name is a 409.
+- `deleteRingtone` (`/ringtones/{id}`) removes a tone; a tone a ring map choice
+  still uses is refused.
+
+## Firmware minimums
+
+Each vendor and model glob has a minimum firmware version. A pin below the
+minimum is refused and never rendered to a phone, and the phone list shows a
+drift badge when a phone runs below its minimum.
+
+- `listFirmwareMinimums` (`/prov/firmware/minimums`) lists the rules with the
+  recommended version (the documented lab build).
+- `putFirmwareMinimums` replaces every rule at once: send the whole list, since
+  any rule left out is removed. Say which rules you changed before you send it.
+
 ## References
 
 - [Tools](references/tools.md) - every tool with its scope.

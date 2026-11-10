@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/ttscache"
 	"github.com/azrtydxb/hello/internal/voiceprompt"
 )
@@ -197,12 +198,18 @@ func TestSettingsSavePregeneratesStaticPrompts(t *testing.T) {
 	c.must(http.StatusOK, "PUT", "/api/v1/tts/settings", map[string]string{"apiKey": key, "model": "elevenlabs/eleven-v3", "voice": "sarah"})
 
 	static := voiceprompt.Static(voiceprompt.English)
+	// The queue callback offer names its key, so it is not static; the default
+	// key's wording is generated ahead as well.
+	texts := []string{voiceprompt.CallbackOffer(voiceprompt.English, queue.DefaultCallbackDigit)}
+	for _, p := range static {
+		texts = append(texts, p.Text)
+	}
 	deadline := time.Now().Add(20 * time.Second)
 	missing := func() []string {
 		var out []string
-		for _, p := range static {
-			if !objs.has(ttscache.Key("elevenlabs/eleven-v3", "sarah", p.Text)) {
-				out = append(out, p.Text)
+		for _, text := range texts {
+			if !objs.has(ttscache.Key("elevenlabs/eleven-v3", "sarah", text)) {
+				out = append(out, text)
 			}
 		}
 		return out
@@ -214,13 +221,13 @@ func TestSettingsSavePregeneratesStaticPrompts(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	// Each prompt once (the texts are distinct), and no key in the objects.
-	if fake.count() != len(static) {
-		t.Fatalf("%d generations for %d prompts", fake.count(), len(static))
+	if fake.count() != len(texts) {
+		t.Fatalf("%d generations for %d prompts", fake.count(), len(texts))
 	}
 	// Saving again with the same voice costs nothing.
 	c.must(http.StatusOK, "PUT", "/api/v1/tts/settings", map[string]string{"voice": "sarah"})
 	time.Sleep(300 * time.Millisecond)
-	if fake.count() != len(static) {
+	if fake.count() != len(texts) {
 		t.Fatalf("a repeat save generated again: %d", fake.count())
 	}
 }

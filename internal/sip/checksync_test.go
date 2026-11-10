@@ -304,3 +304,53 @@ func TestCheckSyncNotify(t *testing.T) {
 		t.Fatalf("unregistered result = %+v, want not_registered", r)
 	}
 }
+
+// fakePushesWithSecrets is a PushQueue that can also open a device's password.
+type fakePushesWithSecrets struct {
+	*fakePushes
+	secret string
+}
+
+func (f fakePushesWithSecrets) DeviceSecret(_ context.Context, _ string) (string, error) {
+	return f.secret, nil
+}
+
+// TestCheckSyncChallengeInPhoneRealm fails if a phone that challenges the
+// NOTIFY in its own realm (a Grandstream uses its SIP server, "host:port",
+// not the SIP domain) is reported as rejecting it instead of being answered
+// from the device password, if a wrong password is accepted, or if a queue
+// without the password still answers a foreign realm.
+func TestCheckSyncChallengeInPhoneRealm(t *testing.T) {
+	old := checkSyncTimeout
+	checkSyncTimeout = 600 * time.Millisecond
+	t.Cleanup(func() { checkSyncTimeout = old })
+	oldPoll := pushPollInterval
+	pushPollInterval = 20 * time.Millisecond
+	t.Cleanup(func() { pushPollInterval = oldPoll })
+
+	const phoneRealm = "192.168.10.101:30508"
+	for _, tc := range []struct {
+		name, secret string
+		want         string
+	}{
+		{"password known", "pb1", PushOK},
+		{"wrong password", "other", PushAuthFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := newFakePushes()
+			pbx := startPBX(t, callerDevices(), func(c *Config, d *Deps) {
+				d.Pushes = fakePushesWithSecrets{q, tc.secret}
+				c.PushRate = 7
+			})
+			b1 := newPhone(t, pbx, "b1", "pb1")
+			b1.register(t)
+			b1.mu.Lock()
+			b1.notifyPass, b1.notifyRealm = "pb1", phoneRealm
+			b1.mu.Unlock()
+			q.queue(PushJob{ID: 1, Kind: PushReboot, Vendor: "grandstream", Device: "b1"})
+			if r := q.result(t, 1); r.Status != tc.want {
+				t.Fatalf("result = %+v, want %s", r, tc.want)
+			}
+		})
+	}
+}

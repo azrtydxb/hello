@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/emiago/sipgo/sip"
 	"github.com/icholy/digest"
@@ -58,6 +59,15 @@ type PushResult struct {
 	Status   string
 	Detail   string
 	Contacts int // contacts the NOTIFY was sent to
+}
+
+// DeviceSecrets is optionally implemented by a PushQueue: it returns the
+// device's SIP password (opened from its sealed copy). A phone challenges a
+// NOTIFY in a realm of its own choosing (Grandstream uses its configured SIP
+// server, "host:port"), not the registrar's; the stored HA1 is bound to the
+// SIP domain, so only the password can answer such a challenge.
+type DeviceSecrets interface {
+	DeviceSecret(ctx context.Context, username string) (string, error)
 }
 
 // PushQueue is the check-sync queue hello-control fills (PostgreSQL).
@@ -231,6 +241,9 @@ func (s *Server) checkSyncContact(ctx context.Context, user, realm, ha1MD5, ha1S
 		}
 		cred, err := answerChallenge(res.GetHeaders(hdr), req.Method.String(), req.Recipient.String(), user, realm, ha1MD5, ha1SHA256)
 		if err != nil {
+			cred, err = s.answerOwnRealm(ctx, res.GetHeaders(hdr), req, user, err)
+		}
+		if err != nil {
 			s.log.Warn("check-sync challenge not answerable", "device", user, "error", err)
 			return PushResult{Status: PushAuthFailed, Detail: rejectedHint + " (" + err.Error() + ")"}
 		}
@@ -252,6 +265,35 @@ func (s *Server) checkSyncContact(ctx context.Context, user, realm, ha1MD5, ha1S
 		return PushResult{Status: PushNotRegistered, Detail: strconv.Itoa(c) + " " + res.Reason}
 	}
 	return PushResult{Status: PushFailed, Detail: strconv.Itoa(res.StatusCode) + " " + res.Reason}
+}
+
+// answerOwnRealm answers a challenge in a realm other than the device's (the
+// phone's own, see DeviceSecrets) by hashing the device password for that
+// realm. It returns prior when no password is available or the challenge is
+// not a realm mismatch, so the original reason is reported.
+func (s *Server) answerOwnRealm(ctx context.Context, headers []sip.Header, req *sip.Request, user string, prior error) (*digest.Credentials, error) {
+	ds, ok := s.deps.Pushes.(DeviceSecrets)
+	if !ok || !strings.Contains(prior.Error(), "is not the device's realm") {
+		return nil, prior
+	}
+	secret, err := ds.DeviceSecret(ctx, user)
+	if err != nil || secret == "" {
+		return nil, prior
+	}
+	var lastErr = prior
+	for _, h := range headers {
+		c, err := digest.ParseChallenge(h.Value())
+		if err != nil || c.Realm == "" {
+			continue
+		}
+		md5Hex, shaHex := auth.HA1(user, c.Realm, secret)
+		cred, err := answerChallenge([]sip.Header{h}, req.Method.String(), req.Recipient.String(), user, c.Realm, md5Hex, shaHex)
+		if err == nil {
+			return cred, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
 
 func pushError(err error) PushResult {

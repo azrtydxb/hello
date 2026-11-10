@@ -61,7 +61,10 @@ type Config struct {
 	// supplies the defaults.
 	SessionExpires time.Duration
 	SessionMinSE   time.Duration
-	MediaDeadAfter time.Duration
+	// SessionTimersTrunks is what a trunk whose session-timers setting is
+	// "default" does: true requests and keeps a session timer on its calls.
+	SessionTimersTrunks bool
+	MediaDeadAfter      time.Duration
 	// SessionRefreshTimeout bounds one session refresh transaction (8s).
 	SessionRefreshTimeout time.Duration
 	// Server paging (spec P-12): PageMaxDuration ends a page (120s),
@@ -70,8 +73,11 @@ type Config struct {
 	// runs at once (5).
 	PageMaxDuration   time.Duration
 	PageAnswerTimeout time.Duration
-	PageFanout        int
-	PageConcurrent    int
+	// OriginateRing is how long a click-to-call rings the user's phone
+	// before it fails agent_no_answer (default 30s).
+	OriginateRing  time.Duration
+	PageFanout     int
+	PageConcurrent int
 	// PageMulticastIface and PageMulticastTTL are the interface and TTL of
 	// the multicast a paging group with a channel sends (iface "" is the
 	// system's choice; TTL 1 when unset).
@@ -125,6 +131,9 @@ type Config struct {
 	HATakeoverPoll    time.Duration
 	HATakeoverJitter  time.Duration
 
+	// CallbackInterval is how often this node sweeps the queues' callback
+	// requests; zero means every 3 s.
+	CallbackInterval time.Duration
 	// PromptLanguage is the language of the spoken voicemail prompts ("en",
 	// "nl"; empty is English) and Timezone the IANA zone message times are
 	// spoken in (empty is UTC).
@@ -193,6 +202,9 @@ type Deps struct {
 	// Queues is the call queues' shared state (Valkey); nil disables call
 	// queues (a call to a queue is refused with 503).
 	Queues queue.Store
+	// Callbacks is the queue callback requests (PostgreSQL); nil turns the
+	// callback offer off.
+	Callbacks queue.CallbackStore
 	// Messages is the SIP MESSAGE queue (PostgreSQL); nil answers every
 	// MESSAGE 503.
 	Messages MessageQueue
@@ -208,6 +220,9 @@ type Deps struct {
 	// Park is the shared call-park store (Valkey); nil disables call park,
 	// retrieve and cross-node pickup. A parked party hears music on hold.
 	Park ParkState
+	// Originates is the queue of click-to-call requests (spec integrations
+	// I-37); nil disables click-to-call on this node.
+	Originates Originates
 	// Events receives call events (ringing, answered, ended, missed,
 	// recording ready) for the event stream; nil emits none.
 	Events EventSink
@@ -273,6 +288,10 @@ type Server struct {
 	// this node sent per dialog Call-ID, so replicated CSeqs continue past
 	// it; entries go with the dialog's binding.
 	haSent sync.Map
+	// cbHold is the lowest place of a due callback request, per queue id
+	// (map[int64]int64, replaced by each sweep): a waiting call that entered
+	// later does not take an agent ahead of it (queue_callback.go).
+	cbHold atomic.Value
 	// haGone holds the dialog Call-IDs of calls this node yielded to a
 	// taker (the value is the taker): their in-dialog requests get 503 so
 	// the edge retries them on a survivor.
@@ -508,6 +527,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.subExpireLoop(rctx) })
 	s.bg.Go(func() { s.mwiPollLoop(rctx) })
 	s.bg.Go(func() { s.queueLoop(rctx) })
+	s.bg.Go(func() { s.callbackLoop(rctx) })
 	if s.deps.MailboxEvents != nil {
 		s.bg.Go(func() { s.deps.MailboxEvents.Watch(rctx, s.mailboxChanged) })
 	}
@@ -516,6 +536,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	}
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })
+	}
+	if s.deps.Originates != nil {
+		s.bg.Go(func() { s.originateLoop(rctx) })
 	}
 	if s.deps.Messages != nil {
 		s.bg.Go(func() { s.messageLoop(rctx) })
