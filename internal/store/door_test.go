@@ -120,7 +120,7 @@ func TestDoorStationsFor(t *testing.T) {
 	ctx := context.Background()
 	inDoor, direct, viaGroup, nobody := mustExtension(t, s, "200"), mustExtension(t, s, "201"), mustExtension(t, s, "202"), mustExtension(t, s, "203")
 	mk := func(name string, isDoor bool, m Extension) RingGroup {
-		g, err := s.CreateRingGroup(ctx, "t", RingGroupInput{Name: name, Strategy: "ring-all", RingTimeout: 30, IsDoor: isDoor,
+		g, err := s.CreateRingGroup(ctx, "t", RingGroupInput{Name: name, Strategy: "ring-all", RingTimeout: 30, FailureKind: "none", IsDoor: isDoor,
 			Members: []RingGroupMember{{ExtensionID: m.ID, Position: 1, Weight: 1}}}, nil)
 		if err != nil {
 			t.Fatal(err)
