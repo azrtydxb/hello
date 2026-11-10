@@ -41,7 +41,7 @@ The user asked for everything and left the details open. These defaults settle e
 12. **E911**: Hello serves a minimal HELD location server from the provisioning listener, with locations assigned per phone group. Geolocation/PIDF-LO is added on emergency trunk legs only for trunks flagged for it (default off).
 13. **Firmware**: WP8x6 is pinned to one lab-tested 1.0.3.x build, the newest of 1.0.3.29 to 1.0.3.39 that passes the lab run. WP822 is pinned to the lab build 1.0.11.78 until a newer one passes. A per-model minimum version blocks downgrades below a vendor floor (WP822 1.0.11.22 [R822 RN]).
 14. **Wi-Fi profiles** are opt-in per phone group, with secrets sealed. A profile push is refused unless the group already has one profile marked "verified on a test phone", because a bad Wi-Fi push strands the handset.
-15. **LDAP stays out of scope** because of the accepted decision of 2026-10-25 (phonebooks-ptt "no LDAP"). Every other row of both reports is built or explicitly configured.
+15. **LDAP out of scope: superseded by pbx-gaps S-24 to S-26 (2026-10-26).** It was left out because of the decision of 2026-10-25 (phonebooks-ptt "no LDAP"), which the 2026-10-26 decision reverses for phones. Every other row of both reports is built or explicitly configured.
 16. **Hot desking** is not offered by either WP family [R822 §3], so it is documented as unsupported. Account sharing [R8x6 AS] is provisioned instead.
 
 ## In scope
@@ -89,7 +89,7 @@ The user asked for everything and left the details open. These defaults settle e
   - The answer-200-and-drop path in `internal/sip/features.go` is removed.
 - [S-9] **Wi-Fi roam, keep-alive and dead-call detection.**
   - A CRLF keep-alive (RFC 5626 double-CRLF ping over UDP/TCP) is answered with a single CRLF over TCP and TLS, and ignored without an error log over UDP.
-  - Session timers (RFC 4028) are supported. Hello honours a phone's `Session-Expires` and `Min-SE` and refreshes as the refresher when the far end does not. It requests `Session-Expires: 1800` on legs to devices of models whose capability says they support it, and tears down a call whose refresh fails, so a handset that drops off Wi-Fi mid-call no longer leaves the call hung. The anchor also ends an anchored call after `HELLO_MEDIA_DEAD_SECONDS` (default 60) without RTP in both directions, unless the call is on hold.
+  - Session timers (RFC 4028) are supported. Hello honours a phone's `Session-Expires` and `Min-SE` and refreshes as the refresher when the far end does not. It requests `Session-Expires: 1800` on legs to devices of models whose capability says they support it, and tears down a call whose refresh fails, so a handset that drops off Wi-Fi mid-call no longer leaves the call hung. The timers follow a call onto the dialogs it moves to (park, retrieve, pickup, return, blind and attended transfer). Each trunk has a session-timers setting, on, off or default (`HELLO_SIP_SESSION_TIMERS_TRUNKS`, off unless set); on requests Session-Expires on its calls and keeps a timer on calls from it. The anchor also ends an anchored call after `HELLO_MEDIA_DEAD_SECONDS` (default 60) without RTP in both directions, unless the call is on hold.
   - A re-INVITE carrying a new `c=` address mid-call (an IP change after a roam) is relayed and the anchor re-learns the address. A re-REGISTER from a new address replaces the old contact for the same instance (`+sip.instance` or same Call-ID).
   - The lab confirms a mid-call AP roam on the same subnet, a roam across subnets, and a handset idle for more than 1 h behind NAT [R822 §10].
 
@@ -219,7 +219,7 @@ The user asked for everything and left the details open. These defaults settle e
 
 ## Out of scope
 
-- LDAP and LDAPS directories (decision of 2026-10-25, unchanged).
+- LDAP and LDAPS directories: superseded by pbx-gaps S-24 to S-26 (2026-10-26).
 - Hot desking (neither WP family documents it [R822 §3]); account sharing (S-11) covers the shared-handset case.
 - Provisioning door stations themselves (Grandstream GDS, 2N, Akuvox, DoorBird are configured on the device); Hello stores their SIP credentials and door-open code only.
 - Door-open over a station's HTTP API (relay URL), and access-control integration; only DTMF is used.

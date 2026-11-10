@@ -218,6 +218,28 @@ certificate for 802.1X (EAP-TLS) without anyone copying keys around.
   (the SCEP certificate; written only where SCEP is on), `peap`, `eap-md5`
   (wired only). A wrong profile can take a phone off the network: try it on
   one phone's group first.
+## Custom tones
+
+The tone library holds WAV files a ring map choice can play as `custom:<name>`
+(Yealink and Snom phones; other vendors keep their built-in ringer).
+
+- `listRingtones` shows each tone and how many ring map choices use it.
+- `createRingtone` (`/ringtones`) adds one: `{ "name": "bell-2", "audioBase64":
+  "..." }` with PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB. A
+  taken name is a 409.
+- `deleteRingtone` (`/ringtones/{id}`) removes a tone; a tone a ring map choice
+  still uses is refused.
+
+## Firmware minimums
+
+Each vendor and model glob has a minimum firmware version. A pin below the
+minimum is refused and never rendered to a phone, and the phone list shows a
+drift badge when a phone runs below its minimum.
+
+- `listFirmwareMinimums` (`/prov/firmware/minimums`) lists the rules with the
+  recommended version (the documented lab build).
+- `putFirmwareMinimums` replaces every rule at once: send the whole list, since
+  any rule left out is removed. Say which rules you changed before you send it.
 
 ## References
 

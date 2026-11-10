@@ -640,3 +640,9 @@
 .pf-secret > .az-field {
   flex: 1;
 }
+
+.pf-actions {
+  display: inline-flex;
+  gap: 4px;
+  justify-content: flex-end;
+}

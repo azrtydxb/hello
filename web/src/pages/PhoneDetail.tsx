@@ -38,6 +38,7 @@ import {
   IssuedUrlModal,
   issuedView,
   type IssuedUrl,
+  FirmwareVersion,
   PhoneFlags,
   phoneName,
   RearmDialog,
@@ -53,6 +54,7 @@ import {
   RedirectBadge,
   vendorModel,
 } from "./phones/ui";
+import { PhoneLdap } from "./phones/PhoneLdap";
 import { PushLine, RebootDialog } from "./phones/push";
 import { hasPttKey, PttOverride } from "./phones/PttOverride";
 import "./phones/inventory.css";
@@ -289,7 +291,7 @@ export function PhoneDetail() {
                   value: phone.lastFetchFile ?? "—",
                   mono: true,
                 },
-                { label: "Firmware", value: phone.firmwareSeen ?? "—" },
+                { label: "Firmware", value: <FirmwareVersion phone={phone} /> },
                 { label: "Added", value: formatTime(phone.createdAt) },
                 { label: "Updated", value: formatTime(phone.updatedAt) },
               ]}
@@ -385,6 +387,8 @@ export function PhoneDetail() {
                 </Can>
               </div>
             </div>
+
+            <PhoneLdap phoneId={phone.id} />
 
             <Tabs<Tab>
               aria-label="Phone activity"

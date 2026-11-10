@@ -124,7 +124,17 @@ export function Extensions() {
     {
       key: "name",
       label: "Name",
-      render: (e) => <span className="az-table__primary">{e.name}</span>,
+      render: (e) => (
+        <span className="az-table__primary">
+          {e.name}
+          {e.kind === "door" && (
+            <>
+              {" "}
+              <Badge tone="info">Door station</Badge>
+            </>
+          )}
+        </span>
+      ),
     },
     {
       key: "externalNumber",
@@ -244,6 +254,7 @@ export function Extensions() {
           key={String(current.id)}
           ext={current}
           devices={devicesOf(devices, current)}
+          extensions={all}
           live={live}
           onClose={() => setSelected(null)}
           onSaved={(saved) => {
