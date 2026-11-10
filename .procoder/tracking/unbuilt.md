@@ -44,7 +44,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P3  | Click-to-call: originate API, /dial, tel:      | wip (#234)  |
 | P4  | Recording links and lookup API                 | todo        |
 | P5  | Browser extension (MV3), fixed signing key     | todo        |
-| P6  | HubSpot and internal/crm framework             | wip (#PR)   |
+| P6  | HubSpot and internal/crm framework             | wip (#289)  |
 | P7  | Zapier                                         | todo        |
 | P8  | Directory engine, AD/LDAP                      | todo        |
 | P9  | Google Workspace and Entra connectors          | todo        |
