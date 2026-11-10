@@ -70,6 +70,12 @@ type Extension struct {
 	// NoAnswerRings is the ring count before the no-answer forward
 	// (migration 00035); 0 uses the system ring timeout.
 	NoAnswerRings int
+	// Door marks a door station (migration 00053, spec S-45); DoorExtensions
+	// and DoorGroups are the extension numbers and ring group names it may
+	// call besides every Door group.
+	Door           bool
+	DoorExtensions []string
+	DoorGroups     []string
 	// DirectoryHidden keeps the extension out of the dial-by-name directory
 	// (migration 00011, the same flag the phone books honour).
 	DirectoryHidden bool
@@ -99,6 +105,8 @@ type RingGroup struct {
 	// RingTag overrides the ringgroup ring tag for calls through the group
 	// ("" keeps ringgroup; migration 00050).
 	RingTag string
+	// IsDoor marks the Door group (migration 00053, spec S-46).
+	IsDoor bool
 }
 
 // RingGroupMember is one member of a group, ordered by Position.
@@ -335,6 +343,9 @@ func (s *Snapshot) PickupGroups() []PickupGroup { return s.pickups }
 // ext belongs to; with no pickup group, the other members of the ring groups
 // ext is a member of (spec S-50, default 4).
 func (s *Snapshot) PickupScope(ext string) []string {
+	if s.IsDoor(ext) {
+		return []string{} // a door station picks nothing up (spec S-45)
+	}
 	set := map[string]bool{}
 	explicit := false
 	for _, g := range s.pickups {
@@ -365,6 +376,9 @@ func (s *Snapshot) PickupScope(ext string) []string {
 	delete(set, ext)
 	out := make([]string, 0, len(set))
 	for m := range set {
+		if s.IsDoor(m) {
+			continue // and nobody picks up a door station's call
+		}
 		out = append(out, m)
 	}
 	slices.Sort(out)
@@ -530,7 +544,7 @@ type Querier interface {
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
        d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name,
        e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id,
-       e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, e.directory_hidden
+       e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, e.directory_hidden, (e.kind = 'door')
 FROM extensions e
 LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled
 LEFT JOIN voicemail_boxes v ON v.extension_id = e.id
@@ -564,7 +578,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 		)
 		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &d.Extension, &d.ExtensionName,
 			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID,
-			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden); err != nil {
+			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden, &e.Door); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan: %w", err)
 		}
@@ -643,6 +657,9 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	}
 	emerg, err := loadEmergency(ctx, db)
 	if err != nil {
+		return nil, err
+	}
+	if err := loadDoorTargets(ctx, db, exts); err != nil {
 		return nil, err
 	}
 	return New(rev, domain, devices).WithExtensions(bare...).WithQueues(queues).
@@ -827,7 +844,7 @@ WHERE m.group_id = $1 ORDER BY e.number`, &groups[i].Callers},
 // parallel slices for WithRingGroups.
 func loadRingGroups(ctx context.Context, db Querier) ([]RingGroup, [][]RingGroupMember, error) {
 	rows, err := db.Query(ctx, `SELECT id, name, strategy, hunt, ring_timeout, member_delay, ignore_dnd, failure_kind, failure_target,
-coalesce(moh_class_id, 0), moh_ringback, coalesce(ring_tag, '')
+coalesce(moh_class_id, 0), moh_ringback, coalesce(ring_tag, ''), is_door
 FROM ring_groups ORDER BY id`)
 	if err != nil {
 		return nil, nil, fmt.Errorf("snapshot: ring groups: %w", err)
@@ -842,7 +859,7 @@ FROM ring_groups ORDER BY id`)
 			timeout, delay int32
 			ext            *string
 		)
-		if err := rows.Scan(&g.ID, &g.Name, &g.Strategy, &g.Hunt, &timeout, &delay, &g.IgnoreDND, &g.FailureKind, &ext, &g.MOHClassID, &g.MOHRingback, &g.RingTag); err != nil {
+		if err := rows.Scan(&g.ID, &g.Name, &g.Strategy, &g.Hunt, &timeout, &delay, &g.IgnoreDND, &g.FailureKind, &ext, &g.MOHClassID, &g.MOHRingback, &g.RingTag, &g.IsDoor); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("snapshot: scan ring group: %w", err)
 		}
@@ -858,7 +875,7 @@ FROM ring_groups ORDER BY id`)
 	}
 	for _, g := range groups {
 		memberRows, err := db.Query(ctx, `SELECT m.extension_id, e.number, m.position, m.weight, m.delay
-FROM ring_group_members m JOIN extensions e ON e.id = m.extension_id
+FROM ring_group_members m JOIN extensions e ON e.id = m.extension_id AND e.kind = 'user'
 WHERE m.group_id = $1 ORDER BY m.position`, g.ID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("snapshot: ring group members: %w", err)

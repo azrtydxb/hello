@@ -275,9 +275,12 @@
 {{- end}}
     <P237>{{xml (noscheme .Prov.URL)}}</P237>
     <P145>0</P145>
-{{- /* Automatic upgrade (PRV-06): P194 on the WP8x6 and WP8xx, P22296 on the WP856. */}}
+{{- /* Automatic upgrade (PRV-06): P194 on the WP8x6 and WP8xx, P22296 on the WP856. A pin's upgrade window (spec S-26) makes P194 = 2, daily at the hour in P285 (config changes then reach the phone by check-sync or at that hour); the WP856 key for it is unverified, so the window is not rendered there. */}}
 {{- if eq .Phone.Family "856"}}
     <P22296>1</P22296>
+{{- else if and .Firmware .Firmware.Window}}
+    <P194>2</P194>
+    <P285>{{.Firmware.Window.Hour}}</P285>
 {{- else}}
     <P194>1</P194>
 {{- end}}
@@ -292,6 +295,22 @@
 {{- if ne $.Phone.Family "856"}}
     <P333>1</P333>
 {{- end}}
+{{- end}}
+{{- /* LDAP phonebook (pbx-gaps S-26): no template or guide in the references on hand lists the LDAP P-values for the WP8x6, WP856 or WP8xx, so P8020 to P8032 below are not confirmed on a phone (verify, needs hardware). They are written only to a phone in a group that turned LDAP on. */}}
+{{- with .LDAP}}
+    <P8020>{{xml .Host}}</P8020>
+    <P8021>{{.Port}}</P8021>
+    <P8022>{{xml .Base}}</P8022>
+    <P8023>{{xml .BindDN}}</P8023>
+    <P8024>{{xml .Password}}</P8024>
+    <P8025>cn sn</P8025>
+    <P8026>telephoneNumber mobile homePhone</P8026>
+    <P8027>cn</P8027>
+    <P8028>{{.MaxHits}}</P8028>
+    <P8029>3</P8029>
+    <P8030>(|(cn=%)(sn=%))</P8030>
+    <P8031>(|(telephoneNumber=%)(mobile=%)(homePhone=%))</P8031>
+    <P8032>2</P8032>
 {{- end}}
 {{- /* HT813 FXO disconnect supervision. Without it a PSTN caller who hangs up first leaves the FXO off-hook and it answers 486 to every later call. Keys and meanings from Grandstream's ht813_config_1.0.19.6 template (config-template-10212026.zip), section "FXO PORT Settings" / "FXO Termination Settings" (not the FXS-side P892/P856 loop-current keys): P893 Enable Current Disconnect, P764 Current Disconnect Threshold (50-800 ms, default 100), P28101 Enable Polarity Reversal, P712 Enable PSTN Disconnect Tone Detection, P841 PSTN Disconnect Tone (f1=<Hz>@<dB>,c=<on>/<off> ms; UAE busy tone 400 Hz, 375 ms on / 375 ms off, level -32 dB as in Grandstream's example). The template has no silence-timeout key, so none is written. TR-069 is not touched. */}}
 {{- if .Phone.FXO}}
@@ -311,7 +330,8 @@
     <P192>{{xml (noscheme .Dir)}}</P192>
     <P232></P232>
     <P233></P233>
-    <P238>0</P238>
+{{- /* P238 "Firmware Upgrade and Provisioning": 0 checks at every boot, 1 only when the firmware pre/suffix changes, so with a window a reboot does not upgrade outside it. */}}
+    <P238>{{if and .Window (ne $.Phone.Family "856")}}1{{else}}0{{end}}</P238>
 {{- end}}
   </config>
 </gs_provision>

@@ -49,6 +49,9 @@ func provSettings(cfg config.Control, deployment map[prov.Vendor]redirect.Creden
 	for v := range deployment {
 		p.Deployment[v] = true
 	}
+	if cfg.LDAP.Enabled {
+		p.LDAPBase, p.LDAPPort = cfg.LDAP.Base, cfg.LDAP.PublicPort
+	}
 	return p
 }
 

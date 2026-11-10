@@ -18,6 +18,9 @@ func TestRoutesTable(t *testing.T) {
 		// The events scope guards the call-event routes, which every role
 		// reads (a user only their own extensions' events).
 		auth.ScopeEvents: auth.RoleViewer,
+		// The calls scope guards click-to-call, which a user places from their
+		// own extension (the handler checks ownership).
+		auth.ScopeCalls: auth.RoleViewer,
 	}
 	secrets := map[string]bool{
 		"POST /api/v1/devices/{id}/rotate-secret":        true,
@@ -25,6 +28,10 @@ func TestRoutesTable(t *testing.T) {
 		"POST /api/v1/phones/{id}/rearm":                 true,
 		"POST /api/v1/phones/{id}/admin-password/reveal": true,
 		"POST /api/v1/phones/{id}/admin-password/rotate": true,
+		"POST /api/v1/phones/{id}/ldap/password":         true,
+		// A webhook's signing secret is shown at creation and at rotation.
+		"POST /api/v1/webhooks":                    true,
+		"POST /api/v1/webhooks/{id}/rotate-secret": true,
 	}
 	// Self-service routes (spec P-19, user accounts) ask only the user role,
 	// which ranks below viewer: the signed-in user's own profile, contacts,
@@ -40,7 +47,8 @@ func TestRoutesTable(t *testing.T) {
 		case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password":
 			return true
 		}
-		return strings.HasPrefix(r.Pattern, "/api/v1/me/") || strings.HasPrefix(r.Pattern, "/api/v1/events")
+		return strings.HasPrefix(r.Pattern, "/api/v1/me/") || strings.HasPrefix(r.Pattern, "/api/v1/events") ||
+			strings.HasPrefix(r.Pattern, "/api/v1/calls/originate")
 	}
 	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true, "POST /api/v1/auth/login/2fa": true}
 	seen := map[string]bool{}
