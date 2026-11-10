@@ -138,6 +138,10 @@ type Store interface {
 	// ErrNotFound when there is none.
 	FirmwareByName(ctx context.Context, v Vendor, filename string) (Firmware, error)
 
+	// RingtoneByName finds a tone of the library (S-43) by name.
+	// ErrNotFound when there is none.
+	RingtoneByName(ctx context.Context, name string) (Ringtone, error)
+
 	// InsertFetches writes audit rows in one batch.
 	InsertFetches(ctx context.Context, rows []FetchRecord) error
 }
@@ -146,6 +150,8 @@ type Store interface {
 // with Range support.
 type Opener interface {
 	OpenFirmware(ctx context.Context, objectKey string) (io.ReadSeekCloser, error)
+	// OpenRingtone opens a tone of the library (bucket hello-ringtones).
+	OpenRingtone(ctx context.Context, objectKey string) (io.ReadSeekCloser, error)
 }
 
 // BootHandoffGrace is how long after a boot hand-off the same phone's

@@ -263,6 +263,9 @@ func validateTrunk(in *store.TrunkInput, hasPassword bool) fieldErrs {
 			f.add("codecs", "%s", why)
 		}
 	}
+	if !routing.ValidSessionTimers(in.SessionTimers) {
+		f.add("sessionTimers", `must be "default", "on" or "off"`)
+	}
 	for i, c := range in.SourceCIDRs {
 		p, err := netip.ParsePrefix(c)
 		if err != nil {

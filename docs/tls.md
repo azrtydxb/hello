@@ -46,7 +46,7 @@ kamailio:
   image: { tag: <a build with kamailio-tls-modules> }
   tls:
     enabled: true
-    secretName: hello-sip-tls   # kubernetes.io/tls Secret from the Hello CA
+    secretName: hello-sip-tls # kubernetes.io/tls Secret from the Hello CA
 ```
 
 The Secret's certificate must name the address phones connect to (`publicHost`)
@@ -115,6 +115,16 @@ on TLS only:
 | Vendor      | Key written | Values                                                                 |
 | ----------- | ----------- | ---------------------------------------------------------------------- |
 | Grandstream | `P183`      | `0` off, `1` enabled but not forced (optional), `2` enabled and forced |
+| Grandstream | `P60078`    | `0` SDES key exchange (WP8x6 and WP856 only)                           |
+
+`P183` and its `0`, `1` and `2` are the same in Grandstream's own templates for
+the WP8x6 (`wp8x6_config_1.0.3.39`), WP810/822/825
+(`wp810_822_825_config_1.0.11.83`), WP820 (`wp820_config_1.0.7.90`) and WP856
+(`wp856_config_1.0.3.16`). The WP8x6 and WP810/822/825 templates add `3` Optional
+and `4` Follow SIP Transport, which Hello does not write; the WP820 has `3`
+Follow SIP transport instead, and the WP856 only `0` to `2`. `P60078` (SRTP Key
+Exchange, `0` SDES, `1` DTLS) is only in the WP8x6 and WP856 templates, and is
+written `0` because Hello's anchor negotiates SDES.
 
 The other vendors write no SRTP key until their key is confirmed from vendor
 documentation. A phone on UDP keeps its own SRTP setting; whatever it offers,
