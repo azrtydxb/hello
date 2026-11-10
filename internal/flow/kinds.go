@@ -134,6 +134,7 @@ var SingletonNodes = map[string]string{
 var NonFlowResources = map[string]string{
 	"tokens":                        "API credentials, not call routing",
 	"users":                         "console logins, not call routing",
+	"backups":                       "backup archives of the database and audio, not call routing",
 	"service-accounts":              "API credentials, not call routing",
 	"webhooks":                      "outbound event receivers, not call routing",
 	"service-accounts/{id}/secrets": "API credentials, not call routing",

@@ -69,6 +69,7 @@ import { Dial } from "./pages/Dial";
 import { Placeholder } from "./pages/Placeholder";
 import { FlowCanvases } from "./pages/FlowCanvases";
 import { Users } from "./pages/Users";
+import { Backups } from "./pages/Backups";
 import { EmailSettings } from "./pages/EmailSettings";
 import { MyForwarding } from "./pages/myphone/MyForwarding";
 import { MyHistory } from "./pages/myphone/MyHistory";
@@ -118,6 +119,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/me/forwarding": MyForwarding,
   "/me/history": MyHistory,
   "/me/profile": MyProfile,
+  "/settings/backups": Backups,
   "/settings/email": EmailSettings,
   "/registrations": Registrations,
   "/calls": Calls,

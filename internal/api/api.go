@@ -318,6 +318,11 @@ type Config struct {
 	// DefaultTimeZone is the zone a new schedule gets when the request names
 	// none: the phones time zone setting (HELLO_PROV_TIMEZONE).
 	DefaultTimeZone string
+	// Backups runs, deletes and restores backups; nil answers 503 on the
+	// backup routes. Maintenance, when set and active, makes every API write
+	// answer 503 (a restore is running).
+	Backups     BackupRunner
+	Maintenance MaintenanceGate
 	// SMTPEnv is the deployment's SMTP_* settings, used while no settings
 	// are saved in the console; SMTPDeliver replaces the SMTP send in tests.
 	SMTPEnv     mailer.Settings
@@ -422,7 +427,9 @@ func Handler(c Config) http.Handler {
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.
-	h := wrapForTest(http.NewCrossOriginProtection().Handler(mux))
+	// The maintenance gate sits outside the conformance wrapper: its 503 is
+	// not an operation's own answer, it applies to every write (see info).
+	h := maintenance(c.Maintenance, wrapForTest(http.NewCrossOriginProtection().Handler(mux)))
 	c.self.Store(&h)
 	return h
 }
