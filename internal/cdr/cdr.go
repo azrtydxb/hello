@@ -88,6 +88,9 @@ type Record struct {
 	CalleeCodec string
 	// Kind is call (default), page or intercom.
 	Kind string
+	// AnsweredBy is the extension that answered when it was not the one
+	// dialled: the assistant of a boss link (migration 00065). Empty otherwise.
+	AnsweredBy string
 	// Origin is phone (default: dialled at a phone) or api (a click-to-call
 	// request, spec integrations I-37); OriginClient names the OAuth client
 	// or token id behind an api call (migration 00057).
@@ -214,17 +217,17 @@ const insert = `WITH c AS (INSERT INTO cdrs (correlation_id, sip_call_id, source
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason,
     direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
-    rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client)
+    rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client, answered_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
 ON CONFLICT (correlation_id) DO NOTHING RETURNING id),
 p AS (INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
 SELECT c.id, l.ord, l.leg->>'extension', l.leg->>'device', l.leg->>'result'
-FROM c, jsonb_array_elements($32::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1)
+FROM c, jsonb_array_elements($33::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1)
 INSERT INTO cdr_queue_legs (cdr_id, position, event, queue, extension, wait_ms, result, at)
 SELECT c.id, l.ord, l.leg->>'event', l.leg->>'queue', l.leg->>'extension', (l.leg->>'waitMs')::bigint,
        l.leg->>'result', (l.leg->>'at')::timestamptz
-FROM c, jsonb_array_elements($33::jsonb) WITH ORDINALITY AS l(leg, ord)`
+FROM c, jsonb_array_elements($34::jsonb) WITH ORDINALITY AS l(leg, ord)`
 
 // Run writes queued records until ctx is cancelled, retrying each with
 // exponential backoff. After cancellation it tries to flush what is left for
@@ -330,7 +333,7 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
 		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, r.RingTag, r.RingRule,
-		nullString(r.CallerCodec), nullString(r.CalleeCodec), origin, r.OriginClient, string(lj), string(qj))
+		nullString(r.CallerCodec), nullString(r.CalleeCodec), origin, r.OriginClient, r.AnsweredBy, string(lj), string(qj))
 	if err != nil {
 		return err
 	}

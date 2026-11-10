@@ -204,6 +204,15 @@ function Detail({ cdr }: { cdr: CallRecord }) {
     },
     { label: "Route", value: cdr.route || "—" },
     { label: "Trunk", value: cdr.trunk || "—", mono: !!cdr.trunk },
+    ...(cdr.answeredBy
+      ? [
+          {
+            label: "Answered by",
+            value: `${cdr.answeredBy} (assistant)`,
+            mono: true,
+          },
+        ]
+      : []),
     {
       label: "Final status",
       value: `${cdr.finalStatus}${failed ? " (failed)" : ""}`,
