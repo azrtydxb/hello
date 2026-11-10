@@ -2049,4 +2049,26 @@ func sentinelStallProbe(t *testing.T, at int) {
 	out, err := compose("exec", "-T", "sentinel-1", "sh", "-c",
 		"time getent hosts valkey-1; echo getent-rc=$?; time getent hosts valkey-2; cat /proc/loadavg /etc/resolv.conf").CombinedOutput()
 	t.Logf("probe +%ds: sentinel-1 resolve err=%v\n%s", at, err, out)
+	if at != 12 {
+		return
+	}
+	// Candidate fixes, tried on the lab network with the stopped primary's
+	// name: a one-off container per variant.
+	variants := map[string][]string{
+		"default":          {},
+		"dns=127.0.0.1":    {"--dns", "127.0.0.1"},
+		"opts t1 a1":       {"--dns-option", "timeout:1", "--dns-option", "attempts:1"},
+		"opts ndots0 t1a1": {"--dns-option", "ndots:0", "--dns-option", "timeout:1", "--dns-option", "attempts:1"},
+	}
+	for name, extra := range variants {
+		args := append([]string{"run", "--rm", "--network", labProject() + "_state"}, extra...)
+		args = append(args, "--entrypoint", "sh", "valkey/valkey:9-alpine", "-c", "time getent hosts valkey-1; echo rc=$?")
+		o, e := exec.Command("docker", args...).CombinedOutput()
+		t.Logf("variant %q err=%v\n%s", name, e, o)
+	}
+	nw := labProject() + "_probeinternal"
+	_ = exec.Command("docker", "network", "create", "--internal", nw).Run()
+	o, e := exec.Command("docker", "run", "--rm", "--network", nw, "--entrypoint", "sh", "valkey/valkey:9-alpine", "-c", "time getent hosts valkey-1; echo rc=$?").CombinedOutput()
+	t.Logf("variant internal-network err=%v\n%s", e, o)
+	_ = exec.Command("docker", "network", "rm", nw).Run()
 }
