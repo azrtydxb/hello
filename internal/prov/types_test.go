@@ -34,6 +34,8 @@ func checkList(t *testing.T, sql, table, column string) []string {
 // kind, 00052 the "scep" kind and the scep_issued and scep_refused results.
 func latestList(t *testing.T, column string) []string {
 	t.Helper()
+	// 00078 (SCEP) is the newest migration that redefines both prov_fetches
+	// lists, and it carries every value the earlier migrations added.
 	b, err := os.ReadFile("../../migrations/00078_scep_dot1x.sql")
 	if err != nil {
 		t.Fatal(err)
@@ -41,25 +43,11 @@ func latestList(t *testing.T, column string) []string {
 	up, _, _ := strings.Cut(string(b), "-- +goose Down")
 	m := regexp.MustCompile(`(?s)prov_fetches_` + column + `_check\s+CHECK \(` + column + ` IN \(([^)]*)\)`).FindStringSubmatch(up)
 	if m == nil {
-		t.Fatalf("00052 has no %s IN list", column)
+		t.Fatalf("00078 has no %s IN list", column)
 	}
 	var out []string
 	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
 		out = append(out, q[1])
-	}
-	// 00052 widened it with hello_check_values (the kinds it adds, before
-	// "other", which closes the Go list).
-	b, err = os.ReadFile("../../migrations/00052_ringtones.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	up, _, _ = strings.Cut(string(b), "-- +goose Down")
-	m = regexp.MustCompile(`'prov_fetches', 'prov_fetches_kind_check',\s+ARRAY\[([^\]]*)\]`).FindStringSubmatch(up)
-	if m == nil {
-		t.Fatal("00052 does not widen the kind list")
-	}
-	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
-		out = slices.Insert(out, len(out)-1, q[1])
 	}
 	return out
 }

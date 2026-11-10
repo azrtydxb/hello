@@ -87,7 +87,7 @@ ALTER TABLE phone_groups
 -- The SCEP endpoint is audited like every other provisioning request.
 ALTER TABLE prov_fetches DROP CONSTRAINT prov_fetches_kind_check;
 ALTER TABLE prov_fetches ADD CONSTRAINT prov_fetches_kind_check
-    CHECK (kind IN ('common','device','master','firmware','ca','boot','upload','phonebook','scep','other'));
+    CHECK (kind IN ('common','device','master','firmware','ca','boot','upload','phonebook','scep','ringtone','other'));
 ALTER TABLE prov_fetches DROP CONSTRAINT prov_fetches_result_check;
 ALTER TABLE prov_fetches ADD CONSTRAINT prov_fetches_result_check
     CHECK (result IN ('served','not_modified','unknown_token','mac_mismatch',
@@ -106,7 +106,7 @@ ALTER TABLE prov_fetches ADD CONSTRAINT prov_fetches_result_check
                       'boot_denied','upload_discarded','not_found','unavailable'));
 ALTER TABLE prov_fetches DROP CONSTRAINT prov_fetches_kind_check;
 ALTER TABLE prov_fetches ADD CONSTRAINT prov_fetches_kind_check
-    CHECK (kind IN ('common','device','master','firmware','ca','boot','upload','phonebook','other'));
+    CHECK (kind IN ('common','device','master','firmware','ca','boot','upload','phonebook','ringtone','other'));
 ALTER TABLE phone_groups DROP COLUMN wired_dot1x_id, DROP COLUMN scep_validity_days, DROP COLUMN scep_enabled;
 DROP TABLE dot1x_profiles;
 DROP TRIGGER phones_scep_revoke ON phones;
