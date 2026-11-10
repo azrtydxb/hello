@@ -144,11 +144,11 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | --------------------------------------------- | --------------------- |
 | Backup and restore                            | wip (#219, A2)        |
 | Follow-me                                     | todo (spec done #199) |
-| Blocklist, anonymous reject, country limits   | wip (#210, A1)        |
+| Blocklist, anonymous reject, country limits   | done (#210, A1)       |
 | Queue callback                                | done (#237)           |
 | 2FA                                           | done (#209)           |
 | Dial-by-name                                  | done (#229, B3)       |
-| Voicemail groups                              | wip (#220, A6)        |
+| Voicemail groups                              | done (#220, A6)       |
 | Fax                                           | todo (spec done #199) |
 | Boss/secretary                                | todo (spec done #199) |
 | Multi-language prompts (Dutch option per box) | done (#208, A5)       |
@@ -159,7 +159,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                                                                                      | Status                |
 | --------------------------------------------------------------------------------------------------------- | --------------------- |
-| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-3dcd77c)    |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-30d7c95)    |
 | MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
 | Transfer-to-voicemail phone key                                                                           | done (#200)           |

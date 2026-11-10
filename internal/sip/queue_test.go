@@ -477,10 +477,17 @@ func TestNumberPrompts(t *testing.T) {
 // TestQueueBreakoutVoicemail: pressing the breakout key leaves the queue for
 // the voicemail box. It fails if the caller stays queued or the exit is not
 // recorded.
-func TestQueueBreakoutVoicemail(t *testing.T) {
+func TestQueueBreakoutVoicemail(t *testing.T) { queueBreakoutVoicemail(t, 1) }
+
+// TestQueueBreakoutWhileRinging: the breakout key is served while the agents
+// ring, not after their (long) timeout. It fails if the caller has to wait
+// out the 30 s ring: the box is not looked up within the test's wait.
+func TestQueueBreakoutWhileRinging(t *testing.T) { queueBreakoutVoicemail(t, 30) }
+
+func queueBreakoutVoicemail(t *testing.T, agentTimeout int) {
 	st := queue.NewMemStore()
 	q := testQueue("sales", "600", queue.RingAll, static("200", 0, 1))
-	q.BreakoutKey, q.BreakoutBox = "1", "200"
+	q.BreakoutKey, q.BreakoutBox, q.AgentTimeout = "1", "200", agentTimeout
 	objs := &fakeObjects{}
 	vm := newVMStore()
 	vm.boxes["200"] = VoicemailBox{ID: 5, Extension: "200"}
