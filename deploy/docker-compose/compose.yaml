@@ -426,15 +426,7 @@ services:
     cpu_shares: 256 # see kamailio
 
 networks:
-  # internal: Docker's embedded DNS forwards a name it does not know (a
-  # stopped container's) to the host's upstream resolver, unless every network
-  # the container is on is internal. Sentinel resolves hostnames in its event
-  # loop (resolve-hostnames); on a GitHub-hosted runner that forward takes
-  # seconds, stalls the loop past 2 s and keeps all three Sentinels in TILT
-  # once the primary stops, so no failover ever starts. Internal answers
-  # NXDOMAIN at once. The nodes reach the outside through edge.
-  state:
-    internal: true
+  state: {}
   edge:
     ipam:
       config:

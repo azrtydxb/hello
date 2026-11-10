@@ -9,8 +9,10 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -1472,6 +1474,7 @@ func TestValkeyFailover(t *testing.T) {
 	// window would have.
 	deadline := stopped.Add(300 * time.Second)
 	manual := false
+	probed := map[int]bool{}
 	var after string
 	for after == "" && time.Now().Before(deadline) {
 		if !manual && time.Since(stopped) >= 240*time.Second {
@@ -1480,6 +1483,12 @@ func TestValkeyFailover(t *testing.T) {
 				"SENTINEL", "failover", "hello").CombinedOutput()
 			t.Logf("manual SENTINEL failover hello on sentinel-1: err=%v out=%q", err, strings.TrimSpace(string(out)))
 			deadline = time.Now().Add(120 * time.Second)
+		}
+		for _, at := range []int{12, 40} {
+			if !probed[at] && time.Since(stopped) >= time.Duration(at)*time.Second {
+				probed[at] = true
+				sentinelStallProbe(t, at)
+			}
 		}
 		addr := sentinelMasterAddr("sentinel-1")
 		if addr == "" || addr == beforeAddr {
@@ -2027,4 +2036,17 @@ func kamailioMetric(t *testing.T, name string) float64 {
 		}
 	}
 	return sum
+}
+
+// sentinelStallProbe logs what could stall a Sentinel's event loop while the
+// primary is down: how long the stopped primary's name takes to resolve inside
+// a Sentinel (it resolves hostnames synchronously) and the host and container
+// load. Diagnostic only.
+func sentinelStallProbe(t *testing.T, at int) {
+	t.Helper()
+	load, _ := os.ReadFile("/proc/loadavg")
+	t.Logf("probe +%ds: host cpus=%d loadavg=%s", at, runtime.NumCPU(), strings.TrimSpace(string(load)))
+	out, err := compose("exec", "-T", "sentinel-1", "sh", "-c",
+		"time getent hosts valkey-1; echo getent-rc=$?; time getent hosts valkey-2; cat /proc/loadavg /etc/resolv.conf").CombinedOutput()
+	t.Logf("probe +%ds: sentinel-1 resolve err=%v\n%s", at, err, out)
 }
