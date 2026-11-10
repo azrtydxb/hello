@@ -9,8 +9,11 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
+	"regexp"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -54,6 +57,58 @@ type fakeLDAP struct {
 	PageSize int // forced page size, 0 = the client's
 	Referral bool
 	FailCode int // result code for searches
+
+	// RootDSE is the server's root entry; NTDS is the object dsServiceName
+	// points at (it holds the invocation ID).
+	RootDSE map[string][][]byte
+	NTDS    map[string][][]byte
+}
+
+const fakeNTDSDN = "CN=NTDS Settings,CN=DC1,CN=Servers,CN=Site,CN=Sites,CN=Configuration,DC=corp"
+
+// enableAD makes the fake answer like a domain controller: a rootDSE with
+// highestCommittedUSN and an invocation ID.
+func (f *fakeLDAP) enableAD(usn int, invocation []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.RootDSE = map[string][][]byte{"highestCommittedUSN": strs(fmt.Sprint(usn)), "dsServiceName": strs(fakeNTDSDN),
+		"supportedCapabilities": strs("1.2.840.113556.1.4.800")}
+	f.NTDS = map[string][][]byte{"invocationId": {invocation}}
+}
+
+func (f *fakeLDAP) setUSN(usn int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.RootDSE["highestCommittedUSN"] = strs(fmt.Sprint(usn))
+}
+
+var changedRe = regexp.MustCompile(`\((uSNChanged|whenChanged|modifyTimestamp)>=([^)]*)\)`)
+
+// changedSince keeps the entries a (uSNChanged|whenChanged|modifyTimestamp)>=
+// clause of the filter selects.
+func changedSince(filter string, in []fakeEntry) []fakeEntry {
+	m := changedRe.FindStringSubmatch(filter)
+	if m == nil {
+		return in
+	}
+	var out []fakeEntry
+	for _, e := range in {
+		vals := e.Attrs[m[1]]
+		if len(vals) == 0 {
+			continue
+		}
+		v := string(vals[0])
+		if m[1] == "uSNChanged" {
+			a, _ := strconv.Atoi(v)
+			b, _ := strconv.Atoi(m[2])
+			if a >= b {
+				out = append(out, e)
+			}
+		} else if v >= m[2] {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func selfSigned(t *testing.T, names ...string) (tls.Certificate, string) {
@@ -240,8 +295,17 @@ func (f *fakeLDAP) serve(raw net.Conn) {
 func (f *fakeLDAP) match(base, filter string) []fakeEntry {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if base == "" && f.RootDSE != nil {
+		return []fakeEntry{{DN: "", Attrs: f.RootDSE}}
+	}
+	if base == "" {
+		return nil
+	}
+	if base == fakeNTDSDN && f.NTDS != nil {
+		return []fakeEntry{{DN: base, Attrs: f.NTDS}}
+	}
 	if base == "ou=groups,dc=corp" {
-		return append([]fakeEntry(nil), f.Groups...)
+		return changedSince(filter, append([]fakeEntry(nil), f.Groups...))
 	}
 	for dn, ids := range f.Members {
 		if containsStr(filter, "1.2.840.113556.1.4.1941:="+dn+")") {
@@ -256,7 +320,7 @@ func (f *fakeLDAP) match(base, filter string) []fakeEntry {
 			return out
 		}
 	}
-	return append([]fakeEntry(nil), f.Users...)
+	return changedSince(filter, append([]fakeEntry(nil), f.Users...))
 }
 
 func containsStr(s, sub string) bool {

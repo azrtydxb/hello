@@ -362,3 +362,48 @@ func TestPGLastAdminIsKept(t *testing.T) {
 		t.Fatalf("the last admin was disabled: %s", got)
 	}
 }
+
+func TestPGIncrementalStateAndRunColumns(t *testing.T) {
+	r := newPGRig(t)
+	at := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	st := SyncState{Mark: &SyncMark{Method: markUSN, USN: 4242, Invocation: "abc"}, Fingerprint: "fp1", LastFullAt: &at}
+	if err := r.pg.SaveSyncState(r.ctx, r.c.ID, st); err != nil {
+		t.Fatal(err)
+	}
+	c, err := r.pg.GetConnector(r.ctx, r.c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Sync.Mark == nil || *c.Sync.Mark != *st.Mark || c.Sync.Fingerprint != "fp1" || c.LastFullRunAt == nil || !c.LastFullRunAt.Equal(at) {
+		t.Fatalf("state = %+v, last full %v", c.Sync, c.LastFullRunAt)
+	}
+	// Editing the connector keeps the mark (the fingerprint decides on the next run).
+	if _, err := r.e.Update(r.ctx, "admin", r.c.ID, ConnectorInput{Name: strPtr("AD2")}); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ = r.pg.GetConnector(r.ctx, r.c.ID); c.Sync.Mark == nil || c.Sync.Mark.USN != 4242 {
+		t.Fatalf("an edit lost the mark: %+v", c.Sync)
+	}
+	// Clearing it.
+	if err := r.pg.SaveSyncState(r.ctx, r.c.ID, SyncState{}); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ = r.pg.GetConnector(r.ctx, r.c.ID); c.Sync.Mark != nil || c.LastFullRunAt != nil {
+		t.Fatalf("state not cleared: %+v", c.Sync)
+	}
+	if err := r.pg.SaveSyncState(r.ctx, 987654, SyncState{}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown connector: %v", err)
+	}
+
+	run, err := r.pg.CreateRun(r.ctx, Run{ConnectorID: r.c.ID, Kind: RunScheduled, Status: StatusRunning, Counts: map[string]int{}, Incremental: true})
+	if err != nil || !run.Incremental {
+		t.Fatalf("create: %+v %v", run, err)
+	}
+	run.Incremental, run.FullReason = false, FullInterval
+	if err := r.pg.UpdateRun(r.ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := r.pg.GetRun(r.ctx, run.ID); got.Incremental || got.FullReason != FullInterval {
+		t.Fatalf("run = %+v", got)
+	}
+}

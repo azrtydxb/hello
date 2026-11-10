@@ -89,6 +89,8 @@ export interface Connector {
   lastErrorDetail: string;
   consecutiveFailures: number;
   linkedUsers: number;
+  /** When the last full run finished (a full run is forced every 24 h). */
+  lastFullRunAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -152,6 +154,11 @@ export interface Run {
   replica: string;
   counts: Record<string, number>;
   diffHash: string;
+  /** The run read only what changed since the last run. It never disables a
+   * user for being absent; only a full run does. */
+  incremental: boolean;
+  /** Why a full run was full (manual, no_mark, full_interval, ...). */
+  fullReason: string;
   errorCode: string;
   errorDetail: string;
 }

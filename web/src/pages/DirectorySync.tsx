@@ -117,6 +117,34 @@ export function countsText(r: Run): string {
   return parts.length === 0 ? "no changes" : parts.join(", ");
 }
 
+const FULL_REASONS: Record<string, string> = {
+  manual: "requested by hand",
+  no_mark: "no earlier run to continue from",
+  full_interval: "24 hours since the last full run",
+  config_changed: "mapping, rules or connection changed",
+  usn_regressed: "the server's USN went backwards",
+  invocation_changed: "the server's invocation ID changed",
+  clock_regressed: "the server's clock went backwards",
+  method_changed: "the server's change tracking changed",
+  groups_changed: "a group used by the rules changed",
+  unsupported: "the server has no change tracking",
+};
+
+/** Whether a run read only the changes or everything, and why. */
+export function readText(r: Run): string {
+  if (r.incremental) return "Incremental";
+  return "Full";
+}
+
+/** The longer form: a full run says why it was full. */
+export function readDetail(r: Run): string {
+  if (r.incremental) {
+    return "Incremental: only changes since the last run were read; absent users are not touched.";
+  }
+  const why = FULL_REASONS[r.fullReason];
+  return why ? `Full: ${why}.` : "Full: the whole directory was read.";
+}
+
 /**
  * Directory sync (/integrations/directory): AD/LDAP connectors that create,
  * update and disable users from a company directory. A run is previewed
@@ -536,6 +564,15 @@ function Runs({
               { key: "id", label: "Run", render: (r) => `#${String(r.id)}` },
               { key: "kind", label: "Kind", render: (r) => r.kind },
               {
+                key: "read",
+                label: "Read",
+                render: (r) => (
+                  <Badge tone={r.incremental ? "info" : "neutral"}>
+                    <span title={readDetail(r)}>{readText(r)}</span>
+                  </Badge>
+                ),
+              },
+              {
                 key: "status",
                 label: "Status",
                 render: (r) => (
@@ -659,7 +696,7 @@ function RunDrawer({
   return (
     <Drawer
       title={`Run #${String(current.id)} of ${connector.name}`}
-      description={`${current.kind}, ${current.status}. ${countsText(current)}.`}
+      description={`${current.kind}, ${current.status}. ${readDetail(current)} ${countsText(current)}.`}
       onClose={busy ? undefined : onClose}
       width={760}
       footer={

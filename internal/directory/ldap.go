@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -363,6 +364,26 @@ func (LDAP) Fetch(ctx context.Context, raw json.RawMessage, secret string, o Fet
 		return nil, err
 	}
 	defer func() { _ = c.Close() }()
+	// The mark is taken before anything is read, so a change made while the
+	// read runs is picked up by the next incremental run.
+	mark := c.readMark(ctx, o.Now)
+	since, reason := chooseSince(o.Since, mark)
+	if since != nil && len(o.NeedGroups) > 0 && cfg.GroupBaseDN != "" {
+		// A user's groups come from the group objects (and, on AD, memberOf,
+		// which does not touch the user's own USN): when a group the rules use
+		// changed, read every user, so no membership change is missed.
+		changed, err := c.groupsChanged(ctx, since, o)
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			since, reason = nil, FullGroupsChanged
+		}
+	}
+	userFilter := cfg.UserFilter
+	if since != nil {
+		userFilter = "(&" + cfg.UserFilter + since.changedClause() + ")"
+	}
 	var groups []SourceGroup
 	dnToGroup := map[string]string{}
 	groupDN := map[string]string{}
@@ -377,7 +398,7 @@ func (LDAP) Fetch(ctx context.Context, raw json.RawMessage, secret string, o Fet
 			groupDN[g.ID] = g.dn
 		}
 	}
-	users, err := c.users(ctx, o, len(o.NeedGroups) > 0 && !cfg.NestedGroups)
+	users, err := c.users(ctx, o, userFilter, len(o.NeedGroups) > 0 && !cfg.NestedGroups)
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +441,131 @@ func (LDAP) Fetch(ctx context.Context, raw json.RawMessage, secret string, o Fet
 			}
 		}
 	}
-	return &Result{Users: users, Groups: groups}, nil
+	res := &Result{Users: users, Groups: groups, Mark: mark, Incremental: since != nil}
+	if since == nil && o.Since != nil {
+		res.FullReason = reason
+	}
+	return res, nil
+}
+
+// markOverlap is subtracted from a time-based mark, so clock skew between
+// Hello and the directory cannot hide a change.
+const markOverlap = 5 * time.Minute
+
+// Mark methods.
+const (
+	markUSN             = "usn"
+	markWhenChanged     = "whenChanged"
+	markModifyTimestamp = "modifyTimestamp"
+)
+
+// adCapability is the rootDSE supportedCapabilities value of Active Directory.
+const adCapability = "1.2.840.113556.1.4.800"
+
+func genTime(t time.Time) string { return t.UTC().Format("20060102150405") + ".0Z" }
+
+// changedClause is the filter clause selecting what changed since the mark.
+func (m *SyncMark) changedClause() string {
+	switch m.Method {
+	case markUSN:
+		return "(uSNChanged>=" + strconv.FormatInt(m.USN, 10) + ")"
+	case markWhenChanged:
+		return "(whenChanged>=" + ldap.EscapeFilter(m.Time) + ")"
+	}
+	return "(modifyTimestamp>=" + ldap.EscapeFilter(m.Time) + ")"
+}
+
+// readMark reads the high-water mark from the rootDSE: AD's
+// highestCommittedUSN with the invocation ID, else a time (whenChanged on AD,
+// modifyTimestamp elsewhere). A server that will not say gets a time mark;
+// nil is returned only when no clock is given.
+func (c *ldapConn) readMark(ctx context.Context, now time.Time) *SyncMark {
+	if now.IsZero() || ctx.Err() != nil {
+		return nil
+	}
+	timeMark := func(method string) *SyncMark {
+		return &SyncMark{Method: method, Time: genTime(now.Add(-markOverlap))}
+	}
+	req := ldap.NewSearchRequest("", ldap.ScopeBaseObject, ldap.NeverDerefAliases, 1, int(c.cfg.timeout().Seconds()), false,
+		"(objectClass=*)", []string{"highestCommittedUSN", "dsServiceName", "supportedCapabilities"}, nil)
+	res, err := c.Search(req)
+	if err != nil || len(res.Entries) == 0 {
+		return timeMark(markModifyTimestamp)
+	}
+	e := res.Entries[0]
+	if v := strings.TrimSpace(e.GetAttributeValue("highestCommittedUSN")); v != "" {
+		if usn, err := strconv.ParseInt(v, 10, 64); err == nil && usn >= 0 {
+			if inv := c.invocationID(e.GetAttributeValue("dsServiceName")); inv != "" {
+				return &SyncMark{Method: markUSN, USN: usn, Invocation: inv}
+			}
+		}
+		// Without an invocation ID a restore cannot be told from a normal
+		// run, so USN is not safe: use the time.
+		return timeMark(markWhenChanged)
+	}
+	for _, cap := range e.GetAttributeValues("supportedCapabilities") {
+		if cap == adCapability {
+			return timeMark(markWhenChanged)
+		}
+	}
+	return timeMark(markModifyTimestamp)
+}
+
+// invocationID reads the DC's invocation ID from its NTDS Settings object.
+func (c *ldapConn) invocationID(dn string) string {
+	if dn == "" {
+		return ""
+	}
+	req := ldap.NewSearchRequest(dn, ldap.ScopeBaseObject, ldap.NeverDerefAliases, 1, int(c.cfg.timeout().Seconds()), false,
+		"(objectClass=*)", []string{"invocationId"}, nil)
+	res, err := c.Search(req)
+	if err != nil || len(res.Entries) == 0 {
+		return ""
+	}
+	if raw := res.Entries[0].GetRawAttributeValues("invocationId"); len(raw) > 0 && len(raw[0]) == 16 {
+		return guidString(raw[0])
+	}
+	return ""
+}
+
+// chooseSince decides whether the read can be incremental from since, given
+// the mark just read from the server, and says why not when it cannot: a
+// restore (the invocation ID changed, or the USN went backwards) or a clock
+// that went backwards means the mark describes a different history.
+func chooseSince(since, now *SyncMark) (*SyncMark, string) {
+	switch {
+	case since == nil:
+		return nil, ""
+	case now == nil:
+		return nil, FullUnsupported
+	case since.Method != now.Method:
+		return nil, FullMethodChanged
+	case since.Method == markUSN && since.Invocation != now.Invocation:
+		return nil, FullInvocation
+	case since.Method == markUSN && now.USN < since.USN:
+		return nil, FullUSNRegressed
+	case since.Method != markUSN && now.Time < since.Time:
+		return nil, FullClockRegressed
+	}
+	return since, ""
+}
+
+// groupsChanged reports whether a group the rules depend on changed since the
+// mark. With nested groups any group may matter, so any change counts.
+func (c *ldapConn) groupsChanged(ctx context.Context, since *SyncMark, o FetchOptions) (bool, error) {
+	need := map[string]bool{}
+	for _, id := range o.NeedGroups {
+		need[id] = true
+	}
+	changed := false
+	filter := "(&" + c.cfg.GroupFilter + since.changedClause() + ")"
+	err := c.paged(ctx, c.cfg.GroupBaseDN, ldap.ScopeWholeSubtree, filter, []string{"objectGUID", "entryUUID", "nsUniqueId"}, maxGroups, func(e *ldap.Entry) error {
+		if id := stableID(e); c.cfg.NestedGroups || need[id] {
+			changed = true
+		}
+		return nil
+	})
+	return changed, err
 }
 
 type ldapGroup struct {
@@ -484,13 +629,13 @@ func (c *ldapConn) paged(ctx context.Context, base string, scope int, filter str
 	}
 }
 
-func (c *ldapConn) users(ctx context.Context, o FetchOptions, withMemberOf bool) ([]SourceUser, error) {
+func (c *ldapConn) users(ctx context.Context, o FetchOptions, filter string, withMemberOf bool) ([]SourceUser, error) {
 	attrs := append([]string{"objectGUID", "entryUUID", "nsUniqueId"}, o.Attributes...)
 	if withMemberOf {
 		attrs = append(attrs, "memberOf")
 	}
 	var out []SourceUser
-	err := c.paged(ctx, c.cfg.BaseDN, c.cfg.scope(), c.cfg.UserFilter, attrs, o.Limit, func(e *ldap.Entry) error {
+	err := c.paged(ctx, c.cfg.BaseDN, c.cfg.scope(), filter, attrs, o.Limit, func(e *ldap.Entry) error {
 		id := stableID(e)
 		if id == "" {
 			return &Error{Code: CodeBadFilter, Detail: "an entry has no stable id (objectGUID, entryUUID or nsUniqueId); the filter matches something that is not a user"}

@@ -65,18 +65,28 @@ func (p *PG) Audit(ctx context.Context, actor, action, resource, id string) erro
 const connectorCols = `c.id, c.kind, c.name, c.enabled, c.mode, c.schedule_minutes, c.config::text, c.mappings::text, c.group_rules::text,
 	c.options::text, c.auto_provision::text, c.credential_enc IS NOT NULL, c.credential_fp, c.status, c.last_run_at, c.last_success_at,
 	c.last_error_code, c.last_error_detail, c.consecutive_failures, c.created_at, c.updated_at,
-	(SELECT count(*) FROM users u WHERE u.source_connector_id = c.id)`
+	(SELECT count(*) FROM users u WHERE u.source_connector_id = c.id), c.sync_mark::text, c.sync_fingerprint, c.last_full_run_at`
 
 func scanConnector(r interface{ Scan(...any) error }) (Connector, error) {
 	var (
 		c                             Connector
 		cfg, maps, rules, opts, autoP string
-		lastRun, lastOK               sql.NullTime
+		lastRun, lastOK, lastFull     sql.NullTime
+		mark                          string
 	)
 	if err := r.Scan(&c.ID, &c.Kind, &c.Name, &c.Enabled, &c.Mode, &c.ScheduleMinutes, &cfg, &maps, &rules, &opts, &autoP,
 		&c.HasCredential, &c.CredentialFP, &c.Status, &lastRun, &lastOK, &c.LastErrorCode, &c.LastErrorDetail,
-		&c.ConsecutiveFailure, &c.CreatedAt, &c.UpdatedAt, &c.LinkedUsers); err != nil {
+		&c.ConsecutiveFailure, &c.CreatedAt, &c.UpdatedAt, &c.LinkedUsers, &mark, &c.Sync.Fingerprint, &lastFull); err != nil {
 		return c, err
+	}
+	if mark != "" && mark != "{}" && mark != "null" {
+		var m SyncMark
+		if json.Unmarshal([]byte(mark), &m) == nil && m.Method != "" {
+			c.Sync.Mark = &m
+		}
+	}
+	if lastFull.Valid {
+		c.LastFullRunAt, c.Sync.LastFullAt = &lastFull.Time, &lastFull.Time
 	}
 	c.Config, c.AutoProvision = json.RawMessage(cfg), json.RawMessage(autoP)
 	for _, d := range []struct {
@@ -281,7 +291,24 @@ func (p *PG) RecordOutcome(ctx context.Context, id int64, ok bool, code, detail 
 	return n, mapErr(err)
 }
 
-const runCols = `id, connector_id, kind, status, requested_by, created_at, started_at, finished_at, replica, counts::text, diff_hash, error_code, error_detail`
+// SaveSyncState implements Store.
+func (p *PG) SaveSyncState(ctx context.Context, id int64, s SyncState) error {
+	mark := "{}"
+	if s.Mark != nil {
+		mark = jsonOf(s.Mark)
+	}
+	res, err := p.DB.ExecContext(ctx, `UPDATE directory_connectors SET sync_mark = $2::jsonb, sync_fingerprint = $3, last_full_run_at = $4 WHERE id = $1`,
+		id, mark, s.Fingerprint, s.LastFullAt)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+const runCols = `id, connector_id, kind, status, requested_by, created_at, started_at, finished_at, replica, counts::text, diff_hash, error_code, error_detail, incremental, full_reason`
 
 func scanRun(r interface{ Scan(...any) error }) (Run, error) {
 	var (
@@ -291,7 +318,7 @@ func scanRun(r interface{ Scan(...any) error }) (Run, error) {
 		counts  string
 	)
 	if err := r.Scan(&x.ID, &x.ConnectorID, &x.Kind, &x.Status, &x.RequestedBy, &x.CreatedAt, &started, &done, &x.Replica, &counts,
-		&x.DiffHash, &x.ErrorCode, &x.ErrorDetail); err != nil {
+		&x.DiffHash, &x.ErrorCode, &x.ErrorDetail, &x.Incremental, &x.FullReason); err != nil {
 		return x, err
 	}
 	if started.Valid {
@@ -308,9 +335,9 @@ func scanRun(r interface{ Scan(...any) error }) (Run, error) {
 // CreateRun implements Store.
 func (p *PG) CreateRun(ctx context.Context, r Run) (Run, error) {
 	x, err := scanRun(p.DB.QueryRowContext(ctx, `
-		INSERT INTO directory_sync_runs (connector_id, kind, status, requested_by, started_at, replica, counts)
-		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb) RETURNING `+runCols,
-		r.ConnectorID, r.Kind, r.Status, r.RequestedBy, r.StartedAt, r.Replica, jsonOf(orEmpty(r.Counts))))
+		INSERT INTO directory_sync_runs (connector_id, kind, status, requested_by, started_at, replica, counts, incremental, full_reason)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9) RETURNING `+runCols,
+		r.ConnectorID, r.Kind, r.Status, r.RequestedBy, r.StartedAt, r.Replica, jsonOf(orEmpty(r.Counts)), r.Incremental, r.FullReason))
 	return x, mapErr(err)
 }
 
@@ -352,8 +379,9 @@ func (p *PG) ListRuns(ctx context.Context, connectorID int64, limit int) ([]Run,
 func (p *PG) UpdateRun(ctx context.Context, r Run) error {
 	_, err := p.DB.ExecContext(ctx, `
 		UPDATE directory_sync_runs SET kind = $2, status = $3, requested_by = $4, started_at = $5, finished_at = $6, replica = $7,
-			counts = $8::jsonb, diff_hash = $9, error_code = $10, error_detail = $11 WHERE id = $1`,
-		r.ID, r.Kind, r.Status, r.RequestedBy, r.StartedAt, r.FinishedAt, r.Replica, jsonOf(orEmpty(r.Counts)), r.DiffHash, r.ErrorCode, r.ErrorDetail)
+			counts = $8::jsonb, diff_hash = $9, error_code = $10, error_detail = $11, incremental = $12, full_reason = $13 WHERE id = $1`,
+		r.ID, r.Kind, r.Status, r.RequestedBy, r.StartedAt, r.FinishedAt, r.Replica, jsonOf(orEmpty(r.Counts)), r.DiffHash, r.ErrorCode, r.ErrorDetail,
+		r.Incremental, r.FullReason)
 	return err
 }
 

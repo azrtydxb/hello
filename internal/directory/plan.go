@@ -104,6 +104,9 @@ type PlanInput struct {
 	State     State
 	Result    *Result
 	Decisions Decisions
+	// Incremental says Result holds only changed users: absence proves
+	// nothing, so no user is counted absent or disabled for it (I-12).
+	Incremental bool
 }
 
 type planner struct {
@@ -192,7 +195,9 @@ func (p *planner) run() {
 			p.unlinked(s)
 		}
 	}
-	p.absent(seen)
+	if !p.in.Incremental {
+		p.absent(seen)
+	}
 }
 
 func (p *planner) add(c Change, op *Op) {

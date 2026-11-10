@@ -1,7 +1,13 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { apiError, json, mockApi, noContent, renderApp } from "../test/api";
-import { countsText, diffText, sourceText } from "./DirectorySync";
+import {
+  countsText,
+  diffText,
+  readDetail,
+  readText,
+  sourceText,
+} from "./DirectorySync";
 import type { Change, Connector, Run } from "../api/dirsync";
 
 const AT = "2026-11-10T10:00:00Z";
@@ -46,6 +52,7 @@ function connector(over: Partial<Connector> = {}): Connector {
     lastErrorDetail: "",
     consecutiveFailures: 0,
     linkedUsers: 12,
+    lastFullRunAt: AT,
     createdAt: AT,
     updatedAt: AT,
     ...over,
@@ -65,6 +72,8 @@ function run(over: Partial<Run> = {}): Run {
     replica: "n1",
     counts: { create: 2, adopt: 1, conflict: 1, users: 4 },
     diffHash: "abc",
+    incremental: false,
+    fullReason: "manual",
     errorCode: "",
     errorDetail: "",
     ...over,
@@ -112,6 +121,22 @@ describe("Directory (spec integrations P8)", () => {
         change(1, { fieldDiffs: { email: { before: "a@x", after: "b@x" } } }),
       ),
     ).toBe("email: a@x → b@x");
+  });
+
+  it("says whether a run was incremental or full, and why", () => {
+    expect(readText(run({ incremental: true, fullReason: "" }))).toBe(
+      "Incremental",
+    );
+    expect(readDetail(run({ incremental: true, fullReason: "" }))).toMatch(
+      /absent users are not touched/,
+    );
+    expect(readText(run())).toBe("Full");
+    expect(readDetail(run({ fullReason: "full_interval" }))).toBe(
+      "Full: 24 hours since the last full run.",
+    );
+    expect(readDetail(run({ fullReason: "usn_regressed" }))).toMatch(
+      /USN went backwards/,
+    );
   });
 
   it("lists the connectors with their state, users and schedule", async () => {
@@ -377,6 +402,8 @@ describe("Directory (spec integrations P8)", () => {
             run(),
             run({
               id: 4,
+              incremental: true,
+              fullReason: "",
               status: "needs_confirmation",
               kind: "scheduled",
               errorCode: "needs_confirmation",
@@ -399,6 +426,8 @@ describe("Directory (spec integrations P8)", () => {
     expect(
       within(table).getByText("2 create, 1 adopt, 1 conflict"),
     ).toBeVisible();
+    expect(within(table).getByText("Incremental")).toBeVisible();
+    expect(within(table).getByText("Full")).toBeVisible();
     expect(
       await screen.findByText(/waiting for your confirmation/),
     ).toBeVisible();

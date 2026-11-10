@@ -36375,6 +36375,11 @@
             "type": "integer",
             "description": "Users this connector manages."
           },
+          "lastFullRunAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the last full run finished. A full run is forced every 24 hours, and when the mapping, rules or config change, because only a full run detects absences."
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -36404,6 +36409,7 @@
           "lastErrorDetail",
           "consecutiveFailures",
           "linkedUsers",
+          "lastFullRunAt",
           "createdAt",
           "updatedAt"
         ]
@@ -36700,6 +36706,14 @@
           "diffHash": {
             "type": "string"
           },
+          "incremental": {
+            "type": "boolean",
+            "description": "The run read only the changes since the last run (scheduled runs, when the source supports it). An incremental run never disables or deprovisions a user for being absent; only a full run detects absences."
+          },
+          "fullReason": {
+            "type": "string",
+            "description": "Why a full run was full: manual, no_mark, full_interval (24 hours since the last full run), config_changed, usn_regressed, invocation_changed, clock_regressed, method_changed, groups_changed or unsupported. Empty for an incremental run."
+          },
           "errorCode": {
             "type": "string",
             "description": "For failed: the classified code. For needs_confirmation: needs_confirmation (more than 20 percent of linked users, and more than 5, would be disabled) or empty_result."
@@ -36720,6 +36734,8 @@
           "replica",
           "counts",
           "diffHash",
+          "incremental",
+          "fullReason",
           "errorCode",
           "errorDetail"
         ]

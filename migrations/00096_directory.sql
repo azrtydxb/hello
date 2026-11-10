@@ -26,6 +26,13 @@ CREATE TABLE directory_connectors (
     -- A short fingerprint of what the secret is bound to (host and bind DN),
     -- so a change of either demands the secret again (T-4).
     credential_fp        TEXT        NOT NULL DEFAULT '',
+    -- Incremental runs (I-12): the high-water mark of the last applied read
+    -- ({} none), a fingerprint of the config, mappings, rules and mode it was
+    -- taken under, and when the last full run finished (full runs are the only
+    -- ones that detect absences, so one is forced every 24 hours).
+    sync_mark            JSONB       NOT NULL DEFAULT '{}',
+    sync_fingerprint     TEXT        NOT NULL DEFAULT '',
+    last_full_run_at     TIMESTAMPTZ,
     status               TEXT        NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'ok', 'failing')),
     last_run_at          TIMESTAMPTZ,
     last_success_at      TIMESTAMPTZ,
@@ -50,6 +57,10 @@ CREATE TABLE directory_sync_runs (
     counts        JSONB       NOT NULL DEFAULT '{}',
     diff_hash     TEXT        NOT NULL DEFAULT '',
     delta_token   TEXT        NOT NULL DEFAULT '',
+    -- Whether the run read only the changes since the last run, and why a full
+    -- run was full (manual, no_mark, full_interval, config_changed, ...).
+    incremental   BOOLEAN     NOT NULL DEFAULT FALSE,
+    full_reason   TEXT        NOT NULL DEFAULT '',
     error_code    TEXT        NOT NULL DEFAULT '',
     error_detail  TEXT        NOT NULL DEFAULT ''
 );

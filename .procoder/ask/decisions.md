@@ -2097,10 +2097,23 @@ connector_in_use`) unless `release=true`, which turns the users into local
   runs name users, so every directory route is scope `admin`, role admin. The
   MCP tools are the five read operations; the writes, the test, the sync and
   the apply and confirm are excluded (credentials, human-in-the-loop).
-- **Full runs only.** The connector reads the whole directory every run. The
-  incremental read (`whenChanged`, `users/delta`) of I-12 is not built: it
-  saves time on very large forests only, and absence detection needs a full
-  read anyway. `directory_sync_runs.delta_token` is reserved.
+- **Incremental runs (I-12).** Only a scheduled run reads incrementally; a
+  preview, a manual apply and a confirm always read everything, so an apply
+  matches its preview. AD reads `uSNChanged>=` the `highestCommittedUSN` taken
+  from the rootDSE before the read, kept per connector with the server's
+  invocation ID; without a USN, `whenChanged>=` (AD) or `modifyTimestamp>=`
+  (other LDAP) from the read's start less 5 minutes for clock skew. The mark is
+  stored only after a run applied with no error row. A full run is forced when
+  there is no mark, 24 h after the last full run, when the config, mappings,
+  group rules or mode changed (a fingerprint), when the invocation ID changed
+  or the USN or clock went backwards, and when a group the rules use changed
+  (AD does not bump a user's USN for a membership change). An incremental run
+  never counts, skips or disables a user for being absent and never trips the
+  empty-result guard; only full runs detect absences. Unchanged users with a
+  conflict are re-examined by the next full run, not before. Stored in
+  `directory_connectors` (`sync_mark`, `sync_fingerprint`, `last_full_run_at`)
+  and shown per run (`incremental`, `fullReason`). `delta_token` stays reserved
+  for Entra.
 - **Stable id.** AD `objectGUID` in its canonical string form, else
   `entryUUID`, else `nsUniqueId`; an entry with none fails the run
   (`bad_filter`) instead of being skipped, because a skipped user would read as

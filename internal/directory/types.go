@@ -153,11 +153,64 @@ type SourceGroup struct {
 	Name string `json:"name"`
 }
 
-// Result is what a full fetch returns.
+// Result is what a fetch returns.
 type Result struct {
 	Users  []SourceUser
 	Groups []SourceGroup
+	// Incremental says Users holds only what changed since FetchOptions.Since,
+	// so the absence of a user proves nothing (I-12). A driver that cannot read
+	// incrementally, or that finds the mark unusable, returns a full read.
+	Incremental bool
+	// FullReason says why a read that was asked to be incremental was full.
+	FullReason string
+	// Mark is the high-water mark taken before the read started, to be stored
+	// when the run succeeds; nil when the source supports no incremental read.
+	Mark *SyncMark
 }
+
+// SyncMark is a connector's high-water mark (I-12): where the next incremental
+// read starts. It holds no secret.
+type SyncMark struct {
+	// Method is usn (AD uSNChanged), whenChanged (AD without USN) or
+	// modifyTimestamp (generic LDAP).
+	Method string `json:"method"`
+	// USN is the server's highestCommittedUSN when the read began.
+	USN int64 `json:"usn,omitempty"`
+	// Invocation is the server's invocation ID: it changes when the directory
+	// is restored from a backup, which also rewinds the USN.
+	Invocation string `json:"invocation,omitempty"`
+	// Time is an LDAP generalized time, the start of the read less an overlap
+	// for clock skew.
+	Time string `json:"time,omitempty"`
+}
+
+// SyncState is what a connector keeps between runs.
+type SyncState struct {
+	Mark *SyncMark
+	// Fingerprint is a hash of what decides the outcome for unchanged users
+	// (config, mappings, rules, mode): when it changes the next run is full.
+	Fingerprint string
+	// LastFullAt is when the last complete (full) run finished applying.
+	LastFullAt *time.Time
+}
+
+// Why a run was a full one (Run.FullReason).
+const (
+	FullManual         = "manual"
+	FullNoMark         = "no_mark"
+	FullInterval       = "full_interval"
+	FullConfigChanged  = "config_changed"
+	FullUSNRegressed   = "usn_regressed"
+	FullInvocation     = "invocation_changed"
+	FullClockRegressed = "clock_regressed"
+	FullMethodChanged  = "method_changed"
+	FullGroupsChanged  = "groups_changed"
+	FullUnsupported    = "unsupported"
+)
+
+// FullRunInterval is how often a full run is forced: it is the only kind of
+// run that detects absences (I-12).
+const FullRunInterval = 24 * time.Hour
 
 // TestResult is the answer to a connection test (I-19). It carries no secret.
 type TestResult struct {
@@ -226,6 +279,10 @@ type FetchOptions struct {
 	// Allow are the private ranges the connection may reach
 	// (HELLO_INTEGRATIONS_ALLOWED_CIDRS).
 	Allow []netip.Prefix
+	// Since asks for an incremental read from this mark (nil: full read).
+	Since *SyncMark
+	// Now is the run's clock.
+	Now time.Time
 }
 
 // Connector is a directory connection with its mapping, rules and state. The
@@ -253,8 +310,12 @@ type Connector struct {
 	LastErrorDetail    string     `json:"lastErrorDetail"`
 	ConsecutiveFailure int        `json:"consecutiveFailures"`
 	LinkedUsers        int        `json:"linkedUsers"`
-	CreatedAt          time.Time  `json:"createdAt"`
-	UpdatedAt          time.Time  `json:"updatedAt"`
+	// LastFullRunAt is when the last full run finished; Sync is the rest of
+	// the state kept for incremental runs (not exposed).
+	LastFullRunAt *time.Time `json:"lastFullRunAt"`
+	Sync          SyncState  `json:"-"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 // Options are the engine settings every kind shares.
@@ -319,8 +380,13 @@ type Run struct {
 	Replica     string         `json:"replica"`
 	Counts      map[string]int `json:"counts"`
 	DiffHash    string         `json:"diffHash"`
-	ErrorCode   string         `json:"errorCode"`
-	ErrorDetail string         `json:"errorDetail"`
+	// Incremental says the run read only the changes since the last run; a
+	// full run reads everything and is the only one that detects absences.
+	// FullReason says why a full run was full.
+	Incremental bool   `json:"incremental"`
+	FullReason  string `json:"fullReason"`
+	ErrorCode   string `json:"errorCode"`
+	ErrorDetail string `json:"errorDetail"`
 }
 
 // Diff is one field's before and after. Secrets are never fields.

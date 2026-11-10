@@ -164,6 +164,18 @@ func (m *Mem) SaveConnector(_ context.Context, actor string, c Connector, secret
 	return c, nil
 }
 
+// SaveSyncState implements Store.
+func (m *Mem) SaveSyncState(_ context.Context, id int64, st SyncState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.Connectors[id]
+	if !ok {
+		return ErrNotFound
+	}
+	c.Sync, c.LastFullRunAt = st, st.LastFullAt
+	return nil
+}
+
 // DeleteConnector implements Store.
 func (m *Mem) DeleteConnector(_ context.Context, actor string, id int64, release bool) error {
 	m.mu.Lock()

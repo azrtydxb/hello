@@ -49,6 +49,10 @@ type Store interface {
 	ReplaceChanges(ctx context.Context, runID int64, cs []Change) error
 	ListChanges(ctx context.Context, runID int64, f ChangeFilter) ([]Change, error)
 
+	// SaveSyncState stores the high-water mark, the config fingerprint and the
+	// last full run time of a connector (I-12).
+	SaveSyncState(ctx context.Context, connectorID int64, s SyncState) error
+
 	LoadState(ctx context.Context, connectorID int64) (State, error)
 	// Apply performs one operation, audited with actor.
 	Apply(ctx context.Context, actor string, c Connector, op Op) error
@@ -322,7 +326,8 @@ func (m Mappings) Attributes() []string {
 }
 
 func (e *Engine) fetchOptions(c Connector) FetchOptions {
-	return FetchOptions{Limit: c.Options.userCap(), NeedGroups: c.GroupRules.GroupIDs(), Attributes: c.Mappings.Attributes(), Allow: e.Allow, Dial: e.Dial, AllowPlaintext: e.AllowPlaintext}
+	return FetchOptions{Limit: c.Options.userCap(), NeedGroups: c.GroupRules.GroupIDs(), Attributes: c.Mappings.Attributes(), Allow: e.Allow, Dial: e.Dial,
+		AllowPlaintext: e.AllowPlaintext, Now: e.now()}
 }
 
 // Test connects with the stored credential and reads a small page (I-19). The
@@ -483,7 +488,10 @@ func (e *Engine) applyRun(ctx context.Context, actor string, runID int64, dec De
 	}
 	runCtx, cancel := context.WithTimeout(ctx, c.Options.runTimeout())
 	defer cancel()
-	res, ferr := e.fetch(runCtx, c)
+	// An apply is always a full read: it must match the preview it applies,
+	// and only a full read may deprovision (I-12).
+	run.FullReason = FullManual
+	res, ferr := e.fetch(runCtx, c, nil)
 	if ferr != nil {
 		return e.fail(ctx, c, run, started, ferr), nil
 	}
@@ -491,7 +499,7 @@ func (e *Engine) applyRun(ctx context.Context, actor string, runID int64, dec De
 	if err != nil {
 		return e.fail(ctx, c, run, started, err), nil
 	}
-	base := MakePlan(PlanInput{Connector: c, State: st, Result: res})
+	base := MakePlan(PlanInput{Connector: c, State: st, Result: res, Incremental: res.Incremental})
 	if started.Sub(ref) > PreviewTTL || base.Hash != run.DiffHash {
 		// Stale: keep the old preview as such and answer with a fresh one.
 		run.Status = StatusStale
@@ -510,8 +518,9 @@ func (e *Engine) applyRun(ctx context.Context, actor string, runID int64, dec De
 		}
 		return fresh, ErrStale
 	}
-	plan := MakePlan(PlanInput{Connector: c, State: st, Result: res, Decisions: dec})
+	plan := MakePlan(PlanInput{Connector: c, State: st, Result: res, Decisions: dec, Incremental: res.Incremental})
 	run.Kind = RunApply
+	run.Incremental, run.FullReason = res.Incremental, fullReasonOf(res, FullManual)
 	run.RequestedBy = actor
 	run.Replica = e.Replica
 	run.Status = StatusRunning
@@ -534,17 +543,20 @@ func (e *Engine) execQueued(ctx context.Context, c Connector, run Run) {
 	started := e.now()
 	ctx, cancel := context.WithTimeout(ctx, c.Options.runTimeout())
 	defer cancel()
-	res, err := e.fetch(ctx, c)
+	since, reason := e.incrementalSince(c, run.Kind)
+	run.FullReason = reason
+	res, err := e.fetch(ctx, c, since)
 	if err != nil {
 		e.fail(ctx, c, run, started, err)
 		return
 	}
+	run.Incremental, run.FullReason = res.Incremental, fullReasonOf(res, reason)
 	st, err := e.Store.LoadState(ctx, c.ID)
 	if err != nil {
 		e.fail(ctx, c, run, started, err)
 		return
 	}
-	plan := MakePlan(PlanInput{Connector: c, State: st, Result: res})
+	plan := MakePlan(PlanInput{Connector: c, State: st, Result: res, Incremental: res.Incremental})
 	if run.Kind == RunPreview {
 		if _, err := e.finishPreview(ctx, c, run, plan, res, started); err != nil {
 			e.log().Error("directory: finish preview", "connector", c.ID, "err", err)
@@ -557,7 +569,7 @@ func (e *Engine) execQueued(ctx context.Context, c Connector, run Run) {
 }
 
 // fetch reads the source and enforces the empty-result precondition inputs.
-func (e *Engine) fetch(ctx context.Context, c Connector) (*Result, error) {
+func (e *Engine) fetch(ctx context.Context, c Connector, since *SyncMark) (*Result, error) {
 	d, err := e.driver(c.Kind)
 	if err != nil {
 		return nil, err
@@ -567,6 +579,7 @@ func (e *Engine) fetch(ctx context.Context, c Connector) (*Result, error) {
 		return nil, &Error{Code: CodeAuthFailed, Detail: "no bind password is set"}
 	}
 	o := e.fetchOptions(c)
+	o.Since = since
 	res, err := d.Fetch(ctx, c.Config, secret, o)
 	if err != nil {
 		return nil, classify(err)
@@ -575,6 +588,72 @@ func (e *Engine) fetch(ctx context.Context, c Connector) (*Result, error) {
 		return nil, &Error{Code: CodeUserCap, Detail: "the source returned more users than the cap of " + strconv.Itoa(o.Limit)}
 	}
 	return res, nil
+}
+
+// syncFingerprint hashes what decides the outcome for users the source did not
+// change: the connection and filter, the mappings, the group rules and the
+// mode. When it changes, an incremental read would leave unchanged users
+// planned under the old rules, so the next run is full (I-12).
+func syncFingerprint(c Connector) string {
+	var cfg any
+	_ = json.Unmarshal(c.Config, &cfg)
+	b, _ := json.Marshal(struct {
+		Config   any
+		Mappings Mappings
+		Rules    GroupRules
+		Mode     string
+	}{cfg, c.Mappings.Normalize(), c.GroupRules, c.Mode})
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:12])
+}
+
+// incrementalSince decides whether a run reads incrementally and from where.
+// Only a scheduled run does; it is forced full when there is no mark or no
+// full run yet, when the last full run is 24 hours old, and when the config,
+// mappings or rules changed. The driver forces a full read too when the
+// server's invocation ID or USN went backwards (I-12).
+func (e *Engine) incrementalSince(c Connector, kind string) (*SyncMark, string) {
+	s := c.Sync
+	switch {
+	case kind != RunScheduled:
+		return nil, FullManual
+	case s.Mark == nil || s.LastFullAt == nil:
+		return nil, FullNoMark
+	case s.Fingerprint != syncFingerprint(c):
+		return nil, FullConfigChanged
+	case e.now().Sub(*s.LastFullAt) >= FullRunInterval:
+		return nil, FullInterval
+	}
+	return s.Mark, ""
+}
+
+func fullReasonOf(res *Result, asked string) string {
+	if res.Incremental {
+		return ""
+	}
+	if res.FullReason != "" {
+		return res.FullReason
+	}
+	return asked
+}
+
+// saveSync stores the mark after a run applied cleanly. A run with an error
+// row keeps the old mark: the user it failed on is read again. A full run also
+// restarts the 24 hour clock.
+func (e *Engine) saveSync(ctx context.Context, c Connector, res *Result, started time.Time) {
+	s := SyncState{Mark: res.Mark, Fingerprint: syncFingerprint(c), LastFullAt: c.Sync.LastFullAt}
+	if !res.Incremental {
+		t := started.UTC()
+		s.LastFullAt = &t
+	} else {
+		s.Fingerprint = c.Sync.Fingerprint
+	}
+	if res.Mark == nil {
+		s.LastFullAt = nil
+	}
+	if err := e.Store.SaveSyncState(ctx, c.ID, s); err != nil {
+		e.log().Error("directory: save sync state", "connector", c.ID, "err", err)
+	}
 }
 
 func counts(p Plan, res *Result) map[string]int {
@@ -614,7 +693,7 @@ func (e *Engine) fail(ctx context.Context, c Connector, run Run, started time.Ti
 
 // finishPreview stores a preview run's rows and hash.
 func (e *Engine) finishPreview(ctx context.Context, c Connector, run Run, plan Plan, res *Result, started time.Time) (Run, error) {
-	if len(res.Users) == 0 && plan.Linked > 0 {
+	if len(res.Users) == 0 && plan.Linked > 0 && !res.Incremental {
 		return e.halt(ctx, c, run, plan, res, started, CodeEmptyResult)
 	}
 	if err := e.Store.ReplaceChanges(ctx, run.ID, plan.Changes); err != nil {
@@ -669,7 +748,7 @@ func guarded(p Plan) bool {
 func (e *Engine) applyPlan(ctx context.Context, c Connector, run Run, plan Plan, res *Result, started time.Time, confirmed bool) (Run, error) {
 	if !confirmed {
 		switch {
-		case len(res.Users) == 0 && plan.Linked > 0:
+		case len(res.Users) == 0 && plan.Linked > 0 && !res.Incremental:
 			return e.halt(ctx, c, run, plan, res, started, CodeEmptyResult)
 		case guarded(plan):
 			return e.halt(ctx, c, run, plan, res, started, "needs_confirmation")
@@ -702,6 +781,9 @@ func (e *Engine) applyPlan(ctx context.Context, c Connector, run Run, plan Plan,
 	}
 	cn := counts(plan, res)
 	cn[ActionError] = errs
+	if errs == 0 {
+		e.saveSync(ctx, c, res, started)
+	}
 	run.Status, run.Counts, run.DiffHash, run.FinishedAt = StatusSucceeded, cn, plan.Hash, e.nowPtr()
 	run.ErrorCode, run.ErrorDetail = "", ""
 	if err := e.Store.UpdateRun(ctx, run); err != nil {
@@ -836,7 +918,7 @@ func (e *Engine) process(ctx context.Context, c Connector) {
 		return
 	}
 	r, err := e.Store.CreateRun(ctx, Run{ConnectorID: c.ID, Kind: RunScheduled, Status: StatusRunning, RequestedBy: "scheduler",
-		StartedAt: e.nowPtr(), Replica: e.Replica, Counts: map[string]int{}})
+		CreatedAt: e.now(), StartedAt: e.nowPtr(), Replica: e.Replica, Counts: map[string]int{}})
 	if err != nil {
 		e.log().Error("directory: create scheduled run", "connector", c.ID, "err", err)
 		return
