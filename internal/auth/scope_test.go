@@ -10,7 +10,7 @@ import (
 // secrets or session are implied by anything, or if an unknown scope is
 // granted.
 func TestScopesHas(t *testing.T) {
-	all := []Scope{ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeCalls, ScopeEvents, ScopeRecordings, ScopeSession, "bogus"}
+	all := []Scope{ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeCalls, ScopeEvents, ScopeRecordings, ScopeMessages, ScopeSession, "bogus"}
 	cases := []struct {
 		have Scopes
 		want []Scope
@@ -21,12 +21,13 @@ func TestScopesHas(t *testing.T) {
 		{Scopes{ScopeAdmin}, []Scope{ScopeRead, ScopeWrite, ScopeAdmin}},
 		{Scopes{ScopeSecrets}, []Scope{ScopeSecrets}},
 		{Scopes{ScopeSession}, []Scope{ScopeSession}},
-		{AllScopes, []Scope{ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeCalls, ScopeEvents, ScopeRecordings}},
+		{AllScopes, []Scope{ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeCalls, ScopeEvents, ScopeRecordings, ScopeMessages}},
 		// The integration scopes are orthogonal: nothing implies them and
 		// they imply nothing.
 		{Scopes{ScopeCalls}, []Scope{ScopeCalls}},
 		{Scopes{ScopeEvents}, []Scope{ScopeEvents}},
 		{Scopes{ScopeRecordings}, []Scope{ScopeRecordings}},
+		{Scopes{ScopeMessages}, []Scope{ScopeMessages}},
 		{Scopes{ScopeRead, ScopeSecrets}, []Scope{ScopeRead, ScopeSecrets}},
 	}
 	for _, c := range cases {
@@ -52,7 +53,7 @@ func TestParseScopes(t *testing.T) {
 	if ss, err := ParseScopes(""); err != nil || len(ss) != 0 {
 		t.Fatalf("empty = %v, %v", ss, err)
 	}
-	if ss, err := ParseScopes("calls events recordings"); err != nil || ss.String() != "calls events recordings" {
+	if ss, err := ParseScopes("calls events recordings messages"); err != nil || ss.String() != "calls events recordings messages" {
 		t.Fatalf("integration scopes = %q, %v", ss, err)
 	}
 	if _, err := ParseScopes("read root"); err == nil {
@@ -80,7 +81,7 @@ func TestRoles(t *testing.T) {
 	if _, err := ParseRole("root"); err == nil {
 		t.Fatal("unknown role parsed")
 	}
-	for r, want := range map[Role]string{RoleViewer: "read events", RoleOperator: "read write calls events recordings", RoleAdmin: "read write admin secrets calls events recordings", "root": ""} {
+	for r, want := range map[Role]string{RoleViewer: "read events", RoleOperator: "read write calls events recordings messages", RoleAdmin: "read write admin secrets calls events recordings messages", "root": ""} {
 		if got := GrantableScopes(r).String(); got != want {
 			t.Errorf("GrantableScopes(%s) = %q, want %q", r, got, want)
 		}

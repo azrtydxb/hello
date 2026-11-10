@@ -207,7 +207,7 @@ The tone library holds WAV files a ring map choice can play as `custom:<name>`
 
 - `listRingtones` shows each tone and how many ring map choices use it.
 - `createRingtone` (`/ringtones`) adds one: `{ "name": "bell-2", "audioBase64":
-  "..." }` with PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB. A
+"..." }` with PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB. A
   taken name is a 409.
 - `deleteRingtone` (`/ringtones/{id}`) removes a tone; a tone a ring map choice
   still uses is refused.

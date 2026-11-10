@@ -336,6 +336,14 @@ export interface TrunkFields {
    * accept G.711 only.
    */
   codecs: string[];
+  /** Turn away calls from a withheld caller (anonymous, Privacy: id). */
+  rejectAnonymous: boolean;
+  /** Calling codes callers must come from; empty is no restriction. */
+  allowedCountryCodes: string[];
+  /** What a restricted trunk does with a number it cannot place. */
+  unknownCallerAction: "allow" | "block";
+  /** The final response of a screened call: 603 Decline or 486 Busy Here. */
+  rejectCode: 603 | 486;
 }
 
 /** A trunk as returned: the password is never returned, only hasPassword. */
@@ -427,6 +435,7 @@ export interface InboundRouteFields {
     | "time_condition"
     | "ring_group"
     | "voicemail"
+    | "voicemail_group"
     | "announcement"
     | "paging"
     | "conference"
@@ -1478,6 +1487,7 @@ export const IVR_DESTINATION_KINDS = [
   "extension",
   "ring_group",
   "voicemail",
+  "voicemail_group",
   "announcement",
   "paging",
   "ivr",
@@ -1498,6 +1508,7 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   extension: "Extension",
   ring_group: "Ring group",
   voicemail: "Voicemail box",
+  voicemail_group: "Voicemail group",
   announcement: "Announcement, then hang up",
   paging: "Paging group",
   ivr: "Another IVR menu",
@@ -1509,8 +1520,8 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
 
 /**
  * A destination. The target is an extension number (extension, voicemail), a
- * name (ring_group, announcement, ivr), a page code (paging) or a number
- * (external); empty for hangup.
+ * name (ring_group, announcement, ivr), a page code (paging), a group number
+ * (voicemail_group) or a number (external); empty for hangup.
  */
 export interface IvrDestination {
   kind: IvrDestinationKind;
@@ -1879,6 +1890,7 @@ export const FEATURE_CODE_ACTIONS = [
   "queue_logout",
   "queue_pause",
   "queue_unpause",
+  "voicemail_broadcast",
   "call_waiting_on",
   "call_waiting_off",
   "park",
@@ -1910,6 +1922,7 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   queue_logout: "Queue agent logout",
   queue_pause: "Queue agent pause (argument: reason)",
   queue_unpause: "Queue agent unpause",
+  voicemail_broadcast: "Voicemail group broadcast (code plus group number)",
   call_waiting_on: "Call waiting on",
   call_waiting_off: "Call waiting off",
   park: "Park the call",
