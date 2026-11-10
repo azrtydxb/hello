@@ -400,7 +400,6 @@ func (c *call) haContinuity(st *livestate.DialogState) {
 	st.OwnerIncarnation = c.s.cfg.Incarnation
 	st.Session = c.sessionSnapshot() // before c.mu: the session lock is never taken under it
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	st.StartedAt, st.RingAt = c.start, c.ringTime
 	st.Direction, st.Route, st.Trunk, st.Rewritten = c.direction, c.route, c.trunkName, c.rewritten
 	st.Door, st.Kind = c.doorCaller, c.kind
@@ -408,6 +407,8 @@ func (c *call) haContinuity(st *livestate.DialogState) {
 	for _, step := range c.trace {
 		st.Trace = append(st.Trace, step.Text)
 	}
+	c.mu.Unlock()
+	st.Events = c.evState() // takes mu itself
 }
 
 // replicate writes the call's recovery state (contract 1). A failure is

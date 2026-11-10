@@ -250,8 +250,8 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 31 {
-		t.Fatalf("insert takes %d arguments, want 31", len(db.args))
+	if len(db.args) != 33 {
+		t.Fatalf("insert takes %d arguments, want 33", len(db.args))
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
@@ -283,9 +283,32 @@ func TestCallQualityCDR(t *testing.T) {
 	}
 }
 
+// TestCDROrigin fails if a click-to-call's origin and client are not the
+// insert arguments after the codecs, or a record without an origin is not
+// stored as a call dialled at a phone.
+func TestCDROrigin(t *testing.T) {
+	db := &argsDB{}
+	w := NewWriter(db, newCounter(), discard)
+	now := time.Now()
+	r := Record{CorrelationID: "o", StartTime: now, EndTime: now}
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[29] != OriginPhone || db.args[30] != "" {
+		t.Fatalf("default origin = %v %v, want phone and no client", db.args[29], db.args[30])
+	}
+	r.Origin, r.OriginClient = OriginAPI, "token:7"
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[29] != OriginAPI || db.args[30] != "token:7" {
+		t.Fatalf("origin = %v %v, want api and token:7", db.args[29], db.args[30])
+	}
+}
+
 // TestCDRCodecColumns fails if the codec columns are not the two arguments
-// after the ring tag and rule (before the legs JSON), are not NULL for a leg without a codec, or carry anything but
-// the record's strings.
+// after the ring tag and rule (before the origin), are not NULL for a leg
+// without a codec, or carry anything but the record's strings.
 func TestCDRCodecColumns(t *testing.T) {
 	db := &argsDB{}
 	w := NewWriter(db, newCounter(), discard)
@@ -294,8 +317,8 @@ func TestCDRCodecColumns(t *testing.T) {
 	if err := w.write(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 31 || db.args[27] != nil || db.args[28] != nil {
-		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 31", db.args[27], db.args[28], len(db.args))
+	if len(db.args) != 33 || db.args[27] != nil || db.args[28] != nil {
+		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 33", db.args[27], db.args[28], len(db.args))
 	}
 	r.CallerCodec, r.CalleeCodec = "opus/48000", "PCMU/8000"
 	if err := w.write(context.Background(), r); err != nil {
@@ -304,7 +327,7 @@ func TestCDRCodecColumns(t *testing.T) {
 	if db.args[27] != "opus/48000" || db.args[28] != "PCMU/8000" {
 		t.Fatalf("codecs = %#v, %#v", db.args[27], db.args[28])
 	}
-	if !strings.Contains(insert, "caller_codec, callee_codec)") || !strings.Contains(insert, "$28, $29)") {
-		t.Fatal("the insert does not name the codec columns with $28 and $29")
+	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client)") || !strings.Contains(insert, "$30, $31)") {
+		t.Fatal("the insert does not name the codec and origin columns with $28 to $31")
 	}
 }

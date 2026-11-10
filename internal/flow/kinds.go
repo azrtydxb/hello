@@ -134,7 +134,9 @@ var SingletonNodes = map[string]string{
 var NonFlowResources = map[string]string{
 	"tokens":                        "API credentials, not call routing",
 	"users":                         "console logins, not call routing",
+	"backups":                       "backup archives of the database and audio, not call routing",
 	"service-accounts":              "API credentials, not call routing",
+	"webhooks":                      "outbound event receivers, not call routing",
 	"service-accounts/{id}/secrets": "API credentials, not call routing",
 	"prov/templates":                "phone provisioning templates, not call routing",
 	"prov/firmware":                 "phone firmware files, not call routing",
@@ -144,6 +146,7 @@ var NonFlowResources = map[string]string{
 	"ring-tags":                     "names the tone a phone plays, sent to it as Alert-Info; the tag a call gets does not change where it goes",
 	"phonebooks/{id}/entries":       "directory data shown on phones, not call routing",
 	"me/contacts":                   "a user's personal contacts, not call routing",
+	"calls/originate":               "click-to-call requests (a call placed on demand, not call routing)",
 	"ai/sessions":                   "assistant conversations, not call routing",
 	"flow/canvases":                 "named views of the canvas that store only node positions, not call routing",
 }
