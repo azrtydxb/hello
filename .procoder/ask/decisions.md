@@ -2507,6 +2507,101 @@ so the VIP stage cannot sit in that file.
 - Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
 - Account sharing group password: shared default `AccountSharing`, or a per-group secret
 
+## Fax (pbx-gaps B5 and B6, S-15 to S-17) (2026-11-09)
+
+Built in one change: the engine, passthrough, T.38, email, API, page and docs.
+
+- **Engine: spandsp through cgo, as D13 decided; there is no pure-Go option.**
+  No maintained pure-Go T.30 or T.38 implementation exists (the V.17, V.29 and
+  V.27ter modems, T.30 and ECM are the work). Upstream spandsp 0.0.6 is itself
+  unmaintained (Homebrew marks it deprecated); Debian and Homebrew still ship
+  it and a fork (spandsp3) continues it. The API used is the 0.0.6 one, so the
+  engine builds on both. Risk and exit: the C code is confined to
+  `cmd/hello-fax/engine_spandsp.go` behind the `spandsp` build tag; moving to
+  spandsp3 is a header and a handful of calls.
+- **Image: Debian, not Alpine.** The `hello-fax` Dockerfile target builds on
+  `golang:1.27-bookworm` (`libspandsp-dev`, `libtiff-dev`) and runs on
+  `debian:bookworm-slim` with `libspandsp2`, `libtiff6` and `poppler-utils`.
+  Alpine's spandsp3 has a different API and a static musl build buys nothing
+  here. The other images are untouched and never link spandsp. CI gains a `fax`
+  job (container `golang:1.27-bookworm` plus the packages) that runs the cgo
+  tests; publish builds the image after it passes.
+- **Pages cross the cgo line as TIFF files.** spandsp's T.30 writes received
+  pages to a TIFF and reads pages to send from one; there is no row API on the
+  T.30 state. Sending is an uncompressed bilevel TIFF written in Go; receiving
+  asks spandsp for T.6 output and decodes it in Go with
+  `golang.org/x/image/ccitt` (new module, Go team, BSD). Rows are then encoded
+  to PDF with stdlib `compress/zlib`, as D13 says.
+- **Control protocol.** hello-sip and hello-control speak HTTP to hello-fax
+  (`internal/fax/client.go`): start a session, poll it, fetch the PDF, stop,
+  forget. A session opens a UDP port; hello-sip's relay forwards RTP or UDPTL
+  there. The response names the pod (`HELLO_FAX_MEDIA_HOST`, the pod IP in the
+  chart): media goes to the pod, not through the Service (replies from a pod
+  would otherwise fail the relay's source check), and later calls for the
+  session go to that pod, so several replicas work. An optional bearer token
+  (`HELLO_FAX_TOKEN`) guards the API.
+- **hello-sip owns the call and the data.** It answers or places the call,
+  runs the relay, writes the `faxes` row, uploads the PDF and records the CDR;
+  hello-fax holds no credentials. hello-control owns the API, the email worker
+  (through `internal/mailer`, claimed from the table so one node sends each)
+  and the retention job (`TryLock`, batches of 500, objects before rows).
+- **UDPTL is read and written in Go** (`internal/fax/udptl.go`, redundancy
+  error recovery, three secondary packets); spandsp's T.38 terminal sees IFP
+  packets only. The relay gained a UDPTL mode (`Relay.SetUDPTL`): datagrams
+  cross unmodified, no RTP parse, no sequence rewrite.
+- **T.38 is per trunk (`trunks.fax_mode`, default passthrough, D14).** CNG
+  (Goertzel, 1100 Hz, three 100 ms windows) on a `t38` trunk re-INVITEs the
+  caller to `m=image`; a carrier's own T.38 re-INVITE is accepted the same way.
+  Outbound: the engine asks for T.38 from the start of a session on a `t38`
+  trunk, and hello-sip re-INVITEs when the carrier answers the call. A 488, a
+  port 0 or parameters Hello does not serve (version above 0, local TCF, FEC)
+  leave the call on G.711. Calls routed through an IVR key do not watch for CNG
+  (the relay is shared with the menu); they still accept a carrier's re-INVITE.
+- **Destinations.** A fax destination is a row (`fax_destinations`: name,
+  owner extension, optional email) that an inbound route (kind `fax`) or an IVR
+  key (kind `fax`) names; admin writes, viewer reads. A destination in use
+  cannot be deleted. An IVR key moves the answered call to G.711 with a
+  re-INVITE; if the caller refuses, the menu says the choice is invalid.
+- **Outbound routing.** A fax is routed as a call from the pseudo source
+  `fax`: outbound routes that apply to every extension carry it, routes that
+  list source extensions do not (documented). Retries: 3 attempts, 5 minutes
+  apart, only for calls that did not connect; a T.30 failure after connection
+  is final (`failed` or `partial`).
+- **Fax email.** The recipient is the destination's address, else the enabled
+  users linked to the owner extension (stored as the sentinel `@owner` and
+  resolved at send time). Six attempts with backoff; no recipient is a final
+  `mail failed`. The attachment is `fax-<yyyymmdd-hhmm>-<id>.pdf`.
+- **Storage and retention.** PDFs live in the `hello-recordings` bucket under
+  `fax/<yyyy>/<id>.pdf`. `HELLO_FAX_RETENTION_DAYS` (default 90, 1 to 3650) is
+  an environment setting, not a console one. A fax still `receiving` after two
+  hours is closed as failed.
+- **API.** `GET|POST /faxes`, `GET|DELETE /faxes/{id}`, `GET /faxes/{id}/pdf`
+  as the spec says, plus `GET|POST /fax-destinations`, `GET|PUT|DELETE
+/fax-destinations/{id}`, and `GET /me/faxes` with `GET /me/faxes/{id}/pdf` so
+  a `user` role reaches the faxes of its own extensions. Viewers read the list;
+  the PDF needs operator (a fax is a document); operators send and delete.
+  `POST /faxes` takes multipart or JSON (`pdfBase64`, 700 KiB) so an agent can
+  send; `GET .../pdf` is excluded from MCP as a binary download. A fax being
+  sent is cancelled by `DELETE`; one being received answers 409.
+- **CDR.** Kind `fax` (constraint widened in `00076`), the direction, the trunk
+  and the route as for any call, and the fax result in the failure reason of a
+  call that ends normally. The fax row carries the CDR correlation id; the CDR
+  API gains no fax columns.
+- **Not replicated.** Fax calls are not part of in-call HA: a node lost during
+  a fax drops it (the sender retries; a received fax keeps its pages as
+  `partial`).
+- **Migration.** `00076_faxes.sql` (renumbered at merge; highest on main was `00060`): `faxes`,
+  `fax_destinations`, `trunks.fax_mode`, and `fax` added to the inbound route,
+  IVR key, IVR exit and CDR kind constraints. The migrate test counts are
+  main's plus this one (49, 47 and 46). Other branches in flight take higher numbers; the merge
+  captain renumbers.
+- **Hardware.** Interop with a real carrier and a real fax machine (G.711 and
+  T.38, ECM, a carrier-initiated re-INVITE, a 488) is the lab list in
+  docs/fax.md. Everything else is tested: a generated multi-page fax goes
+  through the modems over G.711 (PCMU and PCMA) and over T.38 UDPTL, from a PDF
+  rasterised by pdftoppm to the received PDF, and a stopped session keeps its
+  pages.
+
 ## Flow canvas P7: node badges and extensible kinds (2026-11-09)
 
 - **What was already done.** The graph side of P7, the batch ops for every
@@ -2524,6 +2619,7 @@ so the VIP stage cannot sit in that file.
 - **Open PRs (#272, #273, #275)** add their kinds through the checklist in
   `internal/flow/README.md`; nothing here depends on them. No API, migration or
   MCP change, so no conformance, count or skill update is needed.
+
 ## AI on the canvas may apply its own batch (2026-11-10)
 
 - Asked: should the canvas AI assistant only propose (a person applies), or may it apply?

@@ -61,7 +61,7 @@ type CDR struct {
 	// QueueLegs is what the call did in a call queue (migration 00040); set
 	// by GetCDR.
 	QueueLegs []QueueLeg `json:"queueLegs,omitempty"`
-	// FollowMeLegs is what each follow-me target did (migration 00073); set
+	// FollowMeLegs is what each follow-me target did (migration 00074); set
 	// by GetCDR.
 	FollowMeLegs []FollowMeLeg `json:"followMeLegs,omitempty"`
 	// RTCPXR is what the phones on the call reported (migration 00066); set

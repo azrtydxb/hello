@@ -52,7 +52,7 @@ const (
 	ActionBossDivert = "boss_divert"
 
 	// ActionFollowMeOn and ActionFollowMeOff turn the dialling extension's
-	// follow-me profile on or off (migration 00073, pbx-gaps D4).
+	// follow-me profile on or off (migration 00074, pbx-gaps D4).
 	ActionFollowMeOn  = "follow_me_on"
 	ActionFollowMeOff = "follow_me_off"
 )
