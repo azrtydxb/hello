@@ -88,6 +88,7 @@ var Ops = func() map[string]Info {
 	crud(m, flow.KindConference, "createConference", "updateConference", "deleteConference")
 	crud(m, flow.KindMulticast, "createMulticastChannel", "putMulticastChannel", "deleteMulticastChannel")
 	crud(m, flow.KindPagingGroup, "createPagingGroup", "putPagingGroup", "deletePagingGroup")
+	crud(m, flow.KindVMGroup, "createVoicemailGroup", "putVoicemailGroup", "deleteVoicemailGroup")
 	m["reorderInboundRoutes"] = Info{Reorder: true, Read: "/api/v1/routes/inbound"}
 	m["reorderOutboundRoutes"] = Info{Reorder: true, Read: "/api/v1/routes/outbound"}
 	m["putFeatureCodes"] = Info{Read: "/api/v1/feature-codes"}

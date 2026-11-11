@@ -1,4 +1,5 @@
 diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resources.yaml
+index d4840ac..3f6ea05 100644
 --- a/deploy/kuvryn-sync/kw/resources.yaml
 +++ b/deploy/kuvryn-sync/kw/resources.yaml
 @@ -1055,6 +1055,15 @@ spec:
@@ -49,7 +50,24 @@ diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resour
                valueFrom:
                  fieldRef:
                    fieldPath: status.podIP
-@@ -1225,6 +1241,92 @@ spec:
+@@ -1196,6 +1212,16 @@ spec:
+             - name: metrics
+               containerPort: 9071
+               protocol: TCP
++          lifecycle:
++            # Keep serving, and keep this node's ports, for 5s after SIGTERM:
++            # the vip container releases the Lease at once and the other
++            # instance takes it within ~2s. The replacement pod (scheduled
++            # the moment the ports are free) cannot win it back before its
++            # Kamailio is up, so the VIP never lands on an instance that is
++            # still starting.
++            preStop:
++              exec:
++                command: ["sleep", "5"]
+           readinessProbe:
+             httpGet:
+               path: /healthz
+@@ -1225,6 +1251,92 @@ spec:
                memory: 32Mi
              limits:
                memory: 128Mi
@@ -142,7 +160,7 @@ diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resour
        volumes:
          - name: config
            configMap:
-@@ -1232,6 +1334,25 @@ spec:
+@@ -1232,6 +1344,25 @@ spec:
              defaultMode: 420
          - name: run
            emptyDir: {}
@@ -168,7 +186,7 @@ diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resour
          - name: tls
            secret:
              secretName: hello-sip-tls
-@@ -1290,9 +1411,9 @@ metadata:
+@@ -1290,9 +1421,9 @@ metadata:
      app.kubernetes.io/component: edge
      app.kubernetes.io/managed-by: kuvryn-sync
  spec:
@@ -181,7 +199,7 @@ diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resour
    type: ClusterIP
    selector:
      app.kubernetes.io/name: hello
-@@ -1327,6 +1448,55 @@ spec:
+@@ -1327,6 +1458,55 @@ spec:
        app.kubernetes.io/instance: hello
        app.kubernetes.io/component: edge
  ---
@@ -237,7 +255,7 @@ diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resour
  apiVersion: apps/v1
  kind: Deployment
  metadata:
-@@ -1951,10 +2121,13 @@ spec:
+@@ -1951,10 +2131,13 @@ spec:
              - name: HELLO_PROV_PUBLIC_URL
                value: https://prov.hello.kw.watteel.lab
              - name: HELLO_PROV_SIP_SERVER

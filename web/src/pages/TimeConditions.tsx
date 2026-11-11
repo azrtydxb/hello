@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { listVoicemailGroups } from "../api/vmgroups";
 import {
   errorMessage,
   IVR_DESTINATION_LABEL,
@@ -120,6 +121,7 @@ function Conditions() {
   const announcements = useQuietList(listAnnouncements);
   const pagingGroups = useQuietList(listPagingGroups);
   const menus = useQuietList(listIvrMenus);
+  const voicemailGroups = useQuietList(listVoicemailGroups);
   const schedules = useQuietList(listSchedules);
   const timeConditions = list.status === "ready" ? list.items : [];
   const choices: DestinationChoices = {
@@ -129,6 +131,7 @@ function Conditions() {
     pagingGroups,
     menus,
     timeConditions,
+    voicemailGroups,
   };
 
   async function onDelete(t: TimeCondition) {

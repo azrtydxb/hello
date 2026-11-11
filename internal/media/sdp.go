@@ -116,6 +116,9 @@ func ParseAudioSDP(offer []byte) (AudioSDP, error) {
 			if err != nil {
 				return out, fmt.Errorf("media: SDP m=audio port %q is not a number", fields[1])
 			}
+			if port < 0 || port > 65535 {
+				return out, fmt.Errorf("media: SDP m=audio port %d is out of range", port)
+			}
 			if port == 0 {
 				// Port 0 in an offer means the remote refuses this stream.
 				return out, errors.New("media: remote refused audio (m=audio port 0)")

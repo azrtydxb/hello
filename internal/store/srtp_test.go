@@ -6,7 +6,7 @@ import (
 )
 
 // TestSRTPPolicyStorage fails if a device or trunk does not carry its SRTP
-// policy through the database (migration 00052): devices start optional,
+// policy through the database (migration 00072): devices start optional,
 // trunks off, PATCH replaces only what is sent, and an unknown value is
 // refused by the column's CHECK. Needs HELLO_TEST_DATABASE_URL.
 func TestSRTPPolicyStorage(t *testing.T) {

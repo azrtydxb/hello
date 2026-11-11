@@ -331,7 +331,7 @@ func TestSessionTimersAndKeepalive(t *testing.T) {
 			t.Fatal("a Session-Expires without session timers configured")
 		}
 		inv := waitReq(t, b.invites, "INVITE")
-		if headerOfReq(inv, "Session-Expires") != "" || headerOfReq(inv, "Supported") != "" {
+		if headerOfReq(inv, "Session-Expires") != "" || listHas(inv.GetHeaders("Supported"), "timer") {
 			t.Fatal("the INVITE asks for session timers while they are off")
 		}
 		hangup(t, dcs)

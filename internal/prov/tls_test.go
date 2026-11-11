@@ -74,6 +74,49 @@ func TestTLSTransportTemplates(t *testing.T) {
 	}
 }
 
+// TestTCPTransportTemplates fails if a built-in template does not write the
+// TCP transport for Server.Transport "tcp" (Grandstream P130 = 1 without
+// the TLS-only keys, Yealink 1, Poly TCPOnly, Fanvil 1; S-13).
+func TestTCPTransportTemplates(t *testing.T) {
+	cases := []struct {
+		v           Vendor
+		model, file string
+		want        []string
+		absent      []string
+	}{
+		{Grandstream, "WP826", "cfg805ec0aabbcc.xml", []string{"<P130>1</P130>"}, []string{"<P130>0</P130>", "<P130>2</P130>", "<P2329>", "<P22293>"}},
+		// P130 is the same key, 1 = TCP, in the WP8x6, WP810/822/825, WP820 and WP856 templates.
+		{Grandstream, "WP822", "cfg805ec0aabbcc.xml", []string{"<P130>1</P130>"}, []string{"<P130>0</P130>", "<P130>2</P130>", "<P2329>", "<P22293>"}},
+		{Grandstream, "WP856", "cfg805ec0aabbcc.xml", []string{"<P130>1</P130>"}, []string{"<P130>0</P130>", "<P130>2</P130>", "<P2329>", "<P22293>"}},
+		{Grandstream, "WP820", "cfg805ec0aabbcc.xml", []string{"<P130>1</P130>"}, []string{"<P130>0</P130>", "<P130>2</P130>", "<P2329>", "<P22293>"}},
+		{Yealink, "T54W", "805ec0aabbcc.cfg", []string{"account.1.sip_server.1.transport_type = 1"}, []string{"transport_type = 0", "transport_type = 2"}},
+		{Poly, "VVX 450", "805ec0aabbcc-hello.cfg", []string{`reg.1.server.1.transport="TCPOnly"`}, []string{"UDPOnly", `"TLS"`}},
+		{Fanvil, "X5U", "805ec0aabbcc.cfg", []string{"SIP1 Transport     :1"}, []string{"SIP1 Transport     :0", "SIP1 Transport     :2"}},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.v)+"/"+tc.model, func(t *testing.T) {
+			d := renderSample(false)
+			d.Phone.Vendor, d.Phone.Model = tc.v, tc.model
+			d.Server.Transport = "tcp"
+			out, err := Render(context.Background(), builtinFor(t, tc.v), tc.file, d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := string(out)
+			for _, w := range tc.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("lacks %q", w)
+				}
+			}
+			for _, a := range tc.absent {
+				if strings.Contains(got, a) {
+					t.Errorf("carries %q", a)
+				}
+			}
+		})
+	}
+}
+
 // TestTLSModelMatch fails if HELLO_PROV_SIP_TLS_MODELS does not select by
 // vendor or by vendor and model prefix, or selects a vendor that has no
 // transport key (Snom, Generic).

@@ -729,7 +729,7 @@ func (c *call) confForwardDigit(d byte) {
 	out := sip.NewRequest(sip.INFO, w.target())
 	out.AppendHeader(sip.NewHeader("Content-Type", "application/dtmf-relay"))
 	out.SetBody([]byte("Signal=" + string(d) + "\r\nDuration=160\r\n"))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := c.s.timeoutUntilShutdown(5 * time.Second)
 	defer cancel()
 	if _, err := requireResponse(w.session().Do(ctx, out)); err != nil {
 		c.s.log.Debug("conference INFO forward failed", "error", err)
