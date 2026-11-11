@@ -314,6 +314,9 @@ type Config struct {
 	OriginateMetrics *OriginateMetrics
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
+	// Fax is the fax feature (destinations, the fax list, sending a PDF); the
+	// zero value answers 503 on its routes.
+	Fax FaxConfig
 	// Objects is the voicemail audio store; nil makes the audio routes and
 	// greeting uploads answer 503 instead of touching MinIO.
 	Objects Objects

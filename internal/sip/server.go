@@ -139,6 +139,9 @@ type Config struct {
 	// CallbackInterval is how often this node sweeps the queues' callback
 	// requests; zero means every 3 s.
 	CallbackInterval time.Duration
+	// FaxInterval is how often this node looks for queued faxes to send; zero
+	// means every 5 s.
+	FaxInterval time.Duration
 	// PromptLanguage is the language of the spoken voicemail prompts ("en",
 	// "nl"; empty is English) and Timezone the IANA zone message times are
 	// spoken in (empty is UTC).
@@ -233,6 +236,9 @@ type Deps struct {
 	// Park is the shared call-park store (Valkey); nil disables call park,
 	// retrieve and cross-node pickup. A parked party hears music on hold.
 	Park ParkState
+	// Fax is the fax feature (hello-fax, the fax table and the PDF store); nil
+	// answers fax calls 488 and sends nothing.
+	Fax *FaxDeps
 	// CallerNames finds an inbound caller's name in a CRM (spec integrations
 	// I-47); nil leaves the carrier's display name. CallerNameBudget bounds
 	// the wait at ringing time (DefaultCallerNameBudget when zero).
@@ -558,6 +564,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.presencePollLoop(rctx) })
 	s.bg.Go(func() { s.queueLoop(rctx) })
 	s.bg.Go(func() { s.callbackLoop(rctx) })
+	s.bg.Go(func() { s.faxSendLoop(rctx) })
 	if s.deps.MailboxEvents != nil {
 		s.bg.Go(func() { s.deps.MailboxEvents.Watch(rctx, s.mailboxChanged) })
 	}
