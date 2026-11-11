@@ -29,7 +29,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 28  | DSCP marking (S-21)                                                           | done (#231)            |
 | 29  | Phone backup/secondary servers (S-20), partial                                | todo                   |
 | 30  | HELD, Geolocation, locations, callback tag, alarm `*55` (S-28, S-29), partial | wip (#275)             |
-| 31  | Wi-Fi profiles and roaming (S-23, S-24)                                       | todo                   |
+| 31  | Wi-Fi profiles and roaming (S-23, S-24)                                       | wip (#278)             |
 | 34  | Presence: reg event, PUBLISH, eventlist (S-35)                                | todo                   |
 | 35  | RTCP-XR collector (S-36)                                                      | todo                   |
 | 36  | Syslog sink (S-27)                                                            | wip (parity-syslog)    |

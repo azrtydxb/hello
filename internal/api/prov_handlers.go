@@ -568,6 +568,19 @@ func maskSecrets(d *prov.RenderData) {
 		e.Server = tokenInPathRe.ReplaceAllString(e.Server, "/p/"+mask+"/")
 		d.E911 = &e
 	}
+	if d.Wifi != nil {
+		w := *d.Wifi
+		w.Profiles = slices.Clone(w.Profiles)
+		for i := range w.Profiles {
+			if w.Profiles[i].PSK != "" {
+				w.Profiles[i].PSK = mask
+			}
+			if w.Profiles[i].Password != "" {
+				w.Profiles[i].Password = mask
+			}
+		}
+		d.Wifi = &w
+	}
 	if d.LDAP != nil {
 		l := *d.LDAP
 		l.Password = mask

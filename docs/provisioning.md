@@ -471,6 +471,7 @@ shows otherwise.
   The `Fkey` value format `<number>@1/b` and the `--Dsskey Config<page>--:`
   section names come from Fanvil exports and a production template, not from
   a Fanvil document.
+- Wi-Fi profiles and roaming on every model (see [Wi-Fi handsets](#wi-fi-handsets)).
 - Feature key synchronization on every vendor (see [Feature key synchronization](#feature-key-synchronization-dnd-and-call-forwarding)).
 - Time zones on a phone: see [Time zones](#time-zones); the Fanvil keys
   (`Time Zone`, `DST Type` and the rule fields) and the Poly daylight-saving
@@ -1336,6 +1337,115 @@ roaming) is in [phones.md](phones.md#roaming-keep-alive-and-dead-calls).
 
 The WP856 template has neither key and gets none. Other vendors' keep-alive
 keys are not written yet (verify per vendor).
+
+## Wi-Fi handsets
+
+Hello provisions the networks a Grandstream Wi-Fi handset joins and its
+roaming settings (Phones, tab Wi-Fi; API `/api/v1/wifi-profiles`,
+`/api/v1/phone-groups/{id}/wifi` and `/api/v1/phones/{id}/wifi`). Other
+vendors' Wi-Fi models are not written: no vendor document for their keys is on
+hand, and a guessed key can strand a handset.
+
+### Profiles
+
+A profile is a named network: SSID, security, a pre-shared key or an 802.1X
+identity and password, a priority, a hidden flag, a preferred account and a
+"verified on a test phone" mark. A group or a phone carries at most 10
+profiles. The key and the password are stored sealed with `HELLO_SECRET_KEY`
+(context `wifi-psk:<id>` and `wifi-password:<id>`), are never returned by the
+API or the MCP tools, and are masked as `********` in the configuration
+preview. A profile in use by a group or phone cannot be deleted.
+
+A phone gets its group's profiles, then its own; one of its own with the same
+SSID replaces the group's. Once a phone has any profile, Hello owns every
+network slot of the phone: the slots it does not fill are cleared, so a
+network typed in on the handset is overwritten at the next provisioning.
+
+| Security          | WP816/826/836 (`wp8x6_config_1.0.3.39`) | WP810/822/825 (`wp810_822_825_config_1.0.11.83`) | WP856 (`wp856_config_1.0.3.16`) |
+| ----------------- | --------------------------------------- | ------------------------------------------------ | ------------------------------- |
+| open              | `P83002 = 0`                            | `P83002 = 0`                                     | `P7814 = 0`                     |
+| wpa2-psk          | `4`, key in `P83003`                    | `4`, key in `P83003`                             | `P7814 = 2`, key in `P7830`     |
+| wpa3-sae          | `11`                                    | `11`                                             | not offered                     |
+| owe               | `14`                                    | not offered                                      | not offered                     |
+| wpa2/3-enterprise | `5` / `12`, PEAP, MSCHAPv2              | not offered (no 802.1X keys in the template)     | not offered                     |
+
+The key blocks are `P83000 + 100 (n - 1)` for network n: SSID at +0, security
++2, key +3, EAP method +4, anonymous identity +12, phase 2 +13, identity +14,
+password +15, server certificate check +16, priority +49 and preferred account
++85 on the WP8x6; SSID +0, enabled +1, security +2, key +3, 802.11r +48 and
+hidden +50 on the WP810/822/825. The WP856 has one network (`P7812`, `P7814`,
+`P7830`): the profile with the highest priority it can take. EAP-TLS is not
+offered: it needs a device certificate (S-25). The WP820 has a template of its
+own and is not provisioned.
+
+Capacity: the WP8x6 takes 10 networks, the WP810/822/825 17 and the WP856 one.
+Grandstream's WP810/822/825 template lists 20 networks, but gives networks 18
+to 20 a security key outside the pattern of the other 17 (`P84772`, `P84872`,
+`P84972`), so Hello fills 17 and leaves those three alone. The WP8x6 template
+names the EAP method of network 5 `P83304` where the pattern needs `P83404`, so
+an enterprise profile skips network 5. Profiles beyond the model's capacity are
+dropped, lowest priority first. Hello never writes `P84991`, the provisionable
+OEM override, so a Wi-Fi setup from another source survives.
+
+### Safety gate
+
+A bad Wi-Fi push strands a handset: it cannot fetch the corrected
+configuration. Nothing is written to a phone until one profile among those that
+reach it is marked verified on a test phone (decision 14 of the parity spec).
+The assignment shows `pushing` and the console shows a "Not pushing" notice
+until then. Roll out in this order:
+
+1. Create the profile, assign it to one test phone only, resync it.
+2. Check on the handset that it joins the network and still registers, then
+   mark the profile verified.
+3. Assign it to the phone group.
+
+### Roaming and radio settings
+
+Set per phone group; a setting left out is not written, so the phone keeps its
+own value. Each model takes the keys its template has:
+
+| Setting                        | WP8x6                         | WP810/822/825        | WP856                 |
+| ------------------------------ | ----------------------------- | -------------------- | --------------------- |
+| band (both, 2.4, 5)            | `P25438` (0, 1, 2)            | -                    | `P25420` and `P25421` |
+| roaming mode                   | `P82332` (default 0, boost 1) | -                    | `P82332` (0 to 3)     |
+| roaming threshold, -100 to -30 | `P22232`                      | `P22232`             | `P22232`              |
+| poor signal scan interval, s   | `P22231` (5 to 300)           | `P22231`             | `P22231`              |
+| good signal scan interval, s   | -                             | -                    | `P22230`              |
+| roaming gain, dB               | -                             | -                    | `P22443`              |
+| 802.11r                        | -                             | `P83048` per network | `P25315`              |
+| 802.11v                        | -                             | `P84992`             | `P82333`              |
+| roaming prompt                 | `P82334`                      | -                    | -                     |
+
+802.11k has no key in any of the three templates; it is an access point
+setting. Power save (`P82269`) and the VoWLAN target delay (`P82281`) are not
+first-class fields; set them with the per-group setting overrides.
+
+### Access point requirements
+
+Roaming is only as good as the network under it:
+
+- 802.11r, 802.11k and 802.11v enabled on the access points, with 802.11r in
+  mixed mode if other clients are present.
+- One SSID and one VLAN across all access points, so the handset's IP address
+  and its registration survive a roam.
+- WMM on, and DSCP trusted (not rewritten) by the access points and
+  switches, so the DSCP values Hello provisions for SIP and audio keep their
+  priority on the air.
+- 5 GHz preferred, with the 2.4 GHz band either off or on a separate SSID
+  name for the handsets.
+
+### Still to verify on a handset
+
+Every key above is read from the vendor templates; none has been confirmed on
+hardware. A lab run with a WP826 or WP836, a WP822 and a WP856 should check:
+
+- that the profile joins, with a PSK, with WPA3-SAE and with PEAP;
+- the direction of the priority (`P83049`): which number the phone tries first;
+- that a cleared slot (empty SSID) removes a network the phone had;
+- that a hidden network joins on a WP822 (`P83050`);
+- the WP856 `P7814` value for WPA3 and whether `P7830` is read with it;
+- that the roaming threshold takes effect in the WP856's custom mode only.
 
 ## Call park and call pickup
 
