@@ -150,6 +150,15 @@ type blfSlot struct {
 // blfSlots lists the keys a BLF can take on the model, in the order they are
 // filled. bounded is false for a model not in the table.
 func blfSlots(v Vendor, model string) (slots []blfSlot, bounded bool) {
+	return blfSlotsLines(v, model, 1)
+}
+
+// blfSlotsLines is blfSlots for a phone with that many lines: on a Yealink
+// and a Snom the first key of each line is the line's own key (a phone puts
+// account N on line key N by default), so BLF starts after them. A line key
+// beyond the model's keys is not reserved.
+func blfSlotsLines(v Vendor, model string, lines int) (slots []blfSlot, bounded bool) {
+	lines = max(lines, 1)
 	m := keyModelName(v, model)
 	switch v {
 	case Yealink:
@@ -157,7 +166,7 @@ func blfSlots(v Vendor, model string) (slots []blfSlot, bounded bool) {
 		if !ok {
 			return nil, false
 		}
-		for k := 2; k <= km.keys; k++ { // linekey.1 is the account
+		for k := lines + 1; k <= km.keys; k++ { // linekey.1 to linekey.<lines> are the accounts
 			slots = append(slots, blfSlot{slot: k})
 		}
 		for mod := 1; mod <= km.expModules; mod++ {
@@ -171,7 +180,7 @@ func blfSlots(v Vendor, model string) (slots []blfSlot, bounded bool) {
 		if !ok {
 			return nil, false
 		}
-		for idx := 1; idx < km.keys; idx++ { // fkey 0 is the account's line key
+		for idx := lines; idx < km.keys; idx++ { // fkey 0 to fkey <lines>-1 are the accounts' line keys
 			slots = append(slots, blfSlot{slot: idx})
 		}
 		if km.expStart > 0 {
@@ -197,12 +206,15 @@ func blfSlots(v Vendor, model string) (slots []blfSlot, bounded bool) {
 
 // unboundedSlot is key i (0-based) of a model with no table: where the
 // vendor's first free key is.
-func unboundedSlot(v Vendor, i int) blfSlot {
+func unboundedSlot(v Vendor, i, lines int) blfSlot {
 	switch v {
 	case Yealink:
-		return blfSlot{slot: i + 2}
+		return blfSlot{slot: i + 1 + max(lines, 1)}
 	case Fanvil:
 		return blfSlot{slot: i + 1, page: 1}
+	}
+	if v == Snom {
+		return blfSlot{slot: i + max(lines, 1)}
 	}
 	return blfSlot{slot: i + 1}
 }
@@ -212,10 +224,16 @@ func unboundedSlot(v Vendor, i int) blfSlot {
 // directed-pickup code set on the Yealink keys of the phone body. The input
 // is not changed.
 func PlaceBLF(v Vendor, model string, keys []BLFKey, pickup string) []BLFKey {
+	return PlaceBLFLines(v, model, keys, pickup, 1)
+}
+
+// PlaceBLFLines is PlaceBLF for a phone with lines lines (S-10): the keys of
+// the lines come first on a Yealink and a Snom, so BLF starts after them.
+func PlaceBLFLines(v Vendor, model string, keys []BLFKey, pickup string, lines int) []BLFKey {
 	if len(keys) == 0 {
 		return keys
 	}
-	slots, bounded := blfSlots(v, model)
+	slots, bounded := blfSlotsLines(v, model, lines)
 	out := make([]BLFKey, 0, len(keys))
 	prevPage := 0
 	for i, k := range keys {
@@ -226,7 +244,7 @@ func PlaceBLF(v Vendor, model string, keys []BLFKey, pickup string) []BLFKey {
 		case bounded:
 			return out
 		default:
-			s = unboundedSlot(v, i)
+			s = unboundedSlot(v, i, lines)
 		}
 		k.Slot, k.Module, k.Page = s.slot, s.module, s.page
 		if v == Fanvil {
@@ -273,6 +291,12 @@ func SupportsVMKey(v Vendor, model string) bool {
 // so it never displaces a BLF; a phone whose keys the BLF keys fill gets
 // none. domain is the SIP domain, for the vendors whose key takes a URI.
 func PlaceVMKey(v Vendor, model string, nBLF int, code, ext, domain string) *VMKey {
+	return PlaceVMKeyLines(v, model, nBLF, code, ext, domain, 1)
+}
+
+// PlaceVMKeyLines is PlaceVMKey for a phone with lines lines (see
+// PlaceBLFLines).
+func PlaceVMKeyLines(v Vendor, model string, nBLF int, code, ext, domain string, lines int) *VMKey {
 	if code == "" || ext == "" || !SupportsVMKey(v, model) {
 		return nil
 	}
@@ -280,7 +304,7 @@ func PlaceVMKey(v Vendor, model string, nBLF int, code, ext, domain string) *VMK
 	k.URI = "sip:" + k.Number + "@" + domain
 	switch v {
 	case Yealink, Snom, Fanvil:
-		slots, _ := blfSlots(v, model)
+		slots, _ := blfSlotsLines(v, model, lines)
 		if nBLF >= len(slots) {
 			return nil
 		}

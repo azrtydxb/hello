@@ -38,14 +38,21 @@ const (
 	ActionQueueLogout  = "queue_logout"
 	ActionQueuePause   = "queue_pause"
 	ActionQueueUnpause = "queue_unpause"
+	// ActionVoicemailBroadcast is *63<group number>: a member records a
+	// message that is delivered to every member's box (spec pbx-gaps S-14).
+	ActionVoicemailBroadcast = "voicemail_broadcast"
 	// ActionDirectory runs the dial-by-name directory (pbx-gaps S-13).
 	ActionDirectory = "directory"
 	// ActionCallWaitingOn and ActionCallWaitingOff toggle the extension's
 	// call-waiting flag (migration 00026, spec S-18).
 	ActionCallWaitingOn  = "call_waiting_on"
 	ActionCallWaitingOff = "call_waiting_off"
+	// ActionBossDivert toggles the divert of the boss link of the extension
+	// that dialled it (pbx-gaps S-19, *64).
+	ActionBossDivert = "boss_divert"
+
 	// ActionFollowMeOn and ActionFollowMeOff turn the dialling extension's
-	// follow-me profile on or off (migration 00052, pbx-gaps D4).
+	// follow-me profile on or off (migration 00072, pbx-gaps D4).
 	ActionFollowMeOn  = "follow_me_on"
 	ActionFollowMeOff = "follow_me_off"
 )
@@ -83,6 +90,9 @@ type ExtUpdate struct {
 	// NoAnswerRings is the no-answer ring count a phone's feature key set
 	// (as-feature-event ringCount); 0 means the system default.
 	NoAnswerRings *int
+	// BossDivert sets the divert of the boss link whose boss is Extension
+	// (the *64 code); nil leaves it alone.
+	BossDivert *bool
 }
 
 // SettingsSink takes extension-feature changes and applies them later: the
@@ -140,8 +150,14 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 		}
 		c.voicemailOwnBox(fc.Argument)
 		return true
+	case ActionVoicemailBroadcast:
+		c.handleVoicemailBroadcast(tx, arg)
+		return true
 	case ActionIntercom:
 		c.handleIntercom(tx, arg)
+		return true
+	case ActionBossDivert:
+		c.handleBossDivert(tx)
 		return true
 	case ActionQueueLogin, ActionQueueLogout, ActionQueuePause, ActionQueueUnpause:
 		c.handleQueueCode(tx, fc, arg)
@@ -322,6 +338,8 @@ func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 				ref.c.confForwardDigit(d) // the owner's participant reads it
 			case ref.leg == nil && ref.c.ivrDigit(legCaller, d):
 				// A digit for the IVR menu the caller is in.
+			case ref.leg != nil && ref.c.screenDigit(d):
+				// A digit of the assistant answering the screening prompt.
 			default:
 				s.dispatchDigit(ref.c, ref.leg == nil, d)
 			}
@@ -441,7 +459,7 @@ func (s *Server) dispatchDigit(c *call, fromCaller bool, d byte) {
 	// A code whose action carries no argument fires immediately; otherwise
 	// keep collecting (the trailing digits are the argument).
 	switch fc.Action {
-	case ActionDNDOn, ActionDNDOff, ActionVoicemail:
+	case ActionDNDOn, ActionDNDOff, ActionVoicemail, ActionBossDivert:
 		buf.take()
 	case ActionForwardAlways, ActionForwardBusy, ActionForwardNoAnswer:
 		if fc.Argument == "clear" {
@@ -541,8 +559,8 @@ func (s *Server) applyInDialogCode(c *call, fromCaller bool, fc snapshot.Feature
 			}
 		}
 		return
-	case ActionVoicemail:
-		return // dialling *97 mid-call does nothing
+	case ActionVoicemail, ActionVoicemailBroadcast:
+		return // dialling *97 or *63 mid-call does nothing
 	case ActionPark:
 		// The phone that dialled the code is the parker.
 		if slot, err := c.parkCall(fromCaller, arg); err != nil {
@@ -554,6 +572,12 @@ func (s *Server) applyInDialogCode(c *call, fromCaller bool, fc snapshot.Feature
 		return
 	case ActionParkRetrieve, ActionPickupGroup, ActionPickupDirected:
 		return // these are dialled as calls, not inside one
+	case ActionBossDivert:
+		// The current call is unaffected: the next one reads the new state.
+		if _, result, ok := s.applyBossDivert(snap, ext); ok {
+			c.addTrace("Boss divert " + result + " in call")
+		}
+		return
 	}
 	upd, ok := featureUpdate(fc, arg, ext)
 	if !ok || s.deps.Settings == nil || !s.deps.Settings.Apply(upd) {
@@ -578,4 +602,20 @@ func (c *call) announceDNDChange(upd ExtUpdate) {
 		state = StateDND
 	}
 	c.s.publishDeviceState(c.s.devicesOf(snap, upd.Extension), upd.Extension, state)
+}
+
+// handleVoicemailBroadcast is *63<group number> dialled as a call: a member
+// of the group records a message that goes to every member's box. Nothing
+// rings. An unknown group is a 404 and a caller who is not a member gets a 403
+// (spec S-14).
+func (c *call) handleVoicemailBroadcast(tx sip.ServerTransaction, number string) {
+	snap := c.s.deps.Snapshots.Current()
+	g, ok := snap.VoicemailGroup(number)
+	if !ok {
+		c.s.m.VoicemailGroupDeliveries.WithLabelValues(VMGroupRefused).Inc()
+		c.s.respond(tx, c.inv, sip.StatusNotFound, "Not Found")
+		c.record(sip.StatusNotFound, cdr.SideSystem, "no such voicemail group", ResultNotFound)
+		return
+	}
+	c.startVoicemailGroup(tx, g, true)
 }

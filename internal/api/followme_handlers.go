@@ -8,7 +8,7 @@ import (
 	"github.com/azrtydxb/hello/internal/store"
 )
 
-// Follow-me (migration 00052, pbx-gaps S-5): one profile per extension, read
+// Follow-me (migration 00072, pbx-gaps S-5): one profile per extension, read
 // and replaced through the extension (operators) or through /me (the user of
 // the extension).
 

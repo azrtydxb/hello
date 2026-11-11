@@ -57,6 +57,12 @@ func (v voicemails) InsertMessage(ctx context.Context, boxID int64, object, call
 	return v.st.InsertVoicemailMessage(ctx, boxID, object, caller, callerName, durationMs)
 }
 
+// InsertGroupMessage stores one message row per box of a voicemail group,
+// all referencing the one object.
+func (v voicemails) InsertGroupMessage(ctx context.Context, boxIDs []int64, object, caller, callerName string, durationMs int64) ([]int64, error) {
+	return v.st.InsertVoicemailGroupMessage(ctx, boxIDs, object, caller, callerName, durationMs)
+}
+
 // MessageCounts is the box's MWI summary (unheard, total).
 func (v voicemails) MessageCounts(ctx context.Context, boxID int64) (int, int, error) {
 	un, total, err := v.st.VoicemailCounts(ctx, boxID)
@@ -185,6 +191,7 @@ func (q *settings) apply(u sip.ExtUpdate) {
 		CallWaiting:     u.CallWaiting,
 		FollowMe:        u.FollowMe,
 		NoAnswerRings:   u.NoAnswerRings,
+		BossDivert:      u.BossDivert,
 	})
 	if err != nil {
 		q.log.Warn("feature-code update failed", "extension", u.Extension, "error", err)

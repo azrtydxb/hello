@@ -1,4 +1,4 @@
-// Follow-me (pbx-gaps S-5 and S-6, migration 00052). When a call reaches an
+// Follow-me (pbx-gaps S-5 and S-6, migration 00072). When a call reaches an
 // extension's ring step, after forward-always and before the no-answer
 // forward, the extension's profile adds up to five targets to its own
 // devices: an external number (through outbound routing), another extension
@@ -398,7 +398,7 @@ func (c *call) fmStartStep(st fmStep, confirm bool, stage int, live map[*leg]*fm
 				}
 				l := &leg{trunk: t, dest: d, addr: c.s.trunks.destAddr(d), number: dec.Number, callerID: dec.CallerID, stage: stage, fmSlot: member}
 				if confirm {
-					l.screen = c.fmScreen
+					l.accept = c.fmScreen
 				}
 				add(l, &fmRec{kind: st.kind, ext: st.label, trunk: t.Name, route: dec.Route, number: dec.Number})
 				n++
@@ -890,7 +890,7 @@ func (c *call) fmIvrForks(plan fmPlan, confirm bool) []ivrFork {
 					fork(delay, rec, func(stage int) *leg {
 						l := &leg{trunk: t, dest: d, addr: c.s.trunks.destAddr(d), number: dec.Number, callerID: dec.CallerID, stage: stage, fmSlot: member}
 						if confirm {
-							l.screen = c.fmScreen
+							l.accept = c.fmScreen
 						}
 						return c.addLeg(l)
 					})

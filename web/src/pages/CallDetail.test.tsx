@@ -155,6 +155,45 @@ describe("CallDetail", () => {
     expect(await screen.findByText("not measured")).toBeVisible();
   });
 
+  it("shows what the phones reported next to the relay's figures", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/90": () =>
+        json({
+          ...BASE,
+          id: 90,
+          finalStatus: 200,
+          mediaMode: "anchored",
+          rtpPackets: 990,
+          rtpLost: 10,
+          rtpJitterMs: 12.34,
+          rtcpxr: [
+            {
+              device: "dev200",
+              extension: "200",
+              final: true,
+              mosLq: 4.1,
+              mosCq: null,
+              jitterMs: 6,
+              lossPct: 0.5,
+              discardPct: null,
+              roundTripMs: null,
+              reportedAt: "2026-11-09T10:00:00Z",
+            },
+          ],
+          trace: [],
+        }),
+    });
+    renderApp("/history/90");
+    expect(
+      await screen.findByText("1.00% loss · 12.3 ms jitter"),
+    ).toBeVisible();
+    expect(screen.getByText("Phone report (call end)")).toBeVisible();
+    expect(
+      screen.getByText("200: MOS 4.1 · 0.50% loss · 6.0 ms jitter"),
+    ).toBeVisible();
+  });
+
   it("shows the codec of each leg, or a dash when none was recorded", async () => {
     mockApi({
       ...ME,
@@ -436,4 +475,35 @@ describe("CallDetail", () => {
     expect(within(card).getByText("Stopped, answered elsewhere")).toBeVisible();
     expect(within(card).getByText("Answered")).toBeVisible();
   });
+});
+
+it("names the assistant who answered a call to a boss", async () => {
+  mockApi({
+    ...ME,
+    "GET /api/v1/cdrs/90": () =>
+      json({
+        ...BASE,
+        id: 90,
+        finalStatus: 200,
+        answerTime: "2026-10-01T10:00:02Z",
+        answeredBy: "300",
+        failureReason: "",
+        trace: [{ n: 1, text: "Answered by assistant 300 for 200" }],
+      }),
+    "GET /api/v1/cdrs/91": () =>
+      json({
+        ...BASE,
+        id: 91,
+        finalStatus: 200,
+        answerTime: "2026-10-01T10:00:02Z",
+        failureReason: "",
+        trace: [{ n: 1, text: "Call established" }],
+      }),
+  });
+  const first = renderApp("/history/90");
+  expect(await screen.findByText("300 (assistant)")).toBeVisible();
+  first.unmount();
+  renderApp("/history/91");
+  expect(await screen.findByText("Call established")).toBeVisible();
+  expect(screen.queryByText("Answered by")).toBeNull();
 });

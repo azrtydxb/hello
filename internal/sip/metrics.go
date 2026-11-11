@@ -15,6 +15,8 @@ const (
 	ResultNotFound    = "not_found"
 	ResultUnavailable = "unavailable"
 	ResultFailed      = "failed"
+	// ResultBlocked is a call a trunk's screening turned away (pbx-gaps S-7).
+	ResultBlocked = "blocked"
 )
 
 // Metrics are the SIP node's Prometheus series.
@@ -47,10 +49,11 @@ type Metrics struct {
 	// is incremented by the SMTP worker in hello-control through this shared
 	// registry. PresenceSubscriptions counts this node's live dialog
 	// subscriptions; HoldActive the calls currently held on this node.
-	VoicemailMessages *prometheus.CounterVec // result
-	VoicemailStorage  prometheus.Gauge
-	VoicemailEmail    *prometheus.CounterVec // result
-	Transfers         *prometheus.CounterVec // kind, result
+	VoicemailMessages        *prometheus.CounterVec // result
+	VoicemailGroupDeliveries *prometheus.CounterVec // result: delivered, partial, failed, refused
+	VoicemailStorage         prometheus.Gauge
+	VoicemailEmail           *prometheus.CounterVec // result
+	Transfers                *prometheus.CounterVec // kind, result
 	// Originates counts click-to-call requests by how they ended (spec
 	// integrations I-37): connected, or the failure reason. OriginateSetup is
 	// the time from taking a request to the target answering.
@@ -67,6 +70,8 @@ type Metrics struct {
 	// Session counts the refreshes and the teardowns of session timers and
 	// dead-media detection (S-9).
 	Session *SessionMetrics
+	// RTCPXR counts the phones' voice-quality reports (S-36).
+	RTCPXR *RTCPXRMetrics
 	// CheckSync counts check-sync NOTIFYs by event and result (S-5).
 	CheckSync *prometheus.CounterVec // event, result
 	// MessagesIn counts SIP MESSAGE requests by source (phone, trunk) and
@@ -89,6 +94,8 @@ type Metrics struct {
 	// IVRTotal counts IVR menu events: entered, option, direct_dial,
 	// timeout, invalid, dial, dial_failed, connected and exit_<kind>.
 	IVRTotal *prometheus.CounterVec // event
+	// BossDivert counts *64 uses by result (on, off, no_link, failed).
+	BossDivert *prometheus.CounterVec // result
 	// DirectoryTotal counts dial-by-name searches by result (one, several,
 	// too_many, none, too_long, timeout, chosen, invalid_choice, connected,
 	// failed).
@@ -113,6 +120,9 @@ type Metrics struct {
 	// TimeConditionTotal counts time condition decisions: open, closed,
 	// holiday, forced_open, forced_closed, loop, missing and toggled.
 	TimeConditionTotal *prometheus.CounterVec // result
+	// BlockedCalls counts inbound trunk calls turned away before routing,
+	// by reason: blocklist, anonymous or country (pbx-gaps S-7, S-8).
+	BlockedCalls *prometheus.CounterVec // reason
 
 	// Phase 7 (in-call HA, spec S-13). DialogReplicated counts replication
 	// writes by result; DialogTakeovers the calls this node took over;
@@ -144,6 +154,14 @@ const (
 	VMDiscord = "discarded" // caller hung up, or under one second
 )
 
+// Voicemail group delivery results for hello_voicemail_group_deliveries_total.
+const (
+	VMGroupDelivered = "delivered"
+	VMGroupFailed    = "failed"
+	VMGroupRefused   = "refused" // a broadcast from a non-member, or a disabled or empty group
+	VMGroupDiscarded = "discarded"
+)
+
 // Forwarding kinds for hello_forwarded_calls_total.
 const (
 	ForwardAlways   = "always"
@@ -155,6 +173,10 @@ const (
 	// ForwardGroupFailover is a ring group handing the call to an extension
 	// or another group when nobody answered.
 	ForwardGroupFailover = "group_failover"
+	// ForwardBossScreen is an assistant sending a screened call to the boss's
+	// voicemail.
+	ForwardBossScreen = "boss_screen"
+
 	// ForwardFollowMe is a call that rang an extension's follow-me profile.
 	ForwardFollowMe = "follow_me"
 )
@@ -218,6 +240,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.VoicemailMessages = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_voicemail_messages_total", Help: "Voicemail messages by result (stored, failed, discarded).",
 	}, []string{"result"})
+	m.VoicemailGroupDeliveries = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_voicemail_group_deliveries_total", Help: "Voicemail group messages by result (delivered, failed, refused, discarded).",
+	}, []string{"result"})
 	m.VoicemailStorage = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hello_voicemail_storage_bytes", Help: "Voicemail audio bytes this node stored (cluster total lives in MinIO).",
 	})
@@ -278,6 +303,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.IVRTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_ivr_total", Help: "IVR menu events (entered, option, direct_dial, timeout, invalid, dial, dial_failed, connected, exit_<kind>).",
 	}, []string{"event"})
+	m.BossDivert = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_boss_divert_total", Help: "Boss divert (*64) uses by result (on, off, no_link, failed).",
+	}, []string{"result"})
 	m.DirectoryTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_directory_search_total", Help: "Dial-by-name searches by result (one, several, too_many, none, too_long, timeout, chosen, invalid_choice, connected, failed).",
 	}, []string{"result"})
@@ -306,6 +334,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.TimeConditionTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_time_condition_total", Help: "Time condition decisions (open, closed, holiday, forced_open, forced_closed, loop, missing, toggled).",
 	}, []string{"result"})
+	m.BlockedCalls = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_blocked_calls_total", Help: "Inbound trunk calls turned away before routing, by reason (blocklist, anonymous, country).",
+	}, []string{"reason"})
 	m.PagingLegs = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_paging_legs_total", Help: "Page member legs by result (answered, busy, dnd, no_answer, no_registration).",
 	}, []string{"result"})
@@ -323,12 +354,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	})
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
-		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Originates, m.OriginateSetup, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags,
-		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.DirectoryTotal, m.TimeConditionTotal,
+		m.VoicemailMessages, m.VoicemailGroupDeliveries, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Originates, m.OriginateSetup, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags,
+		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.BossDivert, m.DirectoryTotal, m.TimeConditionTotal, m.BlockedCalls,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal, m.FollowMeLegs,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	m.Conf = newConfMetrics(reg)
 	m.Session = newSessionMetrics(reg)
+	m.RTCPXR = newRTCPXRMetrics(reg)
 	return m
 }
 

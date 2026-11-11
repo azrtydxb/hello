@@ -900,6 +900,9 @@ func (c *call) relayDTMF(leg string, digit byte) {
 	if leg == legCallee && c.fmDigit(nil, digit) {
 		return // a follow-me target is being asked to press 1
 	}
+	if leg == legCallee && c.screenDigit(digit) {
+		return // the assistant answers the screening prompt
+	}
 	if c.ivrDigit(leg, digit) {
 		return // the IVR menu is collecting the caller's digits
 	}

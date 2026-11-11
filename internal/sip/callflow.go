@@ -86,6 +86,11 @@ func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *s
 		c.forward(req, tx, snap, e.ForwardAlways, c.stages.visited)
 		return
 	}
+	// A boss's call rings the assistant too; the boss's forwarding always has
+	// won above (S-18). DND silences only the boss's own devices.
+	if link, ok := snap.BossLinkOf(ext); ok && c.ringBoss(req, tx, snap, ext, e, link) {
+		return
+	}
 	// Follow-me runs at the ring step: after forward-always above, before the
 	// no-answer forward (the exhaustion hand-off of its ring), and a DND that
 	// blocks it falls through to the DND handling below (pbx-gaps S-6).

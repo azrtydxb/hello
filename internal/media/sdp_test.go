@@ -132,3 +132,19 @@ func TestBuildAudioSDP(t *testing.T) {
 		t.Errorf("m= line %q", noDTMF)
 	}
 }
+
+// TestParseAudioSDPRejectsOutOfRangePort fails if an offer naming a port no
+// socket can have (65548) is accepted: the answer's first RTP send to it
+// would fail with EINVAL and kill the call, where a refusal is a clean 488.
+func TestParseAudioSDPRejectsOutOfRangePort(t *testing.T) {
+	for _, port := range []string{"65536", "65548", "99999"} {
+		offer := []byte("v=0\r\nc=IN IP4 10.0.0.9\r\nm=audio " + port + " RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\n")
+		if _, err := ParseAudioSDP(offer); err == nil {
+			t.Errorf("port %s accepted", port)
+		}
+	}
+	ok := []byte("v=0\r\nc=IN IP4 10.0.0.9\r\nm=audio 65535 RTP/AVP 0\r\n")
+	if got, err := ParseAudioSDP(ok); err != nil || got.Port != 65535 {
+		t.Errorf("port 65535: %v %+v", err, got)
+	}
+}

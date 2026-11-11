@@ -96,7 +96,7 @@ speech is configured; without it a beep is played.
 `*76` turns the profile of the extension of the phone that dials it on and
 `*77` turns it off, like `*78` and `*79` do for DND. A code dialled by an
 extension that has no profile with a target is refused with 404 and changes
-nothing. The defaults are added by migration 00052 to existing installs when
+nothing. The defaults are added by migration 00072 to existing installs when
 the codes are free; change them under System, Feature codes.
 
 The specification named `*74` and `*75`, which are the default park and park
