@@ -2028,6 +2028,70 @@ Implementation notes (template route, no migration):
   PRs are not merged). The default stays A-record mode; `P103 = 0` is written to
   every Grandstream file so leaving SRV mode reverts.
 
+### Item 27: provisioning hardening (S-22, S-32)
+
+- TR-069 off is included: the user approved it explicitly on 2026-11-09 (the
+  completion plan's open question). Grandstream WP: P1409 = 0 and an empty
+  P4503; Yealink: `static.managementserver.enable = 0`.
+- Keys and values, checked on 2026-11-09 against Grandstream's own configuration
+  templates (config-template-10212026.zip: `wp8x6_config_1.0.3.39`,
+  `wp810_822_825_config_1.0.11.83`, `wp820_config_1.0.7.90`,
+  `wp856_config_1.0.3.16`), which replace the FusionPBX copies the first version
+  was written from:
+  - Confirmed in all four, value meaning as written: `P1409` Enable TR-069 (0
+    No; the WP810/822/825 default is 1), `P4503` ACS URL (written empty; the
+    WP8x6 and WP810/822/825 default is `https://acs.gdms.cloud`), `P8469` Enable
+    User Web Access (0 Disabled), `P2347` Accept Incoming SIP from Proxy Only
+    (1 Yes; the WP820 calls it "Only Accept SIP Requests from Known Servers"),
+    `P26015` Allow SIP Reset (0 No). `P276` SSH: the templates ask the question
+    both ways, "Enable SSH. 0 Yes, 1 No" in the WP8x6, WP820 and WP856 and
+    "Disable SSH. 0 No, 1 Yes" in the WP810/822/825, so `1` is SSH off in all.
+  - Corrected, written only where the template has the key: `P1357`
+    Configuration via Keypad Menu is in the WP8x6, WP810/822/825 and WP820, not
+    the WP856, and `1` is "Basic settings only" in all three (the WP810/822/825
+    has `4` Basic and Network Settings, the WP820 `3` Basic settings and Network
+    settings; either keeps Wi-Fi setup on the keypad, `1` stays per the spec and
+    the Wi-Fi question stays a hardware check). `P1310` Direct IP Call is in the
+    WP8x6 ("Enable Direct IP Call. 0 Yes, 1 No") and WP810/822/825 ("Disable
+    Direct IP Call. 0 No, 1 Yes"), both off at `1`, and in neither the WP820 nor
+    the WP856 template.
+  - `P2347` is per account (account 2 `P2447`, account 3 `P2547`, WP856 accounts
+    4 to 6 `P2647`, `P2747`, `P2847`): the lines of item 21 must write it too,
+    or a second line accepts SIP from anywhere.
+  - Newly found, added: the firmware upgrade confirmation prompt, which holds an
+    upgrade until someone presses OK. `P8375` Firmware Upgrade Confirmation (0
+    No, 1 Yes, default 1) in `wp8x6_config_1.0.3.39`, written 0; `P84988`
+    Disable Firmware Upgrade Confirmation (0 No, 1 Yes, default 0) in
+    `wp810_822_825_config_1.0.11.83`, written 1. The WP820 and WP856 templates
+    have neither.
+- Yealink TR-069 key: Yealink's own comment in the T-series templates,
+  "Enable or disable the TR069 feature; 0-Disabled (default), 1-Enabled".
+- Left out, each now with the meaning the templates give:
+  - `P2346` Authenticate Incoming INVITE (0 No, 1 Yes, default 0; in all four
+    templates, per account: account 2 `P2446`, account 3 `P2546`) and the S-22
+    requirement that Hello answer a phone's 401 on an INVITE it originates
+    (`TestAuthenticatedInviteToPhone`). With it on the phone challenges every
+    INVITE it receives. sipgo's `WaitAnswer` answers a challenge only from a
+    plaintext password and a device leg has HA1 only; a real phone challenges in
+    its own realm (`<server host:port>`, see the resync fix), so the answer needs
+    the sealed device password as `checksync.go` now uses. That is a change to
+    the call setup path that cannot be validated without a phone. Not enabling
+    `P2346` is what keeps calls working; the template test asserts it stays
+    unwritten.
+  - `P60082` Trusted Domain Name List (string up to 256 characters; WP8x6 and
+    WP810/822/825 only) belongs to `P2311` Check Domain Certificates (RFC 5922,
+    0 No, 1 Yes) in the same security block. The templates do not give the list
+    format, and a wrong list would fail TLS registration, so neither is written.
+  - `P240` Authenticate Conf File (0 No, 1 Yes; all four) and `P1359` XML Config
+    File Password (string; all four): the HT813 template says a file "would be
+    authenticated before acceptance" with `P240` on, but no template says how
+    (Grandstream ships a config encryption tool with the bundle, and `P1359` is
+    the password it uses), and Hello serves plain files over HTTPS with a token,
+    so neither is written. `P1` is in none of the WP or HT813 templates.
+  - Snom, Fanvil and Poly TR-069/SSH keys (Fanvil's text format key not found,
+    Poly and Snom none found); outside this review.
+- The group can undo any of it with a setting override (item 15).
+
 ## Item 26: PRACK/100rel and anonymous outbound (2026-11-09)
 
 - 100rel is negotiated hop by hop, not relayed: Hello offers `Supported: 100rel`
