@@ -193,6 +193,11 @@ func (c *call) bindingsFor(snap *snapshot.Snapshot, ext string) ([]livestate.Bin
 		if d.Username == c.callerDevice {
 			continue
 		}
+		// The owner's ring_web / ring_mobile preference: a client kind set to
+		// off is skipped before any fork (S-15).
+		if d.RingOff {
+			continue
+		}
 		ctx, cancel := s.stateCtx()
 		bs, err := s.deps.State.Bindings(ctx, s.aor(d.Username))
 		cancel()

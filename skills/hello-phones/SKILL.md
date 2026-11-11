@@ -1,6 +1,6 @@
 ---
 name: hello-phones
-description: Manage desk phones on a Kuvryn Hello PBX through its MCP server - auto-provisioning (phones, bulk import, onboarding queue, templates, DHCP and vendor redirect), phone groups with address books, multicast paging and push-to-talk, firmware pins, resync, and company and named phonebooks with CSV-style import. Use when someone asks to add or move many phones, to adopt phones that just appeared on the network, to give a department its own directory, to push a configuration change to handsets, or to find out why a phone did not pick up its settings.
+description: Manage desk phones on a Kuvryn Hello PBX through its MCP server - auto-provisioning (phones, bulk import, onboarding queue, templates, DHCP and vendor redirect), phone groups with address books, multicast paging and push-to-talk, Wi-Fi profiles and roaming for Wi-Fi handsets, firmware pins, resync, and company and named phonebooks with CSV-style import. Use when someone asks to add or move many phones, to adopt phones that just appeared on the network, to give a department its own directory, to push a configuration change to handsets, or to find out why a phone did not pick up its settings.
 license: Apache-2.0
 metadata:
   hello-version: "v1"
@@ -236,6 +236,65 @@ The ring map turns a ring tag into a tone on each vendor's phones.
 - `putRingMapGroup` (`/ring-map/groups/{id}`) replaces one phone group's
   overrides; an empty list removes them. An override wins over the global choice
   for that group's phones.
+
+## Certificates and 802.1X (admin)
+
+Hello runs a SCEP server and a device CA, so phones get their own client
+certificate for 802.1X (EAP-TLS) without anyone copying keys around.
+
+- `getSCEP` shows whether the SCEP server is on, the device CA (never its
+  key) and the CA and CRL URLs to give the RADIUS server.
+- `setSCEPCA` with mode `generate` makes the device CA once; mode `import`
+  with `certPem` and `keyPem` brings an intermediate of an existing
+  enterprise CA instead. A second call needs `replace` set to true; ask
+  first, because phones then enrol again.
+- `setPhoneGroupSecurity` switches SCEP on for a phone group (off by
+  default), sets `certValidityDays` and names the wired profile;
+  `getPhoneGroupSecurity` reads it. Grandstream WP816/826/836 and GRP2601 to
+  2604 enrol; GRP26xx desk phones take the wired profile.
+- `listSCEPCertificates` (filter `phoneId`, `status`) shows what was issued;
+  `revokeSCEPCertificate` puts one on the CRL. Removing a phone revokes its
+  certificates. `rotatePhoneSCEPChallenge` discards a phone's one-time
+  challenge; the next configuration carries a new one. No tool shows a
+  challenge, a CA key or a password.
+- 802.1X profiles are reusable: `listDot1XProfiles`, `getDot1XProfile`,
+  `createDot1XProfile` (name, method, identity such as `phone-{mac}`,
+  password, and the RADIUS server's CA as `caCertPem`),
+  `updateDot1XProfile` (leave `password` out to keep it),
+  `deleteDot1XProfile` (refused while a group uses it). Methods: `eap-tls`
+  (the SCEP certificate; written only where SCEP is on), `peap`, `eap-md5`
+  (wired only). A wrong profile can take a phone off the network: try it on
+  one phone's group first.
+## Wi-Fi handsets
+
+A Grandstream Wi-Fi handset (WP810, WP822, WP825, WP816, WP826, WP836, WP856)
+joins the networks Hello gives it. Other models and vendors get no Wi-Fi keys.
+
+- A profile is a named network: `createWifiProfile` with `name`, `ssid` and
+  `security` (`open`, `wpa2-psk`, `wpa3-sae`, `owe`, `wpa2-enterprise`,
+  `wpa3-enterprise`), `psk` for a pre-shared key or `identity` and `password`
+  for 802.1X (PEAP), plus `priority` (0 to 10), `hidden` and `preferAccount`.
+  The key and password are write-only: `listWifiProfiles` and
+  `getWifiProfile` show only `pskSet` and `passwordSet`. Never ask for or
+  repeat them in chat; tell the administrator to type them in the console if
+  they cannot pass them as tool arguments.
+- `updateWifiProfile` (PATCH) keeps a secret that is left out and clears one
+  sent empty. `deleteWifiProfile` is refused while a group or phone uses it.
+- Assign with `putPhoneGroupWifi` (`/phone-groups/{id}/wifi`, at most 10
+  profiles, replaces the whole list) or `putPhoneWifi` (`/phones/{id}/wifi`).
+  A phone's profile with the same SSID replaces its group's.
+  `getPhoneGroupWifi` and `getPhoneWifi` show the assignment.
+- Safety gate: a bad Wi-Fi push strands a handset, so nothing is written
+  until one profile of the phone's set has `verified: true`, set after it
+  joined a test phone. `pushing` in the assignment says whether the gate is
+  open. Walk the administrator through it: assign one profile to a test
+  phone, resync it, confirm it joins, set `verified`, then assign the group.
+- `putPhoneGroupWifi` also takes `radio`: `band`, `roamMode`, `threshold`
+  (-100 to -30 dBm), `poorScan`, `goodScan`, `gain`, `dot11r`, `dot11v` and
+  `prompt`. A field left out is not written. Each model takes only the keys its
+  template has; 802.11k has no key anywhere and is set on the access points.
+- A WP8x6 holds 10 networks, a WP810/822/825 17 and a WP856 one (the best
+  priority it can take). Open hardware checks are in `docs/provisioning.md`.
 
 ## Lines and account sharing
 

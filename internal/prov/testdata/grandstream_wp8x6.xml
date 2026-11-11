@@ -371,6 +371,7 @@
     <P2>sample-admin-password</P2>
     <P212>2</P212>
     <P8433>-----BEGIN CERTIFICATE-----&#xA;U0FNUExF&#xA;-----END CERTIFICATE-----</P8433>
+    <P8647>0</P8647>
     <P237>prov.hello.example/p/sample</P237>
     <P145>0</P145>
     <P194>1</P194>

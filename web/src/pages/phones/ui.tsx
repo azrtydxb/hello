@@ -11,6 +11,8 @@ const SECTIONS = [
   { label: "Groups", path: "/phones/groups", end: false },
   { label: "Templates", path: "/phones/templates", end: false },
   { label: "Firmware", path: "/phones/firmware", end: false },
+  { label: "Certificates", path: "/phones/security", end: false },
+  { label: "Wi-Fi", path: "/phones/wifi", end: false },
   { label: "Unknown syslog", path: "/phones/syslog", end: false },
   { label: "Provisioning settings", path: "/phones/settings", end: false },
 ] as const;

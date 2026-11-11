@@ -247,6 +247,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Ring, err = s.ringInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
 		return d, prov.Template{}, err
 	}
+	if d.Wifi, err = s.wifiInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
+		return d, prov.Template{}, err
+	}
 	d.Server = s.prov.server(d.Phone.Vendor, d.Phone.Model)
 	d.Prov = s.prov.info(token, d.Phone.MAC)
 	d.Time = prov.NewTimeInfo(s.prov.Timezone, s.prov.NTP, time.Now())
@@ -269,6 +272,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 		return d, prov.Template{}, err
 	}
 	if d.Firmware, err = s.pinnedFirmware(ctx, d.Phone.Vendor, d.Phone.Model, d.Prov.URL); err != nil {
+		return d, prov.Template{}, err
+	}
+	if d.SCEP, d.Dot1X, err = s.securityInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model, d.Phone.MAC, token); err != nil {
 		return d, prov.Template{}, err
 	}
 	stored, err := s.ListProvTemplates(ctx)

@@ -309,6 +309,9 @@ func (c *call) cbFinish(result, agent string) {
 // cancelled it (or it expired), and the call must end. A store that cannot be
 // reached reports true: the call carries on and tries again.
 func (c *call) cbRenew() bool {
+	if fx := c.faxState(); fx != nil && fx.outbound {
+		return c.faxRenew(fx) // a fax being dialled holds its lease the same way
+	}
 	c.mu.Lock()
 	id, done := c.cbID, c.cbDone
 	c.mu.Unlock()

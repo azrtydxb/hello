@@ -37,6 +37,7 @@ import {
   IntegrationsOverview,
 } from "./pages/Integrations";
 import { IntegrationEvents } from "./pages/IntegrationEvents";
+import { IntegrationsCRM } from "./pages/IntegrationsCRM";
 import { Webhooks } from "./pages/Webhooks";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
@@ -69,6 +70,8 @@ import { Blocklist } from "./pages/Blocklist";
 import { Onboarding } from "./pages/Onboarding";
 import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
+import { PhoneSecurity } from "./pages/PhoneSecurity";
+import { Wifi } from "./pages/Wifi";
 import { ProvSettings } from "./pages/ProvSettings";
 import { ProvTemplates } from "./pages/ProvTemplates";
 import { Dial } from "./pages/Dial";
@@ -80,6 +83,7 @@ import { EmailSettings } from "./pages/EmailSettings";
 import { MyForwarding } from "./pages/myphone/MyForwarding";
 import { MyHistory } from "./pages/myphone/MyHistory";
 import { MyPhoneHome } from "./pages/myphone/MyPhoneHome";
+import { MyDevices } from "./pages/myphone/MyDevices";
 import { MyProfile } from "./pages/myphone/MyProfile";
 import { MyVoicemail } from "./pages/myphone/MyVoicemail";
 import { Can } from "./role";
@@ -99,6 +103,7 @@ import { Conferences } from "./pages/Conferences";
 import { Ivr } from "./pages/Ivr";
 import { Queues } from "./pages/Queues";
 import { QueueCallbacks } from "./pages/QueueCallbacks";
+import { Faxes, MyFaxes } from "./pages/Faxes";
 import { Wallboard } from "./pages/Wallboard";
 import { TimeConditions } from "./pages/TimeConditions";
 import { BossAssistant } from "./pages/BossAssistant";
@@ -132,6 +137,8 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/me/voicemail": MyVoicemail,
   "/me/forwarding": MyForwarding,
   "/me/history": MyHistory,
+  "/me/devices": MyDevices,
+  "/me/faxes": MyFaxes,
   "/me/profile": MyProfile,
   "/settings/backups": Backups,
   "/settings/email": EmailSettings,
@@ -151,6 +158,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/conferences": Conferences,
   "/ivr": Ivr,
   "/queues": Queues,
+  "/faxes": Faxes,
   "/wallboard": Wallboard,
   "/time-conditions": TimeConditions,
   "/park": ParkPickup,
@@ -170,6 +178,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/integrations": IntegrationsOverview,
   "/integrations/api-access": IntegrationsApiAccess,
   "/integrations/events": IntegrationEvents,
+  "/integrations/crm": IntegrationsCRM,
   "/integrations/webhooks": Webhooks,
 };
 
@@ -381,6 +390,8 @@ export function App() {
             <Route path="/phones/groups" element={<PhoneGroups />} />
             <Route path="/phones/templates" element={<ProvTemplates />} />
             <Route path="/phones/firmware" element={<ProvFirmware />} />
+            <Route path="/phones/security" element={<PhoneSecurity />} />
+            <Route path="/phones/wifi" element={<Wifi />} />
             <Route path="/phones/syslog" element={<UnknownSyslog />} />
             <Route path="/phones/settings" element={<ProvSettings />} />
             <Route path="/phones/:id" element={<PhoneDetail />} />

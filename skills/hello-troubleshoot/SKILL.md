@@ -80,6 +80,12 @@ When the user knows who, when or which call, search instead of paging:
    `listPhoneFetches` for the phone. No fetches means DHCP or the vendor
    redirect does not point at Hello (`getProvSettings` has the values).
 
+A browser softphone shows up in `listDevices` as `kind` `web` (a name like
+`w12`, registered as `w12.<expiry>`). Its credentials expire after 12 hours
+and the softphone refreshes them itself; a web device that stopped
+registering is usually revoked, expired or its owner was unlinked from the
+extension (`listDevices` with `kind=web` no longer shows it enabled).
+
 See [registration verdicts](references/registration.md).
 
 ## A trunk that is down

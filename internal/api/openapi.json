@@ -2020,8 +2020,19 @@
       "get": {
         "operationId": "listDevices",
         "summary": "Every device, ordered by SIP username",
-        "description": "Lists every device (SIP account), ordered by SIP username; secrets are never included.",
+        "description": "Lists every device (SIP account), ordered by SIP username; secrets are never included. The kind filter lists only desk phones, or only the web or mobile clients users enrolled.",
         "tags": ["devices"],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["desk", "web", "mobile"]
+            },
+            "description": "Only devices of this kind; every kind when omitted."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Devices",
@@ -2041,6 +2052,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -2182,6 +2196,16 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "409": {
+            "description": "The device is a web client, which stays on its owner's extension (derived_device)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -2255,6 +2279,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The device is a web client, which has no stored secret to rotate (derived_device)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -21571,6 +21605,2613 @@
           "category": "credentials"
         }
       }
+    },
+    "/api/v1/scep": {
+      "get": {
+        "operationId": "getSCEP",
+        "summary": "SCEP server and device CA",
+        "description": "Returns whether the SCEP server is on (HELLO_SCEP), the active Hello device CA (subject, validity, SHA-256 fingerprint, source and certificate PEM; never the key; null until one is generated or imported) and the plain-HTTP URLs of the CA certificate and its CRL, for the RADIUS server. Phones of a phone group with SCEP on enrol at their own provisioning URL followed by scep, with a one-time challenge password delivered in their configuration (phone-feature-parity S-25).",
+        "tags": ["scep"],
+        "responses": {
+          "200": {
+            "description": "SCEP status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCEPStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/scep/ca": {
+      "put": {
+        "operationId": "setSCEPCA",
+        "summary": "Generate or import the device CA",
+        "description": "Creates the Hello device CA that issues the phones' certificates. mode generate makes a self-signed RSA 3072 CA (commonName default \"Hello device CA\", validityYears 1 to 30, default 10); mode import takes an existing CA certificate and its RSA private key in PEM (an intermediate of your enterprise CA, so the RADIUS server already trusts it). The key is sealed under HELLO_SECRET_KEY and never returned. With a CA already active the request is a 409 unless replace is true; certificates of the replaced CA stay valid until they expire, but can no longer be renewed, so phones enrol again with their challenge. Admin only.",
+        "tags": ["scep"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCEPCAInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The active CA",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCEPCA"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/scep/certificates": {
+      "get": {
+        "operationId": "listSCEPCertificates",
+        "summary": "List issued device certificates",
+        "description": "Lists the certificates the device CA issued, newest first (at most 1000): phone, MAC, serial, subject, enrolment or renewal, validity and revocation. Filter by phoneId and by status (active, expired, revoked).",
+        "tags": ["scep"],
+        "parameters": [
+          {
+            "name": "phoneId",
+            "in": "query",
+            "required": false,
+            "description": "Only this phone's certificates.",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Only certificates in this state.",
+            "schema": {
+              "type": "string",
+              "enum": ["active", "expired", "revoked"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The certificates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCEPCertificateList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/scep/certificates/{id}/revoke": {
+      "post": {
+        "operationId": "revokeSCEPCertificate",
+        "summary": "Revoke a device certificate",
+        "description": "Revokes an issued certificate: it is listed on the CRL from the next fetch and can no longer renew. The phone needs its challenge (rotate it with rotatePhoneSCEPChallenge to be sure) to enrol again. Removing a phone revokes its certificates by itself. 409 when it is already revoked. Admin only.",
+        "tags": ["scep"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCEPRevokeInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The revoked certificate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCEPCertificate"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phones/{id}/scep-challenge": {
+      "post": {
+        "operationId": "rotatePhoneSCEPChallenge",
+        "summary": "Discard a phone's SCEP challenge",
+        "description": "Discards the phone's one-time SCEP challenge password, used or not; its next configuration carries a new one. The challenge itself is never shown. Admin only.",
+        "tags": ["scep"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Discarded"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/dot1x-profiles": {
+      "get": {
+        "operationId": "listDot1XProfiles",
+        "summary": "List 802.1X profiles",
+        "description": "Lists the 802.1X profiles: reusable EAP identities a phone group names for the wired port (and Wi-Fi profiles for an enterprise network). The password is never returned; hasPassword says whether one is stored. usedByGroups lists the phone groups whose wired profile it is.",
+        "tags": ["dot1x"],
+        "responses": {
+          "200": {
+            "description": "The profiles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dot1XProfileList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createDot1XProfile",
+        "summary": "Create an 802.1X profile",
+        "description": "Adds an 802.1X profile. method eap-tls uses the certificate the phone gets from SCEP (no password; written to a phone only while SCEP is on for it), peap is PEAPv0/MSCHAPv2 with identity and password, eap-md5 (wired only) identity and password. identity and anonymousIdentity may hold {mac} and {MAC}, filled in per phone (64 characters at most once filled). caCertPem is the CA the RADIUS server's certificate chains to; serverDomain the RADIUS server name the phone checks. The password is sealed and write-only. 409 when the name is taken. Admin only.",
+        "tags": ["dot1x"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Dot1XProfileInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dot1XProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/dot1x-profiles/{id}": {
+      "get": {
+        "operationId": "getDot1XProfile",
+        "summary": "Get an 802.1X profile",
+        "description": "Returns one 802.1X profile, without its password.",
+        "tags": ["dot1x"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dot1XProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "updateDot1XProfile",
+        "summary": "Replace an 802.1X profile",
+        "description": "Replaces a profile as a whole. Leaving password out keeps the stored one; an empty password removes it. Switching to eap-tls drops the password. Phones take the change at their next fetch, or at once with HELLO_PROV_AUTO_RESYNC. 409 when the name is taken. Admin only.",
+        "tags": ["dot1x"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Dot1XProfileInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dot1XProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteDot1XProfile",
+        "summary": "Delete an 802.1X profile",
+        "description": "Deletes a profile no phone group uses; 409 names the groups that do. Admin only.",
+        "tags": ["dot1x"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/security": {
+      "get": {
+        "operationId": "getPhoneGroupSecurity",
+        "summary": "A phone group's SCEP and 802.1X settings",
+        "description": "Returns whether SCEP is on for the group, the lifetime of the certificates its phones get, and its wired 802.1X profile (null for none).",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroupSecurity"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "setPhoneGroupSecurity",
+        "summary": "Set a phone group's SCEP and 802.1X settings",
+        "description": "Replaces the group's SCEP switch (off by default), the certificate lifetime in days (30 to 1825, default 365) and the wired 802.1X profile (null for none). With SCEP on, the group's Grandstream WP8x6 and GRP260x phones are given the SCEP server URL and a one-time challenge and enrol from the device CA. The wired profile is written to its GRP26xx desk phones; a group without one leaves the phones' 802.1X as it is. Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneGroupSecurityInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroupSecurity"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/me/ice-servers": {
+      "get": {
+        "operationId": "getMyIceServers",
+        "summary": "STUN and TURN servers for a call",
+        "description": "Returns the STUN and TURN servers a softphone passes to RTCPeerConnection, with a TURN credential that expires (the TURN REST API scheme: the username is the expiry and the credential an HMAC of it under the secret coturn shares). The optional deviceId names one of the caller's devices; another user's is 404. Rate limited. 503 while no STUN or TURN server is configured. Needs a browser session.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "One of the caller's own web devices; it is named in the TURN username so the TURN server's logs tell clients apart."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The ICE servers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IceServers"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "SIP credentials and TURN credentials are minted for the signed-in user's browser only, never for an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/me/devices/{id}": {
+      "delete": {
+        "operationId": "deleteMyDevice",
+        "summary": "Revoke a web device",
+        "description": "Revokes one of the caller's own web devices: it is disabled, its registrations are dropped and its credentials are refused from then on. A device of another user is 404. Needs a browser session.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "SIP credentials and TURN credentials are minted for the signed-in user's browser only, never for an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/me/devices/{id}/credentials": {
+      "post": {
+        "operationId": "refreshMyDeviceCredentials",
+        "summary": "Refresh a web device's credentials",
+        "description": "Derives new SIP credentials for one of the caller's own web devices, valid for 12 hours. The previous ones keep working until they expire. A revoked device, or one of another user, is 404. Needs a browser session.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The new credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceCredentials"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "SIP credentials and TURN credentials are minted for the signed-in user's browser only, never for an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/me/devices": {
+      "get": {
+        "operationId": "listMyDevices",
+        "summary": "List my web devices",
+        "description": "Lists the signed-in user's own web softphone devices (label, platform, extension, last seen and whether a registration is live now). Only the caller's devices are reachable: no route takes a user id. Needs a browser session.",
+        "tags": ["me"],
+        "responses": {
+          "200": {
+            "description": "The devices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MyDevice"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "SIP credentials and TURN credentials are minted for the signed-in user's browser only, never for an agent",
+          "category": "credentials"
+        }
+      },
+      "post": {
+        "operationId": "createMyDevice",
+        "summary": "Enrol a web device",
+        "description": "Creates a web softphone device on one of the caller's own extensions (the first one when extensionId is omitted) and returns the SIP credentials for it, once, with the ICE servers. The credentials are derived, expire (12 hours) and are refreshed through the credentials route. A user may have at most HELLO_CLIENT_MAX_DEVICES devices (409 device_limit). 503 while HELLO_CLIENT_AUTH_KEY is not set. Needs a browser session.",
+        "tags": ["me"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MyDeviceCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The device and its credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyDeviceEnrolment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "SIP credentials and TURN credentials are minted for the signed-in user's browser only, never for an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/crm": {
+      "get": {
+        "operationId": "listCRMConnectors",
+        "summary": "List CRM connectors",
+        "description": "Lists the CRM connectors with their capabilities and connection state (connected, needs_reauth, revoked). Client secrets and tokens are never returned; hasClientSecret says whether the secret is set.",
+        "tags": ["integrations"],
+        "responses": {
+          "200": {
+            "description": "CRM connectors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMConnectorList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createCRMConnector",
+        "summary": "Create a CRM connector",
+        "description": "Adds a connector of a registered kind (hubspot). The customer creates the CRM app in their own account; this stores its client id (config.clientId) and, write-only, its client secret. A new connector is not connected until an administrator signs in with connect. Validation failures list each failing field in error.fields.",
+        "tags": ["integrations"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CRMConnectorInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMConnector"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/{id}": {
+      "get": {
+        "operationId": "getCRMConnector",
+        "summary": "Get a CRM connector",
+        "description": "Returns one connector with its connection state and the redirect URI to register in the CRM app.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The connector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMConnector"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "patch": {
+        "operationId": "updateCRMConnector",
+        "summary": "Update a CRM connector",
+        "description": "Changes the settings you send. The kind cannot change. Changing config.clientId requires clientSecret in the same request, so a secret is never sent to another app. Switching recordings off or disabling the connector revokes the recording links it minted.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CRMConnectorInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated connector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMConnector"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteCRMConnector",
+        "summary": "Delete a CRM connector",
+        "description": "Deletes the connector, its connection and its logging jobs, revokes the refresh token at the CRM when it can and revokes the recording links it minted. Calls already written to the CRM stay there.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/{id}/connect": {
+      "post": {
+        "operationId": "connectCRMConnector",
+        "summary": "Start the CRM sign-in",
+        "description": "Starts the OAuth authorization of the connector and returns the CRM address to send the browser to. The CRM returns to /api/v1/integrations/crm/oauth/callback, which finishes the connection and redirects to the console. Needs HELLO_PUBLIC_URL and the client id and secret.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Where to send the browser",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMAuthorize"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/{id}/connection": {
+      "delete": {
+        "operationId": "disconnectCRMConnector",
+        "summary": "Disconnect a CRM connector",
+        "description": "Removes the connection and its stored tokens, revokes the refresh token at the CRM when it can and revokes the recording links the connector minted. Logging jobs wait until the connector is connected again.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Disconnected"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/{id}/test": {
+      "post": {
+        "operationId": "testCRMConnector",
+        "summary": "Test a CRM connection",
+        "description": "Makes a harmless call to the CRM with the stored token (refreshing it when needed) and reports whether it worked. At most 6 tests per minute per connector.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMTestResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/oauth/callback": {
+      "get": {
+        "operationId": "crmOAuthCallback",
+        "summary": "CRM sign-in callback",
+        "description": "Where the CRM returns the browser after the sign-in. It needs no credential: the single-use state in the query, minted for an administrator who started the sign-in, is the only credential. It always redirects to /integrations/crm with connected=<id> or error=<denied|state|failed>.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The state the sign-in was started with."
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The authorization code the CRM issued."
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Set by the CRM when the administrator declined."
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the console",
+            "headers": {
+              "Location": {
+                "description": "The console page that shows the result.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "security": [],
+        "x-hello-mcp": {
+          "exclude": "a browser redirect target of the CRM sign-in, not an operation an agent calls",
+          "category": "session"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/{id}/logs": {
+      "get": {
+        "operationId": "listCRMLogs",
+        "summary": "List CRM logging jobs",
+        "description": "Lists the jobs that write calls into the CRM, newest first: pending, logged, waiting for a recording, skipped (no CRM user for the call) and dead (out of attempts, with the last error). Numbers and names of callers are not part of a job.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "waiting",
+                "pending",
+                "logged",
+                "update",
+                "dead",
+                "skipped"
+              ]
+            },
+            "description": "Only jobs in this state; dead jobs are the dead letters."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "description": "Page size, 1 to 200 (default 50)."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Return jobs older than this log id; pass nextBefore of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of jobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMLogPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/integrations/crm/logs/{id}/retry": {
+      "post": {
+        "operationId": "retryCRMLog",
+        "summary": "Retry a CRM logging job",
+        "description": "Puts a dead or skipped job back in the queue with a fresh series of attempts. A job in any other state answers 409.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requeued job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMLog"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "requeueing a CRM job is done from the console",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/{id}/users": {
+      "get": {
+        "operationId": "listCRMUsers",
+        "summary": "List the CRM user mapping",
+        "description": "Lists every Hello user with the CRM user their calls are logged for. A user is matched by the verified email of the Hello account against the CRM, never by display name; source says whether the mapping was found by email or set by hand.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Users and their CRM users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMUserList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/integrations/crm/{id}/users/{userId}": {
+      "put": {
+        "operationId": "putCRMUser",
+        "summary": "Map a user to a CRM user",
+        "description": "Sets the CRM user id the Hello user's calls are logged for (a manual mapping that automatic matching never replaces). An empty externalUserId clears it.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Numeric id of the Hello user, as the users list returns it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CRMUserMappingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Saved"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/hubspot/engagements": {
+      "post": {
+        "operationId": "recordHubSpotEngagement",
+        "summary": "Record the HubSpot engagement of a call",
+        "description": "The HubSpot calling iframe tells the server which engagement it created for a call, so the server patches that engagement (duration, status, recording link) instead of creating a second one. If the server already logged the call itself, its engagement is kept and adopted is false. A user may only record calls of their own extensions.",
+        "tags": ["integrations"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CRMEngagementInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Whether the engagement was adopted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMEngagementResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "calls",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "called by the HubSpot iframe, not by an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/fax-destinations": {
+      "get": {
+        "operationId": "listFaxDestinations",
+        "summary": "List fax destinations",
+        "description": "Lists the fax destinations an inbound route or an IVR key can name: each names the extension that owns the faxes arriving there and, optionally, an email address the PDF is sent to instead of the owner's.",
+        "tags": ["fax"],
+        "responses": {
+          "200": {
+            "description": "The destinations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaxDestinationList"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createFaxDestination",
+        "summary": "Create a fax destination",
+        "description": "Adds a fax destination. The name (1 to 40 of A-Z a-z 0-9 . _ -) is what a route or IVR key of kind fax names; it cannot change later. The owner extension must exist. With an email the received PDF goes there, otherwise to the users linked to the owner extension.",
+        "tags": ["fax"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FaxDestinationCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaxDestination"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/fax-destinations/{id}": {
+      "get": {
+        "operationId": "getFaxDestination",
+        "summary": "One fax destination",
+        "description": "Returns one fax destination.",
+        "tags": ["fax"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The destination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaxDestination"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "updateFaxDestination",
+        "summary": "Change a fax destination",
+        "description": "Changes the owner extension and the email address. The name cannot change, because routes and IVR keys refer to it.",
+        "tags": ["fax"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FaxDestinationUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The destination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaxDestination"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteFaxDestination",
+        "summary": "Delete a fax destination",
+        "description": "Deletes a fax destination that no inbound route and no IVR key names. Faxes already received keep their owner.",
+        "tags": ["fax"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/faxes": {
+      "get": {
+        "operationId": "listFaxes",
+        "summary": "List faxes",
+        "description": "Lists received and sent faxes, newest first, with their state: pages, the T.30 result, whether a PDF is stored and the email delivery. Filter by direction and status. The PDF is fetched with the pdf route.",
+        "tags": ["fax"],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size, 1-200."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The next of the previous page; omit for the first page."
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["inbound", "outbound"]
+            },
+            "description": "Only received (inbound) or sent (outbound) faxes."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "sending",
+                "receiving",
+                "received",
+                "sent",
+                "partial",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "description": "Only faxes in this state."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of faxes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaxPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "sendFax",
+        "summary": "Send a fax",
+        "description": "Queues a PDF to send. Send multipart/form-data with `file` (the PDF, at most 10 MB and 50 pages), `to` (the destination in E.164, such as +41441234567) and optionally `callerId`, or JSON with `to`, `callerId` and `pdfBase64` (at most 700 KiB decoded). The PDF is rasterised at 204 by 196 dpi by the fax engine; a PDF that cannot be rasterised is refused with 422. Hello places the call through the outbound routes and retries up to 3 times, 5 minutes apart, on busy, no answer or no carrier. The answer is the queued fax; poll the fax for its state.",
+        "tags": ["fax"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file", "to"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The PDF, at most 10 MB and 50 pages."
+                  },
+                  "to": {
+                    "type": "string",
+                    "pattern": "^\\+[1-9][0-9]{6,14}$",
+                    "description": "Destination number in E.164."
+                  },
+                  "callerId": {
+                    "type": "string",
+                    "pattern": "^\\+?[0-9]{1,20}$",
+                    "description": "Station identifier sent in the T.30 frames; empty for the outbound route's caller ID."
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FaxSend"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fax"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/faxes/{id}": {
+      "get": {
+        "operationId": "getFax",
+        "summary": "One fax",
+        "description": "Returns one fax with its state.",
+        "tags": ["fax"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The fax",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fax"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteFax",
+        "summary": "Delete a fax",
+        "description": "Deletes a fax and its stored PDF. A queued fax is removed; a fax being sent is cancelled (its row stays, as cancelled). A fax being received answers 409.",
+        "tags": ["fax"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted or cancelled"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/faxes/{id}/pdf": {
+      "get": {
+        "operationId": "getFaxPdf",
+        "summary": "Download a fax PDF",
+        "description": "Streams the PDF of a received or sent fax. The attachment name is fax-<yyyymmdd-hhmm>-<id>.pdf. A fax with no stored document answers 404.",
+        "tags": ["fax"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The PDF",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "binary document; read the fax's fields with getFax",
+          "category": "binary-download"
+        }
+      }
+    },
+    "/api/v1/me/faxes": {
+      "get": {
+        "operationId": "listMyFaxes",
+        "summary": "My faxes",
+        "description": "Lists the faxes whose destination is owned by one of the signed-in user's own extensions, newest first.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size, 1-200."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The next of the previous page; omit for the first page."
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["inbound", "outbound"]
+            },
+            "description": "Only received (inbound) or sent (outbound) faxes."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "sending",
+                "receiving",
+                "received",
+                "sent",
+                "partial",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "description": "Only faxes in this state."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of faxes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaxPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
+        }
+      }
+    },
+    "/api/v1/me/faxes/{id}/pdf": {
+      "get": {
+        "operationId": "getMyFaxPdf",
+        "summary": "Download one of my fax PDFs",
+        "description": "Streams the PDF of a fax owned by one of the signed-in user's own extensions. A fax owned by anyone else answers 404.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The PDF",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
+        }
+      }
+    },
+    "/api/v1/wifi-profiles": {
+      "get": {
+        "operationId": "listWifiProfiles",
+        "summary": "List Wi-Fi profiles",
+        "description": "Lists every Wi-Fi profile by name. The pre-shared key and 802.1X password are never returned; pskSet and passwordSet say whether they are stored.",
+        "tags": ["wifi"],
+        "responses": {
+          "200": {
+            "description": "Wi-Fi profiles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiProfileList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createWifiProfile",
+        "summary": "Create a Wi-Fi profile",
+        "description": "Creates a profile. name, ssid and security are required. The psk (wpa2-psk, wpa3-sae) or the identity and password (wpa2-enterprise, wpa3-enterprise) are sealed and cannot be read back. A profile reaches phones only when it is assigned to a phone group or a phone, and is written only once the phone's profiles include one marked verified.",
+        "tags": ["wifi"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WifiProfileInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/wifi-profiles/{id}": {
+      "get": {
+        "operationId": "getWifiProfile",
+        "summary": "One Wi-Fi profile",
+        "description": "Returns one Wi-Fi profile without its secrets.",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The Wi-Fi profile id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiProfile"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "patch": {
+        "operationId": "updateWifiProfile",
+        "summary": "Change a Wi-Fi profile",
+        "description": "Changes the fields sent. A psk or password that is absent is kept; an empty one clears it. Changing the security to a mode that does not use a secret clears it.",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The Wi-Fi profile id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WifiProfileInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The changed profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteWifiProfile",
+        "summary": "Delete a Wi-Fi profile",
+        "description": "Deletes a profile no phone group or phone uses; 409 names how many do.",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The Wi-Fi profile id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/wifi": {
+      "get": {
+        "operationId": "getPhoneGroupWifi",
+        "summary": "A phone group's Wi-Fi setup",
+        "description": "Returns the Wi-Fi profiles assigned to the group, its roaming and radio settings, and whether provisioning pushes them (pushing: a verified profile is among them).",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The phone group id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The group's Wi-Fi setup",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiScope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putPhoneGroupWifi",
+        "summary": "Set a phone group's Wi-Fi setup",
+        "description": "Replaces the group's profiles (at most 10) and its roaming and radio settings as a whole; an empty list removes the profiles and an absent radio removes the settings. Settings the model's template has no key for are not written. The change reaches the phones through the automatic resync.",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The phone group id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WifiGroupInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The group's Wi-Fi setup after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiScope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phones/{id}/wifi": {
+      "get": {
+        "operationId": "getPhoneWifi",
+        "summary": "A phone's Wi-Fi profiles",
+        "description": "Returns the Wi-Fi profiles assigned to the phone, those it inherits from its group, and whether provisioning pushes them.",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The phone id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The phone's Wi-Fi setup",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiScope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putPhoneWifi",
+        "summary": "Set a phone's Wi-Fi profiles",
+        "description": "Replaces the profiles assigned to this phone (at most 10). They come after its group's, and one with the same SSID replaces the group's.",
+        "tags": ["wifi"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The phone id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WifiPhoneInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The phone's Wi-Fi setup after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiScope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
     }
   },
   "components": {
@@ -21686,7 +24327,7 @@
         }
       },
       "Unprocessable": {
-        "description": "The request is well formed but refused (emergency_not_allowed, caller_id_not_allowed or route_denied), or valid but cannot be done in the current state",
+        "description": "The request is well formed but refused (emergency_not_allowed, caller_id_not_allowed or route_denied), or valid but cannot be done in the current state, or a fax PDF that cannot be sent as a fax (validation_failed)",
         "content": {
           "application/json": {
             "schema": {
@@ -25629,7 +28270,9 @@
                   "maintenance",
                   "emergency_not_allowed",
                   "caller_id_not_allowed",
-                  "route_denied"
+                  "route_denied",
+                  "device_limit",
+                  "derived_device"
                 ]
               },
               "message": {
@@ -25853,6 +28496,14 @@
           "emailDelivery": {
             "type": "boolean",
             "description": "Whether the system can send email at all."
+          },
+          "ringWeb": {
+            "type": "boolean",
+            "description": "Whether the user's web softphones ring for calls to their extension."
+          },
+          "ringMobile": {
+            "type": "boolean",
+            "description": "Whether the user's mobile apps ring for calls to their extension."
           },
           "mustEnrollMfa": {
             "type": "boolean",
@@ -26156,6 +28807,14 @@
           },
           "voicemailEmail": {
             "$ref": "#/components/schemas/VoicemailEmailPrefsUpdate"
+          },
+          "ringWeb": {
+            "type": "boolean",
+            "description": "Whether the user's web softphones ring for calls to their extension."
+          },
+          "ringMobile": {
+            "type": "boolean",
+            "description": "Whether the user's mobile apps ring for calls to their extension."
           }
         },
         "description": "At least one field."
@@ -27115,6 +29774,38 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["desk", "web", "mobile"],
+            "description": "desk is a phone with a stored digest secret; web and mobile are a user's softphones with derived credentials."
+          },
+          "authMode": {
+            "type": "string",
+            "enum": ["digest", "derived"],
+            "description": "How the device authenticates: a stored digest secret, or credentials derived from HELLO_CLIENT_AUTH_KEY."
+          },
+          "userId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The owner of a web or mobile device; null for a desk phone."
+          },
+          "label": {
+            "type": "string",
+            "description": "The name the owner gave a web or mobile device."
+          },
+          "platform": {
+            "type": "string",
+            "description": "The browser or platform of a web or mobile device."
+          },
+          "appVersion": {
+            "type": "string",
+            "description": "The softphone version of a web or mobile device."
+          },
+          "lastSeenAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When a web or mobile device last enrolled or refreshed its credentials."
           }
         }
       },
@@ -27154,6 +29845,38 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["desk", "web", "mobile"],
+            "description": "desk is a phone with a stored digest secret; web and mobile are a user's softphones with derived credentials."
+          },
+          "authMode": {
+            "type": "string",
+            "enum": ["digest", "derived"],
+            "description": "How the device authenticates: a stored digest secret, or credentials derived from HELLO_CLIENT_AUTH_KEY."
+          },
+          "userId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The owner of a web or mobile device; null for a desk phone."
+          },
+          "label": {
+            "type": "string",
+            "description": "The name the owner gave a web or mobile device."
+          },
+          "platform": {
+            "type": "string",
+            "description": "The browser or platform of a web or mobile device."
+          },
+          "appVersion": {
+            "type": "string",
+            "description": "The softphone version of a web or mobile device."
+          },
+          "lastSeenAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When a web or mobile device last enrolled or refreshed its credentials."
           },
           "secret": {
             "type": "string",
@@ -27453,9 +30176,10 @@
               "intercom",
               "conference",
               "door",
-              "callback"
+              "callback",
+              "fax"
             ],
-            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or door for a door station or a Door group, or callback for a call Hello placed to a queue caller who asked to be called back."
+            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or door for a door station or a Door group, or callback for a call Hello placed to a queue caller who asked to be called back, or fax for a fax call (the fax is in the faxes list, by correlation id)."
           },
           "ringTag": {
             "type": "string",
@@ -27647,7 +30371,8 @@
           "rejectAnonymous",
           "allowedCountryCodes",
           "unknownCallerAction",
-          "rejectCode"
+          "rejectCode",
+          "faxMode"
         ],
         "properties": {
           "id": {
@@ -27790,6 +30515,11 @@
             "enum": [603, 486],
             "default": 603,
             "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
+          },
+          "faxMode": {
+            "type": "string",
+            "enum": ["passthrough", "t38", "off"],
+            "description": "How a fax call on this trunk is carried: passthrough (G.711 audio, the default), t38 (re-INVITE to T.38 when the carrier offers it, falling back to passthrough on 488) or off (fax calls on the trunk are refused with 488)."
           }
         }
       },
@@ -27937,6 +30667,11 @@
             "enum": [603, 486],
             "default": 603,
             "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
+          },
+          "faxMode": {
+            "type": "string",
+            "enum": ["passthrough", "t38", "off"],
+            "description": "How a fax call on this trunk is carried: passthrough (G.711 audio, the default), t38 (re-INVITE to T.38 when the carrier offers it, falling back to passthrough on 488) or off (fax calls on the trunk are refused with 488)."
           }
         }
       },
@@ -28084,6 +30819,11 @@
             "enum": [603, 486],
             "default": 603,
             "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
+          },
+          "faxMode": {
+            "type": "string",
+            "enum": ["passthrough", "t38", "off"],
+            "description": "How a fax call on this trunk is carried: passthrough (G.711 audio, the default), t38 (re-INVITE to T.38 when the carrier offers it, falling back to passthrough on 488) or off (fax calls on the trunk are refused with 488)."
           }
         }
       },
@@ -28498,6 +31238,7 @@
               "conference",
               "time_condition",
               "directory",
+              "fax",
               "queue",
               "ring_group",
               "voicemail",
@@ -28604,6 +31345,7 @@
               "conference",
               "time_condition",
               "directory",
+              "fax",
               "queue",
               "ring_group",
               "voicemail",
@@ -28712,6 +31454,7 @@
               "conference",
               "time_condition",
               "directory",
+              "fax",
               "queue",
               "ring_group",
               "voicemail",
@@ -31636,13 +34379,14 @@
               "external",
               "time_condition",
               "directory",
-              "queue"
+              "queue",
+              "fax"
             ],
-            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; a voicemail group (the message is copied to every member's box, target is the group number); an announcement (played, then hang up); a paging group; another IVR menu; a call queue; a time condition; or an external number routed through the outbound routes."
+            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; a voicemail group (the message is copied to every member's box, target is the group number); an announcement (played, then hang up); a paging group; another IVR menu; a call queue; a time condition; a fax destination (the call is answered by the fax engine); or an external number routed through the outbound routes."
           },
           "target": {
             "type": "string",
-            "description": "Empty for hangup and directory (the dial-by-name directory); an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue, time_condition); a page code such as *60 (paging); a number (external)."
+            "description": "Empty for hangup and directory (the dial-by-name directory); an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue, time_condition, fax); a page code such as *60 (paging); a number (external)."
           }
         }
       },
@@ -36560,6 +39304,1579 @@
             "type": "integer",
             "format": "int64",
             "description": "The call's recording, when it has one; use it with POST /recordings/{id}/links."
+          }
+        }
+      },
+      "SCEPStatus": {
+        "type": "object",
+        "required": ["serverEnabled", "ca", "caUrl", "crlUrl"],
+        "properties": {
+          "serverEnabled": {
+            "type": "boolean",
+            "description": "HELLO_SCEP: the SCEP endpoint answers (still only for groups with SCEP on)."
+          },
+          "ca": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SCEPCA"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The active device CA; null until one exists."
+          },
+          "caUrl": {
+            "type": "string",
+            "description": "Plain-HTTP URL of the device CA certificate; empty while provisioning has no public URL."
+          },
+          "crlUrl": {
+            "type": "string",
+            "description": "Plain-HTTP URL of the device CA's CRL."
+          }
+        }
+      },
+      "SCEPCA": {
+        "type": "object",
+        "required": [
+          "id",
+          "subject",
+          "notBefore",
+          "notAfter",
+          "fingerprintSha256",
+          "source",
+          "certPem",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "notBefore": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notAfter": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fingerprintSha256": {
+            "type": "string",
+            "description": "SHA-256 of the certificate, colon-separated uppercase hex."
+          },
+          "source": {
+            "type": "string",
+            "enum": ["generated", "imported"]
+          },
+          "certPem": {
+            "type": "string",
+            "description": "The CA certificate (public)."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SCEPCAInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode"],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["generate", "import"],
+            "description": "generate a new CA, or import certPem and keyPem."
+          },
+          "commonName": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "generate: the CA's common name (default \"Hello device CA\")."
+          },
+          "validityYears": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30,
+            "description": "generate: years the CA is valid (0 or left out: 10)."
+          },
+          "certPem": {
+            "type": "string",
+            "description": "import: the CA certificate, PEM."
+          },
+          "keyPem": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "Write-only. import: the CA's RSA private key, PEM (PKCS#1 or PKCS#8)."
+          },
+          "replace": {
+            "type": "boolean",
+            "default": false,
+            "description": "Replace an active CA."
+          }
+        }
+      },
+      "SCEPCertificate": {
+        "type": "object",
+        "required": [
+          "id",
+          "caId",
+          "phoneId",
+          "mac",
+          "serial",
+          "subject",
+          "kind",
+          "notBefore",
+          "notAfter",
+          "issuedAt",
+          "revokedAt",
+          "revokeReason",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "caId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "phoneId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Null once the phone is removed."
+          },
+          "mac": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string",
+            "description": "Lowercase hex."
+          },
+          "subject": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["enrol", "renewal"]
+          },
+          "notBefore": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notAfter": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "revokeReason": {
+            "type": ["string", "null"],
+            "enum": [
+              "unspecified",
+              "key_compromise",
+              "superseded",
+              "cessation_of_operation",
+              "phone_removed",
+              null
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "expired", "revoked"]
+          }
+        }
+      },
+      "SCEPCertificateList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SCEPCertificate"
+            }
+          }
+        }
+      },
+      "SCEPRevokeInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": [
+              "unspecified",
+              "key_compromise",
+              "superseded",
+              "cessation_of_operation"
+            ],
+            "default": "unspecified",
+            "description": "The CRL reason; unspecified when left out."
+          }
+        }
+      },
+      "Dot1XProfile": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "method",
+          "identity",
+          "anonymousIdentity",
+          "hasPassword",
+          "caCertPem",
+          "serverDomain",
+          "usedByGroups",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string",
+            "enum": ["eap-tls", "peap", "eap-md5"]
+          },
+          "identity": {
+            "type": "string",
+            "description": "With {mac}/{MAC} placeholders as stored."
+          },
+          "anonymousIdentity": {
+            "type": "string"
+          },
+          "hasPassword": {
+            "type": "boolean"
+          },
+          "caCertPem": {
+            "type": "string"
+          },
+          "serverDomain": {
+            "type": "string"
+          },
+          "usedByGroups": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Dot1XProfileList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Dot1XProfile"
+            }
+          }
+        }
+      },
+      "Dot1XProfileInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "method", "identity"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Unique name, 1 to 64 characters."
+          },
+          "method": {
+            "type": "string",
+            "enum": ["eap-tls", "peap", "eap-md5"],
+            "description": "eap-tls (certificate from SCEP), peap (PEAPv0/MSCHAPv2) or eap-md5 (wired only)."
+          },
+          "identity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Printable, no spaces; {mac} and {MAC} are filled in per phone."
+          },
+          "anonymousIdentity": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "PEAP outer identity (Wi-Fi)."
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "x-hello-secret": true,
+            "description": "Write-only. peap and eap-md5; left out keeps the stored one, empty removes it."
+          },
+          "caCertPem": {
+            "type": "string",
+            "description": "The CA(s) the RADIUS server's certificate chains to, PEM; empty for none."
+          },
+          "serverDomain": {
+            "type": "string",
+            "maxLength": 253,
+            "description": "The RADIUS server name the phone checks."
+          }
+        }
+      },
+      "PhoneGroupSecurity": {
+        "type": "object",
+        "required": [
+          "groupId",
+          "scepEnabled",
+          "certValidityDays",
+          "wiredDot1xProfileId"
+        ],
+        "properties": {
+          "groupId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "scepEnabled": {
+            "type": "boolean"
+          },
+          "certValidityDays": {
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 1825
+          },
+          "wiredDot1xProfileId": {
+            "type": ["integer", "null"],
+            "format": "int64"
+          }
+        }
+      },
+      "PhoneGroupSecurityInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scepEnabled"],
+        "properties": {
+          "scepEnabled": {
+            "type": "boolean",
+            "description": "SCEP on for the group's phones."
+          },
+          "certValidityDays": {
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 1825,
+            "default": 365,
+            "description": "Lifetime of the certificates the group's phones get, in days."
+          },
+          "wiredDot1xProfileId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The wired 802.1X profile; null or left out for none."
+          }
+        }
+      },
+      "IceServers": {
+        "type": "object",
+        "required": ["iceServers", "expiresAt", "ttlSeconds"],
+        "properties": {
+          "iceServers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IceServer"
+            },
+            "description": "The list for RTCPeerConnection's iceServers."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the TURN credential stops working."
+          },
+          "ttlSeconds": {
+            "type": "integer",
+            "description": "The credential's lifetime; refetch once half of it has passed."
+          }
+        }
+      },
+      "IceServer": {
+        "type": "object",
+        "required": ["urls"],
+        "properties": {
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "stun:, turn: or turns: URIs."
+          },
+          "username": {
+            "type": "string",
+            "description": "The TURN username: the expiry time and the device."
+          },
+          "credential": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The TURN credential for the username; expires with it."
+          }
+        }
+      },
+      "MyDeviceEnrolment": {
+        "type": "object",
+        "required": [
+          "deviceId",
+          "sipUsername",
+          "sipPassword",
+          "realm",
+          "wssUrl",
+          "expiresAt",
+          "device",
+          "ice"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The device these credentials are for."
+          },
+          "sipUsername": {
+            "type": "string",
+            "description": "The SIP username to register with: the device's name plus the expiry time (w<id>.<unix>)."
+          },
+          "sipPassword": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The SIP digest password, derived from the username; shown only in this response."
+          },
+          "realm": {
+            "type": "string",
+            "description": "The SIP domain (digest realm)."
+          },
+          "wssUrl": {
+            "type": "string",
+            "description": "The WebSocket address to register at; empty until the edge serves WSS."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the credentials stop working; refresh before then."
+          },
+          "device": {
+            "$ref": "#/components/schemas/MyDevice"
+          },
+          "ice": {
+            "$ref": "#/components/schemas/IceServers"
+          }
+        }
+      },
+      "MyDevice": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "platform",
+          "appVersion",
+          "extensionId",
+          "extensionNumber",
+          "sipUsername",
+          "lastSeenAt",
+          "createdAt",
+          "registered"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["web", "mobile"],
+            "description": "The kind of client."
+          },
+          "label": {
+            "type": "string",
+            "description": "The name the user gave the device."
+          },
+          "platform": {
+            "type": "string",
+            "description": "The browser or platform, as reported at enrolment."
+          },
+          "appVersion": {
+            "type": "string",
+            "description": "The softphone version, as reported at enrolment."
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "extensionNumber": {
+            "type": "string"
+          },
+          "sipUsername": {
+            "type": "string",
+            "description": "The device's stable name (w<id>), not the expiring one it registers with."
+          },
+          "lastSeenAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the device last enrolled or refreshed its credentials."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "registered": {
+            "type": ["boolean", "null"],
+            "description": "Whether the device has a live registration now; null when the live state is unavailable."
+          }
+        }
+      },
+      "MyDeviceCreate": {
+        "type": "object",
+        "required": ["label"],
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "A name for the device, such as the browser and computer."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["web"],
+            "description": "Only web devices exist for now; the default."
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "One of the caller's own extensions; the first one when omitted."
+          },
+          "platform": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "The browser or platform."
+          },
+          "appVersion": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "The softphone version."
+          }
+        }
+      },
+      "DeviceCredentials": {
+        "type": "object",
+        "required": [
+          "deviceId",
+          "sipUsername",
+          "sipPassword",
+          "realm",
+          "wssUrl",
+          "expiresAt"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The device these credentials are for."
+          },
+          "sipUsername": {
+            "type": "string",
+            "description": "The SIP username to register with: the device's name plus the expiry time (w<id>.<unix>)."
+          },
+          "sipPassword": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The SIP digest password, derived from the username; shown only in this response."
+          },
+          "realm": {
+            "type": "string",
+            "description": "The SIP domain (digest realm)."
+          },
+          "wssUrl": {
+            "type": "string",
+            "description": "The WebSocket address to register at; empty until the edge serves WSS."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the credentials stop working; refresh before then."
+          }
+        }
+      },
+      "CRMCapabilities": {
+        "type": "object",
+        "required": [
+          "lookup",
+          "logCalls",
+          "recordings",
+          "clickToCall",
+          "screenPop",
+          "ticket"
+        ],
+        "properties": {
+          "lookup": {
+            "type": "boolean",
+            "description": "The connector finds a contact by phone number."
+          },
+          "logCalls": {
+            "type": "boolean",
+            "description": "The connector writes calls into the CRM."
+          },
+          "recordings": {
+            "type": "boolean",
+            "description": "The connector can carry a recording link."
+          },
+          "clickToCall": {
+            "type": "boolean",
+            "description": "The CRM has a click-to-call integration point."
+          },
+          "screenPop": {
+            "type": "boolean",
+            "description": "The CRM can show the caller on an incoming call."
+          },
+          "ticket": {
+            "type": "boolean",
+            "description": "The connector can open a ticket from a call."
+          }
+        }
+      },
+      "CRMConnection": {
+        "type": "object",
+        "required": ["status", "grantedScopes", "updatedAt"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["connected", "needs_reauth", "revoked"],
+            "description": "needs_reauth means the CRM refused the refresh token: jobs wait until an administrator connects again."
+          },
+          "externalAccount": {
+            "type": "string",
+            "description": "The CRM account the tokens belong to (the HubSpot portal id)."
+          },
+          "grantedScopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The scopes the CRM granted."
+          },
+          "lastError": {
+            "type": "string",
+            "description": "Why the connection stopped working, when it did."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the access token expires; it is refreshed before that."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the connection last changed."
+          }
+        }
+      },
+      "CRMConnector": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "enabled",
+          "config",
+          "hasClientSecret",
+          "recordings",
+          "linkTtlHours",
+          "logMissed",
+          "fallbackOwner",
+          "createdAt",
+          "capabilities",
+          "connection"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "description": "The connector kind, for example hubspot."
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "A disabled connector looks nothing up and logs nothing."
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The connector's settings: clientId and, for HubSpot, region (na or eu)."
+          },
+          "hasClientSecret": {
+            "type": "boolean",
+            "description": "Whether the OAuth client secret is set. The secret itself is never returned."
+          },
+          "recordings": {
+            "type": "boolean",
+            "description": "Whether recording links are written into the CRM. Off by default."
+          },
+          "linkTtlHours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8760,
+            "description": "How long a recording link lives; links of recent calls are renewed before they expire."
+          },
+          "logMissed": {
+            "type": "boolean",
+            "description": "Whether missed calls are logged as no-answer calls."
+          },
+          "fallbackOwner": {
+            "type": "string",
+            "description": "The CRM user id that owns the calls of a user with no CRM user. Empty skips those calls."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/CRMCapabilities"
+          },
+          "connection": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CRMConnection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The connection, null while the connector is not connected."
+          },
+          "redirectUri": {
+            "type": "string",
+            "description": "The redirect URI to register in the CRM app; absent without HELLO_PUBLIC_URL."
+          }
+        }
+      },
+      "CRMConnectorList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CRMConnector"
+            }
+          }
+        }
+      },
+      "CRMConnectorInput": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "The connector kind (hubspot); required on create, immutable afterwards."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "A unique name for the console."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Defaults to true."
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "clientId and, for HubSpot, region (na or eu, default na); keys you leave out are kept."
+          },
+          "clientSecret": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The OAuth client secret of the customer's CRM app. Write-only; an empty string clears it."
+          },
+          "recordings": {
+            "type": "boolean",
+            "description": "Write recording links into the CRM (default false)."
+          },
+          "linkTtlHours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8760,
+            "description": "Recording link lifetime in hours (default 720, 30 days)."
+          },
+          "logMissed": {
+            "type": "boolean",
+            "description": "Log missed calls (default true)."
+          },
+          "fallbackOwner": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "CRM user id owning calls of unmapped users; empty skips them."
+          }
+        }
+      },
+      "CRMAuthorize": {
+        "type": "object",
+        "required": ["authorizeUrl"],
+        "properties": {
+          "authorizeUrl": {
+            "type": "string",
+            "description": "The CRM address that asks the administrator to approve the app."
+          }
+        }
+      },
+      "CRMTestResult": {
+        "type": "object",
+        "required": ["ok"],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Whether the CRM accepted the call."
+          },
+          "error": {
+            "type": "string",
+            "description": "Why it did not, without secrets."
+          }
+        }
+      },
+      "CRMLog": {
+        "type": "object",
+        "required": [
+          "id",
+          "connectorId",
+          "callId",
+          "direction",
+          "status",
+          "externalId",
+          "attempts",
+          "nextAttemptAt",
+          "lastError",
+          "eventType",
+          "ownerExtension",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "connectorId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "callId": {
+            "type": "string",
+            "description": "The call's correlation id, as in the call events and the CDR."
+          },
+          "direction": {
+            "type": "string",
+            "description": "inbound or outbound."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "pending",
+              "logged",
+              "update",
+              "dead",
+              "skipped"
+            ],
+            "description": "waiting has no call data yet, pending is due, logged is in the CRM, update needs a patch, dead ran out of attempts, skipped was deliberately not logged."
+          },
+          "externalId": {
+            "type": "string",
+            "description": "The CRM's id of the logged call."
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Failed attempts in the current series."
+          },
+          "nextAttemptAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastError": {
+            "type": "string",
+            "description": "The last failure or the reason the call was skipped."
+          },
+          "eventType": {
+            "type": "string",
+            "description": "The call event the job was made from."
+          },
+          "ownerExtension": {
+            "type": "string",
+            "description": "The extension whose user owns the call in the CRM."
+          },
+          "recordingId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The recording linked into the CRM record, when there is one."
+          },
+          "linkExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the recording link written into the CRM expires."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CRMLogPage": {
+        "type": "object",
+        "required": ["items", "nextBefore"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CRMLog"
+            }
+          },
+          "nextBefore": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Pass as before for the next page; 0 when this was the last."
+          }
+        }
+      },
+      "CRMUserMapping": {
+        "type": "object",
+        "required": ["userId", "username", "email"],
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "username": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "description": "The account's email, used to find the CRM user."
+          },
+          "extension": {
+            "type": "string",
+            "description": "The user's extension."
+          },
+          "externalUserId": {
+            "type": "string",
+            "description": "The CRM user id; absent while unmapped."
+          },
+          "source": {
+            "type": "string",
+            "enum": ["email", "manual"],
+            "description": "How the mapping was made."
+          }
+        }
+      },
+      "CRMUserList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CRMUserMapping"
+            }
+          }
+        }
+      },
+      "CRMUserMappingInput": {
+        "type": "object",
+        "required": ["externalUserId"],
+        "properties": {
+          "externalUserId": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "The CRM user id; empty clears the mapping."
+          }
+        }
+      },
+      "CRMEngagementInput": {
+        "type": "object",
+        "required": ["callId", "engagementId"],
+        "properties": {
+          "callId": {
+            "type": "string",
+            "description": "The call's correlation id from the call events."
+          },
+          "engagementId": {
+            "type": "string",
+            "pattern": "^[0-9]{1,32}$",
+            "description": "The id of the HubSpot call engagement the iframe created."
+          }
+        }
+      },
+      "CRMEngagementResult": {
+        "type": "object",
+        "required": ["adopted"],
+        "properties": {
+          "adopted": {
+            "type": "boolean",
+            "description": "False when the server had already logged the call and keeps its own engagement."
+          }
+        }
+      },
+      "Fax": {
+        "type": "object",
+        "required": [
+          "id",
+          "direction",
+          "status",
+          "peerNumber",
+          "localNumber",
+          "destination",
+          "ownerExtension",
+          "pages",
+          "mode",
+          "bitRate",
+          "resultCode",
+          "resultText",
+          "hasPdf",
+          "correlationId",
+          "createdBy",
+          "createdAt",
+          "finishedAt",
+          "attempts",
+          "nextAttemptAt",
+          "mailTo",
+          "mailStatus"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["inbound", "outbound"]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "sending",
+              "receiving",
+              "received",
+              "sent",
+              "partial",
+              "failed",
+              "cancelled"
+            ],
+            "description": "queued and sending are outbound, receiving inbound. partial means some pages arrived (or went) before the T.30 session failed; the pages are kept."
+          },
+          "peerNumber": {
+            "type": "string",
+            "description": "The other party: the sender's number for a received fax, the destination for a sent one."
+          },
+          "localNumber": {
+            "type": "string",
+            "description": "The DID a fax arrived on, or the caller ID a fax was sent with."
+          },
+          "destination": {
+            "type": "string",
+            "description": "The fax destination a received fax arrived at; empty for a sent one."
+          },
+          "ownerExtension": {
+            "type": "string",
+            "description": "The extension that owns the fax; a user sees the faxes of their own extensions."
+          },
+          "pages": {
+            "type": "integer"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["", "g711", "t38"],
+            "description": "How the fax travelled: G.711 audio or T.38."
+          },
+          "bitRate": {
+            "type": "integer",
+            "description": "The modem rate of the last page, in bit/s."
+          },
+          "resultCode": {
+            "type": ["integer", "null"],
+            "description": "The T.30 completion code; 0 is success."
+          },
+          "resultText": {
+            "type": "string"
+          },
+          "hasPdf": {
+            "type": "boolean"
+          },
+          "correlationId": {
+            "type": "string",
+            "description": "The call's CDR correlation id."
+          },
+          "createdBy": {
+            "type": "string",
+            "description": "Who queued a sent fax; empty for a received one."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Attempts made to send (0 to 3)."
+          },
+          "nextAttemptAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When a queued fax is next tried."
+          },
+          "mailTo": {
+            "type": "string",
+            "description": "The address a received fax is emailed to when its destination names one; empty when it goes to the owner's users."
+          },
+          "mailStatus": {
+            "type": "string",
+            "enum": ["none", "pending", "sending", "sent", "failed"]
+          }
+        }
+      },
+      "FaxPage": {
+        "type": "object",
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Fax"
+            }
+          },
+          "next": {
+            "type": "string",
+            "description": "The cursor of the next page; empty on the last."
+          }
+        }
+      },
+      "FaxSend": {
+        "type": "object",
+        "required": ["to", "pdfBase64"],
+        "additionalProperties": false,
+        "properties": {
+          "to": {
+            "type": "string",
+            "pattern": "^\\+[1-9][0-9]{6,14}$",
+            "description": "Destination number in E.164."
+          },
+          "callerId": {
+            "type": "string",
+            "pattern": "^\\+?[0-9]{1,20}$",
+            "description": "Station identifier sent in the T.30 frames; empty for the outbound route's caller ID."
+          },
+          "pdfBase64": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "description": "Base64 of the PDF, at most 700 KiB decoded; send larger documents as multipart."
+          }
+        }
+      },
+      "FaxDestination": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "extension",
+          "email",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,40}$"
+          },
+          "extension": {
+            "type": "string",
+            "description": "The owner extension number."
+          },
+          "email": {
+            "type": "string",
+            "description": "Where the PDF is emailed instead of to the owner's users; empty for the owner's."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FaxDestinationList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FaxDestination"
+            }
+          }
+        }
+      },
+      "FaxDestinationCreate": {
+        "type": "object",
+        "required": ["name", "extension"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,40}$",
+            "description": "Name routes and IVR keys refer to; it cannot change."
+          },
+          "extension": {
+            "type": "string",
+            "pattern": "^[0-9]{2,10}$",
+            "description": "The extension number that owns the faxes arriving here."
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "description": "Address the PDF is emailed to instead of the owner's users; empty for the owner's."
+          }
+        }
+      },
+      "FaxDestinationUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "May be sent, but must equal the current name."
+          },
+          "extension": {
+            "type": "string",
+            "pattern": "^[0-9]{2,10}$",
+            "description": "The extension number that owns the faxes arriving here."
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "description": "Address the PDF is emailed to instead of the owner's users; empty for the owner's."
+          }
+        }
+      },
+      "WifiProfile": {
+        "type": "object",
+        "required": ["id", "name", "ssid", "security", "pskSet", "passwordSet"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ssid": {
+            "type": "string"
+          },
+          "security": {
+            "type": "string",
+            "enum": [
+              "open",
+              "wpa2-psk",
+              "wpa3-sae",
+              "owe",
+              "wpa2-enterprise",
+              "wpa3-enterprise"
+            ]
+          },
+          "pskSet": {
+            "type": "boolean",
+            "description": "A pre-shared key is stored. The key itself is never returned."
+          },
+          "eapMethod": {
+            "type": "string",
+            "enum": ["", "peap"]
+          },
+          "identity": {
+            "type": "string"
+          },
+          "anonymousIdentity": {
+            "type": "string"
+          },
+          "passwordSet": {
+            "type": "boolean",
+            "description": "An 802.1X password is stored. The password itself is never returned."
+          },
+          "caCert": {
+            "type": "string",
+            "enum": ["system", "tofu", "skip"],
+            "description": "How an enterprise profile verifies the RADIUS server: system certificates, trust on first use, or no verification."
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "hidden": {
+            "type": "boolean"
+          },
+          "preferAccount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3,
+            "description": "0 is automatic."
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "The profile joined a test phone. Provisioning writes no network until the phone's profiles include a verified one."
+          },
+          "groups": {
+            "type": "integer",
+            "description": "Phone groups the profile is assigned to."
+          },
+          "phones": {
+            "type": "integer",
+            "description": "Phones the profile is assigned to."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WifiProfileList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WifiProfile"
+            }
+          }
+        }
+      },
+      "WifiProfileInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "On create name, ssid and security are required.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Unique name of the profile, at most 64 characters."
+          },
+          "ssid": {
+            "type": "string",
+            "description": "1 to 32 bytes."
+          },
+          "security": {
+            "type": "string",
+            "enum": [
+              "open",
+              "wpa2-psk",
+              "wpa3-sae",
+              "owe",
+              "wpa2-enterprise",
+              "wpa3-enterprise"
+            ],
+            "description": "The security mode. A model takes the modes its template has: WP8x6 all, WP810/822/825 open, wpa2-psk and wpa3-sae, WP856 open and wpa2-psk."
+          },
+          "psk": {
+            "type": "string",
+            "writeOnly": true,
+            "x-hello-secret": true,
+            "description": "The pre-shared key, 8 to 63 printable ASCII characters. Write-only."
+          },
+          "eapMethod": {
+            "type": "string",
+            "enum": ["peap"],
+            "description": "The EAP method of an enterprise profile; only peap."
+          },
+          "identity": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The 802.1X identity of an enterprise profile."
+          },
+          "anonymousIdentity": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The anonymous (outer) identity of an enterprise profile."
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true,
+            "x-hello-secret": true,
+            "description": "The 802.1X password. Write-only."
+          },
+          "caCert": {
+            "type": "string",
+            "enum": ["system", "tofu", "skip"],
+            "description": "How an enterprise profile verifies the RADIUS server: system certificates, trust on first use, or no verification."
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "0 to 10; a higher number is listed first. Written to the WP8x6 only."
+          },
+          "hidden": {
+            "type": "boolean",
+            "description": "The network does not broadcast its name. Written to the WP810/822/825 only."
+          },
+          "preferAccount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3,
+            "description": "0 for automatic, else the account 1 to 3 the network prefers. Written to the WP8x6 only."
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "The profile joined a test phone. Provisioning writes no network until the phone's profiles include a verified one."
+          }
+        }
+      },
+      "WifiRadio": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Roaming and radio settings. A field that is absent is not written, so the phone keeps its own. Each model takes the fields its template has a key for: WP8x6 band, roamMode (default, boost), threshold, poorScan, prompt; WP810/822/825 threshold, poorScan, dot11r, dot11v; WP856 all but prompt. 802.11k has no key in any template and is an access point setting.",
+        "properties": {
+          "band": {
+            "type": "string",
+            "enum": ["both", "2.4", "5"],
+            "description": "Radio band: both, 2.4 or 5 (GHz)."
+          },
+          "roamMode": {
+            "type": "string",
+            "enum": ["default", "boost", "fast", "custom"],
+            "description": "Roaming mode; WP8x6 takes default and boost, WP856 all four."
+          },
+          "threshold": {
+            "type": "integer",
+            "minimum": -100,
+            "maximum": -30,
+            "description": "Roaming signal threshold, dBm."
+          },
+          "poorScan": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 300,
+            "description": "Poor signal scan interval, seconds."
+          },
+          "goodScan": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 600,
+            "description": "Good signal scan interval, seconds."
+          },
+          "gain": {
+            "type": "integer",
+            "minimum": 4,
+            "maximum": 20,
+            "description": "Roaming gain, dB."
+          },
+          "dot11r": {
+            "type": "boolean",
+            "description": "802.11r fast BSS transition."
+          },
+          "dot11v": {
+            "type": "boolean",
+            "description": "802.11v BSS transition management."
+          },
+          "prompt": {
+            "type": "boolean",
+            "description": "Show the roaming prompt."
+          }
+        }
+      },
+      "WifiScope": {
+        "type": "object",
+        "required": ["profileIds", "inheritedProfileIds", "pushing"],
+        "properties": {
+          "profileIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "inheritedProfileIds": {
+            "type": "array",
+            "description": "For a phone, the profiles of its group.",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "pushing": {
+            "type": "boolean",
+            "description": "A verified profile is among the profiles, so provisioning writes the networks."
+          },
+          "radio": {
+            "$ref": "#/components/schemas/WifiRadio"
+          }
+        }
+      },
+      "WifiGroupInput": {
+        "type": "object",
+        "required": ["profileIds"],
+        "additionalProperties": false,
+        "properties": {
+          "profileIds": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "The ids of the Wi-Fi profiles, the whole list; at most 10."
+          },
+          "radio": {
+            "$ref": "#/components/schemas/WifiRadio"
+          }
+        }
+      },
+      "WifiPhoneInput": {
+        "type": "object",
+        "required": ["profileIds"],
+        "additionalProperties": false,
+        "properties": {
+          "profileIds": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "The ids of the Wi-Fi profiles, the whole list; at most 10."
           }
         }
       }

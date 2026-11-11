@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
@@ -291,6 +292,11 @@ type call struct {
 	cbQueue string
 	cbDone  bool
 	cbOffer []byte
+	// Fax (fax.go), guarded by mu: faxMode is the source trunk's fax mode
+	// (migration 00073) and fx the call's fax session, nil on any other call.
+	faxMode string
+	fx      *faxCall
+	faxNote string // the fax result, the CDR's reason on a call that ends normally
 	// Time conditions (timecond.go): tcVisited lists the conditions the call
 	// passed, so a loop through ring group failover or an IVR menu is caught;
 	// vmPre is an announcement played before the voicemail greeting. Guarded
@@ -901,13 +907,17 @@ func (c *call) abandon(l *leg) bool {
 }
 
 func (c *call) cancelForks(except *leg) {
+	if except != nil {
+		// A fork answered: the others were completed elsewhere (RFC 3326), so
+		// a phone or softphone shows "answered elsewhere", not a missed call.
+		c.cancelForksElsewhereExcept(except)
+		return
+	}
 	c.mu.Lock()
 	legs := c.legs
 	c.mu.Unlock()
 	for _, l := range legs {
-		if l != except {
-			l.cancel()
-		}
+		l.cancel()
 	}
 }
 
@@ -959,6 +969,13 @@ func (c *call) respondA(code int, reason string) {
 // answer connects the caller to the winning fork.
 func (c *call) answer(w *leg) {
 	c.cancelForks(w)
+	// A softphone that answered is named in the routing trace (S-17), so the
+	// call detail says which kind of client took it.
+	if snap := c.s.deps.Snapshots.Current(); snap != nil {
+		if d, ok := snap.DeviceByUsername(w.binding.Device); ok && (d.Kind == auth.KindWeb || d.Kind == auth.KindMobile) {
+			c.addTrace(fmt.Sprintf("Answered by %s device %s", d.Kind, d.Username))
+		}
+	}
 	c.stopRingMOH() // the destination answered: the waiting music ends before the bridge
 	dcs := w.session()
 	bres := dcs.InviteResponse
@@ -1279,6 +1296,9 @@ func (c *call) byeA() {
 		c.orig.byeAgent()
 		return
 	}
+	if c.dss == nil {
+		return // a call Hello placed has no caller dialog
+	}
 	ctx, cancel := c.s.timeoutUntilShutdown(byeTimeout)
 	defer cancel()
 	if err := c.dss.Bye(ctx); err != nil {
@@ -1348,6 +1368,7 @@ func (c *call) end(status int, side, reason, result string) {
 		}
 		c.queueAbandoned()
 		c.cbFinish("abandoned", "") // a callback call that ends before an agent was connected
+		c.faxCallEnded()
 		go c.queueEnded()
 		c.unpublish()
 		c.record(status, side, reason, result)
@@ -1396,6 +1417,9 @@ func (c *call) record(status int, side, reason, result string) {
 	}
 	end := time.Now()
 	c.mu.Lock()
+	if reason == "" && result == ResultAnswered {
+		reason = c.faxNote // a fax call's CDR carries how the fax ended
+	}
 	ring, answer := c.ringTime, c.answerTime
 	if result != ResultAnswered {
 		answer = time.Time{}
@@ -2033,6 +2057,10 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	c := ref.c
+	if fx := c.faxState(); fx != nil {
+		c.faxInDialog(fx, req, tx)
+		return
+	}
 	if c.isLinked() {
 		s.linkedReinvite(c, req, tx)
 		return

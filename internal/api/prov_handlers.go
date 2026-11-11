@@ -563,6 +563,19 @@ func maskSecrets(d *prov.RenderData) {
 		}
 		d.Book = &b
 	}
+	if d.Wifi != nil {
+		w := *d.Wifi
+		w.Profiles = slices.Clone(w.Profiles)
+		for i := range w.Profiles {
+			if w.Profiles[i].PSK != "" {
+				w.Profiles[i].PSK = mask
+			}
+			if w.Profiles[i].Password != "" {
+				w.Profiles[i].Password = mask
+			}
+		}
+		d.Wifi = &w
+	}
 	if d.LDAP != nil {
 		l := *d.LDAP
 		l.Password = mask
@@ -572,5 +585,27 @@ func maskSecrets(d *prov.RenderData) {
 		fw := *d.Firmware
 		fw.URL = tokenInPathRe.ReplaceAllString(fw.URL, "/p/"+mask+"/")
 		d.Firmware = &fw
+	}
+	if d.SCEP != nil {
+		sc := *d.SCEP
+		sc.URL = tokenInPathRe.ReplaceAllString(sc.URL, "/p/"+mask+"/")
+		sc.Challenge = mask
+		d.SCEP = &sc
+	}
+	if d.Dot1X != nil {
+		dx := prov.Dot1XInfo{Profiles: slices.Clone(d.Dot1X.Profiles)}
+		for i := range dx.Profiles {
+			if dx.Profiles[i].Password != "" {
+				dx.Profiles[i].Password = mask
+			}
+		}
+		if d.Dot1X.Wired != nil {
+			w := *d.Dot1X.Wired
+			if w.Password != "" {
+				w.Password = mask
+			}
+			dx.Wired = &w
+		}
+		d.Dot1X = &dx
 	}
 }
