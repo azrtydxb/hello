@@ -35,6 +35,9 @@ var publicOps = map[string]int{
 	"GET /api/v1/openapi.json":    http.StatusOK,
 	"POST /api/v1/auth/login":     http.StatusBadRequest,
 	"POST /api/v1/auth/login/2fa": http.StatusBadRequest,
+	// The CRM sign-in callback: without the CRM service wired it answers
+	// 503, and with it a redirect (TestCRMConnectorLifecycle).
+	"GET /api/v1/integrations/crm/oauth/callback": http.StatusServiceUnavailable,
 }
 
 // documentedOps lists "METHOD /path" for every operation in openapi.json.

@@ -100,6 +100,8 @@ interface TrunkDraft {
   /** The header carrying it. */
   identityHeader: "pai" | "ppi";
 
+  /** How a fax call is carried (docs/fax.md). */
+  faxMode: "passthrough" | "t38" | "off";
   /** RFC 4028 session timers on the trunk's calls. */
   sessionTimers: SessionTimers;
   /** What the trunk may dial in the extension namespace. */
@@ -179,6 +181,7 @@ const NEW_TRUNK: TrunkDraft = {
   assertedIdentity: "",
   identityHeader: "pai",
 
+  faxMode: "passthrough",
   sessionTimers: "default",
   dialingMode: "off",
   dialingPatterns: "",
@@ -223,6 +226,7 @@ function toDraft(t: Trunk): TrunkDraft {
     assertedIdentity: t.assertedIdentity ?? "",
     identityHeader: t.identityHeader === "ppi" ? "ppi" : "pai",
 
+    faxMode: t.faxMode ?? "passthrough",
     sessionTimers:
       t.sessionTimers === "on" || t.sessionTimers === "off"
         ? t.sessionTimers
@@ -243,6 +247,18 @@ function toDraft(t: Trunk): TrunkDraft {
 }
 
 const isInt = (v: string) => /^-?[0-9]+$/.test(v.trim());
+
+/** How a fax call on the trunk is carried, for the card and the drawer. */
+function faxModeLabel(mode: string | undefined): string {
+  switch (mode) {
+    case "t38":
+      return "T.38 when offered";
+    case "off":
+      return "Refused";
+    default:
+      return "Passthrough (G.711)";
+  }
+}
 
 /** The patterns of a trunk, for the card and the drawer. */
 function dialingLabel(dialing: InternalDialing): string {
@@ -345,7 +361,7 @@ function toInput(d: TrunkDraft): TrunkInput {
     anonymousPolicy: d.anonymousPolicy,
     assertedIdentity: d.assertedIdentity.trim(),
     identityHeader: d.identityHeader,
-
+    faxMode: d.faxMode,
     sessionTimers: d.sessionTimers,
     codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
     srtp: d.srtp,
@@ -401,6 +417,7 @@ function knownKeys(d: TrunkDraft): string[] {
     "allowedCountryCodes",
     "unknownCallerAction",
     "rejectCode",
+    "faxMode",
     "sessionTimers",
     ...d.destinations.flatMap((_, i) => [
       `destinations[${i}]`,
@@ -660,6 +677,7 @@ function TrunkCard({
             label: "Anonymous calls",
             value: t.anonymousPolicy === "always" ? "Always" : "On request",
           },
+          { label: "Fax", value: faxModeLabel(t.faxMode) },
           {
             label: "Session timers",
             value: SESSION_TIMERS_LABEL[t.sessionTimers ?? "default"],
@@ -690,6 +708,7 @@ function TrunkCard({
             label: "Anonymous calls",
             value: t.anonymousPolicy === "always" ? "Always" : "On request",
           },
+          { label: "Fax", value: faxModeLabel(t.faxMode) },
           {
             label: "Session timers",
             value: SESSION_TIMERS_LABEL[t.sessionTimers ?? "default"],
@@ -1088,6 +1107,20 @@ function TrunkDrawer({
             labelPosition="end"
             checked={draft.messaging}
             onChange={(e) => set("messaging", e.target.checked)}
+          />
+          <Select
+            label="Fax"
+            hint="How a fax call on this trunk is carried. Passthrough keeps G.711 audio. T.38 moves the call to T.38 when the carrier offers it or the fax tone is heard; a carrier that refuses leaves it on G.711. Off refuses fax calls."
+            value={draft.faxMode}
+            error={errors.faxMode}
+            options={[
+              { value: "passthrough", label: "Passthrough (G.711)" },
+              { value: "t38", label: "T.38 when the carrier offers it" },
+              { value: "off", label: "Off (refuse fax calls)" },
+            ]}
+            onChange={(e) =>
+              set("faxMode", e.target.value as TrunkDraft["faxMode"])
+            }
           />
         </fieldset>
 

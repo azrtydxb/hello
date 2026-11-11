@@ -11,6 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/secmedia"
 	"github.com/azrtydxb/hello/internal/store"
@@ -266,6 +267,11 @@ func validateTrunk(in *store.TrunkInput, hasPassword bool) fieldErrs {
 			f.add("codecs", "%s", why)
 		}
 	}
+	switch in.FaxMode {
+	case "", fax.ModePassthrough, fax.ModeT38, fax.ModeOff:
+	default:
+		f.add("faxMode", `must be "passthrough", "t38" or "off"`)
+	}
 	if !routing.ValidSessionTimers(in.SessionTimers) {
 		f.add("sessionTimers", `must be "default", "on" or "off"`)
 	}
@@ -420,7 +426,7 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 		if !usernameRe.MatchString(in.Destination) {
 			f.add("destination", "must be the name of a time condition")
 		}
-	case "ring_group", "announcement":
+	case "ring_group", "announcement", "fax":
 		if !usernameRe.MatchString(in.Destination) {
 			f.add("destination", "must be the name of a %s", strings.ReplaceAll(in.DestinationKind, "_", " "))
 		}
@@ -462,7 +468,7 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 			f.add("destination", "must be a sip: URI of at most 255 characters")
 		}
 	default:
-		f.add("destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "voicemail_group", "announcement", "paging" or "directory"`)
+		f.add("destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "voicemail_group", "announcement", "paging", "fax" or "directory"`)
 	}
 	return f
 }

@@ -39,6 +39,15 @@
 | `createMulticastChannel`    | admin | Add a channel.                                                         |
 | `putMulticastChannel`       | admin | Replace a channel.                                                     |
 | `deleteMulticastChannel`    | admin | Delete a channel.                                                      |
+| `listFaxDestinations`       | read  | Fax destinations: an owner extension and an optional email.        |
+| `getFaxDestination`         | read  | One fax destination.                                               |
+| `createFaxDestination`      | admin | Create a fax destination for routes and IVR keys to name.          |
+| `updateFaxDestination`      | admin | Change a destination's owner and email (not its name).            |
+| `deleteFaxDestination`      | admin | Delete a destination no route or IVR key names.                    |
+| `listFaxes`                 | read  | Received and sent faxes, newest first; filter direction, status.   |
+| `getFax`                    | read  | One fax with its state.                                            |
+| `sendFax`                   | write | Queue a PDF to send to an E.164 number.                            |
+| `deleteFax`                 | write | Delete a fax and its PDF, or cancel one being sent.                |
 | `getMessageSettings`        | admin | Messaging switch, TTL, retention, limits.                              |
 | `updateMessageSettings`     | admin | Replace the messaging settings.                                        |
 | `sendMessage`               | write | Queue a text message to an extension, group, everyone or a number.     |
