@@ -1,4 +1,4 @@
-// Follow-me profiles (migration 00076): GET|PUT /api/v1/extensions/{id}/follow-me
+// Follow-me profiles (migration 00077): GET|PUT /api/v1/extensions/{id}/follow-me
 // for operators and GET|PUT /api/v1/me/extensions/{id}/follow-me for the user
 // of the extension.
 import { request, type Id } from "../api";
