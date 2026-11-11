@@ -49,6 +49,9 @@ export interface Me {
   mustEnrollMfa?: boolean;
   /** The user's own two-factor state. */
   twoFactor?: TwoFactorState;
+  /** Whether the user's web softphones ring for calls to their extension. */
+  ringWeb?: boolean;
+  ringMobile?: boolean;
 }
 
 /** GET /api/v1/me/2fa */
@@ -164,6 +167,10 @@ export interface Device {
   srtp?: SrtpPolicy;
   createdAt: string;
   updatedAt: string;
+  /** desk (a phone), web or mobile (a user's softphone); absent from older servers. */
+  kind?: "desk" | "web" | "mobile";
+  /** The name the owner gave a web or mobile device. */
+  label?: string;
 }
 
 /** Device create / rotate-secret response. */

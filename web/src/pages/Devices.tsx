@@ -168,7 +168,23 @@ export function Devices() {
   }
 
   const columns: TableColumn<Device>[] = [
-    { key: "sipUsername", label: "SIP username", mono: true },
+    {
+      key: "sipUsername",
+      label: "SIP username",
+      mono: true,
+      render: (d) =>
+        d.kind === "web" || d.kind === "mobile" ? (
+          <>
+            {d.sipUsername}
+            <small>
+              {d.kind === "web" ? "Web" : "Mobile"} device
+              {d.label ? `: ${d.label}` : ""}
+            </small>
+          </>
+        ) : (
+          d.sipUsername
+        ),
+    },
     {
       key: "extension",
       label: "Extension",
@@ -251,15 +267,17 @@ export function Devices() {
       render: (d) => (
         <div className="dir-actions">
           <Can min="admin">
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="key-round"
-              aria-label={`Rotate secret for ${d.sipUsername}`}
-              onClick={() => setPending({ kind: "rotate", device: d })}
-            >
-              Rotate secret
-            </Button>
+            {(d.kind === undefined || d.kind === "desk") && (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="key-round"
+                aria-label={`Rotate secret for ${d.sipUsername}`}
+                onClick={() => setPending({ kind: "rotate", device: d })}
+              >
+                Rotate secret
+              </Button>
+            )}
           </Can>
           <Can>
             <IconButton
