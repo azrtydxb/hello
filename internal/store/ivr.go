@@ -43,12 +43,15 @@ const (
 	// caller spells a name on the keypad and is connected to the extension.
 	// It names no object, so its target is empty.
 	IVRDirectory = "directory"
+	// IVRFax names a fax destination (migration 00072): the call is answered
+	// by the fax engine and the PDF goes to the destination's owner.
+	IVRFax = "fax"
 )
 
 // IVRDestinationKinds lists the destination kinds, in the order the UI shows
 // them.
 var IVRDestinationKinds = []string{IVRHangup, IVRExtension, IVRRingGroup, IVRVoicemail, IVRAnnouncement,
-	IVRPaging, IVRMenuDest, IVRExternal, IVRQueueDest, IVRTimeCondition, IVRDirectory}
+	IVRPaging, IVRMenuDest, IVRExternal, IVRQueueDest, IVRTimeCondition, IVRVoicemailGroup, IVRDirectory, IVRFax}
 
 // IVRDestination is where an option, a timeout or an invalid choice sends
 // the call.
@@ -236,6 +239,8 @@ func checkIVRDestination(ctx context.Context, tx *sql.Tx, d ivrDest) error {
 	case IVRVoicemail:
 		return exists(`SELECT count(*) FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id
 			WHERE e.number = $1`, "voicemail box of extension")
+	case IVRVoicemailGroup:
+		return exists(`SELECT count(*) FROM voicemail_groups WHERE number = $1`, "voicemail group with number")
 	case IVRRingGroup:
 		return exists(`SELECT count(*) FROM ring_groups WHERE name = $1`, "ring group")
 	case IVRAnnouncement:
@@ -252,6 +257,8 @@ func checkIVRDestination(ctx context.Context, tx *sql.Tx, d ivrDest) error {
 		// The format is checked by the API; routing decides at call time.
 	case IVRTimeCondition:
 		return exists(`SELECT count(*) FROM time_conditions WHERE name = $1`, "time condition")
+	case IVRFax:
+		return exists(`SELECT count(*) FROM fax_destinations WHERE name = $1`, "fax destination")
 	default:
 		return fieldError(d.path+".kind", "is not a destination kind")
 	}

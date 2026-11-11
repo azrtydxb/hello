@@ -37,6 +37,9 @@ var publicOps = map[string]int{
 	"POST /api/v1/auth/login/2fa": http.StatusBadRequest,
 	// No signature: the trigger answers 401 before it looks the webhook up.
 	"POST /api/v1/door/webhooks/{id}/trigger": http.StatusUnauthorized,
+	// The CRM sign-in callback: without the CRM service wired it answers
+	// 503, and with it a redirect (TestCRMConnectorLifecycle).
+	"GET /api/v1/integrations/crm/oauth/callback": http.StatusServiceUnavailable,
 }
 
 // documentedOps lists "METHOD /path" for every operation in openapi.json.

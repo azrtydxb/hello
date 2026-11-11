@@ -4,6 +4,8 @@ import { errorMessage } from "../api";
 import {
   getPhone,
   listPhoneFetches,
+  listPhoneSyslog,
+  type SyslogLine,
   listPhonePushes,
   previewPhoneFile,
   pushPhone,
@@ -13,6 +15,7 @@ import {
   type Fetch,
   type Phone,
 } from "../api/prov";
+import { rotateSCEPChallenge } from "../api/scep";
 import {
   Alert,
   Badge,
@@ -31,6 +34,7 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
+import { SyslogTable } from "./phones/syslog";
 import { usePolling } from "../usePolling";
 import {
   DeletePhoneDialog,
@@ -56,6 +60,13 @@ import {
 import { PhoneLdap } from "./phones/PhoneLdap";
 import { PushLine, RebootDialog } from "./phones/push";
 import { hasPttKey, PttOverride } from "./phones/PttOverride";
+import {
+  hasAccountSharing,
+  PhoneLines,
+  SharingRoleField,
+} from "./phones/PhoneLines";
+import { DirectoryFit } from "./phones/DirectoryFit";
+import { SettingOverrides } from "./phones/SettingOverrides";
 import "./phones/inventory.css";
 import { Can } from "../role";
 
@@ -64,8 +75,15 @@ type PhoneState =
   | { status: "error"; message: string }
   | { status: "ready"; phone: Phone };
 
-type Pending = "rotate" | "rearm" | "delete" | "rotate-admin" | "reboot" | null;
-type Tab = "fetches" | "preview";
+type Pending =
+  | "rotate"
+  | "rearm"
+  | "delete"
+  | "rotate-admin"
+  | "rotate-scep"
+  | "reboot"
+  | null;
+type Tab = "fetches" | "syslog" | "preview";
 
 const FETCH_PAGE = 50;
 
@@ -289,6 +307,24 @@ export function PhoneDetail() {
               ]}
             />
 
+            <PhoneLines
+              phone={phone}
+              onChanged={(p) => {
+                setState({ status: "ready", phone: p });
+                toast.show("Lines saved. Resync the phone to apply them.");
+              }}
+            />
+
+            {hasAccountSharing(phone) && (
+              <SharingRoleField
+                phone={phone}
+                onSaved={(p) => {
+                  setState({ status: "ready", phone: p });
+                  toast.show("Role saved. Resync the phone to apply it.");
+                }}
+              />
+            )}
+
             {hasPttKey(phone) && (
               <PttOverride
                 phone={phone}
@@ -298,6 +334,16 @@ export function PhoneDetail() {
                     "PTT channel saved. Resync the phone to apply it.",
                   );
                 }}
+              />
+            )}
+
+            <DirectoryFit phoneId={phone.id} />
+
+            {(phone.vendor === "grandstream" || phone.vendor === "yealink") && (
+              <SettingOverrides
+                scope="phones"
+                id={phone.id}
+                title="Setting overrides"
               />
             )}
 
@@ -368,6 +414,15 @@ export function PhoneDetail() {
                     Rotate admin password
                   </Button>
                 </Can>
+                <Can min="admin">
+                  <Button
+                    variant="secondary"
+                    icon="shield-check"
+                    onClick={() => setPending("rotate-scep")}
+                  >
+                    New SCEP challenge
+                  </Button>
+                </Can>
               </div>
             </div>
 
@@ -378,6 +433,7 @@ export function PhoneDetail() {
               idPrefix="phone"
               items={[
                 { id: "fetches", label: "Fetch log" },
+                { id: "syslog", label: "Syslog" },
                 { id: "preview", label: "Preview" },
               ]}
               value={tab}
@@ -390,6 +446,8 @@ export function PhoneDetail() {
             >
               {tab === "fetches" ? (
                 <FetchLog phoneId={phone.id} />
+              ) : tab === "syslog" ? (
+                <SyslogLog phoneId={phone.id} />
               ) : (
                 <Preview phone={phone} />
               )}
@@ -456,6 +514,25 @@ export function PhoneDetail() {
             setPending(null);
             toast.show(
               "Admin password rotated; the phone picks it up on its next fetch.",
+            );
+          }}
+          onClose={() => setPending(null)}
+        />
+      )}
+
+      {phone && pending === "rotate-scep" && (
+        <ConfirmDialog
+          title={`Discard the SCEP challenge of ${phoneName(phone)}?`}
+          description="The phone's one-time SCEP challenge password is discarded, used or not; its next configuration carries a new one. Its certificate keeps working."
+          confirmLabel="Discard challenge"
+          confirmIcon="shield-check"
+          confirmVariant="primary"
+          errorTitle="Could not discard the SCEP challenge"
+          onConfirm={async () => {
+            await rotateSCEPChallenge(phone.id);
+            setPending(null);
+            toast.show(
+              "SCEP challenge discarded; the phone gets a new one on its next fetch.",
             );
           }}
           onClose={() => setPending(null)}
@@ -599,6 +676,60 @@ function FetchLog({ phoneId }: { phoneId: Phone["id"] }) {
             Load older
           </Button>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** The lines the phone sent to Hello's syslog sink (S-27), newest first. */
+function SyslogLog({ phoneId }: { phoneId: Phone["id"] }) {
+  const [state, setState] = useState<
+    | { status: "loading" }
+    | { status: "error"; message: string }
+    | { status: "ready"; lines: SyslogLine[]; hours: number }
+  >({ status: "loading" });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listPhoneSyslog(phoneId, 200, controller.signal)
+      .then((page) =>
+        setState({
+          status: "ready",
+          lines: page.items,
+          hours: Math.round(page.retentionSeconds / 3600),
+        }),
+      )
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted) {
+          setState({ status: "error", message: errorMessage(err) });
+        }
+      });
+    return () => controller.abort();
+  }, [phoneId]);
+
+  if (state.status === "loading") return <Spinner label="Loading syslog…" />;
+  if (state.status === "error") {
+    return (
+      <Alert tone="bad" title="Could not load the syslog">
+        {state.message}
+      </Alert>
+    );
+  }
+  return (
+    <div className="prov-stack">
+      {state.lines.length === 0 ? (
+        <p className="prov-muted">
+          No syslog lines yet. Turn syslog on for the phone's group, then resync
+          the phone.
+        </p>
+      ) : (
+        <>
+          <p className="prov-muted">
+            The newest {state.lines.length} lines, kept for {state.hours} h.
+            Secrets are redacted.
+          </p>
+          <SyslogTable caption="Syslog" lines={state.lines} />
+        </>
       )}
     </div>
   );

@@ -535,6 +535,7 @@ type phone struct {
 	messages   chan *sip.Request
 	subscribes chan *sip.Request
 	notifies   chan *sip.Request
+	pracks     chan *sip.Request // PRACKs the phone received (S-17)
 }
 
 func newPhone(t *testing.T, pbx *testPBX, user, pass string) *phone {
@@ -587,16 +588,25 @@ func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketCo
 	}
 	srv, _ := sipgo.NewServer(ua, sipgo.WithServerLogger(discard))
 	cli, _ := sipgo.NewClient(ua, sipgo.WithClientAddr(addr), sipgo.WithClientConnectionAddr(addr), sipgo.WithClientLogger(discard))
+	// The phone's RTP port sits 1000 above its SIP port. The kernel hands out
+	// SIP ports up to 65535, so for ports above 64535 that sum is not a port
+	// at all (65548): the PBX's first RTP send to the phone fails with
+	// EINVAL and the call ends. Step below the SIP port instead then.
+	rtpPort := port + 1000
+	if rtpPort > 65535 {
+		rtpPort = port - 1000
+	}
 	p := &phone{
 		t: t, user: user, pass: pass, addr: addr, pbx: pbx.addr, ua: ua, srv: srv, cli: cli,
 		sdp: "v=0\r\no=" + user + " 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n" +
-			"m=audio " + strconv.Itoa(port+1000) + " RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\n",
+			"m=audio " + strconv.Itoa(rtpPort) + " RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\n",
 		contact: sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: user, Host: host, Port: port}},
 		servers: map[string]*sipgo.DialogServerSession{}, clients: map[string]*sipgo.DialogClientSession{}, pending: map[string]chan struct{}{},
 		invites: make(chan *sip.Request, 16), reinvites: make(chan *sip.Request, 16), cancels: make(chan *sip.Request, 16),
 		acks: make(chan *sip.Request, 16), byes: make(chan *sip.Request, 16), rings: make(chan int, 16),
 		infos: make(chan *sip.Request, 16), messages: make(chan *sip.Request, 16),
 		subscribes: make(chan *sip.Request, 16), notifies: make(chan *sip.Request, 16),
+		pracks: make(chan *sip.Request, 16),
 		callee: answerAfter(nil),
 	}
 	p.dua = &sipgo.DialogUA{Client: cli, ContactHDR: p.contact, RewriteContact: true}
@@ -617,6 +627,10 @@ func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketCo
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 	})
 	srv.OnNotify(p.onNotify)
+	srv.OnRequest(sip.PRACK, func(req *sip.Request, tx sip.ServerTransaction) {
+		push(p.pracks, req)
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+	})
 	go func() { _ = srv.ServeUDP(conn) }()
 	t.Cleanup(func() {
 		p.done.Store(true)

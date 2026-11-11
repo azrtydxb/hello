@@ -2,6 +2,7 @@
 {{- $ctx := dict "root" . "component" "control" -}}
 {{- $prov := .Values.control.provisioning -}}
 {{- $provOn := ne $prov.publicUrl "" -}}
+{{- $syslog := .Values.control.syslog -}}
 {{- $ldap := .Values.control.ldap -}}
 {{- $ldapOn := and $ldap.enabled $provOn -}}
 apiVersion: v1
@@ -102,6 +103,19 @@ spec:
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_BASE_URL" "key" "base-url" "optional" true) | nindent 12 }}
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_MODEL" "key" "model" "optional" true) | nindent 12 }}
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_API_KEY" "key" "api-key" "optional" true) | nindent 12 }}
+            # Browser softphone (docs/webrtc.md): web devices need the key.
+            {{- include "hello.clientKeyEnv" . | nindent 12 }}
+            - name: HELLO_CLIENT_MAX_DEVICES
+              value: {{ .Values.clients.maxDevices | quote }}
+            {{- with .Values.clients.wssUrl }}
+            - name: HELLO_WSS_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.coturn.enabled }}
+            - name: HELLO_TURN_URLS
+              value: {{ include "hello.turnUrls" . | quote }}
+            {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_TURN_SECRET" "key" "turnSecret") | nindent 12 }}
+            {{- end }}
             - name: HELLO_BACKUP_TMP
               value: /var/lib/hello-backup
             - name: HELLO_VOICEMAIL_LANGUAGE
@@ -119,6 +133,16 @@ spec:
               value: {{ $prov.publicUrl | quote }}
             - name: HELLO_PROV_SIP_SERVER
               value: {{ default (printf "%s:%v" (include "hello.kamailioPublicHost" .) .Values.kamailio.publicPort) $prov.sipServer | quote }}
+            {{- with $prov.sipBackupServers }}
+            # Backup registrars for the phones that take one (S-20).
+            - name: HELLO_PROV_SIP_BACKUP_SERVERS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $prov.sipSrv }}
+            # Grandstream phones resolve the SIP servers by SRV from this name (S-20).
+            - name: HELLO_PROV_SIP_SRV
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.kamailio.tls.enabled }}
             # Phones of the models in sipTlsModels register over TLS (S-14).
             - name: HELLO_PROV_SIP_TLS_SERVER
@@ -127,6 +151,15 @@ spec:
             - name: HELLO_PROV_SIP_TLS_MODELS
               value: {{ . | quote }}
             {{- end }}
+            {{- end }}
+            {{- if $prov.rtcpxr }}
+            - name: HELLO_PROV_RTCPXR
+              value: "true"
+            {{- end }}
+            {{- with $prov.sipTcpModels }}
+            # Phones of these models register over TCP (S-13), on the SIP server address.
+            - name: HELLO_PROV_SIP_TCP_MODELS
+              value: {{ . | quote }}
             {{- end }}
             {{- with $prov.trustedProxies }}
             - name: HELLO_PROV_TRUSTED_PROXIES
@@ -164,6 +197,23 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- if .Values.fax.enabled }}
+            - name: HELLO_FAX_ENABLED
+              value: "true"
+            - name: HELLO_FAX_ADDR
+              value: {{ printf "%s:8083" (include "hello.svcFQDN" (dict "root" . "name" (printf "%s-fax" $full))) | quote }}
+            {{- if .Values.fax.tokenSecret }}
+            {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_FAX_TOKEN" "key" "faxToken" "secret" .Values.fax.tokenSecret) | nindent 12 }}
+            {{- end }}
+            {{- end }}
+            {{- if $syslog.enabled }}
+            - name: HELLO_SYSLOG_UDP_ADDR
+              value: ":5514"
+            {{- with $syslog.host }}
+            - name: HELLO_SYSLOG_HOST
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.control.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -186,6 +236,11 @@ spec:
             {{- if $provOn }}
             - name: prov
               containerPort: 8083
+            {{- end }}
+            {{- if $syslog.enabled }}
+            - name: syslog
+              containerPort: 5514
+              protocol: UDP
             {{- end }}
             {{- if $ldapOn }}
             - name: ldaps
@@ -333,4 +388,28 @@ spec:
                 name: {{ $full }}-prov
                 port:
                   number: 8083
+{{- end }}
+{{- if $syslog.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-syslog
+  labels:
+    {{- include "hello.labels" (dict "root" . "component" "control") | nindent 4 }}
+spec:
+  type: {{ $syslog.service.type }}
+  {{- if ne $syslog.service.type "ClusterIP" }}
+  externalTrafficPolicy: {{ $syslog.service.externalTrafficPolicy }}
+  {{- end }}
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: syslog
+      port: 514
+      protocol: UDP
+      targetPort: syslog
+      {{- if and $syslog.service.nodePort (ne $syslog.service.type "ClusterIP") }}
+      nodePort: {{ $syslog.service.nodePort }}
+      {{- end }}
 {{- end }}

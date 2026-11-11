@@ -405,6 +405,8 @@ type carrier struct {
 	byes     chan *sip.Request
 	acks     chan *sip.Request
 	messages chan *sip.Request // SIP MESSAGEs (SMS over SIP), answered 202
+	pracks   chan *sip.Request // PRACKs received (S-17), answered 200
+	reliable atomic.Bool       // send a reliable 183 and wait for its PRACK before answering
 	rejected atomic.Int64      // requests with bad credentials
 
 	// reinvites gets every in-dialog INVITE; reinviteCode, when set,
@@ -429,7 +431,7 @@ func newCarrier(t *testing.T, user, pass string) *carrier {
 	cr := &carrier{t: t, addr: addr, host: host, port: port, user: user, pass: pass, realm: "carrier.test", ua: ua, srv: srv,
 		sdp:     "v=0\r\no=carrier-" + strconv.Itoa(port) + " 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 30000 RTP/AVP 0\r\n",
 		dialogs: map[string]*sipgo.DialogServerSession{}, invites: make(chan *sip.Request, 16), cancels: make(chan *sip.Request, 16),
-		byes: make(chan *sip.Request, 16), acks: make(chan *sip.Request, 16), messages: make(chan *sip.Request, 16),
+		byes: make(chan *sip.Request, 16), acks: make(chan *sip.Request, 16), messages: make(chan *sip.Request, 16), pracks: make(chan *sip.Request, 16),
 		reinvites: make(chan *sip.Request, 16)}
 	cr.dua = &sipgo.DialogUA{Client: cli, ContactHDR: sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: "carrier", Host: host, Port: port}}}
 	cr.grant.Store(60)
@@ -437,6 +439,10 @@ func newCarrier(t *testing.T, user, pass string) *carrier {
 	srv.OnRegister(cr.onRegister)
 	srv.OnOptions(cr.onOptions)
 	srv.OnInvite(cr.onInvite)
+	srv.OnRequest(sip.PRACK, func(req *sip.Request, tx sip.ServerTransaction) {
+		push(cr.pracks, req)
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+	})
 	srv.OnMessage(func(req *sip.Request, tx sip.ServerTransaction) {
 		push(cr.messages, req)
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 202, "Accepted", nil))
@@ -576,6 +582,14 @@ func (cr *carrier) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 	cr.mu.Unlock()
 	switch code {
 	case 200:
+		if cr.reliable.Load() {
+			_ = dss.Respond(183, "Session Progress", nil, sip.NewHeader("Require", "100rel"), sip.NewHeader("RSeq", "7"))
+			select {
+			case pr := <-cr.pracks:
+				push(cr.pracks, pr) // left for the test to read
+			case <-time.After(3 * time.Second):
+			}
+		}
 		_ = dss.RespondSDP([]byte(cr.answerSDP()))
 	case 0:
 		_ = dss.Respond(180, "Ringing", nil)

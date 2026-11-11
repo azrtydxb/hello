@@ -31,6 +31,10 @@ In the UI, open **Trunks** and create the trunk:
   from any other address with 403.
 - **Password:** entered once. Hello encrypts it with `HELLO_SECRET_KEY` and
   never shows it again; the trunk only reports whether one is set.
+- **Fax mode:** how a fax call on the trunk is carried: `passthrough` (G.711,
+  the default), `t38` (move to T.38 when the carrier offers it or the fax tone
+  is heard; a carrier that answers 488 leaves the call on G.711) or `off`
+  (fax calls on the trunk are refused with 488). See [fax.md](fax.md).
 
 Within a few seconds the trunk shows `registered` (registration trunks) and its
 destinations `up` (OPTIONS health). Exactly one SIP node registers the trunk;
@@ -95,6 +99,45 @@ only.
 Before going live, prove the reach in **Routes → Test** with `from:
 trunk:<id>`: the trace shows the policy verdict and the internal lookup
 exactly as a real call would see them.
+
+## Anonymous calls and 100rel
+
+A call through a trunk is **anonymous** (RFC 3323 and 3325) when any of these
+holds: the trunk's **Anonymous calls** setting is _Every call through this
+trunk_ (`anonymousPolicy: always`), the calling extension has **Anonymous
+outbound** on, or the phone asks for it with a `Privacy` header naming `id`,
+`user` or `header`, or an `anonymous` From (the phone's "send anonymous"
+setting or a dialled anonymous prefix). `Privacy: none` is not anonymous.
+
+The trunk leg then carries:
+
+- a From of `"Anonymous" <sip:anonymous@anonymous.invalid>`, so the number
+  and the extension never reach the carrier in From;
+- the **Asserted identity** (`assertedIdentity`; empty: the call's caller ID)
+  as `sip:<number>@<trunk domain>` in `P-Asserted-Identity`, or in
+  `P-Preferred-Identity` when **Identity header** is `ppi` (for carriers that
+  assert the identity themselves);
+- `Privacy: id`, with any values the phone asked for kept next to it. The
+  privacy request is never stripped, and a phone's own
+  `P-Asserted-Identity` is never forwarded.
+
+Calls between extensions are not affected: the phone shows the caller as
+usual.
+
+The extension's **Phone sends anonymous** setting (`phoneSendAnonymous`) is a
+different thing: it switches on the desk phone's own Grandstream "Send
+Anonymous" (P65, line 1), so the phone hides its caller ID on every call,
+internal ones included. It is off by default, and off writes nothing to the
+phone. **Anonymous outbound** acts only on the calls Hello places through a
+trunk.
+
+Hello offers `Supported: 100rel` on every leg it originates. A provisional
+response that requires 100rel (RFC 3262) is acknowledged with a PRACK on that
+leg, whether it comes from a phone or a carrier. A caller that sends
+`Require: 100rel` gets its provisional responses reliably (`RSeq`,
+retransmitted until the PRACK arrives), and the 200 waits for the PRACK. A
+caller that only lists 100rel in `Supported` gets plain responses. Phones keep
+100rel off; no provisioning key is written for it.
 
 ## 6. The manual check
 
