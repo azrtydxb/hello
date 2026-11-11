@@ -3,6 +3,7 @@
 // ports, colours and shapes come from the catalogue, so a new kind renders
 // without a UI change.
 
+import { badgesFor, type NodeBadge } from "./badges";
 import type { Edge, Node } from "@xyflow/react";
 import type {
   FlowCatalogue,
@@ -55,6 +56,8 @@ export interface FlowNodeData extends Record<string, unknown> {
   warnings: FlowWarning[];
   /** One line of the node's summary fields. */
   summary: string;
+  /** Badges derived from the summary (override, generated). */
+  badges: NodeBadge[];
   pseudo: boolean;
   /** What the draft does to the node. */
   draft?: "new" | "changed";
@@ -299,6 +302,7 @@ export function buildView({
         outputs,
         warnings: warnings.get(n.id) ?? [],
         summary: summaryLine(n),
+        badges: badgesFor(n),
         pseudo: Boolean(type?.pseudo),
         draft: draftMark(marks?.[n.id]),
         errors: errors?.[n.id] ?? [],
