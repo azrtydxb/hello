@@ -161,6 +161,7 @@ var NonFlowResources = map[string]string{
 	"faxes":                         "received and sent documents, not a call destination (a fax destination is the routing object)",
 	"blocklist":                     "a screen on every trunk's inbound calls before routing (its trunk settings are on the trunk), not a step of a call's route",
 	"flow/canvases":                 "named views of the canvas that store only node positions, not call routing",
+	"dot1x-profiles":                "802.1X network identities provisioned to phones, not call routing",
 	"integrations/crm":              "CRM connectors that log finished calls and name callers in a CRM; they never change where a call goes",
 	"messaging/channels":            "customer text channels of the messaging inbox, not call routing",
 	"messaging/addresses":           "numbers customers text in the messaging inbox, not call routing",

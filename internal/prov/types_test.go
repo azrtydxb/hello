@@ -29,8 +29,10 @@ func checkList(t *testing.T, sql, table, column string) []string {
 	return out
 }
 
-// latestKindList is the prov_fetches.kind list the newest migration that
-// redefines it accepts (00012 added "phonebook").
+// latestKindList is the prov_fetches.kind list the newest migrations that
+// redefine it accept (00012 added "phonebook"; 00052 and 00076 widened it
+// with hello_check_values, the kinds each adds going before "other", which
+// closes the Go list).
 func latestKindList(t *testing.T) []string {
 	t.Helper()
 	b, err := os.ReadFile("../../migrations/00012_prov_fetch_phonebook.sql")
@@ -46,19 +48,39 @@ func latestKindList(t *testing.T) []string {
 	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
 		out = append(out, q[1])
 	}
-	// 00052 widened it with hello_check_values (the kinds it adds, before
-	// "other", which closes the Go list).
-	b, err = os.ReadFile("../../migrations/00052_ringtones.sql")
+	for _, f := range []string{"00052_ringtones.sql", "00076_scep_dot1x.sql"} {
+		b, err = os.ReadFile("../../migrations/" + f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		up, _, _ = strings.Cut(string(b), "-- +goose Down")
+		m = regexp.MustCompile(`'prov_fetches', 'prov_fetches_kind_check',\s+ARRAY\[([^\]]*)\]`).FindStringSubmatch(up)
+		if m == nil {
+			t.Fatalf("%s does not widen the kind list", f)
+		}
+		for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
+			out = slices.Insert(out, len(out)-1, q[1])
+		}
+	}
+	return out
+}
+
+// latestResultList is the prov_fetches.result list: 00006's, then the
+// results 00076 adds with hello_check_values (the SCEP results).
+func latestResultList(t *testing.T, base []string) []string {
+	t.Helper()
+	b, err := os.ReadFile("../../migrations/00076_scep_dot1x.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	up, _, _ = strings.Cut(string(b), "-- +goose Down")
-	m = regexp.MustCompile(`'prov_fetches', 'prov_fetches_kind_check',\s+ARRAY\[([^\]]*)\]`).FindStringSubmatch(up)
+	up, _, _ := strings.Cut(string(b), "-- +goose Down")
+	m := regexp.MustCompile(`'prov_fetches', 'prov_fetches_result_check',\s+ARRAY\[([^\]]*)\]`).FindStringSubmatch(up)
 	if m == nil {
-		t.Fatal("00052 does not widen the kind list")
+		t.Fatal("00076 does not widen the result list")
 	}
+	out := slices.Clone(base)
 	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
-		out = slices.Insert(out, len(out)-1, q[1])
+		out = append(out, q[1])
 	}
 	return out
 }
@@ -98,7 +120,10 @@ func TestContractMatchesMigration(t *testing.T) {
 	} {
 		got := checkList(t, sql, tc.table, tc.column)
 		if tc.table == "prov_fetches" && tc.column == "kind" {
-			got = latestKindList(t) // widened by a later migration
+			got = latestKindList(t) // widened by later migrations
+		}
+		if tc.table == "prov_fetches" && tc.column == "result" {
+			got = latestResultList(t, got)
 		}
 		if !slices.Equal(got, tc.want) {
 			t.Errorf("%s.%s CHECK = %v, Go contract = %v", tc.table, tc.column, got, tc.want)

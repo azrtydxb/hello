@@ -463,6 +463,20 @@ func (s *server) routes() []route {
 		{"PUT", "/api/v1/phone-groups/{id}/books", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupBooks},
 		{"PUT", "/api/v1/phone-groups/{id}/multicast", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupMulticast},
 		{"PUT", "/api/v1/phone-groups/{id}/ptt", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupPTT},
+		{"GET", "/api/v1/phone-groups/{id}/security", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneGroupSecurity},
+		{"PUT", "/api/v1/phone-groups/{id}/security", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupSecurity},
+
+		{"GET", "/api/v1/scep", auth.ScopeRead, auth.RoleViewer, false, s.getSCEP},
+		{"PUT", "/api/v1/scep/ca", auth.ScopeAdmin, auth.RoleAdmin, false, s.putSCEPCA},
+		{"GET", "/api/v1/scep/certificates", auth.ScopeRead, auth.RoleViewer, false, s.listSCEPCertificates},
+		{"POST", "/api/v1/scep/certificates/{id}/revoke", auth.ScopeAdmin, auth.RoleAdmin, false, s.revokeSCEPCertificate},
+		{"POST", "/api/v1/phones/{id}/scep-challenge", auth.ScopeAdmin, auth.RoleAdmin, false, s.rotatePhoneSCEPChallenge},
+		{"GET", "/api/v1/dot1x-profiles", auth.ScopeRead, auth.RoleViewer, false, s.listDot1XProfiles},
+		{"POST", "/api/v1/dot1x-profiles", auth.ScopeAdmin, auth.RoleAdmin, false, s.createDot1XProfile},
+		{"GET", "/api/v1/dot1x-profiles/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getDot1XProfile},
+		{"PUT", "/api/v1/dot1x-profiles/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updateDot1XProfile},
+		{"DELETE", "/api/v1/dot1x-profiles/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteDot1XProfile},
+
 		{"PUT", "/api/v1/phone-groups/{id}/account-sharing", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupAccountSharing},
 		{"POST", "/api/v1/phone-groups/{id}/account-sharing/regenerate", auth.ScopeAdmin, auth.RoleAdmin, false, s.postPhoneGroupSharingSecret},
 
