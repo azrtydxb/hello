@@ -282,12 +282,31 @@ export interface PageLegResult {
   result: "answered" | "busy" | "dnd" | "no_answer" | "no_registration";
 }
 
+/** One follow-me leg of a call (cdr_legs, role follow_me). */
+export interface FollowMeLegResult {
+  kind: "own" | "extension" | "ring_group" | "external";
+  /** The extension that rang, or the external number dialled. */
+  extension: string;
+  /** The trunk an external leg left on; "" otherwise. */
+  trunk: string;
+  result:
+    | "answered"
+    | "declined"
+    | "busy"
+    | "no_answer"
+    | "failed"
+    | "skipped"
+    | "cancelled";
+}
+
 /** GET /api/v1/cdrs/{id}: the CDR plus its routing trace. */
 export interface CdrDetail extends Cdr {
-  /** call, page or intercom. */
-  kind?: "call" | "page" | "intercom" | "conference";
+  /** call, page, intercom, conference, callback or alarm (a *55 alarm call). */
+  kind?: "call" | "page" | "intercom" | "conference" | "callback" | "alarm";
   /** A page's outcome per member, in the order they were paged. */
   pageLegs?: PageLegResult[];
+  /** What each follow-me leg did, in the order they rang. */
+  followMeLegs?: FollowMeLegResult[];
   trace: TraceStep[];
   /** For failed calls, the reason of the last trace step. */
   explanation?: string;
@@ -360,6 +379,8 @@ export interface TrunkFields {
   internalDialing: InternalDialing;
   /** SMS over SIP: text messages may be sent and received through it. */
   messaging: boolean;
+  /** Emergency calls through it carry the caller's location (RFC 6442). */
+  geolocation: boolean;
   /** How a fax call is carried: G.711 passthrough, T.38, or refused. */
   faxMode: "passthrough" | "t38" | "off";
   /**
@@ -1549,6 +1570,8 @@ export const IVR_DESTINATION_KINDS = [
   "time_condition",
   "directory",
   "fax",
+  "follow_me_on",
+  "follow_me_off",
 ] as const;
 
 export type IvrDestinationKind = (typeof IVR_DESTINATION_KINDS)[number];
@@ -1571,6 +1594,8 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   time_condition: "Time condition",
   directory: "Dial-by-name directory",
   fax: "Fax destination",
+  follow_me_on: "Follow-me on",
+  follow_me_off: "Follow-me off",
 };
 
 /**

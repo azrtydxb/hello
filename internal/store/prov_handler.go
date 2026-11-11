@@ -258,6 +258,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 		d.Server.SRTP = string(secmedia.Normalize(srtpPolicy, secmedia.Optional))
 	}
 	d.Prov = s.prov.info(token, d.Phone.MAC)
+	if d.E911, d.AlarmNumber, err = s.emergencyInfo(ctx, phoneID, d); err != nil {
+		return d, prov.Template{}, err
+	}
 	d.Time = prov.NewTimeInfo(s.prov.Timezone, s.prov.NTP, time.Now())
 	if d.Book, err = s.bookInfo(ctx, phoneID, token); err != nil {
 		return d, prov.Template{}, err
@@ -667,3 +670,51 @@ func (q redirectQueue) SetStatus(ctx context.Context, mac string, st redirect.St
 	_, err = q.s.db.ExecContext(ctx, `UPDATE phones SET redirect_status = $2 WHERE mac = $1`, mac, string(b))
 	return err
 }
+
+// emergencyInfo is the E911 and alarm provisioning of a phone (spec
+// phone-feature-parity S-28 and S-29): only a WP8x6 has the keys, E911 only
+// when its group switched it on, the alarm number only when the group has an
+// alarm destination.
+func (s *Store) emergencyInfo(ctx context.Context, phoneID int64, d prov.RenderData) (*prov.E911Info, string, error) {
+	if d.Phone.Vendor != prov.Grandstream || prov.GrandstreamFamily(d.Phone.Model) != prov.FamilyWP8x6 {
+		return nil, "", nil
+	}
+	var e911 sql.NullBool
+	var alarm sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT g.e911_enabled, g.alarm_target FROM phones p
+		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = $1`, phoneID).Scan(&e911, &alarm)
+	if err != nil {
+		return nil, "", err
+	}
+	var info *prov.E911Info
+	if e911.Valid && e911.Bool {
+		info = prov.NewE911(d.Prov.URL, d.Emergency)
+	}
+	number := ""
+	if alarm.Valid && alarm.String != "" {
+		number = prov.AlarmNumber
+	}
+	return info, number, nil
+}
+
+// HELDLocation implements prov.LocationSource: the location the HELD server
+// answers a phone with.
+func (s *Store) HELDLocation(ctx context.Context, phoneID int64) (prov.HELDLocation, error) {
+	pl, err := s.PhoneLocation(ctx, phoneID)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return prov.HELDLocation{}, prov.ErrNotFound
+	case errors.Is(err, ErrNoLocation):
+		return prov.HELDLocation{}, prov.ErrNoLocation
+	case err != nil:
+		return prov.HELDLocation{}, err
+	}
+	var ext sql.NullString
+	if err := s.db.QueryRowContext(ctx, `SELECT e.number FROM phones p JOIN devices d ON d.id = p.device_id
+		JOIN extensions e ON e.id = d.extension_id WHERE p.id = $1`, phoneID).Scan(&ext); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return prov.HELDLocation{}, err
+	}
+	return prov.HELDLocation{Place: pl.Place, Extension: ext.String}, nil
+}
+
+var _ prov.LocationSource = (*Store)(nil)

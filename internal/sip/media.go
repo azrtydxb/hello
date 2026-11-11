@@ -930,6 +930,9 @@ func (c *call) storeRecording(rec *media.Recorder, by string) {
 // (spec S-4). Digits also flow into the call's feature-code buffer, so an
 // INFO dtmf-relay *1 and an in-band *1 behave the same.
 func (c *call) relayDTMF(leg string, digit byte) {
+	if leg == legCallee && c.fmDigit(nil, digit) {
+		return // a follow-me target is being asked to press 1
+	}
 	if leg == legCallee && c.screenDigit(digit) {
 		return // the assistant answers the screening prompt
 	}

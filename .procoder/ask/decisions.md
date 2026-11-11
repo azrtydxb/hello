@@ -1291,6 +1291,65 @@ column ("a" when both legs agree, "a → b" when they differ).
   `haNewCall` restores them, so a taken-over door call keeps the trunk ban and CDR
   kind door (`TestDoorCallerSurvivesTakeover`).
 
+## Doorbell webhook (2026-11-09) — phone-feature-parity item 16 (S-48)
+
+- Independent of #222 (outbound event webhooks: signing, retries, dead
+  letters). S-48 is the inverse: an inbound, signed trigger. Nothing is shared
+  with `internal/webhook`; the routes live under `/api/v1/door/webhooks` and the
+  table is `door_webhooks`, so the two cannot collide.
+- Migration `00078_door_webhooks`. #225 owns 00053 and the item-14 PR 00054; the
+  next free numbers of the open PRs are 00061 and 00062 (00055 to 00060 and 00063
+  to 00066 are taken), so 00061 is this one and 00062 is item 17. Columns: name,
+  sealed secret (AAD `door-webhook:<id>`), action, ring group (null: every Door
+  group), paging group, announcement (set null when it is deleted: the built-in
+  chime), rate limit, enabled, last triggered. Check constraints keep a ring
+  action from naming a paging group and a chime from missing one.
+- Management is admin (scope admin; read for list and get, viewer). Not the
+  `secrets` scope, which spec S-5 and `TestRoutesTable` pin to a fixed list.
+  Create and rotate return the secret once; no other response has it. All
+  management routes are excluded from MCP (a signing secret is a console
+  matter), so no tool needs teaching in `skills/`.
+- Trigger route: the only new public route (added to the public lists of
+  `TestRoutesTable` and `TestVersionAndOpenAPI`). Order of checks: both headers
+  present, timestamp an integer within 300 s, body at most 1 KiB (`413`), then
+  the signature, computed for an unknown id against a random per-process decoy
+  secret so an unknown, a disabled and a wrong-secret request cost the same and
+  give the same `401`. Only after the signature: body must be a JSON object
+  (`400`), Valkey present (`503`), rate limit (`429` with `Retry-After`), duplicate
+  window, enqueue. A disabled webhook is `401`, not `403`, for the same reason.
+- Rate limit: a fixed one-minute window per webhook in Valkey, counted by a Lua
+  script that sets the expiry in the same step as the first count (a crash
+  between INCR and EXPIRE cannot lock a webhook out); default 11, 1 to 600 per
+  webhook. It counts every signed request, coalesced ones included.
+- Coalescing: a `SET NX PX` of 10 s per webhook. A second signed trigger inside
+  it answers `202 {"status":"coalesced"}` and queues nothing. Chosen over
+  de-duplicating on the label because a doorbell button has no idempotency key.
+- Origination reuses the paging-group test path instead of a synthetic `call`:
+  hello-control queues a `DoorTrigger` (Valkey list, 60 s TTL), any READY
+  hello-sip node takes it and sends INVITEs to the registered contacts of the
+  members (like `testPage`), with a sendonly offer from a media fan-out. The
+  ring carries the doorbell Alert-Info from the ring tag table and the webhook's
+  name as caller name (From `door-webhook@<domain>`); the first answer wins and
+  the rest are CANCELled; the winner hears the chime (announcement, or a built-in
+  two-note chime), is hung up, and the call also ends after 30 s.
+- Group strategy is not honoured by the webhook: every member rings at once (the
+  strategies belong to calls that have a caller to hold). A member in DND (the
+  group's ignore-DND aside), in a call, or a door station is skipped and the
+  trace says so; the longest ring timeout of the groups bounds the ringing.
+- `chime_page` uses the page auto-answer headers and PAI of a server page and
+  plays to every member that answers.
+- CDR: kind door, source the webhook name, destination the group (or code),
+  ring tag doorbell for a ring, status 200 when somebody answered, 480 when
+  nobody could be reached. Audit rows are `webhook:<name>` `trigger` or
+  `coalesce`, without the body or label. The label (cut to 64 printable
+  characters) appears only in the call trace.
+- Console: a Door page under Call flow (list, create, edit, new secret, delete;
+  viewers see no write control), the secret in a notice that goes away for good
+  when dismissed.
+- Not done: the trigger is acknowledged when queued, not when someone answered,
+  so the doorbell cannot tell. Trigger results could be polled later if a
+  doorbell needs it.
+
 ## Ring map provisioning, phone-feature-parity S-42 and S-44 (2026-10-27)
 
 - Storage: `ring_map` (migration 00051) holds explicit choices only, keyed by
@@ -1965,6 +2024,160 @@ legs) and `internal/sip/srtp.go` (policy and negotiation). Choices:
 - **Keys are never logged.** `media.Crypto` redacts itself under every fmt verb
   and in slog; traces name the leg and suite only (`TestSRTPKeysNeverFormatted`,
   and the call test checks the CDR trace).
+
+## Locations, HELD, Geolocation, callback tag and alarm `*55`, phone-feature-parity S-28 and S-29 (2026-11-09)
+
+- **Already built, left as it was.** The emergency flag on outbound routes and
+  its bypass of the trunk call limit and a down trunk (`acquireSlot`), P8385 and
+  the ring tag constants (`alarm`, `emergency-callback`). The caller's DND and
+  forwarding never act on a call out to a trunk, so (a) needs nothing there. The
+  door extension's target list (S-45) is not on main; the bypass is documented
+  for it to honour when it lands.
+- **Locations** (migration 00052): one table, kind site, floor or room, parent
+  RESTRICT. The civic address is on the site only; a floor's name is `FLR`, a
+  room's `ROOM`; the most specific geo point on the path wins. The user asked for
+  locations assignable to devices and extensions, the spec for a group with an
+  extension override; both are built, plus the phone itself, and the most
+  specific wins: phone, then extension, then phone group. Assignments are one
+  `location_id` column on `phone_groups`, `extensions` and `phones` (RESTRICT),
+  written through `PUT /location-assignments/{kind}/{id}`; a delete names what
+  holds the location. Resolution is the pure `internal/location` package, used by
+  the store, the snapshot and the HELD server.
+- **HELD**: `POST /p/<token>/held` on the provisioning listener, through the same
+  `authorize` as a config fetch (token, HTTPS, allowlisted phone; every denial an
+  empty 404). The body is parsed (root `locationRequest`, no DOCTYPE, 8 KiB) but
+  never picks the location. Answers are `application/held+xml` with status 200
+  also for HELD errors (`locationUnavailable`, `requestError`), the usual client
+  behaviour; a Store without `LocationSource` answers 404, so the fake stores of
+  other tests need no change. No audit kind was added: a HELD request is audited
+  as kind `other`, result `served` (the fetch table's CHECK lists would need a
+  migration for nothing).
+- **Vendor keys, from Grandstream's own documents only.** Fetched
+  `config-template-10212026.zip` (`wp8x6_config_1.0.3.39.txt`) and the WP8x6
+  Administration Guide (documentation.grandstream.com). Written on a WP8x6 with
+  E911: P8565 = 1, P8566 = 1 (HTTPS), P8567 = 60, P8568 = location server,
+  P8597 = emergency numbers separated by ";" (the guide's delimiter), P8725 = 1
+  (RFC 6442 header format), P26059 = 1. With an alarm destination: P22269 = 1,
+  P22270 = `*55`, P22601 = 1, P22602 = 1. Not written, because neither document
+  fixes the value: P8574 (location types; the template spells it
+  `Geodetic,civic,locationURI`, the guide differently), P8576, P8577 to P8596,
+  P8598/P8599. Unconfirmed: the form of P8568 ("address"): written as
+  `host/p/<token>/held` without scheme, as P331 takes its path; a phone check
+  settles it. No other vendor was changed: the spec names none and no vendor
+  document in hand has an E911 key set.
+- **Geolocation on trunks** (migration 00052 `trunks.geolocation`, off). Only an
+  emergency call, only a flagged trunk. The phone's own PIDF-LO (multipart
+  part, well-formed XML with a `presence` root and no DOCTYPE, 16 KiB) is
+  forwarded in place of the stored one; a location by reference in the phone's
+  header is passed on; `Geolocation-Routing` and `P-Emergency-Info` are passed
+  on, never generated (their value is the phone's). The caller's INVITE is
+  reduced to its SDP part at the start of every call, so the media code never
+  sees a multipart body. **UDP size**: sipgo refuses datagrams over 1300 bytes
+  and an INVITE with a PIDF-LO does not fit; the package-level limit is raised to
+  4000 in an `init`, before any server exists (no race), so the request leaves
+  and fragments. The PIDF-LO is as small as RFC 4119 allows (only the namespaces
+  used, no timestamp). The risk is a carrier that drops fragments; that is why
+  the flag is per trunk and off. The alternative, leaving the location out,
+  would make the flag useless on UDP.
+- **Callback tag** (f): `hello:emergency:<ext>` in Valkey (30 min) plus a
+  node-local map, written when a call over an emergency route is routed. A call
+  that entered on a trunk and rings that extension gets ringKind
+  `emergency-callback` and ignores DND; the CDR kind stays `call` (its CHECK
+  has no such value, and the callback is a plain call). Only a trunk call counts:
+  a colleague's call is not the callback.
+- **Notify group** (g): `emergency_settings.notify_group` (one row), a ring group.
+  Its phones are paged like the paging-group test (auto-answer headers, sendonly
+  offer) and hear "Emergency call from <name>, extension <digits>" in the
+  deployment's prompt language, a tone when speech is off. DND is not honoured
+  (a notice, not a call); the calling extension is skipped.
+- **Alarm `*55`**: handled in `handleInvite` before the paging, conference and
+  feature-code lookups, so a feature code or paging code on `*55` can never shadow
+  it; the dial-space guard counts `*55` as a built-in code, so a new overlap is
+  refused (an existing one does not block unrelated changes). Kind `alarm` (CDR
+  CHECK widened), ring tag `alarm`, `ignoreDND` on the call (extension DND and
+  the DND of ring group members), "Panic alarm from <name>" played to the callee
+  leg only after the answer, 404 without a destination or with a deleted one.
+  Forwarding of the destination still applies.
+- **Collision check against origin/main and the open PRs** (2026-11-09): codes
+  taken are `*28 *40 *41 *42 *45 *46 *47 *48 *70 *71 *74 *75 *80` (main), `*76`
+  `*77` (#272), `*64` (#236), `*63` (#220), `*85` as a paging code (#225 test);
+  nobody takes `*55`. Migration 00052 is also taken by #272, #270, #266 and #238:
+  whoever merges second renumbers (and the three migrate counts move by one).
+- **API roles**: locations and assignments write/operator like the ring map and
+  tags; a phone group's E911 switch and alarm destination, and the emergency
+  settings, admin/admin like the phone group changes. They bump the
+  configuration revision (hello-sip reads them).
+- **Not done**: a HELD location URI, LLDP or NAI based lookup, E911 keys for other
+  vendors, the door target list bypass (waits for S-45), an UI picker on the
+  Phones page (the Assignments tab does it).
+
+## Follow-me (pbx-gaps B1: S-5, S-6) (2026-11-09)
+
+- **Feature codes are `*76` (on) and `*77` (off), not `*74` and `*75`.** Those
+  are the default park and park-retrieve codes (migration 00032); the dial-space
+  guard refuses a code that equals or extends another, so the spec's codes could
+  never be seeded. The actions are `follow_me_on` and `follow_me_off`, so an
+  installation can move them; migration 00052 seeds them on existing installs
+  when free, `DefaultFeatureCodes` on fresh ones. The spec text is corrected.
+  A code dialled by an extension with no profile that has a target answers 404
+  and changes nothing.
+- **Migration 00052** (highest on main was 00050): `follow_me`,
+  `follow_me_targets`, the two feature-code actions, and `cdr_legs`. No branch
+  has `cdr_legs` yet (A4 landed as `cdrs.codec` only), so 00052 creates it as the
+  spec's S-22 shape (`CREATE TABLE IF NOT EXISTS`) plus two additive columns,
+  `result` and `target_kind`. Follow-me writes the role `follow_me`; the codec
+  columns stay NULL for it. Down removes the follow-me rows and the two columns,
+  and leaves the table. The migrate test counts are 39/36/37.
+- **Where it runs.** In `ringExtension` (`internal/sip/callflow.go`) after
+  forward-always and before the DND, busy, unreachable and no-answer handling,
+  and in `ivrRingExtension`, the same step for an IVR option that dials an
+  extension. The ring is its own loop (`followMeRun`) because the generic
+  setup loop cannot start legs on a schedule, but it reuses the legs, the
+  event channel, the trunk slot and outbound decision of a forwarded external
+  number, the ring group members, and `exhausted` for the no-answer forward and
+  voicemail, so an unanswered follow-me ends exactly where a plain ring ends. It
+  is not applied to ring group members or to a group or queue failing over to
+  an extension (they ring phones directly), reported in docs/follow-me.md.
+- **Strategies.** Simultaneous rings own phones and all targets at once.
+  Sequential keeps the own phones ringing and starts the targets in order; a
+  target's `delay_seconds` is how long it rings before the next starts, the last
+  one rings to the timeout, 0 on a non-last target means until it fails. In an
+  IVR dial-out the ring primitive cannot stop one leg, so earlier targets keep
+  ringing there (documented).
+- **DND.** `dnd_blocks` (default on) skips follow-me and the ordinary DND
+  handling runs. With it off, DND only silences the own phones.
+- **Targets.** An extension target rings that extension's phones directly (its
+  DND skips it; its own forwarding does not apply), a ring group target rings
+  the eligible members at once, and the first usable trunk of an external
+  target's route carries it. A number that routes to one of our own extensions is
+  treated as that extension. Loops: the extension itself or one in the forward
+  chain is skipped. A leg that goes through a carrier and comes back is a new call
+  and is not detectable; documented as the carrier's hop limit.
+- **Press 1.** The answered external leg is held before it may claim the call
+  (`leg.screen`, run by `fmScreen`): the relay's callee leg is aimed at it, both
+  directions are muted, the prompt `followme.accept` (new key, English and
+  Dutch) is played with the call's Speaker (a beep without one), and the digit
+  `1` (RFC 2833 on the relay, or INFO) connects it; 10 s after the prompt without
+  the digit drops it. One leg is asked at a time. A call with no SDP offer has no
+  media anchor, so its external targets are skipped with a trace line. The Dutch
+  wording needs a native-speaker review before merge (S-21).
+- **CDR.** `cdrs` is unchanged; each leg is a `cdr_legs` row (role `follow_me`,
+  `target_kind`, extension or number, trunk, result). `GET /api/v1/cdrs/{id}`
+  gains `followMeLegs`. The insert statement gains one CTE and one argument. When
+  an external leg wins the call's trunk, route and direction are that leg's.
+- **API.** GET is read-scope/viewer (the route table test ties the read scope to
+  the viewer role; the spec said operator), PUT is write/operator, and the same
+  pair under `/me/extensions/{id}` for a user. A save names the fields it changes;
+  `targets` replaces the list; enabling needs a target; the store re-checks
+  self-target and existence, and refuses deleting or renumbering an extension or
+  group a profile names (409).
+- **HA.** The profile is in the snapshot every node loads, a change goes through
+  `configChange` (revision bump and NOTIFY), and an answered follow-me call is
+  replicated like any answered call, including one an external target answered.
+  A ringing call and a leg being asked to press 1 are not replicated, as for every
+  ringing call.
+- **Tests that need real hardware or a carrier** stay on the lab list (item 4 of
+  the spec): a mobile on a real carrier with press 1.
 
 ## Multiple lines and account sharing (parity item 21, S-10 and S-11) (2026-11-09)
 
