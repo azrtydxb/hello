@@ -2092,6 +2092,33 @@ Implementation notes (template route, no migration):
     Poly and Snom none found); outside this review.
 - The group can undo any of it with a setting override (item 15).
 
+### "Vendor template keys left out" (Poly caps/pickup, record keys, Fanvil CA, Snom/Yealink EXP, pickup values)
+
+- Result: no new key. The tracker row names five gaps without the keys they
+  need, and none could be confirmed this session:
+  - Poly caps and pickup: the UC Software Administrator Guide is script-rendered
+    and not fetchable (the same finding as `keycaps.go`); the FusionPBX Poly
+    templates use `attendant.resourceList` up to 47 entries, which is a template
+    default, not a documented limit. No BLF pickup attribute on a Poly key found.
+  - Record keys: Yealink's `bw.call_recording.mode` and
+    `account.N.call_recording.enable` are BroadSoft server-side recording, not a
+    key that sends the `*1` toggle. No Poly equivalent found. The Grandstream
+    record keys checked against Grandstream's own templates (2026-11-09):
+    `P26028`/`P26029` (Call Recording On/Off codes) and `P29066` (Record Key
+    Default Function, 0 Record On, 1 Record Off) are only in
+    `wp8x6_config_1.0.3.39`, `P6760` (Record Mode, 0 Locally, 2 on UCM, 4
+    Disabled) only in `wp856_config_1.0.3.16`: confirmed for those two families,
+    absent from the WP810/822/825 and WP820 templates (nothing to write). Mode 2
+    "on UCM" for the WP856 is a hardware check.
+  - Fanvil CA: re-checked in the FusionPBX Fanvil templates (X-series, text and
+    XML forms): no CA certificate key. Still none.
+  - Yealink and Snom expansion modules: no Yealink Administrator Guide or Snom
+    page beyond what `keycaps.go` already cites.
+  - Pickup values: unchanged.
+- Documented in `docs/provisioning.md` ("Keys deliberately not written") so the
+  gaps are visible to operators. The tracker row stays open until sources are
+  found; the setting overrides (item 15) can carry a key meanwhile.
+
 ## Item 26: PRACK/100rel and anonymous outbound (2026-11-09)
 
 - 100rel is negotiated hop by hop, not relayed: Hello offers `Supported: 100rel`
