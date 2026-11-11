@@ -1130,40 +1130,62 @@ func (c *call) ivrRingExtension(ctx context.Context, snap *snapshot.Snapshot, ex
 	// A boss's call rings the assistant too (boss.go); screening is not
 	// offered to a menu's call, where the assistant answers as for any call.
 	assist, screen, divert := c.ivrAssistant(snap, ext)
-	if e.DND && len(assist) == 0 {
+	// Follow-me rings at the same step as for a direct call: after
+	// forward-always, before the no-answer forward and voicemail below. A
+	// boss link's ring comes first, as it does for a direct call.
+	var (
+		forks   []ivrFork
+		ringFor = c.s.cfg.RingTimeout
+		fmRung  bool
+	)
+	if fm, ok := snap.FollowMe(ext); ok && fm.Active() && len(assist) == 0 {
+		if apply, why := c.fmApplies(e, fm); !apply {
+			if why != "" {
+				c.addTrace("Follow-me of extension " + ext + " skipped: " + why)
+			}
+		} else if forks, ringFor = c.ivrFollowMeForks(snap, ext, e, fm, visited[:len(visited)-1]); len(forks) > 0 {
+			fmRung = true
+		}
+	}
+	if !fmRung && e.DND && len(assist) == 0 {
 		c.addTrace(fmt.Sprintf("Extension %s is DND", ext))
 		if c.voicemailConfigured(e) {
 			return voicemail("dnd")
 		}
 		return ivrResult{kind: ivrFailed, why: "extension " + ext + " is DND"}
 	}
-	targets, err := c.extensionBindings(snap, ext)
-	if err != nil {
-		return ivrResult{kind: ivrFailed, why: "live state unavailable"}
-	}
-	if len(assist) > 0 {
-		if e.DND || divert {
-			targets = nil // the boss's own phones are silenced
+	if !fmRung {
+		targets, err := c.extensionBindings(snap, ext)
+		if err != nil {
+			return ivrResult{kind: ivrFailed, why: "live state unavailable"}
 		}
-		targets = append(targets, assist...)
-	}
-	if len(targets) == 0 {
-		switch {
-		case e.ForwardNoAnswer != "":
-			return c.ivrFollow(ctx, snap, ext, e.ForwardNoAnswer, visited)
-		case c.voicemailConfigured(e):
-			return voicemail("unreachable")
+		if len(assist) > 0 {
+			if e.DND || divert {
+				targets = nil // the boss's own phones are silenced
+			}
+			targets = append(targets, assist...)
 		}
-		return ivrResult{kind: ivrFailed, why: "no registered device for extension " + ext}
-	}
-	forks := make([]ivrFork, len(targets))
-	for i, b := range targets {
-		b := b
-		scr := screen && len(assist) > 0 && b.Extension != ext
-		forks[i] = ivrFork{mk: func(stage int) *leg { return c.addLeg(&leg{binding: b, stage: stage, screen: scr}) }}
+		if len(targets) == 0 {
+			switch {
+			case e.ForwardNoAnswer != "":
+				return c.ivrFollow(ctx, snap, ext, e.ForwardNoAnswer, visited)
+			case c.voicemailConfigured(e):
+				return voicemail("unreachable")
+			}
+			return ivrResult{kind: ivrFailed, why: "no registered device for extension " + ext}
+		}
+		forks = make([]ivrFork, len(targets))
+		for i, b := range targets {
+			b := b
+			scr := screen && len(assist) > 0 && b.Extension != ext
+			forks[i] = ivrFork{mk: func(stage int) *leg { return c.addLeg(&leg{binding: b, stage: stage, screen: scr}) }}
+		}
 	}
 	c.addTrace("IVR: ringing extension " + ext)
-	w, busyAll := c.ivrRing(ctx, forks, false, c.s.cfg.RingTimeout)
+	w, busyAll := c.ivrRing(ctx, forks, false, ringFor)
+	if fmRung {
+		c.fmIvrDone(w)
+	}
 	if ctx.Err() != nil {
 		return ivrResult{kind: ivrFinished}
 	}

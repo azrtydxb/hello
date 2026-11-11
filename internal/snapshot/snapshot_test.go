@@ -514,3 +514,52 @@ func TestEmergencyLoad(t *testing.T) {
 		t.Errorf("notify group = %q", got)
 	}
 }
+
+// TestFollowMeLoad fails if the follow-me profiles (migration 00079) do not
+// reach the snapshot with their settings, their targets in position order and
+// only for the extension they belong to, or if an extension without a profile
+// reads as having one.
+func TestFollowMeLoad(t *testing.T) {
+	cfg := scratch(t)
+	ctx := context.Background()
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	for _, q := range []string{
+		`INSERT INTO extensions (number, name) VALUES ('200', 'Two'), ('201', 'Three')`,
+		`INSERT INTO follow_me (extension_id, enabled, strategy, ring_own_devices, timeout_seconds, confirm_external, dnd_blocks)
+			SELECT id, true, 'sequential', false, 45, false, false FROM extensions WHERE number = '200'`,
+		`INSERT INTO follow_me_targets (extension_id, position, kind, target, delay_seconds)
+			SELECT id, v.pos, v.kind, v.target, v.delay FROM extensions,
+			(VALUES (2, 'extension', '201', 0), (1, 'external', '+32475123456', 15)) AS v(pos, kind, target, delay)
+			WHERE number = '200'`,
+	} {
+		if _, err := conn.Exec(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	w := &Watcher{Domain: domain}
+	s, err := w.loadAll(ctx, conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fm, ok := s.FollowMe("200")
+	if !ok || !fm.Enabled || fm.Strategy != FollowMeSequential || fm.RingOwnDevices || fm.TimeoutSeconds != 45 || fm.ConfirmExternal || fm.DNDBlocks {
+		t.Fatalf("profile of 200 = %+v ok=%v", fm, ok)
+	}
+	if len(fm.Targets) != 2 || fm.Targets[0] != (FollowMeTarget{Kind: FollowMeExternal, Target: "+32475123456", Delay: 15}) ||
+		fm.Targets[1] != (FollowMeTarget{Kind: FollowMeExtension, Target: "201"}) {
+		t.Fatalf("targets = %+v, want the external one first (position order)", fm.Targets)
+	}
+	if !fm.Active() {
+		t.Fatal("an enabled profile with targets is not active")
+	}
+	if _, ok := s.FollowMe("201"); ok {
+		t.Fatal("extension 201 has no profile")
+	}
+	if (FollowMe{Enabled: true}).Active() || (FollowMe{Targets: []FollowMeTarget{{}}}).Active() {
+		t.Fatal("a profile is active only when enabled and with a target")
+	}
+}

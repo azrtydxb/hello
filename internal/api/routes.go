@@ -79,6 +79,8 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/devices/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteDevice},
 		{"POST", "/api/v1/devices/{id}/rotate-secret", auth.ScopeSecrets, auth.RoleAdmin, false, s.rotateSecret},
 
+		{"GET", "/api/v1/extensions/{id}/follow-me", auth.ScopeRead, auth.RoleViewer, false, s.getFollowMe},
+		{"PUT", "/api/v1/extensions/{id}/follow-me", auth.ScopeWrite, auth.RoleOperator, false, s.putFollowMe},
 		{"GET", "/api/v1/extensions/{id}/voicemail", auth.ScopeRead, auth.RoleViewer, false, s.getVoicemailBox},
 		{"PUT", "/api/v1/extensions/{id}/voicemail", auth.ScopeWrite, auth.RoleOperator, false, s.putVoicemailBox},
 		{"PUT", "/api/v1/extensions/{id}/voicemail/greeting", auth.ScopeWrite, auth.RoleOperator, false, s.putVoicemailGreeting},
@@ -262,6 +264,14 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/boss-links", auth.ScopeRead, auth.RoleViewer, false, s.listBossLinks},
 		{"PUT", "/api/v1/boss-links", auth.ScopeWrite, auth.RoleOperator, false, s.putBossLinks},
 
+		{"GET", "/api/v1/door/webhooks", auth.ScopeRead, auth.RoleViewer, false, s.listDoorWebhooks},
+		{"POST", "/api/v1/door/webhooks", auth.ScopeAdmin, auth.RoleAdmin, false, s.createDoorWebhook},
+		{"GET", "/api/v1/door/webhooks/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getDoorWebhook},
+		{"PUT", "/api/v1/door/webhooks/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putDoorWebhook},
+		{"DELETE", "/api/v1/door/webhooks/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteDoorWebhook},
+		{"POST", "/api/v1/door/webhooks/{id}/rotate-secret", auth.ScopeAdmin, auth.RoleAdmin, false, s.rotateDoorWebhookSecret},
+		{"POST", "/api/v1/door/webhooks/{id}/trigger", "", "", true, s.triggerDoorWebhook},
+
 		{"GET", "/api/v1/presence", auth.ScopeRead, auth.RoleViewer, false, s.presence},
 
 		{"GET", "/api/v1/registrations", auth.ScopeRead, auth.RoleViewer, false, s.registrations},
@@ -386,6 +396,8 @@ func (s *server) routes() []route {
 		{"PATCH", "/api/v1/me/profile", auth.ScopeWrite, auth.RoleUser, false, s.updateProfile},
 		{"GET", "/api/v1/me/extensions", auth.ScopeRead, auth.RoleUser, false, s.listMyExtensions},
 		{"PATCH", "/api/v1/me/extensions/{id}", auth.ScopeWrite, auth.RoleUser, false, s.updateMyExtension},
+		{"GET", "/api/v1/me/extensions/{id}/follow-me", auth.ScopeRead, auth.RoleUser, false, s.getMyFollowMe},
+		{"PUT", "/api/v1/me/extensions/{id}/follow-me", auth.ScopeWrite, auth.RoleUser, false, s.putMyFollowMe},
 		{"GET", "/api/v1/me/extensions/{id}/voicemail", auth.ScopeRead, auth.RoleUser, false, s.getMyVoicemail},
 		{"PUT", "/api/v1/me/extensions/{id}/voicemail", auth.ScopeWrite, auth.RoleUser, false, s.putMyVoicemail},
 		{"GET", "/api/v1/me/extensions/{id}/voicemail/messages", auth.ScopeRead, auth.RoleUser, false, s.listMyMessages},

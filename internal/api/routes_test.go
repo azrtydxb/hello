@@ -61,6 +61,8 @@ func TestRoutesTable(t *testing.T) {
 			strings.HasPrefix(r.Pattern, "/api/v1/calls/originate")
 	}
 	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true, "POST /api/v1/auth/login/2fa": true,
+		// The doorbell webhook is signature-checked and rate-limited instead (spec S-48).
+		"POST /api/v1/door/webhooks/{id}/trigger":     true,
 		"GET /api/v1/integrations/crm/oauth/callback": true}
 	seen := map[string]bool{}
 	for _, r := range Routes() {

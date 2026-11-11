@@ -65,7 +65,7 @@ type Trunk struct {
 	// reject, country restriction); its fields are the trunk's own in JSON.
 	routing.CallerPolicy
 	// Geolocation sends the caller's Geolocation header and PIDF-LO body on
-	// the emergency calls this trunk carries (RFC 6442, migration 00079).
+	// the emergency calls this trunk carries (RFC 6442, migration 00080).
 	Geolocation bool `json:"geolocation"`
 	// SessionTimers is the trunk's RFC 4028 setting: "default" (follow
 	// Hello's own), "on" or "off".

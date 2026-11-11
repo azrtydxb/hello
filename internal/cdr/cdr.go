@@ -36,7 +36,7 @@ const (
 	KindConference = "conference"
 	KindDoor       = "door"     // a door station's call or a call to a Door group (migration 00053)
 	KindCallback   = "callback" // a call Hello placed to a queue caller who asked for a callback (migration 00049)
-	KindAlarm      = "alarm"    // a *55 alarm call (migration 00079)
+	KindAlarm      = "alarm"    // a *55 alarm call (migration 00080)
 	KindFax        = "fax"      // a fax call, received or sent (migration 00073); the fax is in the faxes table, by correlation id
 )
 
@@ -109,6 +109,10 @@ type Record struct {
 	// PageLegs is a page's outcome per member (migration 00014), one row
 	// each; empty for any other call.
 	PageLegs []PageLeg
+	// FollowMeLegs is what each follow-me target did (migration 00080), one
+	// row each in cdr_legs with the role follow_me; empty for a call that
+	// ran no follow-me.
+	FollowMeLegs []FollowMeLeg
 	// QueueLegs is what the call did in a call queue (migration 00040): one
 	// row per event, in order; empty for a call that never queued.
 	QueueLegs []QueueLeg
@@ -142,6 +146,20 @@ type QueueLeg struct {
 	WaitMs    int64     `json:"waitMs"`
 	Result    string    `json:"result"`
 	At        time.Time `json:"at"`
+}
+
+// Roles of a cdr_legs row (pbx-gaps S-22); follow-me writes follow_me.
+const LegRoleFollowMe = "follow_me"
+
+// FollowMeLeg is one follow-me leg: the target's kind (external, extension,
+// ring_group or own), the extension it rang or the trunk it left on, and how
+// it ended (answered, declined, busy, no_answer, failed, skipped or
+// cancelled).
+type FollowMeLeg struct {
+	Kind      string `json:"kind"`
+	Extension string `json:"extension"`
+	Trunk     string `json:"trunk"`
+	Result    string `json:"result"`
 }
 
 // PageLeg is one paged member's outcome: answered, busy, dnd, no_answer or
@@ -229,7 +247,10 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
 ON CONFLICT (correlation_id) DO NOTHING RETURNING id),
 p AS (INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
 SELECT c.id, l.ord, l.leg->>'extension', l.leg->>'device', l.leg->>'result'
-FROM c, jsonb_array_elements($34::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1)
+FROM c, jsonb_array_elements($34::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1),
+f AS (INSERT INTO cdr_legs (cdr_id, position, role, extension, trunk, result, target_kind)
+SELECT c.id, l.ord, 'follow_me', l.leg->>'extension', l.leg->>'trunk', l.leg->>'result', l.leg->>'kind'
+FROM c, jsonb_array_elements($36::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1)
 INSERT INTO cdr_queue_legs (cdr_id, position, event, queue, extension, wait_ms, result, at)
 SELECT c.id, l.ord, l.leg->>'event', l.leg->>'queue', l.leg->>'extension', (l.leg->>'waitMs')::bigint,
        l.leg->>'result', (l.leg->>'at')::timestamptz
@@ -330,6 +351,10 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	if err != nil {
 		return err
 	}
+	fj, err := json.Marshal(append([]FollowMeLeg{}, r.FollowMeLegs...))
+	if err != nil {
+		return err
+	}
 	origin := r.Origin
 	if origin == "" {
 		origin = OriginPhone
@@ -339,7 +364,7 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
 		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, r.RingTag, r.RingRule,
-		nullString(r.CallerCodec), nullString(r.CalleeCodec), origin, r.OriginClient, r.PeerCallID, r.AnsweredBy, string(lj), string(qj))
+		nullString(r.CallerCodec), nullString(r.CalleeCodec), origin, r.OriginClient, r.PeerCallID, r.AnsweredBy, string(lj), string(qj), string(fj))
 	if err != nil {
 		return err
 	}

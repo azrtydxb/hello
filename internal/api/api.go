@@ -80,6 +80,15 @@ type Store interface {
 	UpdateExtension(ctx context.Context, actor string, id int64, c store.ExtensionChange, check store.Check) (store.Extension, error)
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
 
+	ListDoorWebhooks(ctx context.Context) ([]store.DoorWebhook, error)
+	GetDoorWebhook(ctx context.Context, id int64) (store.DoorWebhook, error)
+	CreateDoorWebhook(ctx context.Context, actor string, in store.DoorWebhookInput) (store.DoorWebhook, string, error)
+	UpdateDoorWebhook(ctx context.Context, actor string, id int64, in store.DoorWebhookInput) (store.DoorWebhook, error)
+	DeleteDoorWebhook(ctx context.Context, actor string, id int64) error
+	RotateDoorWebhookSecret(ctx context.Context, actor string, id int64) (string, error)
+	DoorWebhookForTrigger(ctx context.Context, id int64) (store.DoorTriggerHook, bool, error)
+	NoteDoorWebhookTriggered(ctx context.Context, id int64) error
+
 	GetVoicemailBox(ctx context.Context, extensionID int64) (store.VoicemailBox, error)
 	GetVoicemailBoxByID(ctx context.Context, boxID int64) (store.VoicemailBox, error)
 	VoicemailPromptLanguages(ctx context.Context) ([]string, error)
@@ -119,6 +128,8 @@ type Store interface {
 	UpdateCalendar(ctx context.Context, actor string, id int64, in store.CalendarInput, check store.Check) (store.Calendar, error)
 	ImportCalendarEntries(ctx context.Context, actor string, id int64, entries []timecond.Entry, replace bool, check store.Check) (store.Calendar, error)
 	DeleteCalendar(ctx context.Context, actor string, id int64, check store.Check) error
+	GetFollowMe(ctx context.Context, id int64) (store.FollowMe, error)
+	PutFollowMe(ctx context.Context, actor string, id int64, in store.FollowMeInput) (store.FollowMe, error)
 	ListRingTags(ctx context.Context) ([]store.RingTag, error)
 	GetRingTag(ctx context.Context, name string) (store.RingTag, error)
 	CreateRingTag(ctx context.Context, actor string, in store.RingTagInput) (store.RingTag, error)
@@ -346,6 +357,9 @@ type Config struct {
 	OriginateMetrics *OriginateMetrics
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
+	// DoorTriggers carries doorbell webhook triggers to hello-sip and keeps
+	// their rate and duplicate windows; nil answers 503.
+	DoorTriggers DoorTriggers
 	// Fax is the fax feature (destinations, the fax list, sending a PDF); the
 	// zero value answers 503 on its routes.
 	Fax FaxConfig
