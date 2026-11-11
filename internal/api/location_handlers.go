@@ -11,7 +11,7 @@ import (
 )
 
 // Locations, their assignments, the E911 switch and alarm destination of a
-// phone group, and the emergency settings (migration 00074, spec
+// phone group, and the emergency settings (migration 00075, spec
 // phone-feature-parity S-28 and S-29). Reads are open to a viewer; changes to
 // locations and assignments need the write scope, and the phone group's
 // alarm destination and the emergency settings the admin scope, as the

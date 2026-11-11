@@ -1,7 +1,7 @@
 package store
 
 // Locations, the E911 switch and alarm destination of a phone group, and the
-// emergency settings (migration 00074, spec phone-feature-parity S-28 and
+// emergency settings (migration 00075, spec phone-feature-parity S-28 and
 // S-29). hello-sip reads all of it from the snapshot (the alarm destination,
 // the location of a device for the Geolocation header, the trunk flag, the
 // notify group), so every change bumps the configuration revision; the

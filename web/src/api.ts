@@ -336,6 +336,8 @@ export interface TrunkFields {
   messaging: boolean;
   /** Emergency calls through it carry the caller's location (RFC 6442). */
   geolocation: boolean;
+  /** How a fax call is carried: G.711 passthrough, T.38, or refused. */
+  faxMode: "passthrough" | "t38" | "off";
   /**
    * Anonymous calls: "honour" carries a device's privacy request (default),
    * "always" makes every call through the trunk anonymous.
@@ -460,7 +462,8 @@ export interface InboundRouteFields {
     | "announcement"
     | "paging"
     | "conference"
-    | "directory";
+    | "directory"
+    | "fax";
   destination: string;
   enabled: boolean;
   /** Music on hold class of the calls this route delivers; null = the default. */
@@ -1516,6 +1519,7 @@ export const IVR_DESTINATION_KINDS = [
   "queue",
   "time_condition",
   "directory",
+  "fax",
 ] as const;
 
 export type IvrDestinationKind = (typeof IVR_DESTINATION_KINDS)[number];
@@ -1537,6 +1541,7 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   queue: "Call queue",
   time_condition: "Time condition",
   directory: "Dial-by-name directory",
+  fax: "Fax destination",
 };
 
 /**

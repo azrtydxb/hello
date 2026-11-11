@@ -636,6 +636,7 @@ const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   paging: "Paging group",
   conference: "Conference room",
   directory: "Dial-by-name directory",
+  fax: "Fax destination (name)",
 };
 
 type ListedKind =
@@ -855,6 +856,7 @@ export function InboundDrawer({
               { value: "paging", label: "Paging group" },
               { value: "directory", label: "Dial-by-name directory" },
               { value: "conference", label: "Conference room" },
+              { value: "fax", label: "Fax destination" },
             ]}
             onChange={(e) =>
               // The target belongs to the kind: a name chosen for one kind

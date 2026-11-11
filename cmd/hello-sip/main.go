@@ -22,6 +22,7 @@ import (
 	"github.com/azrtydxb/hello/internal/crm"
 	_ "github.com/azrtydxb/hello/internal/crm/hubspot" // registers the HubSpot connector
 	"github.com/azrtydxb/hello/internal/events"
+	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/lifecycle"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
@@ -199,7 +200,7 @@ func run(args []string) error {
 		Voicemails:     voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings, TimeConditions: timeConditions{st: controlStore},
 		Speech:     newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
-		HAState: live, Membership: members, PageTests: live, Originates: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Park: live, Published: live, Emergency: live,
+		HAState: live, Membership: members, PageTests: live, Originates: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Fax: faxDeps(cfg, controlStore), Park: live, Published: live, Emergency: live,
 		Conferences: live, ConferenceAudit: controlStore,
 		CallerNames: crmLookup,
 	})
@@ -352,4 +353,18 @@ func primaryOf(vk valkey.Client) string {
 		return addr
 	}
 	return ""
+}
+
+// faxDeps wires the fax feature (pbx-gaps S-15): nil, so fax calls are
+// answered 488 and nothing is sent, unless HELLO_FAX_ENABLED is true and the
+// PDF store can be built.
+func faxDeps(cfg config.SIP, st *store.Store) *sip.FaxDeps {
+	if !cfg.Fax.Enabled {
+		return nil
+	}
+	objs, err := fax.NewObjects(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioSecure)
+	if err != nil {
+		return nil
+	}
+	return &sip.FaxDeps{Enabled: true, Client: &fax.Client{Addr: cfg.Fax.Addr, Token: cfg.Fax.Token}, Store: st.Faxes(), Objects: objs}
 }
