@@ -245,7 +245,7 @@ type Snapshot struct {
 	// ringTags are the ring tags and rules (migration 00050); nil means the
 	// built-in tags and no rules.
 	ringTags *ringtag.Table
-	// followMe are the follow-me profiles by extension number (migration 00074).
+	// followMe are the follow-me profiles by extension number (migration 00075).
 	followMe map[string]FollowMe
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState
