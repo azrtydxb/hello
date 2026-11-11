@@ -30,6 +30,11 @@ import "./platform/platform.css";
 
 const POLL_MS = 1000;
 
+/** Whether `prev` was updated after `at` (unreadable times count as not). */
+function newer(prev: OriginateStatus, at: string): boolean {
+  return Date.parse(prev.updatedAt) > Date.parse(at);
+}
+
 /** What each state tells the person at the phone. */
 const STATE_TEXT: Record<OriginateStatus["state"], string> = {
   queued: "Getting a line…",
@@ -102,7 +107,16 @@ export function Dial() {
     const poll = () => {
       getOriginate(id, ctl.signal)
         .then((s) => {
-          if (!ctl.signal.aborted) setStatus(s);
+          // A read issued before an event can land after it; it is the older
+          // word, so it must not roll the state back.
+          if (!ctl.signal.aborted)
+            setStatus((prev) =>
+              prev &&
+              prev.originateId === s.originateId &&
+              newer(prev, s.updatedAt)
+                ? prev
+                : s,
+            );
         })
         .catch((err: unknown) => {
           if (!ctl.signal.aborted) setError(errorMessage(err));
@@ -123,7 +137,7 @@ export function Dial() {
           const state = e.data.state as OriginateState;
           const reason = e.data.reason as OriginateReason | undefined;
           setStatus((prev) =>
-            prev && prev.originateId === id
+            prev && prev.originateId === id && !newer(prev, e.createdAt)
               ? { ...prev, state, reason, updatedAt: e.createdAt }
               : prev,
           );

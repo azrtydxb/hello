@@ -212,6 +212,10 @@ type PushJob struct {
 	Kind    string
 	Vendor  string
 	Device  string // the bound device's SIP username
+	// Lines are the SIP usernames of the devices of the phone's lines 2 and
+	// up, in line order: a phone whose first line is not registered is still
+	// reached through another line (S-10).
+	Lines []string
 }
 
 // pushLockKey serialises claims so the per-minute rate holds across nodes.
@@ -239,7 +243,9 @@ func (s *Store) ClaimPushes(ctx context.Context, node string, perMinute int) ([]
 			     upd AS (UPDATE phone_pushes SET status = 'sending', claimed_at = now(), claimed_by = $1
 			             WHERE id IN (SELECT id FROM pick)
 			             RETURNING id, phone_id, kind)
-			SELECT u.id, u.phone_id, u.kind, p.vendor, COALESCE(d.sip_username, '')
+			SELECT u.id, u.phone_id, u.kind, p.vendor, COALESCE(d.sip_username, ''),
+			       COALESCE((SELECT jsonb_agg(ld.sip_username ORDER BY l.line) FROM phone_lines l
+			                 JOIN devices ld ON ld.id = l.device_id WHERE l.phone_id = u.phone_id), '[]'::jsonb)
 			FROM upd u JOIN phones p ON p.id = u.phone_id LEFT JOIN devices d ON d.id = p.device_id
 			ORDER BY u.id`, node, perMinute)
 		if err != nil {
@@ -247,8 +253,14 @@ func (s *Store) ClaimPushes(ctx context.Context, node string, perMinute int) ([]
 		}
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
-			var j PushJob
-			if err := rows.Scan(&j.ID, &j.PhoneID, &j.Kind, &j.Vendor, &j.Device); err != nil {
+			var (
+				j     PushJob
+				lines []byte
+			)
+			if err := rows.Scan(&j.ID, &j.PhoneID, &j.Kind, &j.Vendor, &j.Device, &lines); err != nil {
+				return err
+			}
+			if err := json.Unmarshal(lines, &j.Lines); err != nil {
 				return err
 			}
 			jobs = append(jobs, j)

@@ -1,6 +1,7 @@
 import { QueueSelect } from "../components/QueueSelect";
 import { targetOptions } from "../components/IvrDestination";
 import { listTimeConditions, type TimeCondition } from "../api/timecond";
+import { listVoicemailGroups, type VoicemailGroup } from "../api/vmgroups";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import {
   createInboundRoute,
@@ -630,18 +631,22 @@ const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   time_condition: "Time condition",
   ring_group: "Ring group",
   voicemail: "Voicemail box of",
+  voicemail_group: "Voicemail group",
   announcement: "Announcement",
   paging: "Paging group",
   conference: "Conference room",
   directory: "Dial-by-name directory",
+  fax: "Fax destination (name)",
 };
 
-type ListedKind = "ring_group" | "voicemail" | "announcement" | "paging";
+type ListedKind =
+  "ring_group" | "voicemail" | "voicemail_group" | "announcement" | "paging";
 
 /** What the empty-target error calls each listed kind's target. */
 const LISTED_NOUN: Record<ListedKind, string> = {
   ring_group: "ring group",
   voicemail: "voicemail box",
+  voicemail_group: "voicemail group",
   announcement: "announcement",
   paging: "paging group",
 };
@@ -688,6 +693,7 @@ export function InboundDrawer({
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [pagingGroups, setPagingGroups] = useState<PagingGroup[]>([]);
   const [rooms, setRooms] = useState<Conference[]>([]);
+  const [voicemailGroups, setVoicemailGroups] = useState<VoicemailGroup[]>([]);
   useEffect(() => {
     const controller = new AbortController();
     // The pickers stay empty when a list fails; saving still works.
@@ -702,6 +708,9 @@ export function InboundDrawer({
       .catch(() => undefined);
     listPagingGroups(controller.signal)
       .then(setPagingGroups)
+      .catch(() => undefined);
+    listVoicemailGroups(controller.signal)
+      .then(setVoicemailGroups)
       .catch(() => undefined);
     listConferences(controller.signal)
       .then(setRooms)
@@ -842,10 +851,12 @@ export function InboundDrawer({
               { value: "time_condition", label: "Time condition" },
               { value: "ring_group", label: "Ring group" },
               { value: "voicemail", label: "Voicemail" },
+              { value: "voicemail_group", label: "Voicemail group" },
               { value: "announcement", label: "Announcement" },
               { value: "paging", label: "Paging group" },
               { value: "directory", label: "Dial-by-name directory" },
               { value: "conference", label: "Conference room" },
+              { value: "fax", label: "Fax destination" },
             ]}
             onChange={(e) =>
               // The target belongs to the kind: a name chosen for one kind
@@ -934,6 +945,7 @@ export function InboundDrawer({
                     announcements,
                     pagingGroups,
                     menus,
+                    voicemailGroups,
                   },
                   d.destination,
                 ) ?? []

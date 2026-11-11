@@ -137,7 +137,7 @@ func (c *call) answerPickup(req *pickupReq) {
 	c.publish()
 	c.noteAnswered(req.retriever)
 	req.res <- pickupRes{ok: true, answer: takerAns, callID: c.callID}
-	body := ans.Build(c.anchorHost, relay.LegPort(legCaller), "sendrecv")
+	body := keepSecurity(relay, legCaller, ans).Build(c.anchorHost, relay.LegPort(legCaller), "sendrecv")
 	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", body)
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.NewHeader("Allow", allow))
@@ -145,6 +145,7 @@ func (c *call) answerPickup(req *pickupReq) {
 		res.AppendHeader(h)
 	}
 	s.m.response(sip.StatusOK)
+	c.settleReliable(true)
 	if err := c.dss.WriteResponse(res); err != nil {
 		s.log.Info("caller did not acknowledge the picked-up call", "correlation_id", c.id, "error", err)
 		c.linkedHangup(cdr.SideSystem, "no ACK from caller")

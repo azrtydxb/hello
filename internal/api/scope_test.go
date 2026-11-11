@@ -44,14 +44,14 @@ func below(s auth.Scope) auth.Scopes {
 		return auth.Scopes{auth.ScopeWrite, auth.ScopeSecrets}
 	case auth.ScopeSecrets:
 		return auth.Scopes{auth.ScopeRead, auth.ScopeWrite, auth.ScopeAdmin}
-	case auth.ScopeEvents, auth.ScopeCalls:
+	case auth.ScopeEvents, auth.ScopeMessages, auth.ScopeCalls, auth.ScopeRecordings:
 		return auth.Scopes{auth.ScopeRead, auth.ScopeWrite, auth.ScopeAdmin, auth.ScopeSecrets}
 	}
 	return slices.Clone(auth.AllScopes) // session: every scope a token can hold
 }
 
 var concreteParams = strings.NewReplacer("{id}", "1", "{vendor}", "snom", "{secretId}", "1",
-	"{ip}", "192.0.2.1", "{name}", "hello-setup", "{entryId}", "1")
+	"{ip}", "192.0.2.1", "{name}", "hello-setup", "{entryId}", "1", "{userId}", "1")
 
 // TestScopeEnforcement fails, for any route, if a token whose scopes are
 // just below the route's is admitted, if the route's own scope (or a
@@ -68,7 +68,7 @@ func TestScopeEnforcement(t *testing.T) {
 		}
 		return name
 	}
-	for _, s := range []auth.Scope{auth.ScopeRead, auth.ScopeWrite, auth.ScopeAdmin, auth.ScopeSecrets, auth.ScopeEvents, auth.ScopeCalls, auth.ScopeSession} {
+	for _, s := range []auth.Scope{auth.ScopeRead, auth.ScopeWrite, auth.ScopeAdmin, auth.ScopeSecrets, auth.ScopeEvents, auth.ScopeMessages, auth.ScopeCalls, auth.ScopeRecordings, auth.ScopeSession} {
 		token("below-"+string(s), auth.KindOAuth, below(s))
 		token("exact-"+string(s), auth.KindOAuth, auth.Scopes{s})
 	}

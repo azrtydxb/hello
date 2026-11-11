@@ -6,10 +6,12 @@ import {
   fieldErrors,
   listTrunks,
   listTrunkStatus,
+  SRTP_POLICIES,
   updateTrunk,
   type FieldError,
   type InternalDialing,
   type InternalDialingInput,
+  type SrtpPolicy,
   type Trunk,
   type TrunkInput,
   type TrunkStatus,
@@ -91,6 +93,16 @@ interface TrunkDraft {
   destinations: DestinationDraft[];
   /** SMS over SIP (SIP MESSAGE) through this trunk. */
   messaging: boolean;
+  /** Anonymous calls: carry the device's request, or always. */
+  anonymousPolicy: "honour" | "always";
+  /** The number asserted for an anonymous call. */
+  assertedIdentity: string;
+  /** The header carrying it. */
+  identityHeader: "pai" | "ppi";
+  /** Emergency calls carry the caller's location (Geolocation, PIDF-LO). */
+  geolocation: boolean;
+  /** How a fax call is carried (docs/fax.md). */
+  faxMode: "passthrough" | "t38" | "off";
   /** RFC 4028 session timers on the trunk's calls. */
   sessionTimers: SessionTimers;
   /** What the trunk may dial in the extension namespace. */
@@ -101,6 +113,14 @@ interface TrunkDraft {
   dialingConfirm: boolean;
   /** The codecs offered to the trunk, as codecs[]. */
   codecs: string[];
+  /** Media-encryption policy, as srtp. */
+  srtp: SrtpPolicy;
+  /** Caller screening (pbx-gaps S-8). */
+  rejectAnonymous: boolean;
+  /** Country calling codes, comma or space separated. */
+  allowedCountryCodes: string;
+  unknownCallerAction: "allow" | "block";
+  rejectCode: "603" | "486";
 }
 
 type SessionTimers = "default" | "on" | "off";
@@ -158,12 +178,29 @@ const NEW_TRUNK: TrunkDraft = {
   enabled: true,
   destinations: [NEW_DESTINATION],
   messaging: false,
+  anonymousPolicy: "honour",
+  assertedIdentity: "",
+  identityHeader: "pai",
+  geolocation: false,
+  faxMode: "passthrough",
   sessionTimers: "default",
   dialingMode: "off",
   dialingPatterns: "",
   dialingConfirm: false,
   codecs: DEFAULT_TRUNK_CODECS,
+  srtp: "off",
+  rejectAnonymous: false,
+  allowedCountryCodes: "",
+  unknownCallerAction: "block",
+  rejectCode: "603",
 };
+
+const COUNTRY_CODE_PATTERN = /^[1-9][0-9]{0,2}$/;
+
+/** "41, +49" -> ["41", "49"]; a leading + is dropped. */
+function countryCodes(value: string): string[] {
+  return splitList(value).map((c) => c.replace(/^\+/, ""));
+}
 
 function toDraft(t: Trunk): TrunkDraft {
   const dialing = t.internalDialing;
@@ -186,6 +223,11 @@ function toDraft(t: Trunk): TrunkDraft {
       weight: String(d.weight),
     })),
     messaging: t.messaging === true,
+    anonymousPolicy: t.anonymousPolicy === "always" ? "always" : "honour",
+    assertedIdentity: t.assertedIdentity ?? "",
+    identityHeader: t.identityHeader === "ppi" ? "ppi" : "pai",
+    geolocation: t.geolocation === true,
+    faxMode: t.faxMode ?? "passthrough",
     sessionTimers:
       t.sessionTimers === "on" || t.sessionTimers === "off"
         ? t.sessionTimers
@@ -197,10 +239,27 @@ function toDraft(t: Trunk): TrunkDraft {
     dialingPatterns: (dialing?.patterns ?? []).join("\n"),
     dialingConfirm: false,
     codecs: t.codecs?.length ? t.codecs : DEFAULT_TRUNK_CODECS,
+    srtp: t.srtp ?? "off",
+    rejectAnonymous: t.rejectAnonymous === true,
+    allowedCountryCodes: (t.allowedCountryCodes ?? []).join(", "),
+    unknownCallerAction: t.unknownCallerAction === "allow" ? "allow" : "block",
+    rejectCode: t.rejectCode === 486 ? "486" : "603",
   };
 }
 
 const isInt = (v: string) => /^-?[0-9]+$/.test(v.trim());
+
+/** How a fax call on the trunk is carried, for the card and the drawer. */
+function faxModeLabel(mode: string | undefined): string {
+  switch (mode) {
+    case "t38":
+      return "T.38 when offered";
+    case "off":
+      return "Refused";
+    default:
+      return "Passthrough (G.711)";
+  }
+}
 
 /** The patterns of a trunk, for the card and the drawer. */
 function dialingLabel(dialing: InternalDialing): string {
@@ -214,6 +273,15 @@ function dialingLabel(dialing: InternalDialing): string {
     default:
       return "Off";
   }
+}
+
+/** What the trunk screens, for the card. */
+function screeningLabel(t: Trunk): string {
+  const parts: string[] = [];
+  if (t.rejectAnonymous) parts.push("anonymous rejected");
+  const codes = t.allowedCountryCodes ?? [];
+  if (codes.length > 0) parts.push(`only +${codes.join(", +")}`);
+  return parts.length > 0 ? parts.join(", ") : "Off";
 }
 
 /** Client-side checks; the server validates everything again. */
@@ -253,6 +321,16 @@ function validate(d: TrunkDraft): Record<string, string> {
   if (d.codecs.length === 0) {
     e.codecs = "Offer at least one codec.";
   }
+  const bad = countryCodes(d.allowedCountryCodes).filter(
+    (c) => !COUNTRY_CODE_PATTERN.test(c),
+  );
+  if (bad.length > 0) {
+    e.allowedCountryCodes =
+      "Use calling codes of 1 to 3 digits without a leading 0, such as 41 or 49.";
+  }
+  if (countryCodes(d.allowedCountryCodes).length > 50) {
+    e.allowedCountryCodes = "Use at most 50 country codes.";
+  }
   if (d.dialingMode === "all" && !d.dialingConfirm) {
     e["internalDialing.confirm"] =
       "Confirm that this trunk may dial every internal number.";
@@ -281,8 +359,18 @@ function toInput(d: TrunkDraft): TrunkInput {
     })),
     internalDialing: toDialingInput(d),
     messaging: d.messaging,
+    anonymousPolicy: d.anonymousPolicy,
+    assertedIdentity: d.assertedIdentity.trim(),
+    identityHeader: d.identityHeader,
+    geolocation: d.geolocation,
+    faxMode: d.faxMode,
     sessionTimers: d.sessionTimers,
     codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
+    srtp: d.srtp,
+    rejectAnonymous: d.rejectAnonymous,
+    allowedCountryCodes: countryCodes(d.allowedCountryCodes),
+    unknownCallerAction: d.unknownCallerAction,
+    rejectCode: d.rejectCode === "486" ? 486 : 603,
   };
 }
 
@@ -319,10 +407,20 @@ function knownKeys(d: TrunkDraft): string[] {
     "destinations",
     "internalDialing",
     "codecs",
+    "srtp",
     "internalDialing.mode",
     "internalDialing.patterns",
     "internalDialing.confirm",
     "messaging",
+    "anonymousPolicy",
+    "assertedIdentity",
+    "identityHeader",
+    "rejectAnonymous",
+    "allowedCountryCodes",
+    "unknownCallerAction",
+    "rejectCode",
+    "geolocation",
+    "faxMode",
     "sessionTimers",
     ...d.destinations.flatMap((_, i) => [
       `destinations[${i}]`,
@@ -576,6 +674,17 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          { label: "Media encryption", value: t.srtp ?? "off" },
+          { label: "Caller screening", value: screeningLabel(t) },
+          {
+            label: "Anonymous calls",
+            value: t.anonymousPolicy === "always" ? "Always" : "On request",
+          },
+          { label: "Fax", value: faxModeLabel(t.faxMode) },
+          {
+            label: "Emergency location",
+            value: t.geolocation ? "Sent" : "Off",
+          },
           {
             label: "Session timers",
             value: SESSION_TIMERS_LABEL[t.sessionTimers ?? "default"],
@@ -600,6 +709,17 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          { label: "Media encryption", value: t.srtp ?? "off" },
+          { label: "Caller screening", value: screeningLabel(t) },
+          {
+            label: "Anonymous calls",
+            value: t.anonymousPolicy === "always" ? "Always" : "On request",
+          },
+          { label: "Fax", value: faxModeLabel(t.faxMode) },
+          {
+            label: "Emergency location",
+            value: t.geolocation ? "Sent" : "Off",
+          },
           {
             label: "Session timers",
             value: SESSION_TIMERS_LABEL[t.sessionTimers ?? "default"],
@@ -999,6 +1119,94 @@ function TrunkDrawer({
             checked={draft.messaging}
             onChange={(e) => set("messaging", e.target.checked)}
           />
+          <Switch
+            label="Send the caller's location with emergency calls"
+            hint="An emergency call through this trunk carries a Geolocation header and a PIDF-LO body (RFC 6442): the phone's own location, else the one assigned under Locations. Turn it on only for a carrier that accepts them. The request is larger than a usual SIP datagram. Off by default."
+            labelPosition="end"
+            checked={draft.geolocation}
+            onChange={(e) => set("geolocation", e.target.checked)}
+          />
+          <Select
+            label="Fax"
+            hint="How a fax call on this trunk is carried. Passthrough keeps G.711 audio. T.38 moves the call to T.38 when the carrier offers it or the fax tone is heard; a carrier that refuses leaves it on G.711. Off refuses fax calls."
+            value={draft.faxMode}
+            error={errors.faxMode}
+            options={[
+              { value: "passthrough", label: "Passthrough (G.711)" },
+              { value: "t38", label: "T.38 when the carrier offers it" },
+              { value: "off", label: "Off (refuse fax calls)" },
+            ]}
+            onChange={(e) =>
+              set("faxMode", e.target.value as TrunkDraft["faxMode"])
+            }
+          />
+        </fieldset>
+
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">Media encryption</legend>
+          <Select
+            id={fid("srtp")}
+            label="SRTP"
+            value={draft.srtp}
+            error={errors.srtp}
+            options={SRTP_POLICIES}
+            onChange={(e) => set("srtp", e.target.value as SrtpPolicy)}
+          />
+          <p className="cf-form__note">
+            SRTP keys travel in the call setup, so Hello offers them only on a
+            leg whose signalling is TLS. Trunk legs are UDP today: Optional
+            behaves as Off, and Required refuses calls over this trunk. Off
+            keeps plain RTP.
+          </p>
+        </fieldset>
+
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">Anonymous calls</legend>
+          <p className="cf-form__note">
+            An anonymous call carries Privacy: id and an anonymous From; the
+            carrier learns the caller from the asserted identity.
+          </p>
+          <Select
+            id={fid("anonymousPolicy")}
+            label="Anonymous calls"
+            value={draft.anonymousPolicy}
+            error={errors.anonymousPolicy}
+            options={[
+              { value: "honour", label: "When the phone or extension asks" },
+              { value: "always", label: "Every call through this trunk" },
+            ]}
+            onChange={(e) =>
+              set(
+                "anonymousPolicy",
+                e.target.value as TrunkDraft["anonymousPolicy"],
+              )
+            }
+          />
+          <Input
+            id={fid("assertedIdentity")}
+            label="Asserted identity"
+            mono
+            value={draft.assertedIdentity}
+            error={errors.assertedIdentity}
+            hint="The number sent in the identity header of an anonymous call. Empty uses the caller ID."
+            onChange={(e) => set("assertedIdentity", e.target.value)}
+          />
+          <Select
+            id={fid("identityHeader")}
+            label="Identity header"
+            value={draft.identityHeader}
+            error={errors.identityHeader}
+            options={[
+              { value: "pai", label: "P-Asserted-Identity" },
+              { value: "ppi", label: "P-Preferred-Identity" },
+            ]}
+            onChange={(e) =>
+              set(
+                "identityHeader",
+                e.target.value as TrunkDraft["identityHeader"],
+              )
+            }
+          />
         </fieldset>
 
         <fieldset className="cf-form__section">
@@ -1031,6 +1239,59 @@ function TrunkDrawer({
               </p>
             )}
           </div>
+        </fieldset>
+
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">Caller screening</legend>
+          <p className="cf-form__note">
+            Applies to calls arriving on this trunk, after the blocklist's allow
+            entries. Calls from phones are never screened. The blocklist itself
+            is on the Blocklist page.
+          </p>
+          <Switch
+            label="Reject anonymous callers"
+            hint="Turn away a caller who withholds the number (From anonymous, Privacy: id, or no number)."
+            labelPosition="end"
+            checked={draft.rejectAnonymous}
+            onChange={(e) => set("rejectAnonymous", e.target.checked)}
+          />
+          <Input
+            id={fid("allowedCountryCodes")}
+            label="Allowed country codes"
+            mono
+            value={draft.allowedCountryCodes}
+            error={errors.allowedCountryCodes}
+            hint="Leave empty for no restriction. Callers from any other country are turned away, e.g. 41, 49."
+            onChange={(e) => set("allowedCountryCodes", e.target.value)}
+          />
+          <Select
+            id={fid("unknownCallerAction")}
+            label="Caller number cannot be placed"
+            value={draft.unknownCallerAction}
+            hint="Only used with a country list. A withheld number counts as one that cannot be placed."
+            onChange={(e) =>
+              set(
+                "unknownCallerAction",
+                e.target.value === "allow" ? "allow" : "block",
+              )
+            }
+            options={[
+              { value: "block", label: "Block the call" },
+              { value: "allow", label: "Allow the call" },
+            ]}
+          />
+          <Select
+            id={fid("rejectCode")}
+            label="Answer a screened call with"
+            value={draft.rejectCode}
+            onChange={(e) =>
+              set("rejectCode", e.target.value === "486" ? "486" : "603")
+            }
+            options={[
+              { value: "603", label: "603 Decline" },
+              { value: "486", label: "486 Busy Here" },
+            ]}
+          />
         </fieldset>
 
         <fieldset

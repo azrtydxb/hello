@@ -41,6 +41,7 @@ var conformanceExempt = func() map[string]string {
 	for _, k := range []string{"adoptOnboardingCandidate 409", "bulkAdoptOnboardingCandidates 404", "bulkAdoptOnboardingCandidates 409"} {
 		m[k] = race
 	}
+	m["putBossLinks 409"] = "a unique boss on boss_links is refused only when a concurrent write takes the same boss between the handler's check and the write"
 	return m
 }()
 
@@ -55,6 +56,8 @@ var conformanceBodies = []string{
 	"replaceAnnouncement application/json",
 	"importPhones application/json",
 	"importPhonebook application/json",
+	"sendFax application/json",
+	"sendFax multipart/form-data",
 }
 
 // conformance validates every request the package suite sends through

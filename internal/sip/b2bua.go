@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
@@ -26,15 +27,33 @@ const byeTimeout = 35 * time.Second
 // per binding of the dialled extension (B legs, UAC dialogs). It stays on
 // the node that set it up.
 type call struct {
-	s      *Server
-	id     string // correlation ID
-	callID string // caller's Call-ID
+	s *Server
+	// blocked is why a trunk's screening turned this call away (blocklist,
+	// anonymous or country); empty for every other call. Guarded by mu.
+	blocked string
+	id      string // correlation ID
+	callID  string // caller's Call-ID
 	// The caller as presented: an extension (with its device) or a trunk's
 	// caller ID; callerDevice is never rung for this call.
 	callerNum    string
 	callerName   string
 	callerDevice string
 	dialled      string
+	// trunkSRTP is the SRTP policy of the trunk an inbound call came in on
+	// (S-15); srtpA and srtpB record which relay legs were ever encrypted
+	// (the CDR's srtp column), srtpGauge how many the node gauge counts for
+	// this call and srtpNoted which legs' negotiation result was counted.
+	// All guarded by mu.
+	trunkSRTP string
+	srtpA     bool
+	srtpB     bool
+	srtpGauge int
+	// srtpClosed is set once the call's media ended: the gauge is released.
+	srtpClosed bool
+	srtpNoted  map[string]bool
+	srtpSnap   *snapshot.Snapshot
+	// rel is the reliable provisional response toward the caller (S-17).
+	rel relState
 	// secure marks a sips: call: it forks only onto bindings registered over
 	// TLS and never leaves for a trunk or an external URI (phone-feature-
 	// parity S-14).
@@ -191,6 +210,16 @@ type call struct {
 	// ringTag and ringWhy are the ring tag the call's device legs carry and
 	// what chose it (S-40); guarded by mu, written to the trace and the CDR.
 	ringTag, ringWhy string
+	// ringKind, when set, fixes the ring tag as a call kind does (S-40) for
+	// a call whose CDR kind stays "call": emergency-callback.
+	ringKind string
+	// ignoreDND rings the called extension (or the members of the called
+	// group) whatever their DND: an alarm call and an emergency callback.
+	ignoreDND bool
+	// emergency marks a call routed over an emergency route (S-28). geo
+	// holds what the caller's phone sent for it (RFC 6442).
+	emergency bool
+	geo       geoInfo
 
 	groupName     string
 	groupStrategy string
@@ -262,6 +291,7 @@ type call struct {
 	ivrCancel   context.CancelFunc
 	ivrAnswered time.Time
 	vmExt       string
+	vmGroup     *snapshot.VoicemailGroup // the group a message is being left for, or nil
 	vmTap       func(leg string, pkt *media.RTPPacket)
 	bridgedExt  string
 
@@ -285,6 +315,11 @@ type call struct {
 	cbQueue string
 	cbDone  bool
 	cbOffer []byte
+	// Fax (fax.go), guarded by mu: faxMode is the source trunk's fax mode
+	// (migration 00073) and fx the call's fax session, nil on any other call.
+	faxMode string
+	fx      *faxCall
+	faxNote string // the fax result, the CDR's reason on a call that ends normally
 	// Time conditions (timecond.go): tcVisited lists the conditions the call
 	// passed, so a loop through ring group failover or an IVR menu is caught;
 	// vmPre is an announcement played before the voicemail greeting. Guarded
@@ -294,11 +329,24 @@ type call struct {
 	// ivrUnrecoverable is set when a dial-out cannot be done after a takeover.
 	ivrUnrecoverable bool
 
+	// Boss and secretary (boss.go), guarded by mu: the link the call rings
+	// through, and the assistant's extension when the assistant answered
+	// (the CDR's answered_by).
+	boss       *bossCall
+	answeredBy string
+
 	// Call events (events.go), guarded by mu: the extensions that rang, the
 	// one that answered and the subjects of the finished call.
 	ringedExts  []string
 	answeredExt string
 	evSubjects  []string
+
+	// Follow-me (followme.go): the CDR records of the legs rung, the
+	// "press 1" check in progress and the lock that lets one leg at a time
+	// be asked. fmRecs and fmScr are guarded by mu.
+	fmRecs     []*fmRec
+	fmScr      *fmScreening
+	fmScreenMu sync.Mutex
 	// evMu orders the sequence numbers of the call's events with their
 	// hand-off to the sink; evSeq is the last number used (events.go).
 	// evLegacy marks a call taken over from a node that did not replicate
@@ -328,6 +376,9 @@ const (
 	evAnswered
 	evFailed
 	evChallenged // a trunk challenged the INVITE (code 401 or 407)
+	// evScreenMessage: the assistant of a screened boss call chose to send the
+	// caller to the boss's voicemail (boss.go).
+	evScreenMessage
 )
 
 type legEvent struct {
@@ -350,7 +401,9 @@ type leg struct {
 	acked bool
 	// elsewhere: the leg was cancelled because the call was answered
 	// elsewhere (a pickup); its dialog sends the CANCEL with that Reason.
-	elsewhere bool
+	// It is read when the CANCEL is built, so it is atomic: the dialog's UA
+	// is never replaced while sipgo may be using it.
+	elsewhere atomic.Bool
 
 	// A trunk attempt (trunk set) or a SIP URI target (uri set); neither
 	// means a phone binding.
@@ -360,14 +413,28 @@ type leg struct {
 	number    string
 	callerID  string
 	uri       *sip.Uri
-	abandoned bool // guarded by c.mu: failed over, may no longer win
-	stage     int  // the forwarding stage this fork belongs to; setup ignores older stages' events
+	abandoned bool   // guarded by c.mu: failed over, may no longer win
+	lastRSeq  uint32 // guarded by mu: the last RSeq acknowledged with a PRACK
+	stage     int    // the forwarding stage this fork belongs to; setup ignores older stages' events
 	// pl is set on a page member leg (Phase E): it carries the page's
 	// per-member state and offer.
 	pl *pageLeg
+	// screen marks an assistant's leg of a boss link with screening on: its
+	// answer plays the screening prompt instead of taking the call (boss.go).
+	screen bool
 	// ident presents other identities than the call's: a callback is placed
 	// by the queue, to the caller's own number (queue_callback.go).
 	ident *legIdent
+	// accept, when set, runs on an answered leg before it may claim the call
+	// (a follow-me external target asked to press 1). It returns "" to accept
+	// or the leg's result (declined, cancelled, failed). fmSlot is the trunk
+	// slot member the leg took (guarded by c.mu) and fmResult the result a
+	// screening gave.
+	accept   func(*leg) string
+	fmSlot   string
+	fmResult string
+	// fmRec is the follow-me record of this leg, nil for any other leg.
+	fmRec *fmRec
 }
 
 // legIdent overrides the user parts of a fork's From and To.
@@ -452,6 +519,10 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	c := s.newCall(req)
 	c.callerNum, c.callerName, c.callerDevice = dev.Extension, dev.ExtensionName, dev.Username
+	if !c.srtpGate(tx, snap) {
+		return
+	}
+	c.takeGeolocation()
 	s.routeCaller(c, req, tx, snap, dev)
 }
 
@@ -463,6 +534,11 @@ func (s *Server) routeCaller(c *call, req *sip.Request, tx sip.ServerTransaction
 	// A door station reaches its targets only (spec S-45).
 	if snap.IsDoor(dev.Extension) {
 		c.doorCall(req, tx, snap)
+		return
+	}
+	// The alarm code (spec S-29) is answered here, before any other number.
+	if c.dialled == AlarmCode {
+		c.handleAlarm(tx, snap, dev)
 		return
 	}
 	// A paging group's code (Phase E, spec P-12) pages its members; the
@@ -484,6 +560,11 @@ func (s *Server) routeCaller(c *call, req *sip.Request, tx sip.ServerTransaction
 	// A queue's number answers and queues the caller.
 	if q, ok := snap.QueueByNumber(c.dialled); ok {
 		c.startQueue(tx, snap, q)
+		return
+	}
+	// A voicemail group's number takes a message for its members.
+	if g, ok := snap.VoicemailGroup(c.dialled); ok {
+		c.startVoicemailGroup(tx, g, false)
 		return
 	}
 	// A park slot dialled as a number retrieves the call parked there, and
@@ -518,7 +599,8 @@ func (s *Server) routeCaller(c *call, req *sip.Request, tx sip.ServerTransaction
 	} else {
 		dec = s.decide(rs, routing.Call{
 			FromExtension: dev.Extension, Number: c.dialled, CallerID: dev.Extension,
-			SIPDomain: req.Recipient.Host, Header: headerOf(req), At: time.Now(),
+			CallerIDExtension: outboundCallerIDExt(snap, dev.Extension),
+			SIPDomain:         req.Recipient.Host, Header: headerOf(req), At: time.Now(),
 		})
 	}
 	s.dispatch(c, req, tx, snap, dec)
@@ -587,6 +669,9 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 			c.direction = cdr.DirectionOutbound
 		}
 		c.considerAnchor(snap, EndpointInfo{}) // external: caller-side triggers only
+		if dec.Emergency {
+			c.noteEmergency(snap)
+		}
 		if c.begin(req, tx) {
 			c.setupOutbound(dec)
 		}
@@ -744,10 +829,15 @@ func (c *call) setup(pending int) {
 			case evAnswered:
 				c.answer(ev.leg)
 				return
+			case evScreenMessage:
+				if c.screenMessage() {
+					return
+				}
 			case evFailed:
 				if ev.leg != nil && ev.leg.stage != c.curStage() {
 					continue // a leg the forwarding stage abandoned
 				}
+				c.bossAssistantFailed(ev.leg)
 				pending--
 				if isBusy(ev.code) {
 					busy++
@@ -871,13 +961,17 @@ func (c *call) abandon(l *leg) bool {
 }
 
 func (c *call) cancelForks(except *leg) {
+	if except != nil {
+		// A fork answered: the others were completed elsewhere (RFC 3326), so
+		// a phone or softphone shows "answered elsewhere", not a missed call.
+		c.cancelForksElsewhereExcept(except)
+		return
+	}
 	c.mu.Lock()
 	legs := c.legs
 	c.mu.Unlock()
 	for _, l := range legs {
-		if l != except {
-			l.cancel()
-		}
+		l.cancel()
 	}
 }
 
@@ -913,6 +1007,14 @@ func (c *call) respondA(code int, reason string) {
 		return
 	}
 	c.s.m.response(code)
+	if code >= 200 {
+		c.settleReliable(false)
+	} else if code > 100 {
+		if err := c.respondProv(code, reason, nil); err != nil {
+			c.s.log.Debug("respond to caller failed", "code", code, "error", err)
+		}
+		return
+	}
 	if err := c.dss.Respond(code, reason, nil); err != nil {
 		c.s.log.Debug("respond to caller failed", "code", code, "error", err)
 	}
@@ -921,6 +1023,13 @@ func (c *call) respondA(code int, reason string) {
 // answer connects the caller to the winning fork.
 func (c *call) answer(w *leg) {
 	c.cancelForks(w)
+	// A softphone that answered is named in the routing trace (S-17), so the
+	// call detail says which kind of client took it.
+	if snap := c.s.deps.Snapshots.Current(); snap != nil {
+		if d, ok := snap.DeviceByUsername(w.binding.Device); ok && (d.Kind == auth.KindWeb || d.Kind == auth.KindMobile) {
+			c.addTrace(fmt.Sprintf("Answered by %s device %s", d.Kind, d.Username))
+		}
+	}
 	c.stopRingMOH() // the destination answered: the waiting music ends before the bridge
 	dcs := w.session()
 	bres := dcs.InviteResponse
@@ -953,9 +1062,18 @@ func (c *call) answer(w *leg) {
 		c.abortCaller()
 		return
 	}
+	if !c.calleeCryptoOK(w, bres) {
+		w.bye()
+		why := "SRTP is required on the callee leg but its answer did not deliver it"
+		c.addTrace("Call refused: " + why)
+		c.respondA(sip.StatusNotAcceptableHere, "Not Acceptable Here")
+		c.end(sip.StatusNotAcceptableHere, cdr.SideSystem, why, ResultFailed)
+		return
+	}
 	c.addTrace("Call established")
 	c.publish()
 	c.noteAnswered(w.binding.Extension)
+	c.noteBossAnswer(w)
 	// record_default recordings start when the call is answered (spec
 	// S-4); the flow re-anchors when needed, but an anchored-for-recording
 	// call is already set up.
@@ -975,6 +1093,8 @@ func (c *call) answer(w *leg) {
 		// callee's body (spec S-2); the callee's answer aims leg b.
 		if len(bres.Body()) > 0 {
 			if ans, err := media.ParseAudioSDP(bres.Body()); err == nil {
+				// The leg's keys went in above, before its target is set, so
+				// no packet goes to the callee in the clear.
 				c.relay.SetTarget(legCallee, udpAddr(ans.Address, ans.Port))
 				allowSignalSource(c.relay, legCallee, bres.Source())
 				calleeAns = ans
@@ -996,6 +1116,7 @@ func (c *call) answer(w *leg) {
 	// Counted when sent; WriteResponse blocks until the caller ACKs (or
 	// 64*T1).
 	c.s.m.response(sip.StatusOK)
+	c.settleReliable(true) // the 2xx follows the PRACK of a reliable 18x
 	err := c.dss.WriteResponse(res)
 	if err == nil {
 		c.mu.Lock()
@@ -1008,6 +1129,9 @@ func (c *call) answer(w *leg) {
 		c.mu.Unlock()
 		c.sessionArm()
 		c.startMediaWatch()
+		if c.alarmCall() {
+			go c.playAlarmNotice()
+		}
 		// Replication starts with the dialog confirmed: the snapshot is
 		// taken here and after every in-dialog transaction, and the
 		// heartbeat's write cadence is the owner's liveness.
@@ -1239,7 +1363,10 @@ func (c *call) byeA() {
 		c.orig.byeAgent()
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
+	if c.dss == nil {
+		return // a call Hello placed has no caller dialog
+	}
+	ctx, cancel := c.s.timeoutUntilShutdown(byeTimeout)
 	defer cancel()
 	if err := c.dss.Bye(ctx); err != nil {
 		c.s.log.Debug("BYE to caller failed", "correlation_id", c.id, "error", err)
@@ -1308,6 +1435,7 @@ func (c *call) end(status int, side, reason, result string) {
 		}
 		c.queueAbandoned()
 		c.cbFinish("abandoned", "") // a callback call that ends before an agent was connected
+		c.faxCallEnded()
 		go c.queueEnded()
 		c.unpublish()
 		c.record(status, side, reason, result)
@@ -1356,6 +1484,9 @@ func (c *call) record(status int, side, reason, result string) {
 	}
 	end := time.Now()
 	c.mu.Lock()
+	if reason == "" && result == ResultAnswered {
+		reason = c.faxNote // a fax call's CDR carries how the fax ended
+	}
 	ring, answer := c.ringTime, c.answerTime
 	if result != ResultAnswered {
 		answer = time.Time{}
@@ -1364,14 +1495,20 @@ func (c *call) record(status int, side, reason, result string) {
 		}
 	}
 	trace := append(routing.Trace(nil), c.trace...)
+	if c.blocked != "" {
+		reason = "blocked: " + c.blocked
+	}
 	r := cdr.Record{
 		CorrelationID: c.id, SIPCallID: c.callID, Source: c.callerNum, Destination: c.dialled,
 		StartTime: c.start, RingTime: ring, AnswerTime: answer, EndTime: end,
 		DurationMs: end.Sub(c.start).Milliseconds(), SIPNode: c.s.cfg.NodeID, MediaMode: "direct",
 		FinalStatus: status, TerminationSide: side, FailureReason: reason,
 		Direction: c.direction, OriginalDestination: c.dialled, RewrittenDestination: c.rewritten,
-		Route: c.route, Trunk: c.trunkName, Trace: trace, Kind: c.kind,
+		Route: c.route, Trunk: c.trunkName, Trace: trace, Kind: c.kind, AnsweredBy: c.answeredBy,
 		RingTag: c.ringTag, RingRule: c.ringWhy,
+	}
+	if c.winner != nil {
+		r.PeerCallID = c.winner.callID
 	}
 	c.mu.Unlock()
 	if !answer.IsZero() {
@@ -1383,6 +1520,7 @@ func (c *call) record(status int, side, reason, result string) {
 	c.mu.Lock()
 	r.QueueLegs = append([]cdr.QueueLeg(nil), c.qLegs...)
 	c.mu.Unlock()
+	r.FollowMeLegs = c.fmCDRLegs()
 	if !answer.IsZero() {
 		r.CallerCodec, r.CalleeCodec = c.legCodecNames()
 	}
@@ -1398,6 +1536,7 @@ func (c *call) record(status int, side, reason, result string) {
 	if media != "" {
 		r.MediaMode = media
 	}
+	r.SRTP = c.srtpCDR()
 	if r.MediaMode == "anchored" && !answer.IsZero() {
 		if p, l, j, ok := c.qualityStats(); ok {
 			r.RTPPackets, r.RTPLost, r.RTPJitterMs = &p, &l, &j
@@ -1510,6 +1649,14 @@ func (l *leg) run() {
 
 func (l *leg) drive(report func(legEvent)) {
 	s := l.c.s
+	if l.c.isAnchored() && l.pl == nil && l.c.calleeSRTP(l).required() && !l.c.calleeSRTP(l).tls {
+		// A device or trunk that demands SRTP cannot be rung over a leg that
+		// is not TLS: the crypto would travel in clear signalling.
+		l.c.addTrace("Leg skipped: " + errSRTPRequired.Error())
+		l.c.srtpNote("refused")
+		report(legEvent{leg: l, kind: evFailed, code: sip.StatusNotAcceptableHere})
+		return
+	}
 	req, err := l.invite()
 	if err != nil {
 		s.log.Warn("bad binding contact", "contact", l.binding.ContactURI, "error", err)
@@ -1522,15 +1669,16 @@ func (l *leg) drive(report func(legEvent)) {
 		report(legEvent{leg: l, kind: evFailed, code: sip.StatusServiceUnavailable})
 		return
 	}
+	// This leg's own UA: its CANCEL carries the "completed elsewhere" Reason
+	// once l.elsewhere is set (cancel_reason.go).
+	dcs.UA = newElsewhereUA(s.ua, s.client, s.uac, &l.elsewhere)
 	l.mu.Lock()
 	l.dcs = dcs
-	if l.elsewhere {
-		dcs.UA = s.uacElsewhere
-	}
 	l.mu.Unlock()
 	opts := sipgo.AnswerOptions{OnResponse: func(r *sip.Response) error {
 		switch {
 		case r.StatusCode > 100 && r.StatusCode < 200:
+			l.acknowledgeProvisional(dcs, r)
 			select {
 			case l.c.events <- legEvent{leg: l, kind: evRinging}:
 			default:
@@ -1546,6 +1694,24 @@ func (l *leg) drive(report func(legEvent)) {
 	}
 	err = dcs.WaitAnswer(l.ctx, opts)
 	if res := dcs.InviteResponse; err == nil || (res != nil && res.IsSuccess()) {
+		if l.accept != nil {
+			if res := l.accept(l); res != "" {
+				// Not accepted (or no longer wanted): hung up before any bridge.
+				l.c.mu.Lock()
+				l.fmResult = res
+				l.c.mu.Unlock()
+				l.bye()
+				code := sip.StatusGlobalDecline
+				if res == fmCancelled {
+					code = sip.StatusRequestTerminated
+				}
+				report(legEvent{leg: l, kind: evFailed, code: code, reason: res})
+				return
+			}
+		}
+		if l.screen && l.c.screenLeg(l, report) {
+			return // the screening prompt took the answer; screenLeg reported the outcome
+		}
 		if l.c.claim(l) {
 			report(legEvent{leg: l, kind: evAnswered})
 			return
@@ -1561,6 +1727,13 @@ func (l *leg) drive(report func(legEvent)) {
 		code, reason = de.Res.StatusCode, de.Res.Reason
 	case errors.Is(err, sip.ErrTransactionTimeout):
 		code = sip.StatusRequestTimeout
+	}
+	if l.fmRec != nil {
+		l.c.mu.Lock()
+		if l.fmResult == "" {
+			l.fmResult = fmLegResult(code, reason)
+		}
+		l.c.mu.Unlock()
 	}
 	report(legEvent{leg: l, kind: evFailed, code: code, reason: reason})
 }
@@ -1631,6 +1804,7 @@ func (l *leg) invite() (*sip.Request, error) {
 	req.AppendHeader(sip.HeaderClone(&s.contact))
 	req.AppendHeader(sip.NewHeader("Allow", allow))
 	l.addSessionHeaders(req)
+	l.addPrackHeaders(req)
 	if body := c.offerSDP(); len(body) > 0 {
 		if c.inv != nil {
 			if ct := c.inv.ContentType(); ct != nil {
@@ -1645,7 +1819,7 @@ func (l *leg) invite() (*sip.Request, error) {
 	// leg-b port, not the caller's SDP (spec S-2).
 	if l.c.isAnchored() {
 		if off, err := media.ParseAudioSDP(c.offerSDP()); err == nil {
-			if body := l.c.anchoredOfferB(off, legCodecs(l)); len(body) > 0 {
+			if body := l.c.anchoredOfferB(off, legCodecs(l), l); len(body) > 0 {
 				req.SetBody(body)
 				req.RemoveHeader("Content-Type")
 				req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
@@ -1660,8 +1834,10 @@ func (l *leg) invite() (*sip.Request, error) {
 			to.Address.User = id.toNum
 		}
 	}
+	l.applyAnonymous(req, from)
 	l.addPagingHeaders(req)
 	l.addRingTag(req)
+	l.addGeolocation(req)
 	for _, h := range c.confForwardHeaders(l.callID) {
 		req.AppendHeader(h)
 	}
@@ -1718,7 +1894,7 @@ func (l *leg) bye() {
 		return
 	}
 	l.ack(nil, "")
-	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
+	ctx, cancel := l.c.s.timeoutUntilShutdown(byeTimeout)
 	defer cancel()
 	if err := dcs.Bye(ctx); err != nil {
 		l.c.s.log.Debug("BYE to fork failed", "error", err)
@@ -1851,7 +2027,11 @@ func (s *Server) matchDialog(req *sip.Request) (dialogRef, bool) {
 	w := c.winner
 	c.mu.Unlock()
 	if ref.leg != w {
-		return dialogRef{}, false
+		// The assistant being screened is in a dialog of its own (boss.go).
+		if sl := c.screeningLeg(); sl == nil || sl != ref.leg {
+			return dialogRef{}, false
+		}
+		w = ref.leg
 	}
 	res := w.session().InviteResponse // stable once the fork has won
 	want, err1 := sip.DialogIDFromResponse(res)
@@ -1932,6 +2112,9 @@ func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 		s.pageBye(c, ref, req, tx)
 		return
 	}
+	if ref.leg != nil && c.screenBye(ref.leg, req, tx) {
+		return
+	}
 	c.mu.Lock()
 	w, connected := c.winner, c.connected
 	c.mu.Unlock()
@@ -1974,6 +2157,10 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	c := ref.c
+	if fx := c.faxState(); fx != nil {
+		c.faxInDialog(fx, req, tx)
+		return
+	}
 	if c.isLinked() {
 		s.linkedReinvite(c, req, tx)
 		return

@@ -103,6 +103,8 @@ export function updateProfile(change: {
   displayName?: string;
   email?: string;
   voicemailEmail?: Partial<VoicemailEmailPrefs>;
+  ringWeb?: boolean;
+  ringMobile?: boolean;
 }): Promise<void> {
   return request<void>("PATCH", "/api/v1/me/profile", { body: change });
 }

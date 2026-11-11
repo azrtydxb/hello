@@ -144,6 +144,9 @@ func (s *server) flowInput(ctx context.Context, devices bool) (flow.Input, error
 	if in.PickupGroups, err = st.ListPickupGroups(ctx); err != nil {
 		return in, err
 	}
+	if in.VoicemailGroups, err = st.ListVoicemailGroups(ctx); err != nil {
+		return in, err
+	}
 	if in.TimeConditions, err = st.ListTimeConditions(ctx); err != nil {
 		return in, err
 	}
@@ -168,7 +171,7 @@ func (s *server) flowInput(ctx context.Context, devices bool) (flow.Input, error
 		return in, err
 	}
 	if devices {
-		if in.Devices, err = st.ListDevices(ctx); err != nil {
+		if in.Devices, err = st.ListDevices(ctx, ""); err != nil {
 			return in, err
 		}
 		if s.ProvStore != nil {

@@ -242,9 +242,17 @@ func (s *Store) DeleteVoicemailMessage(ctx context.Context, actor string, id int
 		if err := requireRow(res); err != nil {
 			return id, err
 		}
+		// A copy delivered to a voicemail group shares the object: it goes
+		// only with its last row.
+		if object, err = releaseVoicemailObject(ctx, tx, object); err != nil {
+			return id, err
+		}
 		return id, notifyMailbox(ctx, tx, box)
 	})
-	return object, err
+	if err != nil {
+		return "", err
+	}
+	return object, nil
 }
 
 // notifyMailbox queues the mailbox-changed NOTIFY in the changing
@@ -429,7 +437,12 @@ func (s *Store) RemoveVoicemailMessage(ctx context.Context, boxID, id int64) (st
 	var object string
 	err := s.q(ctx).QueryRowContext(ctx,
 		`DELETE FROM voicemail_messages WHERE id = $1 AND box_id = $2 RETURNING minio_object`, id, boxID).Scan(&object)
-	return object, mapErr(err)
+	if err != nil {
+		return "", mapErr(err)
+	}
+	// A copy delivered to a voicemail group shares the object: it goes only
+	// with its last row.
+	return releaseVoicemailObject(ctx, s.db, object)
 }
 
 // SetVoicemailMessageHeard sets a message's heard flag after the phone
@@ -457,6 +470,13 @@ type FeatureUpdate struct {
 	CallWaiting     *bool
 	// NoAnswerRings is the no-answer ring count (0 = system default).
 	NoAnswerRings *int
+	// FollowMe turns the extension's follow-me profile on or off (migration
+	// 00079); it changes nothing for an extension without a profile.
+	FollowMe *bool
+	// BossDivert sets divert_on of the boss link whose boss is Number (the
+	// *64 code, pbx-gaps S-19); nil leaves it alone. A number with no link is
+	// ErrNotFound.
+	BossDivert *bool
 }
 
 // ApplyFeatureUpdate applies one feature-code change the same way every
@@ -487,6 +507,26 @@ func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureU
 		if err := tx.QueryRowContext(ctx,
 			`SELECT id FROM extensions WHERE number = $1`, u.Number).Scan(&id); err != nil {
 			return "", err
+		}
+		if u.BossDivert != nil {
+			res, err := tx.ExecContext(ctx, `UPDATE boss_links SET divert_on = $2, updated_at = now()
+				WHERE boss_extension_id = $1`, id, *u.BossDivert)
+			if err != nil {
+				return "", err
+			}
+			if err := requireRow(res); err != nil {
+				return "", err
+			}
+		}
+		if u.FollowMe != nil {
+			// An extension without a profile and a target has nothing to turn
+			// on; the feature code is answered before it gets here.
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE follow_me SET enabled = $2, updated_at = now()
+				WHERE extension_id = $1 AND EXISTS (SELECT 1 FROM follow_me_targets t WHERE t.extension_id = $1)`,
+				id, *u.FollowMe); err != nil {
+				return "", err
+			}
 		}
 		return strconv.FormatInt(id, 10), nil
 	})
@@ -782,6 +822,24 @@ func refuseIfGroupFailsTo(ctx context.Context, tx *sql.Tx, what, target, kind st
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	// A follow-me profile names its extension and group targets the same way.
+	frows, err := tx.QueryContext(ctx, `
+		SELECT e.number FROM follow_me_targets t JOIN extensions e ON e.id = t.extension_id
+		WHERE t.kind = $1 AND t.target = $2 ORDER BY e.number`, kind, target)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = frows.Close() }()
+	for frows.Next() {
+		var n string
+		if err := frows.Scan(&n); err != nil {
+			return err
+		}
+		refs = append(refs, "follow-me of extension "+n)
+	}
+	if err := frows.Err(); err != nil {
+		return err
+	}
 	if len(refs) > 0 {
 		return inUseBy(what, refs)
 	}
@@ -926,6 +984,7 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*93", Action: "forward_no_answer", Argument: "clear"},
 		{Code: "*97", Action: "voicemail"},
 		{Code: "*80", Action: "intercom"},
+		{Code: "*63", Action: "voicemail_broadcast"},
 		{Code: "*28", Action: "tc_override", Argument: "toggle"},
 		{Code: "*70", Action: "call_waiting_off"},
 		{Code: "*71", Action: "call_waiting_on"},
@@ -938,7 +997,10 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*46", Action: ActionQueueLogout},
 		{Code: "*47", Action: ActionQueuePause, Argument: "break"},
 		{Code: "*48", Action: ActionQueueUnpause},
+		{Code: "*64", Action: ActionBossDivert},
 		{Code: "*42", Action: ActionDirectory},
+		{Code: "*76", Action: "follow_me_on"},
+		{Code: "*77", Action: "follow_me_off"},
 	}
 }
 

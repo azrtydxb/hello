@@ -184,7 +184,7 @@ func TestSkills(t *testing.T) {
 	for _, s := range list {
 		names = append(names, s.Name)
 	}
-	for _, want := range []string{"hello-routing", "hello-setup", "hello-troubleshoot", "hello-ivr-and-hours", "hello-call-handling", "hello-phones", "hello-flow-graph", "hello-flow"} {
+	for _, want := range []string{"hello-routing", "hello-setup", "hello-troubleshoot", "hello-ivr-and-hours", "hello-call-handling", "hello-phones", "hello-flow-graph", "hello-flow", "hello-crm"} {
 		if !slices.Contains(names, want) {
 			t.Errorf("skill %s is not embedded (have %v)", want, names)
 		}

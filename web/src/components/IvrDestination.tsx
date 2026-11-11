@@ -11,6 +11,7 @@ import {
   type RingGroup,
 } from "../api";
 import type { TimeCondition } from "../api/timecond";
+import type { VoicemailGroup } from "../api/vmgroups";
 import { Input, Select } from "../design/azrty/components";
 import { QueueSelect } from "./QueueSelect";
 
@@ -23,6 +24,8 @@ export interface DestinationChoices {
   menus: readonly IvrMenu[];
   /** Time conditions; absent where a page does not load them. */
   timeConditions?: readonly TimeCondition[];
+  /** Voicemail groups; absent where a page does not load them. */
+  voicemailGroups?: readonly VoicemailGroup[];
 }
 
 interface Option {
@@ -56,6 +59,14 @@ export function targetOptions(
         c.extensions.map((e) => ({
           value: e.number,
           label: e.name ? `${e.number} · ${e.name}` : e.number,
+        })),
+        value,
+      );
+    case "voicemail_group":
+      return withCurrent(
+        (c.voicemailGroups ?? []).map((g) => ({
+          value: g.number,
+          label: `${g.number} · ${g.name}`,
         })),
         value,
       );
@@ -99,6 +110,7 @@ export function targetOptions(
 const TARGET_LABEL: Partial<Record<IvrDestinationKind, string>> = {
   extension: "Extension",
   voicemail: "Voicemail box of",
+  voicemail_group: "Voicemail group",
   ring_group: "Ring group",
   announcement: "Announcement",
   paging: "Paging group",
@@ -106,6 +118,7 @@ const TARGET_LABEL: Partial<Record<IvrDestinationKind, string>> = {
   time_condition: "Time condition",
   external: "Number",
   queue: "Call queue",
+  fax: "Fax destination (name)",
 };
 
 /**

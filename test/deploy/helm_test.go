@@ -374,6 +374,8 @@ func TestChartEnvParityWithKw(t *testing.T) {
 		"--set", "control.provisioning.trustedProxies=10.0.0.0/8",
 		"--set", "control.provisioning.caSecret=hello-prov-tls",
 		"--set", "secrets.provRedirectSecret=hello-prov-redirect",
+		"--set", "control.syslog.enabled=true",
+		"--set", "control.syslog.host=192.168.10.101:30514",
 		// kw serves the node address beside the VIP while phones move.
 		"--set", "kamailio.vip.legacy=true",
 		"--set", "kamailio.vip.apiServerAddress=127.0.0.1",
@@ -866,9 +868,11 @@ func TestChartKamailioConfigMatchesSource(t *testing.T) {
 func TestChartKubeconform(t *testing.T) {
 	kc := requireTool(t, "kubeconform")
 	for name, args := range map[string][]string{
-		"eval":     {"-f", valuesFile(t, "values-eval.yaml"), "--set", "ui.ingress.enabled=true", "--set", "ui.ingress.host=h.example.com"},
-		"ha":       {"-f", valuesFile(t, "values-ha.yaml"), "--set", "control.provisioning.publicUrl=https://p.example.com", "--set", "control.provisioning.ingress.enabled=true", "--set", "control.provisioning.ingress.host=p.example.com"},
-		"nodeport": {"-f", valuesFile(t, "values-eval.yaml"), "--set", "kamailio.hostNetwork=false", "--set", "kamailio.service.type=NodePort", "--set", "kamailio.service.nodePort=30508", "--set", "sip.hostNetwork=false", "--set", "sip.mediaAnchorHost=podIP"},
+		"eval":      {"-f", valuesFile(t, "values-eval.yaml"), "--set", "ui.ingress.enabled=true", "--set", "ui.ingress.host=h.example.com"},
+		"ha":        {"-f", valuesFile(t, "values-ha.yaml"), "--set", "control.provisioning.publicUrl=https://p.example.com", "--set", "control.provisioning.ingress.enabled=true", "--set", "control.provisioning.ingress.host=p.example.com"},
+		"coturn":    append([]string{"-f", valuesFile(t, "values-ha.yaml"), "--set", "coturn.tls.enabled=true", "--set", "coturn.tls.secretName=coturn-tls"}, coturnSet...),
+		"coturn-lb": append([]string{"-f", valuesFile(t, "values-ha.yaml"), "--set", "coturn.hostNetwork=false", "--set", "coturn.relayPortMax=49160"}, coturnSet...),
+		"nodeport":  {"-f", valuesFile(t, "values-eval.yaml"), "--set", "kamailio.hostNetwork=false", "--set", "kamailio.service.type=NodePort", "--set", "kamailio.service.nodePort=30508", "--set", "sip.hostNetwork=false", "--set", "sip.mediaAnchorHost=podIP"},
 	} {
 		raw, err := helmTemplate(t, args...)
 		if err != nil {

@@ -411,3 +411,155 @@ func TestRingTagLoad(t *testing.T) {
 		t.Fatalf("choice = %+v, want rule 2", got)
 	}
 }
+
+// TestBlocklistLoad fails if an enabled blocklist entry (with its trunk
+// scope and announcement name) or a trunk's caller policy is not in the
+// snapshot, or a disabled entry is.
+func TestBlocklistLoad(t *testing.T) {
+	cfg := scratch(t)
+	ctx := context.Background()
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	var trunk, ann int64
+	if err := conn.QueryRow(ctx, `INSERT INTO trunks (name, mode, reject_anonymous, allowed_country_codes, unknown_caller_action, reject_code)
+		VALUES ('carrier', 'ip', true, '{41,49}', 'allow', 486) RETURNING id`).Scan(&trunk); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO trunk_destinations (trunk_id, host, port, priority, weight) VALUES ($1, '203.0.113.10', 5060, 1, 1)`, trunk); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(ctx, `INSERT INTO announcements (name, minio_object) VALUES ('sorry', 'ann/sorry.wav') RETURNING id`).Scan(&ann); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO call_blocklist (pattern, match, action, trunk_id, announcement_id, enabled) VALUES
+		('+4122*', 'prefix', 'block', NULL, $2, true), ('+33123456789', 'exact', 'allow', $1, NULL, true), ('+33999999999', 'exact', 'block', NULL, NULL, false)`, trunk, ann); err != nil {
+		t.Fatal(err)
+	}
+	w := &Watcher{Domain: domain}
+	s, err := w.loadAll(ctx, conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := s.Routing()
+	if len(rs.Config.Blocklist) != 2 || rs.Blocklist.Len() != 2 {
+		t.Fatalf("blocklist = %+v (compiled %d), want the 2 enabled entries", rs.Config.Blocklist, rs.Blocklist.Len())
+	}
+	if e := rs.Config.Blocklist[0]; e.Pattern != "+4122*" || e.Match != "prefix" || e.Announcement != "sorry" || e.TrunkID != 0 {
+		t.Fatalf("first entry = %+v", e)
+	}
+	if e := rs.Config.Blocklist[1]; e.Action != "allow" || e.TrunkID != trunk {
+		t.Fatalf("second entry = %+v", e)
+	}
+	tr, ok := rs.Router.Trunk(trunk)
+	if !ok || !tr.CallerPolicy.RejectAnonymous || tr.CallerPolicy.RejectCode != 486 || tr.CallerPolicy.UnknownCallerAction != "allow" ||
+		len(tr.CallerPolicy.AllowedCountryCodes) != 2 {
+		t.Fatalf("trunk policy = %+v ok=%v", tr, ok)
+	}
+}
+
+// TestEmergencyLoad fails if the snapshot lacks the alarm destination of a
+// device's phone group, the location of a device resolved phone over
+// extension over group, or the notify group; or if a device with no phone gets
+// another's.
+func TestEmergencyLoad(t *testing.T) {
+	cfg := scratch(t)
+	ctx := context.Background()
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	for _, q := range []string{
+		`INSERT INTO locations (kind, name, country, city, street) VALUES ('site', 'HQ', 'NL', 'Amsterdam', 'Damrak')`,
+		`INSERT INTO locations (kind, name, parent_id) SELECT 'floor', '3', id FROM locations WHERE name = 'HQ'`,
+		`INSERT INTO phone_groups (name, alarm_target, location_id) SELECT 'Front', '200', id FROM locations WHERE name = 'HQ'`,
+		`INSERT INTO extensions (number, name) VALUES ('100', 'A'), ('200', 'B')`,
+		`INSERT INTO ring_groups (name, strategy, hunt, failure_kind, failure_target) VALUES ('900', 'ring-all', false, 'none', '')`,
+		`UPDATE extensions SET location_id = (SELECT id FROM locations WHERE name = '3') WHERE number = '100'`,
+		`INSERT INTO devices (extension_id, sip_username, realm, ha1_md5, ha1_sha256, enabled)
+			SELECT id, 'd100', 'hello.test', 'x', 'x', true FROM extensions WHERE number = '100'`,
+		`INSERT INTO devices (extension_id, sip_username, realm, ha1_md5, ha1_sha256, enabled)
+			SELECT id, 'd200', 'hello.test', 'x', 'x', true FROM extensions WHERE number = '200'`,
+		`INSERT INTO phones (mac, vendor, model, device_id, group_id, token_hash, token_enc, admin_password_enc, enabled)
+			SELECT '001122334455', 'grandstream', 'WP836', id, (SELECT id FROM phone_groups WHERE name = 'Front'),
+			       decode(repeat('01', 32), 'hex'), '\x00'::bytea, '\x00'::bytea, true FROM devices WHERE sip_username = 'd100'`,
+		`UPDATE emergency_settings SET notify_group = '900'`,
+	} {
+		if _, err := conn.Exec(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	w := &Watcher{Domain: domain}
+	s, err := w.loadAll(ctx, conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.AlarmTarget("d100"); got != "200" {
+		t.Errorf("alarm target of d100 = %q, want 200", got)
+	}
+	if got := s.AlarmTarget("d200"); got != "" {
+		t.Errorf("alarm target of d200, which has no phone = %q, want none", got)
+	}
+	p, ok := s.DevicePlace("d100")
+	if !ok || p.City != "Amsterdam" || p.Floor != "3" {
+		t.Errorf("place of d100 = %+v %v, want the extension's floor 3 of HQ (over the group's HQ)", p, ok)
+	}
+	if _, ok := s.DevicePlace("d200"); ok {
+		t.Error("d200 has a place, but nothing is assigned to it")
+	}
+	if got := s.EmergencyNotifyGroup(); got != "900" {
+		t.Errorf("notify group = %q", got)
+	}
+}
+
+// TestFollowMeLoad fails if the follow-me profiles (migration 00079) do not
+// reach the snapshot with their settings, their targets in position order and
+// only for the extension they belong to, or if an extension without a profile
+// reads as having one.
+func TestFollowMeLoad(t *testing.T) {
+	cfg := scratch(t)
+	ctx := context.Background()
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	for _, q := range []string{
+		`INSERT INTO extensions (number, name) VALUES ('200', 'Two'), ('201', 'Three')`,
+		`INSERT INTO follow_me (extension_id, enabled, strategy, ring_own_devices, timeout_seconds, confirm_external, dnd_blocks)
+			SELECT id, true, 'sequential', false, 45, false, false FROM extensions WHERE number = '200'`,
+		`INSERT INTO follow_me_targets (extension_id, position, kind, target, delay_seconds)
+			SELECT id, v.pos, v.kind, v.target, v.delay FROM extensions,
+			(VALUES (2, 'extension', '201', 0), (1, 'external', '+32475123456', 15)) AS v(pos, kind, target, delay)
+			WHERE number = '200'`,
+	} {
+		if _, err := conn.Exec(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	w := &Watcher{Domain: domain}
+	s, err := w.loadAll(ctx, conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fm, ok := s.FollowMe("200")
+	if !ok || !fm.Enabled || fm.Strategy != FollowMeSequential || fm.RingOwnDevices || fm.TimeoutSeconds != 45 || fm.ConfirmExternal || fm.DNDBlocks {
+		t.Fatalf("profile of 200 = %+v ok=%v", fm, ok)
+	}
+	if len(fm.Targets) != 2 || fm.Targets[0] != (FollowMeTarget{Kind: FollowMeExternal, Target: "+32475123456", Delay: 15}) ||
+		fm.Targets[1] != (FollowMeTarget{Kind: FollowMeExtension, Target: "201"}) {
+		t.Fatalf("targets = %+v, want the external one first (position order)", fm.Targets)
+	}
+	if !fm.Active() {
+		t.Fatal("an enabled profile with targets is not active")
+	}
+	if _, ok := s.FollowMe("201"); ok {
+		t.Fatal("extension 201 has no profile")
+	}
+	if (FollowMe{Enabled: true}).Active() || (FollowMe{Targets: []FollowMeTarget{{}}}).Active() {
+		t.Fatal("a profile is active only when enabled and with a target")
+	}
+}

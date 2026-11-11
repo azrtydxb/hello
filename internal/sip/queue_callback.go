@@ -309,6 +309,9 @@ func (c *call) cbFinish(result, agent string) {
 // cancelled it (or it expired), and the call must end. A store that cannot be
 // reached reports true: the call carries on and tries again.
 func (c *call) cbRenew() bool {
+	if fx := c.faxState(); fx != nil && fx.outbound {
+		return c.faxRenew(fx) // a fax being dialled holds its lease the same way
+	}
 	c.mu.Lock()
 	id, done := c.cbID, c.cbDone
 	c.mu.Unlock()
@@ -840,7 +843,8 @@ func (c *call) callbackHome(snap *snapshot.Snapshot, q snapshot.Queue, cb queue.
 		RouteSet:      reversed(headerValues(res, "Record-Route")),
 		LocalIdentity: uriString(*req.From().Address.Clone()), RemoteIdentity: uriString(*req.To().Address.Clone()),
 		RemoteTarget: uriString(w.target()), Endpoint: w.binding.AOR, Source: res.Source(),
-		SDP: relaySDPDir(host, relay, legCaller, neg, "sendrecv"), RemoteSDP: string(res.Body()),
+		SDP: relaySDPDir(host, relay, legCaller, neg, "sendrecv"), RemoteSDP: media.StripCrypto(string(res.Body())),
+		SRTP: haSRTP(relay, legCaller),
 	}, false)
 	if a == nil {
 		return false

@@ -21,7 +21,9 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/events"
+	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/mailer"
+	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/oauth"
 	"github.com/azrtydxb/hello/internal/originate"
@@ -30,10 +32,12 @@ import (
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/telemetry"
+	"github.com/azrtydxb/hello/internal/turn"
 	"github.com/azrtydxb/hello/internal/version"
 	"github.com/azrtydxb/hello/internal/vkconn"
 	"github.com/azrtydxb/hello/internal/webhook"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/valkey-io/valkey-go"
 )
 
@@ -145,6 +149,13 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		return fmt.Errorf("HELLO_PROV_ADDR: %w", err)
 	}
 	go runMailer(ctx, envSMTP(cfg), st, objs, log)
+	faxCfg, err := startFax(ctx, cfg, st, log)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("MINIO_ENDPOINT: %w", err)
+	}
+	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, messaging.NewMetrics(metrics.Registry), log)
+	go runInboxNotifier(ctx, envSMTP(cfg), st, log)
 
 	// Scheduled and manual backups, and restore (spec pbx-gaps S-2 to S-4).
 	// Every replica runs the scheduler; the run itself is taken under an
@@ -188,8 +199,12 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	// Call events (spec integrations I-35): consume the stream hello-sip
 	// appends to, store it, and fan it out to the SSE clients of this pod.
+	// CRM connectors (spec integrations I-47): their hook queues calls in
+	// the ingest transaction, so it is registered before the service runs.
+	crmSvc := newCRM(cfg, st, db, box, vk, metrics.Registry, nil, log)
 	evSvc := &events.Service{
-		DB: db, Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
+		Hooks: []events.TxHook{crmSvc.Hook},
+		DB:    db, Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
 		RetentionDays: cfg.EventRetentionDays, Log: log.With("component", "events"),
 		Metrics: events.NewServiceMetrics(metrics.Registry),
 	}
@@ -214,11 +229,17 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	go dispatcher.Run(ctx)
 	go evSvc.Run(ctx)
+	go crmSvc.Run(ctx)
+	if err := startSyslog(ctx, cfg.Syslog, st, vk, metrics.Registry, log); err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("HELLO_SYSLOG_*: %w", err)
+	}
 	// Click-to-call (spec I-37): close the requests a dead SIP node left
 	// open and copy the states the nodes post into their rows.
 	sweeper := &originate.Sweeper{Store: st, Live: vk, Lock: st, Log: log.With("component", "originate")}
 	go sweeper.Run(ctx)
 	apiCfg := api.Config{
+		CRM:             crmSvc.Service,
 		Events:          evSvc,
 		Webhooks:        hooks,
 		AIAgent:         agent,
@@ -226,15 +247,18 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Live:            vk,
 		Queues:          vk,
 		Callbacks:       st.QueueCallbacks(),
+		Fax:             faxCfg,
 		Trunks:          vk,
 		Cluster:         vk,
 		Valkey:          vk,
 		PageTests:       vk,
 		Parked:          vk,
+		DoorTriggers:    vk,
 		Objects:         objs,
 		Backups:         backups,
 		Maintenance:     backups.Maintenance,
 		Diagnostics:     vk,
+		Syslog:          vk,
 		AuthFailLimit:   cfg.AuthFailLimit,
 		EmailDelivery:   cfg.SmtpHost != "",
 		SMTPEnv:         envSMTP(cfg),
@@ -246,8 +270,13 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		TwoFALogins:     api.NewTwoFactorMetrics(metrics.Registry),
 		Batches:         st,
 		BatchMetrics:    api.NewBatchMetrics(metrics.Registry),
+		LinkMetrics:     api.NewLinkMetrics(metrics.Registry, func() float64 { return activeRecordingLinks(ctx, st) }),
 		ConferenceLive:  vk,
 		Messages:        st,
+		Clients:         st,
+		ClientAuth:      clientConfig(cfg, metrics.Registry),
+		Inbox:           st,
+		Blocklist:       st,
 		Dialing:         cfg.Dial,
 		PromptLanguage:  cfg.VoicePromptLanguage,
 		Prov:            provAPI(cfg, settings, deployment, objs, log),
@@ -400,6 +429,37 @@ func envSMTP(cfg config.Control) mailer.Settings {
 		Username: cfg.SmtpUser, Password: cfg.SmtpPass, From: cfg.SmtpFrom}
 }
 
+// startFax wires the fax feature of the control plane (pbx-gaps S-15 to S-17):
+// the API's store, the engine client that checks a PDF can be sent, the PDF
+// store, the fax-to-email worker and the retention job. The workers run on
+// every node; the database queue and a lock keep them to one at a time.
+func startFax(ctx context.Context, cfg config.Control, st *store.Store, log *slog.Logger) (api.FaxConfig, error) {
+	objs, err := fax.NewObjects(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioSecure)
+	if err != nil {
+		return api.FaxConfig{}, err
+	}
+	c := api.FaxConfig{Store: st, Objects: objs, Enabled: cfg.Fax.Enabled}
+	if cfg.Fax.Enabled {
+		c.Engine = &fax.Client{Addr: cfg.Fax.Addr, Token: cfg.Fax.Token}
+	}
+	smtpEnv := envSMTP(cfg)
+	go (&fax.Delivery{
+		Queue: st, Objects: objs, Log: log.With("component", "fax-mail"),
+		Settings: func(ctx context.Context) (mailer.Settings, bool, error) {
+			s, source, err := api.EffectiveSMTP(ctx, st, smtpEnv)
+			if err != nil || source == api.SMTPNone {
+				return mailer.Settings{}, false, err
+			}
+			if s.Validate() != nil {
+				return mailer.Settings{}, false, nil // unusable settings: wait for a fix
+			}
+			return s, true, nil
+		},
+	}).Run(ctx)
+	go (&fax.Retention{Store: st, Objects: objs, Locker: st, Days: cfg.Fax.RetentionDays, Log: log.With("component", "fax-retention")}).Run(ctx)
+	return c, nil
+}
+
 // runMailer starts the voicemail email worker. It runs on every node; the
 // database queue hands each notification to one of them, and the SMTP
 // settings are read on every pass, so saving them in the console takes
@@ -521,4 +581,38 @@ func connectValkey(ctx context.Context, c vkconn.Config, vk *api.LazyValkey, log
 		log.Warn("valkey unreachable at startup; live and cluster views unavailable until it is", "error", err)
 	}
 	vk.Set(cl)
+}
+
+// activeRecordingLinks is the hello_recording_links_active reading: the
+// links that can still be used, or 0 when the database does not answer in
+// time.
+func activeRecordingLinks(ctx context.Context, st *store.Store) float64 {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	n, err := st.CountActiveRecordingLinks(ctx)
+	if err != nil {
+		return 0
+	}
+	return float64(n)
+}
+
+// clientConfig is the browser softphone's settings: the key derived device
+// credentials come from, the cap, and the STUN and TURN servers handed out.
+// The shared TURN secret and the key stay in this process; neither is
+// logged.
+func clientConfig(cfg config.Control, reg prometheus.Registerer) api.ClientConfig {
+	c := cfg.Clients
+	stun := c.STUNURLs
+	if len(stun) == 0 {
+		stun = turn.StunFromTurn(c.TURNURLs)
+	}
+	issued := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "hello_ice_credentials_issued_total", Help: "TURN credentials handed out by /api/v1/me/ice-servers.",
+	})
+	reg.MustRegister(issued)
+	return api.ClientConfig{
+		AuthKey: c.AuthKey, MaxDevices: c.MaxDevices, WSSURL: c.WSSURL,
+		ICE:       turn.Config{STUN: stun, TURN: c.TURNURLs, Secret: c.TURNSecret, TTL: c.TURNTTL},
+		ICEIssued: issued,
+	}
 }

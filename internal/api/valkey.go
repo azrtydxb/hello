@@ -317,6 +317,33 @@ func (l *LazyValkey) ParkList(ctx context.Context) ([]livestate.ParkedCall, erro
 	return c.live.ParkList(ctx)
 }
 
+// DoorHookRate implements DoorTriggers.
+func (l *LazyValkey) DoorHookRate(ctx context.Context, id int64, window time.Duration) (int64, time.Duration, error) {
+	c, err := l.get()
+	if err != nil {
+		return 0, 0, err
+	}
+	return c.live.DoorHookRate(ctx, id, window)
+}
+
+// DoorHookClaim implements DoorTriggers.
+func (l *LazyValkey) DoorHookClaim(ctx context.Context, id int64, window time.Duration) (bool, error) {
+	c, err := l.get()
+	if err != nil {
+		return false, err
+	}
+	return c.live.DoorHookClaim(ctx, id, window)
+}
+
+// EnqueueDoorTrigger implements DoorTriggers.
+func (l *LazyValkey) EnqueueDoorTrigger(ctx context.Context, t livestate.DoorTrigger) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.live.EnqueueDoorTrigger(ctx, t)
+}
+
 // EnqueuePageTest implements PageTester.
 func (l *LazyValkey) EnqueuePageTest(ctx context.Context, r livestate.PageTestRequest) error {
 	c, err := l.get()
@@ -414,6 +441,33 @@ func (l *LazyValkey) AvgHandle(ctx context.Context, name string) (time.Duration,
 		return 0, err
 	}
 	return q.AvgHandle(ctx, name)
+}
+
+// SyslogPhoneLines implements SyslogLive.
+func (l *LazyValkey) SyslogPhoneLines(ctx context.Context, phoneID int64, limit int) ([]livestate.SyslogLine, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.SyslogPhoneLines(ctx, phoneID, limit)
+}
+
+// SyslogUnknownLines implements SyslogLive.
+func (l *LazyValkey) SyslogUnknownLines(ctx context.Context, ip string, limit int) ([]livestate.SyslogLine, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.SyslogUnknownLines(ctx, ip, limit)
+}
+
+// SyslogUnknownSources implements SyslogLive.
+func (l *LazyValkey) SyslogUnknownSources(ctx context.Context) ([]string, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.SyslogUnknownSources(ctx)
 }
 
 // Click-to-call (spec integrations I-37): the queue, state, idempotency keys

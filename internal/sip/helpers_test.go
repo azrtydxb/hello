@@ -484,7 +484,8 @@ type phone struct {
 	pass    string
 	addr    string
 	pbx     string
-	sdp     string
+	sdp     string // guarded by sdpMu once calls run: use sdpText and rewriteSDP
+	sdpMu   sync.Mutex
 	ua      *sipgo.UserAgent
 	srv     *sipgo.Server
 	cli     *sipgo.Client
@@ -534,6 +535,7 @@ type phone struct {
 	messages   chan *sip.Request
 	subscribes chan *sip.Request
 	notifies   chan *sip.Request
+	pracks     chan *sip.Request // PRACKs the phone received (S-17)
 }
 
 func newPhone(t *testing.T, pbx *testPBX, user, pass string) *phone {
@@ -586,16 +588,25 @@ func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketCo
 	}
 	srv, _ := sipgo.NewServer(ua, sipgo.WithServerLogger(discard))
 	cli, _ := sipgo.NewClient(ua, sipgo.WithClientAddr(addr), sipgo.WithClientConnectionAddr(addr), sipgo.WithClientLogger(discard))
+	// The phone's RTP port sits 1000 above its SIP port. The kernel hands out
+	// SIP ports up to 65535, so for ports above 64535 that sum is not a port
+	// at all (65548): the PBX's first RTP send to the phone fails with
+	// EINVAL and the call ends. Step below the SIP port instead then.
+	rtpPort := port + 1000
+	if rtpPort > 65535 {
+		rtpPort = port - 1000
+	}
 	p := &phone{
 		t: t, user: user, pass: pass, addr: addr, pbx: pbx.addr, ua: ua, srv: srv, cli: cli,
 		sdp: "v=0\r\no=" + user + " 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n" +
-			"m=audio " + strconv.Itoa(port+1000) + " RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\n",
+			"m=audio " + strconv.Itoa(rtpPort) + " RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\n",
 		contact: sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: user, Host: host, Port: port}},
 		servers: map[string]*sipgo.DialogServerSession{}, clients: map[string]*sipgo.DialogClientSession{}, pending: map[string]chan struct{}{},
 		invites: make(chan *sip.Request, 16), reinvites: make(chan *sip.Request, 16), cancels: make(chan *sip.Request, 16),
 		acks: make(chan *sip.Request, 16), byes: make(chan *sip.Request, 16), rings: make(chan int, 16),
 		infos: make(chan *sip.Request, 16), messages: make(chan *sip.Request, 16),
 		subscribes: make(chan *sip.Request, 16), notifies: make(chan *sip.Request, 16),
+		pracks: make(chan *sip.Request, 16),
 		callee: answerAfter(nil),
 	}
 	p.dua = &sipgo.DialogUA{Client: cli, ContactHDR: p.contact, RewriteContact: true}
@@ -616,6 +627,10 @@ func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketCo
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 	})
 	srv.OnNotify(p.onNotify)
+	srv.OnRequest(sip.PRACK, func(req *sip.Request, tx sip.ServerTransaction) {
+		push(p.pracks, req)
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+	})
 	go func() { _ = srv.ServeUDP(conn) }()
 	t.Cleanup(func() {
 		p.done.Store(true)
@@ -698,7 +713,7 @@ func (p *phone) onReinvite(req *sip.Request, tx sip.ServerTransaction) {
 	p.mu.Lock()
 	body := req.Body()
 	if p.reinviteOwnSDP && len(body) > 0 {
-		body = []byte(p.sdp)
+		body = []byte(p.sdpText())
 	}
 	p.mu.Unlock()
 	res := sip.NewResponseFromRequest(req, 200, "OK", body)
@@ -767,7 +782,7 @@ func answerAfter(ch <-chan struct{}) calleeFn {
 				return
 			}
 		}
-		_ = dss.RespondSDP([]byte(p.sdp))
+		_ = dss.RespondSDP([]byte(p.sdpText()))
 	}
 }
 
@@ -787,7 +802,7 @@ func answerReporting(ch <-chan struct{}, answered chan<- bool) calleeFn {
 			answered <- false
 			return
 		}
-		err := dss.RespondSDP([]byte(p.sdp))
+		err := dss.RespondSDP([]byte(p.sdpText()))
 		answered <- !errors.Is(err, sip.ErrTransactionCanceled)
 	}
 }
@@ -806,7 +821,7 @@ func answerOnCancel() calleeFn {
 	return func(p *phone, req *sip.Request, tx sip.ServerTransaction, dss *sipgo.DialogServerSession) {
 		_ = dss.Respond(180, "Ringing", nil)
 		tx.OnCancel(func(*sip.Request) {
-			res := sip.NewResponseFromRequest(dss.InviteRequest, 200, "OK", []byte(p.sdp))
+			res := sip.NewResponseFromRequest(dss.InviteRequest, 200, "OK", []byte(p.sdpText()))
 			res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 			res.AppendHeader(sip.HeaderClone(&p.contact))
 			_ = p.srv.WriteResponse(res)
@@ -960,7 +975,7 @@ func (p *phone) inviteReq(ext string) *sip.Request {
 	req.AppendHeader(&callID)
 	req.AppendHeader(sip.NewHeader("Route", "<sip:"+p.pbx+";lr>"))
 	req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
-	req.SetBody([]byte(p.sdp))
+	req.SetBody([]byte(p.sdpText()))
 	return req
 }
 
@@ -1115,4 +1130,22 @@ func (p *phone) subscribeEvent(t *testing.T, ext, event string, expires int) *si
 	req.SetDestination(p.pbx)
 	res := p.authDo(req, AlgSHA256, p.pass)
 	return res
+}
+
+// sdpText returns the phone's current SDP. Callee goroutines of earlier
+// subtests may still be answering while a later subtest rewrites the SDP
+// (newRTPSink), so they must read it through here.
+func (p *phone) sdpText() string {
+	p.sdpMu.Lock()
+	defer p.sdpMu.Unlock()
+	return p.sdp
+}
+
+// rewriteSDP replaces the phone's SDP with fn of the current one and returns
+// the new text.
+func (p *phone) rewriteSDP(fn func(string) string) string {
+	p.sdpMu.Lock()
+	defer p.sdpMu.Unlock()
+	p.sdp = fn(p.sdp)
+	return p.sdp
 }
