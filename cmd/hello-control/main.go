@@ -22,6 +22,7 @@ import (
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/mailer"
+	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/oauth"
 	"github.com/azrtydxb/hello/internal/originate"
@@ -147,6 +148,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		return fmt.Errorf("HELLO_PROV_ADDR: %w", err)
 	}
 	go runMailer(ctx, envSMTP(cfg), st, objs, log)
+	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, messaging.NewMetrics(metrics.Registry), log)
+	go runInboxNotifier(ctx, envSMTP(cfg), st, log)
 
 	// Scheduled and manual backups, and restore (spec pbx-gaps S-2 to S-4).
 	// Every replica runs the scheduler; the run itself is taken under an
@@ -216,6 +219,10 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	go dispatcher.Run(ctx)
 	go evSvc.Run(ctx)
+	if err := startSyslog(ctx, cfg.Syslog, st, vk, metrics.Registry, log); err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("HELLO_SYSLOG_*: %w", err)
+	}
 	// Click-to-call (spec I-37): close the requests a dead SIP node left
 	// open and copy the states the nodes post into their rows.
 	sweeper := &originate.Sweeper{Store: st, Live: vk, Lock: st, Log: log.With("component", "originate")}
@@ -237,6 +244,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Backups:         backups,
 		Maintenance:     backups.Maintenance,
 		Diagnostics:     vk,
+		Syslog:          vk,
 		AuthFailLimit:   cfg.AuthFailLimit,
 		EmailDelivery:   cfg.SmtpHost != "",
 		SMTPEnv:         envSMTP(cfg),
@@ -252,6 +260,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Messages:        st,
 		Clients:         st,
 		ClientAuth:      clientConfig(cfg, metrics.Registry),
+		Inbox:           st,
+		Blocklist:       st,
 		Dialing:         cfg.Dial,
 		PromptLanguage:  cfg.VoicePromptLanguage,
 		Prov:            provAPI(cfg, settings, deployment, objs, log),

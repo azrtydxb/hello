@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -504,4 +505,25 @@ func TestKwKamailioVIPIsOff(t *testing.T) {
 		str(dig(kwVIPObject(t, "Deployment", "kamailio"), "spec", "template", "metadata", "annotations", configChecksumAnnotation)); a != b {
 		t.Errorf("the go-live patch changes the config checksum annotation (%s vs %s)", a, b)
 	}
+}
+
+// A stopping Kamailio must keep its node's ports for a few seconds after the
+// vip container has released the Lease, or its replacement (scheduled the
+// moment the ports are free) starts its own kube-vip while Kamailio is still
+// starting and wins the Lease back from the healthy instance (the flake of
+// "graceful loss of the active instance" in test/kindha).
+func TestKamailioHandoffPreStop(t *testing.T) {
+	check := func(what string, dep map[string]any) {
+		kam := containerNamed(t, dep, false, "kamailio")
+		cmd := strOf(list(dig(kam, "lifecycle", "preStop", "exec", "command")))
+		if len(cmd) != 2 || cmd[0] != "sleep" {
+			t.Fatalf("%s: kamailio preStop = %v, want [sleep N]: the survivor must win the Lease before the replacement starts", what, cmd)
+		}
+		n, err := strconv.Atoi(cmd[1])
+		if err != nil || n < 4 {
+			t.Errorf("%s: preStop sleep %q, want at least 4s (retryPeriodSeconds 1 x 2.2 jitter, plus the ARP announcement)", what, cmd[1])
+		}
+	}
+	check("chart", findObj(t, haRender(t), "Deployment", "hello-kamailio"))
+	check("kw go-live", kwVIPObject(t, "Deployment", "kamailio"))
 }

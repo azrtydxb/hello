@@ -1,0 +1,197 @@
+/*
+ * Layout for the messaging inbox: a conversation list, the thread with its
+ * composer, and a details column. Tokens only, no raw colours.
+ */
+
+.inbox-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr) minmax(
+      220px,
+      280px
+    );
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .inbox-layout {
+    grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  }
+  .inbox-details {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 700px) {
+  .inbox-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.inbox-panel {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.inbox-panel__head {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--az-border, currentColor);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inbox-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--az-border, currentColor);
+}
+
+.inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.inbox-conv {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 12px 16px;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--az-border, currentColor);
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.inbox-conv[aria-current="true"] {
+  background: var(--az-surface-2, transparent);
+}
+
+.inbox-conv__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.inbox-conv__preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+.inbox-conv__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.inbox-thread {
+  list-style: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.inbox-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--az-border, currentColor);
+}
+
+.inbox-msg--in {
+  align-self: flex-start;
+}
+
+.inbox-msg--out {
+  align-self: flex-end;
+  background: var(--az-surface-2, transparent);
+}
+
+.inbox-msg--note {
+  align-self: stretch;
+  max-width: none;
+  border-style: dashed;
+}
+
+.inbox-msg--system {
+  align-self: center;
+  max-width: none;
+  border: 0;
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
+.inbox-msg__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  opacity: 0.8;
+  font-size: 0.85em;
+}
+
+.inbox-msg__body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.inbox-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--az-border, currentColor);
+}
+
+.inbox-composer textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  font: inherit;
+}
+
+.inbox-composer__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inbox-details {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.inbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

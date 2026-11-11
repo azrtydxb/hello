@@ -132,6 +132,9 @@ func (s *server) flowInput(ctx context.Context, devices bool) (flow.Input, error
 	if in.PickupGroups, err = st.ListPickupGroups(ctx); err != nil {
 		return in, err
 	}
+	if in.VoicemailGroups, err = st.ListVoicemailGroups(ctx); err != nil {
+		return in, err
+	}
 	if in.TimeConditions, err = st.ListTimeConditions(ctx); err != nil {
 		return in, err
 	}
