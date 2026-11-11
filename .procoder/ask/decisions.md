@@ -2597,6 +2597,23 @@ so the VIP stage cannot sit in that file.
 - Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
 - Account sharing group password: shared default `AccountSharing`, or a per-group secret
 
+## Flow canvas P7: node badges and extensible kinds (2026-11-09)
+
+- **What was already done.** The graph side of P7, the batch ops for every
+  merged object (`TestBatchCoverage`), time conditions with override in the
+  trace (P5) and the catalogue guards were on main. The one visible gap was the
+  badges: the server sent `summary.forced` / `summary.generated` but the canvas
+  drew them as plain text.
+- **Badges are rules, not per-kind code.** `web/src/pages/flow/badges.ts` holds
+  a list of rules `(node, summary) -> badge`; `buildView` puts the result in
+  `FlowNodeData.badges` and `FlowNodeView` draws it. Override badge: a time
+  condition with `forced` shows "Override: open|closed" (tooltip says the
+  schedule is ignored). Generated badge: a TTS announcement shows "Generated".
+  A new kind (follow-me, fax, locations) adds one rule and no other web code;
+  unknown kinds already render from the catalogue.
+- **Open PRs (#272, #273, #275)** add their kinds through the checklist in
+  `internal/flow/README.md`; nothing here depends on them. No API, migration or
+  MCP change, so no conformance, count or skill update is needed.
 ## AI on the canvas may apply its own batch (2026-11-10)
 
 - Asked: should the canvas AI assistant only propose (a person applies), or may it apply?
