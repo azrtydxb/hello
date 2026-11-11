@@ -258,6 +258,19 @@ ports, peers and values.
   `sip.resources` by concurrent calls; memory is the limit that matters for
   the anchor.
 
+## Fax engine
+
+`fax.enabled: true` adds the `hello-fax` Deployment and a ClusterIP Service
+(control API on 8083, never an Ingress) and sets `HELLO_FAX_ENABLED` and
+`HELLO_FAX_ADDR` on hello-control and hello-sip. The image carries spandsp and
+poppler-utils (`pdftoppm`); the other images carry neither. Fax media is UDP:
+hello-sip sends it straight to the hello-fax pod's address
+(`HELLO_FAX_MEDIA_HOST` is the pod IP), in the range `fax.rtpPortMin` to
+`fax.rtpPortMax` (40000 to 40999 by default), so the pods' network policy must
+allow UDP from the hello-sip nodes on that range. Set `fax.tokenSecret` to a
+Secret with the key `faxToken` to require a bearer token between the services.
+See [fax.md](fax.md).
+
 ## Highly available state
 
 The chart's bundled PostgreSQL, Valkey and MinIO are single instances without

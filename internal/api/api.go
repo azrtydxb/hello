@@ -127,6 +127,15 @@ type Store interface {
 	ReplaceRingRules(ctx context.Context, actor string, in []store.RingRuleInput) ([]store.RingRule, error)
 	GetRingMap(ctx context.Context) (store.RingMap, error)
 	ReplaceRingMap(ctx context.Context, actor string, groupID *int64, in []store.RingMapEntry) (store.RingMap, error)
+	ListWifiProfiles(ctx context.Context) ([]store.WifiProfile, error)
+	GetWifiProfile(ctx context.Context, id int64) (store.WifiProfile, error)
+	CreateWifiProfile(ctx context.Context, actor string, in store.WifiProfileInput) (store.WifiProfile, error)
+	UpdateWifiProfile(ctx context.Context, actor string, id int64, in store.WifiProfileInput) (store.WifiProfile, error)
+	DeleteWifiProfile(ctx context.Context, actor string, id int64) error
+	GetWifiGroup(ctx context.Context, groupID int64) (store.WifiScope, error)
+	PutWifiGroup(ctx context.Context, actor string, groupID int64, ids []int64, radio prov.WifiRadio) (store.WifiScope, error)
+	GetWifiPhone(ctx context.Context, phoneID int64) (store.WifiScope, error)
+	PutWifiPhone(ctx context.Context, actor string, phoneID int64, ids []int64) (store.WifiScope, error)
 	ListRingtones(ctx context.Context) ([]store.RingtoneFile, error)
 	RingtoneExists(ctx context.Context, name string) (bool, error)
 	CreateRingtone(ctx context.Context, actor, name string, info prov.ToneInfo, size int64, sha256 string) (store.RingtoneFile, error)
@@ -294,6 +303,9 @@ type Config struct {
 	TwoFactor      TwoFactorStore
 	TwoFALogins    *prometheus.CounterVec
 	ConferenceLive ConferenceLive
+	// CRM is the CRM connector administration (spec integrations I-47); nil
+	// answers 503 on the CRM routes.
+	CRM CRMService
 	// Events is the call-event pipeline (stream, history, tickets); nil
 	// answers 503 on the event routes.
 	Events EventService
@@ -311,6 +323,9 @@ type Config struct {
 	OriginateMetrics *OriginateMetrics
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
+	// Fax is the fax feature (destinations, the fax list, sending a PDF); the
+	// zero value answers 503 on its routes.
+	Fax FaxConfig
 	// Objects is the voicemail audio store; nil makes the audio routes and
 	// greeting uploads answer 503 instead of touching MinIO.
 	Objects Objects

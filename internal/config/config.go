@@ -49,6 +49,8 @@ type Backup struct {
 // Control is hello-control's configuration.
 type Control struct {
 	Common
+	// Fax is the fax feature (HELLO_FAX_*); disabled unless HELLO_FAX_ENABLED.
+	Fax         Fax
 	DatabaseURL string
 	// Database is DatabaseURL parsed, so a malformed DSN fails at startup.
 	Database *pgx.ConnConfig
@@ -385,6 +387,8 @@ type ProvRedirect struct {
 // listens; the advertised address is what it puts in Via/Contact (spec §18).
 type SIP struct {
 	Common
+	// Fax is the fax feature (HELLO_FAX_*); disabled unless HELLO_FAX_ENABLED.
+	Fax               Fax
 	ValkeyAddr        string
 	ValkeySentinels   []string
 	ValkeyMaster      string
@@ -547,6 +551,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		BootstrapAdminPassword: r.optional("HELLO_BOOTSTRAP_ADMIN_PASSWORD", ""),
 		SessionTTL:             r.duration("HELLO_SESSION_TTL", 12*time.Hour),
 	}
+	c.Fax = r.fax()
 	c.EventRetentionDays = r.positiveInt("HELLO_EVENT_RETENTION_DAYS", 7)
 	if c.EventRetentionDays > 30 {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
@@ -1056,6 +1061,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.PageFanout = r.positiveInt("HELLO_PAGE_FANOUT", 200)
 	c.PageMulticastIface = r.getenv("HELLO_PAGE_MULTICAST_IFACE")
 	c.PageMulticastTTL = r.positiveInt("HELLO_PAGE_MULTICAST_TTL", 1)
+	c.Fax = r.fax()
 	c.RTPPortMin = r.port("HELLO_RTP_PORT_MIN", 20000)
 	c.RTPPortMax = r.port("HELLO_RTP_PORT_MAX", 21000)
 	c.DSCPSIP = r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP)
@@ -1437,4 +1443,38 @@ func (r *reader) common(defaultHTTP string) Common {
 		r.fail("HELLO_LOG_LEVEL", err)
 	}
 	return c
+}
+
+// Fax is the settings of the fax feature (pbx-gaps S-15 to S-17), read by
+// hello-control and hello-sip. The fax engine itself, hello-fax, reads its
+// own listen and port settings.
+type Fax struct {
+	// Enabled (HELLO_FAX_ENABLED, default false) turns the feature on. Off,
+	// fax calls are answered 488 and the API refuses to queue a fax.
+	Enabled bool
+	// Addr (HELLO_FAX_ADDR) is the host:port of hello-fax's control API; the
+	// host is also where hello-sip relays the fax media.
+	Addr string
+	// Token (HELLO_FAX_TOKEN) is the bearer token hello-fax requires; empty
+	// sends none.
+	Token string
+	// RetentionDays (HELLO_FAX_RETENTION_DAYS, default 90, 1 to 3650) is how
+	// long a fax is kept.
+	RetentionDays int
+}
+
+// fax reads the HELLO_FAX_* settings.
+func (r *reader) fax() Fax {
+	f := Fax{
+		Enabled: r.boolean("HELLO_FAX_ENABLED"), Addr: r.optional("HELLO_FAX_ADDR", ""),
+		Token: r.optional("HELLO_FAX_TOKEN", ""), RetentionDays: r.positiveInt("HELLO_FAX_RETENTION_DAYS", 90),
+	}
+	if f.RetentionDays > 3650 {
+		r.fail("HELLO_FAX_RETENTION_DAYS", errors.New("must be between 1 and 3650"))
+	}
+	if f.Enabled && f.Addr == "" {
+		r.fail("HELLO_FAX_ADDR", errors.New("is required when HELLO_FAX_ENABLED is true"))
+	}
+	r.hostPort("HELLO_FAX_ADDR", f.Addr)
+	return f
 }

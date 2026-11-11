@@ -29,7 +29,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 28  | DSCP marking (S-21)                                                           | done (#231)            |
 | 29  | Phone backup/secondary servers (S-20), partial                                | todo                   |
 | 30  | HELD, Geolocation, locations, callback tag, alarm `*55` (S-28, S-29), partial | todo                   |
-| 31  | Wi-Fi profiles and roaming (S-23, S-24)                                       | todo                   |
+| 31  | Wi-Fi profiles and roaming (S-23, S-24)                                       | wip (#278)             |
 | 34  | Presence: reg event, PUBLISH, eventlist (S-35)                                | todo                   |
 | 35  | RTCP-XR collector (S-36)                                                      | todo                   |
 | 36  | Syslog sink (S-27)                                                            | wip (parity-syslog)    |
@@ -102,7 +102,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P3  | Click-to-call: originate API, /dial, tel:      | wip (#234)  |
 | P4  | Recording links and lookup API                 | todo        |
 | P5  | Browser extension (MV3), fixed signing key     | todo        |
-| P6  | HubSpot and internal/crm framework             | todo        |
+| P6  | HubSpot and internal/crm framework             | wip (#289)  |
 | P7  | Zapier                                         | todo        |
 | P8  | Directory engine, AD/LDAP                      | todo        |
 | P9  | Google Workspace and Entra connectors          | todo        |
@@ -160,7 +160,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P4  | Editing UI                                                | done (#227)             |
 | P5  | traceFlow, trace mode                                     | done (#224)             |
 | P6  | AI on the canvas                                          | todo (after P4)         |
-| P7  | New node types: batch ops, trace, override badge          | wip (#277)               |
+| P7  | New node types: batch ops, trace, override badge          | wip (#277)              |
 | D3  | Every call output accepts every target kind               | done (#196)             |
 | -   | Routes form `conference` destination chooser              | wip (routes-conference) |
 | -   | Canvas usability: Add everything, Arrange, open on create | wip (#233)              |
@@ -183,7 +183,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 2FA                                           | done (#209)           |
 | Dial-by-name                                  | done (#229, B3)       |
 | Voicemail groups                              | done (#220, A6)       |
-| Fax                                           | todo (spec done #199) |
+| Fax                                           | wip (#273)            |
 | Boss/secretary                                | done (#236, B2)       |
 | Multi-language prompts (Dutch option per box) | done (#208, A5)       |
 | Codec in call history                         | done (#206)           |

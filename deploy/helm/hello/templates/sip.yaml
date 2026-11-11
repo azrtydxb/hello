@@ -149,6 +149,15 @@ spec:
               value: {{ .Values.global.voicemailLanguage | default "en" | quote }}
             - name: HELLO_TIMEZONE
               value: {{ .Values.global.timezone | default "UTC" | quote }}
+            {{- if .Values.fax.enabled }}
+            - name: HELLO_FAX_ENABLED
+              value: "true"
+            - name: HELLO_FAX_ADDR
+              value: {{ printf "%s:8083" (include "hello.svcFQDN" (dict "root" . "name" (printf "%s-fax" $full))) | quote }}
+            {{- if .Values.fax.tokenSecret }}
+            {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_FAX_TOKEN" "key" "faxToken" "secret" .Values.fax.tokenSecret) | nindent 12 }}
+            {{- end }}
+            {{- end }}
             {{- with $sip.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

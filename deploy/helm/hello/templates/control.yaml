@@ -197,6 +197,15 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- if .Values.fax.enabled }}
+            - name: HELLO_FAX_ENABLED
+              value: "true"
+            - name: HELLO_FAX_ADDR
+              value: {{ printf "%s:8083" (include "hello.svcFQDN" (dict "root" . "name" (printf "%s-fax" $full))) | quote }}
+            {{- if .Values.fax.tokenSecret }}
+            {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_FAX_TOKEN" "key" "faxToken" "secret" .Values.fax.tokenSecret) | nindent 12 }}
+            {{- end }}
+            {{- end }}
             {{- if $syslog.enabled }}
             - name: HELLO_SYSLOG_UDP_ADDR
               value: ":5514"
