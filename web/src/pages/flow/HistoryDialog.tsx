@@ -17,6 +17,14 @@ import {
   Spinner,
 } from "../../design/azrty/components";
 import { ReviewDialog } from "./ReviewDialog";
+import { VIA_AI } from "../../api/aiagent";
+
+/**
+ * Who applied a batch: its actor, or for a batch the assistant applied
+ * itself (via ai:<session>) "the assistant for" its actor.
+ */
+export const byLabel = (b: Pick<BatchSummary, "actor" | "via">) =>
+  b.via.startsWith(VIA_AI) ? `the assistant for ${b.actor}` : b.actor;
 
 export function HistoryDialog({
   canRevert,
@@ -63,7 +71,7 @@ export function HistoryDialog({
     return (
       <ReviewDialog
         title="Revert this change?"
-        description={`Puts back what the change of ${when} by ${preview.batch.actor} did.`}
+        description={`Puts back what the change of ${when} by ${byLabel(preview.batch)} did.`}
         items={preview.res.results.map((r) => ({
           title: `${r.status} ${r.node ?? r.operationId}`,
           result: r,
@@ -100,9 +108,12 @@ export function HistoryDialog({
           {items.map((b) => (
             <li key={b.id} className="flow-item">
               <span>
-                {new Date(b.createdAt).toLocaleString()} by {b.actor}:{" "}
+                {new Date(b.createdAt).toLocaleString()} by {byLabel(b)}:{" "}
                 {b.opCount} {b.opCount === 1 ? "change" : "changes"}
-                {b.via ? ` (${b.via})` : ""}{" "}
+                {b.via && !b.via.startsWith(VIA_AI) ? ` (${b.via})` : ""}{" "}
+                {b.via.startsWith(VIA_AI) && (
+                  <Badge tone="info">Applied by the assistant</Badge>
+                )}{" "}
                 {b.reverts && <Badge tone="info">Revert</Badge>}
                 {b.revertedBy && <Badge tone="neutral">Reverted</Badge>}
               </span>

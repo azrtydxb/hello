@@ -2810,6 +2810,69 @@ so the VIP stage cannot sit in that file.
 - Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
 - Account sharing group password: shared default `AccountSharing`, or a per-group secret
 
+## Flow canvas P6: AI on the canvas (2026-11-09)
+
+Built per `.procoder/specs/flow-canvas.md` (P6, S-17, S-19, S-20). Choices the
+spec left open, and one deviation:
+
+- **The assistant may apply its own batch (decision 2, user decision of
+  2026-11-10 below).** It has one write tool, `applyConfigBatch`, offered only
+  for a question asked with the canvas switch "Let AI apply changes" on;
+  otherwise a change is a proposal whose batch the operator previews on the
+  canvas and applies or discards. Write-scoped MCP clients keep
+  `applyConfigBatch` as before.
+- **A batch proposal is one action.** `applyConfigBatch` joins
+  `proposal.Allowlist`; a proposal that carries it has no other action, so the
+  whole change is one transaction. The inner allowlist is the batch's own
+  table (`configbatch.Ops`, every object type the canvas draws); `createDevice`,
+  `createPhone`, credential, multipart and external-effect operations stay
+  out. At most 50 inner operations.
+- **Credentials stay out of proposals.** Decision 2 allows the AI to set
+  secrets with redacted reads; a proposal's body is stored and shown to
+  people and to the model, so an inner operation that sets a password, PIN or
+  secret is refused, as for every other proposal (S-12).
+- **The dry run runs as the user, rolled back.** The validator dry-runs the
+  batch through the API as the user's agent identity with a new `Preview`
+  flag (`auth.Agent.Preview`): it then holds write scopes with the user's own
+  role, but the API admits its writes only on `POST /api/v1/config/batch`
+  with `dryRun` and inside a dry-run store batch (`agentGuard`,
+  `Batch.DryRun`). A viewer's or an operator's admin-only batch is refused
+  there and the model is told the user cannot make the change.
+- **Hello fills the staleness tokens.** The model does not send
+  `baseRevision` or `expect`: the validator reads the graph (devices
+  included) and sets `baseRevision` to its revision and each update or
+  delete's `expect` to the node's version. A configuration that moves under
+  the proposal makes the batch's own check answer 409, which makes the
+  proposal `stale`; changes to other objects do not.
+- **The preview is stored.** The dry run's results (redacted), warnings and a
+  new `flowDiff` (added, changed, removed nodes, edges added and removed,
+  `flow.Diff`) are kept on the action as `preview`, so the overlay and the
+  proposal page need no write scope and viewers see them. Every dry-run batch
+  answer now carries `flowDiff` (documented in `openapi.json` and
+  `docs/config-batch.md`).
+- **Overlay placement.** Created nodes have dry-run ids (sequences do not roll
+  back), so the canvas draws them as ghosts placed next to a connected node
+  (not draggable) and, after apply, places the real nodes at the ghost
+  positions by matching kind and label (`placementsAfterApply`).
+- **Canvas context.** A question carries a `context` with `canvasId`,
+  `nodes` and `trace`, stored in `ai_messages.context` (migration `00057`) so the task and
+  the history see it, and given to the model as data (`canvas`), never as
+  instructions. The panel sends the canvas, the selected node and the traced
+  call.
+- **`describeOperation`.** One assistant tool that is not an API read: it
+  answers the request schema of an operation a proposal may carry, from the
+  embedded document, so the model writes valid batch bodies. It is not an MCP
+  tool and reads no PBX data.
+- **`getFlowGraph` `fields=summary`** (S-17) empties node summaries and drops
+  edge `data`, keeping ids, labels, versions, ports and owners.
+- **Roles.** Asking needs operator (the chat already did); viewers see the
+  panel's proposal list and the overlay, without Apply. Discard is
+  `dismissAIProposal` with reason `not_needed`. With the agent off the panel
+  shows the same reason as every AI page.
+- **Import cycle.** `configbatch` used `proposal.Change`; the JSON diff moved
+  to `internal/jsondiff` (proposal keeps aliases) so `proposal` can use
+  `configbatch`.
+
 ## Integrations P4: recording links and lookup (2026-11-09)
 
 - Links are Hello-signed proxy URLs (`/r/<token>.wav`), not MinIO presigned
@@ -3103,6 +3166,44 @@ Built in one change: the engine, passthrough, T.38, email, API, page and docs.
 - Answer (user): the AI may apply. Give the assistant a write tool that applies its batch,
   audited and revertible, in line with the earlier AI-access decision. Operators still see
   and can revert every applied batch.
+
+Built on #280 (choices the decision left open):
+
+- **The write tool.** `applyConfigBatch` in the assistant (go-ai-sdk tool,
+  `internal/ai/assistant/apply.go`). Its batch is validated exactly as a
+  proposal's batch (inner allowlist, no credential property, at most 50 ops,
+  `baseRevision` and `expect` from the graph, the dry run as the user), stored
+  as a proposal (so the overlay, the proposal page and the session link show
+  it), then applied with `proposal.DBStore.ApplyAsAgent`:
+  `POST /api/v1/config/batch` replayed as the user under a new
+  `auth.Agent.Apply` identity. That identity holds write and admin scopes with the user's own
+  role, so a viewer's batch is `403 forbidden_role` and an operator's
+  admin-only op is refused; `agentGuard` admits its writes only on the batch
+  route and inside that batch (no direct object write, layout or revert). One
+  applied batch per question; an answer may not add a proposal after it.
+  Credentials stay out, as for every proposal.
+- **Audit.** The actor is the user (`user:<name>`), the via `ai:<session>`
+  (decision 2's form) on the `config_batches` row, on the proposal
+  (`ai_proposals.applied_via`, new) and on the proposal's `apply_applied`
+  audit row (now with its via); each object's row carries `batch:<id>` as for
+  every batch. The proposal also keeps `batch_id` (new, set for a person's
+  apply too) so the console reverts it with the ordinary
+  `revertConfigBatch`. Migration `00086_ai_proposal_applied_via.sql`,
+  additive.
+- **The switch: per session, ask first by default (chosen).** Decision 2 lets
+  the AI apply but sets no default, so the canvas panel's "Let AI apply
+  changes" starts off each time the panel opens and holds for the questions
+  sent while it stays open; each question stores it (`context.allowApply` in
+  `ai_messages.context`), and only that question gets the write tool. Viewers
+  see no switch. Not a stored per-user setting: no setting outlives the panel,
+  so nothing applies without the user turning it on where they are looking.
+- **UI.** An AI-applied batch is drawn as what was applied: the canvas
+  reloads, places the new nodes and marks new and changed nodes; the panel
+  shows "Applied by the assistant for you" with the operations and a
+  Revert (dry run, then confirm). History and the proposal page label it
+  "by the assistant for <user>".
+- **No new API status codes.** The refusals are the existing
+  `403 forbidden_role` and `403 insufficient_scope`.
 
 ## Integrations P6: HubSpot and the internal/crm framework (2026-11-10)
 

@@ -33,8 +33,8 @@ func wantsEventStream(r *http.Request) bool {
 // nothing happens. A refusal before the task starts is the usual JSON
 // error. The request's context ends the work: when the client goes, or this
 // function returns, the model call is cancelled.
-func (s *server) streamAIMessage(w http.ResponseWriter, r *http.Request, st chat.Streamer, u chat.User, sessionID, content string) {
-	ch, err := st.PostMessageStream(r.Context(), u, sessionID, content)
+func (s *server) streamAIMessage(w http.ResponseWriter, r *http.Request, st chat.Streamer, u chat.User, sessionID, content string, mc *chat.Context) {
+	ch, err := st.PostMessageStream(r.Context(), u, sessionID, content, mc)
 	if err != nil {
 		s.assistantError(w, "session", err)
 		return
