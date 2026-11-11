@@ -117,6 +117,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       },
       { label: "Devices", path: "/devices", phase: 1, icon: "smartphone" },
       { label: "Phones", path: "/phones", phase: 5, icon: "phone" },
+      { label: "Locations", path: "/locations", phase: 5, icon: "map-pin" },
       {
         label: "Onboarding",
         path: "/onboarding",

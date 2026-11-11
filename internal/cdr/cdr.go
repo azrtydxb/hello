@@ -36,6 +36,7 @@ const (
 	KindConference = "conference"
 	KindDoor       = "door"     // a door station's call or a call to a Door group (migration 00053)
 	KindCallback   = "callback" // a call Hello placed to a queue caller who asked for a callback (migration 00049)
+	KindAlarm      = "alarm"    // a *55 alarm call (migration 00080)
 	KindFax        = "fax"      // a fax call, received or sent (migration 00073); the fax is in the faxes table, by correlation id
 )
 
@@ -108,7 +109,7 @@ type Record struct {
 	// PageLegs is a page's outcome per member (migration 00014), one row
 	// each; empty for any other call.
 	PageLegs []PageLeg
-	// FollowMeLegs is what each follow-me target did (migration 00079), one
+	// FollowMeLegs is what each follow-me target did (migration 00080), one
 	// row each in cdr_legs with the role follow_me; empty for a call that
 	// ran no follow-me.
 	FollowMeLegs []FollowMeLeg

@@ -197,6 +197,16 @@ type call struct {
 	// ringTag and ringWhy are the ring tag the call's device legs carry and
 	// what chose it (S-40); guarded by mu, written to the trace and the CDR.
 	ringTag, ringWhy string
+	// ringKind, when set, fixes the ring tag as a call kind does (S-40) for
+	// a call whose CDR kind stays "call": emergency-callback.
+	ringKind string
+	// ignoreDND rings the called extension (or the members of the called
+	// group) whatever their DND: an alarm call and an emergency callback.
+	ignoreDND bool
+	// emergency marks a call routed over an emergency route (S-28). geo
+	// holds what the caller's phone sent for it (RFC 6442).
+	emergency bool
+	geo       geoInfo
 
 	groupName     string
 	groupStrategy string
@@ -496,6 +506,7 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	c := s.newCall(req)
 	c.callerNum, c.callerName, c.callerDevice = dev.Extension, dev.ExtensionName, dev.Username
+	c.takeGeolocation()
 	s.routeCaller(c, req, tx, snap, dev)
 }
 
@@ -507,6 +518,11 @@ func (s *Server) routeCaller(c *call, req *sip.Request, tx sip.ServerTransaction
 	// A door station reaches its targets only (spec S-45).
 	if snap.IsDoor(dev.Extension) {
 		c.doorCall(req, tx, snap)
+		return
+	}
+	// The alarm code (spec S-29) is answered here, before any other number.
+	if c.dialled == AlarmCode {
+		c.handleAlarm(tx, snap, dev)
 		return
 	}
 	// A paging group's code (Phase E, spec P-12) pages its members; the
@@ -637,6 +653,9 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 			c.direction = cdr.DirectionOutbound
 		}
 		c.considerAnchor(snap, EndpointInfo{}) // external: caller-side triggers only
+		if dec.Emergency {
+			c.noteEmergency(snap)
+		}
 		if c.begin(req, tx) {
 			c.setupOutbound(dec)
 		}
@@ -1084,6 +1103,9 @@ func (c *call) answer(w *leg) {
 		c.mu.Unlock()
 		c.sessionArm()
 		c.startMediaWatch()
+		if c.alarmCall() {
+			go c.playAlarmNotice()
+		}
 		// Replication starts with the dialog confirmed: the snapshot is
 		// taken here and after every in-dialog transaction, and the
 		// heartbeat's write cadence is the owner's liveness.
@@ -1780,6 +1802,7 @@ func (l *leg) invite() (*sip.Request, error) {
 	l.applyAnonymous(req, from)
 	l.addPagingHeaders(req)
 	l.addRingTag(req)
+	l.addGeolocation(req)
 	for _, h := range c.confForwardHeaders(l.callID) {
 		req.AppendHeader(h)
 	}

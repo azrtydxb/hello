@@ -20,6 +20,7 @@ import (
 	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/location"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/originate"
 	"github.com/azrtydxb/hello/internal/phonebook"
@@ -138,6 +139,18 @@ type Store interface {
 	ReplaceRingRules(ctx context.Context, actor string, in []store.RingRuleInput) ([]store.RingRule, error)
 	GetRingMap(ctx context.Context) (store.RingMap, error)
 	ReplaceRingMap(ctx context.Context, actor string, groupID *int64, in []store.RingMapEntry) (store.RingMap, error)
+	ListLocations(ctx context.Context) ([]store.Location, error)
+	GetLocation(ctx context.Context, id int64) (store.Location, error)
+	CreateLocation(ctx context.Context, actor string, n location.Node) (store.Location, error)
+	UpdateLocation(ctx context.Context, actor string, id int64, n location.Node) (store.Location, error)
+	DeleteLocation(ctx context.Context, actor string, id int64) error
+	ListLocationAssignments(ctx context.Context) ([]store.LocationAssignment, error)
+	SetLocationAssignment(ctx context.Context, actor, kind string, id int64, locationID *int64) error
+	PhoneLocation(ctx context.Context, phoneID int64) (store.PhoneLocation, error)
+	GetPhoneGroupEmergency(ctx context.Context, id int64) (store.PhoneEmergency, error)
+	SetPhoneGroupEmergency(ctx context.Context, actor string, id int64, in store.PhoneEmergency) (store.PhoneEmergency, error)
+	GetEmergencySettings(ctx context.Context) (store.EmergencySettings, error)
+	PutEmergencySettings(ctx context.Context, actor string, in store.EmergencySettings) (store.EmergencySettings, error)
 	ListWifiProfiles(ctx context.Context) ([]store.WifiProfile, error)
 	GetWifiProfile(ctx context.Context, id int64) (store.WifiProfile, error)
 	CreateWifiProfile(ctx context.Context, actor string, in store.WifiProfileInput) (store.WifiProfile, error)

@@ -97,7 +97,8 @@ interface TrunkDraft {
   assertedIdentity: string;
   /** The header carrying it. */
   identityHeader: "pai" | "ppi";
-
+  /** Emergency calls carry the caller's location (Geolocation, PIDF-LO). */
+  geolocation: boolean;
   /** How a fax call is carried (docs/fax.md). */
   faxMode: "passthrough" | "t38" | "off";
   /** RFC 4028 session timers on the trunk's calls. */
@@ -176,7 +177,7 @@ const NEW_TRUNK: TrunkDraft = {
   anonymousPolicy: "honour",
   assertedIdentity: "",
   identityHeader: "pai",
-
+  geolocation: false,
   faxMode: "passthrough",
   sessionTimers: "default",
   dialingMode: "off",
@@ -220,7 +221,7 @@ function toDraft(t: Trunk): TrunkDraft {
     anonymousPolicy: t.anonymousPolicy === "always" ? "always" : "honour",
     assertedIdentity: t.assertedIdentity ?? "",
     identityHeader: t.identityHeader === "ppi" ? "ppi" : "pai",
-
+    geolocation: t.geolocation === true,
     faxMode: t.faxMode ?? "passthrough",
     sessionTimers:
       t.sessionTimers === "on" || t.sessionTimers === "off"
@@ -355,6 +356,7 @@ function toInput(d: TrunkDraft): TrunkInput {
     anonymousPolicy: d.anonymousPolicy,
     assertedIdentity: d.assertedIdentity.trim(),
     identityHeader: d.identityHeader,
+    geolocation: d.geolocation,
     faxMode: d.faxMode,
     sessionTimers: d.sessionTimers,
     codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
@@ -409,6 +411,7 @@ function knownKeys(d: TrunkDraft): string[] {
     "allowedCountryCodes",
     "unknownCallerAction",
     "rejectCode",
+    "geolocation",
     "faxMode",
     "sessionTimers",
     ...d.destinations.flatMap((_, i) => [
@@ -670,6 +673,10 @@ function TrunkCard({
           },
           { label: "Fax", value: faxModeLabel(t.faxMode) },
           {
+            label: "Emergency location",
+            value: t.geolocation ? "Sent" : "Off",
+          },
+          {
             label: "Session timers",
             value: SESSION_TIMERS_LABEL[t.sessionTimers ?? "default"],
           },
@@ -699,6 +706,10 @@ function TrunkCard({
             value: t.anonymousPolicy === "always" ? "Always" : "On request",
           },
           { label: "Fax", value: faxModeLabel(t.faxMode) },
+          {
+            label: "Emergency location",
+            value: t.geolocation ? "Sent" : "Off",
+          },
           {
             label: "Session timers",
             value: SESSION_TIMERS_LABEL[t.sessionTimers ?? "default"],
@@ -1097,6 +1108,13 @@ function TrunkDrawer({
             labelPosition="end"
             checked={draft.messaging}
             onChange={(e) => set("messaging", e.target.checked)}
+          />
+          <Switch
+            label="Send the caller's location with emergency calls"
+            hint="An emergency call through this trunk carries a Geolocation header and a PIDF-LO body (RFC 6442): the phone's own location, else the one assigned under Locations. Turn it on only for a carrier that accepts them. The request is larger than a usual SIP datagram. Off by default."
+            labelPosition="end"
+            checked={draft.geolocation}
+            onChange={(e) => set("geolocation", e.target.checked)}
           />
           <Select
             label="Fax"

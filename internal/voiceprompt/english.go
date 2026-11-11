@@ -98,5 +98,7 @@ var english = map[Key]string{
 	DirectoryMore:        "That matches too many names. Please enter more letters.",
 	DirectoryNone:        "Sorry, no name matches those letters.",
 	DirectoryTooLong:     "That is too many letters. Please enter fewer letters.",
+	AlarmAnnounce:        "Panic alarm from {who}.",
+	EmergencyAnnounce:    "Emergency call from {who}, extension {ext}.",
 	FollowMeAccept:       "You have a forwarded call. Press 1 to accept it.",
 }

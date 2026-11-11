@@ -201,7 +201,7 @@ func run(args []string) error {
 		Voicemails:     voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings, TimeConditions: timeConditions{st: controlStore},
 		Speech:     newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
-		HAState: live, Membership: members, PageTests: live, DoorTriggers: live, Originates: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Fax: faxDeps(cfg, controlStore), Park: live, Published: live,
+		HAState: live, Membership: members, PageTests: live, DoorTriggers: live, Originates: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Fax: faxDeps(cfg, controlStore), Park: live, Published: live, Emergency: live,
 		Conferences: live, ConferenceAudit: controlStore,
 		CallerNames: crmLookup,
 	})

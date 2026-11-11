@@ -3,7 +3,7 @@
   "info": {
     "title": "Hello management API",
     "version": "v1",
-    "description": "hello-control REST API. Every route except version, openapi.json and auth/login requires the hello_session cookie or an `Authorization: Bearer <token>` header. Secrets (device SIP secrets, API tokens, trunk passwords) appear only in the response that creates them; trunk passwords never appear in any response. While a backup restore runs, every request that is not a read (GET, HEAD, OPTIONS) is refused with 503 and the error code `maintenance`, whatever its operation documents; retry after the Retry-After seconds."
+    "description": "hello-control REST API. Every route except version, openapi.json and auth/login requires the hello_session cookie or an `Authorization: Bearer <token>` header. Secrets (device SIP secrets, API tokens, trunk passwords) appear only in the response that creates them; trunk passwords never appear in any response."
   },
   "security": [
     {
@@ -2951,7 +2951,7 @@
       "get": {
         "operationId": "exportCDRs",
         "summary": "Call detail records as CSV, newest first",
-        "description": "Exports the filtered call records as a CSV download. The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe. The caller_codec and callee_codec columns are empty when no codec was negotiated.",
+        "description": "Exports the filtered call records as a CSV download. The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe.",
         "tags": ["history"],
         "parameters": [
           {
@@ -15763,7 +15763,7 @@
       "put": {
         "operationId": "putRingMap",
         "summary": "Replace the global ring map",
-        "description": "Replaces the global choices as a whole. A change reaches the affected phones through the automatic resync (check-sync). The tone must be in the vendor's ringer list (silent only where the vendor has it), or custom:<name> of a tone in the library on a vendor whose customTones is true.",
+        "description": "Replaces the global choices as a whole. A change reaches the affected phones through the automatic resync (check-sync). The tone must be in the vendor's ringer list (silent only where the vendor has it).",
         "tags": ["ring-tags"],
         "requestBody": {
           "required": true,
@@ -24748,6 +24748,507 @@
         "x-hello-role": "admin",
         "x-hello-mcp": true
       }
+    },
+    "/api/v1/locations": {
+      "get": {
+        "operationId": "listLocations",
+        "summary": "List locations",
+        "description": "Returns every location: sites, the floors of a site and the rooms of a floor. A site carries the civic address and an optional geo point; a floor or room only names a place inside its site and may carry a more exact geo point.",
+        "tags": ["locations"],
+        "responses": {
+          "200": {
+            "description": "The locations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createLocation",
+        "summary": "Create a location",
+        "description": "Creates a site (civic address and/or a geo point), a floor (parent: a site) or a room (parent: a floor or a site). A location is assigned to phone groups, extensions and phones with the location assignments; the HELD server and the Geolocation header of an emergency call read it.",
+        "tags": ["locations"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Location"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/locations/{id}": {
+      "get": {
+        "operationId": "getLocation",
+        "summary": "One location",
+        "description": "Returns one location by id.",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The location",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Location"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putLocation",
+        "summary": "Replace a location",
+        "description": "Replaces every field of a location, so fields left out are cleared. The kind cannot change. The change reaches the phones that ask the HELD server and the emergency calls placed afterwards.",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Location"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteLocation",
+        "summary": "Delete a location",
+        "description": "Deletes a location. A location with floors or rooms inside it, or that a phone group, extension or phone is assigned to, cannot be deleted (409); the message names what is in the way.",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/location-assignments": {
+      "get": {
+        "operationId": "listLocationAssignments",
+        "summary": "List what is assigned to a location",
+        "description": "Returns every phone group, extension and phone with the location it is assigned to (null for none). A phone's own location wins over its extension's, which wins over its phone group's.",
+        "tags": ["locations"],
+        "responses": {
+          "200": {
+            "description": "The assignments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationAssignmentList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/location-assignments/{kind}/{id}": {
+      "put": {
+        "operationId": "putLocationAssignment",
+        "summary": "Assign a location",
+        "description": "Assigns a phone group, an extension or a phone to a location, or to none with a null locationId. The id is that of the phone group, extension or phone.",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "description": "What is assigned: group, extension or phone.",
+            "schema": {
+              "type": "string",
+              "enum": ["group", "extension", "phone"]
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the phone group, extension or phone.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocationAssignmentInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Assigned"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phones/{id}/location": {
+      "get": {
+        "operationId": "getPhoneLocation",
+        "summary": "The location of a phone",
+        "description": "Returns the location a phone resolves to (its own, else its extension's, else its phone group's) with the civic address and geo point the HELD server would answer it with, and where it came from. Source is empty and place null when none is assigned.",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The location",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneLocation"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/emergency": {
+      "get": {
+        "operationId": "getPhoneGroupEmergency",
+        "summary": "A phone group's E911 switch and alarm destination",
+        "description": "Returns whether the WP8x6 phones of the group are provisioned for E911 and HELD, and the extension or ring group the *55 alarm call rings (empty for none).",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroupEmergency"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putPhoneGroupEmergency",
+        "summary": "Set a phone group's E911 switch and alarm destination",
+        "description": "Sets both. With e911Enabled the WP8x6 phones of the group are provisioned to ask Hello's HELD server for their location. With an alarmTarget (an extension or ring group number) the phones are provisioned to dial *55 for their alarm and *55 from them rings the destination through DND with the ring tag alarm; without one *55 is answered 404 and the alarm keys are not written.",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneGroupEmergency"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroupEmergency"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/emergency": {
+      "get": {
+        "operationId": "getEmergencySettings",
+        "summary": "The emergency settings",
+        "description": "Returns the settings of emergency calls that belong to no phone group: the ring group told of every emergency call.",
+        "tags": ["locations"],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmergencySettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putEmergencySettings",
+        "summary": "Set the emergency settings",
+        "description": "Sets the notify group, a ring group whose phones are paged one way with a spoken notice naming the extension on every emergency call (empty for none).",
+        "tags": ["locations"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmergencySettings"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmergencySettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
     }
   },
   "components": {
@@ -26411,9 +26912,9 @@
           "failureKind",
           "failureTarget",
           "members",
-          "isDoor",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
+          "isDoor"
         ],
         "properties": {
           "id": {
@@ -26485,10 +26986,6 @@
             "type": "string",
             "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
           },
-          "isDoor": {
-            "type": "boolean",
-            "description": "Marks the Door group: a door station may call it, its calls have kind door and ring with the doorbell tag. A new Door group with no ringTag gets doorbell."
-          },
           "failureTarget": {
             "type": "string"
           },
@@ -26505,6 +27002,10 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "isDoor": {
+            "type": "boolean",
+            "description": "Marks the Door group: a door station may call it, its calls have kind door and ring with the doorbell tag. A new Door group with no ringTag gets doorbell."
           }
         }
       },
@@ -30942,9 +31443,10 @@
               "conference",
               "door",
               "callback",
-              "fax"
+              "fax",
+              "alarm"
             ],
-            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or door for a door station or a Door group, or callback for a call Hello placed to a queue caller who asked to be called back, or fax for a fax call (the fax is in the faxes list, by correlation id)."
+            "description": "call, or alarm for a *55 alarm call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or door for a door station or a Door group, or callback for a call Hello placed to a queue caller who asked to be called back, or fax for a fax call (the fax is in the faxes list, by correlation id)."
           },
           "ringTag": {
             "type": "string",
@@ -31137,7 +31639,8 @@
           "allowedCountryCodes",
           "unknownCallerAction",
           "rejectCode",
-          "faxMode"
+          "faxMode",
+          "geolocation"
         ],
         "properties": {
           "id": {
@@ -31285,6 +31788,10 @@
             "type": "string",
             "enum": ["passthrough", "t38", "off"],
             "description": "How a fax call on this trunk is carried: passthrough (G.711 audio, the default), t38 (re-INVITE to T.38 when the carrier offers it, falling back to passthrough on 488) or off (fax calls on the trunk are refused with 488)."
+          },
+          "geolocation": {
+            "type": "boolean",
+            "description": "Whether an emergency call sent through this trunk carries the caller's location: the Geolocation header and a PIDF-LO body (RFC 6442), the phone's own when it sent one, else the location assigned to it. Off by default; turn it on only for a carrier that accepts them. The request grows past the usual size of a SIP datagram, which a carrier on UDP must take."
           }
         }
       },
@@ -31437,6 +31944,10 @@
             "type": "string",
             "enum": ["passthrough", "t38", "off"],
             "description": "How a fax call on this trunk is carried: passthrough (G.711 audio, the default), t38 (re-INVITE to T.38 when the carrier offers it, falling back to passthrough on 488) or off (fax calls on the trunk are refused with 488)."
+          },
+          "geolocation": {
+            "type": "boolean",
+            "description": "Whether an emergency call sent through this trunk carries the caller's location (Geolocation header and PIDF-LO body, RFC 6442). Default false."
           }
         }
       },
@@ -31589,6 +32100,10 @@
             "type": "string",
             "enum": ["passthrough", "t38", "off"],
             "description": "How a fax call on this trunk is carried: passthrough (G.711 audio, the default), t38 (re-INVITE to T.38 when the carrier offers it, falling back to passthrough on 488) or off (fax calls on the trunk are refused with 488)."
+          },
+          "geolocation": {
+            "type": "boolean",
+            "description": "Whether an emergency call sent through this trunk carries the caller's location (Geolocation header and PIDF-LO body, RFC 6442). Default false."
           }
         }
       },
@@ -41790,6 +42305,329 @@
               "format": "int64"
             },
             "description": "The ids of the Wi-Fi profiles, the whole list; at most 10."
+          }
+        }
+      },
+      "Location": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "parentId",
+          "country",
+          "state",
+          "city",
+          "street",
+          "houseNumber",
+          "postalCode",
+          "latitude",
+          "longitude",
+          "radiusM",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["site", "floor", "room"],
+            "description": "A site carries the civic address; a floor belongs to a site; a room to a floor or a site."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Unique among the locations with the same parent. A floor's name is the civic floor (FLR) and a room's the civic room (ROOM)."
+          },
+          "parentId": {
+            "type": ["integer", "null"],
+            "description": "The site of a floor, the floor or site of a room; null for a site."
+          },
+          "country": {
+            "type": "string",
+            "pattern": "^([A-Z]{2})?$",
+            "description": "ISO 3166 alpha-2 code in capitals, or empty. A site only."
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element A1. A site only."
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element A3. A site only."
+          },
+          "street": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element A6. A site only."
+          },
+          "houseNumber": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element HNO. A site only."
+          },
+          "postalCode": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element PC. A site only."
+          },
+          "latitude": {
+            "type": ["number", "null"],
+            "description": "WGS 84 degrees; set together with longitude."
+          },
+          "longitude": {
+            "type": ["number", "null"],
+            "description": "WGS 84 degrees."
+          },
+          "radiusM": {
+            "type": ["number", "null"],
+            "description": "Uncertainty radius in metres; needs a latitude and longitude."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LocationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "name"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["site", "floor", "room"],
+            "description": "A site carries the civic address; a floor belongs to a site; a room to a floor or a site."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Unique among the locations with the same parent. A floor's name is the civic floor (FLR) and a room's the civic room (ROOM)."
+          },
+          "parentId": {
+            "type": ["integer", "null"],
+            "description": "The site of a floor, the floor or site of a room; null for a site."
+          },
+          "country": {
+            "type": "string",
+            "pattern": "^([A-Z]{2})?$",
+            "description": "ISO 3166 alpha-2 code in capitals, or empty. A site only."
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element A1. A site only."
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element A3. A site only."
+          },
+          "street": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element A6. A site only."
+          },
+          "houseNumber": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element HNO. A site only."
+          },
+          "postalCode": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element PC. A site only."
+          },
+          "latitude": {
+            "type": ["number", "null"],
+            "description": "WGS 84 degrees; set together with longitude."
+          },
+          "longitude": {
+            "type": ["number", "null"],
+            "description": "WGS 84 degrees."
+          },
+          "radiusM": {
+            "type": ["number", "null"],
+            "description": "Uncertainty radius in metres; needs a latitude and longitude."
+          }
+        }
+      },
+      "LocationList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Location"
+            }
+          }
+        }
+      },
+      "LocationAssignment": {
+        "type": "object",
+        "required": ["kind", "id", "name", "locationId"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["group", "extension", "phone"]
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "description": "The group's name, the extension's number and name, or the phone's MAC and label."
+          },
+          "locationId": {
+            "type": ["integer", "null"]
+          }
+        }
+      },
+      "LocationAssignmentList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocationAssignment"
+            }
+          }
+        }
+      },
+      "LocationAssignmentInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["locationId"],
+        "properties": {
+          "locationId": {
+            "type": ["integer", "null"],
+            "description": "The location to assign, or null to unassign."
+          }
+        }
+      },
+      "Place": {
+        "type": "object",
+        "required": [
+          "path",
+          "country",
+          "state",
+          "city",
+          "street",
+          "houseNumber",
+          "postalCode",
+          "floor",
+          "room",
+          "latitude",
+          "longitude",
+          "radiusM"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The names from the site down, such as HQ / 3 / Server room."
+          },
+          "country": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "street": {
+            "type": "string"
+          },
+          "houseNumber": {
+            "type": "string"
+          },
+          "postalCode": {
+            "type": "string"
+          },
+          "floor": {
+            "type": "string"
+          },
+          "room": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": ["number", "null"]
+          },
+          "longitude": {
+            "type": ["number", "null"]
+          },
+          "radiusM": {
+            "type": ["number", "null"]
+          }
+        }
+      },
+      "PhoneLocation": {
+        "type": "object",
+        "required": ["source", "locationId", "place", "e911"],
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": ["", "phone", "extension", "group"],
+            "description": "Which assignment decided: the phone's own, its extension's or its phone group's; empty when none is assigned."
+          },
+          "locationId": {
+            "type": ["integer", "null"]
+          },
+          "place": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Place"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "e911": {
+            "type": "boolean",
+            "description": "Whether the phone's group has E911 switched on."
+          }
+        }
+      },
+      "PhoneGroupEmergency": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["e911Enabled", "alarmTarget"],
+        "properties": {
+          "e911Enabled": {
+            "type": "boolean",
+            "description": "Provision the group's WP8x6 phones for E911 and HELD (Grandstream P8565 and related keys)."
+          },
+          "alarmTarget": {
+            "type": "string",
+            "pattern": "^[0-9A-Za-z._-]{0,64}$",
+            "description": "The extension or ring group number *55 rings; empty for none."
+          }
+        }
+      },
+      "EmergencySettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["notifyGroup"],
+        "properties": {
+          "notifyGroup": {
+            "type": "string",
+            "pattern": "^[0-9A-Za-z._-]{0,64}$",
+            "description": "The ring group told of every emergency call; empty for none."
           }
         }
       }

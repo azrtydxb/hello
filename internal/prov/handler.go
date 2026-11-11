@@ -110,7 +110,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	readOnly := r.Method == http.MethodGet || r.Method == http.MethodHead
 	scepReq := seg != "" && isSCEPName(name)
 	// SCEP alone takes POST (PKIOperation, RFC 8894 section 4.1).
-	allowed := readOnly || r.Method == http.MethodPut || (scepReq && r.Method == http.MethodPost)
+	allowed := readOnly || r.Method == http.MethodPut || (scepReq && r.Method == http.MethodPost) || (r.Method == http.MethodPost && strings.HasSuffix(rest, "/held"))
 	if !ok || !allowed {
 		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
 		return
@@ -126,6 +126,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveSCEP(w, r, ev, seg, https)
 	case seg == "boot":
 		h.serveBoot(ctx, w, ev, name)
+	case name == "held" && r.Method == http.MethodPost:
+		h.serveHELD(w, r, ev, seg, https)
 	case strings.HasPrefix(name, "pb/") && readOnly:
 		h.serveBookSlot(w, r, ev, seg, strings.TrimPrefix(name, "pb/"), https)
 	case strings.HasPrefix(name, "fw/") && readOnly:

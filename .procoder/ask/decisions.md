@@ -1349,6 +1349,7 @@ column ("a" when both legs agree, "a → b" when they differ).
 - Not done: the trigger is acknowledged when queued, not when someone answered,
   so the doorbell cannot tell. Trigger results could be polled later if a
   doorbell needs it.
+
 ## Ring map provisioning, phone-feature-parity S-42 and S-44 (2026-10-27)
 
 - Storage: `ring_map` (migration 00051) holds explicit choices only, keyed by
@@ -1932,6 +1933,92 @@ Implementation notes (template route, no migration):
 - Start: run waves 0-6 in order, three or four builder agents in parallel plus the merge captain (recommended)
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
+
+## Locations, HELD, Geolocation, callback tag and alarm `*55`, phone-feature-parity S-28 and S-29 (2026-11-09)
+
+- **Already built, left as it was.** The emergency flag on outbound routes and
+  its bypass of the trunk call limit and a down trunk (`acquireSlot`), P8385 and
+  the ring tag constants (`alarm`, `emergency-callback`). The caller's DND and
+  forwarding never act on a call out to a trunk, so (a) needs nothing there. The
+  door extension's target list (S-45) is not on main; the bypass is documented
+  for it to honour when it lands.
+- **Locations** (migration 00052): one table, kind site, floor or room, parent
+  RESTRICT. The civic address is on the site only; a floor's name is `FLR`, a
+  room's `ROOM`; the most specific geo point on the path wins. The user asked for
+  locations assignable to devices and extensions, the spec for a group with an
+  extension override; both are built, plus the phone itself, and the most
+  specific wins: phone, then extension, then phone group. Assignments are one
+  `location_id` column on `phone_groups`, `extensions` and `phones` (RESTRICT),
+  written through `PUT /location-assignments/{kind}/{id}`; a delete names what
+  holds the location. Resolution is the pure `internal/location` package, used by
+  the store, the snapshot and the HELD server.
+- **HELD**: `POST /p/<token>/held` on the provisioning listener, through the same
+  `authorize` as a config fetch (token, HTTPS, allowlisted phone; every denial an
+  empty 404). The body is parsed (root `locationRequest`, no DOCTYPE, 8 KiB) but
+  never picks the location. Answers are `application/held+xml` with status 200
+  also for HELD errors (`locationUnavailable`, `requestError`), the usual client
+  behaviour; a Store without `LocationSource` answers 404, so the fake stores of
+  other tests need no change. No audit kind was added: a HELD request is audited
+  as kind `other`, result `served` (the fetch table's CHECK lists would need a
+  migration for nothing).
+- **Vendor keys, from Grandstream's own documents only.** Fetched
+  `config-template-10212026.zip` (`wp8x6_config_1.0.3.39.txt`) and the WP8x6
+  Administration Guide (documentation.grandstream.com). Written on a WP8x6 with
+  E911: P8565 = 1, P8566 = 1 (HTTPS), P8567 = 60, P8568 = location server,
+  P8597 = emergency numbers separated by ";" (the guide's delimiter), P8725 = 1
+  (RFC 6442 header format), P26059 = 1. With an alarm destination: P22269 = 1,
+  P22270 = `*55`, P22601 = 1, P22602 = 1. Not written, because neither document
+  fixes the value: P8574 (location types; the template spells it
+  `Geodetic,civic,locationURI`, the guide differently), P8576, P8577 to P8596,
+  P8598/P8599. Unconfirmed: the form of P8568 ("address"): written as
+  `host/p/<token>/held` without scheme, as P331 takes its path; a phone check
+  settles it. No other vendor was changed: the spec names none and no vendor
+  document in hand has an E911 key set.
+- **Geolocation on trunks** (migration 00052 `trunks.geolocation`, off). Only an
+  emergency call, only a flagged trunk. The phone's own PIDF-LO (multipart
+  part, well-formed XML with a `presence` root and no DOCTYPE, 16 KiB) is
+  forwarded in place of the stored one; a location by reference in the phone's
+  header is passed on; `Geolocation-Routing` and `P-Emergency-Info` are passed
+  on, never generated (their value is the phone's). The caller's INVITE is
+  reduced to its SDP part at the start of every call, so the media code never
+  sees a multipart body. **UDP size**: sipgo refuses datagrams over 1300 bytes
+  and an INVITE with a PIDF-LO does not fit; the package-level limit is raised to
+  4000 in an `init`, before any server exists (no race), so the request leaves
+  and fragments. The PIDF-LO is as small as RFC 4119 allows (only the namespaces
+  used, no timestamp). The risk is a carrier that drops fragments; that is why
+  the flag is per trunk and off. The alternative, leaving the location out,
+  would make the flag useless on UDP.
+- **Callback tag** (f): `hello:emergency:<ext>` in Valkey (30 min) plus a
+  node-local map, written when a call over an emergency route is routed. A call
+  that entered on a trunk and rings that extension gets ringKind
+  `emergency-callback` and ignores DND; the CDR kind stays `call` (its CHECK
+  has no such value, and the callback is a plain call). Only a trunk call counts:
+  a colleague's call is not the callback.
+- **Notify group** (g): `emergency_settings.notify_group` (one row), a ring group.
+  Its phones are paged like the paging-group test (auto-answer headers, sendonly
+  offer) and hear "Emergency call from <name>, extension <digits>" in the
+  deployment's prompt language, a tone when speech is off. DND is not honoured
+  (a notice, not a call); the calling extension is skipped.
+- **Alarm `*55`**: handled in `handleInvite` before the paging, conference and
+  feature-code lookups, so a feature code or paging code on `*55` can never shadow
+  it; the dial-space guard counts `*55` as a built-in code, so a new overlap is
+  refused (an existing one does not block unrelated changes). Kind `alarm` (CDR
+  CHECK widened), ring tag `alarm`, `ignoreDND` on the call (extension DND and
+  the DND of ring group members), "Panic alarm from <name>" played to the callee
+  leg only after the answer, 404 without a destination or with a deleted one.
+  Forwarding of the destination still applies.
+- **Collision check against origin/main and the open PRs** (2026-11-09): codes
+  taken are `*28 *40 *41 *42 *45 *46 *47 *48 *70 *71 *74 *75 *80` (main), `*76`
+  `*77` (#272), `*64` (#236), `*63` (#220), `*85` as a paging code (#225 test);
+  nobody takes `*55`. Migration 00052 is also taken by #272, #270, #266 and #238:
+  whoever merges second renumbers (and the three migrate counts move by one).
+- **API roles**: locations and assignments write/operator like the ring map and
+  tags; a phone group's E911 switch and alarm destination, and the emergency
+  settings, admin/admin like the phone group changes. They bump the
+  configuration revision (hello-sip reads them).
+- **Not done**: a HELD location URI, LLDP or NAI based lookup, E911 keys for other
+  vendors, the door target list bypass (waits for S-45), an UI picker on the
+  Phones page (the Assignments tab does it).
 
 ## Follow-me (pbx-gaps B1: S-5, S-6) (2026-11-09)
 
@@ -2602,6 +2689,7 @@ so the VIP stage cannot sit in that file.
 - Minting and revoking are excluded from MCP (they hand out a public URL to
   call audio); the lookups are MCP tools, taught in the hello-troubleshoot
   skill.
+
 ## SCEP and 802.1X, item 37 (S-25) (2026-11-09)
 
 Builder's design choices, within the spec; nothing here was asked of the user.
@@ -2666,6 +2754,7 @@ Builder's design choices, within the spec; nothing here was asked of the user.
   `/dot1x-profiles` CRUD, `GET|PUT /phone-groups/{id}/security`; viewers read,
   admins change (S-25 RBAC). UI: Phones > Certificates, and "New SCEP
   challenge" on the phone page.
+
 ## Clients 3 and 4: web devices, coturn and ICE servers (2026-11-09)
 
 Spec: `.procoder/specs/clients-webrtc-mobile-video.md`, phases 3 and 4 (S-13 to S-17, S-21 to S-24). One PR: the two share the configuration, the credentials Secret and the chart wiring, and neither depends on the media foundation (#276) or the WSS edge.
@@ -2682,6 +2771,7 @@ Spec: `.procoder/specs/clients-webrtc-mobile-video.md`, phases 3 and 4 (S-13 to 
 - **coturn.** One Deployment per address, one replica, `Recreate`, `hostNetwork` by default (the relay leaves from the node address that is `externalIP`); without hostNetwork each server is a LoadBalancer Service listing at most 200 relay ports. `allowedPeers` is required, so the chart cannot render an open relay. The Prometheus exporter is off by default because the Debian build was not checked. `ct-<tree hash of docker/coturn>` is the content tag, like `kc-` for Kamailio.
 - **ICE servers.** `GET /api/v1/me/ice-servers[?deviceId=]`, 60 requests a minute per user (in-process window, per node), counted by `hello_ice_credentials_issued_total` and not audited per credential. STUN defaults to the `turn:` hosts.
 - **Migration 00075** (web devices; the highest on main is now 00074). `test/integration/migrate_{prov,ai,ai_agent}_test.go` counts bumped by one.
+
 ## Wi-Fi profiles and roaming (item 31, S-23, S-24)
 
 Keys come from Grandstream's official templates only (config-template-10212026.zip):
@@ -2735,6 +2825,7 @@ Nothing here is confirmed on a handset.
   changed render data.
 - Migration 00052 (`wifi_profiles`, `wifi_assignments`, `wifi_radio`); the
   migrate test counts follow it.
+
 ## Fax (pbx-gaps B5 and B6, S-15 to S-17) (2026-11-09)
 
 Built in one change: the engine, passthrough, T.38, email, API, page and docs.

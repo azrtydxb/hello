@@ -111,6 +111,7 @@ import { BossAssistant } from "./pages/BossAssistant";
 import { ParkPickup } from "./pages/ParkPickup";
 import { VoicemailGroups } from "./pages/VoicemailGroups";
 import { RingGroups } from "./pages/RingGroups";
+import { Locations } from "./pages/Locations";
 import { RingTags } from "./pages/RingTags";
 import { System } from "./pages/System";
 import { UnknownSyslog } from "./pages/UnknownSyslog";
@@ -157,6 +158,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/ring-tags": RingTags,
   "/door": Door,
   "/ringing": RingTags,
+  "/locations": Locations,
   "/paging": Paging,
   "/conferences": Conferences,
   "/ivr": Ivr,

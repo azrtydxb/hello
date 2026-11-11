@@ -91,6 +91,7 @@ func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *s
 	if link, ok := snap.BossLinkOf(ext); ok && c.ringBoss(req, tx, snap, ext, e, link) {
 		return
 	}
+	c.noteEmergencyCallback(ext)
 	// Follow-me runs at the ring step: after forward-always above, before the
 	// no-answer forward (the exhaustion hand-off of its ring), and a DND that
 	// blocks it falls through to the DND handling below (pbx-gaps S-6).
@@ -103,7 +104,7 @@ func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *s
 			c.addTrace("Follow-me of extension " + ext + " skipped: " + why)
 		}
 	}
-	if e.DND {
+	if e.DND && !c.dndIgnored() {
 		if c.voicemailConfigured(e) {
 			c.addTrace(fmt.Sprintf("Extension %s is DND: to voicemail", ext))
 			s.m.Forwarded.WithLabelValues(ForwardDND).Inc()

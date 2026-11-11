@@ -260,6 +260,9 @@ type Snapshot struct {
 	// ringTags are the ring tags and rules (migration 00050); nil means the
 	// built-in tags and no rules.
 	ringTags *ringtag.Table
+	// emergency is the alarm destinations, device locations and notify group
+	// (migration 00080).
+	emergency EmergencyData
 	// followMe are the follow-me profiles by extension number (migration 00079).
 	followMe map[string]FollowMe
 	// routing is the trunk and route state; nil for a snapshot from New.
@@ -727,6 +730,10 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	emerg, err := loadEmergency(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	fm, err := loadFollowMe(ctx, db)
 	if err != nil {
 		return nil, err
@@ -740,7 +747,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	}
 	return New(rev, domain, devices).WithFaxDestinations(faxes).WithExtensions(bare...).WithQueues(queues).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithVoicemailGroups(vmgs).WithRingTags(rtags).WithBLFLists(blf).WithBossLinks(bosses).WithFollowMe(fm), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithVoicemailGroups(vmgs).WithRingTags(rtags).WithBLFLists(blf).WithBossLinks(bosses).WithEmergency(emerg).WithFollowMe(fm), nil
 }
 
 // loadMOHClasses reads the music on hold classes with their playlists

@@ -150,6 +150,7 @@ var NonFlowResources = map[string]string{
 	"prov/firmware":                 "phone firmware files, not call routing",
 	"phone-groups":                  "provisioning groups of phones (templates, multicast listening, PTT), not call routing",
 	"phonebooks":                    "directory data shown on phones, not call routing",
+	"locations":                     "where phones are, for the HELD server and the location sent with an emergency call; it does not change where a call goes",
 	"wifi-profiles":                 "networks a Wi-Fi handset joins, written to its provisioned configuration, not call routing",
 	"ringtones":                     "custom tones phones download for the ring map, not call routing",
 	"ring-tags":                     "names the tone a phone plays, sent to it as Alert-Info; the tag a call gets does not change where it goes",

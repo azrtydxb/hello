@@ -80,6 +80,9 @@ type Trunk struct {
 	// ways. Off by default; an inbound MESSAGE from a trunk is refused
 	// unless this is on and the source is the trunk's.
 	Messaging bool
+	// Geolocation adds the caller's Geolocation header and PIDF-LO body to
+	// an emergency call sent through this trunk (RFC 6442; spec S-28 e).
+	Geolocation bool
 	// Codecs is the audio codec allow-list offered to the trunk, in the
 	// caller's order (names: PCMU, PCMA, G722, opus). Empty means the
 	// default, PCMU and PCMA: most carriers accept G.711 only.

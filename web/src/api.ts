@@ -282,8 +282,8 @@ export interface FollowMeLegResult {
 
 /** GET /api/v1/cdrs/{id}: the CDR plus its routing trace. */
 export interface CdrDetail extends Cdr {
-  /** call, page or intercom. */
-  kind?: "call" | "page" | "intercom" | "conference";
+  /** call, page, intercom, conference, callback or alarm (a *55 alarm call). */
+  kind?: "call" | "page" | "intercom" | "conference" | "callback" | "alarm";
   /** A page's outcome per member, in the order they were paged. */
   pageLegs?: PageLegResult[];
   /** What each follow-me leg did, in the order they rang. */
@@ -360,6 +360,8 @@ export interface TrunkFields {
   internalDialing: InternalDialing;
   /** SMS over SIP: text messages may be sent and received through it. */
   messaging: boolean;
+  /** Emergency calls through it carry the caller's location (RFC 6442). */
+  geolocation: boolean;
   /** How a fax call is carried: G.711 passthrough, T.38, or refused. */
   faxMode: "passthrough" | "t38" | "off";
   /**
