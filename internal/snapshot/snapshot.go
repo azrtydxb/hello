@@ -261,7 +261,7 @@ type Snapshot struct {
 	// built-in tags and no rules.
 	ringTags *ringtag.Table
 	// emergency is the alarm destinations, device locations and notify group
-	// (migration 00077).
+	// (migration 00078).
 	emergency EmergencyData
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState

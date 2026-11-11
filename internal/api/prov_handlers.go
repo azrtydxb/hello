@@ -591,4 +591,26 @@ func maskSecrets(d *prov.RenderData) {
 		fw.URL = tokenInPathRe.ReplaceAllString(fw.URL, "/p/"+mask+"/")
 		d.Firmware = &fw
 	}
+	if d.SCEP != nil {
+		sc := *d.SCEP
+		sc.URL = tokenInPathRe.ReplaceAllString(sc.URL, "/p/"+mask+"/")
+		sc.Challenge = mask
+		d.SCEP = &sc
+	}
+	if d.Dot1X != nil {
+		dx := prov.Dot1XInfo{Profiles: slices.Clone(d.Dot1X.Profiles)}
+		for i := range dx.Profiles {
+			if dx.Profiles[i].Password != "" {
+				dx.Profiles[i].Password = mask
+			}
+		}
+		if d.Dot1X.Wired != nil {
+			w := *d.Dot1X.Wired
+			if w.Password != "" {
+				w.Password = mask
+			}
+			dx.Wired = &w
+		}
+		d.Dot1X = &dx
+	}
 }

@@ -1,7 +1,6 @@
 package prov
 
 import (
-	"context"
 	"encoding/xml"
 	"errors"
 	"net/http"
@@ -157,15 +156,6 @@ func e911Data(model string) RenderData {
 	d.E911 = NewE911("https://prov.hello.test/p/"+strings.Repeat("a", 52)+"/", "112,911")
 	d.AlarmNumber = AlarmNumber
 	return d
-}
-
-func renderGS(t *testing.T, d RenderData) string {
-	t.Helper()
-	got, err := Render(context.Background(), builtinFor(t, Grandstream), "cfg"+d.Phone.MAC+".xml", d)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(got)
 }
 
 // TestWP8x6EmergencyKeys fails if a WP8x6 with E911 on lacks the E911 and HELD

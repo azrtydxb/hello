@@ -36,7 +36,7 @@ const (
 	KindConference = "conference"
 	KindDoor       = "door"     // a door station's call or a call to a Door group (migration 00053)
 	KindCallback   = "callback" // a call Hello placed to a queue caller who asked for a callback (migration 00049)
-	KindAlarm      = "alarm"    // a *55 alarm call (migration 00077)
+	KindAlarm      = "alarm"    // a *55 alarm call (migration 00078)
 	KindFax        = "fax"      // a fax call, received or sent (migration 00073); the fax is in the faxes table, by correlation id
 )
 

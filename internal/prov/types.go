@@ -51,12 +51,13 @@ const (
 	KindBoot      FileKind = "boot"      // /p/boot/<file>
 	KindUpload    FileKind = "upload"    // a discarded PUT
 	KindPhonebook FileKind = "phonebook" // /p/<token>/pb/<n>.xml and Poly's <mac>-directory.xml
+	KindSCEP      FileKind = "scep"      // /p/<token>/scep (S-25)
 	KindRingtone  FileKind = "ringtone"  // /p/<token>/ring/<name>.wav (S-43)
 	KindOther     FileKind = "other"     // anything not recognised
 )
 
 // FileKinds lists every file kind.
-var FileKinds = []FileKind{KindCommon, KindDevice, KindMaster, KindFirmware, KindCA, KindBoot, KindUpload, KindPhonebook, KindRingtone, KindOther}
+var FileKinds = []FileKind{KindCommon, KindDevice, KindMaster, KindFirmware, KindCA, KindBoot, KindUpload, KindPhonebook, KindRingtone, KindSCEP, KindOther}
 
 // Result is the outcome recorded on a fetch (spec S-14).
 type Result string
@@ -82,6 +83,11 @@ const (
 	ResultUploadDiscarded Result = "upload_discarded"
 	ResultNotFound        Result = "not_found"
 	ResultUnavailable     Result = "unavailable"
+	// ResultSCEPIssued is a SCEP PKIOperation that issued (or re-sent) a
+	// certificate; ResultSCEPRefused one answered with a failure, or a
+	// malformed SCEP request (S-25).
+	ResultSCEPIssued  Result = "scep_issued"
+	ResultSCEPRefused Result = "scep_refused"
 )
 
 // Results lists every fetch result.
@@ -89,7 +95,7 @@ var Results = []Result{
 	ResultServed, ResultNotModified, ResultUnknownToken, ResultMACMismatch, ResultNotAllowlisted,
 	ResultPlainHTTP, ResultRateLimited, ResultNoTemplate, ResultRenderError, ResultBootServed,
 	ResultBootHandoff, ResultBootReclaim, ResultBootDenied, ResultUploadDiscarded, ResultNotFound,
-	ResultUnavailable,
+	ResultUnavailable, ResultSCEPIssued, ResultSCEPRefused,
 }
 
 // RenderData is the only value a template sees (spec S-8). Nothing outside
@@ -157,6 +163,11 @@ type RenderData struct {
 	// only when the phone's group has an alarm destination (S-29).
 	E911        *E911Info
 	AlarmNumber string
+	// SCEP is the phone's SCEP client settings (phone-feature-parity
+	// S-25), nil when SCEP is not on for it. Dot1X is its 802.1X profiles,
+	// nil when there are none.
+	SCEP  *SCEPInfo
+	Dot1X *Dot1XInfo
 }
 
 // E911Info is what a WP8x6 needs to ask Hello for its location (RFC 5985).
@@ -230,6 +241,11 @@ type Phone struct {
 	// Family is the Grandstream WP family of the model ("8x6", "856",
 	// "8xx"), empty for any other phone. Render fills it from Model.
 	Family string
+	// SCEPCapable is set for a model whose built-in template has SCEP keys
+	// (SupportsSCEP) and Wired8021X for one with wired 802.1X keys
+	// (SupportsWired8021X). Render fills both from Vendor and Model.
+	SCEPCapable bool
+	Wired8021X  bool
 	// FXO is set for the Grandstream HT813 (FXS port plus an FXO port to
 	// the PSTN): the template then writes the FXO disconnect supervision
 	// keys. Render fills it from Vendor and Model.

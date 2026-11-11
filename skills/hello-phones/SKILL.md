@@ -237,6 +237,34 @@ The ring map turns a ring tag into a tone on each vendor's phones.
   overrides; an empty list removes them. An override wins over the global choice
   for that group's phones.
 
+## Certificates and 802.1X (admin)
+
+Hello runs a SCEP server and a device CA, so phones get their own client
+certificate for 802.1X (EAP-TLS) without anyone copying keys around.
+
+- `getSCEP` shows whether the SCEP server is on, the device CA (never its
+  key) and the CA and CRL URLs to give the RADIUS server.
+- `setSCEPCA` with mode `generate` makes the device CA once; mode `import`
+  with `certPem` and `keyPem` brings an intermediate of an existing
+  enterprise CA instead. A second call needs `replace` set to true; ask
+  first, because phones then enrol again.
+- `setPhoneGroupSecurity` switches SCEP on for a phone group (off by
+  default), sets `certValidityDays` and names the wired profile;
+  `getPhoneGroupSecurity` reads it. Grandstream WP816/826/836 and GRP2601 to
+  2604 enrol; GRP26xx desk phones take the wired profile.
+- `listSCEPCertificates` (filter `phoneId`, `status`) shows what was issued;
+  `revokeSCEPCertificate` puts one on the CRL. Removing a phone revokes its
+  certificates. `rotatePhoneSCEPChallenge` discards a phone's one-time
+  challenge; the next configuration carries a new one. No tool shows a
+  challenge, a CA key or a password.
+- 802.1X profiles are reusable: `listDot1XProfiles`, `getDot1XProfile`,
+  `createDot1XProfile` (name, method, identity such as `phone-{mac}`,
+  password, and the RADIUS server's CA as `caCertPem`),
+  `updateDot1XProfile` (leave `password` out to keep it),
+  `deleteDot1XProfile` (refused while a group uses it). Methods: `eap-tls`
+  (the SCEP certificate; written only where SCEP is on), `peap`, `eap-md5`
+  (wired only). A wrong profile can take a phone off the network: try it on
+  one phone's group first.
 ## Wi-Fi handsets
 
 A Grandstream Wi-Fi handset (WP810, WP822, WP825, WP816, WP826, WP836, WP856)

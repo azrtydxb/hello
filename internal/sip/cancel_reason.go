@@ -61,7 +61,7 @@ func (c *call) cancelForksElsewhereExcept(except *leg) {
 		}
 		l.mu.Lock()
 		l.elsewhere = true
-		if l.dcs != nil {
+		if l.dcs != nil && !l.answered {
 			l.dcs.UA = c.s.uacElsewhere
 		}
 		l.mu.Unlock()

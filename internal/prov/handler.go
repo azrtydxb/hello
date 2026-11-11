@@ -52,6 +52,10 @@ type Options struct {
 	// Onboarding records the MACs of unadopted phones that ask for their
 	// configuration (spec phone-onboarding); nil records none.
 	Onboarding Onboarding
+	// SCEP serves the SCEP endpoint /p/<token>/scep, the device CA at
+	// /p/scep-ca.crt and its CRL at /p/scep-ca.crl (phone-feature-parity
+	// S-25); nil (HELLO_SCEP=false) answers them 404.
+	SCEP SCEPStore
 }
 
 type handler struct {
@@ -102,18 +106,24 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rest, ok := strings.CutPrefix(path, "/p/")
+	seg, name, _ := strings.Cut(rest, "/")
 	readOnly := r.Method == http.MethodGet || r.Method == http.MethodHead
-	allowed := readOnly || r.Method == http.MethodPut || (r.Method == http.MethodPost && strings.HasSuffix(rest, "/held"))
+	scepReq := seg != "" && isSCEPName(name)
+	// SCEP alone takes POST (PKIOperation, RFC 8894 section 4.1).
+	allowed := readOnly || r.Method == http.MethodPut || (scepReq && r.Method == http.MethodPost) || (r.Method == http.MethodPost && strings.HasSuffix(rest, "/held"))
 	if !ok || !allowed {
 		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
 		return
 	}
-	seg, name, _ := strings.Cut(rest, "/")
 	switch {
-	case !readOnly && (seg == "boot" || seg == "ca.crt" || seg == "ca.der"):
+	case !readOnly && (seg == "boot" || seg == "ca.crt" || seg == "ca.der" || seg == "scep-ca.crt" || seg == "scep-ca.crl"):
 		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
 	case rest == "ca.crt" || rest == "ca.der":
 		h.serveCA(w, r, ev, rest)
+	case rest == "scep-ca.crt" || rest == "scep-ca.crl":
+		h.servePublicSCEP(w, r, ev, rest)
+	case scepReq && r.Method != http.MethodPut:
+		h.serveSCEP(w, r, ev, seg, https)
 	case seg == "boot":
 		h.serveBoot(ctx, w, ev, name)
 	case name == "held" && r.Method == http.MethodPost:

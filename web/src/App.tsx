@@ -70,6 +70,7 @@ import { Blocklist } from "./pages/Blocklist";
 import { Onboarding } from "./pages/Onboarding";
 import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
+import { PhoneSecurity } from "./pages/PhoneSecurity";
 import { Wifi } from "./pages/Wifi";
 import { ProvSettings } from "./pages/ProvSettings";
 import { ProvTemplates } from "./pages/ProvTemplates";
@@ -391,6 +392,7 @@ export function App() {
             <Route path="/phones/groups" element={<PhoneGroups />} />
             <Route path="/phones/templates" element={<ProvTemplates />} />
             <Route path="/phones/firmware" element={<ProvFirmware />} />
+            <Route path="/phones/security" element={<PhoneSecurity />} />
             <Route path="/phones/wifi" element={<Wifi />} />
             <Route path="/phones/syslog" element={<UnknownSyslog />} />
             <Route path="/phones/settings" element={<ProvSettings />} />
