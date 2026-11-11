@@ -115,6 +115,34 @@ describe("Call History", () => {
     );
   });
 
+  it("lists the calls a trunk turned away on the Blocked tab", async () => {
+    const blocked = {
+      ...cdr(11, "+447900000001"),
+      finalStatus: 603,
+      failureReason: "blocked: blocklist",
+      direction: "inbound",
+      trunk: "carrier-primary",
+    };
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/counts": () => json({ all: 12, failed: 3 }),
+      "GET /api/v1/cdrs?limit=50": () => json({ items: [], next: "" }),
+      "GET /api/v1/cdrs?limit=50&disposition=blocked": () =>
+        json({ items: [blocked], next: "" }),
+    });
+    renderApp("/history");
+    fireEvent.click(await screen.findByRole("tab", { name: "Blocked" }));
+    expect(await screen.findByText("+447900000001")).toBeVisible();
+    expect(screen.getByText("603")).toBeVisible();
+    expect(screen.getByRole("link", { name: /Export CSV/ })).toHaveAttribute(
+      "href",
+      "/api/v1/cdrs/export?disposition=blocked",
+    );
+    expect(calls.map((c) => c.url)).toContain(
+      "/api/v1/cdrs?limit=50&disposition=blocked",
+    );
+  });
+
   it("opens on the tab named in the URL, and a row opens the call", async () => {
     mockApi({
       ...ME,

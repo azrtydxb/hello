@@ -81,6 +81,10 @@ var english = map[Key]string{
 	GreetBusyTail:        "is busy at the moment. Please leave a message after the tone.",
 	GreetUnreachableTail: "cannot be reached at the moment. Please leave a message after the tone.",
 
+	BossScreen:           "Call for {who}. Press 1 to put the caller through, or 2 to take a message.",
+	GroupLeave:           "Please leave a message for {group} after the tone.",
+	GroupBroadcast:       "After the tone, record your message for the group. Press pound when finished.",
+	GroupSent:            "Your message has been sent.",
 	QueueCallbackOffer:   "To be called back when an agent is free, and keep your place in line, press {digit}.",
 	QueueCallbackConfirm: "Thank you. We will call you back on this number as soon as an agent is free. You keep your place in line. Goodbye.",
 	QueueCallbackFull:    "Sorry, a callback cannot be arranged right now. Please stay on the line.",

@@ -418,7 +418,9 @@ def verify(secret: str, header: str, raw_body: bytes, now: float | None = None) 
     sigs = [v for k, _, v in parts if k == "v1"]
     if t is None or abs((time.time() if now is None else now) - t) > 300:
         raise ValueError("stale or missing timestamp")
-    want = hmac.new(secret.encode(), f"{t}.".encode() + raw_body, hashlib.sha256).hexdigest()
+    want = hmac.new(
+        secret.encode(), f"{t}.".encode() + raw_body, hashlib.sha256
+    ).hexdigest()
     if not any(hmac.compare_digest(want.encode(), s.encode()) for s in sigs):
         raise ValueError("signature mismatch")
 ```
