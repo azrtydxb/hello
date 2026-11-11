@@ -37,6 +37,7 @@ import {
   IntegrationsOverview,
 } from "./pages/Integrations";
 import { IntegrationEvents } from "./pages/IntegrationEvents";
+import { IntegrationsCRM } from "./pages/IntegrationsCRM";
 import { Webhooks } from "./pages/Webhooks";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
@@ -100,6 +101,7 @@ import { Conferences } from "./pages/Conferences";
 import { Ivr } from "./pages/Ivr";
 import { Queues } from "./pages/Queues";
 import { QueueCallbacks } from "./pages/QueueCallbacks";
+import { Faxes, MyFaxes } from "./pages/Faxes";
 import { Wallboard } from "./pages/Wallboard";
 import { TimeConditions } from "./pages/TimeConditions";
 import { BossAssistant } from "./pages/BossAssistant";
@@ -133,6 +135,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/me/voicemail": MyVoicemail,
   "/me/forwarding": MyForwarding,
   "/me/history": MyHistory,
+  "/me/faxes": MyFaxes,
   "/me/profile": MyProfile,
   "/settings/backups": Backups,
   "/settings/email": EmailSettings,
@@ -152,6 +155,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/conferences": Conferences,
   "/ivr": Ivr,
   "/queues": Queues,
+  "/faxes": Faxes,
   "/wallboard": Wallboard,
   "/time-conditions": TimeConditions,
   "/park": ParkPickup,
@@ -171,6 +175,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/integrations": IntegrationsOverview,
   "/integrations/api-access": IntegrationsApiAccess,
   "/integrations/events": IntegrationEvents,
+  "/integrations/crm": IntegrationsCRM,
   "/integrations/webhooks": Webhooks,
 };
 

@@ -510,7 +510,7 @@ func newAcctFake(t *testing.T) (*acctFake, http.Handler, *audioFake, *bytes.Buff
 	f.actors[hex.EncodeToString(auth.HashToken("svc"+cookieSuffix))] = auth.Actor{UserID: 0, Username: "", Role: auth.RoleUser}
 	objs := &audioFake{}
 	logs := &bytes.Buffer{}
-	h := Handler(Config{Store: f, Objects: objs, Log: slog.New(slog.NewTextHandler(logs, nil)), SessionTTL: time.Hour,
+	h := Handler(Config{Store: f, Objects: objs, Fax: acctFax(f), Log: slog.New(slog.NewTextHandler(logs, nil)), SessionTTL: time.Hour,
 		SMTPDeliver: func(context.Context, mailer.Settings, string, []byte) error { return nil }})
 	return f, h, objs, logs
 }

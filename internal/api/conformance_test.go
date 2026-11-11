@@ -56,6 +56,8 @@ var conformanceBodies = []string{
 	"replaceAnnouncement application/json",
 	"importPhones application/json",
 	"importPhonebook application/json",
+	"sendFax application/json",
+	"sendFax multipart/form-data",
 }
 
 // conformance validates every request the package suite sends through

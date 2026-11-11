@@ -480,6 +480,37 @@ func TestLoadVoicemailVoice(t *testing.T) {
 	}
 }
 
+// TestLoadFax fails if fax is on by default, if the engine address is not
+// required when it is on, or if the retention is outside 1 to 3650 days.
+func TestLoadFax(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Fax.Enabled || c.Fax.RetentionDays != 90 {
+		t.Fatalf("defaults = %+v, want fax off and 90 days", c.Fax)
+	}
+	c, err = LoadSIP(env(map[string]string{"HELLO_FAX_ENABLED": "true", "HELLO_FAX_ADDR": "hello-fax:8083", "HELLO_FAX_TOKEN": "t"}))
+	if err != nil || !c.Fax.Enabled || c.Fax.Addr != "hello-fax:8083" || c.Fax.Token != "t" {
+		t.Fatalf("fax settings = %+v (%v)", c.Fax, err)
+	}
+	for name, vars := range map[string]map[string]string{
+		"enabled without an address": {"HELLO_FAX_ENABLED": "true"},
+		"address without a port":     {"HELLO_FAX_ENABLED": "true", "HELLO_FAX_ADDR": "hello-fax"},
+		"not a boolean":              {"HELLO_FAX_ENABLED": "yes"},
+		"retention too long":         {"HELLO_FAX_RETENTION_DAYS": "3651"},
+		"retention zero":             {"HELLO_FAX_RETENTION_DAYS": "0"},
+	} {
+		if _, err := LoadSIP(env(vars)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	ctl, err := LoadControl(env(map[string]string{"HELLO_FAX_RETENTION_DAYS": "3650"}))
+	if err != nil || ctl.Fax.RetentionDays != 3650 {
+		t.Fatalf("control fax = %+v (%v)", ctl.Fax, err)
+	}
+}
+
 // TestLoadSessionTimersTrunks fails if HELLO_SIP_SESSION_TIMERS_TRUNKS is not
 // off by default, does not read true, or accepts junk.
 func TestLoadSessionTimersTrunks(t *testing.T) {

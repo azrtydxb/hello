@@ -51,7 +51,7 @@ func below(s auth.Scope) auth.Scopes {
 }
 
 var concreteParams = strings.NewReplacer("{id}", "1", "{vendor}", "snom", "{secretId}", "1",
-	"{ip}", "192.0.2.1", "{name}", "hello-setup", "{entryId}", "1")
+	"{ip}", "192.0.2.1", "{name}", "hello-setup", "{entryId}", "1", "{userId}", "1")
 
 // TestScopeEnforcement fails, for any route, if a token whose scopes are
 // just below the route's is admitted, if the route's own scope (or a
