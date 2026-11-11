@@ -85,6 +85,15 @@
 | `createDot1XProfile`            | admin | Add an 802.1X profile.                                    |
 | `updateDot1XProfile`            | admin | Replace an 802.1X profile.                                |
 | `deleteDot1XProfile`            | admin | Delete an unused 802.1X profile.                          |
+| `listWifiProfiles`              | read  | Wi-Fi profiles, secrets never shown.                      |
+| `createWifiProfile`             | admin | Create a Wi-Fi profile.                                   |
+| `getWifiProfile`                | read  | One Wi-Fi profile.                                        |
+| `updateWifiProfile`             | admin | Change a Wi-Fi profile.                                   |
+| `deleteWifiProfile`             | admin | Delete an unused Wi-Fi profile.                           |
+| `getPhoneGroupWifi`             | read  | A group's Wi-Fi profiles and roaming.                     |
+| `putPhoneGroupWifi`             | admin | Set a group's Wi-Fi profiles and roaming.                 |
+| `getPhoneWifi`                  | read  | A phone's own and inherited profiles.                     |
+| `putPhoneWifi`                  | admin | Set a phone's Wi-Fi profiles.                             |
 | Tool                                | Scope | What it does                                                       |
 | -------------------------------     | ----- | --------------------------------------------------------           |
 | `listPhones`                        | read  | Provisioned phones by MAC.                                         |

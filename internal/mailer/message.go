@@ -122,6 +122,73 @@ func BuildTest(from, to string, now time.Time) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// FaxMessage is one fax-to-email notification (pbx-gaps S-17): a short text
+// with the sender's number and the PDF attached.
+type FaxMessage struct {
+	To       string
+	Peer     string
+	Pages    int
+	Received time.Time
+	// Name is the attachment's file name, fax-<yyyymmdd-hhmm>-<id>.pdf.
+	Name string
+	PDF  []byte
+}
+
+// BuildFaxMessage renders the email of a received fax. The sender number is in
+// the subject and the body, as the CDR carries it for the owner (decision
+// D15).
+func BuildFaxMessage(from string, m FaxMessage) ([]byte, error) {
+	if from == "" {
+		return nil, errors.New("mailer: no From address configured")
+	}
+	if strings.ContainsAny(from, "\r\n") || strings.ContainsAny(m.To, "\r\n") || strings.ContainsAny(m.Name, "\r\n\"\\") {
+		return nil, errors.New("mailer: address or file name contains a forbidden character")
+	}
+	var buf bytes.Buffer
+	subject := "New fax"
+	if m.Peer != "" {
+		subject += " from " + m.Peer
+	}
+	fmt.Fprintf(&buf, "From: %s\r\n", from)
+	fmt.Fprintf(&buf, "To: %s\r\n", m.To)
+	fmt.Fprintf(&buf, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject))
+	fmt.Fprintf(&buf, "Date: %s\r\n", m.Received.Format(time.RFC1123Z))
+	buf.WriteString("MIME-Version: 1.0\r\n")
+	mp := multipart.NewWriter(&buf)
+	fmt.Fprintf(&buf, "Content-Type: multipart/mixed; boundary=%q\r\n", mp.Boundary())
+	buf.WriteString("\r\n")
+	tw, err := mp.CreatePart(textproto.MIMEHeader{
+		"Content-Type":              {"text/plain; charset=utf-8"},
+		"Content-Transfer-Encoding": {"quoted-printable"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var b strings.Builder
+	b.WriteString("You have received a fax")
+	if m.Peer != "" {
+		b.WriteString(" from " + m.Peer)
+	}
+	b.WriteString(".\r\n\r\nPages: " + strconv.Itoa(m.Pages))
+	b.WriteString("\r\nReceived: " + m.Received.UTC().Format(time.RFC1123Z))
+	b.WriteString("\r\n\r\nThe fax is attached as a PDF.\r\n")
+	if _, err := quotedprintable.NewWriter(tw).Write([]byte(b.String())); err != nil {
+		return nil, err
+	}
+	aw, err := mp.CreatePart(textproto.MIMEHeader{
+		"Content-Type":              {"application/pdf; name=\"" + m.Name + "\""},
+		"Content-Disposition":       {"attachment; filename=\"" + m.Name + "\""},
+		"Content-Transfer-Encoding": {"base64"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := writeBase64(aw, m.PDF); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), mp.Close()
+}
+
 // BuildNotice renders a short plain-text notification email. subject and
 // body are the caller's own words (never customer text): a line break in
 // the subject or an address is refused so nothing can inject a header.

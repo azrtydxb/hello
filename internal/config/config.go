@@ -49,6 +49,8 @@ type Backup struct {
 // Control is hello-control's configuration.
 type Control struct {
 	Common
+	// Fax is the fax feature (HELLO_FAX_*); disabled unless HELLO_FAX_ENABLED.
+	Fax         Fax
 	DatabaseURL string
 	// Database is DatabaseURL parsed, so a malformed DSN fails at startup.
 	Database *pgx.ConnConfig
@@ -89,6 +91,8 @@ type Control struct {
 	// SecretKey (HELLO_SECRET_KEY) seals trunk passwords; identical on every
 	// hello-control and hello-sip.
 	SecretKey string
+	// Clients is the browser softphone's device and ICE settings.
+	Clients Clients
 	// Backup is where the PostgreSQL client programs and the staging
 	// directory of backups are (HELLO_BACKUP_*, spec pbx-gaps S-2).
 	Backup Backup
@@ -389,6 +393,8 @@ type ProvRedirect struct {
 // listens; the advertised address is what it puts in Via/Contact (spec §18).
 type SIP struct {
 	Common
+	// Fax is the fax feature (HELLO_FAX_*); disabled unless HELLO_FAX_ENABLED.
+	Fax               Fax
 	ValkeyAddr        string
 	ValkeySentinels   []string
 	ValkeyMaster      string
@@ -418,6 +424,15 @@ type SIP struct {
 	VoicePromptLanguage string
 	Timezone            string
 	Dial                phonebook.Dialing
+	// ClientAuthKey and ClientAuthKeyPrevious (HELLO_CLIENT_AUTH_KEY and
+	// HELLO_CLIENT_AUTH_KEY_PREVIOUS) derive the digest secret of a web
+	// device; empty turns derived credentials off. A credential made under
+	// either key is accepted, so rotating the key drops no registered client.
+	ClientAuthKey         string
+	ClientAuthKeyPrevious string
+	// MaxContacts (HELLO_SIP_MAX_CONTACTS, default 10) caps the bindings of
+	// one AOR.
+	MaxContacts int
 	// SecretKey (HELLO_SECRET_KEY) opens trunk passwords sealed by
 	// hello-control and the text-to-speech key.
 	SecretKey      string
@@ -542,6 +557,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		BootstrapAdminPassword: r.optional("HELLO_BOOTSTRAP_ADMIN_PASSWORD", ""),
 		SessionTTL:             r.duration("HELLO_SESSION_TTL", 12*time.Hour),
 	}
+	c.Fax = r.fax()
 	c.EventRetentionDays = r.positiveInt("HELLO_EVENT_RETENTION_DAYS", 7)
 	if c.EventRetentionDays > 30 {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
@@ -568,8 +584,86 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	c.VoicePromptLanguage = r.optional("HELLO_VOICEMAIL_LANGUAGE", "en")
 	c.AI = r.ai()
 	c.AIAgent = r.aiAgent()
+	c.Clients = r.clients()
 	c.Syslog = r.syslog()
 	return c, r.err()
+}
+
+// Clients is the browser softphone's settings on hello-control.
+type Clients struct {
+	// AuthKey and AuthKeyPrevious (HELLO_CLIENT_AUTH_KEY, _PREVIOUS) derive
+	// the digest secret of a web device; hello-sip holds the same keys. Empty
+	// AuthKey turns web devices off (the enrolment routes answer 503).
+	AuthKey         string
+	AuthKeyPrevious string
+	// MaxDevices (HELLO_CLIENT_MAX_DEVICES, default 5) caps the web devices
+	// of one user.
+	MaxDevices int
+	// WSSURL (HELLO_WSS_URL) is the WebSocket address the softphone
+	// registers at, returned with the credentials.
+	WSSURL string
+	// STUNURLs and TURNURLs (HELLO_STUN_URLS, HELLO_TURN_URLS, comma
+	// separated) are handed to the softphone; STUN defaults to the plain
+	// turn: hosts. TURNSecret (HELLO_TURN_SECRET) is coturn's
+	// static-auth-secret and TURNTTL (HELLO_TURN_TTL, default 1h) the
+	// lifetime of a credential made from it.
+	STUNURLs   []string
+	TURNURLs   []string
+	TURNSecret string
+	TURNTTL    time.Duration
+}
+
+// clientKey reads a client credential key: at least 32 bytes, never echoed.
+func (r *reader) clientKey(key string) string {
+	k := r.getenv(key)
+	if k != "" && len(k) < 32 {
+		r.fail(key, errors.New("must be at least 32 bytes; generate one with: openssl rand -base64 32"))
+	}
+	return k
+}
+
+// urlList reads a comma separated list of URIs that must start with one of
+// the schemes.
+func (r *reader) urlList(key string, schemes ...string) []string {
+	var out []string
+	for _, u := range strings.Split(r.getenv(key), ",") {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		if !slices.ContainsFunc(schemes, func(p string) bool { return strings.HasPrefix(u, p) }) || strings.ContainsAny(u, " \t\n\"") {
+			r.fail(key, fmt.Errorf("%q must start with %s", u, strings.Join(schemes, " or ")))
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
+}
+
+func (r *reader) clients() Clients {
+	c := Clients{
+		AuthKey:         r.clientKey("HELLO_CLIENT_AUTH_KEY"),
+		AuthKeyPrevious: r.clientKey("HELLO_CLIENT_AUTH_KEY_PREVIOUS"),
+		MaxDevices:      r.positiveInt("HELLO_CLIENT_MAX_DEVICES", 5),
+		WSSURL:          r.optional("HELLO_WSS_URL", ""),
+		STUNURLs:        r.urlList("HELLO_STUN_URLS", "stun:", "stuns:"),
+		TURNURLs:        r.urlList("HELLO_TURN_URLS", "turn:", "turns:"),
+		TURNSecret:      r.getenv("HELLO_TURN_SECRET"),
+		TURNTTL:         r.duration("HELLO_TURN_TTL", time.Hour),
+	}
+	if c.AuthKeyPrevious != "" && c.AuthKey == "" {
+		r.fail("HELLO_CLIENT_AUTH_KEY_PREVIOUS", errors.New("needs HELLO_CLIENT_AUTH_KEY"))
+	}
+	if c.WSSURL != "" && !strings.HasPrefix(c.WSSURL, "wss://") && !strings.HasPrefix(c.WSSURL, "ws://") {
+		r.fail("HELLO_WSS_URL", errors.New("must be a wss:// (or ws://) URL"))
+	}
+	if len(c.TURNURLs) > 0 && len(c.TURNSecret) < 16 {
+		r.fail("HELLO_TURN_SECRET", errors.New("is required with HELLO_TURN_URLS and must be at least 16 bytes"))
+	}
+	if c.TURNTTL < time.Minute || c.TURNTTL > 24*time.Hour {
+		r.fail("HELLO_TURN_TTL", errors.New("must be between 1m and 24h"))
+	}
+	return c
 }
 
 // ai reads HELLO_PUBLIC_URL, HELLO_OAUTH_* and HELLO_MCP_ALLOWED_ORIGINS.
@@ -982,6 +1076,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.PageFanout = r.positiveInt("HELLO_PAGE_FANOUT", 200)
 	c.PageMulticastIface = r.getenv("HELLO_PAGE_MULTICAST_IFACE")
 	c.PageMulticastTTL = r.positiveInt("HELLO_PAGE_MULTICAST_TTL", 1)
+	c.Fax = r.fax()
 	c.RTPPortMin = r.port("HELLO_RTP_PORT_MIN", 20000)
 	c.RTPPortMax = r.port("HELLO_RTP_PORT_MAX", 21000)
 	c.DSCPSIP = r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP)
@@ -999,6 +1094,12 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	}
 	c.Database = r.database(c.DatabaseURL)
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
+	c.ClientAuthKey = r.clientKey("HELLO_CLIENT_AUTH_KEY")
+	c.ClientAuthKeyPrevious = r.clientKey("HELLO_CLIENT_AUTH_KEY_PREVIOUS")
+	if c.ClientAuthKeyPrevious != "" && c.ClientAuthKey == "" {
+		r.fail("HELLO_CLIENT_AUTH_KEY_PREVIOUS", errors.New("needs HELLO_CLIENT_AUTH_KEY"))
+	}
+	c.MaxContacts = r.positiveInt("HELLO_SIP_MAX_CONTACTS", 10)
 	c.SecretKey = r.secretKey()
 	r.minio(&c.MinioEndpoint, &c.MinioAccessKey, &c.MinioSecretKey, &c.MinioSecure)
 	c.TrustedProxies = r.prefixes("HELLO_SIP_TRUSTED_PROXIES")
@@ -1357,4 +1458,38 @@ func (r *reader) common(defaultHTTP string) Common {
 		r.fail("HELLO_LOG_LEVEL", err)
 	}
 	return c
+}
+
+// Fax is the settings of the fax feature (pbx-gaps S-15 to S-17), read by
+// hello-control and hello-sip. The fax engine itself, hello-fax, reads its
+// own listen and port settings.
+type Fax struct {
+	// Enabled (HELLO_FAX_ENABLED, default false) turns the feature on. Off,
+	// fax calls are answered 488 and the API refuses to queue a fax.
+	Enabled bool
+	// Addr (HELLO_FAX_ADDR) is the host:port of hello-fax's control API; the
+	// host is also where hello-sip relays the fax media.
+	Addr string
+	// Token (HELLO_FAX_TOKEN) is the bearer token hello-fax requires; empty
+	// sends none.
+	Token string
+	// RetentionDays (HELLO_FAX_RETENTION_DAYS, default 90, 1 to 3650) is how
+	// long a fax is kept.
+	RetentionDays int
+}
+
+// fax reads the HELLO_FAX_* settings.
+func (r *reader) fax() Fax {
+	f := Fax{
+		Enabled: r.boolean("HELLO_FAX_ENABLED"), Addr: r.optional("HELLO_FAX_ADDR", ""),
+		Token: r.optional("HELLO_FAX_TOKEN", ""), RetentionDays: r.positiveInt("HELLO_FAX_RETENTION_DAYS", 90),
+	}
+	if f.RetentionDays > 3650 {
+		r.fail("HELLO_FAX_RETENTION_DAYS", errors.New("must be between 1 and 3650"))
+	}
+	if f.Enabled && f.Addr == "" {
+		r.fail("HELLO_FAX_ADDR", errors.New("is required when HELLO_FAX_ENABLED is true"))
+	}
+	r.hostPort("HELLO_FAX_ADDR", f.Addr)
+	return f
 }

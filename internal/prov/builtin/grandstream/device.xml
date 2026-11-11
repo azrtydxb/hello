@@ -484,6 +484,12 @@
     <P712>1</P712>
     <P841>f1=400@-32,c=375/375;</P841>
 {{- end}}
+{{- /* Wi-Fi profiles and roaming (phone-feature-parity S-23, S-24): .Wifi.Keys holds the P-values of the phone's model, worked out by prov.WifiKeys from Grandstream's templates wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83 and wp856_config_1.0.3.16. It is empty until the phone's profiles include one marked verified on a test phone. P84991 (provisionable OEM override) is never written. Unverified on hardware (verify). */}}
+{{- with .Wifi}}
+{{- range .Keys}}
+    <P{{.P}}>{{xml .V}}</P{{.P}}>
+{{- end}}
+{{- end}}
     <P30>{{xml .Time.NTP}}</P30>
 {{- with .Time.TZ.POSIX}}
     <P64>{{xml .}}</P64>

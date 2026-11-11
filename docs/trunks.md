@@ -31,6 +31,10 @@ In the UI, open **Trunks** and create the trunk:
   from any other address with 403.
 - **Password:** entered once. Hello encrypts it with `HELLO_SECRET_KEY` and
   never shows it again; the trunk only reports whether one is set.
+- **Fax mode:** how a fax call on the trunk is carried: `passthrough` (G.711,
+  the default), `t38` (move to T.38 when the carrier offers it or the fax tone
+  is heard; a carrier that answers 488 leaves the call on G.711) or `off`
+  (fax calls on the trunk are refused with 488). See [fax.md](fax.md).
 
 Within a few seconds the trunk shows `registered` (registration trunks) and its
 destinations `up` (OPTIONS health). Exactly one SIP node registers the trunk;

@@ -2503,6 +2503,169 @@ Builder's design choices, within the spec; nothing here was asked of the user.
   `/dot1x-profiles` CRUD, `GET|PUT /phone-groups/{id}/security`; viewers read,
   admins change (S-25 RBAC). UI: Phones > Certificates, and "New SCEP
   challenge" on the phone page.
+## Clients 3 and 4: web devices, coturn and ICE servers (2026-11-09)
+
+Spec: `.procoder/specs/clients-webrtc-mobile-video.md`, phases 3 and 4 (S-13 to S-17, S-21 to S-24). One PR: the two share the configuration, the credentials Secret and the chart wiring, and neither depends on the media foundation (#276) or the WSS edge.
+
+- **Derived credentials, stored under the base name.** A web device row stores `sip_username = w<id>` and no HA1 (`auth_mode = derived`, HA1 columns nullable); the client presents `w<id>.<expiryUnix>`. `Snapshot.DeviceByUsername` resolves the expiring name to the base device (only when that device is derived, so a desk device named like `w99` is never reached through the derived path), and bindings are keyed by the base AOR, so a refreshed credential replaces the old binding. Revocation is `enabled = false`; the snapshot then drops the device and `SnapshotChanged` removes its bindings.
+- **Browser session only.** The five new routes use `ScopeSession` (a bearer token, an OAuth grant or a service account is refused) because the SIP password is minted there. The spec's `softphone` scope is for the mobile pairing flow (S-27, not now). They are excluded from the MCP tools (category `credentials`), so no new tool and no skill teaching is needed; the skills mention the `kind` filter of `listDevices` and the 409 on web devices.
+- **Only `web` is enrolable.** `devices.kind` allows `mobile` so the schema does not change when the apps come, but the API refuses `kind: mobile` (decision of 2026-10-25: apps not now).
+- **Revoke disables, the list shows active only.** Following S-14. The cap counts active client devices, under a lock on the user row (a concurrent test proves it).
+- **Account changes revoke devices.** Disabling or deleting a user, or unlinking an extension from a user, disables the user's client devices on it in the same transaction and moves the revision, otherwise a removed person would keep a working softphone until its credential expired.
+- **Ring preferences.** `users.ring_web` and `ring_mobile` (default on) reach hello-sip as `Device.RingOff` in the snapshot; `bindingsFor` skips such a device before forking. Every fork that is cancelled because another answered now carries `Reason: SIP;cause=200;text="Call completed elsewhere"` (it was pickup only).
+- **`last_seen_at` is the last enrol or refresh**, not the last REGISTER: hello-sip does not write to PostgreSQL on a registration, and "registered now" is read from the live bindings.
+- **Not in this PR, with the reason.** `cdrs.video` and the ICE candidate type in the CDR (there is no video or WebRTC leg yet; the trace names the web device that answered); the Diagnostics "Clients" tab and `GET /api/v1/webrtc/status` (S-52, nothing to count before the WSS edge and the softphone; REGISTER attempts of web devices already show in the existing per-device diagnostics); the pairing code and `softphone` scope (mobile). These belong to items 2, 5 and 6.
+- **TURN secret and key are environment values from the credentials Secret** (`turnSecret`, `clientAuthKey`, `clientAuthKeyPrevious`), referenced by the chart and never rendered; "sealed" is the sops Secret on kw, as for `secretKey`. They are never logged or put in an audit row (tests check it). Rotating the TURN secret needs a rolling restart of control and coturn together (coturn has no multiple concurrent secrets that were verified).
+- **coturn.** One Deployment per address, one replica, `Recreate`, `hostNetwork` by default (the relay leaves from the node address that is `externalIP`); without hostNetwork each server is a LoadBalancer Service listing at most 200 relay ports. `allowedPeers` is required, so the chart cannot render an open relay. The Prometheus exporter is off by default because the Debian build was not checked. `ct-<tree hash of docker/coturn>` is the content tag, like `kc-` for Kamailio.
+- **ICE servers.** `GET /api/v1/me/ice-servers[?deviceId=]`, 60 requests a minute per user (in-process window, per node), counted by `hello_ice_credentials_issued_total` and not audited per credential. STUN defaults to the `turn:` hosts.
+- **Migration 00075** (web devices; the highest on main is now 00074). `test/integration/migrate_{prov,ai,ai_agent}_test.go` counts bumped by one.
+## Wi-Fi profiles and roaming (item 31, S-23, S-24)
+
+Keys come from Grandstream's official templates only (config-template-10212026.zip):
+`wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`, `wp856_config_1.0.3.16`.
+Nothing here is confirmed on a handset.
+
+- **Model scope.** WP816/826/836, WP810/822/825 and WP856 get Wi-Fi keys. The
+  WP820 has its own template (`wp820_config_1.0.7.90`) and is not written. No
+  other vendor is written: no vendor document for their Wi-Fi keys is on hand.
+- **Profiles are named records**, assigned to phone groups and to single phones
+  (a phone's profile with the same SSID replaces its group's). The spec said
+  groups only; phones were asked for. At most 10 per group and per phone; a
+  model writes at most its slots (WP8x6 10, WP810/822/825 17, WP856 1), lowest
+  priority dropped first.
+- **17 networks on the WP810/822/825, not 20.** The template gives networks
+  18 to 20 a security key outside the pattern of the other 17 (P84772, P84872,
+  P84972 against P83002 + 100 (n - 1)). Unconfirmed keys are not written.
+- **No enterprise profile in network 5 of a WP8x6.** The template names its
+  EAP method P83304 where the pattern needs P83404; the profile moves to the
+  next network.
+- **No 802.1X, WPA3 or OWE on models whose template has no key for it.** WP8x6:
+  open, WPA2/WPA3 personal, OWE, WPA2/WPA3 enterprise (PEAP, MSCHAPv2).
+  WP810/822/825: open, WPA2 and WPA3 personal (no EAP keys in the template).
+  WP856: open and WPA2 personal. A profile a model cannot take is skipped for
+  that model. EAP-TLS and an uploaded CA wait for S-25 (device certificates).
+- **Server certificate check** defaults to system certificates (P83016 = 1);
+  trust on first use and skip are offered, uploaded CA is not (S-25).
+- **Band is a group radio setting, not a profile field.** The templates have
+  one band key per phone (P25438 on the WP8x6, P25420 and P25421 on the
+  WP856), none per network. Hidden is written to the WP810/822/825 only
+  (P83050), priority and preferred account to the WP8x6 only (P83049, P83085).
+- **802.11k is not provisioned.** No key for it in any of the three templates.
+  802.11r is P83048 per network (WP810/822/825) and P25315 (WP856); 802.11v is
+  P84992 (WP810/822/825) and P82333 (WP856); the WP8x6 template has neither.
+  The spec's P22232/P22231 map to all three; P82281 is the VoWLAN target delay
+  in the templates (not a roaming threshold), left to S-12 overrides with the
+  power-save mode P82269.
+- **Safety gate (decision 14) is enforced at render time**: profiles are
+  written only when the phone's effective set holds one marked verified. The
+  radio settings do not wait for it. The API shows `pushing`. An assigned but
+  unverified set is accepted (so the test-phone step can be prepared), and
+  writes nothing.
+- **Hello owns the slots once a phone has profiles**: slots it does not fill are
+  written empty so a removed profile disappears from the handset.
+- **P84991 (provisionable OEM override) is never written**, so an OEM Wi-Fi
+  setup survives.
+- **Sealing**: the PSK and the 802.1X password use the store's secret box with
+  contexts `wifi-psk:<id>` and `wifi-password:<id>`; the API shows only
+  `pskSet` and `passwordSet`; previews mask them. A change does not bump the
+  configuration revision (as the ring map): the automatic resync notices the
+  changed render data.
+- Migration 00052 (`wifi_profiles`, `wifi_assignments`, `wifi_radio`); the
+  migrate test counts follow it.
+## Fax (pbx-gaps B5 and B6, S-15 to S-17) (2026-11-09)
+
+Built in one change: the engine, passthrough, T.38, email, API, page and docs.
+
+- **Engine: spandsp through cgo, as D13 decided; there is no pure-Go option.**
+  No maintained pure-Go T.30 or T.38 implementation exists (the V.17, V.29 and
+  V.27ter modems, T.30 and ECM are the work). Upstream spandsp 0.0.6 is itself
+  unmaintained (Homebrew marks it deprecated); Debian and Homebrew still ship
+  it and a fork (spandsp3) continues it. The API used is the 0.0.6 one, so the
+  engine builds on both. Risk and exit: the C code is confined to
+  `cmd/hello-fax/engine_spandsp.go` behind the `spandsp` build tag; moving to
+  spandsp3 is a header and a handful of calls.
+- **Image: Debian, not Alpine.** The `hello-fax` Dockerfile target builds on
+  `golang:1.27-bookworm` (`libspandsp-dev`, `libtiff-dev`) and runs on
+  `debian:bookworm-slim` with `libspandsp2`, `libtiff6` and `poppler-utils`.
+  Alpine's spandsp3 has a different API and a static musl build buys nothing
+  here. The other images are untouched and never link spandsp. CI gains a `fax`
+  job (container `golang:1.27-bookworm` plus the packages) that runs the cgo
+  tests; publish builds the image after it passes.
+- **Pages cross the cgo line as TIFF files.** spandsp's T.30 writes received
+  pages to a TIFF and reads pages to send from one; there is no row API on the
+  T.30 state. Sending is an uncompressed bilevel TIFF written in Go; receiving
+  asks spandsp for T.6 output and decodes it in Go with
+  `golang.org/x/image/ccitt` (new module, Go team, BSD). Rows are then encoded
+  to PDF with stdlib `compress/zlib`, as D13 says.
+- **Control protocol.** hello-sip and hello-control speak HTTP to hello-fax
+  (`internal/fax/client.go`): start a session, poll it, fetch the PDF, stop,
+  forget. A session opens a UDP port; hello-sip's relay forwards RTP or UDPTL
+  there. The response names the pod (`HELLO_FAX_MEDIA_HOST`, the pod IP in the
+  chart): media goes to the pod, not through the Service (replies from a pod
+  would otherwise fail the relay's source check), and later calls for the
+  session go to that pod, so several replicas work. An optional bearer token
+  (`HELLO_FAX_TOKEN`) guards the API.
+- **hello-sip owns the call and the data.** It answers or places the call,
+  runs the relay, writes the `faxes` row, uploads the PDF and records the CDR;
+  hello-fax holds no credentials. hello-control owns the API, the email worker
+  (through `internal/mailer`, claimed from the table so one node sends each)
+  and the retention job (`TryLock`, batches of 500, objects before rows).
+- **UDPTL is read and written in Go** (`internal/fax/udptl.go`, redundancy
+  error recovery, three secondary packets); spandsp's T.38 terminal sees IFP
+  packets only. The relay gained a UDPTL mode (`Relay.SetUDPTL`): datagrams
+  cross unmodified, no RTP parse, no sequence rewrite.
+- **T.38 is per trunk (`trunks.fax_mode`, default passthrough, D14).** CNG
+  (Goertzel, 1100 Hz, three 100 ms windows) on a `t38` trunk re-INVITEs the
+  caller to `m=image`; a carrier's own T.38 re-INVITE is accepted the same way.
+  Outbound: the engine asks for T.38 from the start of a session on a `t38`
+  trunk, and hello-sip re-INVITEs when the carrier answers the call. A 488, a
+  port 0 or parameters Hello does not serve (version above 0, local TCF, FEC)
+  leave the call on G.711. Calls routed through an IVR key do not watch for CNG
+  (the relay is shared with the menu); they still accept a carrier's re-INVITE.
+- **Destinations.** A fax destination is a row (`fax_destinations`: name,
+  owner extension, optional email) that an inbound route (kind `fax`) or an IVR
+  key (kind `fax`) names; admin writes, viewer reads. A destination in use
+  cannot be deleted. An IVR key moves the answered call to G.711 with a
+  re-INVITE; if the caller refuses, the menu says the choice is invalid.
+- **Outbound routing.** A fax is routed as a call from the pseudo source
+  `fax`: outbound routes that apply to every extension carry it, routes that
+  list source extensions do not (documented). Retries: 3 attempts, 5 minutes
+  apart, only for calls that did not connect; a T.30 failure after connection
+  is final (`failed` or `partial`).
+- **Fax email.** The recipient is the destination's address, else the enabled
+  users linked to the owner extension (stored as the sentinel `@owner` and
+  resolved at send time). Six attempts with backoff; no recipient is a final
+  `mail failed`. The attachment is `fax-<yyyymmdd-hhmm>-<id>.pdf`.
+- **Storage and retention.** PDFs live in the `hello-recordings` bucket under
+  `fax/<yyyy>/<id>.pdf`. `HELLO_FAX_RETENTION_DAYS` (default 90, 1 to 3650) is
+  an environment setting, not a console one. A fax still `receiving` after two
+  hours is closed as failed.
+- **API.** `GET|POST /faxes`, `GET|DELETE /faxes/{id}`, `GET /faxes/{id}/pdf`
+  as the spec says, plus `GET|POST /fax-destinations`, `GET|PUT|DELETE
+/fax-destinations/{id}`, and `GET /me/faxes` with `GET /me/faxes/{id}/pdf` so
+  a `user` role reaches the faxes of its own extensions. Viewers read the list;
+  the PDF needs operator (a fax is a document); operators send and delete.
+  `POST /faxes` takes multipart or JSON (`pdfBase64`, 700 KiB) so an agent can
+  send; `GET .../pdf` is excluded from MCP as a binary download. A fax being
+  sent is cancelled by `DELETE`; one being received answers 409.
+- **CDR.** Kind `fax` (constraint widened in `00076`), the direction, the trunk
+  and the route as for any call, and the fax result in the failure reason of a
+  call that ends normally. The fax row carries the CDR correlation id; the CDR
+  API gains no fax columns.
+- **Not replicated.** Fax calls are not part of in-call HA: a node lost during
+  a fax drops it (the sender retries; a received fax keeps its pages as
+  `partial`).
+- **Migration.** `00076_faxes.sql` (renumbered at merge; highest on main was `00060`): `faxes`,
+  `fax_destinations`, `trunks.fax_mode`, and `fax` added to the inbound route,
+  IVR key, IVR exit and CDR kind constraints. The migrate test counts are
+  main's plus this one (49, 47 and 46). Other branches in flight take higher numbers; the merge
+  captain renumbers.
+- **Hardware.** Interop with a real carrier and a real fax machine (G.711 and
+  T.38, ECM, a carrier-initiated re-INVITE, a 488) is the lab list in
+  docs/fax.md. Everything else is tested: a generated multi-page fax goes
+  through the modems over G.711 (PCMU and PCMA) and over T.38 UDPTL, from a PDF
+  rasterised by pdftoppm to the received PDF, and a stopped session keeps its
+  pages.
 
 ## Flow canvas P7: node badges and extensible kinds (2026-11-09)
 
@@ -2521,12 +2684,64 @@ Builder's design choices, within the spec; nothing here was asked of the user.
 - **Open PRs (#272, #273, #275)** add their kinds through the checklist in
   `internal/flow/README.md`; nothing here depends on them. No API, migration or
   MCP change, so no conformance, count or skill update is needed.
+
 ## AI on the canvas may apply its own batch (2026-11-10)
 
 - Asked: should the canvas AI assistant only propose (a person applies), or may it apply?
 - Answer (user): the AI may apply. Give the assistant a write tool that applies its batch,
   audited and revertible, in line with the earlier AI-access decision. Operators still see
   and can revert every applied batch.
+
+## Integrations P6: HubSpot and the internal/crm framework (2026-11-10)
+
+Decided while building, without asking, within the spec and the brief:
+
+- **Scope of P6 as built.** Framework, HubSpot connector (OAuth, contact search, call
+  engagements, owners, caller names), admin API, console page, MCP reads, the `hello-crm`
+  skill and docs. The HubSpot calling iframe and its SDK controller (I-50) are NOT in this
+  PR: its click-to-call needs the originate API and the first-party `hello-hubspot` OAuth
+  client from P3 (#234), which are not on main. The server half of the handshake
+  (`POST /api/v1/integrations/hubspot/engagements`) is built and tested so the iframe can
+  land as a small follow-up once P3 merges.
+- **Recording links** are behind a `crm.LinkMinter` interface (mint, revoke by label). The
+  link service is P4's (#281, not merged), so `hello-control` passes none yet: a connector
+  with recordings on logs calls without a link. Wiring P4's service in is one line in
+  `cmd/hello-control/crm.go`. Links are minted with label `crm:<connectorId>`; disabling a
+  connector, switching recordings off, disconnecting or deleting it revokes that label.
+- **Caller-name budget.** The spec bounds a lookup to 1.5 s, but a call must never be held
+  that long. The CRM query keeps the 1.5 s bound and runs in the background (it fills the
+  Valkey cache); the SIP path waits at most 250 ms (`DefaultCallerNameBudget`). A repeat
+  caller is a cache hit. Three failures in a row open a 30 s breaker per connector.
+- **Carrier name wins** when it is a real name; a display name that is only a number is
+  replaced by the CRM's. Numbers under 6 digits (extensions) are never looked up.
+- **Ownership.** A call is owned by the HubSpot owner with the same email as the Hello user
+  of the call's extension (exact, case-insensitive match; never display name). Hello's
+  `users.email` is administrator-set, so it is treated as verified. No match: the
+  connector's fallback owner, or the call is `skipped` and shows in the console with a
+  retry. A manual mapping is never replaced by an automatic one.
+- **One log per call per connector** (unique `(connector, callId)`): a missed call logged
+  first is not logged again by the call's `call.completed`; a ring group's call is logged for
+  the first member's event.
+- **Late engagement handshake:** if the server already logged a call, its engagement is kept
+  (`adopted: false`); the iframe's stays in HubSpot as a separate record.
+- **Callback is a public route** (`GET /api/v1/integrations/crm/oauth/callback`): the
+  cross-site redirect carries no Strict session cookie, so the single-use 10-minute state
+  (stored as a hash, bound to the administrator) is the credential. It always redirects to
+  `/integrations/crm`. No PKCE: HubSpot does not use it for confidential apps.
+- **Routes beyond the spec table:** `DELETE .../{id}/connection` (disconnect),
+  `GET .../{id}/users` and `PUT .../{id}/users/{userId}` (user mapping, the "field mapping"
+  of the console), `GET .../oauth/callback`. The job list is scope `write`, role `operator`
+  (the route test ties `read` to viewer; the spec wants operator).
+- **MCP:** reads only (`listCRMConnectors`, `getCRMConnector`, `listCRMUsers`,
+  `listCRMLogs`); everything that handles credentials or requeues is console-only.
+- **Needs-reauth notice** is e-mailed to every administrator with an address, when SMTP is
+  configured; otherwise it is the console banner only. "The owner" in the spec is read as
+  the administrators, since a connection has no single owner.
+- **Link renewal job** runs hourly on every replica (idempotent single UPDATE) instead of a
+  daily job under an advisory lock.
+- **HubSpot facts still to prove with a real account** (listed in docs/crm.md): the scope
+  set (`crm.objects.contacts.write` for the Calls object), the phone search filters, the
+  disposition ids lookup, and the EU host split.
 
 ## Conference two-node test raced on srv.deps (2026-11-10)
 

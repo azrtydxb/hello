@@ -39,11 +39,17 @@ type Config struct {
 	Domain         string // digest realm and AOR host
 	AdvertisedAddr string // host:port written into Via and Contact
 	NonceSecret    []byte
-	MinExpires     time.Duration
-	MaxExpires     time.Duration
-	RingTimeout    time.Duration
-	AuthFailLimit  int
-	StateTimeout   time.Duration
+	// ClientAuthKey and ClientAuthKeyPrevious derive the digest secret of a
+	// web device; empty turns derived credentials off. MaxContacts caps the
+	// bindings of one AOR (10 when zero).
+	ClientAuthKey         string
+	ClientAuthKeyPrevious string
+	MaxContacts           int
+	MinExpires            time.Duration
+	MaxExpires            time.Duration
+	RingTimeout           time.Duration
+	AuthFailLimit         int
+	StateTimeout          time.Duration
 	// CallHeartbeat and CallTTL govern the live call record (10s / 30s).
 	CallHeartbeat time.Duration
 	CallTTL       time.Duration
@@ -139,6 +145,9 @@ type Config struct {
 	// CallbackInterval is how often this node sweeps the queues' callback
 	// requests; zero means every 3 s.
 	CallbackInterval time.Duration
+	// FaxInterval is how often this node looks for queued faxes to send; zero
+	// means every 5 s.
+	FaxInterval time.Duration
 	// PromptLanguage is the language of the spoken voicemail prompts ("en",
 	// "nl"; empty is English) and Timezone the IANA zone message times are
 	// spoken in (empty is UTC).
@@ -233,6 +242,14 @@ type Deps struct {
 	// Park is the shared call-park store (Valkey); nil disables call park,
 	// retrieve and cross-node pickup. A parked party hears music on hold.
 	Park ParkState
+	// Fax is the fax feature (hello-fax, the fax table and the PDF store); nil
+	// answers fax calls 488 and sends nothing.
+	Fax *FaxDeps
+	// CallerNames finds an inbound caller's name in a CRM (spec integrations
+	// I-47); nil leaves the carrier's display name. CallerNameBudget bounds
+	// the wait at ringing time (DefaultCallerNameBudget when zero).
+	CallerNames      CallerNamer
+	CallerNameBudget time.Duration
 	// Published is the shared event state of PUBLISHed presence (Valkey);
 	// nil answers PUBLISH 503 (S-35).
 	Published PublishedPresence
@@ -553,6 +570,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.presencePollLoop(rctx) })
 	s.bg.Go(func() { s.queueLoop(rctx) })
 	s.bg.Go(func() { s.callbackLoop(rctx) })
+	s.bg.Go(func() { s.faxSendLoop(rctx) })
 	if s.deps.MailboxEvents != nil {
 		s.bg.Go(func() { s.deps.MailboxEvents.Watch(rctx, s.mailboxChanged) })
 	}
@@ -815,7 +833,15 @@ func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 		s.authFailed(tx, req, ip, "unknown or disabled device", false)
 		return snapshot.Device{}, false
 	}
-	verdict, check := s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256)
+	var (
+		verdict Verdict
+		check   string
+	)
+	if dev.AuthMode == snapshot.AuthDerived {
+		verdict, check = s.digest.VerifyDerived(creds, req.Method.String(), req.Recipient, ip, dev.Username, s.clientKeys())
+	} else {
+		verdict, check = s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256)
+	}
 	switch verdict {
 	case OK:
 		return s.checkReplay(req, tx, creds.Username, creds.Nonce, creds.Cnonce, creds.Nc, dev)
@@ -862,6 +888,18 @@ func (s *Server) checkReplay(req *sip.Request, tx sip.ServerTransaction, user, n
 		return snapshot.Device{}, false
 	}
 	return dev, true
+}
+
+// clientKeys are the keys a derived credential may have been made under,
+// the current one first.
+func (s *Server) clientKeys() [][]byte {
+	var keys [][]byte
+	for _, k := range []string{s.cfg.ClientAuthKey, s.cfg.ClientAuthKeyPrevious} {
+		if k != "" {
+			keys = append(keys, []byte(k))
+		}
+	}
+	return keys
 }
 
 func (s *Server) challenge(tx sip.ServerTransaction, req *sip.Request, stale bool) {

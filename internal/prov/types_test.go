@@ -30,7 +30,7 @@ func checkList(t *testing.T, sql, table, column string) []string {
 }
 
 // latestKindList is the prov_fetches.kind list the newest migrations that
-// redefine it accept (00012 added "phonebook"; 00052 and 00073 widened it
+// redefine it accept (00012 added "phonebook"; 00052 and 00076 widened it
 // with hello_check_values, the kinds each adds going before "other", which
 // closes the Go list).
 func latestKindList(t *testing.T) []string {
@@ -48,7 +48,7 @@ func latestKindList(t *testing.T) []string {
 	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
 		out = append(out, q[1])
 	}
-	for _, f := range []string{"00052_ringtones.sql", "00073_scep_dot1x.sql"} {
+	for _, f := range []string{"00052_ringtones.sql", "00076_scep_dot1x.sql"} {
 		b, err = os.ReadFile("../../migrations/" + f)
 		if err != nil {
 			t.Fatal(err)
@@ -66,17 +66,17 @@ func latestKindList(t *testing.T) []string {
 }
 
 // latestResultList is the prov_fetches.result list: 00006's, then the
-// results 00073 adds with hello_check_values (the SCEP results).
+// results 00076 adds with hello_check_values (the SCEP results).
 func latestResultList(t *testing.T, base []string) []string {
 	t.Helper()
-	b, err := os.ReadFile("../../migrations/00073_scep_dot1x.sql")
+	b, err := os.ReadFile("../../migrations/00076_scep_dot1x.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	up, _, _ := strings.Cut(string(b), "-- +goose Down")
 	m := regexp.MustCompile(`'prov_fetches', 'prov_fetches_result_check',\s+ARRAY\[([^\]]*)\]`).FindStringSubmatch(up)
 	if m == nil {
-		t.Fatal("00073 does not widen the result list")
+		t.Fatal("00076 does not widen the result list")
 	}
 	out := slices.Clone(base)
 	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
