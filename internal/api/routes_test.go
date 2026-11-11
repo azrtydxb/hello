@@ -25,8 +25,10 @@ func TestRoutesTable(t *testing.T) {
 		// The calls scope guards the HubSpot engagement handshake, which a
 		// user makes for their own calls only. The calls scope also guards
 		// click-to-call, which a user places from their own extension (the
-		// handler checks ownership).
-		auth.ScopeCalls: auth.RoleViewer,
+		// handler checks ownership). The calls and recordings scopes guard the
+		// lookup and the recording links, which a user reaches for their own
+		// extensions' calls.
+		auth.ScopeCalls: auth.RoleViewer, auth.ScopeRecordings: auth.RoleViewer,
 	}
 	secrets := map[string]bool{
 		"POST /api/v1/devices/{id}/rotate-secret":        true,
@@ -54,7 +56,8 @@ func TestRoutesTable(t *testing.T) {
 			return true
 		}
 		return strings.HasPrefix(r.Pattern, "/api/v1/me/") || strings.HasPrefix(r.Pattern, "/api/v1/events") ||
-			r.Pattern == "/api/v1/integrations/hubspot/engagements" ||
+			strings.HasPrefix(r.Pattern, "/api/v1/lookup/") || r.Pattern == "/api/v1/recording-links/{id}" ||
+			r.Pattern == "/api/v1/recordings/{id}/links" || r.Pattern == "/api/v1/integrations/hubspot/engagements" ||
 			strings.HasPrefix(r.Pattern, "/api/v1/calls/originate")
 	}
 	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true, "POST /api/v1/auth/login/2fa": true,

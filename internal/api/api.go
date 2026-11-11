@@ -203,6 +203,13 @@ type Store interface {
 	ListRecordings(ctx context.Context, extension string, before int64, limit int) ([]store.Recording, string, error)
 	GetRecording(ctx context.Context, id int64) (store.Recording, error)
 	DeleteRecording(ctx context.Context, actor string, id int64) (string, error)
+	CreateRecordingLink(ctx context.Context, actor string, recordingID int64, hash []byte, expires time.Time, maxUses int) (store.RecordingLink, error)
+	GetRecordingLink(ctx context.Context, id int64) (store.RecordingLink, error)
+	RevokeRecordingLink(ctx context.Context, actor string, id int64) error
+	UseRecordingLink(ctx context.Context, hash []byte) (object string, id int64, res store.LinkResult, err error)
+	RecordingParties(ctx context.Context, id int64) ([]string, error)
+	LookupCalls(ctx context.Context, f store.LookupFilter, before int64, limit int) ([]store.CallMatch, string, error)
+	LookupRecordings(ctx context.Context, f store.LookupFilter, before int64, limit int) ([]store.Recording, string, error)
 
 	ListAnnouncements(ctx context.Context) ([]store.Announcement, error)
 	GetAnnouncement(ctx context.Context, id int64) (store.Announcement, error)
@@ -303,6 +310,9 @@ type Config struct {
 	TwoFactor      TwoFactorStore
 	TwoFALogins    *prometheus.CounterVec
 	ConferenceLive ConferenceLive
+	// LinkMetrics counts recording link requests; nil counts nothing.
+	LinkMetrics *LinkMetrics
+	links       *linkLimiter
 	// CRM is the CRM connector administration (spec integrations I-47); nil
 	// answers 503 on the CRM routes.
 	CRM CRMService
@@ -441,6 +451,7 @@ func Handler(c Config) http.Handler {
 	c.speech, c.prewarmMu = newSpeechCache(c), &sync.Mutex{}
 	c.prewarmKick = make(chan struct{}, 1)
 	c.self = new(atomic.Pointer[http.Handler])
+	c.links = newLinkLimiter()
 	s := &server{c}
 	go s.runPrewarmKicks()
 	opts := auth.Options{Cookies: true}
@@ -463,6 +474,9 @@ func Handler(c Config) http.Handler {
 		}
 		mux.Handle(rt.Method+" "+rt.Pattern, h)
 	}
+	// The recording link route is public (the token is the credential) and
+	// outside /api/v1, so it is not in the route table or the OpenAPI document.
+	mux.HandleFunc("GET /r/{token}", s.publicRecording)
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.
