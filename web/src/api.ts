@@ -49,6 +49,9 @@ export interface Me {
   mustEnrollMfa?: boolean;
   /** The user's own two-factor state. */
   twoFactor?: TwoFactorState;
+  /** Whether the user's web softphones ring for calls to their extension. */
+  ringWeb?: boolean;
+  ringMobile?: boolean;
 }
 
 /** GET /api/v1/me/2fa */
@@ -113,6 +116,18 @@ export interface Extension {
    * setting is switched off at the next resync.
    */
   callWaiting?: boolean;
+  /**
+   * Anonymous outbound; false by default. On: every trunk call from the
+   * extension carries Privacy: id, an anonymous From and the trunk's asserted
+   * identity.
+   */
+  anonymousOutbound?: boolean;
+  /**
+   * The phone's own "Send Anonymous" (Grandstream P65); false by default. On:
+   * the provisioned phone blanks its caller ID on every call, internal ones
+   * included. Not the trunk-only anonymousOutbound.
+   */
+  phoneSendAnonymous?: boolean;
   /** Rings before the no-answer forward (the phone's ring count); 0 = the system default. */
   noAnswerRings?: number;
   /** The extension's voicemail box, when it has one. */
@@ -128,13 +143,34 @@ export interface Extension {
 }
 
 /** A device: SIP credentials belonging to one extension. */
+/**
+ * Media-encryption policy of a device or trunk (secmedia.Policy): off is
+ * plain RTP, optional offers SDES SRTP on a TLS leg and uses it when the far
+ * end answers with it, required allows SRTP only (a call that cannot be
+ * encrypted is refused with 488). Crypto is never offered on a leg that is not
+ * TLS.
+ */
+export type SrtpPolicy = "off" | "optional" | "required";
+
+export const SRTP_POLICIES: { value: SrtpPolicy; label: string }[] = [
+  { value: "off", label: "Off (plain RTP)" },
+  { value: "optional", label: "Optional" },
+  { value: "required", label: "Required" },
+];
+
 export interface Device {
   id: Id;
   extensionId: Id;
   sipUsername: string;
   enabled: boolean;
+  /** Media-encryption policy; optional for a device that predates it. */
+  srtp?: SrtpPolicy;
   createdAt: string;
   updatedAt: string;
+  /** desk (a phone), web or mobile (a user's softphone); absent from older servers. */
+  kind?: "desk" | "web" | "mobile";
+  /** The name the owner gave a web or mobile device. */
+  label?: string;
 }
 
 /** Device create / rotate-secret response. */
@@ -191,6 +227,8 @@ export interface Cdr {
   billableMs: number;
   sipNode: string;
   mediaMode: string;
+  /** Which legs carried SRTP: none, caller, callee or both. */
+  srtp?: "none" | "caller" | "callee" | "both";
   finalStatus: number;
   terminationSide: string;
   failureReason: string;
@@ -199,16 +237,35 @@ export interface Cdr {
   rewrittenDestination: string;
   route: string;
   trunk: string;
+  /** The assistant's extension when the call to a boss was answered by the assistant. */
+  answeredBy?: string;
   /** Call quality of an anchored call; null when not measured. */
   rtpPackets?: number | null;
   rtpLost?: number | null;
   rtpJitterMs?: number | null;
+  /** What the phones on the call reported (RTCP-XR); single-CDR read only. */
+  rtcpxr?: RtcpxrQuality[];
   /**
    * The audio codec each leg ended on, as "name/clock rate" ("PCMU/8000");
    * null when none was negotiated, and for calls recorded before it was kept.
    */
   callerCodec?: string | null;
   calleeCodec?: string | null;
+}
+
+/** One phone's own view of a call's voice quality (RFC 6035 report). */
+export interface RtcpxrQuality {
+  device: string;
+  extension: string;
+  /** True for the call-end report. */
+  final: boolean;
+  mosLq: number | null;
+  mosCq: number | null;
+  jitterMs: number | null;
+  lossPct: number | null;
+  discardPct: number | null;
+  roundTripMs: number | null;
+  reportedAt: string;
 }
 
 /** One line of a routing trace (routing.Step). */
@@ -225,12 +282,31 @@ export interface PageLegResult {
   result: "answered" | "busy" | "dnd" | "no_answer" | "no_registration";
 }
 
+/** One follow-me leg of a call (cdr_legs, role follow_me). */
+export interface FollowMeLegResult {
+  kind: "own" | "extension" | "ring_group" | "external";
+  /** The extension that rang, or the external number dialled. */
+  extension: string;
+  /** The trunk an external leg left on; "" otherwise. */
+  trunk: string;
+  result:
+    | "answered"
+    | "declined"
+    | "busy"
+    | "no_answer"
+    | "failed"
+    | "skipped"
+    | "cancelled";
+}
+
 /** GET /api/v1/cdrs/{id}: the CDR plus its routing trace. */
 export interface CdrDetail extends Cdr {
-  /** call, page or intercom. */
-  kind?: "call" | "page" | "intercom" | "conference";
+  /** call, page, intercom, conference, callback or alarm (a *55 alarm call). */
+  kind?: "call" | "page" | "intercom" | "conference" | "callback" | "alarm";
   /** A page's outcome per member, in the order they were paged. */
   pageLegs?: PageLegResult[];
+  /** What each follow-me leg did, in the order they rang. */
+  followMeLegs?: FollowMeLegResult[];
   trace: TraceStep[];
   /** For failed calls, the reason of the last trace step. */
   explanation?: string;
@@ -303,6 +379,19 @@ export interface TrunkFields {
   internalDialing: InternalDialing;
   /** SMS over SIP: text messages may be sent and received through it. */
   messaging: boolean;
+  /** Emergency calls through it carry the caller's location (RFC 6442). */
+  geolocation: boolean;
+  /** How a fax call is carried: G.711 passthrough, T.38, or refused. */
+  faxMode: "passthrough" | "t38" | "off";
+  /**
+   * Anonymous calls: "honour" carries a device's privacy request (default),
+   * "always" makes every call through the trunk anonymous.
+   */
+  anonymousPolicy: "honour" | "always";
+  /** The number asserted for an anonymous call; empty uses the caller ID. */
+  assertedIdentity: string;
+  /** Header carrying it: P-Asserted-Identity (pai) or P-Preferred-Identity (ppi). */
+  identityHeader: "pai" | "ppi";
   /**
    * RFC 4028 session timers on the trunk's calls: "on" asks for and keeps
    * one, "off" never does, "default" follows Hello's own setting
@@ -315,6 +404,19 @@ export interface TrunkFields {
    * accept G.711 only.
    */
   codecs: string[];
+  /**
+   * Media-encryption policy (default "off"). Trunk legs are not TLS today, so
+   * "optional" behaves as "off" and "required" refuses calls over the trunk.
+   */
+  srtp?: SrtpPolicy;
+  /** Turn away calls from a withheld caller (anonymous, Privacy: id). */
+  rejectAnonymous: boolean;
+  /** Calling codes callers must come from; empty is no restriction. */
+  allowedCountryCodes: string[];
+  /** What a restricted trunk does with a number it cannot place. */
+  unknownCallerAction: "allow" | "block";
+  /** The final response of a screened call: 603 Decline or 486 Busy Here. */
+  rejectCode: 603 | 486;
 }
 
 /** A trunk as returned: the password is never returned, only hasPassword. */
@@ -406,10 +508,12 @@ export interface InboundRouteFields {
     | "time_condition"
     | "ring_group"
     | "voicemail"
+    | "voicemail_group"
     | "announcement"
     | "paging"
     | "conference"
-    | "directory";
+    | "directory"
+    | "fax";
   destination: string;
   enabled: boolean;
   /** Music on hold class of the calls this route delivers; null = the default. */
@@ -797,6 +901,9 @@ export const updateExtension = (
     directoryHidden?: boolean;
     allowIntercom?: boolean;
     callWaiting?: boolean;
+    anonymousOutbound?: boolean;
+    phoneSendAnonymous?: boolean;
+
     kind?: "user" | "door";
     doorTargets?: DoorTargets;
     /** null clears the pick (the global default plays). */
@@ -824,7 +931,7 @@ export const createDevice = (input: {
 
 export const updateDevice = (
   deviceId: Id,
-  patch: { enabled?: boolean; extensionId?: Id },
+  patch: { enabled?: boolean; extensionId?: Id; srtp?: SrtpPolicy },
 ) =>
   request<Device>("PATCH", `/api/v1/devices/${id(deviceId)}`, { body: patch });
 
@@ -1454,6 +1561,7 @@ export const IVR_DESTINATION_KINDS = [
   "extension",
   "ring_group",
   "voicemail",
+  "voicemail_group",
   "announcement",
   "paging",
   "ivr",
@@ -1461,6 +1569,9 @@ export const IVR_DESTINATION_KINDS = [
   "queue",
   "time_condition",
   "directory",
+  "fax",
+  "follow_me_on",
+  "follow_me_off",
 ] as const;
 
 export type IvrDestinationKind = (typeof IVR_DESTINATION_KINDS)[number];
@@ -1474,6 +1585,7 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   extension: "Extension",
   ring_group: "Ring group",
   voicemail: "Voicemail box",
+  voicemail_group: "Voicemail group",
   announcement: "Announcement, then hang up",
   paging: "Paging group",
   ivr: "Another IVR menu",
@@ -1481,12 +1593,15 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   queue: "Call queue",
   time_condition: "Time condition",
   directory: "Dial-by-name directory",
+  fax: "Fax destination",
+  follow_me_on: "Follow-me on",
+  follow_me_off: "Follow-me off",
 };
 
 /**
  * A destination. The target is an extension number (extension, voicemail), a
- * name (ring_group, announcement, ivr), a page code (paging) or a number
- * (external); empty for hangup.
+ * name (ring_group, announcement, ivr), a page code (paging), a group number
+ * (voicemail_group) or a number (external); empty for hangup.
  */
 export interface IvrDestination {
   kind: IvrDestinationKind;
@@ -1855,6 +1970,8 @@ export const FEATURE_CODE_ACTIONS = [
   "queue_logout",
   "queue_pause",
   "queue_unpause",
+  "boss_divert",
+  "voicemail_broadcast",
   "call_waiting_on",
   "call_waiting_off",
   "park",
@@ -1886,6 +2003,8 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   queue_logout: "Queue agent logout",
   queue_pause: "Queue agent pause (argument: reason)",
   queue_unpause: "Queue agent unpause",
+  boss_divert: "Boss divert on or off (assistant only rings)",
+  voicemail_broadcast: "Voicemail group broadcast (code plus group number)",
   call_waiting_on: "Call waiting on",
   call_waiting_off: "Call waiting off",
   park: "Park the call",
@@ -1904,6 +2023,52 @@ export const listFeatureCodes = (signal?: AbortSignal) =>
 /** PUT /api/v1/feature-codes: the full list, replacing what is stored. */
 export const updateFeatureCodes = (codes: readonly FeatureCode[]) =>
   request<void>("PUT", "/api/v1/feature-codes", { body: { items: codes } });
+
+/** How a boss's call rings: both sets of phones, or the assistant's first. */
+export type BossRingMode = "both" | "assistant_first";
+
+/** One boss with their assistant (GET /api/v1/boss-links). */
+export interface BossLink {
+  id: Id;
+  bossExtensionId: Id;
+  bossNumber: string;
+  bossName: string;
+  assistantExtensionId: Id;
+  assistantNumber: string;
+  assistantName: string;
+  ringMode: BossRingMode;
+  /** The assistant who answers hears a prompt and presses 1 or 2. */
+  screening: boolean;
+  enabled: boolean;
+  /** Only the assistant rings; *64 on the boss's phone toggles it. */
+  divertOn: boolean;
+  /** The assistant's outbound calls present the boss's caller ID. */
+  outboundAsBoss: boolean;
+}
+
+/** The writable fields of a link. */
+export type BossLinkInput = Pick<
+  BossLink,
+  | "bossExtensionId"
+  | "assistantExtensionId"
+  | "ringMode"
+  | "screening"
+  | "enabled"
+  | "divertOn"
+  | "outboundAsBoss"
+>;
+
+export const listBossLinks = (signal?: AbortSignal) =>
+  list<BossLink>("/api/v1/boss-links", signal);
+
+/** PUT /api/v1/boss-links: the full list, replacing what is stored. */
+export const putBossLinks = async (links: readonly BossLinkInput[]) =>
+  items<BossLink>(
+    await request<unknown>("PUT", "/api/v1/boss-links", {
+      body: { items: links },
+    }),
+    "/api/v1/boss-links",
+  );
 
 /** livestate DeviceState (GET /api/v1/presence). */
 export interface DeviceState {

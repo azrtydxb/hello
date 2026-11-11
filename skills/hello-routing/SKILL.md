@@ -49,11 +49,18 @@ Read the trace back to the user in plain words.
 2. `createTrunk`: mode registration (Hello registers with a username and
    password) or ip (the carrier sends from known source ranges). Give the
    destinations (host, port, priority, weight). The password is accepted but
-   never returned.
+   never returned. `srtp` (off by default) is the trunk's media-encryption
+   policy; trunk legs are UDP today, so `optional` behaves as `off` and
+   `required` makes calls over the trunk fail with 488.
 3. `listTrunkStatus` until the registration is registered (registration
    mode) and the destinations are up.
 4. Nothing uses a new trunk until a route lists it: add or change an
    outbound route next.
+5. `geolocation` (default false) makes an emergency call through the trunk
+   carry the caller's location (a Geolocation header and a PIDF-LO body, RFC
+   6442): the phone's own, else the location assigned under `hello-phones`
+   (locations). Turn it on only for a carrier that accepts them; the request is
+   larger than a usual SIP datagram.
 
 ### Outbound: send a pattern out of a trunk
 
@@ -88,6 +95,29 @@ announcement or nothing). `updateRingGroup` replaces the members you send.
 
 `listFeatureCodes` then `putFeatureCodes` with the whole list (it replaces
 every code). Codes are a star and two to four digits, or # and ##.
+
+### Screen callers: the blocklist and a trunk's caller policy
+
+A blocklist entry matches a caller number: `exact`, or `prefix` (a number
+ending in `*`). Its `action` is `block` (the default) or `allow`, which lets a
+number through an earlier block. Its `scope` is `global` (the default) or one
+trunk by name. A blocked call is turned away before routing. The optional
+`reason` is a note shown to administrators only.
+
+1. `listBlocklist` to see the entries, and whether the number is already
+   listed for that scope.
+2. `createBlocklistEntry` with the number, action, match and scope. Sending a
+   number that is already listed for its scope updates that entry. Use
+   `putBlocklistEntry` with the entry id to change one, and
+   `deleteBlocklistEntry` to remove it.
+3. For many numbers, `importBlocklist` with `dry_run` true first. It takes
+   the rows as a JSON body with the columns number, action, match, scope and
+   reason. It is all or nothing: one failing row writes nothing.
+4. Anonymous callers and country restrictions belong to the trunk.
+   `updateTrunk` sets `rejectAnonymous`, `allowedCountryCodes`,
+   `unknownCallerAction` and `rejectCode` (603 or 486) on that trunk.
+5. `testRouting` with the number as the caller, and `trunk:<id>` as the
+   source, to show the user the decision after the change.
 
 ## References
 

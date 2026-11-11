@@ -28,6 +28,7 @@ import {
 } from "../design/azrty/components";
 import { type DestinationChoices } from "../components/IvrDestination";
 import { listTimeConditions, type TimeCondition } from "../api/timecond";
+import { listVoicemailGroups, type VoicemailGroup } from "../api/vmgroups";
 import { Can } from "../role";
 import { IvrDrawer } from "../forms/IvrForm";
 
@@ -43,6 +44,7 @@ function useChoices(): { choices: DestinationChoices; error: string | null } {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [pagingGroups, setPagingGroups] = useState<PagingGroup[]>([]);
   const [timeConditions, setTimeConditions] = useState<TimeCondition[]>([]);
+  const [voicemailGroups, setVoicemailGroups] = useState<VoicemailGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -56,6 +58,9 @@ function useChoices(): { choices: DestinationChoices; error: string | null } {
     listTimeConditions(controller.signal)
       .then(setTimeConditions)
       .catch(() => undefined); // the picker stays empty; saving still works
+    listVoicemailGroups(controller.signal)
+      .then(setVoicemailGroups)
+      .catch(() => undefined); // the picker stays empty; saving still works
     return () => controller.abort();
   }, []);
   return {
@@ -66,6 +71,7 @@ function useChoices(): { choices: DestinationChoices; error: string | null } {
       pagingGroups,
       menus: [],
       timeConditions,
+      voicemailGroups,
     },
     error,
   };

@@ -155,6 +155,14 @@ func (c *call) applyTCDest(tx sip.ServerTransaction, snap *snapshot.Snapshot, d 
 		c.vmExt = d.Target
 		c.mu.Unlock()
 		c.startVoicemail(vmLeave, "time-condition")
+	case snapshot.IVRVoicemailGroup:
+		g, ok := snap.VoicemailGroup(d.Target)
+		if !ok {
+			c.addTrace("Time condition: voicemail group " + d.Target + " does not exist")
+			c.tcReject(tx, sip.StatusNotFound, "voicemail group "+d.Target+" does not exist")
+			return
+		}
+		c.startVoicemailGroup(tx, g, false)
 	case timecond.KindAnnouncement:
 		if d.ThenVoicemail != "" {
 			e, ok := snap.Extension(d.ThenVoicemail)
@@ -194,6 +202,8 @@ func (c *call) applyTCDest(tx sip.ServerTransaction, snap *snapshot.Snapshot, d 
 		c.forward(c.inv, tx, snap, d.Target, nil)
 	case timecond.KindDirectory:
 		c.startDirectory(tx, snap)
+	case timecond.KindFax:
+		c.startFax(tx, snap, d.Target)
 	case timecond.KindQueue:
 		q, ok := snap.Queue(d.Target)
 		if !ok {

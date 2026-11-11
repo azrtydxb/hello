@@ -57,6 +57,22 @@ func TestBookRefreshFor(t *testing.T) {
 	}
 }
 
+// TestBookRefreshForPhone fails if the WP820 is not held to the intervals its
+// template lists, or any other family changes.
+func TestBookRefreshForPhone(t *testing.T) {
+	for _, c := range []struct {
+		family, wp string
+		in, want   int
+	}{
+		{FamilyWP8xx, WP820, 15, 30}, {FamilyWP8xx, WP820, 0, 0}, {FamilyWP8xx, WP820, 1, 5}, {FamilyWP8xx, WP820, 721, 720},
+		{FamilyWP8xx, WP8xx, 15, 15}, {FamilyWP8x6, WP8x6, 15, 15}, {FamilyWP856, WP856, 15, 30},
+	} {
+		if got := BookRefreshForPhone(c.family, c.wp, c.in); got != c.want {
+			t.Errorf("BookRefreshForPhone(%q, %q, %d) = %d, want %d", c.family, c.wp, c.in, got, c.want)
+		}
+	}
+}
+
 func TestAddEmergencyNumber(t *testing.T) {
 	var n []string
 	for _, m := range []string{"112", " 911 ", "112", "^0[0-9]+$", "", "9-1-1", "*67"} {
@@ -90,14 +106,14 @@ func TestGrandstreamFamilyGolden(t *testing.T) {
 		want, not   []string
 	}{
 		{"wp8x6", "WP836",
-			[]string{"<P298>1</P298>", "<P194>1</P194>", "<P8433>", "<P8385>112,911</P8385>", "<P60069>*85</P60069>", "<P2336>*86</P2336>", "<P333>1</P333>", "<P4428>0</P4428>", "<P22177>1</P22177>", "<P22556>1</P22556>", "<P82317>0</P82317>"},
-			[]string{"<P323>", "<P324>", "<P325>", "<P90>", "<P22296>", "<P25675>"}},
+			[]string{"<P298>1</P298>", "<P194>1</P194>", "<P8433>", "<P8385>112,911</P8385>", "<P60069>*85</P60069>", "<P2336>*86</P2336>", "<P333>1</P333>", "<P4428>0</P4428>", "<P22177>1</P22177>", "<P22556>1</P22556>", "<P82317>0</P82317>", "<P8647>0</P8647>"},
+			[]string{"<P323>", "<P324>", "<P325>", "<P90>", "<P22296>", "<P25675>", "<P7901>"}},
 		{"wp856", "WP856",
 			[]string{"<P90>2</P90>", "<P22296>1</P22296>", "<P25675>112,911</P25675>", "<P60069>*85</P60069>", "<P26072>1</P26072>", "<P332>30</P332>", "<P4428>0</P4428>", "<P22177>1</P22177>", "<P82317>0</P82317>"},
-			[]string{"<P323>", "<P298>", "<P194>", "<P8433>", "<P8385>", "<P333>", "<P22556>", "<P8381>", "<P22532>"}},
+			[]string{"<P323>", "<P298>", "<P194>", "<P8433>", "<P8385>", "<P333>", "<P22556>", "<P8381>", "<P22532>", "<P8647>", "<P7901>"}},
 		{"wp8xx", "WP822",
 			[]string{"<P298>1</P298>", "<P194>1</P194>", "<P333>1</P333>", "<P332>15</P332>", "<P4428>0</P4428>", "<P22177>1</P22177>", "<P8381>"},
-			[]string{"<P323>", "<P90>", "<P22296>", "<P8433>", "<P8385>", "<P25675>", "<P60069>", "<P2336>", "<P22556>", "<P82317>", "<P26072>"}},
+			[]string{"<P323>", "<P90>", "<P22296>", "<P8433>", "<P8385>", "<P25675>", "<P60069>", "<P2336>", "<P22556>", "<P82317>", "<P26072>", "<P8647>", "<P7901>"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -143,6 +159,31 @@ func TestGrandstreamGenericKeepsBLF(t *testing.T) {
 	}
 	if !bytes.Contains(got, []byte("<P323>1</P323>")) {
 		t.Errorf("BLF block missing:\n%s", got)
+	}
+}
+
+// TestGrandstreamSyslog fails if a phone whose group turned syslog on is not
+// given the sink and level (P207, P208), or one whose group did not is not
+// told explicitly to log nowhere (so turning it off reaches the phone).
+func TestGrandstreamSyslog(t *testing.T) {
+	for _, model := range []string{"WP826", "WP856", "WP822", "GRP2614"} {
+		d := gsFamilyData(model)
+		d.Syslog = NewSyslogInfo("syslog.hello.example", "warning")
+		on, err := Render(context.Background(), builtinFor(t, Grandstream), "cfg"+d.Phone.MAC+".xml", d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(on, []byte("<P207>syslog.hello.example</P207>")) || !bytes.Contains(on, []byte("<P208>3</P208>")) {
+			t.Errorf("%s: syslog on is not rendered", model)
+		}
+		d.Syslog = nil
+		off, err := Render(context.Background(), builtinFor(t, Grandstream), "cfg"+d.Phone.MAC+".xml", d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(off, []byte("<P207></P207>")) || !bytes.Contains(off, []byte("<P208>0</P208>")) || bytes.Contains(off, []byte("syslog.hello")) {
+			t.Errorf("%s: syslog off is not rendered as off", model)
+		}
 	}
 }
 

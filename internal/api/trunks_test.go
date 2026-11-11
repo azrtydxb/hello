@@ -187,6 +187,41 @@ func TestTrunkCodecs(t *testing.T) {
 	}
 }
 
+// TestTrunkSRTPPolicy covers the trunk media-encryption policy: off by
+// default, the three spellings, the refusal of anything else, and PATCH
+// keeping or replacing it.
+func TestTrunkSRTPPolicy(t *testing.T) {
+	p := newP2Env(t, nil, false)
+	c := p.login()
+	plain := func(extra map[string]any) map[string]any {
+		b := map[string]any{"name": trunkName(), "mode": "ip", "destinations": []map[string]any{{"host": "10.0.0.5"}}}
+		for k, v := range extra {
+			b[k] = v
+		}
+		return b
+	}
+	created := c.must(http.StatusCreated, "POST", "/api/v1/trunks", plain(nil)).json(t)
+	if got := created["srtp"]; got != "off" {
+		t.Fatalf("default srtp = %v, want off", got)
+	}
+	req := c.must(http.StatusCreated, "POST", "/api/v1/trunks", plain(map[string]any{"srtp": "required"})).json(t)
+	if got := req["srtp"]; got != "required" {
+		t.Fatalf("srtp = %v, want required", got)
+	}
+	id := fmt.Sprint(req["id"])
+	if got := fieldPaths(t, c.do("POST", "/api/v1/trunks", plain(map[string]any{"srtp": "maybe"}))); !slices.Contains(got, "srtp") {
+		t.Errorf("fields %v lack srtp", got)
+	}
+	kept := c.must(http.StatusOK, "PATCH", "/api/v1/trunks/"+id, map[string]any{"maxCalls": 2}).json(t)
+	if got := kept["srtp"]; got != "required" {
+		t.Fatalf("PATCH of maxCalls changed srtp to %v", got)
+	}
+	changed := c.must(http.StatusOK, "PATCH", "/api/v1/trunks/"+id, map[string]any{"srtp": "optional"}).json(t)
+	if got := changed["srtp"]; got != "optional" {
+		t.Fatalf("PATCH of srtp = %v", got)
+	}
+}
+
 // TestTrunkSessionTimers covers the trunk's RFC 4028 setting: the default,
 // the three values, the refusal of any other, and PATCH keeping or replacing
 // it.

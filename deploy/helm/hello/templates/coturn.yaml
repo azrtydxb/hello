@@ -1,0 +1,204 @@
+{{- if .Values.coturn.enabled }}
+{{- $full := include "hello.fullname" . -}}
+{{- $c := .Values.coturn -}}
+{{- $realm := default .Values.global.sipDomain $c.realm -}}
+{{- if not $c.servers }}{{ fail "coturn.servers is required when coturn.enabled: one entry per address clients reach TURN at (name and externalIP)" }}{{ end }}
+{{- if not $c.allowedPeers }}{{ fail "coturn.allowedPeers is required when coturn.enabled: the hello-sip media addresses (single IPs or a-b ranges) clients may relay to" }}{{ end }}
+{{- range $p := $c.allowedPeers }}
+{{- if not (regexMatch "^[0-9.]+(-[0-9.]+)?$" (toString $p)) }}{{ fail (printf "coturn.allowedPeers entry %q must be an IPv4 address or an a-b range" $p) }}{{ end }}
+{{- end }}
+{{- if and $c.tls.enabled (not $c.tls.secretName) }}{{ fail "coturn.tls.secretName is required when coturn.tls.enabled: a kubernetes.io/tls Secret whose names include the server addresses" }}{{ end }}
+{{- if and (not $c.hostNetwork) (gt (sub (int $c.relayPortMax) (int $c.relayPortMin)) 200) }}{{ fail "coturn.relayPortMax - coturn.relayPortMin must be at most 200 without hostNetwork: a Service lists every relay port" }}{{ end }}
+{{- range $s := $c.servers }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (toString $s.name)) }}{{ fail (printf "coturn.servers name %q must be a DNS label" $s.name) }}{{ end }}
+{{- if not (regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$" (toString $s.externalIP)) }}{{ fail (printf "coturn.servers %s: externalIP must be an IPv4 address" $s.name) }}{{ end }}
+{{- end }}
+{{- /* One Deployment per address, never replicas behind one address: a TURN
+       allocation lives on one server and the relayed media must come back to
+       the same one. */}}
+{{- range $s := $c.servers }}
+{{- $sname := toString $s.name }}
+{{- $name := printf "%s-coturn-%s" $full $sname }}
+{{- $ctx := dict "root" $ "component" (printf "coturn-%s" $sname) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  # The new pod needs the old one's ports under hostNetwork, and a relay
+  # allocation cannot move: the old pod goes first.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "hello.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hello.selectorLabels" $ctx | nindent 8 }}
+      {{- with $c.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $full }}
+      automountServiceAccountToken: false
+      {{- include "hello.pullSecrets" $ | nindent 6 }}
+      {{- if $c.hostNetwork }}
+      # Relayed media must leave from the address clients are told about.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
+      {{- with (default $c.nodeSelector $s.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $c.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 103
+        runAsGroup: 103
+        fsGroup: 103
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: coturn
+          image: {{ include "hello.image" (dict "root" $ "name" $c.image.name "tag" $c.image.tag) }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            {{- include "hello.containerSecurity" $ | nindent 12 }}
+          env:
+            {{- include "hello.secretEnv" (dict "root" $ "env" "TURN_SECRET" "key" "turnSecret") | nindent 12 }}
+            - name: TURN_REALM
+              value: {{ $realm | quote }}
+            - name: TURN_EXTERNAL_IP
+              value: {{ $s.externalIP | quote }}
+            - name: TURN_PORT
+              value: {{ $c.port | quote }}
+            - name: TURN_MIN_PORT
+              value: {{ $c.relayPortMin | quote }}
+            - name: TURN_MAX_PORT
+              value: {{ $c.relayPortMax | quote }}
+            - name: TURN_ALLOWED_PEERS
+              value: {{ join "," $c.allowedPeers | quote }}
+            - name: TURN_USER_QUOTA
+              value: {{ $c.userQuota | quote }}
+            - name: TURN_TOTAL_QUOTA
+              value: {{ $c.totalQuota | quote }}
+            {{- if $c.tls.enabled }}
+            - name: TURN_TLS_PORT
+              value: {{ $c.tlsPort | quote }}
+            - name: TURN_TLS_CERT
+              value: /etc/coturn/tls/tls.crt
+            - name: TURN_TLS_KEY
+              value: /etc/coturn/tls/tls.key
+            {{- end }}
+            {{- if $c.metrics.enabled }}
+            - name: TURN_PROMETHEUS
+              value: "true"
+            {{- end }}
+          ports:
+            - name: turn-udp
+              containerPort: {{ $c.port }}
+              protocol: UDP
+            - name: turn-tcp
+              containerPort: {{ $c.port }}
+              protocol: TCP
+            {{- if $c.tls.enabled }}
+            - name: turns
+              containerPort: {{ $c.tlsPort }}
+              protocol: TCP
+            {{- end }}
+            {{- if $c.metrics.enabled }}
+            - name: metrics
+              containerPort: 9641
+              protocol: TCP
+            {{- end }}
+          readinessProbe:
+            tcpSocket:
+              port: turn-tcp
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: turn-tcp
+            periodSeconds: 20
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if $c.tls.enabled }}
+            - name: tls
+              mountPath: /etc/coturn/tls
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Mi
+        {{- if $c.tls.enabled }}
+        - name: tls
+          secret:
+            secretName: {{ $c.tls.secretName }}
+            defaultMode: 288
+        {{- end }}
+{{- if not $c.hostNetwork }}
+---
+# One address per server: the Service owns externalIP, so the relay's source
+# address is the one the client was told.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+  {{- with $c.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $c.service.type }}
+  {{- if ne $c.service.type "ClusterIP" }}
+  externalTrafficPolicy: Local
+  {{- end }}
+  {{- if eq $c.service.type "LoadBalancer" }}
+  loadBalancerIP: {{ $s.externalIP }}
+  {{- end }}
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: turn-udp
+      port: {{ $c.port }}
+      protocol: UDP
+      targetPort: turn-udp
+    - name: turn-tcp
+      port: {{ $c.port }}
+      protocol: TCP
+      targetPort: turn-tcp
+    {{- if $c.tls.enabled }}
+    - name: turns
+      port: {{ $c.tlsPort }}
+      protocol: TCP
+      targetPort: turns
+    {{- end }}
+    {{- range $i := until (int (add1 (sub (int $c.relayPortMax) (int $c.relayPortMin)))) }}
+    {{- $p := add (int $c.relayPortMin) $i }}
+    - name: relay-{{ $p }}
+      port: {{ $p }}
+      protocol: UDP
+      targetPort: {{ $p }}
+    {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

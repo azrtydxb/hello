@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo/sip"
@@ -36,8 +37,9 @@ func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
 	if !ok {
 		return
 	}
-	if req.To().Address.User != dev.Username {
-		// A device may only register its own AOR.
+	if user := req.To().Address.User; user != dev.Username && !isDerivedName(user, dev) {
+		// A device may only register its own AOR. A derived device's To user
+		// may be the expiring name it authenticates with.
 		s.respond(tx, req, sip.StatusForbidden, "Forbidden")
 		return
 	}
@@ -60,6 +62,7 @@ func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
 			return
 		}
 		s.triggerRecount()
+		s.regChanged(dev.Extension)
 		s.respond(tx, req, sip.StatusOK, "OK")
 		return
 	}
@@ -92,6 +95,7 @@ func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	res.AppendHeader(sip.NewHeader("Date", time.Now().UTC().Format(time.RFC1123)))
 	s.send(tx, res)
+	s.regChanged(dev.Extension)
 	if len(contacts) > 0 {
 		s.triggerRecount()
 		// Messages stored while the extension had no device go out now.
@@ -106,6 +110,13 @@ func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
 		}
 		s.publishDeviceState([]string{dev.Username}, dev.Extension, state)
 	}
+}
+
+// isDerivedName reports whether user is the expiring name (w<id>.<expiry>)
+// of the derived device dev.
+func isDerivedName(user string, dev snapshot.Device) bool {
+	base, _, ok := auth.SplitDerived(user)
+	return ok && dev.AuthMode == snapshot.AuthDerived && base == dev.Username
 }
 
 // parseContacts reads the Contact headers and their expiry, clamped to the
@@ -156,12 +167,19 @@ func (s *Server) parseContacts(req *sip.Request) (contacts []contactReq, wildcar
 	return contacts, wildcard, 0, ""
 }
 
-// maxContacts caps the bindings of one AOR, so one device cannot fan a
-// call out to an unbounded number of forks.
-const maxContacts = 10
+// defaultMaxContacts caps the bindings of one AOR, so one device cannot fan
+// a call out to an unbounded number of forks (HELLO_SIP_MAX_CONTACTS).
+const defaultMaxContacts = 10
+
+func (s *Server) maxContacts() int {
+	if s.cfg.MaxContacts > 0 {
+		return s.cfg.MaxContacts
+	}
+	return defaultMaxContacts
+}
 
 // tooManyContacts reports whether applying contacts would leave aor with
-// more than maxContacts bindings. A binding the request replaces (a roamed
+// more than the configured number of bindings. A binding the request replaces (a roamed
 // phone's old contact) does not count.
 func (s *Server) tooManyContacts(aor string, contacts []contactReq, callID string) (bool, error) {
 	ctx, cancel := s.stateCtx()
@@ -184,7 +202,7 @@ func (s *Server) tooManyContacts(aor string, contacts []contactReq, callID strin
 			set[c.uri] = true
 		}
 	}
-	return len(set) > maxContacts, nil
+	return len(set) > s.maxContacts(), nil
 }
 
 // replacedBindings lists the contact URIs of existing bindings a REGISTER

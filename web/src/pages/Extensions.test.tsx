@@ -47,6 +47,19 @@ function api(extensions: unknown[], more: Routes = {}) {
     ...ME,
     "GET /api/v1/extensions": () => json({ items: extensions }),
     "GET /api/v1/devices": () => json({ items: [] }),
+    // The follow-me section of the drawer; extension 1 is the one opened.
+    "GET /api/v1/extensions/1/follow-me": () =>
+      json({
+        extensionId: 1,
+        number: "100",
+        enabled: false,
+        strategy: "simultaneous",
+        ringOwnDevices: true,
+        timeoutSeconds: 30,
+        confirmExternal: true,
+        dndBlocks: true,
+        targets: [],
+      }),
     ...more,
   });
 }
@@ -647,6 +660,54 @@ describe("Extensions", () => {
       method: "PATCH",
       url: "/api/v1/extensions/1",
       body: { callWaiting: false },
+    });
+  });
+
+  it("turns anonymous outbound on, off by default", async () => {
+    const calls = api([EXT], {
+      "GET /api/v1/devices": () => json({ items: [DEVICE] }),
+      "GET /api/v1/registrations": () => json({ items: [] }),
+      "GET /api/v1/presence": () => json({ items: [] }),
+      "PATCH /api/v1/extensions/1": () =>
+        json({ ...EXT, anonymousOutbound: true }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer();
+    const sw = within(drawer).getByRole("switch", {
+      name: /^Anonymous outbound/,
+    });
+    expect(sw).not.toBeChecked();
+    fireEvent.click(sw);
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Extension 100 saved.")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/extensions/1",
+      body: { anonymousOutbound: true },
+    });
+  });
+
+  it("turns the phone's send anonymous on, off by default", async () => {
+    const calls = api([EXT], {
+      "GET /api/v1/devices": () => json({ items: [DEVICE] }),
+      "GET /api/v1/registrations": () => json({ items: [] }),
+      "GET /api/v1/presence": () => json({ items: [] }),
+      "PATCH /api/v1/extensions/1": () =>
+        json({ ...EXT, phoneSendAnonymous: true }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer();
+    const sw = within(drawer).getByRole("switch", {
+      name: /Phone sends anonymous/,
+    });
+    expect(sw).not.toBeChecked();
+    fireEvent.click(sw);
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Extension 100 saved.")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/extensions/1",
+      body: { phoneSendAnonymous: true },
     });
   });
 

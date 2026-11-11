@@ -80,6 +80,10 @@ var dutch = map[Key]string{
 	GreetBusyTail:        "is in gesprek. Laat een bericht achter na de toon.",
 	GreetUnreachableTail: "is momenteel niet bereikbaar. Laat een bericht achter na de toon.",
 
+	BossScreen:           "Gesprek voor {who}. Druk 1 om de beller door te verbinden, of 2 om een bericht op te nemen.",
+	GroupLeave:           "Laat een bericht achter voor {group} na de toon.",
+	GroupBroadcast:       "Spreek na de toon uw bericht voor de groep in. Druk op het hekje als u klaar bent.",
+	GroupSent:            "Uw bericht is verzonden.",
 	QueueCallbackOffer:   "Wilt u teruggebeld worden zodra een medewerker vrij is, met behoud van uw plaats in de wachtrij? Druk dan op {digit}.",
 	QueueCallbackConfirm: "Dank u. Wij bellen u terug op dit nummer zodra een medewerker vrij is. U behoudt uw plaats in de wachtrij. Tot ziens.",
 	QueueCallbackFull:    "Sorry, een terugbelverzoek kan nu niet worden ingepland. Blijf aan de lijn.",
@@ -93,4 +97,7 @@ var dutch = map[Key]string{
 	DirectoryMore:        "Dat levert te veel namen op. Toets meer letters in.",
 	DirectoryNone:        "Sorry, er is geen naam gevonden bij deze letters.",
 	DirectoryTooLong:     "Dat zijn te veel letters. Toets minder letters in.",
+	AlarmAnnounce:        "Paniekalarm van {who}.",
+	EmergencyAnnounce:    "Noodoproep van {who}, toestel {ext}.",
+	FollowMeAccept:       "U heeft een doorgeschakeld gesprek. Druk op 1 om het aan te nemen.",
 }

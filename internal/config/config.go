@@ -53,7 +53,9 @@ type Control struct {
 	// reach (HELLO_DOOR_CAMERA_ALLOW, CIDRs); public addresses need no entry
 	// and loopback and link-local ones are never reachable.
 	DoorCameraAllow []netip.Prefix
-	DatabaseURL     string
+	// Fax is the fax feature (HELLO_FAX_*); disabled unless HELLO_FAX_ENABLED.
+	Fax         Fax
+	DatabaseURL string
 	// Database is DatabaseURL parsed, so a malformed DSN fails at startup.
 	Database *pgx.ConnConfig
 	// ValkeyAddr is read for the live registrations/calls API.
@@ -93,6 +95,8 @@ type Control struct {
 	// SecretKey (HELLO_SECRET_KEY) seals trunk passwords; identical on every
 	// hello-control and hello-sip.
 	SecretKey string
+	// Clients is the browser softphone's device and ICE settings.
+	Clients Clients
 	// Backup is where the PostgreSQL client programs and the staging
 	// directory of backups are (HELLO_BACKUP_*, spec pbx-gaps S-2).
 	Backup Backup
@@ -110,6 +114,59 @@ type Control struct {
 	AI AI
 	// AIAgent is the in-product AI agent (HELLO_AI_*, spec ai-agent).
 	AIAgent AIAgent
+	// Syslog is the phone syslog sink (HELLO_SYSLOG_*).
+	Syslog Syslog
+}
+
+// Syslog configures the phone syslog sink (phone-feature-parity S-27). It is
+// off until a listen address is set.
+type Syslog struct {
+	// UDPAddr (HELLO_SYSLOG_UDP_ADDR) and TLSAddr (HELLO_SYSLOG_TLS_ADDR) are
+	// the listen addresses; empty turns that listener off. The Service maps
+	// the well-known ports 514 and 6514 onto them.
+	UDPAddr, TLSAddr string
+	// TLSCert and TLSKey (HELLO_SYSLOG_TLS_CERT, HELLO_SYSLOG_TLS_KEY) are
+	// required with TLSAddr.
+	TLSCert, TLSKey string
+	// Host (HELLO_SYSLOG_HOST) is the address phones are told to send
+	// syslog to; empty keeps syslog out of every phone configuration.
+	Host string
+	// Rate (HELLO_SYSLOG_RATE, default 20) is the sustained lines per second
+	// kept per phone and Burst (HELLO_SYSLOG_BURST, default 200) the burst;
+	// lines over it are dropped.
+	Rate, Burst int
+}
+
+// Enabled reports whether the sink listens at all.
+func (s Syslog) Enabled() bool { return s.UDPAddr != "" || s.TLSAddr != "" }
+
+// syslog reads the HELLO_SYSLOG_* settings.
+func (r *reader) syslog() Syslog {
+	s := Syslog{
+		UDPAddr: r.getenv("HELLO_SYSLOG_UDP_ADDR"),
+		TLSAddr: r.getenv("HELLO_SYSLOG_TLS_ADDR"),
+		TLSCert: r.getenv("HELLO_SYSLOG_TLS_CERT"),
+		TLSKey:  r.getenv("HELLO_SYSLOG_TLS_KEY"),
+		Host:    r.getenv("HELLO_SYSLOG_HOST"),
+		Rate:    r.positiveInt("HELLO_SYSLOG_RATE", 20),
+		Burst:   r.positiveInt("HELLO_SYSLOG_BURST", 200),
+	}
+	r.hostPort("HELLO_SYSLOG_UDP_ADDR", s.UDPAddr)
+	r.hostPort("HELLO_SYSLOG_TLS_ADDR", s.TLSAddr)
+	if s.Host != "" && !ntpRe.MatchString(s.Host) {
+		r.fail("HELLO_SYSLOG_HOST", errors.New("must be a host name or address"))
+	}
+	switch {
+	case (s.TLSCert == "") != (s.TLSKey == ""):
+		r.fail("HELLO_SYSLOG_TLS_CERT", errors.New("HELLO_SYSLOG_TLS_CERT and HELLO_SYSLOG_TLS_KEY are set together"))
+	case s.TLSAddr != "" && s.TLSCert == "":
+		r.fail("HELLO_SYSLOG_TLS_CERT", errors.New("required with HELLO_SYSLOG_TLS_ADDR"))
+	case s.TLSCert != "":
+		if _, err := tls.LoadX509KeyPair(s.TLSCert, s.TLSKey); err != nil {
+			r.fail("HELLO_SYSLOG_TLS_CERT", errors.New("cannot load the certificate and key"))
+		}
+	}
+	return s
 }
 
 // AIAgent configures the in-product AI agent: an LLM endpoint reached
@@ -222,11 +279,30 @@ type Prov struct {
 	// prefixes ("grandstream:WP8") provisioned for TLS once SIPTLSServer is
 	// set. Taking a model out switches it back to UDP at its next resync.
 	SIPTLSModels []string
+	// SIPBackupServers (HELLO_PROV_SIP_BACKUP_SERVERS, comma separated
+	// host:port, at most 2) are the backup registrars rendered configs name
+	// for the phones that can take one: Yealink and Poly (second server) and
+	// Grandstream (backup outbound proxy). The first is used; the list is
+	// the HA node list of a deployment that does not publish SRV records
+	// (phone-feature-parity S-20). Empty provisions none.
+	SIPBackupServers []string
+	// SIPSRV (HELLO_PROV_SIP_SRV, a DNS name) switches Grandstream phones to
+	// DNS SRV mode: they register with this name and resolve the SIP
+	// servers from its _sip._udp SRV records. Empty keeps A-record mode,
+	// the default until the failover lab test passes.
+	SIPSRV string
+	// SIPTCPModels (HELLO_PROV_SIP_TCP_MODELS, same format, default none)
+	// are provisioned to register over TCP with SIPServer (S-13).
+	SIPTCPModels []string
 	// DSCPSIP and DSCPRTP (HELLO_DSCP_SIP, HELLO_DSCP_RTP; defaults 26 and
 	// 46) are the QoS values rendered configs carry, the same ones hello-sip
 	// marks its sockets with (spec phone-feature-parity S-21).
 	DSCPSIP int
 	DSCPRTP int
+	// RTCPXR (HELLO_PROV_RTCPXR, default off) provisions the phones that
+	// support it (Grandstream WP8xx) to publish RTCP-XR voice-quality reports
+	// to the SIP server (phone-feature-parity S-36).
+	RTCPXR bool
 	// RegisterExpiry is the registration expiry rendered configs carry:
 	// HELLO_SIP_REGISTER_MAX_EXPIRES (default 1h), the same value hello-sip
 	// caps registrations at, so it is always inside its window.
@@ -268,6 +344,12 @@ type Prov struct {
 	// hello-control push a check-sync to a phone, debounced 30s, after a
 	// change to what its configuration renders from.
 	AutoResync bool
+	// SCEP (HELLO_SCEP, default true) serves the SCEP endpoint
+	// /p/<token>/scep and the device CA and CRL; false turns them off
+	// everywhere (404) and stops rendering SCEP settings. SCEP is still off
+	// per phone group until an administrator switches it on there
+	// (phone-feature-parity S-25).
+	SCEP bool
 	// Redirect holds vendor redirect credentials set by the deployment.
 	Redirect ProvRedirect
 }
@@ -315,6 +397,8 @@ type ProvRedirect struct {
 // listens; the advertised address is what it puts in Via/Contact (spec §18).
 type SIP struct {
 	Common
+	// Fax is the fax feature (HELLO_FAX_*); disabled unless HELLO_FAX_ENABLED.
+	Fax               Fax
 	ValkeyAddr        string
 	ValkeySentinels   []string
 	ValkeyMaster      string
@@ -344,6 +428,15 @@ type SIP struct {
 	VoicePromptLanguage string
 	Timezone            string
 	Dial                phonebook.Dialing
+	// ClientAuthKey and ClientAuthKeyPrevious (HELLO_CLIENT_AUTH_KEY and
+	// HELLO_CLIENT_AUTH_KEY_PREVIOUS) derive the digest secret of a web
+	// device; empty turns derived credentials off. A credential made under
+	// either key is accepted, so rotating the key drops no registered client.
+	ClientAuthKey         string
+	ClientAuthKeyPrevious string
+	// MaxContacts (HELLO_SIP_MAX_CONTACTS, default 10) caps the bindings of
+	// one AOR.
+	MaxContacts int
 	// SecretKey (HELLO_SECRET_KEY) opens trunk passwords sealed by
 	// hello-control and the text-to-speech key.
 	SecretKey      string
@@ -468,6 +561,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		BootstrapAdminPassword: r.optional("HELLO_BOOTSTRAP_ADMIN_PASSWORD", ""),
 		SessionTTL:             r.duration("HELLO_SESSION_TTL", 12*time.Hour),
 	}
+	c.Fax = r.fax()
 	c.EventRetentionDays = r.positiveInt("HELLO_EVENT_RETENTION_DAYS", 7)
 	if c.EventRetentionDays > 30 {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
@@ -495,6 +589,8 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	c.VoicePromptLanguage = r.optional("HELLO_VOICEMAIL_LANGUAGE", "en")
 	c.AI = r.ai()
 	c.AIAgent = r.aiAgent()
+	c.Clients = r.clients()
+	c.Syslog = r.syslog()
 	return c, r.err()
 }
 
@@ -511,6 +607,83 @@ func (r *reader) cameraAllow() []netip.Prefix {
 		return nil
 	}
 	return p
+}
+
+// Clients is the browser softphone's settings on hello-control.
+type Clients struct {
+	// AuthKey and AuthKeyPrevious (HELLO_CLIENT_AUTH_KEY, _PREVIOUS) derive
+	// the digest secret of a web device; hello-sip holds the same keys. Empty
+	// AuthKey turns web devices off (the enrolment routes answer 503).
+	AuthKey         string
+	AuthKeyPrevious string
+	// MaxDevices (HELLO_CLIENT_MAX_DEVICES, default 5) caps the web devices
+	// of one user.
+	MaxDevices int
+	// WSSURL (HELLO_WSS_URL) is the WebSocket address the softphone
+	// registers at, returned with the credentials.
+	WSSURL string
+	// STUNURLs and TURNURLs (HELLO_STUN_URLS, HELLO_TURN_URLS, comma
+	// separated) are handed to the softphone; STUN defaults to the plain
+	// turn: hosts. TURNSecret (HELLO_TURN_SECRET) is coturn's
+	// static-auth-secret and TURNTTL (HELLO_TURN_TTL, default 1h) the
+	// lifetime of a credential made from it.
+	STUNURLs   []string
+	TURNURLs   []string
+	TURNSecret string
+	TURNTTL    time.Duration
+}
+
+// clientKey reads a client credential key: at least 32 bytes, never echoed.
+func (r *reader) clientKey(key string) string {
+	k := r.getenv(key)
+	if k != "" && len(k) < 32 {
+		r.fail(key, errors.New("must be at least 32 bytes; generate one with: openssl rand -base64 32"))
+	}
+	return k
+}
+
+// urlList reads a comma separated list of URIs that must start with one of
+// the schemes.
+func (r *reader) urlList(key string, schemes ...string) []string {
+	var out []string
+	for _, u := range strings.Split(r.getenv(key), ",") {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		if !slices.ContainsFunc(schemes, func(p string) bool { return strings.HasPrefix(u, p) }) || strings.ContainsAny(u, " \t\n\"") {
+			r.fail(key, fmt.Errorf("%q must start with %s", u, strings.Join(schemes, " or ")))
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
+}
+
+func (r *reader) clients() Clients {
+	c := Clients{
+		AuthKey:         r.clientKey("HELLO_CLIENT_AUTH_KEY"),
+		AuthKeyPrevious: r.clientKey("HELLO_CLIENT_AUTH_KEY_PREVIOUS"),
+		MaxDevices:      r.positiveInt("HELLO_CLIENT_MAX_DEVICES", 5),
+		WSSURL:          r.optional("HELLO_WSS_URL", ""),
+		STUNURLs:        r.urlList("HELLO_STUN_URLS", "stun:", "stuns:"),
+		TURNURLs:        r.urlList("HELLO_TURN_URLS", "turn:", "turns:"),
+		TURNSecret:      r.getenv("HELLO_TURN_SECRET"),
+		TURNTTL:         r.duration("HELLO_TURN_TTL", time.Hour),
+	}
+	if c.AuthKeyPrevious != "" && c.AuthKey == "" {
+		r.fail("HELLO_CLIENT_AUTH_KEY_PREVIOUS", errors.New("needs HELLO_CLIENT_AUTH_KEY"))
+	}
+	if c.WSSURL != "" && !strings.HasPrefix(c.WSSURL, "wss://") && !strings.HasPrefix(c.WSSURL, "ws://") {
+		r.fail("HELLO_WSS_URL", errors.New("must be a wss:// (or ws://) URL"))
+	}
+	if len(c.TURNURLs) > 0 && len(c.TURNSecret) < 16 {
+		r.fail("HELLO_TURN_SECRET", errors.New("is required with HELLO_TURN_URLS and must be at least 16 bytes"))
+	}
+	if c.TURNTTL < time.Minute || c.TURNTTL > 24*time.Hour {
+		r.fail("HELLO_TURN_TTL", errors.New("must be between 1m and 24h"))
+	}
+	return c
 }
 
 // ai reads HELLO_PUBLIC_URL, HELLO_OAUTH_* and HELLO_MCP_ALLOWED_ORIGINS.
@@ -637,6 +810,14 @@ func (r *reader) boolean(key string) bool {
 	return false
 }
 
+// booleanDefault reads "true" or "false"; empty is def.
+func (r *reader) booleanDefault(key string, def bool) bool {
+	if r.getenv(key) == "" {
+		return def
+	}
+	return r.boolean(key)
+}
+
 // ntpRe is the shape of an NTP server name or address.
 var ntpRe = regexp.MustCompile(`^[A-Za-z0-9.:-]{1,253}$`)
 
@@ -706,6 +887,9 @@ func (r *reader) prov() Prov {
 		SIPServer:          r.optional("HELLO_PROV_SIP_SERVER", r.getenv("HELLO_SIP_ADVERTISED_ADDR")),
 		SIPTLSServer:       r.getenv("HELLO_PROV_SIP_TLS_SERVER"),
 		SIPTLSModels:       r.tlsModels("HELLO_PROV_SIP_TLS_MODELS", "grandstream:WP"),
+		SIPBackupServers:   r.hostPorts("HELLO_PROV_SIP_BACKUP_SERVERS", 2),
+		SIPSRV:             r.getenv("HELLO_PROV_SIP_SRV"),
+		SIPTCPModels:       r.tlsModels("HELLO_PROV_SIP_TCP_MODELS", ""),
 		TrustedProxies:     r.prefixes("HELLO_PROV_TRUSTED_PROXIES"),
 		TokenGrace:         r.days("HELLO_PROV_TOKEN_GRACE", 7*24*time.Hour),
 		DSCPSIP:            r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP),
@@ -723,6 +907,8 @@ func (r *reader) prov() Prov {
 		TLSKey:             r.getenv("HELLO_PROV_TLS_KEY"),
 		BootCIDRs:          r.prefixes("HELLO_PROV_BOOT_CIDRS"),
 		AutoResync:         r.boolean("HELLO_PROV_AUTO_RESYNC"),
+		SCEP:               r.booleanDefault("HELLO_SCEP", true),
+		RTCPXR:             r.boolean("HELLO_PROV_RTCPXR"),
 	}
 	minExp := r.duration("HELLO_SIP_REGISTER_MIN_EXPIRES", 60*time.Second)
 	p.RegisterExpiry = r.duration("HELLO_SIP_REGISTER_MAX_EXPIRES", time.Hour)
@@ -743,6 +929,11 @@ func (r *reader) prov() Prov {
 		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must be an address phones can reach, not unspecified"))
 	} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must end in a port number"))
+	}
+	if p.SIPSRV != "" {
+		if _, _, err := net.SplitHostPort(p.SIPSRV); err == nil || net.ParseIP(p.SIPSRV) != nil || strings.ContainsAny(p.SIPSRV, " /:@") {
+			r.fail("HELLO_PROV_SIP_SRV", errors.New("must be a DNS name without a port"))
+		}
 	}
 	if p.SIPTLSServer != "" {
 		if host, port, err := net.SplitHostPort(p.SIPTLSServer); err != nil {
@@ -905,6 +1096,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.PageFanout = r.positiveInt("HELLO_PAGE_FANOUT", 200)
 	c.PageMulticastIface = r.getenv("HELLO_PAGE_MULTICAST_IFACE")
 	c.PageMulticastTTL = r.positiveInt("HELLO_PAGE_MULTICAST_TTL", 1)
+	c.Fax = r.fax()
 	c.RTPPortMin = r.port("HELLO_RTP_PORT_MIN", 20000)
 	c.RTPPortMax = r.port("HELLO_RTP_PORT_MAX", 21000)
 	c.DSCPSIP = r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP)
@@ -922,6 +1114,12 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	}
 	c.Database = r.database(c.DatabaseURL)
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
+	c.ClientAuthKey = r.clientKey("HELLO_CLIENT_AUTH_KEY")
+	c.ClientAuthKeyPrevious = r.clientKey("HELLO_CLIENT_AUTH_KEY_PREVIOUS")
+	if c.ClientAuthKeyPrevious != "" && c.ClientAuthKey == "" {
+		r.fail("HELLO_CLIENT_AUTH_KEY_PREVIOUS", errors.New("needs HELLO_CLIENT_AUTH_KEY"))
+	}
+	c.MaxContacts = r.positiveInt("HELLO_SIP_MAX_CONTACTS", 10)
 	c.SecretKey = r.secretKey()
 	r.minio(&c.MinioEndpoint, &c.MinioAccessKey, &c.MinioSecretKey, &c.MinioSecure)
 	c.TrustedProxies = r.prefixes("HELLO_SIP_TRUSTED_PROXIES")
@@ -1169,6 +1367,36 @@ func (r *reader) hostPort(key, v string) {
 	}
 }
 
+// hostPorts reads a comma separated list of host:port addresses phones can
+// reach, at most max of them.
+func (r *reader) hostPorts(key string, max int) []string {
+	v := r.getenv(key)
+	if v == "" {
+		return nil
+	}
+	var out []string
+	for _, a := range strings.Split(v, ",") {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		host, port, err := net.SplitHostPort(a)
+		switch n, perr := strconv.Atoi(port); {
+		case err != nil:
+			r.fail(key, err)
+		case unspecified(host):
+			r.fail(key, errors.New("must be addresses phones can reach, not unspecified"))
+		case perr != nil || n < 1 || n > 65535:
+			r.fail(key, errors.New("each address must end in a port number"))
+		}
+		out = append(out, a)
+	}
+	if len(out) > max {
+		r.fail(key, fmt.Errorf("at most %d addresses", max))
+	}
+	return out
+}
+
 // port reads a UDP port number setting (1-65535).
 func (r *reader) port(key string, def int) int {
 	v := r.getenv(key)
@@ -1250,4 +1478,38 @@ func (r *reader) common(defaultHTTP string) Common {
 		r.fail("HELLO_LOG_LEVEL", err)
 	}
 	return c
+}
+
+// Fax is the settings of the fax feature (pbx-gaps S-15 to S-17), read by
+// hello-control and hello-sip. The fax engine itself, hello-fax, reads its
+// own listen and port settings.
+type Fax struct {
+	// Enabled (HELLO_FAX_ENABLED, default false) turns the feature on. Off,
+	// fax calls are answered 488 and the API refuses to queue a fax.
+	Enabled bool
+	// Addr (HELLO_FAX_ADDR) is the host:port of hello-fax's control API; the
+	// host is also where hello-sip relays the fax media.
+	Addr string
+	// Token (HELLO_FAX_TOKEN) is the bearer token hello-fax requires; empty
+	// sends none.
+	Token string
+	// RetentionDays (HELLO_FAX_RETENTION_DAYS, default 90, 1 to 3650) is how
+	// long a fax is kept.
+	RetentionDays int
+}
+
+// fax reads the HELLO_FAX_* settings.
+func (r *reader) fax() Fax {
+	f := Fax{
+		Enabled: r.boolean("HELLO_FAX_ENABLED"), Addr: r.optional("HELLO_FAX_ADDR", ""),
+		Token: r.optional("HELLO_FAX_TOKEN", ""), RetentionDays: r.positiveInt("HELLO_FAX_RETENTION_DAYS", 90),
+	}
+	if f.RetentionDays > 3650 {
+		r.fail("HELLO_FAX_RETENTION_DAYS", errors.New("must be between 1 and 3650"))
+	}
+	if f.Enabled && f.Addr == "" {
+		r.fail("HELLO_FAX_ADDR", errors.New("is required when HELLO_FAX_ENABLED is true"))
+	}
+	r.hostPort("HELLO_FAX_ADDR", f.Addr)
+	return f
 }

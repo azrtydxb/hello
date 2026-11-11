@@ -75,3 +75,44 @@ P-values follow the official WP8x6 (1.0.3.39) and WP810/822/825 (1.0.11.83) temp
 whether a WP then shows the station's video and an Open door key for a station with no
 access password is for a WP on the bench to confirm. The WP856 and the Yealink, Poly,
 Snom and Fanvil phones get none.
+
+## Doorbell webhook
+
+A doorbell that cannot register as a SIP phone (a camera doorbell, a smart button, a
+home-automation rule) posts to a webhook instead. Create it under **Door** (admins), or
+with `POST /api/v1/door/webhooks`:
+
+- **name**: the caller name the phones show;
+- **action** `ring_door`: Hello originates a call from a virtual caller named after the
+  webhook to the members of the Door group (every Door group unless one is named), with
+  the `doorbell` ring tag. The first member to answer hears the chime and the call ends
+  after it, or after 30 s; the other phones stop ringing. Members in do-not-disturb
+  (unless the group ignores it) or in a call are skipped;
+- **action** `chime_page`: a one-way page to a paging group (auto-answer, as for a
+  server page) that plays the chime and ends;
+- **chime**: an announcement, or the built-in chime;
+- **rate limit**: triggers a minute (default 11).
+
+The secret is returned once, on create and on `POST .../rotate-secret`, and stored sealed.
+
+The doorbell posts `POST /api/v1/door/webhooks/{id}/trigger`, with no session:
+
+```
+X-Hello-Timestamp: <Unix seconds, within 300 s of now>
+X-Hello-Signature: <hex HMAC-SHA256(secret, timestamp + "." + body)>
+```
+
+The body is optional JSON of at most 1 KiB; a `label` in it shows in the call trace.
+Sign the exact bytes sent (an empty body signs `timestamp + "."`). Answers:
+
+- `202` `{"status":"queued"}`, or `{"status":"coalesced"}` when the same webhook fired in
+  the last 10 s and is already ringing, so a button pressed twice rings once;
+- `401` for a missing, wrong or stale signature, an unknown id and a disabled webhook,
+  all alike, so an id cannot be probed;
+- `400` for a body that is not a JSON object, `413` over 1 KiB;
+- `429` with `Retry-After` above the rate limit (counted per webhook, shared by every
+  node);
+- `503` when Valkey is down.
+
+Triggers are audited as `webhook:<name>` without the body, and each ring or chime
+writes a CDR with kind `door`.

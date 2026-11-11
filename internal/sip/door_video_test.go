@@ -5,7 +5,6 @@ import (
 	"net"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/azrtydxb/hello/internal/media"
 )
@@ -35,17 +34,6 @@ func videoPhone(t *testing.T, p *phone, dir string) (rtp, rtcp *net.UDPConn) {
 			"a=rtcp:%d\r\na=%s\r\n", p.user, portOf4(audio), portOf4(rtp), portOf4(rtcp), dir)
 	})
 	return rtp, rtcp
-}
-
-func readUDP(t *testing.T, c *net.UDPConn, what string) []byte {
-	t.Helper()
-	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
-	buf := make([]byte, 1500)
-	n, _, err := c.ReadFromUDP(buf)
-	if err != nil {
-		t.Fatalf("%s: %v", what, err)
-	}
-	return buf[:n]
 }
 
 // TestDoorVideoPassthrough fails if a door call offering H.264 video to a

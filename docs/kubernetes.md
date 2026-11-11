@@ -221,6 +221,15 @@ identical across nodes; it is one value for the StatefulSet.
   `10.0.0.0/8` to your CIDRs; trusting more than Kamailio's addresses lets
   anyone in that range spoof a phone's address.
 
+## Browser softphone and coturn
+
+Web devices need `clientAuthKey` in the credentials Secret (and
+`clientAuthKeyPrevious` while it is replaced); TURN for WebRTC media is the
+optional `coturn` block: one single-replica Deployment per address, with
+`hostNetwork` and a `Recreate` rollout like Kamailio, and the shared secret
+(`turnSecret`) from the Secret. See [docs/webrtc.md](webrtc.md) for the
+ports, peers and values.
+
 ## Placement and disruption
 
 - **hello-sip** carries a required `podAntiAffinity` on
@@ -248,6 +257,19 @@ identical across nodes; it is one value for the StatefulSet.
 - Resources: the defaults match what runs on kw. Size
   `sip.resources` by concurrent calls; memory is the limit that matters for
   the anchor.
+
+## Fax engine
+
+`fax.enabled: true` adds the `hello-fax` Deployment and a ClusterIP Service
+(control API on 8083, never an Ingress) and sets `HELLO_FAX_ENABLED` and
+`HELLO_FAX_ADDR` on hello-control and hello-sip. The image carries spandsp and
+poppler-utils (`pdftoppm`); the other images carry neither. Fax media is UDP:
+hello-sip sends it straight to the hello-fax pod's address
+(`HELLO_FAX_MEDIA_HOST` is the pod IP), in the range `fax.rtpPortMin` to
+`fax.rtpPortMax` (40000 to 40999 by default), so the pods' network policy must
+allow UDP from the hello-sip nodes on that range. Set `fax.tokenSecret` to a
+Secret with the key `faxToken` to require a bearer token between the services.
+See [fax.md](fax.md).
 
 ## Highly available state
 

@@ -55,6 +55,7 @@ var scopeDescriptions = []struct {
 	{auth.ScopeCalls, "Place and hang up calls from your own extensions (click-to-call), and see the state of the calls you started."},
 	{auth.ScopeEvents, "Receive live call events (ringing, answered, ended, missed) for the extensions you may see."},
 	{auth.ScopeRecordings, "Create and revoke expiring links to call recordings."},
+	{auth.ScopeMessages, "Read and answer customer text conversations in the messaging inbox, for the conversations you may see."},
 }
 
 // aiSettings is GET /api/v1/ai/settings.

@@ -142,7 +142,7 @@ func (s *Store) lookupSources(ctx context.Context, callee string) ([]lookupSourc
 			SELECT DISTINCT p.group_id, gb.position, b.id, b.name
 			FROM extensions e
 			JOIN devices d ON d.extension_id = e.id
-			JOIN phones p ON p.device_id = d.id
+			JOIN phones p ON p.device_id = d.id OR p.id IN (SELECT phone_id FROM phone_lines WHERE device_id = d.id)
 			JOIN phone_group_books gb ON gb.group_id = p.group_id
 			JOIN phonebooks b ON b.id = gb.book_id AND b.kind = 'named'
 			WHERE e.number = $1

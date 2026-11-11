@@ -15,7 +15,7 @@ import (
 	"github.com/azrtydxb/hello/internal/store"
 )
 
-// cdrFilter reads the direction and failed query parameters shared by the
+// cdrFilter reads the direction, disposition and failed query parameters shared by the
 // CDR list and export, answering 400 itself when one is invalid.
 func cdrFilter(w http.ResponseWriter, r *http.Request) (store.CDRFilter, bool) {
 	q := r.URL.Query()
@@ -25,6 +25,13 @@ func cdrFilter(w http.ResponseWriter, r *http.Request) (store.CDRFilter, bool) {
 		f.Direction = d
 	default:
 		badRequest(w, "direction must be internal, inbound or outbound")
+		return f, false
+	}
+	switch d := q.Get("disposition"); d {
+	case "", "blocked":
+		f.Disposition = d
+	default:
+		badRequest(w, `disposition must be "blocked"`)
 		return f, false
 	}
 	switch q.Get("failed") {
@@ -157,7 +164,7 @@ func (s *server) cdrExport(w http.ResponseWriter, r *http.Request) {
 	cw := csv.NewWriter(w)
 	_ = cw.Write([]string{"id", "start_time", "answer_time", "end_time", "direction", "source", "original_destination",
 		"rewritten_destination", "route", "trunk", "final_status", "failure_reason", "termination_side", "duration_ms",
-		"billable_ms", "sip_node", "media_mode", "sip_call_id", "correlation_id", "caller_codec", "callee_codec"})
+		"billable_ms", "sip_node", "media_mode", "srtp", "sip_call_id", "correlation_id", "caller_codec", "callee_codec"})
 	ts := func(t *time.Time) string {
 		if t == nil {
 			return ""
@@ -169,7 +176,7 @@ func (s *server) cdrExport(w http.ResponseWriter, r *http.Request) {
 		row := []string{strconv.FormatInt(c.ID, 10), ts(&start), ts(c.AnswerTime), ts(&end), c.Direction, c.Source,
 			c.OriginalDestination, c.RewrittenDestination, c.Route, c.Trunk, strconv.Itoa(c.FinalStatus), c.FailureReason,
 			c.TerminationSide, strconv.FormatInt(c.DurationMs, 10), strconv.FormatInt(c.BillableMs, 10), c.SIPNode,
-			c.MediaMode, c.SIPCallID, c.CorrelationID, deref(c.CallerCodec), deref(c.CalleeCodec)}
+			c.MediaMode, c.SRTP, c.SIPCallID, c.CorrelationID, deref(c.CallerCodec), deref(c.CalleeCodec)}
 		for i := range row {
 			row[i] = csvSafe(row[i])
 		}

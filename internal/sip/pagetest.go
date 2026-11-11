@@ -81,6 +81,10 @@ type testContact struct {
 	b   livestate.Binding
 	res livestate.PageTestContact
 	l   *leg
+	// ext is the extension the contact belongs to (the emergency notice pages
+	// several), name and num the caller identity of its INVITE; empty name and
+	// num are the page test's own.
+	ext, name, num string
 }
 
 // testPage pages one member of a group and reports what happened.
@@ -246,7 +250,7 @@ func (s *Server) testInvite(c *testContact, ext string, offer []byte) (*sip.Requ
 	if err := sip.ParseUri(c.b.ContactURI, &ruri); err != nil {
 		return nil, err
 	}
-	const name, num = "Hello paging test", "paging-test"
+	name, num := orDefault(c.name, "Hello paging test"), orDefault(c.num, "paging-test")
 	req := sip.NewRequest(sip.INVITE, ruri)
 	callID := sip.CallIDHeader(newID())
 	maxFwd := sip.MaxForwardsHeader(70)

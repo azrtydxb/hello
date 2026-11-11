@@ -52,6 +52,12 @@ type PushJob struct {
 	Kind   string // PushResync or PushReboot
 	Vendor string
 	Device string // the bound device's SIP username
+	// Lines are the SIP usernames of the devices of the phone's lines 2 and
+	// up (phone-feature-parity S-10). The push goes to line 1's contacts and,
+	// only while that device has none registered, to those of the next line:
+	// a phone with two registered lines is notified once, and one whose
+	// first line is down is still reached through another.
+	Lines []string
 }
 
 // PushResult is what a push achieved.
@@ -178,19 +184,32 @@ func pushRank(status string) int {
 	return 4
 }
 
-// sendCheckSync sends the push to every registered contact of the device
-// and returns the best result.
+// sendCheckSync sends the push to the phone: to line 1's device, and while
+// that has no registered contact, to the device of the next line.
 func (s *Server) sendCheckSync(j PushJob) PushResult {
+	res := s.sendCheckSyncDevice(j, j.Device)
+	for _, d := range j.Lines {
+		if res.Status != PushNotRegistered {
+			break
+		}
+		res = s.sendCheckSyncDevice(j, d)
+	}
+	return res
+}
+
+// sendCheckSyncDevice sends the push to every registered contact of the
+// device and returns the best result.
+func (s *Server) sendCheckSyncDevice(j PushJob, device string) PushResult {
 	snap := s.deps.Snapshots.Current()
 	if snap == nil {
 		return PushResult{Status: PushFailed, Detail: "no configuration loaded"}
 	}
-	dev, ok := snap.DeviceByUsername(j.Device)
+	dev, ok := snap.DeviceByUsername(device)
 	if !ok {
 		return PushResult{Status: PushNotRegistered, Detail: "device not in the configuration"}
 	}
 	ctx, cancel := s.stateCtx()
-	bindings, err := s.deps.State.Bindings(ctx, s.aor(j.Device))
+	bindings, err := s.deps.State.Bindings(ctx, s.aor(device))
 	cancel()
 	if err != nil {
 		return PushResult{Status: PushFailed, Detail: "registrations unavailable: " + err.Error()}
