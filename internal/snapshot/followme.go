@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// Follow-me (migration 00072, pbx-gaps S-5 and S-6): the profile of each
+// Follow-me (migration 00073, pbx-gaps S-5 and S-6): the profile of each
 // extension rides the snapshot, so ringing a follow-me never touches
 // PostgreSQL.
 
