@@ -460,7 +460,7 @@ func TestBlocklistLoad(t *testing.T) {
 	}
 }
 
-// TestFollowMeLoad fails if the follow-me profiles (migration 00078) do not
+// TestFollowMeLoad fails if the follow-me profiles (migration 00079) do not
 // reach the snapshot with their settings, their targets in position order and
 // only for the extension they belong to, or if an extension without a profile
 // reads as having one.

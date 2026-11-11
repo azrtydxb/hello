@@ -471,7 +471,7 @@ type FeatureUpdate struct {
 	// NoAnswerRings is the no-answer ring count (0 = system default).
 	NoAnswerRings *int
 	// FollowMe turns the extension's follow-me profile on or off (migration
-	// 00078); it changes nothing for an extension without a profile.
+	// 00079); it changes nothing for an extension without a profile.
 	FollowMe *bool
 	// BossDivert sets divert_on of the boss link whose boss is Number (the
 	// *64 code, pbx-gaps S-19); nil leaves it alone. A number with no link is

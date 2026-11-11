@@ -1,6 +1,6 @@
 package store
 
-// Follow-me (migration 00078, pbx-gaps S-5): one profile per extension with
+// Follow-me (migration 00079, pbx-gaps S-5): one profile per extension with
 // up to five targets. Every change runs through configChangeID, so it is
 // audited, bumps the configuration revision and reaches hello-sip as a new
 // snapshot.
