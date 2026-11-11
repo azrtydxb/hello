@@ -101,7 +101,12 @@ func urlParts(s string) url.URL {
 func Render(ctx context.Context, t Template, file string, d RenderData) ([]byte, error) {
 	for _, f := range t.Files {
 		if strings.EqualFold(ExpandPattern(f.Pattern, d.Phone), file) {
-			return renderBody(ctx, f.Body, d, renderBudget)
+			out, err := renderBody(ctx, f.Body, d, renderBudget)
+			if err != nil || len(d.Overrides) == 0 || !strings.Contains(strings.ToLower(f.Pattern), "{mac}") {
+				return out, err
+			}
+			// Setting overrides (S-12) change the per-phone file only.
+			return ApplyOverrides(d.Phone.Vendor, out, d.Overrides)
 		}
 	}
 	return nil, ErrNoFile
@@ -144,7 +149,7 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 		d.Phone.Family = GrandstreamFamily(d.Phone.Model)
 		if d.Book != nil {
 			b := *d.Book
-			b.RefreshMinutes = BookRefreshFor(d.Phone.Family, b.RefreshMinutes)
+			b.RefreshMinutes = BookRefreshForPhone(d.Phone.Family, d.Phone.WP, b.RefreshMinutes)
 			d.Book = &b
 		}
 	}
@@ -153,6 +158,10 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 	d.Lines = renderLines(d)
 	lines := 1 + len(d.Lines)
 	d.BLF = PlaceBLFLines(d.Phone.Vendor, d.Phone.Model, d.BLF, d.Codes.PickupDirected, lines)
+	d.Line.BLFListURI = ""
+	if len(d.BLF) > 0 && d.Line.Username != "" {
+		d.Line.BLFListURI = "sip:blf-" + d.Line.Username + "@" + d.Line.Domain
+	}
 	d.VMKey = nil
 	if !d.Line.NoVoicemail {
 		d.VMKey = PlaceVMKeyLines(d.Phone.Vendor, d.Phone.Model, len(d.BLF), d.Line.VoicemailCode, d.Line.Label, d.Line.Domain, lines)
@@ -557,6 +566,7 @@ func SampleData(full bool) RenderData {
 				{Channel: 26, Label: "Announcements", Transmit: 1, Subscribe: 1},
 			}})
 		d.Paging = DefaultPagingOptions()
+		d.Syslog = NewSyslogInfo("syslog.hello.example:5514", "info")
 		for i := range 12 {
 			n := strconv.Itoa(1002 + i)
 			d.BLF = append(d.BLF, BLFKey{Number: n, Label: "User " + n, URI: "sip:" + n + "@hello.example"})

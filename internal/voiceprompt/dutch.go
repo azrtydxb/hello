@@ -80,6 +80,7 @@ var dutch = map[Key]string{
 	GreetBusyTail:        "is in gesprek. Laat een bericht achter na de toon.",
 	GreetUnreachableTail: "is momenteel niet bereikbaar. Laat een bericht achter na de toon.",
 
+	BossScreen:           "Gesprek voor {who}. Druk 1 om de beller door te verbinden, of 2 om een bericht op te nemen.",
 	GroupLeave:           "Laat een bericht achter voor {group} na de toon.",
 	GroupBroadcast:       "Spreek na de toon uw bericht voor de groep in. Druk op het hekje als u klaar bent.",
 	GroupSent:            "Uw bericht is verzonden.",

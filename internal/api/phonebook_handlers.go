@@ -50,6 +50,7 @@ type PhonebookStore interface {
 	SetPhoneGroupAccountSharing(ctx context.Context, actor string, id int64, enabled bool) (phonebook.Group, error)
 	RegeneratePhoneGroupSharingSecret(ctx context.Context, actor string, id int64) (phonebook.Group, error)
 
+	SetPhoneGroupSyslog(ctx context.Context, actor string, id int64, in phonebook.Syslog) (phonebook.Group, error)
 	SetPhoneGroupLDAP(ctx context.Context, actor string, id int64, enabled bool) (phonebook.Group, error)
 }
 
@@ -707,6 +708,29 @@ func (s *server) putPhoneGroupPTT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g, err := s.Phonebooks.SetPhoneGroupPTT(r.Context(), actor(r).String(), id, in)
+	if err != nil {
+		s.bookError(w, "phone group", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, g)
+}
+
+// putPhoneGroupSyslog sets whether a group's phones send their log to
+// Hello's syslog sink and at what level (phone-feature-parity S-27).
+func (s *server) putPhoneGroupSyslog(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok || s.booksDisabled(w) {
+		return
+	}
+	in := phonebook.DefaultSyslog()
+	if !decode(w, r, &in) {
+		return
+	}
+	if f := phonebook.ValidateSyslog(in); len(f) > 0 {
+		writePhonebookFields(w, f)
+		return
+	}
+	g, err := s.Phonebooks.SetPhoneGroupSyslog(r.Context(), actor(r).String(), id, in)
 	if err != nil {
 		s.bookError(w, "phone group", err)
 		return

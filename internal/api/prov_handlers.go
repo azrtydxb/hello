@@ -546,6 +546,12 @@ func maskSecrets(d *prov.RenderData) {
 		sh.Password = mask
 		d.Sharing = &sh
 	}
+	d.Overrides = slices.Clone(d.Overrides)
+	for i := range d.Overrides {
+		if d.Overrides[i].Secret {
+			d.Overrides[i].Value = mask
+		}
+	}
 	d.Prov.URL = tokenInPathRe.ReplaceAllString(d.Prov.URL, "/p/"+mask+"/")
 	if d.Book != nil {
 		b := *d.Book

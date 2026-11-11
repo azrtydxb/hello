@@ -87,6 +87,16 @@ created or none (400 with the same rows).
 `templateId`, `blf`, `enabled`, `groupId`, `pttChannelId`), `getPhone`,
 `listPhones`, `deletePhone` (its SIP device stays).
 
+## Phone "Send Anonymous"
+
+`updateExtension` (path `id`) accepts `phoneSendAnonymous`, off by default. On,
+provisioning writes the Grandstream "Send Anonymous" setting (P65, line 1) at
+the next resync, and the phone then hides its caller ID on every call it
+makes, internal calls included. Off writes nothing. It is not
+`anonymousOutbound`, which only makes the calls Hello places through a trunk
+anonymous and leaves internal caller ID alone. Ask which one the person means
+before changing either, then `resyncPhone` and check with `previewPhoneFile`.
+
 ## Push a change and check it
 
 1. `previewPhoneFile` (query `file`) renders what the phone would get,
@@ -139,6 +149,38 @@ A group delivers address books and multicast settings to its phones.
 switches; the named books stay), `deletePhoneGroup` (phones fall back to no
 group).
 
+### Extra vendor settings (overrides)
+
+Keys the built-in templates do not write can be set per group or per phone.
+The order is the template, then the group, then the phone (the phone wins).
+
+- `listPhoneGroupSettings` and `putPhoneGroupSettings` (replaces all), and
+  `listPhoneSettings` and `putPhoneSettings` for one phone. Body:
+  `{ "overrides": [ { "key": "P71", "value": "100" } ] }`; an empty list
+  clears them.
+- A key is a Grandstream P-value (`P71`) or a Yealink dotted key
+  (`features.text_message.enable`); other vendors are refused. Keys Hello owns
+  (account, provisioning URL, CA, admin password) get a 400.
+- Mark a password-like value `"secret": true`: it is sealed and reads back as
+  `********`; send the mask, or no value, to keep it.
+- Only use a key you can confirm in the vendor's documentation; Hello does not
+  check that a phone knows it. Then `resyncPhone` or `resyncPhoneGroup`.
+
+## Phone syslog
+
+Phones can send their log to Hello's syslog sink. It is off by default, and
+no phone is told about syslog until `HELLO_SYSLOG_HOST` is set on the server.
+
+1. `setPhoneGroupSyslog` (admin) with `{ "enabled": true, "level": "warning" }`.
+   The level is debug, info, warning or error. The phone template writes the
+   sink and level, so run `resyncPhoneGroup` afterwards.
+2. `listPhoneSyslog` shows one phone's newest lines. Hello keeps the last 10000
+   lines per phone for 24 hours, with secrets redacted before storage. It
+   answers 503 while live state is unavailable.
+3. `listUnknownSyslog` lists the senders no phone owns. Pass `ip` to read that
+   address's lines. A line from an address shared through NAT lands here, not
+   on a phone.
+
 ## Phonebooks
 
 Books: the computed extensions book (read-only), the company book and up to
@@ -163,6 +205,11 @@ Books: the computed extensions book (read-only), the company book and up to
   company. Use it to explain why a name shows or does not.
 - Deliver a named book by adding it to a group with `setPhoneGroupBooks`,
   then resync.
+- `getPhoneDirectory` (path `id` of the phone) says how many contacts the
+  phone's books hold, how many its model takes (WP822 500, WP8x6 1000) and
+  how many are cut from the end of the delivery order (`dropped`). Check it
+  when a user says a contact is missing on a Grandstream handset; the fix is a
+  shorter book or a different order of books, not the phone.
 
 ## Ring tags
 

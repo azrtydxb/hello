@@ -94,6 +94,7 @@ var FeatureCodeNoTarget = map[string]string{
 	"queue_logout":        "acts on the caller's own agent state",
 	"queue_pause":         "acts on the caller's own agent state; the argument is a pause reason",
 	"queue_unpause":       "acts on the caller's own agent state",
+	"boss_divert":         "toggles the divert of the boss link of the caller's own extension",
 	"voicemail_broadcast": "records a message for the voicemail group whose number is dialled after the code",
 }
 
