@@ -58,7 +58,7 @@ func (e *srtpEnd) hears(t *testing.T, fill byte, d time.Duration) bool {
 	t.Helper()
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
-		raw, ok := readUDP(t, e.p.sock, 100*time.Millisecond)
+		raw, ok := readUDPWithin(t, e.p.sock, 100*time.Millisecond)
 		if !ok {
 			continue
 		}
