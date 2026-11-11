@@ -2,6 +2,7 @@ package sip
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
@@ -19,6 +20,8 @@ const reasonElsewhere = `SIP;cause=200;text="Call completed elsewhere"`
 // of a pickup is switched to a dialog UA whose client uses this requester.
 type elsewhereRequester struct {
 	ua *sipgo.UserAgent
+	// elsewhere is the leg's flag: the Reason is added only once it is set.
+	elsewhere *atomic.Bool
 }
 
 func (r elsewhereRequester) Request(ctx context.Context, req *sip.Request) (sip.ClientTransaction, error) {
@@ -27,7 +30,7 @@ func (r elsewhereRequester) Request(ctx context.Context, req *sip.Request) (sip.
 		// same dialog: an ACK is no transaction (Client.WriteRequest).
 		return nil, r.ua.TransportLayer().WriteMsg(req)
 	}
-	if req.IsCancel() && req.GetHeader("Reason") == nil {
+	if req.IsCancel() && r.elsewhere.Load() && req.GetHeader("Reason") == nil {
 		req.AppendHeader(sip.NewHeader("Reason", reasonElsewhere))
 	}
 	return r.ua.TransactionLayer().Request(ctx, req)
@@ -36,9 +39,9 @@ func (r elsewhereRequester) Request(ctx context.Context, req *sip.Request) (sip.
 // newElsewhereUA is a copy of the fork dialog UA whose CANCELs carry
 // reasonElsewhere. Only the requester differs: the client keeps its
 // address, NAT and connection settings.
-func newElsewhereUA(ua *sipgo.UserAgent, client *sipgo.Client, base *sipgo.DialogUA) *sipgo.DialogUA {
+func newElsewhereUA(ua *sipgo.UserAgent, client *sipgo.Client, base *sipgo.DialogUA, elsewhere *atomic.Bool) *sipgo.DialogUA {
 	cl := *client
-	cl.TxRequester = elsewhereRequester{ua: ua}
+	cl.TxRequester = elsewhereRequester{ua: ua, elsewhere: elsewhere}
 	d := *base
 	d.Client = &cl
 	return &d
@@ -59,12 +62,7 @@ func (c *call) cancelForksElsewhereExcept(except *leg) {
 		if l == except {
 			continue
 		}
-		l.mu.Lock()
-		l.elsewhere = true
-		if l.dcs != nil && !l.answered {
-			l.dcs.UA = c.s.uacElsewhere
-		}
-		l.mu.Unlock()
+		l.elsewhere.Store(true)
 		l.cancel()
 	}
 }

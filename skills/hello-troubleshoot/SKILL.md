@@ -44,6 +44,25 @@ from it. See [cluster states](references/cluster.md).
 4. Explain the cause in one or two sentences and name the fix: a route
    (hello-routing), a device (hello-setup), or the carrier.
 
+## Find a call or its recording
+
+When the user knows who, when or which call, search instead of paging:
+
+- `lookupCalls` finds calls by `number` (spaces, dashes and brackets are
+  ignored, and a number of eight or more digits also matches by its last eight
+  digits, so `+32 11 111 222` finds `011 111 222`), `extension`, `from` and `to`
+  (RFC 3339), or `callId` (the id call events carry). `recorded=true` keeps
+  calls that have a recording. Every hit carries `recordingId` when the call
+  was recorded; `id` is the CDR id for `getCDR`.
+- `lookupRecordings` is the same search over recordings.
+- Both need the `calls` scope (calls) or the `recordings` scope (recordings).
+  A user, or a credential limited to some extensions, only sees calls
+  involving those extensions; naming another extension is a 403, so report that
+  instead of retrying with a wider filter.
+- Creating a link to a recording is not an MCP tool: the link is a public URL
+  to call audio. Tell the user to create it in the console or with the
+  REST API (`POST /api/v1/recordings/{id}/links`, scope `recordings`).
+
 ## A phone that does not register
 
 1. `listRegistrations`: is the device registered at all, from which address
