@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Directions and statuses of a fax row (migration 00076).
+// Directions and statuses of a fax row (migration 00072).
 const (
 	DirInbound  = "inbound"
 	DirOutbound = "outbound"
@@ -36,7 +36,7 @@ const (
 	MailFailed  = "failed"
 )
 
-// Trunk fax modes (migration 00076, pbx-gaps S-16).
+// Trunk fax modes (migration 00072, pbx-gaps S-16).
 const (
 	ModePassthrough = "passthrough" // G.711 audio; the default
 	ModeT38         = "t38"         // T.38 when the carrier offers it

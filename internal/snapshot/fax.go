@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// FaxDestination is a named fax destination (migration 00076): the extension
+// FaxDestination is a named fax destination (migration 00072): the extension
 // whose faxes arrive there and an address that replaces the owner's for
 // delivery.
 type FaxDestination struct {

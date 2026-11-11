@@ -155,6 +155,14 @@ func (c *call) applyTCDest(tx sip.ServerTransaction, snap *snapshot.Snapshot, d 
 		c.vmExt = d.Target
 		c.mu.Unlock()
 		c.startVoicemail(vmLeave, "time-condition")
+	case snapshot.IVRVoicemailGroup:
+		g, ok := snap.VoicemailGroup(d.Target)
+		if !ok {
+			c.addTrace("Time condition: voicemail group " + d.Target + " does not exist")
+			c.tcReject(tx, sip.StatusNotFound, "voicemail group "+d.Target+" does not exist")
+			return
+		}
+		c.startVoicemailGroup(tx, g, false)
 	case timecond.KindAnnouncement:
 		if d.ThenVoicemail != "" {
 			e, ok := snap.Extension(d.ThenVoicemail)

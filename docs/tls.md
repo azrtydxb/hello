@@ -46,7 +46,7 @@ kamailio:
   image: { tag: <a build with kamailio-tls-modules> }
   tls:
     enabled: true
-    secretName: hello-sip-tls   # kubernetes.io/tls Secret from the Hello CA
+    secretName: hello-sip-tls # kubernetes.io/tls Secret from the Hello CA
 ```
 
 The Secret's certificate must name the address phones connect to (`publicHost`)
@@ -98,6 +98,18 @@ next resync.
 | Yealink     | `account.1.sip_server.1.transport_type = 2`                                                            |
 | Poly        | `reg.1.server.1.transport = "TLS"`                                                                     |
 | Fanvil      | `SIP1 Transport = 2`                                                                                   |
+
+### TCP
+
+`HELLO_PROV_SIP_TCP_MODELS` (same format, default none) lists the models that
+register over TCP with the ordinary SIP server address (Kamailio shares port
+5060 between UDP and TCP). A model listed for both uses TLS while
+`HELLO_PROV_SIP_TLS_SERVER` is set. Keys written for TCP: Grandstream
+`P130 = 1`, Yealink `transport_type = 1`, Poly `transport = "TCPOnly"`, Fanvil
+`SIP1 Transport = 1`. Kamailio reports the connection in `X-Hello-Transport: tcp`,
+the registration stores it, and requests to the phone reuse its connection
+(idle timeout one hour). Helm: `control.prov.sipTcpModels`. The keys are not yet
+confirmed on a phone.
 
 Snom has no confirmed transport key, so Snom phones stay on UDP. The phone must
 trust the Hello CA; provisioning already installs it (Grandstream P8433, the

@@ -109,6 +109,8 @@ func validateIVRDestination(f *fieldErrs, path, kind, target string) {
 		ok, want = target == "", `empty when kind is "directory"`
 	case store.IVRExtension, store.IVRVoicemail:
 		ok, want = numberRe.MatchString(target), "an extension number (2-10 digits)"
+	case store.IVRVoicemailGroup:
+		ok, want = voicemailGroupNumberRe.MatchString(target), "a voicemail group number (2-16 digits)"
 	case store.IVRRingGroup, store.IVRAnnouncement, store.IVRMenuDest, store.IVRTimeCondition, store.IVRFax:
 		ok, want = usernameRe.MatchString(target), "a name of 1-64 of A-Z a-z 0-9 . _ -"
 	case store.IVRPaging:

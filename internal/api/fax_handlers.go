@@ -17,7 +17,7 @@ import (
 	"github.com/azrtydxb/hello/internal/store"
 )
 
-// Fax (migration 00076, pbx-gaps S-15 to S-17). The API lists and downloads
+// Fax (migration 00072, pbx-gaps S-15 to S-17). The API lists and downloads
 // received and sent faxes, queues a PDF to send, and manages the fax
 // destinations a route or IVR key can name. The engine that rasterises the
 // PDF and carries the call is hello-fax; hello-sip places and answers the

@@ -236,8 +236,26 @@ func validateTrunk(in *store.TrunkInput, hasPassword bool) fieldErrs {
 	if !callerIDRe.MatchString(in.DefaultCallerID) {
 		f.add("defaultCallerId", "must be empty or 2-20 digits with an optional leading +")
 	}
+	switch in.AnonymousPolicy {
+	case "", routing.AnonymousHonour, routing.AnonymousAlways:
+	default:
+		f.add("anonymousPolicy", `must be "honour" or "always"`)
+	}
+	switch in.IdentityHeader {
+	case "", routing.IdentityPAI, routing.IdentityPPI:
+	default:
+		f.add("identityHeader", `must be "pai" or "ppi"`)
+	}
+	if !callerIDRe.MatchString(in.AssertedIdentity) {
+		f.add("assertedIdentity", "must be empty or 2-20 digits with an optional leading +")
+	}
 	if len(in.SourceCIDRs) > 100 {
 		f.add("sourceCidrs", "at most 100 entries")
+	}
+	var pol []routing.FieldError
+	routing.ValidateCallerPolicy(in.CallerPolicy, "", &pol)
+	for _, e := range pol {
+		f.add(strings.TrimPrefix(e.Path, "."), "%s", e.Message)
 	}
 	// nil is "not set" (the default applies); an empty list is refused.
 	if in.Codecs != nil {
@@ -412,6 +430,10 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 		if !numberRe.MatchString(in.Destination) {
 			f.add("destination", "must be the extension number of a voicemail box")
 		}
+	case "voicemail_group":
+		if !voicemailGroupNumberRe.MatchString(in.Destination) {
+			f.add("destination", "must be the number of a voicemail group")
+		}
 	case "paging":
 		if !pageCodeRe.MatchString(in.Destination) {
 			f.add("destination", "must be the code of a paging group")
@@ -442,7 +464,7 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 			f.add("destination", "must be a sip: URI of at most 255 characters")
 		}
 	default:
-		f.add("destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "announcement", "paging", "fax" or "directory"`)
+		f.add("destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "voicemail_group", "announcement", "paging", "fax" or "directory"`)
 	}
 	return f
 }

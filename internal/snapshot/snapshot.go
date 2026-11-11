@@ -64,6 +64,9 @@ type Extension struct {
 	// rung. The inverted sense keeps the zero value (and every extension
 	// built without the flag) on the default, call waiting on.
 	NoCallWaiting bool
+	// AnonymousOutbound makes the extension's trunk calls anonymous
+	// (migration 00051, spec S-19).
+	AnonymousOutbound bool
 	// MOHClassID is the music on hold class callers hear while this
 	// extension holds them (migration 00021); 0 uses the global default.
 	MOHClassID int64
@@ -201,6 +204,7 @@ type Snapshot struct {
 	// Skipped lists usernames whose realm did not match the SIP domain.
 	Skipped []string
 
+	blf    map[string][]string // device username -> BLF key extension numbers (S-35)
 	byUser map[string]Device
 	byExt  map[string][]Device
 	// known holds extension numbers that exist but have no enabled device,
@@ -216,7 +220,7 @@ type Snapshot struct {
 	codes  map[string]FeatureCode
 	pages  map[string]PagingGroup
 	anns   map[string]string
-	// faxDests maps a fax destination name to it (migration 00076).
+	// faxDests maps a fax destination name to it (migration 00072).
 	faxDests map[string]FaxDestination
 	// confs maps a dialled number to its conference room (spec S-34).
 	confs map[string]Conference
@@ -224,12 +228,16 @@ type Snapshot struct {
 	ivrByName, ivrByNumber map[string]IVRMenu
 	// queueByName and queueByNumber are the call queues (migration 00040).
 	queueByName, queueByNumber map[string]Queue
+	// vmGroups are the voicemail groups by number (migration 00061).
+	vmGroups map[string]VoicemailGroup
 	// tcByName and tcByToggle are the time conditions (migration 00038).
 	tcByName, tcByToggle map[string]TimeCondition
 	// parkLots are the enabled park lots in slot order; pickups the pickup
 	// groups (migration 00032).
 	parkLots []ParkLot
 	pickups  []PickupGroup
+	// bosses maps a boss extension number to its enabled link (migration 00065).
+	bosses map[string]BossLink
 	// mohs maps a music on hold class ID to its playlist; mohDefault is the
 	// global default class (0 when none is set).
 	mohs       map[int64]MOHClass
@@ -543,7 +551,7 @@ type Querier interface {
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
        d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name,
        e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id,
-       e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, e.directory_hidden, (e.kind = 'door')
+       e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, e.directory_hidden, e.anonymous_outbound, (e.kind = 'door')
 FROM extensions e
 LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled
 LEFT JOIN voicemail_boxes v ON v.extension_id = e.id
@@ -577,7 +585,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 		)
 		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &d.Extension, &d.ExtensionName,
 			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID,
-			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden, &e.Door); err != nil {
+			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden, &e.AnonymousOutbound, &e.Door); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan: %w", err)
 		}
@@ -634,6 +642,10 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	vmgs, err := loadVoicemailGroups(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	tcs, err := loadTimeConditions(ctx, db)
 	if err != nil {
 		return nil, err
@@ -650,7 +662,15 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	bosses, err := loadBossLinks(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	rtags, err := loadRingTags(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	blf, err := loadBLFLists(ctx, db)
 	if err != nil {
 		return nil, err
 	}
@@ -663,7 +683,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	}
 	return New(rev, domain, devices).WithFaxDestinations(faxes).WithExtensions(bare...).WithQueues(queues).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithRingTags(rtags), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithVoicemailGroups(vmgs).WithRingTags(rtags).WithBLFLists(blf).WithBossLinks(bosses), nil
 }
 
 // loadMOHClasses reads the music on hold classes with their playlists

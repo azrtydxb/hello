@@ -384,6 +384,7 @@ const DESTINATION_KIND: Record<
   time_condition: { label: "Time condition", icon: "clock" },
   ring_group: { label: "Ring group", icon: "users-round" },
   voicemail: { label: "Voicemail", icon: "voicemail" },
+  voicemail_group: { label: "Voicemail group", icon: "voicemail" },
   announcement: { label: "Announcement", icon: "megaphone" },
   paging: { label: "Paging group", icon: "megaphone" },
   conference: { label: "Conference room", icon: "users" },
