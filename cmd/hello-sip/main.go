@@ -19,6 +19,8 @@ import (
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/config"
+	"github.com/azrtydxb/hello/internal/crm"
+	_ "github.com/azrtydxb/hello/internal/crm/hubspot" // registers the HubSpot connector
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/lifecycle"
 	"github.com/azrtydxb/hello/internal/livestate"
@@ -26,6 +28,7 @@ import (
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/ops"
 	"github.com/azrtydxb/hello/internal/queue"
+	"github.com/azrtydxb/hello/internal/safehttp"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/sip"
 	"github.com/azrtydxb/hello/internal/snapshot"
@@ -156,6 +159,13 @@ func run(args []string) error {
 	controlStore.WithSecretBox(box)
 	live := livestate.New(vk)
 	members := cluster.New(vk)
+	// CRM caller names (spec integrations I-47): a cache-first lookup that
+	// the SIP path bounds to a few hundred milliseconds. The CRM query runs
+	// in the background, so a slow CRM never holds a call.
+	crmRepo := &crm.PG{DB: sipDB, Box: box}
+	crmTokens := &crm.TokenManager{Repo: crmRepo, Providers: crm.DefaultProvider(safehttp.NewClient(safehttp.Options{Timeout: crm.LookupTimeout})),
+		Log: log.With("component", "crm")}
+	crmLookup := &crm.Lookup{Repo: crmRepo, Tokens: crmTokens, Cache: crm.ValkeyCache{Client: func() valkey.Client { return vk }}, Log: log.With("component", "crm")}
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
 		ReloadFailures: reloadFailures, Box: box, ConfigInvalid: routingInvalid, InvalidRevision: routingInvalidRev, Revision: configRevision,
 		DNSFailures: dnsFailures}
@@ -191,6 +201,7 @@ func run(args []string) error {
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
 		HAState: live, Membership: members, PageTests: live, Originates: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Park: live, Published: live, Emergency: live,
 		Conferences: live, ConferenceAudit: controlStore,
+		CallerNames: crmLookup,
 	})
 	if err != nil {
 		return err

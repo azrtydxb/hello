@@ -155,6 +155,7 @@ var NonFlowResources = map[string]string{
 	"ai/sessions":                   "assistant conversations, not call routing",
 	"blocklist":                     "a screen on every trunk's inbound calls before routing (its trunk settings are on the trunk), not a step of a call's route",
 	"flow/canvases":                 "named views of the canvas that store only node positions, not call routing",
+	"integrations/crm":              "CRM connectors that log finished calls and name callers in a CRM; they never change where a call goes",
 	"messaging/channels":            "customer text channels of the messaging inbox, not call routing",
 	"messaging/addresses":           "numbers customers text in the messaging inbox, not call routing",
 }

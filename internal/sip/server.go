@@ -233,6 +233,11 @@ type Deps struct {
 	// Park is the shared call-park store (Valkey); nil disables call park,
 	// retrieve and cross-node pickup. A parked party hears music on hold.
 	Park ParkState
+	// CallerNames finds an inbound caller's name in a CRM (spec integrations
+	// I-47); nil leaves the carrier's display name. CallerNameBudget bounds
+	// the wait at ringing time (DefaultCallerNameBudget when zero).
+	CallerNames      CallerNamer
+	CallerNameBudget time.Duration
 	// Published is the shared event state of PUBLISHed presence (Valkey);
 	// nil answers PUBLISH 503 (S-35).
 	Published PublishedPresence
