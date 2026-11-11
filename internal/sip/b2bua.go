@@ -371,7 +371,9 @@ type leg struct {
 	acked bool
 	// elsewhere: the leg was cancelled because the call was answered
 	// elsewhere (a pickup); its dialog sends the CANCEL with that Reason.
-	elsewhere bool
+	// It is read when the CANCEL is built, so it is atomic: the dialog's UA
+	// is never replaced while sipgo may be using it.
+	elsewhere atomic.Bool
 
 	// A trunk attempt (trunk set) or a SIP URI target (uri set); neither
 	// means a phone binding.
@@ -1592,11 +1594,11 @@ func (l *leg) drive(report func(legEvent)) {
 		report(legEvent{leg: l, kind: evFailed, code: sip.StatusServiceUnavailable})
 		return
 	}
+	// This leg's own UA: its CANCEL carries the "completed elsewhere" Reason
+	// once l.elsewhere is set (cancel_reason.go).
+	dcs.UA = newElsewhereUA(s.ua, s.client, s.uac, &l.elsewhere)
 	l.mu.Lock()
 	l.dcs = dcs
-	if l.elsewhere {
-		dcs.UA = s.uacElsewhere
-	}
 	l.mu.Unlock()
 	opts := sipgo.AnswerOptions{OnResponse: func(r *sip.Response) error {
 		switch {
