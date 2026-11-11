@@ -1839,6 +1839,15 @@ Wi-Fi handset check that the keypad menu at `P1357 = 1` still allows the Wi-Fi
 setup; the WP810/822/825 template also has `P1357 = 4` (basic and network
 settings) and the WP820 `3`.
 
+## Locations, E911 and the alarm key
+
+A WP8x6 of a phone group with E911 on is written the HELD keys `P8565` to `P8568`,
+`P8597`, `P8725` and `P26059`, and one whose group has an alarm destination the
+alarm keys `P22269`, `P22270` (`*55`), `P22601` and `P22602`. The keys, their
+sources and what is still to be confirmed on a phone are in
+[locations.md](locations.md). A change reaches the phones through the automatic
+resync.
+
 ## Security model and its limits
 
 What protects the phones' secrets:

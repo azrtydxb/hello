@@ -12,6 +12,8 @@
 | `setQueueAgent`             | write | Log an agent in or out, pause or resume.                               |
 | `listQueueCallbacks`        | read  | Open callback requests of a queue.                                     |
 | `cancelQueueCallback`       | write | Cancel one callback request.                                           |
+| `getFollowMe`               | read  | An extension's follow-me profile.                                      |
+| `putFollowMe`               | write | Change the profile; targets replace the list.                          |
 | `listConferences`           | read  | Rooms with live state; PINs never returned.                            |
 | `getConference`             | read  | One room with who is in it.                                            |
 | `createConference`          | admin | Create a room.                                                         |

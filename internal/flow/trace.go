@@ -728,6 +728,7 @@ func FeatureCodeStart(in Input, from, dialled string, live *Live) (TraceStart, b
 		"forward_always": "forward-always", "forward_busy": "forward-busy", "forward_no_answer": "forward-no-answer",
 		"dnd_on": "turns do not disturb on", "dnd_off": "turns do not disturb off",
 		"call_waiting_on": "turns call waiting on", "call_waiting_off": "turns call waiting off",
+		"follow_me_on": "turns follow-me on", "follow_me_off": "turns follow-me off",
 	}[fc.Action]
 	text := head + " " + what + " for the caller's extension; the call is answered and ends"
 	if strings.HasPrefix(fc.Action, "forward_") {

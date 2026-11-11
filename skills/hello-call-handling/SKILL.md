@@ -1,6 +1,6 @@
 ---
 name: hello-call-handling
-description: Configure and run the call-handling features of a Kuvryn Hello PBX through its MCP server - call queues and their agents (log in, pause, live wallboard), conference rooms and their live controls, fax (receive to email, send a PDF, fax destinations and trunk fax mode), call park lots and parked calls, pickup groups, paging groups and multicast channels, text messaging, presence, voicemail messages and call recordings. Use when someone asks for a support queue, a meeting room, to park or pick up a call, to page a warehouse, to see who is busy or what is waiting in a queue, to receive or send a fax, or to clean up voicemail and recordings.
+description: Configure and run the call-handling features of a Kuvryn Hello PBX through its MCP server - call queues and their agents (log in, pause, live wallboard), follow-me (ring other numbers, extensions and groups when an extension is called), conference rooms and their live controls, fax (receive to email, send a PDF, fax destinations and trunk fax mode), call park lots and parked calls, pickup groups, paging groups and multicast channels, text messaging, presence, voicemail messages and call recordings. Use when someone asks for a support queue, to ring a mobile as well as the desk phone, a meeting room, to park or pick up a call, to page a warehouse, to see who is busy or what is waiting in a queue, to receive or send a fax, or to clean up voicemail and recordings.
 license: Apache-2.0
 metadata:
   hello-version: "v1"
@@ -75,6 +75,47 @@ wait exceeds `callbackOfferAfterSeconds`. `listQueueCallbacks` (path `id`)
 lists the open requests of the queue, with their position and attempts.
 `cancelQueueCallback` (path `id`, `callbackId`) cancels one request the caller
 no longer wants. Say which caller you cancelled for.
+
+## Follow-me
+
+An extension's follow-me profile rings its own devices and up to five more
+targets when a call reaches it: an external number (through outbound routing),
+another extension or a ring group. It runs after forward-always and before the
+no-answer forward and voicemail; do-not-disturb stops it unless `dndBlocks` is
+off.
+
+- `getFollowMe` (path `id` is the extension id) reads the profile; an extension
+  with none reads as off with no targets. `putFollowMe` changes it: fields left
+  out keep their value, and `targets` (at most 5, in ring order) replaces the
+  whole list.
+
+```json
+{
+  "enabled": true,
+  "strategy": "sequential",
+  "timeoutSeconds": 40,
+  "targets": [
+    { "kind": "external", "target": "+32475123456", "delaySeconds": 15 },
+    { "kind": "extension", "target": "102" }
+  ]
+}
+```
+
+- `simultaneous` rings everything at once. `sequential` starts the targets in
+  order; `delaySeconds` is how long a target rings before the next starts
+  (the last one rings to `timeoutSeconds`). A call nobody answers within
+  `timeoutSeconds` goes on to the no-answer forward or voicemail.
+- An external target with `confirmExternal` (the default) plays "press 1 to
+  accept" and is dropped after 10 seconds without the digit, so a mobile's
+  voicemail cannot take the call. Say so before turning it off.
+- A target cannot be the extension itself (400). An external target is 2 to 32
+  digits with an optional leading +. An extension or ring group target must
+  exist, and cannot be deleted or renamed while a profile names it (409).
+- A person turns their own profile on with `*76` and off with `*77` (the
+  feature codes `follow_me_on` and `follow_me_off`; the dial plan keeps `*74`
+  and `*75` for park). They do nothing for an extension without a target.
+- A call's follow-me legs are in `getCDR` as `followMeLegs` (kind, extension,
+  trunk, result), and in the call's trace.
 
 ## Conferences
 

@@ -47,6 +47,19 @@ function api(extensions: unknown[], more: Routes = {}) {
     ...ME,
     "GET /api/v1/extensions": () => json({ items: extensions }),
     "GET /api/v1/devices": () => json({ items: [] }),
+    // The follow-me section of the drawer; extension 1 is the one opened.
+    "GET /api/v1/extensions/1/follow-me": () =>
+      json({
+        extensionId: 1,
+        number: "100",
+        enabled: false,
+        strategy: "simultaneous",
+        ringOwnDevices: true,
+        timeoutSeconds: 30,
+        confirmExternal: true,
+        dndBlocks: true,
+        targets: [],
+      }),
     ...more,
   });
 }

@@ -97,6 +97,7 @@ type trunkBody struct {
 	Destinations    *[]routing.Destination `json:"destinations"`
 	InternalDialing *dialingBody           `json:"internalDialing"`
 	Messaging       *bool                  `json:"messaging"`
+	Geolocation     *bool                  `json:"geolocation"`
 	Codecs          *[]string              `json:"codecs"`
 	// Anonymous-call handling (spec S-19).
 	AnonymousPolicy  *string `json:"anonymousPolicy"`
@@ -165,6 +166,7 @@ func (b trunkBody) applyTo(in *store.TrunkInput) {
 	setIf(&in.Destinations, b.Destinations)
 	setIf(&in.Messaging, b.Messaging)
 	setIf(&in.SRTP, b.SRTP)
+	setIf(&in.Geolocation, b.Geolocation)
 	setIf(&in.AnonymousPolicy, b.AnonymousPolicy)
 	setIf(&in.AssertedIdentity, b.AssertedIdentity)
 	setIf(&in.IdentityHeader, b.IdentityHeader)

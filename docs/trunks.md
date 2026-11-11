@@ -139,6 +139,14 @@ retransmitted until the PRACK arrives), and the 200 waits for the PRACK. A
 caller that only lists 100rel in `Supported` gets plain responses. Phones keep
 100rel off; no provisioning key is written for it.
 
+### Sending the caller's location with emergency calls
+
+A trunk has a **geolocation** switch, off by default. With it on, an emergency
+call through the trunk carries a Geolocation header and a PIDF-LO body (RFC
+6442), the phone's own or the location assigned under Locations. Turn it on only
+for a carrier that accepts them: the request is larger than a usual SIP datagram.
+See [locations.md](locations.md).
+
 ## 6. The manual check
 
 1. Call an external mobile from your extension. It rings, answers, and both

@@ -563,6 +563,11 @@ func maskSecrets(d *prov.RenderData) {
 		}
 		d.Book = &b
 	}
+	if d.E911 != nil {
+		e := *d.E911
+		e.Server = tokenInPathRe.ReplaceAllString(e.Server, "/p/"+mask+"/")
+		d.E911 = &e
+	}
 	if d.Wifi != nil {
 		w := *d.Wifi
 		w.Profiles = slices.Clone(w.Profiles)

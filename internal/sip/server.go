@@ -213,6 +213,9 @@ type Deps struct {
 	// PageTests is the queue of paging-group test requests from the admin
 	// API; nil disables them.
 	PageTests PageTests
+	// DoorTriggers is the queue of doorbell webhook triggers (spec S-48);
+	// nil leaves the webhook unanswered.
+	DoorTriggers DoorTriggers
 	// Queues is the call queues' shared state (Valkey); nil disables call
 	// queues (a call to a queue is refused with 503).
 	Queues queue.Store
@@ -260,6 +263,9 @@ type Deps struct {
 	// Events receives call events (ringing, answered, ended, missed,
 	// recording ready) for the event stream; nil emits none.
 	Events EventSink
+	// Emergency is the shared record of extensions that placed an emergency
+	// call lately (Valkey); nil keeps it on this node alone.
+	Emergency EmergencyMarks
 }
 
 // Server is one SIP node.
@@ -279,10 +285,9 @@ type Server struct {
 	client     *sipgo.Client
 	uas        *sipgo.DialogUA // A legs: callers
 	uac        *sipgo.DialogUA // B legs: forks
-	// uacElsewhere is uac with "Call completed elsewhere" on its CANCELs,
-	// for the ringing legs of a picked-up call.
-	uacElsewhere *sipgo.DialogUA
-	bg           sync.WaitGroup
+	bg         sync.WaitGroup
+	// emMarks is the node-local record of emergency calls (emergency.go).
+	emMarks emergencyMarks
 	// bgMu guards bgClosed: once shutdown waits for bg, a late call event
 	// (a call ending as the node stops) must not start more work on it.
 	bgMu     sync.Mutex
@@ -544,7 +549,6 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.refreshPeers(ctx) // before serving, so the edge knows its peers
 	s.uas = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
 	s.uac = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
-	s.uacElsewhere = newElsewhereUA(ua, client, s.uac)
 
 	s.handle(srv, sip.OPTIONS, s.handleOptions)
 	s.handle(srv, sip.REGISTER, s.handleRegister)
@@ -579,6 +583,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	}
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })
+	}
+	if s.deps.DoorTriggers != nil {
+		s.bg.Go(func() { s.doorTriggerLoop(rctx) })
 	}
 	if s.deps.Originates != nil {
 		s.bg.Go(func() { s.originateLoop(rctx) })
