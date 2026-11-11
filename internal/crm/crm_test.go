@@ -101,6 +101,7 @@ func (f *fake) Refresh(_ context.Context, _ Config, refresh string) (Tokens, err
 }
 
 type fakeLinks struct {
+	now     func() time.Time // the rig's clock; the wall clock would drift from it
 	minted  []int64
 	revoked []string
 	err     error
@@ -111,7 +112,7 @@ func (l *fakeLinks) Mint(_ context.Context, rec int64, _ string, ttl time.Durati
 		return "", time.Time{}, l.err
 	}
 	l.minted = append(l.minted, rec)
-	return "https://hello.example/r/tok.wav", time.Now().Add(ttl), nil
+	return "https://hello.example/r/tok.wav", l.now().Add(ttl), nil
 }
 
 func (l *fakeLinks) RevokeAll(_ context.Context, label string) error {
@@ -135,7 +136,8 @@ type rig struct {
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
-	r := &rig{repo: NewMem(), f: newFake(), links: &fakeLinks{}, now: time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)}
+	r := &rig{repo: NewMem(), f: newFake(), now: time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)}
+	r.links = &fakeLinks{now: func() time.Time { return r.now }}
 	r.repo.Now = func() time.Time { return r.now }
 	prov := func(kind string) (Connector, bool) { return r.f, kind == "fake" }
 	r.tokens = &TokenManager{Repo: r.repo, Providers: prov, Now: func() time.Time { return r.now },
