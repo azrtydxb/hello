@@ -155,6 +155,7 @@ var NonFlowResources = map[string]string{
 	"ring-tags":                     "names the tone a phone plays, sent to it as Alert-Info; the tag a call gets does not change where it goes",
 	"phonebooks/{id}/entries":       "directory data shown on phones, not call routing",
 	"me/contacts":                   "a user's personal contacts, not call routing",
+	"me/devices":                    "a user's own browser softphones, managed by the user, not call routing",
 	"calls/originate":               "click-to-call requests (a call placed on demand, not call routing)",
 	"ai/sessions":                   "assistant conversations, not call routing",
 	"faxes":                         "received and sent documents, not a call destination (a fax destination is the routing object)",

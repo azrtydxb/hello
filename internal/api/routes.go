@@ -362,6 +362,13 @@ func (s *server) routes() []route {
 
 		// Extension self-service (role user): only the caller's own
 		// extensions, never an id of someone else's.
+		// The browser softphone's own devices and ICE servers: a browser
+		// session of the user, never a token (the SIP password is minted here).
+		{"GET", "/api/v1/me/devices", auth.ScopeSession, auth.RoleUser, false, s.listMyDevices},
+		{"POST", "/api/v1/me/devices", auth.ScopeSession, auth.RoleUser, false, s.createMyDevice},
+		{"DELETE", "/api/v1/me/devices/{id}", auth.ScopeSession, auth.RoleUser, false, s.deleteMyDevice},
+		{"POST", "/api/v1/me/devices/{id}/credentials", auth.ScopeSession, auth.RoleUser, false, s.refreshMyDevice},
+		{"GET", "/api/v1/me/ice-servers", auth.ScopeSession, auth.RoleUser, false, s.getICEServers},
 		{"PATCH", "/api/v1/me/profile", auth.ScopeWrite, auth.RoleUser, false, s.updateProfile},
 		{"GET", "/api/v1/me/extensions", auth.ScopeRead, auth.RoleUser, false, s.listMyExtensions},
 		{"PATCH", "/api/v1/me/extensions/{id}", auth.ScopeWrite, auth.RoleUser, false, s.updateMyExtension},
