@@ -266,7 +266,7 @@ func (c *call) startRingMOH(classID int64) bool {
 		return false
 	}
 	c.s.m.response(sip.StatusSessionInProgress)
-	if err := c.dss.Respond(sip.StatusSessionInProgress, "Session Progress", body,
+	if err := c.respondProv(sip.StatusSessionInProgress, "Session Progress", body,
 		sip.NewHeader("Content-Type", "application/sdp")); err != nil {
 		c.s.log.Debug("waiting music early media failed", "correlation_id", c.id, "error", err)
 		return false

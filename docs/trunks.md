@@ -96,16 +96,46 @@ Before going live, prove the reach in **Routes → Test** with `from:
 trunk:<id>`: the trace shows the policy verdict and the internal lookup
 exactly as a real call would see them.
 
-## 6. Turn unwanted callers away
+## Anonymous calls and 100rel
 
-A trunk can screen its inbound calls before any route or phone: reject
-anonymous callers, allow only callers from listed countries (**Allowed country
-codes** in the trunk form), and answer a screened call with `603 Decline` or
-`486 Busy Here`. Numbers you block or always allow are on **Call flow →
-Blocklist**. See [blocklist.md](blocklist.md) for the order of checks, the CSV
-import and the limits. Nothing is on by default.
+A call through a trunk is **anonymous** (RFC 3323 and 3325) when any of these
+holds: the trunk's **Anonymous calls** setting is _Every call through this
+trunk_ (`anonymousPolicy: always`), the calling extension has **Anonymous
+outbound** on, or the phone asks for it with a `Privacy` header naming `id`,
+`user` or `header`, or an `anonymous` From (the phone's "send anonymous"
+setting or a dialled anonymous prefix). `Privacy: none` is not anonymous.
 
-## 7. The manual check
+The trunk leg then carries:
+
+- a From of `"Anonymous" <sip:anonymous@anonymous.invalid>`, so the number
+  and the extension never reach the carrier in From;
+- the **Asserted identity** (`assertedIdentity`; empty: the call's caller ID)
+  as `sip:<number>@<trunk domain>` in `P-Asserted-Identity`, or in
+  `P-Preferred-Identity` when **Identity header** is `ppi` (for carriers that
+  assert the identity themselves);
+- `Privacy: id`, with any values the phone asked for kept next to it. The
+  privacy request is never stripped, and a phone's own
+  `P-Asserted-Identity` is never forwarded.
+
+Calls between extensions are not affected: the phone shows the caller as
+usual.
+
+The extension's **Phone sends anonymous** setting (`phoneSendAnonymous`) is a
+different thing: it switches on the desk phone's own Grandstream "Send
+Anonymous" (P65, line 1), so the phone hides its caller ID on every call,
+internal ones included. It is off by default, and off writes nothing to the
+phone. **Anonymous outbound** acts only on the calls Hello places through a
+trunk.
+
+Hello offers `Supported: 100rel` on every leg it originates. A provisional
+response that requires 100rel (RFC 3262) is acknowledged with a PRACK on that
+leg, whether it comes from a phone or a carrier. A caller that sends
+`Require: 100rel` gets its provisional responses reliably (`RSeq`,
+retransmitted until the PRACK arrives), and the 200 waits for the PRACK. A
+caller that only lists 100rel in `Supported` gets plain responses. Phones keep
+100rel off; no provisioning key is written for it.
+
+## 6. The manual check
 
 1. Call an external mobile from your extension. It rings, answers, and both
    sides hear audio.

@@ -207,6 +207,8 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/multicast-channels/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteMulticastChannel},
 		{"GET", "/api/v1/feature-codes", auth.ScopeRead, auth.RoleViewer, false, s.listFeatureCodes},
 		{"PUT", "/api/v1/feature-codes", auth.ScopeWrite, auth.RoleOperator, false, s.putFeatureCodes},
+		{"GET", "/api/v1/boss-links", auth.ScopeRead, auth.RoleViewer, false, s.listBossLinks},
+		{"PUT", "/api/v1/boss-links", auth.ScopeWrite, auth.RoleOperator, false, s.putBossLinks},
 
 		{"GET", "/api/v1/presence", auth.ScopeRead, auth.RoleViewer, false, s.presence},
 
@@ -412,6 +414,9 @@ func (s *server) routes() []route {
 		{"PUT", "/api/v1/phone-groups/{id}/books", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupBooks},
 		{"PUT", "/api/v1/phone-groups/{id}/multicast", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupMulticast},
 		{"PUT", "/api/v1/phone-groups/{id}/ptt", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupPTT},
+		{"PUT", "/api/v1/phone-groups/{id}/syslog", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupSyslog},
+		{"GET", "/api/v1/phones/{id}/syslog", auth.ScopeRead, auth.RoleViewer, false, s.phoneSyslog},
+		{"GET", "/api/v1/syslog/unknown", auth.ScopeRead, auth.RoleViewer, false, s.unknownSyslog},
 		{"GET", "/api/v1/phone-groups/{id}/ldap", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneGroupLDAP},
 		{"PUT", "/api/v1/phone-groups/{id}/ldap", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupLDAP},
 

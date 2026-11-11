@@ -873,6 +873,127 @@ another group) is lifted: the ring state machine can open a new ring stage.
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
 
+## Boss and secretary (pbx-gaps B2, S-18, S-19) (2026-10-27)
+
+Built to the spec (D16): one assistant per boss, an assistant for many bosses,
+both sets of phones ring and the first answer wins, the boss's forward always
+wins over the link. The choices the spec left open:
+
+- Table `boss_links` and column `cdrs.answered_by`, migration `00065` (the
+  merge captain renumbers it). `*64` is a new feature-code action
+  `boss_divert` (CHECK widened additively through `pg_temp.hello_check_values`),
+  seeded for an existing install only when the code is free, and in
+  `DefaultFeatureCodes` for a fresh one. The spec's S-1 also lists `*74` and
+  `*75` for follow-me; they are the park codes in the defaults today, so that
+  clash is for the follow-me item to settle, not this one.
+- API: `GET|PUT /api/v1/boss-links`, a whole-list replace like the feature
+  codes (the spec names GET and PUT only). Viewers read, operators write. An
+  assistant may carry `outboundAsBoss` on one link only: with two bosses the
+  caller ID to present would be a guess, so the API refuses it, and the
+  snapshot ignores the flag if it ever finds two.
+- Runtime data rides the snapshot (`snapshot.BossLink`, enabled links only,
+  `divert_on` included). The hook is in `ringExtension`, after forward always
+  and before DND, so a boss reached by a forward, an IVR option or a
+  direct dial rings the same way. Not covered: a boss that is a ring group
+  member, a queue agent or a transfer target rings as a plain extension.
+- DND on the boss, the divert and "busy with call waiting off" silence only the
+  boss's own legs; the assistant still rings. With no registered assistant
+  device the link does not apply and the boss rings as usual, so a call is
+  never lost for want of an assistant. The assistant's own forwarding and DND
+  are not consulted: the link rings the assistant's devices.
+- `assistant_first` starts the boss's legs after `bossAssistantLead` (10 s) or
+  when a screened call is put through. The pending count includes the delayed
+  legs, so a busy assistant does not end the call before the boss has rung;
+  the cost is that the boss rings after the full 10 s even if the assistant
+  declines at once.
+- A call from the assistant to the boss (or the boss to itself) skips the link,
+  so the assistant's other desk phone is not rung for the assistant's own call.
+- Screening is a gate on the assistant's leg, before the leg can claim the call
+  (`screenLeg`, in `leg.drive`): the leg is acknowledged, the relay's callee leg
+  points at it, both legs are muted against each other, and the prompt plays to
+  the assistant while the caller keeps hearing ringback. 1 releases the boss's
+  legs and drops the assistant; 2 sends the caller to the boss's box
+  (`evScreenMessage`, handled by the setup loop so it is the only goroutine
+  that answers the caller); no key after two rounds of the prompt, or the
+  assistant hanging up, is no choice. The assistant never speaks to the caller
+  on a screened call. That is what the spec says ("1 connects to the boss"); the
+  assistant who wants to talk first uses the ordinary call, with screening off.
+  Keys come from RFC 2833 (the relay's DTMF hook) and from SIP INFO (the
+  screened leg's dialog is matched while it is being screened, `matchDialog`).
+  Screening needs the anchor and an early offer; otherwise the answer is an
+  ordinary one and the trace says so. The prompt is `boss.screen` in both
+  language tables, spoken through the voicemail speaker, a tone when none is
+  configured. Only one device of the assistant is screened at a time; another
+  that answers meanwhile is dropped.
+- IVR: a menu option that dials the boss rings the assistant too, and screening
+  is offered there as on a direct call. A menu's call always rings both sets of
+  phones at once (the ring mode does not apply), so putting a screened call
+  through has nothing to release; 2 goes to the boss's box through the menu's
+  voicemail exit.
+- Transfer: a call transferred to a boss rings the assistant's phones as well
+  (no screening, no `answered_by`, the boss's own DND and divert are not applied
+  to the transfer's legs, which is how transfers treat DND today).
+- Early decline: with `assistant_first`, once every assistant leg has ended
+  without taking the call (486, 603, unreachable, hang-up, no screening choice)
+  the boss's legs start at once (`bossAssistantFailed`), not after the 10 s.
+- Not built, and why: a boss who is a ring-group member or a queue agent rings
+  as an ordinary extension. S-18 and D16 define the link for "calls to the boss";
+  a call to a group or queue is a call to the group or queue, and no spec line
+  asks for the link there. The spec excludes: "Two or more assistants on one boss,
+  and a boss-side call-screening queue" (pbx-gaps.md, Out of scope, line 287).
+- CDR: `answered_by` is the assistant's extension when the assistant answered,
+  empty otherwise (not filled with the answering extension of every call). The
+  trace reads "Answered by assistant 300 for 200" (extension numbers, no names).
+  A screened call the assistant sent to voicemail or through has no
+  `answered_by`: the assistant never took it.
+- `*64`: dialled as a call from the boss's own phone, or inside a call, it flips
+  `divert_on` of the boss's link (computed from the snapshot, written through
+  the settings sink with the audited `ApplyFeatureUpdate`, one transaction with
+  the revision bump). Two presses before the snapshot reloads send the same
+  value; the phone hears the 200. From an extension that is no boss it is 404.
+  Metric `hello_boss_divert_total{result}` (on, off, no_link, failed). The
+  screening choices are logged with the two extension numbers only, and are in
+  the call trace.
+- Calling out as the boss: `routing.Call.CallerIDExtension` selects the
+  extension whose external number and caller-ID rule the outbound decision
+  uses; the route is still matched for the assistant's own extension, so the
+  flag grants no dialling rights.
+- Not done here: the boss's BLF
+  does not show the divert; no second assistant per boss (the spec's out of
+  scope).
+
+## Syslog sink (S-27, item 36) (2026-10-27)
+
+- **Where.** In hello-control (package `internal/syslogsink`), not a sidecar: it needs the phone table
+  and Valkey, both already there. Off unless `HELLO_SYSLOG_UDP_ADDR` or `HELLO_SYSLOG_TLS_ADDR` is set.
+  The pod binds 5514 and 6514 (non-root); Services map them to 514 and 6514.
+- **Storage.** Valkey lists in `internal/livestate/syslog.go` (it owns a test database; every Valkey
+  test database is taken): `hello:syslog:phone:<id>` capped 10000 with a 24 h TTL; unknown sources
+  under `hello:syslog:ip:<ip>` capped 1000, indexed in a sorted set bounded to 200 addresses whose
+  evicted lists are deleted in the same script.
+- **Attribution.** By source IP = `phones.last_fetch_ip`. An address two phones share is treated as
+  unknown rather than guessed. Syslog carries no reliable phone identity otherwise.
+- **Rate cap.** Token bucket per phone (per address for unknown), default 20/s burst 200; drops are
+  reported by one stored notice line instead of a counter key.
+- **Redaction.** There was no shared line redactor, so `syslogsink.Redact` combines the Authorization
+  header, credential key/value, provisioning-path and 52+ char token rules (same token shape as
+  `prov.RedactPath`), plus URL passwords. It runs before truncation and storage.
+- **Config.** Group setting in two columns on `phone_groups` (migration 00064), default off, level
+  default info; `PUT /api/v1/phone-groups/{id}/syslog` (admin). Template change is Grandstream only
+  (P207/P208, as the spec says [R8x6 TPL]); other vendors are not touched. Off is written explicitly
+  (P207 empty, P208 0) so disabling reaches phones. P208 mapping debug 1, info 2, warning 3, error 4
+  is read from the template and UNVERIFIED on hardware, as is a `host:port` in P207 (kw needs it: the
+  NodePort is 30514).
+- **kw manifest.** UDP only (no TLS cert on kw yet): `hello-syslog` NodePort 30514, traffic policy
+  Local to keep the phone address; works only on a node with a hello-control pod. Not deployed.
+- **API/UI.** `GET /api/v1/phones/{id}/syslog`, `GET /api/v1/syslog/unknown`; Syslog tab on
+  PhoneDetail, toggle and level in the phone group editor. No UI for unknown sources.
+- **Follow-ups (built).** Counters received/dropped/unmatched; a minimum-level filter on the tab (a
+  line without a priority always shows); Phones > Unknown syslog page; Yealink, Poly and snom keys
+  (all marked verify; Poly has no port so it needs UDP 514; the level scales are mapped from the guides:
+  Yealink debug and info 6, warning 4, error 3; Poly 0, 1, 4, 5). Fanvil has no documented syslog keys, so
+  none. Migration number: 00065 went to PR #236 (boss links), so this one is 00064.
+
 ## Messaging inbox core (2026-10-26)
 
 Delivery item 1 of `.procoder/specs/messaging-channels.md`, built LAN-only on the
@@ -1997,6 +2118,146 @@ Implementation notes (template route, no migration):
 - Documented in `docs/provisioning.md` ("Keys deliberately not written") so the
   gaps are visible to operators. The tracker row stays open until sources are
   found; the setting overrides (item 15) can carry a key meanwhile.
+
+## Item 26: PRACK/100rel and anonymous outbound (2026-11-09)
+
+- 100rel is negotiated hop by hop, not relayed: Hello offers `Supported: 100rel`
+  on every INVITE it originates and PRACKs any reliable 18x from a phone or
+  trunk. Toward the caller it sends reliable provisionals only when the INVITE
+  says `Require: 100rel`; `Supported` alone gets plain responses, as phones keep
+  100rel off (P272 = 0). The 2xx waits up to 64*T1 for the PRACK. A PRACK that
+  never arrives is traced and the call is answered anyway rather than failed.
+- Anonymous outbound is trunk-leg only. It triggers on the trunk policy
+  `always`, the extension flag, or a device request (Privacy id/user/header, or
+  From `anonymous`; `Privacy: none` cancels). The leg gets an anonymous From,
+  the trunk's asserted identity in PAI or PPI (trunk setting, default PAI) and
+  `Privacy: id` merged with the device's values. A device's own PAI/PPI is
+  never forwarded.
+- The spec has no feature code for per-call anonymity, so none was added: a
+  per-call request is the device's Privacy header or anonymous From.
+- The WP "Send Anonymous" setting is found in Grandstream's own templates
+  (config-template-10212026.zip, 2026-11-09 review): `P65` "Send Anonymous
+  (caller ID will be blocked if set to Yes). 0 - No, 1 - Yes. Default is 0" for
+  account 1, in `wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`,
+  `wp820_config_1.0.7.90` and `wp856_config_1.0.3.16` (also
+  `ht813_config_1.0.19.6`); account 2 is `P421`, account 3 `P521` (WP8x6,
+  WP856). It is deliberately not written: the extension flag
+  `anonymousOutbound` is applied by Hello on trunk legs only, so a phone sending
+  an anonymous From on every call, internal ones included, would add nothing the
+  flag does not already do and would blank the caller on internal calls. A site
+  that wants one phone always anonymous sets `P65 = 1` through the S-12 per-phone
+  override. `TestAnonymousKeyNotProvisioned` pins this. Related keys in the same
+  templates, left at their defaults: `P2338` Use Privacy Header (0 Default, 1
+  No, 2 Yes), `P2339` Use P-Preferred-Identity Header (0 Default, 1 No, 2 Yes),
+  `P29098` Use P-Asserted-Identity Header (0 No, 1 Yes; WP8x6 and WP856
+  templates only), `P129` Anonymous Call Rejection (0 No, 1 Yes; Hello rejects
+  anonymous callers itself, item A1) and `P272` Enable 100rel (0 No, 1 Yes,
+  default 0, confirmed as the key behind "phones keep 100rel off").
+- Migration 00051: `extensions.anonymous_outbound`, `trunks.anonymous_policy`,
+  `trunks.asserted_identity`, `trunks.identity_header`. Replaces and call
+  waiting of the same delivery-plan item are not in this PR.
+
+## RTCP-XR collector (parity-rtcpxr, item 35, S-36) (2026-11-09)
+
+- Reports live in their own table `cdr_rtcpxr` (migration 00066), not in
+  columns on `cdrs` as the spec's Data says. A phone sends its call-end
+  report within moments of the BYE, usually before the CDR is written, and
+  the report names the phone's own leg of a B2BUA call, which is not always
+  the CDR's `sip_call_id`. The CDR therefore also stores the answering callee
+  leg's Call-ID (`cdrs.peer_call_id`) and `GetCDR` joins on either. A report
+  with no CDR yet (or ever) costs nothing.
+- One row per (dialog Call-ID, device): a later report replaces the earlier,
+  an interval report never replaces the call-end one. Kept 90 days, pruned on
+  every 1000th write. A device is held to 60 reports a minute in memory per
+  node. Remote metrics (what the far end reported) are ignored; the phone's
+  own receive-side view is the figure.
+- A malformed or out-of-range report (MOS outside 0 to 5, loss outside 0 to
+  100, no dialog id, no metrics, over 4 KiB) is answered 400 and stored not at
+  all. Wrong content type 415, other Event 489 (item 34 adds presence),
+  store down 503. The sender must authenticate as a device.
+- Vendor keys, checked against Grandstream's own configuration templates
+  (config-template-10212026.zip; 2026-11-09 review). Account 1:
+  P26093 collector name, P26094 collector address and P26095 collector port
+  (default 5060) are in `wp8x6_config_1.0.3.39`,
+  `wp810_822_825_config_1.0.11.83` and `wp856_config_1.0.3.16` (confirmed;
+  account 2 is P26193, P26194, P26195 in the same three). P60087 collector
+  address selection (0 Manual, 1 Auto) is in `wp8x6_config_1.0.3.39` and
+  `wp810_822_825_config_1.0.11.83` only (confirmed; account 2 is P60187).
+  P8489 "VQ RTCP-XR Session Report" (0 Disabled, 1 Enabled, default 0) is in
+  the same two and is newly found: without it the phone sends no call-end
+  report, so the collector would stay empty. `wp820_config_1.0.7.90` has no
+  RTCP-XR key. The earlier reading that the WP8x6 and WP856 name no such keys
+  (from release notes) was wrong: corrected, they now get the keys.
+  Template (only when `HELLO_PROV_RTCPXR=true`, default off, spec "off by
+  default"): WP8x6 and WP810/822/825 get P26093 = SIP server host, P60087 = 1,
+  empty P26094, P26095 = SIP server port, P8489 = 1; the WP856 has no Auto
+  selection and no session report key, so it gets P26093 and P26094 = SIP
+  server host and P26095, and nothing else; the WP820 and non-WP Grandstream
+  phones get none. P8490 (interval report) stays at its default off, because
+  the collector keeps the call-end report. Yealink, Poly, Snom and Fanvil are
+  not provisioned (no confirmed keys read). Behaviour is not yet seen on a
+  phone (verify: Auto with an empty address; the WP856 with the address set).
+- No MCP tool added; nothing to teach in skills/. The CDR REST read gains
+  `rtcpxr`, and the call detail page shows it beside the relay figures.
+- Merge note: `handlePublish` in `internal/sip/rtcpxr.go` owns the PUBLISH
+  route and answers 489 for other events; item 34 (presence PUBLISH) should
+  dispatch its event from there.
+
+## SIP over TCP is provisioned per model, on the UDP address (2026-11-09)
+
+Phone-feature-parity S-13 (delivery item 22). hello-sip already records the
+phone leg's transport (`X-Hello-Transport`, set by Kamailio) on the binding, and
+Kamailio already shares port 5060 between UDP and TCP, reuses the phone's
+connection for requests towards it (`phones_tcp` socket, alias with the
+protocol) and closes idle connections after an hour. What was missing was
+provisioning. `HELLO_PROV_SIP_TCP_MODELS` (same format as the TLS list, default
+none, so nothing changes until a model is listed) puts the listed models on
+transport TCP with `HELLO_PROV_SIP_SERVER`: Grandstream `P130 = 1`, Yealink
+`transport_type = 1`, Poly `TCPOnly`, Fanvil `SIP1 Transport = 1`; Snom has no
+confirmed key and stays UDP. A model in both lists uses TLS while the TLS server
+is set, and falls back to TCP when it is not. The setting is per model, not per
+device: a device that needs another transport has its model taken out of the
+list (per-device overrides belong to S-12). Helm: `control.prov.sipTcpModels`.
+Keys checked against Grandstream's own configuration templates
+(config-template-10212026.zip, 2026-11-09 review): `P130` "SIP Transport. 0 -
+UDP, 1 - TCP, 2 - TLS/TCP" is the same key with the same values in
+`wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`,
+`wp820_config_1.0.7.90`, `wp856_config_1.0.3.16` and `ht813_config_1.0.19.6`
+(confirmed). Account 2 is `P448` and account 3 `P548` in the WP8x6 (account 2 in
+the WP810/822/825 and WP820, accounts 2 to 6 in the WP856 at `P448`, `P548`,
+`P648`, `P1748`, `P1848`); lines 2 and up are item 21. Newly found and left at
+their defaults: `P2331` Use Actual Ephemeral Port in Contact with TCP/TLS
+(default 0) and `P60065` Enable TCP Keep-alive (default 1), in the same
+templates. The other vendors' keys remain from vendor notes, unconfirmed on
+hardware.
+
+## Presence extensions (item 34, S-35)
+
+- Resource list URI: `sip:blf-<device username>@<domain>`. Its members are the BLF keys of the phone bound to that device (`phones.blf`), loaded into the snapshot (`WithBLFLists`); only that device may subscribe (`403` otherwise), and the phone must send `Supported: eventlist` (`421` with `Require: eventlist`). Editing a phone's BLF keys now bumps the configuration revision so the list reaches hello-sip. No migration.
+- Datagram limit: sipgo refuses UDP packets over 1300 bytes, so a list is one full-state NOTIFY plus partial ones (RFC 4662 `fullState="false"`), and a change sends only the changed resource. At about 600 body bytes a resource, that is one resource per NOTIFY. TCP/TLS toward Kamailio (#258) would allow bigger chunks; the budget constant stays until then.
+- PUBLISH event state lives in Valkey (`hello:pubpres:<ext>:<etag>`, the publication's lifetime as TTL), so both hello-sip nodes serve, refresh and remove it. Nodes learn of the other node's PUBLISH and REGISTER by a 5 s poll of the shared state (`presencePollInterval`), plus an immediate NOTIFY for changes handled locally. Kamailio needs no change: PUBLISH and SUBSCRIBE already go to any Hello node.
+- Several publications per extension are allowed (a desk phone and a softphone); the extension is "open" if any is open, the newest note wins. With none, it is "open" while a device is registered.
+- Grandstream keys, checked against Grandstream's own configuration templates
+  (config-template-10212026.zip, 2026-11-09 review). `P188` "PUBLISH for
+  Presence" (0 Disabled, 1 Enabled, default 0; account 2 `P488`, account 3
+  `P588` in the WP8x6) and `P2319` "SUBSCRIBE for Registration" (0 No, 1 Yes,
+  default 0; account 2 `P2419`, account 3 `P2519`) are in `wp8x6_config_1.0.3.39`
+  and `wp810_822_825_config_1.0.11.83` (confirmed), and in neither
+  `wp820_config_1.0.7.90` nor `wp856_config_1.0.3.16`. The spec keeps both off for
+  the WP phones [R8x6 section 4], so the template now writes `P188 = 0` and
+  `P2319 = 0` for the WP8x6 and WP810/822/825 (a phone someone switched on goes
+  back); a test asserts the rendered keys and that the WP820 and WP856, whose
+  templates lack them, get none. No WP template has an Eventlist BLF URI, a
+  Presence Eventlist URI or a PUBLISH-for-presence list key: not in the
+  templates, so `.Line.BLFListURI` is not written to a WP. The key exists only in
+  the GRP templates (`grp26xx_config_1.0.15.23`: `P134` Eventlist BLF URI,
+  `P26084` Presence Eventlist URI, `P2389` Auto Provision Eventlists, 0
+  Disabled, 1 BLF Eventlist, 2 Presence Eventlist; account 2 `P444`, `P26184`,
+  `P2489`); Hello's non-WP Grandstream BLF block writes per-key subscriptions
+  (`P323` and on), so switching to the list is a hardware decision and is not
+  written. Yealink, Snom, Fanvil and Poly keys were not in scope and stay unwritten.
+- The spec lists no UI or REST fields for S-35, so none were added.
+- PUBLISH for events other than presence answers `489`; `vq-rtcpxr` (S-36, item 35) is not served here.
 
 ## Kamailio HA: the VIP ships off, go-live is a separate step (2026-11-09)
 

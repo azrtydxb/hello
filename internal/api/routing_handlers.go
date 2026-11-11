@@ -96,12 +96,17 @@ type trunkBody struct {
 	InternalDialing *dialingBody           `json:"internalDialing"`
 	Messaging       *bool                  `json:"messaging"`
 	Codecs          *[]string              `json:"codecs"`
+	// Anonymous-call handling (spec S-19).
+	AnonymousPolicy  *string `json:"anonymousPolicy"`
+	AssertedIdentity *string `json:"assertedIdentity"`
+	IdentityHeader   *string `json:"identityHeader"`
 	// Caller screening of inbound calls (pbx-gaps S-8).
 	RejectAnonymous     *bool     `json:"rejectAnonymous"`
 	AllowedCountryCodes *[]string `json:"allowedCountryCodes"`
 	UnknownCallerAction *string   `json:"unknownCallerAction"`
 	RejectCode          *int      `json:"rejectCode"`
-	SessionTimers       *string   `json:"sessionTimers"`
+
+	SessionTimers *string `json:"sessionTimers"`
 }
 
 // dialingBody is an internalDialing request field (trunk plan contract 5).
@@ -155,6 +160,10 @@ func (b trunkBody) applyTo(in *store.TrunkInput) {
 	setIf(&in.Enabled, b.Enabled)
 	setIf(&in.Destinations, b.Destinations)
 	setIf(&in.Messaging, b.Messaging)
+	setIf(&in.AnonymousPolicy, b.AnonymousPolicy)
+	setIf(&in.AssertedIdentity, b.AssertedIdentity)
+	setIf(&in.IdentityHeader, b.IdentityHeader)
+
 	setIf(&in.CallerPolicy.RejectAnonymous, b.RejectAnonymous)
 	setIf(&in.CallerPolicy.UnknownCallerAction, b.UnknownCallerAction)
 	setIf(&in.CallerPolicy.RejectCode, b.RejectCode)
