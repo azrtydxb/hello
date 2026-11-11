@@ -657,3 +657,9 @@
 .flow-empty .az-empty__action {
   pointer-events: auto;
 }
+
+.flow-node__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
