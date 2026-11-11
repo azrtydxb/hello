@@ -55,12 +55,28 @@ control:
     publicUrl: ""
     # Where provisioned phones register; default <kamailio.publicHost>:<kamailio.publicPort>.
     sipServer: ""
+    # Backup registrars (comma separated host:port, at most 2; the first is
+    # used) written to the phones that take one: Yealink and Poly (second
+    # server), Grandstream (backup outbound proxy). The HA node list when
+    # SRV records are not published. Empty: none (S-20).
+    sipBackupServers: ""
+    # A DNS name whose _sip._udp SRV records list the SIP servers (see
+    # docs/provisioning.md, "SRV records and backup servers"). Set, Grandstream
+    # phones use DNS SRV mode with it. Empty keeps A-record mode, the default
+    # until the failover lab test passes.
+    sipSrv: ""
     # With kamailio.tls.enabled, the SIP-over-TLS address (default
     # <kamailio.publicHost>:<kamailio.tls.publicPort>) and the models that
     # register over it: comma separated vendors or vendor:model-prefix
     # (default grandstream:WP; "none" keeps every phone on UDP).
     sipTlsServer: ""
     sipTlsModels: ""
+    # Provision Grandstream WP810/WP822/WP825 to publish RTCP-XR voice-quality
+    # reports to the SIP server (HELLO_PROV_RTCPXR, docs/provisioning.md).
+    rtcpxr: false
+    # Models that register over TCP (same format as sipTlsModels, default
+    # none: UDP). A model also in sipTlsModels uses TLS while TLS is on.
+    sipTcpModels: ""
     # Proxies whose X-Forwarded-* is believed (the ingress controller's pods).
     trustedProxies: ""
     # Secret holding ca.crt (cert-manager writes it next to the certificate);
@@ -74,6 +90,18 @@ control:
       annotations:
         nginx.ingress.kubernetes.io/ssl-redirect: "false"
         nginx.ingress.kubernetes.io/enable-access-log: "false"
+  # Phone syslog sink (UDP :5514 in the pod, Service port 514). Off by
+  # default. host is what phones are told to send to (HELLO_SYSLOG_HOST, host
+  # or host:port); empty leaves syslog out of every phone configuration.
+  # Local traffic policy keeps the phone's address, which attributes a line to
+  # its phone.
+  syslog:
+    enabled: false
+    host: ""
+    service:
+      type: ClusterIP
+      nodePort: 0
+      externalTrafficPolicy: Local
   # Phone LDAP directory (pbx-gaps S-24): read-only, LDAPS only. Needs
   # control.provisioning.publicUrl (phones are given its host) and a TLS
   # Secret (tls.crt, tls.key; cert-manager writes it) for the listener.

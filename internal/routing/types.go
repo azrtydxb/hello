@@ -84,6 +84,20 @@ type Trunk struct {
 	// caller's order (names: PCMU, PCMA, G722, opus). Empty means the
 	// default, PCMU and PCMA: most carriers accept G.711 only.
 	Codecs []string
+	// AnonymousPolicy is AnonymousHonour (carry a device's privacy request
+	// to the carrier) or AnonymousAlways (every call out is anonymous);
+	// empty is honour.
+	AnonymousPolicy string
+	// AssertedIdentity is the number asserted for an anonymous call (empty:
+	// the call's caller ID) and IdentityHeader the header carrying it,
+	// IdentityPAI or IdentityPPI (empty: PAI).
+	AssertedIdentity string
+	IdentityHeader   string
+
+	// CallerPolicy screens inbound calls from this trunk: anonymous reject
+	// and a country restriction (pbx-gaps S-8). The zero value screens
+	// nothing.
+	CallerPolicy CallerPolicy
 	// SessionTimers is the trunk's RFC 4028 setting: SessionTimersOn,
 	// SessionTimersOff, or SessionTimersDefault (also the empty value) to
 	// follow Hello's own setting.
@@ -106,6 +120,14 @@ func ValidSessionTimers(v string) bool {
 	}
 	return false
 }
+
+// Trunk anonymous-call policies and identity headers (spec S-19).
+const (
+	AnonymousHonour = "honour"
+	AnonymousAlways = "always"
+	IdentityPAI     = "pai"
+	IdentityPPI     = "ppi"
+)
 
 // OutboundRoute matches calls from extensions to external numbers.
 type OutboundRoute struct {
@@ -169,13 +191,16 @@ type Config struct {
 	Conferences map[string]string
 	// Named is the set of "<kind>:<target>" keys an inbound route of the
 	// unified kinds (NamedKinds) may name: "ring_group:<name>",
-	// "voicemail:<extension number>", "announcement:<name>" and
-	// "paging:<code>".
+	// "voicemail:<extension number>", "voicemail_group:<number>",
+	// "announcement:<name>" and "paging:<code>".
 	Named map[string]bool
 	// ResolvedIPs maps a trunk ID to the IPs its destination hostnames
 	// resolved to, for source validation. hello-sip fills it off the call
 	// path (DNS); hello-control's route tester may leave it empty.
 	ResolvedIPs map[int64][]netip.Addr
+	// Blocklist is the enabled blocklist entries (pbx-gaps S-7). It is not
+	// validated by Compile: hello-sip compiles it with CompileBlocklist.
+	Blocklist []BlockEntry
 }
 
 // FieldError is a validation failure on one field, for API 400 responses.
@@ -192,9 +217,14 @@ type Call struct {
 	FromTrunk     int64
 	Number        string // as dialled (outbound) or the called DID (inbound)
 	CallerID      string // as presented by the caller
-	SIPDomain     string // host of the Request-URI
-	Header        func(name string) string
-	At            time.Time
+	// CallerIDExtension, when set, is the extension whose external number and
+	// outbound caller-ID rule an outbound call uses in place of
+	// FromExtension's: the boss an assistant calls on behalf of (pbx-gaps
+	// S-19). Routes are still matched for FromExtension.
+	CallerIDExtension string
+	SIPDomain         string // host of the Request-URI
+	Header            func(name string) string
+	At                time.Time
 }
 
 // TrunkUsability reports at decision time whether a trunk can take another

@@ -32,3 +32,17 @@ func TestLoadDSCP(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadProvRTCPXR fails if HELLO_PROV_RTCPXR is not off by default, is not
+// read when set, or a value that is not a boolean starts (spec S-36).
+func TestLoadProvRTCPXR(t *testing.T) {
+	c, err := LoadControl(provOn(nil))
+	if err != nil || c.Prov.RTCPXR {
+		t.Fatalf("default = %v, %v", c.Prov.RTCPXR, err)
+	}
+	c, err = LoadControl(provOn(map[string]string{"HELLO_PROV_RTCPXR": "true"}))
+	if err != nil || !c.Prov.RTCPXR {
+		t.Fatalf("set = %v, %v", c.Prov.RTCPXR, err)
+	}
+	wantProvErr(t, provOn(map[string]string{"HELLO_PROV_RTCPXR": "maybe"}), "HELLO_PROV_RTCPXR", "maybe")
+}
