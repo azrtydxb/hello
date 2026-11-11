@@ -34,6 +34,23 @@ const PAGE_RESULT: Record<string, string> = {
   no_registration: "Not registered",
 };
 
+const FOLLOW_ME_KIND: Record<string, string> = {
+  own: "Own phones",
+  extension: "Extension",
+  ring_group: "Ring group",
+  external: "External",
+};
+
+const FOLLOW_ME_RESULT: Record<string, string> = {
+  answered: "Answered",
+  declined: "Did not press 1",
+  busy: "Busy",
+  no_answer: "No answer",
+  failed: "Failed",
+  skipped: "Skipped",
+  cancelled: "Stopped, answered elsewhere",
+};
+
 /** One call's record: timeline, the CDR fields, its routing trace and, if it failed, why. */
 export function CallDetail() {
   const { id = "" } = useParams();
@@ -294,6 +311,21 @@ function Detail({ cdr }: { cdr: CallRecord }) {
                   value: (
                     <Badge tone={l.result === "answered" ? "good" : "neutral"}>
                       {PAGE_RESULT[l.result] ?? l.result}
+                    </Badge>
+                  ),
+                }))}
+              />
+            </div>
+          )}
+          {cdr.followMeLegs && cdr.followMeLegs.length > 0 && (
+            <div className="az-card calls-card">
+              <h2 className="calls-card__title">Follow-me</h2>
+              <PropertyList
+                items={cdr.followMeLegs.map((l) => ({
+                  label: `${FOLLOW_ME_KIND[l.kind] ?? l.kind} ${l.extension}${l.trunk ? ` (${l.trunk})` : ""}`,
+                  value: (
+                    <Badge tone={l.result === "answered" ? "good" : "neutral"}>
+                      {FOLLOW_ME_RESULT[l.result] ?? l.result}
                     </Badge>
                   ),
                 }))}

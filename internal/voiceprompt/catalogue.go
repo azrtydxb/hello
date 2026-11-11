@@ -125,6 +125,9 @@ const (
 	DirectoryMore       Key = "directory.more"
 	DirectoryNone       Key = "directory.none"
 	DirectoryTooLong    Key = "directory.toolong"
+	// Follow-me (pbx-gaps S-6): played to an external target before the call
+	// is connected, so a carrier voicemail cannot accept it.
+	FollowMeAccept Key = "followme.accept"
 )
 
 // tables holds the language tables. Add a language here and in its own file.

@@ -79,6 +79,8 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/devices/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteDevice},
 		{"POST", "/api/v1/devices/{id}/rotate-secret", auth.ScopeSecrets, auth.RoleAdmin, false, s.rotateSecret},
 
+		{"GET", "/api/v1/extensions/{id}/follow-me", auth.ScopeRead, auth.RoleViewer, false, s.getFollowMe},
+		{"PUT", "/api/v1/extensions/{id}/follow-me", auth.ScopeWrite, auth.RoleOperator, false, s.putFollowMe},
 		{"GET", "/api/v1/extensions/{id}/voicemail", auth.ScopeRead, auth.RoleViewer, false, s.getVoicemailBox},
 		{"PUT", "/api/v1/extensions/{id}/voicemail", auth.ScopeWrite, auth.RoleOperator, false, s.putVoicemailBox},
 		{"PUT", "/api/v1/extensions/{id}/voicemail/greeting", auth.ScopeWrite, auth.RoleOperator, false, s.putVoicemailGreeting},
@@ -382,6 +384,8 @@ func (s *server) routes() []route {
 		{"PATCH", "/api/v1/me/profile", auth.ScopeWrite, auth.RoleUser, false, s.updateProfile},
 		{"GET", "/api/v1/me/extensions", auth.ScopeRead, auth.RoleUser, false, s.listMyExtensions},
 		{"PATCH", "/api/v1/me/extensions/{id}", auth.ScopeWrite, auth.RoleUser, false, s.updateMyExtension},
+		{"GET", "/api/v1/me/extensions/{id}/follow-me", auth.ScopeRead, auth.RoleUser, false, s.getMyFollowMe},
+		{"PUT", "/api/v1/me/extensions/{id}/follow-me", auth.ScopeWrite, auth.RoleUser, false, s.putMyFollowMe},
 		{"GET", "/api/v1/me/extensions/{id}/voicemail", auth.ScopeRead, auth.RoleUser, false, s.getMyVoicemail},
 		{"PUT", "/api/v1/me/extensions/{id}/voicemail", auth.ScopeWrite, auth.RoleUser, false, s.putMyVoicemail},
 		{"GET", "/api/v1/me/extensions/{id}/voicemail/messages", auth.ScopeRead, auth.RoleUser, false, s.listMyMessages},

@@ -433,6 +433,48 @@ describe("CallDetail", () => {
     expect(within(card).getByText("Do not disturb")).toBeVisible();
     expect(within(card).getByText("Answered")).toBeVisible();
   });
+
+  it("lists what each follow-me leg did", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/91": () =>
+        json({
+          ...BASE,
+          id: 91,
+          finalStatus: 200,
+          trace: [],
+          followMeLegs: [
+            { kind: "own", extension: "101", trunk: "", result: "cancelled" },
+            {
+              kind: "external",
+              extension: "0475123456",
+              trunk: "carrier",
+              result: "declined",
+            },
+            {
+              kind: "external",
+              extension: "0475999999",
+              trunk: "carrier",
+              result: "answered",
+            },
+          ],
+        }),
+      "GET /api/v1/trunks": () => json({ items: [] }),
+    });
+    renderApp("/history/91");
+
+    const card = (await screen.findByRole("heading", { name: "Follow-me" }))
+      .parentElement as HTMLElement;
+    const rows = within(card).getAllByRole("term");
+    expect(rows.map((r) => r.textContent)).toEqual([
+      "Own phones 101",
+      "External 0475123456 (carrier)",
+      "External 0475999999 (carrier)",
+    ]);
+    expect(within(card).getByText("Did not press 1")).toBeVisible();
+    expect(within(card).getByText("Stopped, answered elsewhere")).toBeVisible();
+    expect(within(card).getByText("Answered")).toBeVisible();
+  });
 });
 
 it("names the assistant who answered a call to a boss", async () => {

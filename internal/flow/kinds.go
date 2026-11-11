@@ -81,6 +81,8 @@ var FeatureCodeNoTarget = map[string]string{
 	"dnd_off":             "setting on the caller's own extension",
 	"call_waiting_on":     "setting on the caller's own extension",
 	"call_waiting_off":    "setting on the caller's own extension",
+	"follow_me_on":        "setting on the caller's own extension",
+	"follow_me_off":       "setting on the caller's own extension",
 	"voicemail":           "opens the caller's own voicemail box, or the box of the extension dialled after the code",
 	"blind_transfer":      "a transfer key, the target is dialled during the call",
 	"attended_transfer":   "a transfer key, the target is dialled during the call",
@@ -171,9 +173,12 @@ var NonFlowResources = map[string]string{
 // each with why. The key is the schema path of the enum. Anything else that
 // overlaps fails TestCatalogueDrift until it is classified.
 var NotDestinationEnums = map[string]string{
-	"/components/schemas/MessageSend/properties/targetKind": "who a text message is addressed to, not where a call goes",
+	"/components/schemas/MessageSend/properties/targetKind":                               "who a text message is addressed to, not where a call goes",
+	"/components/schemas/CDRDetail/allOf/1/properties/followMeLegs/items/properties/kind": "which follow-me target a call leg rang (own phones included), not where a call goes",
 }
 
 // NotDestinationConstraints is NotDestinationEnums for database CHECK
 // constraints, keyed by constraint name.
-var NotDestinationConstraints = map[string]string{}
+var NotDestinationConstraints = map[string]string{
+	"follow_me_targets_kind_check": "a follow-me target is an extra ring of the extension, not a destination the call is sent to",
+}
