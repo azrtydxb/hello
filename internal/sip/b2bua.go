@@ -379,6 +379,10 @@ type leg struct {
 	// elsewhere: the leg was cancelled because the call was answered
 	// elsewhere (a pickup); its dialog sends the CANCEL with that Reason.
 	elsewhere bool
+	// answered: the leg's INVITE was answered with a 2xx. Its dialog is then
+	// ACKed and ended, never cancelled, so the UA that picks the CANCEL's
+	// Reason is left alone (guarded by mu; see cancelForksElsewhereExcept).
+	answered bool
 
 	// A trunk attempt (trunk set) or a SIP URI target (uri set); neither
 	// means a phone binding.
@@ -1635,6 +1639,9 @@ func (l *leg) drive(report func(legEvent)) {
 	}
 	err = dcs.WaitAnswer(l.ctx, opts)
 	if res := dcs.InviteResponse; err == nil || (res != nil && res.IsSuccess()) {
+		l.mu.Lock()
+		l.answered = true
+		l.mu.Unlock()
 		if l.accept != nil {
 			if res := l.accept(l); res != "" {
 				// Not accepted (or no longer wanted): hung up before any bridge.
