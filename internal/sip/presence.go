@@ -44,13 +44,26 @@ type subscription struct {
 	// subscription's NOTIFYs ordered.
 	feat     *featState
 	notifyMu *sync.Mutex
+	// lastDoc is the body last sent on a reg, presence or list
+	// subscription, to skip repeats; version numbers its reginfo and
+	// resource-list documents.
+	lastDoc string
+	// list marks a dialog subscription to a resource list (RFC 4662, S-35):
+	// members are the list's extension numbers and memberState the dialog
+	// state last seen for each.
+	list        bool
+	listURI     string
+	members     []string
+	memberState map[string]string
 }
 
 // Subscription event packages Hello serves.
 const (
 	eventDialog         = "dialog"
 	eventMessageSummary = "message-summary"
-	allowEvents         = "dialog, message-summary, as-feature-event"
+	eventReg            = "reg"      // RFC 3680 (S-35)
+	eventPresence       = "presence" // RFC 3856 (S-35)
+	allowEvents         = "dialog, message-summary, as-feature-event, reg, presence"
 
 	// MWI subscriptions renew at the phone's pace but are clamped to this
 	// range (spec S-1).
@@ -113,9 +126,12 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 	if !ok {
 		return
 	}
-	event := ""
-	if ev := req.GetHeader("Event"); ev != nil {
-		event = strings.ToLower(strings.TrimSpace(strings.SplitN(ev.Value(), ";", 2)[0]))
+	event := eventOf(req)
+	if event == eventDialog {
+		if listUser, isList := blfListUser(snap, req.Recipient.User); isList {
+			s.handleListSubscribe(req, tx, snap, dev, listUser)
+			return
+		}
 	}
 	var (
 		ext     string
@@ -124,22 +140,26 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 	switch event {
 	case eventDialog:
 		ext = req.Recipient.User
-		_, isSlot := snap.ParkLotOf(ext)
-		_, room := snap.Conference(ext)
-		if !snap.HasExtension(ext) && !isSlot && !room {
-			// An agent's login or pause lamp (*45101) or a key on a day/night
-			// toggle code (*28<n>) is a BLF too.
-			_, _, isAgent := queueBLFTarget(snap, ext)
-			_, isToggle := tcToggleCode(snap, ext)
-			if !isAgent && !isToggle {
-				s.respond(tx, req, sip.StatusNotFound, "Not Found")
-				return
-			}
+		if !blfTargetKnown(snap, ext) {
+			s.respond(tx, req, sip.StatusNotFound, "Not Found")
+			return
 		}
 	case eventMessageSummary:
 		var ok bool
 		if ext, ok = mailboxOf(snap, dev, req.Recipient.User); !ok {
 			s.respond(tx, req, sip.StatusForbidden, "Forbidden")
+			return
+		}
+	case eventReg:
+		var ok bool
+		if ext, ok = ownFeatureExtension(snap, dev, req.Recipient.User); !ok {
+			s.respond(tx, req, sip.StatusForbidden, "Forbidden")
+			return
+		}
+	case eventPresence:
+		ext = req.Recipient.User
+		if !snap.HasExtension(ext) {
+			s.respond(tx, req, sip.StatusNotFound, "Not Found")
 			return
 		}
 	case eventFeature:
@@ -158,7 +178,7 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	exp := s.subscribeExpires(req)
-	if exp > 0 && event == eventMessageSummary {
+	if exp > 0 && (event == eventMessageSummary || event == eventReg || event == eventPresence) {
 		exp = min(max(exp, mwiMinExpires), mwiMaxExpires)
 	}
 	if exp > 0 && event == eventFeature {
@@ -199,31 +219,72 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 		s.goBG(func() { s.sendMWINotify(sub, int(exp/time.Second), "", kind) })
 		return
 	}
+	if event == eventReg {
+		s.goBG(func() { s.sendRegNotify(sub, int(exp/time.Second), "", true) })
+		return
+	}
+	if event == eventPresence {
+		if fresh {
+			s.subsMu.Lock()
+			sub.lastState = s.initialDialogState(snap, ext)
+			s.subsMu.Unlock()
+		}
+		s.goBG(func() { s.sendPresenceNotify(sub, int(exp/time.Second), "", true) })
+		return
+	}
 	if fresh {
-		init := StateIdle
-		if e, ok := snap.Extension(ext); ok && e.DND {
-			init = StateDND
-		}
-		if _, room := snap.Conference(ext); room && s.confOccupied(ext) {
-			init = StateOnCall // a conference key's lamp is lit while the room has people in it
-		}
-		if _, slot := snap.ParkLotOf(ext); slot {
-			// A park slot's lamp shows occupancy (spec S-6).
-			init = slotState(s.slotOccupied(ext))
-		} else if t, ok := tcToggleCode(snap, ext); ok {
-			init = tcLampState(t)
-		} else if !snap.HasExtension(ext) {
-			if st := s.queueStore(); st != nil {
-				cctx, cancel := s.stateCtx()
-				states, err := st.Agents(cctx)
-				cancel()
-				if err == nil {
-					init, _ = s.queueLamp(snap, ext, states)
-				}
+		go s.sendStateNotify(sub, s.initialDialogState(snap, ext), int(exp/time.Second), "")
+	}
+}
+
+// eventOf reads the lower-cased event package of a SUBSCRIBE or PUBLISH,
+// without its parameters.
+func eventOf(req *sip.Request) string {
+	if ev := req.GetHeader("Event"); ev != nil {
+		return strings.ToLower(strings.TrimSpace(strings.SplitN(ev.Value(), ";", 2)[0]))
+	}
+	return ""
+}
+
+// blfTargetKnown reports whether ext is something a BLF key can watch: an
+// extension, a park slot, a conference room, an agent's login or pause lamp
+// (*45101) or a key on a day/night toggle code (*28<n>).
+func blfTargetKnown(snap *snapshot.Snapshot, ext string) bool {
+	_, isSlot := snap.ParkLotOf(ext)
+	_, room := snap.Conference(ext)
+	if snap.HasExtension(ext) || isSlot || room {
+		return true
+	}
+	_, _, isAgent := queueBLFTarget(snap, ext)
+	_, isToggle := tcToggleCode(snap, ext)
+	return isAgent || isToggle
+}
+
+// initialDialogState is the lamp state a new subscription to ext starts at.
+func (s *Server) initialDialogState(snap *snapshot.Snapshot, ext string) string {
+	init := StateIdle
+	if e, ok := snap.Extension(ext); ok && e.DND {
+		init = StateDND
+	}
+	if _, room := snap.Conference(ext); room && s.confOccupied(ext) {
+		init = StateOnCall // a conference key's lamp is lit while the room has people in it
+	}
+	if _, slot := snap.ParkLotOf(ext); slot {
+		// A park slot's lamp shows occupancy (spec S-6).
+		init = slotState(s.slotOccupied(ext))
+	} else if t, ok := tcToggleCode(snap, ext); ok {
+		init = tcLampState(t)
+	} else if !snap.HasExtension(ext) {
+		if st := s.queueStore(); st != nil {
+			cctx, cancel := s.stateCtx()
+			states, err := st.Agents(cctx)
+			cancel()
+			if err == nil {
+				init, _ = s.queueLamp(snap, ext, states)
 			}
 		}
-		go s.sendStateNotify(sub, init, int(exp/time.Second), "")
 	}
+	return init
 }
 
 // mailboxOf resolves the mailbox a message-summary SUBSCRIBE addresses: the
@@ -295,7 +356,7 @@ func (s *Server) upsertSub(req *sip.Request, event, ext string, exp time.Duratio
 			sub.expires = time.Now().Add(exp)
 			return sub, false
 		}
-		if event != eventFeature {
+		if event != eventFeature && event != eventReg && event != eventPresence && !isListSub(req) {
 			return nil, false
 		}
 		// A refresh of a feature subscription this node never held (it was
@@ -361,7 +422,15 @@ func (s *Server) dropSub(id string, notify bool) {
 			s.goBG(func() { s.sendMWINotify(sub, 0, "deactivated", MWITerminate) })
 		case eventFeature:
 			s.goBG(func() { s.sendFeatureTerminate(sub, "deactivated") })
+		case eventReg:
+			s.goBG(func() { s.sendRegNotify(sub, 0, "deactivated", true) })
+		case eventPresence:
+			s.goBG(func() { s.sendPresenceNotify(sub, 0, "deactivated", true) })
 		default:
+			if sub.list {
+				s.goBG(func() { s.sendListNotify(sub, 0, "deactivated", nil) })
+				break
+			}
 			go s.sendStateNotify(sub, StateIdle, 0, "deactivated")
 		}
 	}
@@ -388,17 +457,43 @@ func tagOf(h *sip.FromHeader) string {
 // one goroutine per subscription (spec failure mode "presence flood").
 func (s *Server) notifyExtension(ext, state string) {
 	s.subsMu.Lock()
-	var targets []*subscription
+	var (
+		targets  []*subscription
+		presence []*subscription
+		lists    []*subscription
+	)
 	for id := range s.byExt[ext] {
-		if sub, ok := s.subs[id]; ok && sub.event == eventDialog {
+		sub, ok := s.subs[id]
+		if !ok {
+			continue
+		}
+		switch {
+		case sub.event == eventPresence:
+			sub.lastState = state
+			presence = append(presence, sub)
+		case sub.event == eventDialog && !sub.list:
 			sub.lastState = state
 			cp := *sub
 			targets = append(targets, &cp)
 		}
 	}
+	for _, sub := range s.subs {
+		if sub.list && sub.memberState != nil {
+			if prev, member := sub.memberState[ext]; member && prev != state {
+				sub.memberState[ext] = state
+				lists = append(lists, sub)
+			}
+		}
+	}
 	s.subsMu.Unlock()
 	for _, sub := range targets {
 		go s.sendStateNotify(sub, state, int(time.Until(sub.expires)/time.Second), "")
+	}
+	for _, sub := range presence {
+		go s.sendPresenceNotify(sub, int(time.Until(sub.expires)/time.Second), "", false)
+	}
+	for _, sub := range lists {
+		go s.sendListNotify(sub, int(time.Until(sub.expires)/time.Second), "", []string{ext})
 	}
 }
 
@@ -500,6 +595,16 @@ func (s *Server) subExpireLoop(ctx context.Context) {
 					continue
 				case eventFeature:
 					s.goBG(func() { s.sendFeatureTerminate(sub, "timeout") })
+					continue
+				case eventReg:
+					s.goBG(func() { s.sendRegNotify(sub, 0, "timeout", true) })
+					continue
+				case eventPresence:
+					s.goBG(func() { s.sendPresenceNotify(sub, 0, "timeout", true) })
+					continue
+				}
+				if sub.list {
+					s.goBG(func() { s.sendListNotify(sub, 0, "timeout", nil) })
 					continue
 				}
 				//nolint:gosec // detached on purpose: the fan-out must not

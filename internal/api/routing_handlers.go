@@ -96,7 +96,17 @@ type trunkBody struct {
 	InternalDialing *dialingBody           `json:"internalDialing"`
 	Messaging       *bool                  `json:"messaging"`
 	Codecs          *[]string              `json:"codecs"`
-	SessionTimers   *string                `json:"sessionTimers"`
+	// Anonymous-call handling (spec S-19).
+	AnonymousPolicy  *string `json:"anonymousPolicy"`
+	AssertedIdentity *string `json:"assertedIdentity"`
+	IdentityHeader   *string `json:"identityHeader"`
+	// Caller screening of inbound calls (pbx-gaps S-8).
+	RejectAnonymous     *bool     `json:"rejectAnonymous"`
+	AllowedCountryCodes *[]string `json:"allowedCountryCodes"`
+	UnknownCallerAction *string   `json:"unknownCallerAction"`
+	RejectCode          *int      `json:"rejectCode"`
+
+	SessionTimers *string `json:"sessionTimers"`
 }
 
 // dialingBody is an internalDialing request field (trunk plan contract 5).
@@ -150,6 +160,16 @@ func (b trunkBody) applyTo(in *store.TrunkInput) {
 	setIf(&in.Enabled, b.Enabled)
 	setIf(&in.Destinations, b.Destinations)
 	setIf(&in.Messaging, b.Messaging)
+	setIf(&in.AnonymousPolicy, b.AnonymousPolicy)
+	setIf(&in.AssertedIdentity, b.AssertedIdentity)
+	setIf(&in.IdentityHeader, b.IdentityHeader)
+
+	setIf(&in.CallerPolicy.RejectAnonymous, b.RejectAnonymous)
+	setIf(&in.CallerPolicy.UnknownCallerAction, b.UnknownCallerAction)
+	setIf(&in.CallerPolicy.RejectCode, b.RejectCode)
+	if b.AllowedCountryCodes != nil {
+		in.CallerPolicy.AllowedCountryCodes = routing.NormalizeCountryCodes(*b.AllowedCountryCodes)
+	}
 	setIf(&in.SessionTimers, b.SessionTimers)
 	if b.Codecs != nil {
 		// Canonical spelling; validateTrunk refuses what does not normalise.
@@ -197,7 +217,9 @@ func (s *server) createTrunk(w http.ResponseWriter, r *http.Request) {
 	}
 	in := store.TrunkInput{RegisterExpires: 3600, OptionsInterval: 30, Enabled: true, SourceCIDRs: []string{},
 		InternalDialing: store.Dialing{Mode: "off", Patterns: []string{}},
-		Codecs:          slices.Clone(routing.DefaultTrunkCodecs), SessionTimers: routing.SessionTimersDefault}
+		Codecs:          slices.Clone(routing.DefaultTrunkCodecs),
+		CallerPolicy:    routing.CallerPolicy{UnknownCallerAction: routing.UnknownBlock, RejectCode: routing.RejectDecline},
+		SessionTimers:   routing.SessionTimersDefault}
 	b.applyTo(&in)
 	if b.InternalDialing != nil {
 		d, f := dialingPolicy(b.InternalDialing)

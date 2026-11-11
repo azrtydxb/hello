@@ -7,14 +7,19 @@ package secret
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
 )
 
 // Box seals and opens values under one key.
-type Box struct{ aead cipher.AEAD }
+type Box struct {
+	aead cipher.AEAD
+	key  []byte
+}
 
 // ErrKey is returned for a key that is not 32 bytes of base64.
 var ErrKey = errors.New("secret: key must be 32 bytes, base64-encoded")
@@ -33,7 +38,7 @@ func New(keyB64 string) (*Box, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Box{aead: aead}, nil
+	return &Box{aead: aead, key: key}, nil
 }
 
 // Seal encrypts plaintext with a fresh random nonce. The additional data
@@ -59,4 +64,16 @@ func (b *Box) Open(sealed []byte, aad string) (string, error) {
 		return "", fmt.Errorf("secret: cannot open value for %s", aad)
 	}
 	return string(pt), nil
+}
+
+// MAC returns HMAC-SHA256 of data under a key derived from the box's key
+// for purpose, so a value can be recognised later without being stored
+// (the opt-out list keeps only these for an erased number). Different
+// purposes give unrelated keys, and none of them is the sealing key.
+func (b *Box) MAC(purpose, data string) []byte {
+	kd := hmac.New(sha256.New, b.key)
+	kd.Write([]byte("hello-mac:" + purpose))
+	m := hmac.New(sha256.New, kd.Sum(nil))
+	m.Write([]byte(data))
+	return m.Sum(nil)
 }

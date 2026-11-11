@@ -134,3 +134,28 @@ subnet, a roam across subnets, a handset idle for more than an hour behind NAT,
 the P2397 and P84989 keys on an exported XML, and that the phones accept
 `Session-Expires` on a call and UPDATE as a refresh.
 
+## Presence, registration events and BLF lists
+
+hello-sip serves these SUBSCRIBE and PUBLISH events to a phone that
+authenticates (digest) as a device:
+
+| Event                 | Method                                                                     | Who                                                                                                                        | What                                                                                                                                                                                                                                       |
+| --------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `reg` (RFC 3680)      | SUBSCRIBE `sip:<ext>@<domain>`                                             | the extension's own devices; anything else is `403`                                                                        | `application/reginfo+xml` with the extension's live contacts, sent when a binding appears or goes (on either node, within a few seconds)                                                                                                   |
+| `presence` (RFC 3856) | SUBSCRIBE                                                                  | any device, for an extension that exists (`404` otherwise)                                                                 | `application/pidf+xml`: the published basic status and note, or "open" while a device is registered; the dialog state is added as an RPID activity (on the phone, busy for DND)                                                            |
+| `presence`            | PUBLISH (RFC 3903)                                                         | the extension's own devices (`403` for another extension, also when the PIDF `entity` names someone else)                  | `Expires` 60 to 3600 (default 3600), `SIP-ETag` in the answer, `SIP-If-Match` to refresh, modify or remove (`412` when it is gone). The event state is kept in Valkey, so either hello-sip node refreshes or removes what the other stored |
+| `dialog` to a list    | SUBSCRIBE `sip:blf-<device username>@<domain>` with `Supported: eventlist` | the phone's own device (`403` for another phone, `421` without `Supported: eventlist`, `404` for a phone without BLF keys) | RFC 4662 resource list of the phone's BLF keys (at most 100 extensions, as set on the phone)                                                                                                                                               |
+
+A list travels as `multipart/related` with an RLMI document and one
+`dialog-info` part per resource. A datagram holds about one resource, so the
+first NOTIFY is full state (`fullState="true"`) and the rest are partial; a
+state change sends only the resource that changed.
+
+The list URI is available to generic templates as `.Line.BLFListURI` (empty
+when the phone has no BLF keys). No built-in template writes a vendor key
+for it. The Grandstream WP8x6 and WP810/822/825 templates have `P188` (PUBLISH
+for Presence) and `P2319` (SUBSCRIBE for Registration), and both are written `0`:
+the WP phones gain nothing from them. The WP820 and WP856 templates have neither
+key, and no WP template has an eventlist URI key (only the GRP templates do,
+`P134`). Add a vendor key to a template only after reading it in the vendor's
+own documentation, then check it on a phone.

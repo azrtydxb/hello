@@ -8,6 +8,7 @@
 package prov
 
 import (
+	"net"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -94,8 +95,11 @@ var Results = []Result{
 // RenderData is the only value a template sees (spec S-8). Nothing outside
 // it is reachable: its fields are plain data with no methods.
 type RenderData struct {
-	Phone  Phone
+	Phone Phone
+	// Line is the phone's first line. Lines holds its further lines (2 and
+	// up, in order; empty for a one-line phone), each a Line with N set.
 	Line   Line
+	Lines  []Line
 	Server Server
 	BLF    []BLFKey
 	// VMKey is the transfer-to-voicemail key (see PlaceVMKey); nil when the
@@ -117,6 +121,9 @@ type RenderData struct {
 	PTT       *PTTInfo
 	Paging    *PagingOptions
 	Time      TimeInfo
+	// Syslog is where the phone sends its log (phone-feature-parity S-27);
+	// nil when its group has syslog off, which is the default.
+	Syslog *SyslogInfo
 	// Codes are the PBX's star codes (feature_codes), for phones whose own
 	// DND and forward keys dial them; a code the PBX does not define is
 	// empty.
@@ -124,6 +131,12 @@ type RenderData struct {
 	// Codecs is the HD voice codec plan: Opus first where the model has
 	// it, then G.722, PCMU and PCMA (see CodecInfo).
 	Codecs CodecInfo
+	// Overrides are the setting overrides of the phone's group and of the
+	// phone, resolved (see ResolveOverrides); Render applies them to the
+	// phone's own file after the template. Secret values are masked in
+	// previews.
+	Overrides []Override
+
 	// Ring is the ring map (phone-feature-parity S-44): the distinctive-ring
 	// rules that map each ring tag's Alert-Info to a tone, and the line's
 	// default tone (see RingInfo).
@@ -132,9 +145,49 @@ type RenderData struct {
 	// nil when the phone has no profile and no radio setting. Render fills
 	// Wifi.Keys for the phone's model.
 	Wifi *WifiInfo
+	// Sharing is the account-sharing role of a Grandstream WP8x6 in a phone
+	// group that enabled it (S-11); nil for any other phone.
+	Sharing *SharingInfo
 	// Emergency is the comma-separated emergency numbers of Hello's
 	// emergency-flagged outbound routes (digits only), empty when none.
 	Emergency string
+}
+
+// SyslogInfo is a phone's syslog setting. Host is the sink's bare host and
+// Port its UDP port (514 when the configured address names none); Address
+// is host or host:port as configured, for settings that take one string.
+// Level is the Grandstream P208 value (1 debug, 2 info, 3 warning, 4 error),
+// YealinkLevel static.syslog.level (0 to 6) and PolyLevel
+// device.syslog.renderLevel; vendors' scales are mapped in NewSyslogInfo.
+type SyslogInfo struct {
+	Host, Address string
+	Port          int
+	Level         int
+	YealinkLevel  int
+	PolyLevel     int
+}
+
+// NewSyslogInfo builds the setting from the sink address (host or
+// host:port) and a level name (debug, info, warning or error).
+func NewSyslogInfo(address, level string) *SyslogInfo {
+	host, port := address, 514
+	if h, p, err := net.SplitHostPort(address); err == nil {
+		if n, err := strconv.Atoi(p); err == nil && n > 0 && n < 65536 {
+			host, port = h, n
+		}
+	}
+	i := &SyslogInfo{Host: host, Address: address, Port: port}
+	switch level {
+	case "debug":
+		i.Level, i.YealinkLevel, i.PolyLevel = 1, 6, 0
+	case "warning":
+		i.Level, i.YealinkLevel, i.PolyLevel = 3, 4, 4
+	case "error":
+		i.Level, i.YealinkLevel, i.PolyLevel = 4, 3, 5
+	default:
+		i.Level, i.YealinkLevel, i.PolyLevel = 2, 6, 1
+	}
+	return i
 }
 
 // Phone is the phone itself, as templates and resolution see it.
@@ -166,6 +219,9 @@ type Phone struct {
 
 // Line is the SIP account of the phone's bound device.
 type Line struct {
+	// N is the line number: 1 for the first line, 2 and up for Lines. Render
+	// sets it.
+	N           int
 	Username    string
 	AuthName    string
 	Password    string // the opened device secret; masked in previews
@@ -188,6 +244,10 @@ type Line struct {
 	// it, so the phone and Hello agree about a second call. False means the
 	// phone must not announce one.
 	CallWaiting bool
+	// SendAnonymous is the extension's phoneSendAnonymous flag: the
+	// Grandstream template writes the phone's "Send Anonymous" (P65, account
+	// 1) as 1 only when it is set, and writes nothing otherwise.
+	SendAnonymous bool
 	// ParkCode and ParkRetrieveCode are the call-park and park-retrieve
 	// feature codes, empty when none is configured.
 	ParkCode, ParkRetrieveCode string
@@ -195,17 +255,44 @@ type Line struct {
 	// directed-pickup feature codes (phone-feature-parity S-50), empty when
 	// none is configured; the directed one is dialled with the extension after it.
 	PickupGroupCode, PickupDirectedCode string
+	// BLFListURI is the resource-list URI (RFC 4662) a phone that
+	// subscribes to its BLF keys as one list uses: sip:blf-<username>@<domain>.
+	// Render fills it when the phone has BLF keys; it is empty otherwise.
+	// No built-in template writes it: a vendor key for it is added only once
+	// the vendor's documentation names it (phone-feature-parity S-35).
+	BLFListURI string
 }
 
 // Server is the registrar the phone registers with.
 type Server struct {
 	Host string
 	Port int
-	// Transport is "udp" (the default) or "tls": TLS for a phone whose
+	// Transport is "udp" (the default), "tcp" (a model listed in
+	// HELLO_PROV_SIP_TCP_MODELS, S-13) or "tls": TLS for a phone whose
 	// vendor has a transport key and whose model HELLO_PROV_SIP_TLS_MODELS
 	// lists, registering with HELLO_PROV_SIP_TLS_SERVER (S-14).
 	Transport string
-	Expiry    int // registration expiry, seconds
+	// DNSMode is DNSA (the default: the host is resolved by its A record)
+	// or DNSSRV (Grandstream only: the host is a name whose SRV records list
+	// the servers, and Port is 0). See S-20.
+	DNSMode string
+	// Backup is the backup registrar of a phone that registers over UDP
+	// with a fixed address, nil when none is configured or the phone
+	// resolves its servers by SRV (S-20).
+	Backup *Backup
+	Expiry int // registration expiry, seconds
+}
+
+// The DNS modes of Server.DNSMode.
+const (
+	DNSA   = "a"
+	DNSSRV = "srv"
+)
+
+// Backup is a backup registrar.
+type Backup struct {
+	Host string
+	Port int
 }
 
 // BLFKey is one busy-lamp-field key. Render places the keys of a Yealink,
@@ -274,6 +361,8 @@ type ProvInfo struct {
 	// SIP and RTP packets with (HELLO_DSCP_SIP, HELLO_DSCP_RTP; spec S-21).
 	DSCPSIP int
 	DSCPRTP int
+	// RTCPXR turns on the phone's RTCP-XR reports to the SIP server (S-36).
+	RTCPXR bool
 }
 
 // BookInfo is where a phone fetches its address book (spec P-4). The URLs
@@ -428,6 +517,12 @@ func PhoneTokenAAD(phoneID int64) string { return "phone-token:" + strconv.Forma
 
 // PhoneAdminAAD is the context of a phone's sealed admin password.
 func PhoneAdminAAD(phoneID int64) string { return "phone-admin:" + strconv.FormatInt(phoneID, 10) }
+
+// SharingSecretAAD is the context of a phone group's sealed account sharing
+// password (P22523).
+func SharingSecretAAD(groupID int64) string {
+	return "account-sharing:" + strconv.FormatInt(groupID, 10)
+}
 
 // PhoneLDAPAAD and PhoneLDAPPrevAAD are the contexts of a phone's sealed
 // LDAP password and of the previous one kept after a rotation.

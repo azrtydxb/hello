@@ -182,6 +182,11 @@ func TestTrunkInternalLab(t *testing.T) {
 		"destinationKind": "internal", "enabled": true,
 	}, &route, 201)
 	lc.t.Cleanup(func() { _ = lc.do("DELETE", fmt.Sprintf("/api/v1/routes/inbound/%d", route.ID), nil, nil, 204) })
+	// fixedExtension waited for the snapshot holding the trunk and the
+	// device, but the route is created after that wait. The carrier's INVITE
+	// reaches hello-sip-1 straight away and gets 404 "No inbound route
+	// matched" until the node serves a snapshot with the route in it.
+	lc.waitSnapshots(10 * time.Second)
 
 	p := phone(t, d, labSIP1)
 	register(t, p)

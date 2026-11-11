@@ -851,19 +851,23 @@ func TestFirmwareHosting(t *testing.T) {
 func TestMaskSecrets(t *testing.T) {
 	token := strings.Repeat("a2", 26)
 	d := prov.RenderData{
-		Phone:    prov.Phone{AdminPassword: "admin-pw"},
-		Line:     prov.Line{Password: "sip-secret"},
-		Prov:     prov.ProvInfo{URL: testPublicURL + "/p/" + token + "/"},
-		Firmware: &prov.FirmwareInfo{URL: testPublicURL + "/p/" + token + "/fw/x.rom"},
-		Book:     prov.NewBookInfo(testPublicURL+"/p/"+token+"/", []string{"Extensions", "Company"}, prov.DefaultBookRefresh),
+		Phone:     prov.Phone{AdminPassword: "admin-pw"},
+		Line:      prov.Line{Password: "sip-secret"},
+		Overrides: []prov.Override{{Key: "P71", Value: "plain"}, {Key: "P9999", Value: "ovr-secret", Secret: true}},
+		Prov:      prov.ProvInfo{URL: testPublicURL + "/p/" + token + "/"},
+		Firmware:  &prov.FirmwareInfo{URL: testPublicURL + "/p/" + token + "/fw/x.rom"},
+		Book:      prov.NewBookInfo(testPublicURL+"/p/"+token+"/", []string{"Extensions", "Company"}, prov.DefaultBookRefresh),
 	}
 	fw, book := d.Firmware, d.Book
 	maskSecrets(&d)
 	b, _ := json.Marshal(d)
-	for _, s := range []string{token, "admin-pw", "sip-secret"} {
+	for _, s := range []string{token, "admin-pw", "sip-secret", "ovr-secret"} {
 		if bytes.Contains(b, []byte(s)) {
 			t.Fatalf("masked data still holds %q: %s", s, b)
 		}
+	}
+	if d.Overrides[0].Value != "plain" {
+		t.Fatalf("a plain override was masked: %+v", d.Overrides)
 	}
 	if d.Prov.URL != testPublicURL+"/p/"+mask+"/" || d.Firmware.URL != testPublicURL+"/p/"+mask+"/fw/x.rom" {
 		t.Fatalf("masked URLs = %s, %s", d.Prov.URL, d.Firmware.URL)

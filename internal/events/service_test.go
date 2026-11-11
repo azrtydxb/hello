@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"slices"
@@ -65,7 +66,7 @@ func newPipeline(t *testing.T) *pipeline {
 	if err := vk.Do(ctx, vk.B().Flushdb().Build()).Error(); err != nil {
 		t.Fatal(err)
 	}
-	svc := &Service{DB: db, Valkey: func() valkey.Client { return vk }, Consumer: "test-1", Log: discard,
+	svc := &Service{DB: db, Valkey: func() valkey.Client { return vk }, Consumer: "test-1", Log: slog.New(slog.NewTextHandler(testLog{t}, nil)),
 		ClaimIdle: 200 * time.Millisecond, ClaimEvery: 100 * time.Millisecond}
 	return &pipeline{svc: svc, vk: vk, db: db, app: ValkeyAppender{C: vk}}
 }
@@ -111,6 +112,7 @@ func (p *pipeline) waitStored(t *testing.T, n int) []Entry {
 			return es
 		}
 		if time.Now().After(deadline) {
+			p.dump(t)
 			t.Fatalf("%d events stored, want %d", len(es), n)
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -544,5 +546,25 @@ func TestPurgeKeepsEventsThatWebhooksNeed(t *testing.T) {
 	}
 	if !slices.Equal(ids, []string{"evt_old_0", "evt_old_1", "evt_old_2"}) {
 		t.Fatalf("after purge: %v, want the events of the pending, retrying and dead deliveries", ids)
+	}
+}
+
+// testLog sends the service's log lines to the test log, so a failure shows
+// the errors the ingester hit (a failed batch is retried, silently).
+type testLog struct{ t *testing.T }
+
+func (w testLog) Write(b []byte) (int, error) { w.t.Logf("%s", b); return len(b), nil }
+
+// dump logs what the stream and the consumer group hold, for a test that
+// timed out waiting on the ingester: whether an entry is unread, pending
+// (delivered, not acknowledged) or gone tells the failures apart.
+func (p *pipeline) dump(t *testing.T) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"XINFO", "GROUPS", StreamKey}, {"XINFO", "CONSUMERS", StreamKey, Group},
+		{"XPENDING", StreamKey, Group, "-", "+", "20"}, {"XRANGE", StreamKey, "-", "+"},
+	} {
+		m, err := p.vk.Do(context.Background(), p.vk.B().Arbitrary(args[0]).Args(args[1:]...).Build()).ToMessage()
+		t.Logf("%v: %v (err %v)", args, m.String(), err)
 	}
 }
