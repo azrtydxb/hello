@@ -637,12 +637,20 @@ func (c *call) fmWon(w *leg, rec *fmRec) {
 		if l == w {
 			continue
 		}
-		l.mu.Lock()
-		l.elsewhere = true
-		if l.dcs != nil {
-			l.dcs.UA = c.s.uacElsewhere
+		// A leg already abandoned (its turn ended) is being cancelled for
+		// no answer, not for the call being completed elsewhere; abandon sets
+		// the flag under c.mu before it cancels, so holding c.mu here keeps
+		// the write to the dialog's UA ahead of that cancel's read of it.
+		c.mu.Lock()
+		if !l.abandoned {
+			l.mu.Lock()
+			l.elsewhere = true
+			if l.dcs != nil {
+				l.dcs.UA = c.s.uacElsewhere
+			}
+			l.mu.Unlock()
 		}
-		l.mu.Unlock()
+		c.mu.Unlock()
 		c.fmFreeSlot(l)
 	}
 	if w.trunk != nil {
