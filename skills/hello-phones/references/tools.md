@@ -73,6 +73,15 @@
 | `getRingMap`                        | read  | The ring map: ringer lists, defaults, choices, overrides.          |
 | `putRingMap`                        | write | Replace the global ring map choices.                               |
 | `putRingMapGroup`                   | write | Replace one phone group's ring map overrides.                      |
+| `listWifiProfiles`                  | read  | Wi-Fi profiles, secrets never shown.                               |
+| `createWifiProfile`                 | admin | Create a Wi-Fi profile.                                            |
+| `getWifiProfile`                    | read  | One Wi-Fi profile.                                                 |
+| `updateWifiProfile`                 | admin | Change a Wi-Fi profile.                                            |
+| `deleteWifiProfile`                 | admin | Delete an unused Wi-Fi profile.                                    |
+| `getPhoneGroupWifi`                 | read  | A group's Wi-Fi profiles and roaming.                              |
+| `putPhoneGroupWifi`                 | admin | Set a group's Wi-Fi profiles and roaming.                          |
+| `getPhoneWifi`                      | read  | A phone's own and inherited profiles.                              |
+| `putPhoneWifi`                      | admin | Set a phone's Wi-Fi profiles.                                      |
 | Tool                                | Scope | What it does                                                       |
 | -------------------------------     | ----- | --------------------------------------------------------           |
 | `listPhones`                        | read  | Provisioned phones by MAC.                                         |

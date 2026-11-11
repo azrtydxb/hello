@@ -59,7 +59,7 @@ type CDR struct {
 	// (migration 00052).
 	SRTP string `json:"srtp"`
 	// SRTPKeyEx is how the encrypted legs agreed their keys: none, sdes, dtls
-	// or mixed, and ICE whether a leg ran ICE-lite (migration 00075).
+	// or mixed, and ICE whether a leg ran ICE-lite (migration 00076).
 	SRTPKeyEx string `json:"srtpKeyEx"`
 	ICE       bool   `json:"ice"`
 	// PageLegs is a page's outcome per member (migration 00014); set by

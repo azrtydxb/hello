@@ -258,7 +258,7 @@ type Device struct {
 	SRTP string `json:"srtp"`
 	// SRTPKeyEx is how Hello offers the device SRTP keys: sdes (the default)
 	// or dtls; MediaICE makes Hello offer it ICE-lite and provisions its ICE
-	// setting (migration 00075).
+	// setting (migration 00076).
 	SRTPKeyEx string    `json:"srtpKeyExchange"`
 	MediaICE  bool      `json:"mediaIce"`
 	CreatedAt time.Time `json:"createdAt"`
