@@ -1605,6 +1605,15 @@ group, and a change is pushed to the affected phones by the automatic resync.
 Page and intercom calls keep the auto-answer `Alert-Info` described under
 paging and intercom above.
 
+## Certificates (SCEP) and 802.1X
+
+Hello runs a SCEP server on this listener (`/p/<token>/scep`) that issues each
+phone of a group with SCEP on its own certificate from the Hello device CA,
+and writes reusable 802.1X profiles (EAP-TLS, PEAP, EAP-MD5) to the phones'
+wired port; Wi-Fi profiles reference the same profiles. The device CA and its
+CRL are public at `/p/scep-ca.crt` and `/p/scep-ca.crl`. Setup, keys, limits
+and the hardware checks are in [scep.md](scep.md).
+
 ## Multiple lines and shared lines
 
 A phone registers one SIP account per line. Line 1 is the extension chosen

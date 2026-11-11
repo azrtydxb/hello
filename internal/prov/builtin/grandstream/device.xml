@@ -376,6 +376,35 @@
 {{- if and .Prov.CACertPEM (ne .Phone.Family "856") (ne .Phone.Family "8xx")}}
     <P8433>{{xml .Prov.CACertPEM}}</P8433>
 {{- end}}
+{{- /* SCEP (phone-feature-parity S-25): the phone enrols for a device certificate from the Hello device CA at its own /p/<token>/scep with its one-time challenge password. Keys from Grandstream's templates wp8x6_config_1.0.3.39 and grp260x_config_1.0.7.74 ("Maintenance/Security Settings/SCEP"): P8647 enable, P8648 SCEP server URL, P8653 challenge password, P8654 key length (1 = 2048 bit), P8655 name of the certificate applicant (the MAC, which Hello puts in the certificate whatever the request says). P8652 (CA fingerprint) is left empty: its format is not documented, and the phone takes the CA from GetCACert over the HTTPS it already trusts (verify). P8662 (renew 20 days before expiry) and P8663 (scope of use) stay at their defaults. A model with the keys whose group has SCEP off gets P8647 = 0. Not confirmed on a phone (verify). */}}
+{{- if .Phone.SCEPCapable}}
+{{- with .SCEP}}
+    <P8647>1</P8647>
+    <P8648>{{xml .URL}}</P8648>
+    <P8653>{{xml .Challenge}}</P8653>
+    <P8654>1</P8654>
+    <P8655>{{$.Phone.MAC}}</P8655>
+{{- else}}
+    <P8647>0</P8647>
+{{- end}}
+{{- end}}
+{{- /* Wired 802.1X (phone-feature-parity S-25), GRP26xx desk phones only (grp26xx_config_1.0.15.23, grp261x_2x_3x_5x_7x_config_1.0.13.127, grp260x_config_1.0.7.74, "Network/Advanced Settings"): P7901 mode (1 EAP-MD5, 2 EAP-TLS, 3 EAP-PEAPv0/MSCHAPv2), P7902 identity, P7903 password (MD5 and PEAP), P8439 the CA the RADIUS server's certificate chains to. Written only while the group names a profile: a phone whose group names none keeps what it has, so Hello never switches off 802.1X a port depends on. EAP-TLS is written only to a phone that gets its certificate from SCEP (Usable), and P8440 (client certificate) is not written: which certificate the phone presents after SCEP is to be confirmed on a phone (verify). */}}
+{{- if .Phone.Wired8021X}}
+{{- with .Dot1X}}
+{{- with .Wired}}
+{{- if .Usable}}
+    <P7901>{{.GSWiredMode}}</P7901>
+    <P7902>{{xml .Identity}}</P7902>
+{{- if ne .Method "eap-tls"}}
+    <P7903>{{xml .Password}}</P7903>
+{{- end}}
+{{- with .CACertPEM}}
+    <P8439>{{xml .}}</P8439>
+{{- end}}
+{{- end}}
+{{- end}}
+{{- end}}
+{{- end}}
     <P237>{{xml (noscheme .Prov.URL)}}</P237>
     <P145>0</P145>
 {{- /* Automatic upgrade (PRV-06): P194 on the WP8x6 and WP8xx, P22296 on the WP856. A pin's upgrade window (spec S-26) makes P194 = 2, daily at the hour in P285 (config changes then reach the phone by check-sync or at that hour); the WP856 key for it is unverified, so the window is not rendered there. */}}
