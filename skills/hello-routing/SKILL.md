@@ -91,6 +91,29 @@ announcement or nothing). `updateRingGroup` replaces the members you send.
 `listFeatureCodes` then `putFeatureCodes` with the whole list (it replaces
 every code). Codes are a star and two to four digits, or # and ##.
 
+### Screen callers: the blocklist and a trunk's caller policy
+
+A blocklist entry matches a caller number: `exact`, or `prefix` (a number
+ending in `*`). Its `action` is `block` (the default) or `allow`, which lets a
+number through an earlier block. Its `scope` is `global` (the default) or one
+trunk by name. A blocked call is turned away before routing. The optional
+`reason` is a note shown to administrators only.
+
+1. `listBlocklist` to see the entries, and whether the number is already
+   listed for that scope.
+2. `createBlocklistEntry` with the number, action, match and scope. Sending a
+   number that is already listed for its scope updates that entry. Use
+   `putBlocklistEntry` with the entry id to change one, and
+   `deleteBlocklistEntry` to remove it.
+3. For many numbers, `importBlocklist` with `dry_run` true first. It takes
+   the rows as a JSON body with the columns number, action, match, scope and
+   reason. It is all or nothing: one failing row writes nothing.
+4. Anonymous callers and country restrictions belong to the trunk.
+   `updateTrunk` sets `rejectAnonymous`, `allowedCountryCodes`,
+   `unknownCallerAction` and `rejectCode` (603 or 486) on that trunk.
+5. `testRouting` with the number as the caller, and `trunk:<id>` as the
+   source, to show the user the decision after the change.
+
 ## References
 
 - [Tools for routing](references/tools.md) - every tool with its scope.

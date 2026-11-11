@@ -225,6 +225,19 @@ spec:
             - name: metrics
               containerPort: {{ $k.metricsPort }}
               protocol: TCP
+          {{- if $vip.enabled }}
+          lifecycle:
+            # Hold the node's ports (hostNetwork) for a few seconds after
+            # SIGTERM. The vip container releases the Lease at once; the other
+            # instance takes it within about retryPeriodSeconds. Without this
+            # the replacement pod (created at once, scheduled the moment the
+            # ports are free) starts its own kube-vip while Kamailio is still
+            # starting and can win the Lease back, so the VIP lands on an
+            # instance that is not serving yet, not on the healthy one.
+            preStop:
+              exec:
+                command: ["sleep", {{ $vip.handoffSeconds | quote }}]
+          {{- end }}
           readinessProbe:
             httpGet:
               path: /healthz

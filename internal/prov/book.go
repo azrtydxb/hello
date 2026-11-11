@@ -100,6 +100,10 @@ func (h *handler) serveBookSlot(w http.ResponseWriter, r *http.Request, ev *even
 	if !ok {
 		return
 	}
+	if name == "0.vcf" {
+		h.serveBookVCard(w, r, ev, rec, token)
+		return
+	}
 	m := bookSlotRE.FindStringSubmatch(name)
 	if m == nil {
 		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
@@ -150,7 +154,50 @@ func (h *handler) serveBook(w http.ResponseWriter, r *http.Request, ev *event, r
 	h.body(w, ev, ResultServed, f.ContentType, body)
 }
 
-// bookBody returns the phone's rendered directory for a slot: from the
+// vcardSlot is the cache slot of the vCard form of the merged set; the
+// directory slots are 0 to 5.
+const vcardSlot = 100
+
+// serveBookVCard answers /p/<token>/pb/0.vcf: the merged delivered set as a
+// vCard file (phone-feature-parity S-31), for the Grandstream WP8x6 only. No
+// template setting points a phone at it: it is for the phone's own "Upload
+// vCard Phonebook" page. Everything else is as serveBook.
+func (h *handler) serveBookVCard(w http.ResponseWriter, r *http.Request, ev *event, rec PhoneRecord, token string) {
+	ctx := r.Context()
+	ev.rec.Kind = KindPhonebook
+	ev.rec.MACClaimed = ""
+	f, ok := phonebook.FormatForModel(string(rec.Vendor), rec.Model)
+	if !ok || !phonebook.VCardModel(string(rec.Vendor), rec.Model) {
+		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
+		return
+	}
+	body, ok := h.bookBody(ctx, w, ev, rec, f, vcardSlot)
+	if !ok {
+		return
+	}
+	hash := HashToken(token)
+	ua := r.UserAgent()
+	st := FetchState{At: ev.rec.At, IP: ev.rec.IP, UserAgent: ev.rec.UserAgent, File: "pb/0.vcf",
+		FirmwareSeen: uaFirmware(ua), UAMismatch: ev.rec.UAMismatch}
+	if m := uaMAC(ua); m != "" && m != rec.MAC {
+		st.UAMismatch, ev.rec.UAMismatch = true, true
+	}
+	if err := h.s.MarkFetched(ctx, rec.ID, hash, st); err != nil {
+		h.outage(w, ev, "mark fetched", err)
+		return
+	}
+	etag := etagOf(body)
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-store")
+	if etagMatch(r.Header.Get("If-None-Match"), etag) {
+		ev.rec.Status, ev.rec.Result = http.StatusNotModified, ResultNotModified
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	h.body(w, ev, ResultServed, phonebook.ContentTypeVCard, body)
+}
+
+// bookBody returns the phone's rendered directory for a slot (vcardSlot for the vCard file): from the
 // cache when the set's version has been rendered before, else rendered and
 // cached. It answers the failure itself and reports false.
 func (h *handler) bookBody(ctx context.Context, w http.ResponseWriter, ev *event, rec PhoneRecord, f phonebook.Format, slot int) ([]byte, bool) {
@@ -194,6 +241,9 @@ func (h *handler) renderBook(ctx context.Context, w http.ResponseWriter, ev *eve
 		h.outage(w, ev, "delivered books", err)
 		return nil, false
 	}
+	if slot == vcardSlot {
+		return h.renderVCard(w, ev, rec, f, books)
+	}
 	if slot > 0 {
 		books = phonebook.Group(books, f.Sources)
 		if f.Sources < 2 || slot > len(books) {
@@ -209,6 +259,24 @@ func (h *handler) renderBook(ctx context.Context, w http.ResponseWriter, ev *eve
 	body, truncated, err := phonebook.RenderBooks(string(rec.Vendor), rec.Model, books)
 	if err != nil || len(body) > MaxBookBytes {
 		h.opt.Log.Error("provisioning: directory not served", "phone", rec.ID, "vendor", rec.Vendor, "bytes", len(body), "error", err)
+		h.empty(w, ev, http.StatusNotFound, ResultRenderError)
+		return nil, false
+	}
+	if truncated {
+		h.opt.Log.Warn("provisioning: directory cut to the vendor's capacity", "phone", rec.ID, "vendor", rec.Vendor, "max", f.MaxEntries)
+	}
+	return body, true
+}
+
+// renderVCard renders the merged delivered set as vCards.
+func (h *handler) renderVCard(w http.ResponseWriter, ev *event, rec PhoneRecord, f phonebook.Format, books []phonebook.Book) ([]byte, bool) {
+	if len(books) == 0 {
+		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
+		return nil, false
+	}
+	body, truncated, err := phonebook.RenderVCard(string(rec.Vendor), rec.Model, books)
+	if err != nil || len(body) > MaxBookBytes {
+		h.opt.Log.Error("provisioning: vCard directory not served", "phone", rec.ID, "vendor", rec.Vendor, "bytes", len(body), "error", err)
 		h.empty(w, ev, http.StatusNotFound, ResultRenderError)
 		return nil, false
 	}
