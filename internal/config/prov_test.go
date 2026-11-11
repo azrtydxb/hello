@@ -302,6 +302,20 @@ func selfSigned(t *testing.T) (certPEM, keyPEM []byte) {
 		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: kd})
 }
 
+// TestLoadProvSIPTCP fails if TCP provisioning is on by default, the model
+// list is not read, or a malformed entry is accepted.
+func TestLoadProvSIPTCP(t *testing.T) {
+	c, err := LoadControl(provOn(nil))
+	if err != nil || len(c.Prov.SIPTCPModels) != 0 {
+		t.Fatalf("default = %q, %v", c.Prov.SIPTCPModels, err)
+	}
+	c, err = LoadControl(provOn(map[string]string{"HELLO_PROV_SIP_TCP_MODELS": "grandstream:WP8, yealink"}))
+	if err != nil || len(c.Prov.SIPTCPModels) != 2 || c.Prov.SIPTCPModels[1] != "yealink" {
+		t.Fatalf("tcp = %q, %v", c.Prov.SIPTCPModels, err)
+	}
+	wantProvErr(t, provOn(map[string]string{"HELLO_PROV_SIP_TCP_MODELS": "Grandstream"}), "HELLO_PROV_SIP_TCP_MODELS", "Grandstream")
+}
+
 // TestLoadProvSIPTLS fails if SIP over TLS is on without being asked for,
 // the model list does not default to Grandstream WP phones, "none" does not
 // empty it, or a malformed TLS registrar or model entry is accepted.

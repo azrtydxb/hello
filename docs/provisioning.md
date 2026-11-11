@@ -705,6 +705,36 @@ burst of edits pushes once; pushes still go out at `HELLO_PROV_PUSH_RATE`. A
 phone seen for the first time is only recorded. Automatic pushes show as
 "(automatic)" and are audited as `auto_resync` by `system`.
 
+## Phone voice-quality reports (RTCP-XR)
+
+Hello-sip collects the per-call voice quality that phones report with SIP
+`PUBLISH`, `Event: vq-rtcpxr` (RFC 6035, `application/vq-rtcpxr`). The sender
+must authenticate as a device, like any request from a phone. A report names
+the phone's dialog by Call-ID; the phone's figures (MOS-LQ, MOS-CQ,
+inter-arrival jitter, network loss, discard rate, round-trip delay, from the
+`LocalMetrics` block only) are stored once per dialog and device (a later
+report replaces an earlier one, an interval report never replaces the call-end
+one) and kept 90 days. They are joined to the call's CDR by its caller-leg or
+callee-leg Call-ID, so the call detail in the console shows them beside the
+relay's own loss and jitter (`rtcpxr` in `GET /api/v1/cdrs/{id}`). A malformed
+or out-of-range report is answered 400 and stored not at all; a device is held
+to 60 reports a minute.
+
+Metrics: `hello_sip_rtcpxr_reports_total{result}`, and histograms
+`hello_rtcpxr_mos_lq`, `hello_rtcpxr_loss_percent`, `hello_rtcpxr_jitter_ms`
+over the call-end reports.
+
+`HELLO_PROV_RTCPXR=true` (default off) makes hello-control provision the
+reporting on the phones whose vendor documents it. Account 1 of the Grandstream
+WP8x6 (`wp8x6_config_1.0.3.39`) and WP810/WP822/WP825
+(`wp810_822_825_config_1.0.11.83`) gets P26093 (collector name, the SIP server
+host), P60087 = 1 (address selection Auto, the registered SIP server), P26094
+empty, P26095 (the SIP server port) and P8489 = 1 (VQ RTCP-XR Session Report,
+the call-end report Hello stores). The WP856 (`wp856_config_1.0.3.16`) has no
+Auto selection and no session report key, so it gets P26093 and P26094 (both the
+SIP server host) and P26095. The WP820 template has no RTCP-XR key, and the other
+vendors are not provisioned: set their collector on the phone to the SIP server.
+
 ## Moving phones to a new Kamailio address
 
 The proxy address a phone registers with (`HELLO_PROV_SIP_SERVER`) is part of
@@ -767,16 +797,16 @@ a priority, and one or more files, each a file-name pattern (`{mac}`,
 
 Templates see only these values:
 
-| Value       | Fields                                                                                                                                                               |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                                                                                                 |
-| `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`                                                                                |
-| `.Server`   | `Host`, `Port`, `Transport` (`udp` or `tls`), `Expiry` (seconds)                                                                                                     |
-| `.BLF`      | a list of `Number`, `Label`, `URI`, placed on the model's keys: `Slot`, `Module`, `Page`, `Section`, `PageStart`, `Pickup`                                           |
-| `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `CACertBase64`, `ResyncSeconds`                                                                                          |
-| `.Codes`    | the PBX's star codes: `DNDOn`, `DNDOff`, `ForwardOn`, `ForwardOff`, `ForwardBusyOn`/`Off`, `ForwardNoAnswerOn`/`Off`, `PickupDirected` (empty when the PBX has none) |
-| `.Firmware` | `URL` (the file), `Dir` (its directory, no trailing slash), `Version`, `Via` (1 HTTP, 2 HTTPS), or nil when no firmware is pinned                                    |
-| `.Time`     | `Zone`, `NTP`, `TZ` (the zone per vendor, see [Time zones](#time-zones))                                                                                             |
+| Value       | Fields                                                                                                                                                                  |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                                                                                                    |
+| `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`, `BLFListURI` (the phone's BLF keys as one RFC 4662 list, empty without BLF keys) |
+| `.Server`   | `Host`, `Port`, `Transport` (`udp` or `tls`), `Expiry` (seconds)                                                                                                        |
+| `.BLF`      | a list of `Number`, `Label`, `URI`, placed on the model's keys: `Slot`, `Module`, `Page`, `Section`, `PageStart`, `Pickup`                                              |
+| `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `CACertBase64`, `ResyncSeconds`                                                                                             |
+| `.Codes`    | the PBX's star codes: `DNDOn`, `DNDOff`, `ForwardOn`, `ForwardOff`, `ForwardBusyOn`/`Off`, `ForwardNoAnswerOn`/`Off`, `PickupDirected` (empty when the PBX has none)    |
+| `.Firmware` | `URL` (the file), `Dir` (its directory, no trailing slash), `Version`, `Via` (1 HTTP, 2 HTTPS), or nil when no firmware is pinned                                       |
+| `.Time`     | `Zone`, `NTP`, `TZ` (the zone per vendor, see [Time zones](#time-zones))                                                                                                |
 
 Functions: `xml` (escape), `upper`, `lower`, `default`, `add`, `mul`, `div`,
 `urlhost` (`https://h:8/p/x/` gives `h:8`) and `urlpath` (the same gives
@@ -1372,6 +1402,44 @@ and a resume as `sendrecv`, as on any bridged call.
 **Pickup cancels.** The ringing phones a pickup cancels get
 `Reason: SIP;cause=200;text="Call completed elsewhere"` on the CANCEL, so they
 do not log the call as missed.
+
+## Phone syslog
+
+Hello can receive the log of its Grandstream phones, so a phone that misbehaves can be read
+without a visit. It is off until the server and a phone group turn it on.
+
+1. **Server.** Set `HELLO_SYSLOG_UDP_ADDR` (for example `:5514`) on hello-control to listen for
+   UDP syslog, and `HELLO_SYSLOG_TLS_ADDR` with `HELLO_SYSLOG_TLS_CERT` and
+   `HELLO_SYSLOG_TLS_KEY` (for example `:6514`) for syslog over TLS (RFC 5425, octet-counted or
+   newline-framed). Publish them as UDP 514 and TLS 6514 (the Helm chart's
+   `control.syslog` values, the `hello-syslog` Service on kw).
+   `HELLO_SYSLOG_HOST` is the address phones are told to send to (`host` or `host:port`). Without
+   it no phone configuration mentions syslog.
+2. **Phone group.** In Phone groups, turn on "Send phone logs to Hello (syslog)" and pick a level
+   (debug, info, warning, error). The Grandstream template writes P207 (the server) and P208 (the
+   level 1 to 4). The Yealink (`static.syslog.*`), Poly (`device.syslog.*`) and snom
+   (`syslog_server`) templates write the sink and level too; those keys come from the vendors'
+   guides and are not confirmed on a phone (verify). Poly takes no port, so the sink must listen
+   on UDP 514 for Poly phones; Fanvil has no documented keys and is left out. A group with syslog off writes P207 empty and P208 0, so turning it off reaches
+   phones that had it on. Resync the phones afterwards.
+3. **Read it.** Phone detail has a Syslog tab with the newest lines, newest first, with a level
+   filter (`GET /api/v1/phones/{id}/syslog`). Phones, Unknown syslog lists the senders no phone owns.
+   Prometheus counts `hello_syslog_lines_received_total`, `hello_syslog_lines_dropped_total` (rate
+   cap) and `hello_syslog_lines_unmatched_total`.
+
+What Hello keeps: the last 10000 lines per phone, for 24 hours after the newest line, in Valkey.
+Every line is redacted before it is stored: Authorization header values, `password=`, `secret=`,
+`token=` and similar pairs, the token in a provisioning URL, long token-like runs and passwords
+in URLs. Lines are cut at 2048 bytes. Each phone is limited to `HELLO_SYSLOG_RATE` lines per
+second (default 20, burst `HELLO_SYSLOG_BURST`, default 200); lines over it are dropped and the
+next stored line says how many.
+
+A line is attributed to a phone by its source address, the address the phone last fetched its
+configuration from. A line from any other address, or from an address two phones share (NAT), is
+not dropped: it is kept under that address for 24 hours (the last 1000 lines of up to 200
+addresses), listed by `GET /api/v1/syslog/unknown`. Keep the phone's source address on the way in
+(Kubernetes `externalTrafficPolicy: Local`), or lines show up as unknown. Syslog over UDP is not
+authenticated: anyone who can reach the port can write lines, so keep it on the phone network.
 
 ## Distinctive ringing (ring tags)
 

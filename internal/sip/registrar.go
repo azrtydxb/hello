@@ -60,6 +60,7 @@ func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
 			return
 		}
 		s.triggerRecount()
+		s.regChanged(dev.Extension)
 		s.respond(tx, req, sip.StatusOK, "OK")
 		return
 	}
@@ -92,6 +93,7 @@ func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	res.AppendHeader(sip.NewHeader("Date", time.Now().UTC().Format(time.RFC1123)))
 	s.send(tx, res)
+	s.regChanged(dev.Extension)
 	if len(contacts) > 0 {
 		s.triggerRecount()
 		// Messages stored while the extension had no device go out now.
