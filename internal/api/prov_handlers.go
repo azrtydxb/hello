@@ -30,6 +30,8 @@ type ProvStore interface {
 	ImportPhones(ctx context.Context, actor string, in []store.PhoneInput) ([]store.Phone, error)
 	UpdatePhone(ctx context.Context, actor string, id int64, c store.PhoneChange) (store.Phone, bool, error)
 	DeletePhone(ctx context.Context, actor string, id int64) error
+	SetPhoneLine(ctx context.Context, actor string, phoneID int64, line int, b store.Binding, realm string) (store.Phone, bool, error)
+	ClearPhoneLine(ctx context.Context, actor string, phoneID int64, line int) (store.Phone, error)
 	RotatePhoneToken(ctx context.Context, actor string, id int64, immediate bool) (store.CreatedPhone, error)
 	RearmPhone(ctx context.Context, actor string, id int64) (store.CreatedPhone, error)
 	RevealAdminPassword(ctx context.Context, actor string, id int64) (string, error)
@@ -288,13 +290,15 @@ func (s *server) updatePhone(w http.ResponseWriter, r *http.Request) {
 		PTTChannel  json.RawMessage `json:"pttChannelId"`
 		BLF         *[]string       `json:"blf"`
 		Enabled     *bool           `json:"enabled"`
+		SharingRole *string         `json:"sharingRole"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	c := store.PhoneChange{Serial: in.Serial, Vendor: in.Vendor, Model: in.Model, Label: in.Label, BLF: in.BLF,
-		Enabled: in.Enabled, Realm: s.SIPDomain}
+		Enabled: in.Enabled, SharingRole: in.SharingRole, Realm: s.SIPDomain}
 	var f fieldErrs
+	validSharingRole(&f, in.SharingRole)
 	var tpl *int64
 	if in.TemplateID != nil {
 		if string(in.TemplateID) != "null" {
@@ -532,7 +536,16 @@ func (s *server) previewPhone(w http.ResponseWriter, r *http.Request) {
 // maskSecrets replaces every secret in d with the mask.
 func maskSecrets(d *prov.RenderData) {
 	d.Line.Password = mask
+	d.Lines = slices.Clone(d.Lines)
+	for i := range d.Lines {
+		d.Lines[i].Password = mask
+	}
 	d.Phone.AdminPassword = mask
+	if d.Sharing != nil {
+		sh := *d.Sharing
+		sh.Password = mask
+		d.Sharing = &sh
+	}
 	d.Overrides = slices.Clone(d.Overrides)
 	for i := range d.Overrides {
 		if d.Overrides[i].Secret {

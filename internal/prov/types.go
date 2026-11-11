@@ -95,8 +95,11 @@ var Results = []Result{
 // RenderData is the only value a template sees (spec S-8). Nothing outside
 // it is reachable: its fields are plain data with no methods.
 type RenderData struct {
-	Phone  Phone
+	Phone Phone
+	// Line is the phone's first line. Lines holds its further lines (2 and
+	// up, in order; empty for a one-line phone), each a Line with N set.
 	Line   Line
+	Lines  []Line
 	Server Server
 	BLF    []BLFKey
 	// VMKey is the transfer-to-voicemail key (see PlaceVMKey); nil when the
@@ -138,6 +141,9 @@ type RenderData struct {
 	// rules that map each ring tag's Alert-Info to a tone, and the line's
 	// default tone (see RingInfo).
 	Ring RingInfo
+	// Sharing is the account-sharing role of a Grandstream WP8x6 in a phone
+	// group that enabled it (S-11); nil for any other phone.
+	Sharing *SharingInfo
 	// Emergency is the comma-separated emergency numbers of Hello's
 	// emergency-flagged outbound routes (digits only), empty when none.
 	Emergency string
@@ -209,6 +215,9 @@ type Phone struct {
 
 // Line is the SIP account of the phone's bound device.
 type Line struct {
+	// N is the line number: 1 for the first line, 2 and up for Lines. Render
+	// sets it.
+	N           int
 	Username    string
 	AuthName    string
 	Password    string // the opened device secret; masked in previews
@@ -504,6 +513,12 @@ func PhoneTokenAAD(phoneID int64) string { return "phone-token:" + strconv.Forma
 
 // PhoneAdminAAD is the context of a phone's sealed admin password.
 func PhoneAdminAAD(phoneID int64) string { return "phone-admin:" + strconv.FormatInt(phoneID, 10) }
+
+// SharingSecretAAD is the context of a phone group's sealed account sharing
+// password (P22523).
+func SharingSecretAAD(groupID int64) string {
+	return "account-sharing:" + strconv.FormatInt(groupID, 10)
+}
 
 // PhoneLDAPAAD and PhoneLDAPPrevAAD are the contexts of a phone's sealed
 // LDAP password and of the previous one kept after a rotation.

@@ -237,6 +237,42 @@ The ring map turns a ring tag into a tone on each vendor's phones.
   overrides; an empty list removes them. An override wins over the global choice
   for that group's phones.
 
+## Lines and account sharing
+
+A phone has one line per SIP account. Line 1 is the extension `createPhone`
+bound; lines 2 and up are further extensions on the same handset, each with
+its own voicemail light, BLF and ring tags.
+
+- `getPhone` shows `lines` (line 1 first, each with its extension, device user
+  name and whether the template writes it), `maxLines` for the model and
+  `sharingRole`. A WP8x6 takes three lines, a WP822 two; Yealink, Poly, Snom
+  and Fanvil up to six.
+- `setPhoneLine` (`/phones/{id}/lines/{line}`, line 2 to 6) with `{
+"extensionId": 9 }` binds the line to a device of that extension; a new device
+  is made unless `deviceId` names one, and its secret is rotated. A phone has at
+  most one line on an extension, and a device is one line of one phone. Line 1
+  has to be bound first. `clearPhoneLine` unbinds it. Resync the phone after.
+- Several phones can answer one extension: give each phone a line on it
+  (`setPhoneLine` on each). A call to the extension rings all of them, and each
+  phone has its own device and secret. This is the shared line appearance.
+- The templates of all five vendors write lines 2 and up (Grandstream's from
+  its own templates: WP8x6 three lines, WP810/820/822/825 two, WP856 six). A line
+  of a model whose template does not write it shows `provisioned` false and is
+  kept; tell the administrator it is not yet on the phone.
+- Account sharing is the other way to let handsets share one line, for
+  Grandstream WP8x6 only. `setPhoneGroupAccountSharing` (admin) switches it on
+  for a phone group; each phone of the group is the host or a guest
+  (`updatePhone` with `sharingRole`, host by default). Without the group
+  switch the phone is written account sharing off. Resync the group after.
+  Each group has its own sharing password (the phone's Group Password), which
+  Hello generates when the group is created, stores sealed and never shows,
+  so handsets of different groups on one network do not join each other's
+  line. `regeneratePhoneGroupSharingSecret` (admin, path `id`) replaces it;
+  handsets keep the old one until they are resynced, so resync the whole group
+  straight after and expect shared lines to drop in between.
+- The check-sync of a multi-line phone goes to line 1, or to the next line
+  while line 1 is not registered.
+
 ## Custom tones
 
 The tone library holds WAV files a ring map choice can play as `custom:<name>`

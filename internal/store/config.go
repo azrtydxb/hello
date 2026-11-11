@@ -341,7 +341,7 @@ func (s *Store) RotateDeviceSecret(ctx context.Context, actor string, id int64, 
 		// renderer (spec S-2): re-seal it so the phone picks the new one up
 		// at its next fetch.
 		var bound bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM phones WHERE device_id = $1)`, id).Scan(&bound); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM phones WHERE device_id = $1) OR EXISTS (SELECT 1 FROM phone_lines WHERE device_id = $1)`, id).Scan(&bound); err != nil {
 			return id, err
 		}
 		if bound {

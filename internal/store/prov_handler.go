@@ -222,6 +222,12 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 		return d, prov.Template{}, prov.ErrSealed
 	}
 	d.Line.AuthName, d.Line.Domain = d.Line.Username, s.prov.Domain
+	if d.Lines, err = s.renderLines(ctx, phoneID); err != nil {
+		return d, prov.Template{}, err
+	}
+	if d.Sharing, err = s.phoneSharing(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
+		return d, prov.Template{}, err
+	}
 	if err := s.db.QueryRowContext(ctx, `SELECT
 		COALESCE(min(code) FILTER (WHERE action = 'voicemail' AND argument = ''), ''),
 		COALESCE(min(code) FILTER (WHERE action = 'park'), ''),

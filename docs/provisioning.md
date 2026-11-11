@@ -1495,6 +1495,75 @@ group, and a change is pushed to the affected phones by the automatic resync.
 Page and intercom calls keep the auto-answer `Alert-Info` described under
 paging and intercom above.
 
+## Multiple lines and shared lines
+
+A phone registers one SIP account per line. Line 1 is the extension chosen
+when the phone was added; lines 2 and up are further extensions on the same
+handset, for a reception phone that also answers the sales line, or a
+cordless that carries two numbers.
+
+On the phone's page, under **Lines**, pick a line number and an extension and
+press **Bind line**. Hello creates a device for the extension on that phone
+(named `<extension>-<last six MAC digits>`, like line 1) and writes its
+credentials into the phone's configuration at the next fetch; press Resync to
+push it now. **Unbind line** removes it. Each line has its own voicemail light,
+BLF, ring tags and call waiting, because each is a device of its own extension.
+
+- How many lines a model takes: Grandstream WP8x6 three, WP810, WP820, WP822
+  and WP825 two, WP856 six (the account blocks of Grandstream's own templates);
+  Yealink and Snom as many as the model has line keys, up to six; Poly and
+  Fanvil up to six. Other Grandstream models take one.
+- A phone has at most one line on an extension, and a device is one line of one
+  phone.
+- On a Yealink and a Snom the first keys are the line keys (key N is line N by
+  default), so BLF and the transfer-to-voicemail key start after them.
+- The check-sync of a multi-line phone goes to line 1's contacts, or to the
+  next line's while line 1 is not registered, so the phone is notified once.
+- All five vendors' templates write lines 2 and up. Grandstream's are written
+  from the account blocks of its own templates (`wp8x6_config_1.0.3.39`,
+  `wp810_822_825_config_1.0.11.83`, `wp820_config_1.0.7.90`,
+  `wp856_config_1.0.3.16`): account 2 from `P401`, account 3 from `P501`, the
+  WP856's accounts 4 to 6 from `P601`, `P1701` and `P1801`. For each line the
+  file carries the account switch, label, server, user, authentication ID,
+  password, name, voicemail number, expiry, MWI subscription, transport (and the
+  `sips` scheme on TLS), the four-codec choice, the Broadsoft special feature
+  with feature key sync, accept-SIP-from-the-proxy-only (S-32) and call waiting
+  (not on the WP820, whose template has only the phone-wide switch). The WP8x6
+  template labels account 3 "GRP2602/2603/2604 only"; the spec and the
+  template's account choices give the WP8x6 three accounts, so check the third on
+  a handset.
+
+### One extension on several phones
+
+To let a call to an extension ring on several phones (a shared line
+appearance), give each phone a line on that extension. Each phone gets its own
+device and secret, so the extension rings on every one of them and the first to
+answer takes the call. Hello does not mirror the line's busy state onto the
+other phones (no bridged line appearance).
+
+### Account sharing (Grandstream WP8x6)
+
+The alternative for WP8x6 handsets is account sharing: several handsets share
+one line, one as the host and the others as guests. Switch it on in the phone
+group's dialog (**Account sharing**), then set each phone's role on its page
+(host by default). Hello writes `P22521` (Enable Account Sharing) = 1 and
+`P22522` (Role in Account Sharing: 0 host device, 1 guest device) to the group's
+WP8x6 phones only, from `wp8x6_config_1.0.3.39`. A WP8x6 in a group without the
+switch is written `P22521 = 0`, so taking it out of the group turns sharing off;
+every other model gets neither. The group password (`P22523`, "Group Password")
+is the group's own secret: Hello generates it when the phone group is created
+(for an older group, when sharing is first switched on or a phone renders),
+stores it sealed like a device password, and writes it only into the
+configuration of the group's WP8x6 phones. It is never shown in the API, the
+console, a preview or the logs, so handsets of different groups on one network
+do not join each other's shared line. **Regenerate password** in the group's
+dialog (`regeneratePhoneGroupSharingSecret`) replaces it; resync the group
+straight after, because handsets that still hold the old one drop out of the
+shared line until they fetch the new one. The group name (`P22527`, default
+`AccountSharing`), SIP server port (`P22537`, 15060) and the shared account
+(`P22524`, account 1) stay at their defaults. The WP822 and the other vendors have no such setting. Hot desking is
+not offered by either WP family.
+
 ## Setting overrides (extra vendor keys)
 
 The built-in templates write the keys Hello needs. A key they do not write
