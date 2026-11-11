@@ -311,9 +311,19 @@
 {{- $k := mul 100 (add $n -1)}}
     <P{{$b}}>1</P{{$b}}>
     <P{{add $b 16}}>{{xml .AccountLabel}}</P{{add $b 16}}>
+{{- /* DNS mode of account N (srv-extra-lines), the same keys as account 1 per Grandstream's own templates (wp8x6_config_1.0.3.39 accounts 2 and 3, wp810_822_825_config_1.0.11.83 and wp820_config_1.0.7.90 account 2, wp856_config_1.0.3.16 accounts 2 to 6): DNS Mode is b+7 (P408, P508, P608, P1708, P1808; account 1 has P103) and, with k = 100 (N-1), Register Before DNS SRV Fail-over is P29095+k, DNS SRV Failover Mode P26040+k (3 = failback follows the timer) and Failback Timer P60056+k. The WP8x6 template lists only 0 to 2 for the failover mode of accounts 2 and 3, so there it is not written (default 0) and neither is the timer; the WP810/822/825 template lists its Failback Timer under the retry count's key (P60155), a mistake, so the timer is not written there either. Written in A-record mode only as DNS Mode 0, so a phone taken out of SRV mode returns to A records. Not confirmed on a phone. */}}
 {{- if eq $.Server.DNSMode "srv"}}
+    <P{{add $b 7}}>1</P{{add $b 7}}>
+    <P{{add 29095 $k}}>1</P{{add 29095 $k}}>
+{{- if ne $.Phone.WP "WP8x6"}}
+    <P{{add 26040 $k}}>3</P{{add 26040 $k}}>
+{{- end}}
+{{- if or (eq $.Phone.WP "WP820") (eq $.Phone.WP "WP856")}}
+    <P{{add 60056 $k}}>60</P{{add 60056 $k}}>
+{{- end}}
     <P{{add $b 1}}>{{xml $.Server.Host}}</P{{add $b 1}}>
 {{- else}}
+    <P{{add $b 7}}>0</P{{add $b 7}}>
     <P{{add $b 1}}>{{xml $.Server.Host}}:{{$.Server.Port}}</P{{add $b 1}}>
 {{- end}}
     <P{{add $b 3}}>{{xml .Username}}</P{{add $b 3}}>
