@@ -602,9 +602,11 @@ func (c *call) followMeRun(plan fmPlan) {
 				return
 			}
 		case <-timer.C:
+			// The ring is over: settle the legs now, before the no-answer
+			// forward can be answered and make them read as cancelled.
+			settle()
 			switch c.exhausted(false) {
 			case exhRetry:
-				settle()
 				delegated = true
 				c.setup(c.pendingLegs())
 				return
