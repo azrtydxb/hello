@@ -314,7 +314,35 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 	lastTouch, lastAnn, lastEmpty, lastRenew, lastCB := start, start, start, start, start
 	callbackOffered := false
 	nextOffer := start
+	// onKey acts on a key the caller pressed; true ends the queue session.
+	onKey := func(d byte) bool {
+		switch c.keyFor(snap, q, d) {
+		case keyBreakout:
+			moh.halt()
+			leave("breakout", snapshot.QueueDest{Kind: snapshot.IVRVoicemail, Target: q.BreakoutBox})
+			return true
+		case keyCallback:
+			moh.halt()
+			if c.queueCallbackAccept(ctx, q, entry) {
+				leave("callback", snapshot.QueueDest{Kind: snapshot.IVRHangup})
+				return true
+			}
+			moh.start()
+		}
+		return false
+	}
 	for {
+		// A key press goes before everything else: a select picks at random
+		// among its ready cases, so a pressed key would lose to the tick one
+		// time in two and wait out a whole ring of the agents.
+		select {
+		case d := <-digits:
+			if onKey(d) {
+				return
+			}
+			continue
+		default:
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -324,18 +352,8 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 			left = true
 			return
 		case d := <-digits:
-			switch c.keyFor(snap, q, d) {
-			case keyBreakout:
-				moh.halt()
-				leave("breakout", snapshot.QueueDest{Kind: snapshot.IVRVoicemail, Target: q.BreakoutBox})
+			if onKey(d) {
 				return
-			case keyCallback:
-				moh.halt()
-				if c.queueCallbackAccept(ctx, q, entry) {
-					leave("callback", snapshot.QueueDest{Kind: snapshot.IVRHangup})
-					return
-				}
-				moh.start()
 			}
 		case <-tick.C:
 		}
@@ -417,7 +435,10 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 		if now.Before(nextOffer) {
 			continue
 		}
-		w, ext, release := c.queueOffer(ctx, snap, q)
+		w, ext, release, keyed := c.queueOfferKeys(ctx, snap, q, digits)
+		if keyed {
+			continue // the key is back in the channel: the top of the loop acts on it
+		}
 		if h := queueOfferedHook.Load(); h != nil && w != nil {
 			(*h)(c)
 		}
@@ -459,6 +480,53 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 		c.queueLog("queue answered", q.Name, "agent", ext, "wait", wait.String())
 		release() // the agent shows as busy now
 		return
+	}
+}
+
+// queueOfferKeys is queueOffer that a key press of the caller interrupts: the
+// agents ring for as long as the queue's agent timeout, and a caller who
+// presses the breakout (or callback) key must not wait that out. keyed means
+// the offer was cancelled for a key, which is put back for the loop to act
+// on; an agent that answered just before is connected as usual and the key
+// is dropped.
+func (c *call) queueOfferKeys(ctx context.Context, snap *snapshot.Snapshot, q snapshot.Queue, digits chan byte) (w *leg, agent string, release func(), keyed bool) {
+	octx, stop := context.WithCancel(ctx)
+	defer stop()
+	type offer struct {
+		w       *leg
+		agent   string
+		release func()
+	}
+	done := make(chan offer, 1)
+	go func() {
+		defer contain(c.s.log, "queue offer")
+		var o offer
+		o.w, o.agent, o.release = c.queueOffer(octx, snap, q)
+		done <- o
+	}()
+	var pressed []byte
+	for {
+		select {
+		case o := <-done:
+			if o.w != nil || len(pressed) == 0 {
+				return o.w, o.agent, o.release, false
+			}
+			if o.release != nil {
+				o.release()
+			}
+			for _, d := range pressed {
+				select {
+				case digits <- d:
+				default:
+				}
+			}
+			return nil, "", nil, true
+		case d := <-digits:
+			if c.keyFor(snap, q, d) != keyNone {
+				pressed = append(pressed, d)
+				stop()
+			}
+		}
 	}
 }
 

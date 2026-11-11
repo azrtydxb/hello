@@ -7,7 +7,7 @@ import (
 	"github.com/azrtydxb/hello/internal/location"
 )
 
-// Emergency and alarm data (migration 00052, spec phone-feature-parity S-28
+// Emergency and alarm data (migration 00073, spec phone-feature-parity S-28
 // and S-29): the alarm destination and the location of every device, and
 // the ring group told of emergency calls. hello-sip reads it on the call
 // path, so it is compiled per revision and never read from PostgreSQL then.

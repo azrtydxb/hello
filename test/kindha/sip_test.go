@@ -223,7 +223,8 @@ type ua struct {
 	onRequest func(*msg)
 	log       []string
 	closed    bool
-	options   map[string]int // OPTIONS answered, by source address (the dispatcher's probes)
+	options   map[string]int  // OPTIONS answered, by source address (the dispatcher's probes)
+	acked     map[string]bool // INVITEs whose 2xx was acknowledged, by Call-ID and CSeq number
 }
 
 func newUA(t *testing.T, name, host string, port int) *ua {
@@ -232,7 +233,7 @@ func newUA(t *testing.T, name, host string, port int) *ua {
 	if err != nil {
 		t.Fatalf("%s: listen: %v", name, err)
 	}
-	u := &ua{t: t, name: name, conn: conn, host: host, port: conn.LocalAddr().(*net.UDPAddr).Port, pending: map[string]chan *msg{}, options: map[string]int{}}
+	u := &ua{t: t, name: name, conn: conn, host: host, port: conn.LocalAddr().(*net.UDPAddr).Port, pending: map[string]chan *msg{}, options: map[string]int{}, acked: map[string]bool{}}
 	go u.read()
 	t.Cleanup(u.close)
 	return u
@@ -288,6 +289,11 @@ func (u *ua) read() {
 				}
 			}
 			continue
+		}
+		if m.method() == "ACK" {
+			u.mu.Lock()
+			u.acked[ackKey(m)] = true
+			u.mu.Unlock()
 		}
 		if m.method() == "OPTIONS" {
 			u.mu.Lock()
@@ -346,6 +352,36 @@ func (u *ua) reply(req *msg, code int, reason, toTag string, extra []hdr, body [
 		r.h = append(r.h, hdr{"Content-Type", "application/sdp"})
 	}
 	u.sendTo(req.src.String(), r)
+	if code >= 200 && code < 300 && req.method() == "INVITE" {
+		go u.retransmit2xx(req, r)
+	}
+}
+
+// ackKey identifies the INVITE an ACK (or the INVITE itself) belongs to.
+func ackKey(m *msg) string {
+	n, _, _ := strings.Cut(strings.TrimSpace(m.get("CSeq")), " ")
+	return m.get("Call-ID") + " " + n
+}
+
+// retransmit2xx sends the 2xx to an INVITE again, as RFC 3261 13.3.1.4
+// requires of a UAS core until the ACK arrives: T1, doubling up to T2, for
+// 64*T1. A proxy that dies holding the INVITE transaction takes the 2xx it was
+// about to relay with it, and the INVITE's sender, having had a 100, does not
+// retransmit; only the 2xx's retransmission, which the surviving instance
+// relays statelessly by its Via, ends the call setup.
+func (u *ua) retransmit2xx(req, resp *msg) {
+	key := ackKey(req)
+	for d, waited := 500*time.Millisecond, time.Duration(0); waited < 32*time.Second; d = min(2*d, 4*time.Second) {
+		time.Sleep(d)
+		waited += d
+		u.mu.Lock()
+		done := u.acked[key] || u.closed
+		u.mu.Unlock()
+		if done {
+			return
+		}
+		u.sendTo(req.src.String(), resp)
+	}
 }
 
 func (u *ua) sdp() []byte {

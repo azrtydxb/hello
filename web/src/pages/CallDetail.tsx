@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
-import { errorMessage, listTrunks } from "../api";
+import { errorMessage, listTrunks, type RtcpxrQuality } from "../api";
 import { getCallRecord, type CallRecord } from "../api/calls";
 import {
   Alert,
@@ -188,6 +188,17 @@ function qualityText(cdr: CallRecord): string {
   return `${loss.toFixed(2)}% loss · ${jitter.toFixed(1)} ms jitter`;
 }
 
+/** One phone's reported figures, e.g. "ext 200: MOS 4.1 · 0.50% loss · 6.0 ms jitter". */
+function phoneQualityText(q: RtcpxrQuality): string {
+  const parts: string[] = [];
+  if (q.mosLq != null) parts.push(`MOS ${q.mosLq.toFixed(1)}`);
+  if (q.lossPct != null) parts.push(`${q.lossPct.toFixed(2)}% loss`);
+  if (q.jitterMs != null) parts.push(`${q.jitterMs.toFixed(1)} ms jitter`);
+  if (q.roundTripMs != null)
+    parts.push(`${q.roundTripMs.toFixed(0)} ms round trip`);
+  return `${q.extension || q.device}: ${parts.join(" · ") || "no figures"}`;
+}
+
 function Detail({ cdr }: { cdr: CallRecord }) {
   const failed = isFailed(cdr);
   const orig = cdr.originalDestination || cdr.destination;
@@ -204,6 +215,15 @@ function Detail({ cdr }: { cdr: CallRecord }) {
     },
     { label: "Route", value: cdr.route || "—" },
     { label: "Trunk", value: cdr.trunk || "—", mono: !!cdr.trunk },
+    ...(cdr.answeredBy
+      ? [
+          {
+            label: "Answered by",
+            value: `${cdr.answeredBy} (assistant)`,
+            mono: true,
+          },
+        ]
+      : []),
     {
       label: "Final status",
       value: `${cdr.finalStatus}${failed ? " (failed)" : ""}`,
@@ -222,6 +242,10 @@ function Detail({ cdr }: { cdr: CallRecord }) {
     { label: "Caller codec", value: cdr.callerCodec || "—", mono: true },
     { label: "Callee codec", value: cdr.calleeCodec || "—", mono: true },
     { label: "Call quality", value: qualityText(cdr) },
+    ...(cdr.rtcpxr ?? []).map((q) => ({
+      label: `Phone report (${q.final ? "call end" : "interval"})`,
+      value: phoneQualityText(q),
+    })),
     { label: "SIP Call-ID", value: cdr.sipCallId || "—", mono: true },
     { label: "Correlation ID", value: cdr.correlationId || "—", mono: true },
   ];

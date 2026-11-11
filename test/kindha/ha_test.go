@@ -550,6 +550,25 @@ func (l *lab) failover(t *testing.T, crash bool) {
 	victimPod := l.podOn(t, victim)
 	t.Logf("losing %s (pod %s); survivor %s; crash=%v", victim, victimPod, survivor, crash)
 
+	if !crash {
+		// For a few seconds after the VIP moves, the runner still addresses it
+		// to the old holder, which forwards to the new one (see
+		// noMasqueradeForVIP). Do that now, with the survivor in the old
+		// holder's place: Hello's call reaches the VIP through the survivor, and
+		// the survivor must leave its source alone, or its conntrack would
+		// rewrite Hello's address to the survivor's own for as long as the flow
+		// lives, and the survivor, holding the VIP after the failover, would
+		// refuse Hello's requests as coming from a stranger.
+		l.withStaleVIPNeighbour(t, survivor, func() {
+			d, err := l.hello.callPhone(p.user)
+			if err != nil {
+				t.Fatalf("Hello's call through a stale neighbour entry: %v", err)
+			}
+			if _, err := l.hello.hangup(d, byeBound); err != nil {
+				t.Fatalf("Hello's BYE through a stale neighbour entry: %v", err)
+			}
+		})
+	}
 	t0 := time.Now()
 	if crash {
 		// A power-off: the node container is killed, its network namespace goes
@@ -661,7 +680,9 @@ func (l *lab) failover(t *testing.T, crash bool) {
 		// Its NAT rules went with the container.
 		deadline := time.Now().Add(2 * time.Minute)
 		for {
-			if _, err := tryRun("docker", "exec", victim, "iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-s", l.vip+"/32", "-j", "RETURN"); err == nil {
+			_, err1 := tryRun("docker", "exec", victim, "iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-s", l.vip+"/32", "-j", "RETURN")
+			_, err2 := tryRun("docker", "exec", victim, "iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-d", l.vip+"/32", "-j", "RETURN")
+			if err1 == nil && err2 == nil {
 				break
 			}
 			if time.Now().After(deadline) {

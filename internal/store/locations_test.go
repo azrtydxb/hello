@@ -10,8 +10,7 @@ import (
 	"github.com/azrtydxb/hello/internal/prov"
 )
 
-func fptr(v float64) *float64 { return &v }
-func iptr(v int64) *int64     { return &v }
+func iptr(v int64) *int64 { return &v }
 
 // TestLocationsAndEmergencyProvisioning fails if a phone's location is not the
 // most specific of its own, its extension's and its group's, if the HELD

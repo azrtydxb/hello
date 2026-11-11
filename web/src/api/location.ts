@@ -1,4 +1,4 @@
-// Locations client (migration 00052): the sites, floors and rooms phones are
+// Locations client (migration 00073): the sites, floors and rooms phones are
 // in, what they are assigned to, the E911 switch and alarm destination of a
 // phone group, and the emergency settings.
 

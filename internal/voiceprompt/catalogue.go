@@ -101,6 +101,14 @@ const (
 	GreetBusyTail        Key = "greet.busy.tail"
 	GreetUnreachableTail Key = "greet.unreachable.tail"
 
+	// Boss and secretary: what the assistant hears when a screened call for
+	// the boss is answered ({who} is the boss).
+	BossScreen Key = "boss.screen"
+	// Voicemail groups (S-14): the prompt for a message left for the group,
+	// the one for a member's broadcast, and its confirmation.
+	GroupLeave     Key = "vmgroup.leave"
+	GroupBroadcast Key = "vmgroup.broadcast"
+	GroupSent      Key = "vmgroup.sent"
 	// Queue callback (pbx-gaps S-9). Spoken in the queue's language (S-20).
 	QueueCallbackOffer   Key = "queue.callback.offer"   // {digit}: the key that accepts
 	QueueCallbackConfirm Key = "queue.callback.confirm" // after the caller accepted; the call then ends
