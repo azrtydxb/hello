@@ -51,6 +51,7 @@ export function FlowNodeView({
     outputs,
     warnings,
     summary,
+    badges,
     pseudo,
     draft,
     errors,
@@ -75,6 +76,15 @@ export function FlowNodeView({
         <span className="flow-node__title" title={node.label}>
           {node.label}
         </span>
+        {badges.length > 0 && (
+          <span className="flow-node__badges">
+            {badges.map((b) => (
+              <span key={b.id} title={b.title} data-badge={b.id}>
+                <Badge tone={b.tone}>{b.text}</Badge>
+              </span>
+            ))}
+          </span>
+        )}
         {summary && <span className="flow-node__summary">{summary}</span>}
         {draft && (
           <span className="flow-node__draft">
