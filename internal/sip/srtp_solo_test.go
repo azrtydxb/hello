@@ -61,7 +61,7 @@ func TestSRTPVoicemail(t *testing.T) {
 				t.Fatal(err)
 			}
 			// The greeting is SRTP that only the phone's key opens.
-			raw, ok := readUDP(t, a.sock, 5*time.Second)
+			raw, ok := readUDPWithin(t, a.sock, 5*time.Second)
 			if !ok {
 				t.Fatal("no greeting audio")
 			}
@@ -244,7 +244,7 @@ func TestSRTPPage(t *testing.T) {
 	}
 
 	// Until a member answers the caller hears the page tone as SRTP.
-	if raw, ok := readUDP(t, a.sock, 3*time.Second); !ok {
+	if raw, ok := readUDPWithin(t, a.sock, 3*time.Second); !ok {
 		t.Fatal("no page tone for the caller")
 	} else if _, ok := media.ParseRTP(raw); !ok {
 		t.Fatal("page tone is not RTP")
@@ -276,7 +276,7 @@ func TestSRTPPage(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, _ = a.sock.WriteToUDP(enc, to)
-		if raw, ok := readUDP(t, b.sock, 40*time.Millisecond); ok {
+		if raw, ok := readUDPWithin(t, b.sock, 40*time.Millisecond); ok {
 			if plain, err := memberProto.Unprotect(raw); err == nil {
 				if pkt, ok := media.ParseRTP(plain); ok && string(pkt.Payload) == string(payload) {
 					heardB = true
@@ -285,7 +285,7 @@ func TestSRTPPage(t *testing.T) {
 				t.Fatal("the SRTP member heard the page in clear")
 			}
 		}
-		if raw, ok := readUDP(t, cRTP, 40*time.Millisecond); ok {
+		if raw, ok := readUDPWithin(t, cRTP, 40*time.Millisecond); ok {
 			if pkt, ok := media.ParseRTP(raw); ok && string(pkt.Payload) == string(payload) {
 				heardC = true
 			}

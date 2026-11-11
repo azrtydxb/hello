@@ -89,6 +89,9 @@ type Trunk struct {
 	// a leg whose signalling is TLS, which no trunk leg is yet, so "required"
 	// today refuses calls over the trunk and the other two are plain RTP.
 	SRTP string
+	// FaxMode is how the trunk carries a fax (pbx-gaps S-16): "passthrough"
+	// (G.711, the default; empty reads as passthrough), "t38" or "off".
+	FaxMode string
 	// AnonymousPolicy is AnonymousHonour (carry a device's privacy request
 	// to the carrier) or AnonymousAlways (every call out is anonymous);
 	// empty is honour.
@@ -164,7 +167,7 @@ type InboundRoute struct {
 	HeaderRegex     string
 	Schedule        *Schedule
 	CallerID        Transform
-	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition" | "ring_group" | "voicemail" | "announcement" | "paging" | "directory"
+	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition" | "ring_group" | "voicemail" | "announcement" | "paging" | "fax" | "directory"
 	Destination     string // empty for "internal" (the DID names the target); the menu name for "ivr", the room number for "conference", the queue name for "queue"
 	Enabled         bool
 	// MOHClassID is the music on hold class of calls the route delivers

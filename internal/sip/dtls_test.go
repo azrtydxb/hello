@@ -330,7 +330,7 @@ func TestICELiteCall(t *testing.T) {
 	// A connectivity check from the phone is answered by the anchor leg.
 	check := stunBindingRequest(t, ansA.ICE.Ufrag+":"+ufrag, ansA.ICE.Pwd)
 	_, _ = a.sock.WriteToUDP(check, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: ansA.Port})
-	resp, ok := readUDP(t, a.sock, 2*time.Second)
+	resp, ok := readUDPWithin(t, a.sock, 2*time.Second)
 	if !ok || len(resp) < 20 || resp[0] != 0x01 || resp[1] != 0x01 {
 		t.Fatalf("no binding success from the anchor (%v, % x)", ok, resp)
 	}

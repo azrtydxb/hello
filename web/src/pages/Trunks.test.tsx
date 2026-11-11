@@ -21,6 +21,7 @@ const TRUNK = {
   destinations: [{ host: "10.0.0.5", port: 5060, priority: 0, weight: 1 }],
   internalDialing: { mode: "off", patterns: [] },
   messaging: false,
+  faxMode: "passthrough",
   anonymousPolicy: "honour",
   assertedIdentity: "",
   identityHeader: "pai",
@@ -215,6 +216,33 @@ describe("Trunks", () => {
     ).toBeVisible();
     expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
       sessionTimers: "on",
+    });
+  });
+
+  it("sets the fax mode of a trunk: passthrough by default, T.38 on request", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [TRUNK] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+      "PATCH /api/v1/trunks/4": () => json({ ...TRUNK, faxMode: "t38" }),
+    });
+    renderApp("/trunks");
+    const primary = await card(/carrier-primary/);
+    expect(within(primary).getByText("Passthrough (G.711)")).toBeVisible();
+    fireEvent.click(
+      within(primary).getByRole("button", {
+        name: "Edit trunk carrier-primary",
+      }),
+    );
+    const fax = screen.getByLabelText("Fax") as HTMLSelectElement;
+    expect(fax.value).toBe("passthrough");
+    fireEvent.change(fax, { target: { value: "t38" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(
+      await screen.findByText("Trunk carrier-primary saved."),
+    ).toBeVisible();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      faxMode: "t38",
     });
   });
 
