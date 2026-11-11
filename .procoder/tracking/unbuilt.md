@@ -27,7 +27,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 26  | PRACK/100rel, anonymous outbound (Privacy), partial                           | wip (#265)             |
 | 27  | Provisioning hardening (S-22, S-32), TR-069 off etc. (explicitly in spec)     | todo                   |
 | 28  | DSCP marking (S-21)                                                           | done (#231)            |
-| 29  | Phone backup/secondary servers (S-20), partial                                | todo                   |
+| 29  | Phone backup/secondary servers (S-20), partial                                | wip (#262)             |
 | 30  | HELD, Geolocation, locations, callback tag, alarm `*55` (S-28, S-29), partial | todo                   |
 | 31  | Wi-Fi profiles and roaming (S-23, S-24)                                       | todo                   |
 | 34  | Presence: reg event, PUBLISH, eventlist (S-35)                                | wip (#268)             |

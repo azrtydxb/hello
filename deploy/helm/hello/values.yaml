@@ -55,6 +55,16 @@ control:
     publicUrl: ""
     # Where provisioned phones register; default <kamailio.publicHost>:<kamailio.publicPort>.
     sipServer: ""
+    # Backup registrars (comma separated host:port, at most 2; the first is
+    # used) written to the phones that take one: Yealink and Poly (second
+    # server), Grandstream (backup outbound proxy). The HA node list when
+    # SRV records are not published. Empty: none (S-20).
+    sipBackupServers: ""
+    # A DNS name whose _sip._udp SRV records list the SIP servers (see
+    # docs/provisioning.md, "SRV records and backup servers"). Set, Grandstream
+    # phones use DNS SRV mode with it. Empty keeps A-record mode, the default
+    # until the failover lab test passes.
+    sipSrv: ""
     # With kamailio.tls.enabled, the SIP-over-TLS address (default
     # <kamailio.publicHost>:<kamailio.tls.publicPort>) and the models that
     # register over it: comma separated vendors or vendor:model-prefix

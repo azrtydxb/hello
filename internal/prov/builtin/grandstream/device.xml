@@ -5,11 +5,29 @@
   <config version="1">
     <P271>1</P271>
     <P270>{{xml .Line.AccountLabel}}</P270>
-    <P47>{{xml .Server.Host}}:{{.Server.Port}}</P47>
+    <P47>{{xml .Server.Host}}{{if .Server.Port}}:{{.Server.Port}}{{end}}</P47>
     <P35>{{xml .Line.Username}}</P35>
     <P36>{{xml .Line.AuthName}}</P36>
     <P34>{{xml .Line.Password}}</P34>
     <P3>{{xml .Line.DisplayName}}</P3>
+{{- /* DNS mode and backup server (phone-feature-parity S-20), account 1, keys per Grandstream's own configuration templates (config-template-10212026.zip; 2026-11-09 review). P103 = DNS Mode: 0 A Record, 1 SRV, 2 NAPTR/SRV (3 Use Configured IP takes IPv4 addresses of at most 15 characters in P2308 to P2310, no port, so it cannot carry a backup) in wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83, wp820_config_1.0.7.90 and wp856_config_1.0.3.16. Written always, so a phone taken back out of SRV mode returns to A records. In SRV mode (Server.DNSMode "srv", HELLO_PROV_SIP_SRV) P47 is the name whose _sip._udp SRV records list the servers (no port); P29095 = 1 (Register Before DNS SRV Fail-over, 0 No, 1 Yes) registers with the next server before failing calls over to it; P26040 = 3 (DNS SRV Failover Mode: 0 Default, 1 saved one until DNS TTL, 2 saved one until no response, 3 failback follows the failback expiration timer, in all four templates) makes the phone return to the first server when the timer ends; P60056 = 60 is that Failback Timer in minutes (wp8x6, wp820 and wp856 templates; the WP810/822/825 template lists the Failback Timer under P60055, the retry count's own key, which is a mistake in that template, so P60056 is not written to it and it keeps its default, 60). Otherwise, with a backup server (HELLO_PROV_SIP_BACKUP_SERVERS) three keys name it, each host:port: P2312 = Secondary SIP Server (WP8x6, WP810/822/825 and WP856 templates; the WP820 has none), and P48 = Outbound Proxy repeating the primary with P2333 = Backup Outbound Proxy ("Secondary Outbound Proxy" in the WP8x6, WP820 and WP856 templates), which every template has; the phone uses the backup when the primary fails. With none, P48, P2312 and P2333 are left as they are. Not confirmed on a phone (verify, lab item "failover"). */}}
+{{- if eq .Server.DNSMode "srv"}}
+    <P103>1</P103>
+    <P29095>1</P29095>
+    <P26040>3</P26040>
+{{- if ne .Phone.WP "WP8xx"}}
+    <P60056>60</P60056>
+{{- end}}
+{{- else}}
+    <P103>0</P103>
+{{- with .Server.Backup}}
+{{- if or (eq $.Phone.WP "WP8x6") (eq $.Phone.WP "WP8xx") (eq $.Phone.WP "WP856") (eq $.Phone.WP "")}}
+    <P2312>{{xml .Host}}:{{.Port}}</P2312>
+{{- end}}
+    <P48>{{xml $.Server.Host}}:{{$.Server.Port}}</P48>
+    <P2333>{{xml .Host}}:{{.Port}}</P2333>
+{{- end}}
+{{- end}}
 {{- /* SIP transport (phone-feature-parity S-13, S-14): P130 = SIP Transport, 0 UDP, 1 TCP, 2 TLS/TCP, account 1, same key and values in Grandstream's wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83, wp820_config_1.0.7.90, wp856_config_1.0.3.16 and ht813_config_1.0.19.6. Server.Transport is "tcp" for a model HELLO_PROV_SIP_TCP_MODELS lists (P130 = 1, no TLS-only keys; S-13). P2331 (Use Actual Ephemeral Port in Contact with TCP/TLS, default 0) and P60065 (Enable TCP Keep-alive, default 1) are in the same templates and stay at their defaults: the Contact keeps the listening port and Kamailio reuses the connection (phones_tcp alias). Server.Transport is "tls" only for a model HELLO_PROV_SIP_TLS_MODELS lists while HELLO_PROV_SIP_TLS_SERVER is set, so a model that fails its TLS lab run is switched back by removing it there. With TLS: P2329 = 1 writes the sips scheme (SIP URI Scheme when using TLS, 0 sip, 1 sips; in all five templates, default 1 in the WP8x6 and WP810/822/825 and 0 in the WP820 and WP856, hence written), and P22293/P22294 are the Minimum and Maximum TLS Version (10 to 13 = TLS 1.0 to 1.3, 99 = no upper limit; written as 12 and 99; the wp8x6_config_1.0.3.39 template lists P22293 and P22294 a second time as the DTLS versions, a duplicate in Grandstream's template). Not confirmed on a phone (verify, lab item 10). The Hello CA the server certificate chains to is installed through P8433 (CA URL above). */}}
 {{- if eq .Server.Transport "tls"}}
     <P130>2</P130>

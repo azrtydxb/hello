@@ -259,7 +259,27 @@ type Server struct {
 	// vendor has a transport key and whose model HELLO_PROV_SIP_TLS_MODELS
 	// lists, registering with HELLO_PROV_SIP_TLS_SERVER (S-14).
 	Transport string
-	Expiry    int // registration expiry, seconds
+	// DNSMode is DNSA (the default: the host is resolved by its A record)
+	// or DNSSRV (Grandstream only: the host is a name whose SRV records list
+	// the servers, and Port is 0). See S-20.
+	DNSMode string
+	// Backup is the backup registrar of a phone that registers over UDP
+	// with a fixed address, nil when none is configured or the phone
+	// resolves its servers by SRV (S-20).
+	Backup *Backup
+	Expiry int // registration expiry, seconds
+}
+
+// The DNS modes of Server.DNSMode.
+const (
+	DNSA   = "a"
+	DNSSRV = "srv"
+)
+
+// Backup is a backup registrar.
+type Backup struct {
+	Host string
+	Port int
 }
 
 // BLFKey is one busy-lamp-field key. Render places the keys of a Yealink,

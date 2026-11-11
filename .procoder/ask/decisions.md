@@ -1977,6 +1977,57 @@ Implementation notes (template route, no migration):
   WP856 1 TFTP, 2 HTTP). The firmware gate "1.0.3.24 and later" is not checked:
   the page simply does not exist on older firmware.
 
+### Item 29: backup and secondary servers (S-20), partial
+
+- Sources for the Grandstream P-values: first read from the Pvalue-annotated
+  copies of Grandstream's templates in the FusionPBX repository, then checked on
+  2026-11-09 against Grandstream's own configuration templates
+  (config-template-10212026.zip), which replace the third-party copies as the
+  source. Result per key:
+  - `P103` DNS Mode (0 A Record, 1 SRV, 2 NAPTR/SRV; the WP8x6 and WP810/822/825
+    add 3 Use Configured IP) confirmed in `wp8x6_config_1.0.3.39`,
+    `wp810_822_825_config_1.0.11.83`, `wp820_config_1.0.7.90`,
+    `wp856_config_1.0.3.16` (and `ht813_config_1.0.19.6`).
+  - `P29095` Register Before DNS SRV Fail-over (0 No, 1 Yes) confirmed in the
+    same four.
+  - `P26040` DNS SRV Failover Mode (0 Default, 1 saved one until DNS TTL, 2
+    saved one until no response, 3 failback follows the failback expiration
+    timer) confirmed in the same four, and now written `3` in SRV mode:
+    without it the failback timer of `P60056` has nothing to time (added).
+  - `P60056` Failback Timer (minutes, 1 to 64800, default 60) confirmed in the
+    WP8x6, WP820 and WP856 templates. The WP810/822/825 template lists its
+    "Failback Timer" under `P60055`, the key of "Maximum Number of SIP Request
+    Retries" (default 4) a few lines above: a mistake in that template, so
+    `P60056` is no longer written to the WP810/822/825 (corrected; it keeps its
+    default of 60 minutes).
+  - `P48` Outbound Proxy and `P2333` confirmed in all four ("Secondary Outbound
+    Proxy" in the WP8x6, WP820 and WP856; "Backup Outbound Proxy" in the
+    WP810/822/825). Newly found: `P2312` "Secondary SIP Server" in the WP8x6,
+    WP810/822/825 and WP856 templates (not the WP820), the registrar-level
+    counterpart of Yealink's `sip_server.2` and Poly's `server.2`; written with
+    the backup next to the outbound proxy pair. Also newly found: `P2308` Primary
+    IP, `P2309` Backup IP 1 and `P2310` Backup IP 2 (DNS mode 3, at most 15
+    characters, so IPv4 without a port): they would give a second backup but
+    cannot carry a port, so they are not used. Account 2 is `P402`, `P403`,
+    `P2412`, `P2433`, `P408`, `P29195`, `P60156`, `P26140` in the WP8x6 (account
+    3 `P502`...), left to item 21.
+    Every one stays **verify** on a phone.
+- Yealink `account.N.sip_server.2.address/port/transport_type/expires` and Poly
+  `reg.N.server.2.address/port/transport/expires` are confirmed the same way
+  (the T7x and VVX templates in the same repository) and are the same key
+  families the Hello templates already use for server 1.
+- Left out: Snom and Fanvil backup keys (snom `user_outbound` has an `idx` for
+  the line, not a second registrar; no Fanvil key found), SRV mode for Yealink
+  and Poly (their SRV setting is DNS-NAPTR, which is not plain SRV), the WP822's
+  RN-only keys beyond the ones above, a second backup (Grandstream has one
+  backup proxy slot and one secondary SIP server; P2308 to P2310 hold at most
+  15-character IPs), and a chart
+  that publishes DNS (Hello cannot manage DNS: the record set is documented).
+- The backup list is an explicit setting, not read from an HA node list: on main
+  hello-control has no list of the SIP nodes phones can use (the Kamailio pair
+  PRs are not merged). The default stays A-record mode; `P103 = 0` is written to
+  every Grandstream file so leaving SRV mode reverts.
+
 ## Item 26: PRACK/100rel and anonymous outbound (2026-11-09)
 
 - 100rel is negotiated hop by hop, not relayed: Hello offers `Supported: 100rel`

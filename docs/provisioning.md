@@ -1505,6 +1505,61 @@ configuration templates (`wp8x6_config_1.0.3.39`,
 The WP856's `P23001`/`P23003` are the account and user ID of an expansion key,
 not the handset speed dial. Check the model's template before you set a key.
 
+## SRV records and backup servers
+
+By default every phone registers with one address (`HELLO_PROV_SIP_SERVER`). Two
+optional settings add failover. Neither changes what a phone does until it is
+set, and the failover has not yet passed a lab test (a node killed under a
+Wi-Fi handset), so leave both off until it has.
+
+**Backup servers (A-record mode).** `HELLO_PROV_SIP_BACKUP_SERVERS` (chart value
+`control.provisioning.sipBackupServers`) is a comma separated list of `host:port`
+registrars, at most two; the first is written to the phones that take one. List
+the other HA nodes here.
+
+| Vendor      | Keys written                                                                                                                                                                                                                                  |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.1.sip_server.2.address`, `.port`, `.transport_type = 0`, `.expires`                                                                                                                                                                  |
+| Poly        | `reg.1.server.2.address`, `.port`, `.transport = "UDPOnly"`, `.expires`                                                                                                                                                                       |
+| Grandstream | `P48` Outbound Proxy (the primary, `host:port`), `P2333` Backup Outbound Proxy (the backup) and, on the WP8x6, WP810/822/825 and WP856, `P2312` Secondary SIP Server (the backup); the phone uses the backup when the primary does not answer |
+
+Snom and Fanvil get none: no key for a second registrar is in a vendor
+document Hello was checked against. A phone that registers over TLS gets none
+(the TLS registrar has no backup setting). Taking the setting away later does
+not clear `P2333` or `P2312` on a Grandstream phone: put them with an empty value
+in the phone group's setting overrides, then resync.
+
+**DNS SRV (Grandstream).** `HELLO_PROV_SIP_SRV` (chart value
+`control.provisioning.sipSrv`) is a DNS name. Grandstream phones are then
+written `P103 = 1` (DNS Mode: SRV), register with that name (`P47`, no port),
+`P29095 = 1` (register with the next server before failing calls over to it),
+`P26040 = 3` (failback follows the failback timer) and `P60056 = 60` (failback
+timer, minutes; the WP810/822/825 template has no such key, so those phones keep
+their default of 60). Every Grandstream file carries
+`P103 = 0` otherwise, so a phone taken out of SRV mode goes back to A records.
+Other vendors keep the A-record address: their SRV settings (DNS-NAPTR) are not
+plain SRV.
+
+Hello does not manage DNS. Publish the records for the name yourself, one target
+per SIP node (Kamailio's public address and port from the chart: `kamailio.publicPort`
+for UDP and TCP, `kamailio.tls.publicPort` for TLS):
+
+```
+_sip._udp.sip.example.com.   300 IN SRV 10 50 5060 sip-a.example.com.
+_sip._udp.sip.example.com.   300 IN SRV 10 50 5060 sip-b.example.com.
+_sip._tcp.sip.example.com.   300 IN SRV 10 50 5060 sip-a.example.com.
+_sip._tcp.sip.example.com.   300 IN SRV 10 50 5060 sip-b.example.com.
+_sips._tcp.sip.example.com.  300 IN SRV 10 50 5061 sip-a.example.com.
+_sips._tcp.sip.example.com.  300 IN SRV 10 50 5061 sip-b.example.com.
+```
+
+Use a lower priority number for the node that should be preferred. On the kw
+cluster the SIP node port is 30508, not 5060.
+
+The keys are from Grandstream's GRP261x and WP810/822/825 configuration
+templates (the WP8x6 template has the same settings under the same names); see
+`.procoder/ask/decisions.md` for the source. Not confirmed on a phone.
+
 ## Security model and its limits
 
 What protects the phones' secrets:
