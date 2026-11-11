@@ -93,3 +93,82 @@ func TestSRVAndBackupProvisioning(t *testing.T) {
 		}
 	}
 }
+
+// TestSRVExtraLines fails if a Grandstream line 2 or later lacks its own DNS
+// mode (account N: P408, P508, P608, P1708, P1808), register-before-failover
+// (P29095 + 100 (N-1)), failover mode (P26040 + 100 (N-1)) or failback timer
+// (P60056 + 100 (N-1)) in SRV mode, if a key is written for a model whose
+// template does not take it, or if A-record mode writes any but DNS Mode 0.
+func TestSRVExtraLines(t *testing.T) {
+	srv := Server{Host: "sip.hello.example.com", Port: 0, Transport: "udp", DNSMode: DNSSRV, Expiry: 3600}
+	cases := []struct {
+		model string
+		lines int
+		want  [][]string // per extra line: keys that must be written
+		not   []string
+	}{
+		{"WP836", 2, [][]string{
+			{"<P408>1</P408>", "<P29195>1</P29195>"},
+			{"<P508>1</P508>", "<P29295>1</P29295>"},
+		}, []string{"<P26140>", "<P26240>", "<P60156>", "<P60256>"}},
+		{"WP822", 1, [][]string{
+			{"<P408>1</P408>", "<P29195>1</P29195>", "<P26140>3</P26140>"},
+		}, []string{"<P60155>", "<P60156>"}},
+		{"WP820", 1, [][]string{
+			{"<P408>1</P408>", "<P29195>1</P29195>", "<P26140>3</P26140>", "<P60156>60</P60156>"},
+		}, nil},
+		{"WP856", 2, [][]string{
+			{"<P408>1</P408>", "<P29195>1</P29195>", "<P26140>3</P26140>", "<P60156>60</P60156>"},
+			{"<P508>1</P508>", "<P29295>1</P29295>", "<P26240>3</P26240>", "<P60256>60</P60256>"},
+		}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.model, func(t *testing.T) {
+			d := linesSample(Grandstream, c.model, c.lines)
+			d.Server = srv
+			out := renderFor(t, Grandstream, linesFile(Grandstream, d), d)
+			for _, keys := range c.want {
+				for _, want := range keys {
+					if !strings.Contains(out, want) {
+						t.Errorf("SRV mode lacks %s", want)
+					}
+				}
+			}
+			for _, not := range c.not {
+				if strings.Contains(out, not) {
+					t.Errorf("SRV mode writes %s", not)
+				}
+			}
+			d.Server.DNSMode = DNSA
+			d.Server.Host, d.Server.Port = "192.0.2.10", 5060
+			out = renderFor(t, Grandstream, linesFile(Grandstream, d), d)
+			if !strings.Contains(out, "<P408>0</P408>") {
+				t.Error("A-record mode does not reset line 2 to DNS Mode 0")
+			}
+			for _, not := range []string{"<P29195>", "<P26140>", "<P60156>"} {
+				if strings.Contains(out, not) {
+					t.Errorf("A-record mode writes %s", not)
+				}
+			}
+		})
+	}
+}
+
+// TestSRVWP856SixLines fails if the WP856's lines 5 and 6 (account blocks at
+// P1701 and P1801) do not take their DNS mode at b+7.
+func TestSRVWP856SixLines(t *testing.T) {
+	d := linesSample(Grandstream, "WP856", 2)
+	extra := d.Lines[0]
+	d.Lines = nil
+	for range 5 {
+		d.Lines = append(d.Lines, extra)
+	}
+	d.Server = Server{Host: "sip.hello.example.com", Transport: "udp", DNSMode: DNSSRV, Expiry: 3600}
+	out := renderFor(t, Grandstream, linesFile(Grandstream, d), d)
+	for _, want := range []string{"<P608>1</P608>", "<P1708>1</P1708>", "<P1808>1</P1808>", "<P29495>1</P29495>", "<P29595>1</P29595>",
+		"<P26440>3</P26440>", "<P26540>3</P26540>", "<P60456>60</P60456>", "<P60556>60</P60556>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("SRV mode lacks %s", want)
+		}
+	}
+}
