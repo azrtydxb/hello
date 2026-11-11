@@ -307,6 +307,11 @@ type call struct {
 	cbQueue string
 	cbDone  bool
 	cbOffer []byte
+	// Fax (fax.go), guarded by mu: faxMode is the source trunk's fax mode
+	// (migration 00073) and fx the call's fax session, nil on any other call.
+	faxMode string
+	fx      *faxCall
+	faxNote string // the fax result, the CDR's reason on a call that ends normally
 	// Time conditions (timecond.go): tcVisited lists the conditions the call
 	// passed, so a loop through ring group failover or an IVR menu is caught;
 	// vmPre is an announcement played before the voicemail greeting. Guarded
@@ -1312,6 +1317,9 @@ func (c *call) byeA() {
 		c.orig.byeAgent()
 		return
 	}
+	if c.dss == nil {
+		return // a call Hello placed has no caller dialog
+	}
 	ctx, cancel := c.s.timeoutUntilShutdown(byeTimeout)
 	defer cancel()
 	if err := c.dss.Bye(ctx); err != nil {
@@ -1381,6 +1389,7 @@ func (c *call) end(status int, side, reason, result string) {
 		}
 		c.queueAbandoned()
 		c.cbFinish("abandoned", "") // a callback call that ends before an agent was connected
+		c.faxCallEnded()
 		go c.queueEnded()
 		c.unpublish()
 		c.record(status, side, reason, result)
@@ -1429,6 +1438,9 @@ func (c *call) record(status int, side, reason, result string) {
 	}
 	end := time.Now()
 	c.mu.Lock()
+	if reason == "" && result == ResultAnswered {
+		reason = c.faxNote // a fax call's CDR carries how the fax ended
+	}
 	ring, answer := c.ringTime, c.answerTime
 	if result != ResultAnswered {
 		answer = time.Time{}
@@ -2080,6 +2092,10 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	c := ref.c
+	if fx := c.faxState(); fx != nil {
+		c.faxInDialog(fx, req, tx)
+		return
+	}
 	if c.isLinked() {
 		s.linkedReinvite(c, req, tx)
 		return

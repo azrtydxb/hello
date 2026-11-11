@@ -15,6 +15,16 @@ implementation detail lives in `internal/media`.
 | Voicemail is involved     | unanswered/busy/DND call with a voicemail box         |
 | The operator forces it    | `HELLO_MEDIA_FORCE_ANCHOR=true`                       |
 
+## Fax and T.38
+
+A fax call is anchored by a relay of its own whose far leg is the hello-fax
+service (see [fax.md](fax.md)). It carries G.711 (PCMU or PCMA) only; there is
+no echo cancellation, silence suppression, comfort noise or recording on it,
+and the engine's receive buffer is fixed. On a trunk whose fax mode is `t38`
+the same relay switches to **UDPTL** after a re-INVITE to `m=image udptl t38`:
+the datagrams cross the relay unmodified (no sequence or timestamp rewrite, no
+RTP parsing), and a carrier answering 488 leaves the call on G.711.
+
 An anchored call keeps its anchor until it ends — a mid-call re-INVITE can
 add the anchor, but Hello does not remove it mid-call.
 

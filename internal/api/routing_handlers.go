@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/secmedia"
@@ -109,6 +110,7 @@ type trunkBody struct {
 
 	SRTP          *string `json:"srtp"`
 	SessionTimers *string `json:"sessionTimers"`
+	FaxMode       *string `json:"faxMode"`
 }
 
 // dialingBody is an internalDialing request field (trunk plan contract 5).
@@ -174,6 +176,7 @@ func (b trunkBody) applyTo(in *store.TrunkInput) {
 		in.CallerPolicy.AllowedCountryCodes = routing.NormalizeCountryCodes(*b.AllowedCountryCodes)
 	}
 	setIf(&in.SessionTimers, b.SessionTimers)
+	setIf(&in.FaxMode, b.FaxMode)
 	if b.Codecs != nil {
 		// Canonical spelling; validateTrunk refuses what does not normalise.
 		if canon, why := routing.NormalizeCodecs(*b.Codecs); why == "" {
@@ -223,7 +226,7 @@ func (s *server) createTrunk(w http.ResponseWriter, r *http.Request) {
 		Codecs:          slices.Clone(routing.DefaultTrunkCodecs),
 		CallerPolicy:    routing.CallerPolicy{UnknownCallerAction: routing.UnknownBlock, RejectCode: routing.RejectDecline},
 		SRTP:            string(secmedia.Off),
-		SessionTimers:   routing.SessionTimersDefault}
+		SessionTimers:   routing.SessionTimersDefault, FaxMode: fax.ModePassthrough}
 	b.applyTo(&in)
 	if b.InternalDialing != nil {
 		d, f := dialingPolicy(b.InternalDialing)

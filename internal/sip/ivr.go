@@ -353,6 +353,8 @@ func (c *call) ivrLeave(ctx context.Context, snap *snapshot.Snapshot, m snapshot
 		return d.Target, false
 	case snapshot.IVRDirectory:
 		return c.ivrDirectoryExit(ctx, snap, m)
+	case snapshot.IVRFax:
+		return c.ivrFaxExit(snap, d.Target)
 	case snapshot.IVRAnnouncement:
 		c.ivrAnnounce(ctx, snap, d.Target)
 		c.ivrHangup()

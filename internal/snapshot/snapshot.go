@@ -223,6 +223,8 @@ type Snapshot struct {
 	codes  map[string]FeatureCode
 	pages  map[string]PagingGroup
 	anns   map[string]string
+	// faxDests maps a fax destination name to it (migration 00073).
+	faxDests map[string]FaxDestination
 	// confs maps a dialled number to its conference room (spec S-34).
 	confs map[string]Conference
 	// ivrByName and ivrByNumber are the IVR menus (migration 00033).
@@ -680,7 +682,11 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err := loadDoorTargets(ctx, db, exts); err != nil {
 		return nil, err
 	}
-	return New(rev, domain, devices).WithExtensions(bare...).WithQueues(queues).
+	faxes, err := loadFaxDestinations(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	return New(rev, domain, devices).WithFaxDestinations(faxes).WithExtensions(bare...).WithQueues(queues).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
 		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithVoicemailGroups(vmgs).WithRingTags(rtags).WithBLFLists(blf).WithBossLinks(bosses), nil
 }

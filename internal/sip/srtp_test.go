@@ -80,7 +80,7 @@ func rtpPacket(seq uint16, fill byte) []byte {
 	return media.BuildRTP(0, seq, uint32(seq)*160, 4242, false, bytes.Repeat([]byte{fill}, 160))
 }
 
-func readUDP(t *testing.T, c *net.UDPConn, within time.Duration) ([]byte, bool) {
+func readUDPWithin(t *testing.T, c *net.UDPConn, within time.Duration) ([]byte, bool) {
 	t.Helper()
 	buf := make([]byte, 2048)
 	_ = c.SetReadDeadline(time.Now().Add(within))
@@ -149,7 +149,7 @@ func TestSRTPCallThroughTheAnchor(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, _ = a.sock.WriteToUDP(wire, toA)
-			if raw, ok := readUDP(t, b.sock, 200*time.Millisecond); ok {
+			if raw, ok := readUDPWithin(t, b.sock, 200*time.Millisecond); ok {
 				got = raw
 			}
 		}
@@ -211,7 +211,7 @@ func TestSRTPCallThroughTheAnchor(t *testing.T) {
 		for i := 0; i < 20 && got == nil; i++ {
 			wire, _ := aSend.Protect(rtpPacket(uint16(i+1), 0x33))
 			_, _ = a.sock.WriteToUDP(wire, toA)
-			if raw, ok := readUDP(t, b.sock, 200*time.Millisecond); ok {
+			if raw, ok := readUDPWithin(t, b.sock, 200*time.Millisecond); ok {
 				got = raw
 			}
 		}

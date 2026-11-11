@@ -113,6 +113,9 @@ type Metrics struct {
 	// CallbackTotal counts queue callback outcomes: requested, coalesced,
 	// full, dialled, connected, no_answer, busy, failed, abandoned, no_agent.
 	CallbackTotal *prometheus.CounterVec // result
+	// FaxTotal counts fax calls by direction (inbound, outbound) and result
+	// (received, sent, partial, failed, refused, retry, cancelled).
+	FaxTotal *prometheus.CounterVec // direction, result
 	// TimeConditionTotal counts time condition decisions: open, closed,
 	// holiday, forced_open, forced_closed, loop, missing and toggled.
 	TimeConditionTotal *prometheus.CounterVec // result
@@ -321,6 +324,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.CallbackTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_callback_total", Help: "Queue callback outcomes (requested, coalesced, full, dialled, connected, no_answer, busy, failed, abandoned, no_agent).",
 	}, []string{"result"})
+	m.FaxTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_fax_total", Help: "Fax calls by direction (inbound, outbound) and result (received, sent, partial, failed, refused, retry, cancelled).",
+	}, []string{"direction", "result"})
 	m.TimeConditionTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_time_condition_total", Help: "Time condition decisions (open, closed, holiday, forced_open, forced_closed, loop, missing, toggled).",
 	}, []string{"result"})
@@ -346,7 +352,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailGroupDeliveries, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Originates, m.OriginateSetup, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags,
 		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.BossDivert, m.DirectoryTotal, m.TimeConditionTotal, m.BlockedCalls,
-		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal,
+		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal, m.FaxTotal,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	m.Conf = newConfMetrics(reg)
 	m.Session = newSessionMetrics(reg)

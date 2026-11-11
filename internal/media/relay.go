@@ -81,6 +81,9 @@ type Relay struct {
 	observe ObserveFunc
 	// onFail counts a failed session (panic recovery); nil is fine.
 	onFail func(what string)
+	// udptl switches the relay to T.38: the datagrams are UDPTL, not RTP, and
+	// cross between the legs unmodified (pbx-gaps S-16).
+	udptl atomic.Bool
 	// onDTMF and onPacket are the tap hooks (nil disables).
 	onDTMF   func(leg string, digit byte)
 	onPacket func(leg string, pkt *RTPPacket)
@@ -535,6 +538,15 @@ func (r *Relay) recv(l *relayLeg) {
 		data = plain
 		r.lastRx.Store(time.Now().UnixNano())
 		r.latch(l, from)
+		if r.udptl.Load() {
+			// UDPTL (T.38) is relayed unmodified except for its addresses:
+			// no sequence rewrite, no payload inspection. The fax endpoint
+			// reads the packets; the relay only keeps the legs apart.
+			if len(data) > 0 && !l.muted.Load() {
+				r.forward(l, data)
+			}
+			continue
+		}
 		pkt, ok := ParseRTP(data)
 		if !ok {
 			continue // a malformed datagram is a dropped packet, never fatal
@@ -757,6 +769,9 @@ func (l *relayLeg) write(pkt []byte, dst *net.UDPAddr) {
 // sequence, timestamp and SSRC are rewritten (contract 3), the payload is
 // untouched (no transcoding).
 func (r *Relay) rewrite(l *relayLeg, data []byte) ([]byte, bool) {
+	if r.udptl.Load() {
+		return data, true
+	}
 	return l.out.rewritePacket(data)
 }
 
@@ -996,3 +1011,15 @@ func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate 
 	}
 	return nil
 }
+
+// SetUDPTL switches the relay between RTP (false, the default) and UDPTL
+// (true) for the rest of the call, the media side of a T.38 re-INVITE. The
+// sockets and peer addresses stay; only how a datagram is treated changes.
+// Datagrams already queued as RTP are dropped by the receiving end of the
+// leg, which expects the new kind.
+func (r *Relay) SetUDPTL(on bool) {
+	r.udptl.Store(on)
+}
+
+// UDPTL reports whether the relay is in T.38 mode.
+func (r *Relay) UDPTL() bool { return r.udptl.Load() }

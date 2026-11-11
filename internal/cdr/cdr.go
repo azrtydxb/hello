@@ -36,6 +36,7 @@ const (
 	KindConference = "conference"
 	KindDoor       = "door"     // a door station's call or a call to a Door group (migration 00053)
 	KindCallback   = "callback" // a call Hello placed to a queue caller who asked for a callback (migration 00049)
+	KindFax        = "fax"      // a fax call, received or sent (migration 00073); the fax is in the faxes table, by correlation id
 )
 
 // Call origins (migration 00057).
@@ -100,7 +101,7 @@ type Record struct {
 	// what chose it (migration 00050); empty for a call that rang no
 	// internal device.
 	RingTag, RingRule string
-	// SRTP says which legs of the call carried SRTP (migration 00072):
+	// SRTP says which legs of the call carried SRTP (migration 00074):
 	// none (the default), caller, callee or both.
 	SRTP string
 	// PeerCallID is the Call-ID of the answering callee leg (migration

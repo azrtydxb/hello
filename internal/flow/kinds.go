@@ -29,6 +29,7 @@ var StoredKinds = map[string]Reach{
 	"sip_uri":         {KindSIPURI, "call"},
 	"internal":        {KindInternalDID, "call"},
 	"directory":       {KindDirectory, "call"},
+	"fax":             {KindFax, "call"},
 }
 
 // NoDestination lists the stored values that mean "no edge": the call ends
@@ -122,6 +123,7 @@ var ResourceNodes = map[string]string{
 	"schedules":          KindSchedule,
 	"calendars":          KindHolidayCal,
 	"moh-classes":        KindMOHClass,
+	"fax-destinations":   KindFax,
 }
 
 // SingletonNodes are node kinds drawn from configuration that has no
@@ -152,8 +154,10 @@ var NonFlowResources = map[string]string{
 	"me/contacts":                   "a user's personal contacts, not call routing",
 	"calls/originate":               "click-to-call requests (a call placed on demand, not call routing)",
 	"ai/sessions":                   "assistant conversations, not call routing",
+	"faxes":                         "received and sent documents, not a call destination (a fax destination is the routing object)",
 	"blocklist":                     "a screen on every trunk's inbound calls before routing (its trunk settings are on the trunk), not a step of a call's route",
 	"flow/canvases":                 "named views of the canvas that store only node positions, not call routing",
+	"integrations/crm":              "CRM connectors that log finished calls and name callers in a CRM; they never change where a call goes",
 	"messaging/channels":            "customer text channels of the messaging inbox, not call routing",
 	"messaging/addresses":           "numbers customers text in the messaging inbox, not call routing",
 }
