@@ -16,6 +16,7 @@ func TOTPAAD(userID int64) string { return fmt.Sprintf("user:%d:totp", userID) }
 // DoorOpenAAD is the additional data a door station's door-open code is
 // sealed under, so a code copied to another extension's row does not open.
 func DoorOpenAAD(extensionID int64) string { return fmt.Sprintf("door-open:%d", extensionID) }
+
 // CRMSecretAAD is the additional data a CRM connector's OAuth client secret
 // is sealed under.
 func CRMSecretAAD(connectorID int64) string { return fmt.Sprintf("crm:%d:client_secret", connectorID) }
