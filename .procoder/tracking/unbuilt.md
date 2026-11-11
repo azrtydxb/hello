@@ -160,7 +160,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P4  | Editing UI                                                | done (#227)             |
 | P5  | traceFlow, trace mode                                     | done (#224)             |
 | P6  | AI on the canvas                                          | todo (after P4)         |
-| P7  | New node types: batch ops, trace, override badge          | todo (after P5)         |
+| P7  | New node types: batch ops, trace, override badge          | wip (#277)               |
 | D3  | Every call output accepts every target kind               | done (#196)             |
 | -   | Routes form `conference` destination chooser              | wip (routes-conference) |
 | -   | Canvas usability: Add everything, Arrange, open on create | wip (#233)              |
