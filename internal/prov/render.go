@@ -145,6 +145,8 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 	d.Phone.PTTCapable, d.Phone.WP = SupportsPTT(d.Phone.Vendor, d.Phone.Model), WPFamily(d.Phone.Vendor, d.Phone.Model)
 	d.Phone.CWInverted = d.Phone.Vendor == Grandstream && strings.HasPrefix(strings.ToUpper(strings.ReplaceAll(d.Phone.Model, " ", "")), "WP856")
 	d.Phone.FXO = HasFXOPort(d.Phone.Vendor, d.Phone.Model)
+	d.Phone.SCEPCapable = SupportsSCEP(d.Phone.Vendor, d.Phone.Model)
+	d.Phone.Wired8021X = SupportsWired8021X(d.Phone.Vendor, d.Phone.Model)
 	if d.Phone.Vendor == Grandstream {
 		d.Phone.Family = GrandstreamFamily(d.Phone.Model)
 		if d.Book != nil {

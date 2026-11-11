@@ -342,6 +342,21 @@ func TestLoadProvSIPTLS(t *testing.T) {
 	}
 }
 
+// TestLoadSCEP fails if the SCEP server is off without being turned off,
+// HELLO_SCEP=false does not turn it off, or a value other than true or
+// false is accepted.
+func TestLoadSCEP(t *testing.T) {
+	c, err := LoadControl(provOn(nil))
+	if err != nil || !c.Prov.SCEP {
+		t.Fatalf("default SCEP = %v, %v", c.Prov.SCEP, err)
+	}
+	c, err = LoadControl(provOn(map[string]string{"HELLO_SCEP": "false"}))
+	if err != nil || c.Prov.SCEP {
+		t.Fatalf("HELLO_SCEP=false = %v, %v", c.Prov.SCEP, err)
+	}
+	wantProvErr(t, provOn(map[string]string{"HELLO_SCEP": "yes"}), "HELLO_SCEP", "yes")
+}
+
 // TestLoadProvBackupAndSRV fails if the backup registrars or the SRV name are
 // on by default, are not read, or a malformed one is accepted (S-20).
 func TestLoadProvBackupAndSRV(t *testing.T) {

@@ -21284,6 +21284,566 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/scep": {
+      "get": {
+        "operationId": "getSCEP",
+        "summary": "SCEP server and device CA",
+        "description": "Returns whether the SCEP server is on (HELLO_SCEP), the active Hello device CA (subject, validity, SHA-256 fingerprint, source and certificate PEM; never the key; null until one is generated or imported) and the plain-HTTP URLs of the CA certificate and its CRL, for the RADIUS server. Phones of a phone group with SCEP on enrol at their own provisioning URL followed by scep, with a one-time challenge password delivered in their configuration (phone-feature-parity S-25).",
+        "tags": ["scep"],
+        "responses": {
+          "200": {
+            "description": "SCEP status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCEPStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/scep/ca": {
+      "put": {
+        "operationId": "setSCEPCA",
+        "summary": "Generate or import the device CA",
+        "description": "Creates the Hello device CA that issues the phones' certificates. mode generate makes a self-signed RSA 3072 CA (commonName default \"Hello device CA\", validityYears 1 to 30, default 10); mode import takes an existing CA certificate and its RSA private key in PEM (an intermediate of your enterprise CA, so the RADIUS server already trusts it). The key is sealed under HELLO_SECRET_KEY and never returned. With a CA already active the request is a 409 unless replace is true; certificates of the replaced CA stay valid until they expire, but can no longer be renewed, so phones enrol again with their challenge. Admin only.",
+        "tags": ["scep"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCEPCAInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The active CA",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCEPCA"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/scep/certificates": {
+      "get": {
+        "operationId": "listSCEPCertificates",
+        "summary": "List issued device certificates",
+        "description": "Lists the certificates the device CA issued, newest first (at most 1000): phone, MAC, serial, subject, enrolment or renewal, validity and revocation. Filter by phoneId and by status (active, expired, revoked).",
+        "tags": ["scep"],
+        "parameters": [
+          {
+            "name": "phoneId",
+            "in": "query",
+            "required": false,
+            "description": "Only this phone's certificates.",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Only certificates in this state.",
+            "schema": {
+              "type": "string",
+              "enum": ["active", "expired", "revoked"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The certificates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCEPCertificateList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/scep/certificates/{id}/revoke": {
+      "post": {
+        "operationId": "revokeSCEPCertificate",
+        "summary": "Revoke a device certificate",
+        "description": "Revokes an issued certificate: it is listed on the CRL from the next fetch and can no longer renew. The phone needs its challenge (rotate it with rotatePhoneSCEPChallenge to be sure) to enrol again. Removing a phone revokes its certificates by itself. 409 when it is already revoked. Admin only.",
+        "tags": ["scep"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SCEPRevokeInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The revoked certificate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCEPCertificate"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phones/{id}/scep-challenge": {
+      "post": {
+        "operationId": "rotatePhoneSCEPChallenge",
+        "summary": "Discard a phone's SCEP challenge",
+        "description": "Discards the phone's one-time SCEP challenge password, used or not; its next configuration carries a new one. The challenge itself is never shown. Admin only.",
+        "tags": ["scep"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Discarded"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/dot1x-profiles": {
+      "get": {
+        "operationId": "listDot1XProfiles",
+        "summary": "List 802.1X profiles",
+        "description": "Lists the 802.1X profiles: reusable EAP identities a phone group names for the wired port (and Wi-Fi profiles for an enterprise network). The password is never returned; hasPassword says whether one is stored. usedByGroups lists the phone groups whose wired profile it is.",
+        "tags": ["dot1x"],
+        "responses": {
+          "200": {
+            "description": "The profiles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dot1XProfileList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createDot1XProfile",
+        "summary": "Create an 802.1X profile",
+        "description": "Adds an 802.1X profile. method eap-tls uses the certificate the phone gets from SCEP (no password; written to a phone only while SCEP is on for it), peap is PEAPv0/MSCHAPv2 with identity and password, eap-md5 (wired only) identity and password. identity and anonymousIdentity may hold {mac} and {MAC}, filled in per phone (64 characters at most once filled). caCertPem is the CA the RADIUS server's certificate chains to; serverDomain the RADIUS server name the phone checks. The password is sealed and write-only. 409 when the name is taken. Admin only.",
+        "tags": ["dot1x"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Dot1XProfileInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dot1XProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/dot1x-profiles/{id}": {
+      "get": {
+        "operationId": "getDot1XProfile",
+        "summary": "Get an 802.1X profile",
+        "description": "Returns one 802.1X profile, without its password.",
+        "tags": ["dot1x"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dot1XProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "updateDot1XProfile",
+        "summary": "Replace an 802.1X profile",
+        "description": "Replaces a profile as a whole. Leaving password out keeps the stored one; an empty password removes it. Switching to eap-tls drops the password. Phones take the change at their next fetch, or at once with HELLO_PROV_AUTO_RESYNC. 409 when the name is taken. Admin only.",
+        "tags": ["dot1x"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Dot1XProfileInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dot1XProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteDot1XProfile",
+        "summary": "Delete an 802.1X profile",
+        "description": "Deletes a profile no phone group uses; 409 names the groups that do. Admin only.",
+        "tags": ["dot1x"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/security": {
+      "get": {
+        "operationId": "getPhoneGroupSecurity",
+        "summary": "A phone group's SCEP and 802.1X settings",
+        "description": "Returns whether SCEP is on for the group, the lifetime of the certificates its phones get, and its wired 802.1X profile (null for none).",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroupSecurity"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "setPhoneGroupSecurity",
+        "summary": "Set a phone group's SCEP and 802.1X settings",
+        "description": "Replaces the group's SCEP switch (off by default), the certificate lifetime in days (30 to 1825, default 365) and the wired 802.1X profile (null for none). With SCEP on, the group's Grandstream WP8x6 and GRP260x phones are given the SCEP server URL and a one-time challenge and enrol from the device CA. The wired profile is written to its GRP26xx desk phones; a group without one leaves the phones' 802.1X as it is. Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneGroupSecurityInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroupSecurity"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/me/ice-servers": {
       "get": {
         "operationId": "getMyIceServers",
@@ -38280,6 +38840,386 @@
                 }
               }
             }
+          }
+        }
+      },
+      "SCEPStatus": {
+        "type": "object",
+        "required": ["serverEnabled", "ca", "caUrl", "crlUrl"],
+        "properties": {
+          "serverEnabled": {
+            "type": "boolean",
+            "description": "HELLO_SCEP: the SCEP endpoint answers (still only for groups with SCEP on)."
+          },
+          "ca": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SCEPCA"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The active device CA; null until one exists."
+          },
+          "caUrl": {
+            "type": "string",
+            "description": "Plain-HTTP URL of the device CA certificate; empty while provisioning has no public URL."
+          },
+          "crlUrl": {
+            "type": "string",
+            "description": "Plain-HTTP URL of the device CA's CRL."
+          }
+        }
+      },
+      "SCEPCA": {
+        "type": "object",
+        "required": [
+          "id",
+          "subject",
+          "notBefore",
+          "notAfter",
+          "fingerprintSha256",
+          "source",
+          "certPem",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "notBefore": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notAfter": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fingerprintSha256": {
+            "type": "string",
+            "description": "SHA-256 of the certificate, colon-separated uppercase hex."
+          },
+          "source": {
+            "type": "string",
+            "enum": ["generated", "imported"]
+          },
+          "certPem": {
+            "type": "string",
+            "description": "The CA certificate (public)."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SCEPCAInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode"],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["generate", "import"],
+            "description": "generate a new CA, or import certPem and keyPem."
+          },
+          "commonName": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "generate: the CA's common name (default \"Hello device CA\")."
+          },
+          "validityYears": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30,
+            "description": "generate: years the CA is valid (0 or left out: 10)."
+          },
+          "certPem": {
+            "type": "string",
+            "description": "import: the CA certificate, PEM."
+          },
+          "keyPem": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "Write-only. import: the CA's RSA private key, PEM (PKCS#1 or PKCS#8)."
+          },
+          "replace": {
+            "type": "boolean",
+            "default": false,
+            "description": "Replace an active CA."
+          }
+        }
+      },
+      "SCEPCertificate": {
+        "type": "object",
+        "required": [
+          "id",
+          "caId",
+          "phoneId",
+          "mac",
+          "serial",
+          "subject",
+          "kind",
+          "notBefore",
+          "notAfter",
+          "issuedAt",
+          "revokedAt",
+          "revokeReason",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "caId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "phoneId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Null once the phone is removed."
+          },
+          "mac": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string",
+            "description": "Lowercase hex."
+          },
+          "subject": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["enrol", "renewal"]
+          },
+          "notBefore": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notAfter": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "revokeReason": {
+            "type": ["string", "null"],
+            "enum": [
+              "unspecified",
+              "key_compromise",
+              "superseded",
+              "cessation_of_operation",
+              "phone_removed",
+              null
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "expired", "revoked"]
+          }
+        }
+      },
+      "SCEPCertificateList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SCEPCertificate"
+            }
+          }
+        }
+      },
+      "SCEPRevokeInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": [
+              "unspecified",
+              "key_compromise",
+              "superseded",
+              "cessation_of_operation"
+            ],
+            "default": "unspecified",
+            "description": "The CRL reason; unspecified when left out."
+          }
+        }
+      },
+      "Dot1XProfile": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "method",
+          "identity",
+          "anonymousIdentity",
+          "hasPassword",
+          "caCertPem",
+          "serverDomain",
+          "usedByGroups",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string",
+            "enum": ["eap-tls", "peap", "eap-md5"]
+          },
+          "identity": {
+            "type": "string",
+            "description": "With {mac}/{MAC} placeholders as stored."
+          },
+          "anonymousIdentity": {
+            "type": "string"
+          },
+          "hasPassword": {
+            "type": "boolean"
+          },
+          "caCertPem": {
+            "type": "string"
+          },
+          "serverDomain": {
+            "type": "string"
+          },
+          "usedByGroups": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Dot1XProfileList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Dot1XProfile"
+            }
+          }
+        }
+      },
+      "Dot1XProfileInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "method", "identity"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Unique name, 1 to 64 characters."
+          },
+          "method": {
+            "type": "string",
+            "enum": ["eap-tls", "peap", "eap-md5"],
+            "description": "eap-tls (certificate from SCEP), peap (PEAPv0/MSCHAPv2) or eap-md5 (wired only)."
+          },
+          "identity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Printable, no spaces; {mac} and {MAC} are filled in per phone."
+          },
+          "anonymousIdentity": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "PEAP outer identity (Wi-Fi)."
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "x-hello-secret": true,
+            "description": "Write-only. peap and eap-md5; left out keeps the stored one, empty removes it."
+          },
+          "caCertPem": {
+            "type": "string",
+            "description": "The CA(s) the RADIUS server's certificate chains to, PEM; empty for none."
+          },
+          "serverDomain": {
+            "type": "string",
+            "maxLength": 253,
+            "description": "The RADIUS server name the phone checks."
+          }
+        }
+      },
+      "PhoneGroupSecurity": {
+        "type": "object",
+        "required": [
+          "groupId",
+          "scepEnabled",
+          "certValidityDays",
+          "wiredDot1xProfileId"
+        ],
+        "properties": {
+          "groupId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "scepEnabled": {
+            "type": "boolean"
+          },
+          "certValidityDays": {
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 1825
+          },
+          "wiredDot1xProfileId": {
+            "type": ["integer", "null"],
+            "format": "int64"
+          }
+        }
+      },
+      "PhoneGroupSecurityInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scepEnabled"],
+        "properties": {
+          "scepEnabled": {
+            "type": "boolean",
+            "description": "SCEP on for the group's phones."
+          },
+          "certValidityDays": {
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 1825,
+            "default": 365,
+            "description": "Lifetime of the certificates the group's phones get, in days."
+          },
+          "wiredDot1xProfileId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The wired 802.1X profile; null or left out for none."
           }
         }
       },
