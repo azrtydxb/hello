@@ -266,15 +266,17 @@ type Device struct {
 	Platform   string     `json:"platform"`
 	AppVersion string     `json:"appVersion"`
 	LastSeenAt *time.Time `json:"lastSeenAt"`
+	// SRTP is the media-encryption policy: off, optional or required.
+	SRTP string `json:"srtp"`
 }
 
 const deviceCols = `id, extension_id, sip_username, enabled, created_at, updated_at, kind, auth_mode, user_id, label,
-	coalesce(platform, ''), coalesce(app_version, ''), last_seen_at`
+	coalesce(platform, ''), coalesce(app_version, ''), last_seen_at, srtp`
 
 func scanDevice(r interface{ Scan(...any) error }) (Device, error) {
 	var d Device
 	err := r.Scan(&d.ID, &d.ExtensionID, &d.SIPUsername, &d.Enabled, &d.CreatedAt, &d.UpdatedAt,
-		&d.Kind, &d.AuthMode, &d.UserID, &d.Label, &d.Platform, &d.AppVersion, &d.LastSeenAt)
+		&d.Kind, &d.AuthMode, &d.UserID, &d.Label, &d.Platform, &d.AppVersion, &d.LastSeenAt, &d.SRTP)
 	return d, err
 }
 
@@ -328,8 +330,9 @@ func (s *Store) CreateDevice(ctx context.Context, actor string, in NewDevice) (D
 	return d, err
 }
 
-// UpdateDevice changes the fields that are not nil.
-func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64) (Device, error) {
+// UpdateDevice changes the fields that are not nil. srtp is a media-
+// encryption policy (secmedia); the caller has validated it.
+func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, srtp *string) (Device, error) {
 	var d Device
 	err := s.configChange(ctx, actor, "update", "device", nil, func(tx *sql.Tx) (int64, error) {
 		if extensionID != nil {
@@ -344,8 +347,9 @@ func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enable
 		}
 		var err error
 		d, err = scanDevice(tx.QueryRowContext(ctx, `
-			UPDATE devices SET enabled = COALESCE($2, enabled), extension_id = COALESCE($3, extension_id), updated_at = now()
-			WHERE id = $1 RETURNING `+deviceCols, id, enabled, extensionID))
+			UPDATE devices SET enabled = COALESCE($2, enabled), extension_id = COALESCE($3, extension_id),
+			       srtp = COALESCE($4, srtp), updated_at = now()
+			WHERE id = $1 RETURNING `+deviceCols, id, enabled, extensionID, srtp))
 		return id, err
 	})
 	return d, err

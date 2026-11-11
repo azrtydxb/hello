@@ -155,6 +155,28 @@ describe("CallDetail", () => {
     expect(await screen.findByText("not measured")).toBeVisible();
   });
 
+  it("says which legs of a call carried SRTP", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/90": () =>
+        json({ ...BASE, id: 90, finalStatus: 200, srtp: "both", trace: [] }),
+      "GET /api/v1/cdrs/91": () =>
+        json({ ...BASE, id: 91, finalStatus: 200, srtp: "caller", trace: [] }),
+      "GET /api/v1/cdrs/92": () =>
+        json({ ...BASE, id: 92, finalStatus: 200, trace: [] }),
+    });
+    const first = renderApp("/history/90");
+    expect(await screen.findByText("SRTP on both legs")).toBeVisible();
+    first.unmount();
+    const second = renderApp("/history/91");
+    expect(
+      await screen.findByText("SRTP on the caller leg only"),
+    ).toBeVisible();
+    second.unmount();
+    renderApp("/history/92");
+    expect(await screen.findByText("None (plain RTP)")).toBeVisible();
+  });
+
   it("shows what the phones reported next to the relay's figures", async () => {
     mockApi({
       ...ME,
@@ -431,6 +453,48 @@ describe("CallDetail", () => {
       "Extension 200 (b1)",
     ]);
     expect(within(card).getByText("Do not disturb")).toBeVisible();
+    expect(within(card).getByText("Answered")).toBeVisible();
+  });
+
+  it("lists what each follow-me leg did", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/91": () =>
+        json({
+          ...BASE,
+          id: 91,
+          finalStatus: 200,
+          trace: [],
+          followMeLegs: [
+            { kind: "own", extension: "101", trunk: "", result: "cancelled" },
+            {
+              kind: "external",
+              extension: "0475123456",
+              trunk: "carrier",
+              result: "declined",
+            },
+            {
+              kind: "external",
+              extension: "0475999999",
+              trunk: "carrier",
+              result: "answered",
+            },
+          ],
+        }),
+      "GET /api/v1/trunks": () => json({ items: [] }),
+    });
+    renderApp("/history/91");
+
+    const card = (await screen.findByRole("heading", { name: "Follow-me" }))
+      .parentElement as HTMLElement;
+    const rows = within(card).getAllByRole("term");
+    expect(rows.map((r) => r.textContent)).toEqual([
+      "Own phones 101",
+      "External 0475123456 (carrier)",
+      "External 0475999999 (carrier)",
+    ]);
+    expect(within(card).getByText("Did not press 1")).toBeVisible();
+    expect(within(card).getByText("Stopped, answered elsewhere")).toBeVisible();
     expect(within(card).getByText("Answered")).toBeVisible();
   });
 });

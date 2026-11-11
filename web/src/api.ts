@@ -143,11 +143,28 @@ export interface Extension {
 }
 
 /** A device: SIP credentials belonging to one extension. */
+/**
+ * Media-encryption policy of a device or trunk (secmedia.Policy): off is
+ * plain RTP, optional offers SDES SRTP on a TLS leg and uses it when the far
+ * end answers with it, required allows SRTP only (a call that cannot be
+ * encrypted is refused with 488). Crypto is never offered on a leg that is not
+ * TLS.
+ */
+export type SrtpPolicy = "off" | "optional" | "required";
+
+export const SRTP_POLICIES: { value: SrtpPolicy; label: string }[] = [
+  { value: "off", label: "Off (plain RTP)" },
+  { value: "optional", label: "Optional" },
+  { value: "required", label: "Required" },
+];
+
 export interface Device {
   id: Id;
   extensionId: Id;
   sipUsername: string;
   enabled: boolean;
+  /** Media-encryption policy; optional for a device that predates it. */
+  srtp?: SrtpPolicy;
   createdAt: string;
   updatedAt: string;
   /** desk (a phone), web or mobile (a user's softphone); absent from older servers. */
@@ -210,6 +227,8 @@ export interface Cdr {
   billableMs: number;
   sipNode: string;
   mediaMode: string;
+  /** Which legs carried SRTP: none, caller, callee or both. */
+  srtp?: "none" | "caller" | "callee" | "both";
   finalStatus: number;
   terminationSide: string;
   failureReason: string;
@@ -263,12 +282,31 @@ export interface PageLegResult {
   result: "answered" | "busy" | "dnd" | "no_answer" | "no_registration";
 }
 
+/** One follow-me leg of a call (cdr_legs, role follow_me). */
+export interface FollowMeLegResult {
+  kind: "own" | "extension" | "ring_group" | "external";
+  /** The extension that rang, or the external number dialled. */
+  extension: string;
+  /** The trunk an external leg left on; "" otherwise. */
+  trunk: string;
+  result:
+    | "answered"
+    | "declined"
+    | "busy"
+    | "no_answer"
+    | "failed"
+    | "skipped"
+    | "cancelled";
+}
+
 /** GET /api/v1/cdrs/{id}: the CDR plus its routing trace. */
 export interface CdrDetail extends Cdr {
-  /** call, page or intercom. */
-  kind?: "call" | "page" | "intercom" | "conference";
+  /** call, page, intercom, conference, callback or alarm (a *55 alarm call). */
+  kind?: "call" | "page" | "intercom" | "conference" | "callback" | "alarm";
   /** A page's outcome per member, in the order they were paged. */
   pageLegs?: PageLegResult[];
+  /** What each follow-me leg did, in the order they rang. */
+  followMeLegs?: FollowMeLegResult[];
   trace: TraceStep[];
   /** For failed calls, the reason of the last trace step. */
   explanation?: string;
@@ -341,6 +379,8 @@ export interface TrunkFields {
   internalDialing: InternalDialing;
   /** SMS over SIP: text messages may be sent and received through it. */
   messaging: boolean;
+  /** Emergency calls through it carry the caller's location (RFC 6442). */
+  geolocation: boolean;
   /** How a fax call is carried: G.711 passthrough, T.38, or refused. */
   faxMode: "passthrough" | "t38" | "off";
   /**
@@ -364,6 +404,11 @@ export interface TrunkFields {
    * accept G.711 only.
    */
   codecs: string[];
+  /**
+   * Media-encryption policy (default "off"). Trunk legs are not TLS today, so
+   * "optional" behaves as "off" and "required" refuses calls over the trunk.
+   */
+  srtp?: SrtpPolicy;
   /** Turn away calls from a withheld caller (anonymous, Privacy: id). */
   rejectAnonymous: boolean;
   /** Calling codes callers must come from; empty is no restriction. */
@@ -886,7 +931,7 @@ export const createDevice = (input: {
 
 export const updateDevice = (
   deviceId: Id,
-  patch: { enabled?: boolean; extensionId?: Id },
+  patch: { enabled?: boolean; extensionId?: Id; srtp?: SrtpPolicy },
 ) =>
   request<Device>("PATCH", `/api/v1/devices/${id(deviceId)}`, { body: patch });
 
@@ -1525,6 +1570,8 @@ export const IVR_DESTINATION_KINDS = [
   "time_condition",
   "directory",
   "fax",
+  "follow_me_on",
+  "follow_me_off",
 ] as const;
 
 export type IvrDestinationKind = (typeof IVR_DESTINATION_KINDS)[number];
@@ -1547,6 +1594,8 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   time_condition: "Time condition",
   directory: "Dial-by-name directory",
   fax: "Fax destination",
+  follow_me_on: "Follow-me on",
+  follow_me_off: "Follow-me off",
 };
 
 /**

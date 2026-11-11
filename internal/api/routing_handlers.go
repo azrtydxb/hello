@@ -12,6 +12,7 @@ import (
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/routing"
+	"github.com/azrtydxb/hello/internal/secmedia"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -96,6 +97,7 @@ type trunkBody struct {
 	Destinations    *[]routing.Destination `json:"destinations"`
 	InternalDialing *dialingBody           `json:"internalDialing"`
 	Messaging       *bool                  `json:"messaging"`
+	Geolocation     *bool                  `json:"geolocation"`
 	Codecs          *[]string              `json:"codecs"`
 	// Anonymous-call handling (spec S-19).
 	AnonymousPolicy  *string `json:"anonymousPolicy"`
@@ -107,6 +109,7 @@ type trunkBody struct {
 	UnknownCallerAction *string   `json:"unknownCallerAction"`
 	RejectCode          *int      `json:"rejectCode"`
 
+	SRTP          *string `json:"srtp"`
 	SessionTimers *string `json:"sessionTimers"`
 	FaxMode       *string `json:"faxMode"`
 }
@@ -162,6 +165,8 @@ func (b trunkBody) applyTo(in *store.TrunkInput) {
 	setIf(&in.Enabled, b.Enabled)
 	setIf(&in.Destinations, b.Destinations)
 	setIf(&in.Messaging, b.Messaging)
+	setIf(&in.SRTP, b.SRTP)
+	setIf(&in.Geolocation, b.Geolocation)
 	setIf(&in.AnonymousPolicy, b.AnonymousPolicy)
 	setIf(&in.AssertedIdentity, b.AssertedIdentity)
 	setIf(&in.IdentityHeader, b.IdentityHeader)
@@ -222,6 +227,7 @@ func (s *server) createTrunk(w http.ResponseWriter, r *http.Request) {
 		InternalDialing: store.Dialing{Mode: "off", Patterns: []string{}},
 		Codecs:          slices.Clone(routing.DefaultTrunkCodecs),
 		CallerPolicy:    routing.CallerPolicy{UnknownCallerAction: routing.UnknownBlock, RejectCode: routing.RejectDecline},
+		SRTP:            string(secmedia.Off),
 		SessionTimers:   routing.SessionTimersDefault, FaxMode: fax.ModePassthrough}
 	b.applyTo(&in)
 	if b.InternalDialing != nil {

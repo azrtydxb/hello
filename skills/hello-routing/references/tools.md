@@ -6,7 +6,7 @@
 | `listTrunks`            | read  | Every trunk; never its password.                                                                             |
 | `getTrunk`              | read  | One trunk.                                                                                                   |
 | `createTrunk`           | write | Create a registration or IP trunk.                                                                           |
-| `updateTrunk`           | write | Change a trunk; an omitted password keeps the stored one.                                                    |
+| `updateTrunk`           | write | Change a trunk, including its `srtp` policy; an omitted password keeps the stored one.                       |
 | `deleteTrunk`           | write | Delete a trunk; refused while a route uses it.                                                               |
 | `listTrunkStatus`       | read  | Live registration state, destination health and active calls per trunk.                                      |
 | `listOutboundRoutes`    | read  | Outbound routes in position order.                                                                           |

@@ -70,6 +70,16 @@ provisioning service. Voicemail belongs to the extension
 - Bare device: `updateDevice` with the new extension id. The SIP credentials
   stay the same.
 
+### Media encryption (SRTP) for a device
+
+`updateDevice` takes `srtp`: `off` (plain RTP), `optional` (the default: Hello
+offers SDES SRTP and uses it when the phone answers with it) or `required` (a
+call that cannot be encrypted is refused with 488). SRTP is only ever offered
+on a leg whose signalling is TLS, so a phone on UDP stays plain RTP whatever
+the policy says, and a `required` device on UDP cannot call or be called. After
+a change, `getCDR` shows `srtp` (none, caller, callee or both) on the next
+call, and the call's trace says which legs were encrypted. Keys are never
+shown.
 ### Web devices (browser softphones)
 
 A user adds a browser softphone to their own extension under **My phone, Web

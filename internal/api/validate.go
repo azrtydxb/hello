@@ -13,6 +13,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/routing"
+	"github.com/azrtydxb/hello/internal/secmedia"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -251,6 +252,9 @@ func validateTrunk(in *store.TrunkInput, hasPassword bool) fieldErrs {
 	}
 	if len(in.SourceCIDRs) > 100 {
 		f.add("sourceCidrs", "at most 100 entries")
+	}
+	if in.SRTP != "" && !secmedia.Valid(in.SRTP) {
+		f.add("srtp", "must be off, optional or required")
 	}
 	var pol []routing.FieldError
 	routing.ValidateCallerPolicy(in.CallerPolicy, "", &pol)

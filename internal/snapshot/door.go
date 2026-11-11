@@ -19,6 +19,18 @@ func (s *Snapshot) IsDoor(number string) bool {
 	return ok && e.Door
 }
 
+// DoorGroups lists the names of the Door ring groups, sorted.
+func (s *Snapshot) DoorGroups() []string {
+	var out []string
+	for name, g := range s.groups {
+		if g.g.IsDoor {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // DoorMayCall reports whether the door station may call dialled: an
 // extension or ring group on its own list, or any Door ring group. A dialled
 // number that is another door station never qualifies.

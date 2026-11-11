@@ -34,6 +34,23 @@ const PAGE_RESULT: Record<string, string> = {
   no_registration: "Not registered",
 };
 
+const FOLLOW_ME_KIND: Record<string, string> = {
+  own: "Own phones",
+  extension: "Extension",
+  ring_group: "Ring group",
+  external: "External",
+};
+
+const FOLLOW_ME_RESULT: Record<string, string> = {
+  answered: "Answered",
+  declined: "Did not press 1",
+  busy: "Busy",
+  no_answer: "No answer",
+  failed: "Failed",
+  skipped: "Skipped",
+  cancelled: "Stopped, answered elsewhere",
+};
+
 /** One call's record: timeline, the CDR fields, its routing trace and, if it failed, why. */
 export function CallDetail() {
   const { id = "" } = useParams();
@@ -179,6 +196,20 @@ export function timeline(cdr: CallRecord): Moment[] {
   ];
 }
 
+/** Which legs of the call carried SRTP, for the detail card. */
+function srtpText(srtp: CallRecord["srtp"]): string {
+  switch (srtp) {
+    case "both":
+      return "SRTP on both legs";
+    case "caller":
+      return "SRTP on the caller leg only";
+    case "callee":
+      return "SRTP on the callee leg only";
+    default:
+      return "None (plain RTP)";
+  }
+}
+
 /** Loss percent and jitter of an anchored call, or "not measured". */
 function qualityText(cdr: CallRecord): string {
   const { rtpPackets: packets, rtpLost: lost, rtpJitterMs: jitter } = cdr;
@@ -239,6 +270,7 @@ function Detail({ cdr }: { cdr: CallRecord }) {
     { label: "Billable", value: formatDuration(cdr.billableMs) },
     { label: "SIP node", value: cdr.sipNode || "—", mono: true },
     { label: "Media", value: cdr.mediaMode || "—" },
+    { label: "Media encryption", value: srtpText(cdr.srtp) },
     { label: "Caller codec", value: cdr.callerCodec || "—", mono: true },
     { label: "Callee codec", value: cdr.calleeCodec || "—", mono: true },
     { label: "Call quality", value: qualityText(cdr) },
@@ -294,6 +326,21 @@ function Detail({ cdr }: { cdr: CallRecord }) {
                   value: (
                     <Badge tone={l.result === "answered" ? "good" : "neutral"}>
                       {PAGE_RESULT[l.result] ?? l.result}
+                    </Badge>
+                  ),
+                }))}
+              />
+            </div>
+          )}
+          {cdr.followMeLegs && cdr.followMeLegs.length > 0 && (
+            <div className="az-card calls-card">
+              <h2 className="calls-card__title">Follow-me</h2>
+              <PropertyList
+                items={cdr.followMeLegs.map((l) => ({
+                  label: `${FOLLOW_ME_KIND[l.kind] ?? l.kind} ${l.extension}${l.trunk ? ` (${l.trunk})` : ""}`,
+                  value: (
+                    <Badge tone={l.result === "answered" ? "good" : "neutral"}>
+                      {FOLLOW_ME_RESULT[l.result] ?? l.result}
                     </Badge>
                   ),
                 }))}

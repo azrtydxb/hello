@@ -118,6 +118,30 @@ other vendors' trusted-certificate keys).
 The keys come from the vendor templates and release notes and are not yet
 confirmed on a phone (see Hardware checks).
 
+### SRTP
+
+A phone on TLS can also encrypt its media: see [media.md](media.md#srtp-sdes).
+Provisioning writes the phone's SRTP mode from the device's policy, for a phone
+on TLS only:
+
+| Vendor      | Key written | Values                                                                 |
+| ----------- | ----------- | ---------------------------------------------------------------------- |
+| Grandstream | `P183`      | `0` off, `1` enabled but not forced (optional), `2` enabled and forced |
+| Grandstream | `P60078`    | `0` SDES key exchange (WP8x6 and WP856 only)                           |
+
+`P183` and its `0`, `1` and `2` are the same in Grandstream's own templates for
+the WP8x6 (`wp8x6_config_1.0.3.39`), WP810/822/825
+(`wp810_822_825_config_1.0.11.83`), WP820 (`wp820_config_1.0.7.90`) and WP856
+(`wp856_config_1.0.3.16`). The WP8x6 and WP810/822/825 templates add `3` Optional
+and `4` Follow SIP Transport, which Hello does not write; the WP820 has `3`
+Follow SIP transport instead, and the WP856 only `0` to `2`. `P60078` (SRTP Key
+Exchange, `0` SDES, `1` DTLS) is only in the WP8x6 and WP856 templates, and is
+written `0` because Hello's anchor negotiates SDES.
+
+The other vendors write no SRTP key until their key is confirmed from vendor
+documentation. A phone on UDP keeps its own SRTP setting; whatever it offers,
+Hello answers with plain RTP on that leg.
+
 ## Certificate renewal and alerting
 
 cert-manager renews the certificate 30 days before it expires. Kamailio reads
@@ -137,3 +161,10 @@ TLS with `P130 = 2`, whether `P2329 = 1` and `P22293`/`P22294` take the values
 above on the firmware in the lab, whether the phone sends `sips:` and accepts a
 `sip:` Contact from Hello in a `sips:` dialog, TLS 1.3 negotiation, and a phone
 behind NAT keeping its TLS connection for an hour idle.
+
+SRTP (S-15): whether `P183` takes `0`, `1` and `2` as above on WP822 and WP836,
+whether the phone in "enabled but not forced" mode offers `a=crypto` on an
+`RTP/AVP` line and answers Hello's `RTP/AVP` offer with its own crypto line,
+whether a phone set to forced mode accepts Hello's `RTP/SAVP` offer, that a
+hold and resume keep the key, and that an `AES_CM_128_HMAC_SHA1_32` answer is
+taken when the phone prefers it.

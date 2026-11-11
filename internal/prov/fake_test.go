@@ -38,6 +38,9 @@ type fakeStore struct {
 	insertErr error
 	nextID    int64
 	bookReads int // DeliveredBooks calls: what a cache hit saves
+	// locs is the location of each phone for the HELD server; a phone not in
+	// it has none.
+	locs map[int64]HELDLocation
 	// beforeMark, when set, runs as MarkFetched starts: the race window
 	// between PhoneByToken and the write.
 	beforeMark func()
@@ -484,3 +487,16 @@ func (e *env) last() FetchRecord {
 }
 
 func devPath(token, file string) string { return "/p/" + token + "/" + file }
+
+// HELDLocation implements LocationSource.
+func (s *fakeStore) HELDLocation(_ context.Context, id int64) (HELDLocation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.outage != nil {
+		return HELDLocation{}, s.outage
+	}
+	if l, ok := s.locs[id]; ok {
+		return l, nil
+	}
+	return HELDLocation{}, ErrNoLocation
+}

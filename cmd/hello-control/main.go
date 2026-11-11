@@ -254,6 +254,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		PageTests:       vk,
 		Parked:          vk,
 		DoorCalls:       vk,
+		DoorTriggers:    vk,
 		Objects:         objs,
 		Backups:         backups,
 		Maintenance:     backups.Maintenance,

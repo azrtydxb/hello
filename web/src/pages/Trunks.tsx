@@ -6,10 +6,12 @@ import {
   fieldErrors,
   listTrunks,
   listTrunkStatus,
+  SRTP_POLICIES,
   updateTrunk,
   type FieldError,
   type InternalDialing,
   type InternalDialingInput,
+  type SrtpPolicy,
   type Trunk,
   type TrunkInput,
   type TrunkStatus,
@@ -97,7 +99,8 @@ interface TrunkDraft {
   assertedIdentity: string;
   /** The header carrying it. */
   identityHeader: "pai" | "ppi";
-
+  /** Emergency calls carry the caller's location (Geolocation, PIDF-LO). */
+  geolocation: boolean;
   /** How a fax call is carried (docs/fax.md). */
   faxMode: "passthrough" | "t38" | "off";
   /** RFC 4028 session timers on the trunk's calls. */
@@ -110,6 +113,8 @@ interface TrunkDraft {
   dialingConfirm: boolean;
   /** The codecs offered to the trunk, as codecs[]. */
   codecs: string[];
+  /** Media-encryption policy, as srtp. */
+  srtp: SrtpPolicy;
   /** Caller screening (pbx-gaps S-8). */
   rejectAnonymous: boolean;
   /** Country calling codes, comma or space separated. */
@@ -176,13 +181,14 @@ const NEW_TRUNK: TrunkDraft = {
   anonymousPolicy: "honour",
   assertedIdentity: "",
   identityHeader: "pai",
-
+  geolocation: false,
   faxMode: "passthrough",
   sessionTimers: "default",
   dialingMode: "off",
   dialingPatterns: "",
   dialingConfirm: false,
   codecs: DEFAULT_TRUNK_CODECS,
+  srtp: "off",
   rejectAnonymous: false,
   allowedCountryCodes: "",
   unknownCallerAction: "block",
@@ -220,7 +226,7 @@ function toDraft(t: Trunk): TrunkDraft {
     anonymousPolicy: t.anonymousPolicy === "always" ? "always" : "honour",
     assertedIdentity: t.assertedIdentity ?? "",
     identityHeader: t.identityHeader === "ppi" ? "ppi" : "pai",
-
+    geolocation: t.geolocation === true,
     faxMode: t.faxMode ?? "passthrough",
     sessionTimers:
       t.sessionTimers === "on" || t.sessionTimers === "off"
@@ -233,6 +239,7 @@ function toDraft(t: Trunk): TrunkDraft {
     dialingPatterns: (dialing?.patterns ?? []).join("\n"),
     dialingConfirm: false,
     codecs: t.codecs?.length ? t.codecs : DEFAULT_TRUNK_CODECS,
+    srtp: t.srtp ?? "off",
     rejectAnonymous: t.rejectAnonymous === true,
     allowedCountryCodes: (t.allowedCountryCodes ?? []).join(", "),
     unknownCallerAction: t.unknownCallerAction === "allow" ? "allow" : "block",
@@ -355,9 +362,11 @@ function toInput(d: TrunkDraft): TrunkInput {
     anonymousPolicy: d.anonymousPolicy,
     assertedIdentity: d.assertedIdentity.trim(),
     identityHeader: d.identityHeader,
+    geolocation: d.geolocation,
     faxMode: d.faxMode,
     sessionTimers: d.sessionTimers,
     codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
+    srtp: d.srtp,
     rejectAnonymous: d.rejectAnonymous,
     allowedCountryCodes: countryCodes(d.allowedCountryCodes),
     unknownCallerAction: d.unknownCallerAction,
@@ -398,6 +407,7 @@ function knownKeys(d: TrunkDraft): string[] {
     "destinations",
     "internalDialing",
     "codecs",
+    "srtp",
     "internalDialing.mode",
     "internalDialing.patterns",
     "internalDialing.confirm",
@@ -409,6 +419,7 @@ function knownKeys(d: TrunkDraft): string[] {
     "allowedCountryCodes",
     "unknownCallerAction",
     "rejectCode",
+    "geolocation",
     "faxMode",
     "sessionTimers",
     ...d.destinations.flatMap((_, i) => [
@@ -663,12 +674,17 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          { label: "Media encryption", value: t.srtp ?? "off" },
           { label: "Caller screening", value: screeningLabel(t) },
           {
             label: "Anonymous calls",
             value: t.anonymousPolicy === "always" ? "Always" : "On request",
           },
           { label: "Fax", value: faxModeLabel(t.faxMode) },
+          {
+            label: "Emergency location",
+            value: t.geolocation ? "Sent" : "Off",
+          },
           {
             label: "Session timers",
             value: SESSION_TIMERS_LABEL[t.sessionTimers ?? "default"],
@@ -693,12 +709,17 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          { label: "Media encryption", value: t.srtp ?? "off" },
           { label: "Caller screening", value: screeningLabel(t) },
           {
             label: "Anonymous calls",
             value: t.anonymousPolicy === "always" ? "Always" : "On request",
           },
           { label: "Fax", value: faxModeLabel(t.faxMode) },
+          {
+            label: "Emergency location",
+            value: t.geolocation ? "Sent" : "Off",
+          },
           {
             label: "Session timers",
             value: SESSION_TIMERS_LABEL[t.sessionTimers ?? "default"],
@@ -1098,6 +1119,13 @@ function TrunkDrawer({
             checked={draft.messaging}
             onChange={(e) => set("messaging", e.target.checked)}
           />
+          <Switch
+            label="Send the caller's location with emergency calls"
+            hint="An emergency call through this trunk carries a Geolocation header and a PIDF-LO body (RFC 6442): the phone's own location, else the one assigned under Locations. Turn it on only for a carrier that accepts them. The request is larger than a usual SIP datagram. Off by default."
+            labelPosition="end"
+            checked={draft.geolocation}
+            onChange={(e) => set("geolocation", e.target.checked)}
+          />
           <Select
             label="Fax"
             hint="How a fax call on this trunk is carried. Passthrough keeps G.711 audio. T.38 moves the call to T.38 when the carrier offers it or the fax tone is heard; a carrier that refuses leaves it on G.711. Off refuses fax calls."
@@ -1112,6 +1140,24 @@ function TrunkDrawer({
               set("faxMode", e.target.value as TrunkDraft["faxMode"])
             }
           />
+        </fieldset>
+
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">Media encryption</legend>
+          <Select
+            id={fid("srtp")}
+            label="SRTP"
+            value={draft.srtp}
+            error={errors.srtp}
+            options={SRTP_POLICIES}
+            onChange={(e) => set("srtp", e.target.value as SrtpPolicy)}
+          />
+          <p className="cf-form__note">
+            SRTP keys travel in the call setup, so Hello offers them only on a
+            leg whose signalling is TLS. Trunk legs are UDP today: Optional
+            behaves as Off, and Required refuses calls over this trunk. Off
+            keeps plain RTP.
+          </p>
         </fieldset>
 
         <fieldset className="cf-form__section">

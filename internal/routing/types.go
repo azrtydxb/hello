@@ -80,10 +80,18 @@ type Trunk struct {
 	// ways. Off by default; an inbound MESSAGE from a trunk is refused
 	// unless this is on and the source is the trunk's.
 	Messaging bool
+	// Geolocation adds the caller's Geolocation header and PIDF-LO body to
+	// an emergency call sent through this trunk (RFC 6442; spec S-28 e).
+	Geolocation bool
 	// Codecs is the audio codec allow-list offered to the trunk, in the
 	// caller's order (names: PCMU, PCMA, G722, opus). Empty means the
 	// default, PCMU and PCMA: most carriers accept G.711 only.
 	Codecs []string
+	// SRTP is the trunk's media-encryption policy: "off" (the default),
+	// "optional" or "required" (internal/secmedia). Crypto is offered only on
+	// a leg whose signalling is TLS, which no trunk leg is yet, so "required"
+	// today refuses calls over the trunk and the other two are plain RTP.
+	SRTP string
 	// FaxMode is how the trunk carries a fax (pbx-gaps S-16): "passthrough"
 	// (G.711, the default; empty reads as passthrough), "t38" or "off".
 	FaxMode string

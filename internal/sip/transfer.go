@@ -779,7 +779,8 @@ func (c2 *call) handOverAnchored(from *call, l *leg) bool {
 	// The target is offered the caller's codecs (filtered for a trunk) and
 	// the caller is refreshed with whatever the target picks, so the pair
 	// agrees on one codec.
-	cOffer := filteredOffer(off, legCodecs(l)).Build(host, relay.LegPort(legCallee), "sendrecv")
+	relay.ResetCrypto(legCallee) // the transfer target is a new endpoint: plain RTP
+	cOffer := filteredOffer(off, legCodecs(l)).PlainOffer().Build(host, relay.LegPort(legCallee), "sendrecv")
 	cAns, ok := reinvite(l.session(), cOffer)
 	if !ok {
 		c2.addTrace("Transferred leg re-INVITE onto the anchor failed; its media follows the original offer")
@@ -791,7 +792,7 @@ func (c2 *call) handOverAnchored(from *call, l *leg) bool {
 	targetAns, _ := media.ParseAudioSDP(cAns)
 	neg := media.AnswerFor(off, targetAns)
 	c2.applyNegotiated(neg, "transfer", "")
-	aOffer := neg.Build(host, relay.LegPort(legCaller), "sendrecv")
+	aOffer := keepSecurity(relay, legCaller, neg).Build(host, relay.LegPort(legCaller), "sendrecv")
 	if aAns, ok := reinviteA(from.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
 		c2.noteSDP(sessCaller, aOffer)
@@ -816,7 +817,8 @@ func (other *call) bridgeAnchored(wB *leg) (*media.Relay, bool) {
 	if err != nil {
 		return nil, false
 	}
-	cOffer := filteredOffer(off, legCodecs(wB)).Build(host, relay.LegPort(legCallee), "sendrecv")
+	relay.ResetCrypto(legCallee) // the second party is a new endpoint: plain RTP
+	cOffer := filteredOffer(off, legCodecs(wB)).PlainOffer().Build(host, relay.LegPort(legCallee), "sendrecv")
 	cAns, ok := reinvite(wB.session(), cOffer)
 	if !ok {
 		return relay, false
@@ -827,7 +829,7 @@ func (other *call) bridgeAnchored(wB *leg) (*media.Relay, bool) {
 	targetAns, _ := media.ParseAudioSDP(cAns)
 	neg := media.AnswerFor(off, targetAns)
 	other.applyNegotiated(neg, "transfer", "")
-	aOffer := neg.Build(host, relay.LegPort(legCaller), "sendrecv")
+	aOffer := keepSecurity(relay, legCaller, neg).Build(host, relay.LegPort(legCaller), "sendrecv")
 	if aAns, ok := reinviteA(other.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
 		other.noteBridgeSDP(sessCaller, aOffer)
@@ -840,15 +842,21 @@ func (other *call) bridgeAnchored(wB *leg) (*media.Relay, bool) {
 // the media metrics keep counting one anchored session.
 func (c *call) adoptRelay(from *call, relay *media.Relay) {
 	from.mu.Lock()
+	var gauge int
+	var callerSRTP bool
 	if from.relay == relay {
 		from.relay = nil
 		from.anchored = false
+		// The node's SRTP leg gauge follows the relay to its new owner.
+		gauge, from.srtpGauge, callerSRTP = from.srtpGauge, 0, from.srtpA
 	}
 	reason, host := from.anchorReason, from.anchorHost
 	from.mu.Unlock()
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
 	c.mu.Lock()
+	c.srtpGauge += gauge
+	c.srtpA = c.srtpA || callerSRTP
 	c.relay, c.anchored, c.anchorReason = relay, true, reason
 	if c.anchorHost == "" {
 		c.anchorHost = host
