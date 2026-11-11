@@ -197,8 +197,12 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	// Call events (spec integrations I-35): consume the stream hello-sip
 	// appends to, store it, and fan it out to the SSE clients of this pod.
+	// CRM connectors (spec integrations I-47): their hook queues calls in
+	// the ingest transaction, so it is registered before the service runs.
+	crmSvc := newCRM(cfg, st, db, box, vk, metrics.Registry, nil, log)
 	evSvc := &events.Service{
-		DB: db, Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
+		Hooks: []events.TxHook{crmSvc.Hook},
+		DB:    db, Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
 		RetentionDays: cfg.EventRetentionDays, Log: log.With("component", "events"),
 		Metrics: events.NewServiceMetrics(metrics.Registry),
 	}
@@ -223,6 +227,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	go dispatcher.Run(ctx)
 	go evSvc.Run(ctx)
+	go crmSvc.Run(ctx)
 	if err := startSyslog(ctx, cfg.Syslog, st, vk, metrics.Registry, log); err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("HELLO_SYSLOG_*: %w", err)
@@ -232,6 +237,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	sweeper := &originate.Sweeper{Store: st, Live: vk, Lock: st, Log: log.With("component", "originate")}
 	go sweeper.Run(ctx)
 	apiCfg := api.Config{
+		CRM:             crmSvc.Service,
 		Events:          evSvc,
 		Webhooks:        hooks,
 		AIAgent:         agent,

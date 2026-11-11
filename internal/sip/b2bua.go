@@ -292,7 +292,7 @@ type call struct {
 	cbDone  bool
 	cbOffer []byte
 	// Fax (fax.go), guarded by mu: faxMode is the source trunk's fax mode
-	// (migration 00072) and fx the call's fax session, nil on any other call.
+	// (migration 00073) and fx the call's fax session, nil on any other call.
 	faxMode string
 	fx      *faxCall
 	faxNote string // the fax result, the CDR's reason on a call that ends normally

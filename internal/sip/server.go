@@ -239,6 +239,11 @@ type Deps struct {
 	// Fax is the fax feature (hello-fax, the fax table and the PDF store); nil
 	// answers fax calls 488 and sends nothing.
 	Fax *FaxDeps
+	// CallerNames finds an inbound caller's name in a CRM (spec integrations
+	// I-47); nil leaves the carrier's display name. CallerNameBudget bounds
+	// the wait at ringing time (DefaultCallerNameBudget when zero).
+	CallerNames      CallerNamer
+	CallerNameBudget time.Duration
 	// Published is the shared event state of PUBLISHed presence (Valkey);
 	// nil answers PUBLISH 503 (S-35).
 	Published PublishedPresence

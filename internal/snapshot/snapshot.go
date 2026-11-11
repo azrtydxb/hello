@@ -220,7 +220,7 @@ type Snapshot struct {
 	codes  map[string]FeatureCode
 	pages  map[string]PagingGroup
 	anns   map[string]string
-	// faxDests maps a fax destination name to it (migration 00072).
+	// faxDests maps a fax destination name to it (migration 00073).
 	faxDests map[string]FaxDestination
 	// confs maps a dialled number to its conference room (spec S-34).
 	confs map[string]Conference

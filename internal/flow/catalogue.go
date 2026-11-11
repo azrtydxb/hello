@@ -188,7 +188,7 @@ func buildCatalogue() Catalogue {
 	// same set: hangup, extension, ring group, voicemail, announcement,
 	// paging, IVR, queue, time condition, voicemail group and external number.
 	exit := []Target{tExt, tVoicemail, tVMGroup, tGroup, tIVR, tQueue, tAnn, tPaging, tTC, tExternal, tDirectory}
-	// An IVR key can also name a fax destination (migration 00072); the other
+	// An IVR key can also name a fax destination (migration 00073); the other
 	// exits cannot.
 	ivrKey := append(slices.Clone(exit), tFax)
 
