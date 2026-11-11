@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -209,6 +210,11 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/pickup-groups/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getPickupGroup},
 		{"PUT", "/api/v1/pickup-groups/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.putPickupGroup},
 		{"DELETE", "/api/v1/pickup-groups/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deletePickupGroup},
+		{"GET", "/api/v1/voicemail-groups", auth.ScopeRead, auth.RoleViewer, false, s.listVoicemailGroups},
+		{"POST", "/api/v1/voicemail-groups", auth.ScopeAdmin, auth.RoleAdmin, false, s.createVoicemailGroup},
+		{"GET", "/api/v1/voicemail-groups/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getVoicemailGroup},
+		{"PUT", "/api/v1/voicemail-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putVoicemailGroup},
+		{"DELETE", "/api/v1/voicemail-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteVoicemailGroup},
 		{"GET", "/api/v1/multicast-channels", auth.ScopeRead, auth.RoleViewer, false, s.listMulticastChannels},
 		{"POST", "/api/v1/multicast-channels", auth.ScopeAdmin, auth.RoleAdmin, false, s.createMulticastChannel},
 		{"GET", "/api/v1/multicast-channels/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getMulticastChannel},
@@ -216,6 +222,8 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/multicast-channels/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteMulticastChannel},
 		{"GET", "/api/v1/feature-codes", auth.ScopeRead, auth.RoleViewer, false, s.listFeatureCodes},
 		{"PUT", "/api/v1/feature-codes", auth.ScopeWrite, auth.RoleOperator, false, s.putFeatureCodes},
+		{"GET", "/api/v1/boss-links", auth.ScopeRead, auth.RoleViewer, false, s.listBossLinks},
+		{"PUT", "/api/v1/boss-links", auth.ScopeWrite, auth.RoleOperator, false, s.putBossLinks},
 
 		{"GET", "/api/v1/presence", auth.ScopeRead, auth.RoleViewer, false, s.presence},
 
@@ -276,6 +284,8 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/phones/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getPhone},
 		{"PATCH", "/api/v1/phones/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.updatePhone},
 		{"DELETE", "/api/v1/phones/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deletePhone},
+		{"PUT", "/api/v1/phones/{id}/lines/{line}", auth.ScopeWrite, auth.RoleOperator, false, s.putPhoneLine},
+		{"DELETE", "/api/v1/phones/{id}/lines/{line}", auth.ScopeWrite, auth.RoleOperator, false, s.deletePhoneLine},
 		{"POST", "/api/v1/phones/{id}/rotate-token", auth.ScopeSecrets, auth.RoleAdmin, false, s.rotatePhoneToken},
 		{"POST", "/api/v1/phones/{id}/rearm", auth.ScopeSecrets, auth.RoleAdmin, false, s.rearmPhone},
 		{"POST", "/api/v1/phones/{id}/admin-password/reveal", auth.ScopeSecrets, auth.RoleAdmin, false, s.revealAdminPassword},
@@ -289,6 +299,9 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/phones/{id}/reboot", auth.ScopeWrite, auth.RoleOperator, false, s.pushPhone(store.PushReboot)},
 		{"GET", "/api/v1/phones/{id}/pushes", auth.ScopeRead, auth.RoleViewer, false, s.listPhonePushes},
 		{"GET", "/api/v1/phone-pushes", auth.ScopeRead, auth.RoleViewer, false, s.latestPhonePushes},
+		{"GET", "/api/v1/phones/{id}/settings", auth.ScopeRead, auth.RoleViewer, false, s.listSettings(prov.ScopePhone, "phone")},
+		{"PUT", "/api/v1/phones/{id}/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.putSettings(prov.ScopePhone, "phone")},
+		{"GET", "/api/v1/phones/{id}/directory", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneDirectory},
 		{"GET", "/api/v1/phones/{id}/preview", auth.ScopeRead, auth.RoleViewer, false, s.previewPhone},
 
 		{"GET", "/api/v1/onboarding/candidates", auth.ScopeWrite, auth.RoleOperator, false, s.listOnboarding},
@@ -310,6 +323,12 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/phonebooks/{id}/entries/{entryId}", auth.ScopeWrite, auth.RoleOperator, false, s.deletePhonebookEntry},
 		{"POST", "/api/v1/phonebooks/{id}/import", auth.ScopeWrite, auth.RoleOperator, false, s.importPhonebook},
 		{"GET", "/api/v1/phonebooks/{id}/export", auth.ScopeWrite, auth.RoleOperator, false, s.exportPhonebook},
+
+		{"GET", "/api/v1/blocklist", auth.ScopeRead, auth.RoleViewer, false, s.listBlocklist},
+		{"POST", "/api/v1/blocklist", auth.ScopeWrite, auth.RoleOperator, false, s.createBlocklistEntry},
+		{"POST", "/api/v1/blocklist/import", auth.ScopeWrite, auth.RoleOperator, false, s.importBlocklist},
+		{"PUT", "/api/v1/blocklist/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.putBlocklistEntry},
+		{"DELETE", "/api/v1/blocklist/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteBlocklistEntry},
 
 		{"GET", "/api/v1/me/contacts", auth.ScopeRead, auth.RoleUser, false, s.listContacts},
 		{"POST", "/api/v1/me/contacts", auth.ScopeWrite, auth.RoleUser, false, s.createContact},
@@ -352,6 +371,54 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/me/messages", auth.ScopeWrite, auth.RoleUser, false, s.sendMyText},
 		{"GET", "/api/v1/me/messages/conversations", auth.ScopeRead, auth.RoleUser, false, s.listMyTextConversations},
 
+		// The messaging inbox (spec messaging-channels, phase 1): channels,
+		// numbers, opt-outs and settings are administrators'; /inbox is the
+		// supervisors' view of every conversation, /me/inbox an agent's own.
+		{"GET", "/api/v1/messaging/channels", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessagingChannels},
+		{"POST", "/api/v1/messaging/channels", auth.ScopeAdmin, auth.RoleAdmin, false, s.createMessagingChannel},
+		{"GET", "/api/v1/messaging/channels/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessagingChannel},
+		{"PUT", "/api/v1/messaging/channels/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putMessagingChannel},
+		{"DELETE", "/api/v1/messaging/channels/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteMessagingChannel},
+		{"POST", "/api/v1/messaging/channels/{id}/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testMessagingChannel},
+		{"GET", "/api/v1/messaging/addresses", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessagingAddresses},
+		{"POST", "/api/v1/messaging/addresses", auth.ScopeAdmin, auth.RoleAdmin, false, s.createMessagingAddress},
+		{"GET", "/api/v1/messaging/addresses/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessagingAddress},
+		{"PUT", "/api/v1/messaging/addresses/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putMessagingAddress},
+		{"DELETE", "/api/v1/messaging/addresses/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteMessagingAddress},
+		{"GET", "/api/v1/messaging/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessagingSettings},
+		{"PUT", "/api/v1/messaging/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.putMessagingSettings},
+		{"GET", "/api/v1/messaging/optouts", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessagingOptOuts},
+		{"POST", "/api/v1/messaging/optouts", auth.ScopeAdmin, auth.RoleAdmin, false, s.recordMessagingOptOut},
+		{"POST", "/api/v1/messaging/optouts/{id}/reconsent", auth.ScopeAdmin, auth.RoleAdmin, false, s.reconsentMessagingOptOut},
+		{"POST", "/api/v1/inbox/erase", auth.ScopeAdmin, auth.RoleAdmin, false, s.eraseMessagingPeer},
+
+		{"GET", "/api/v1/inbox/conversations", auth.ScopeMessages, auth.RoleOperator, false, s.listInboxConversations},
+		{"POST", "/api/v1/inbox/conversations/bulk", auth.ScopeMessages, auth.RoleOperator, false, s.bulkInboxConversations},
+		{"GET", "/api/v1/inbox/conversations/{id}", auth.ScopeMessages, auth.RoleOperator, false, s.getInboxConversation},
+		{"GET", "/api/v1/inbox/conversations/{id}/messages", auth.ScopeMessages, auth.RoleOperator, false, s.listInboxMessages},
+		{"POST", "/api/v1/inbox/conversations/{id}/messages", auth.ScopeMessages, auth.RoleOperator, false, s.sendInboxMessage},
+		{"POST", "/api/v1/inbox/conversations/{id}/notes", auth.ScopeMessages, auth.RoleOperator, false, s.addInboxNote},
+		{"POST", "/api/v1/inbox/conversations/{id}/claim", auth.ScopeMessages, auth.RoleOperator, false, s.claimInboxConversation},
+		{"POST", "/api/v1/inbox/conversations/{id}/assign", auth.ScopeMessages, auth.RoleOperator, false, s.assignInboxConversation},
+		{"POST", "/api/v1/inbox/conversations/{id}/status", auth.ScopeMessages, auth.RoleOperator, false, s.setInboxStatus},
+		{"POST", "/api/v1/inbox/conversations/{id}/tags", auth.ScopeMessages, auth.RoleOperator, false, s.setInboxTags},
+		{"POST", "/api/v1/inbox/conversations/{id}/read", auth.ScopeMessages, auth.RoleOperator, false, s.readInboxConversation},
+		{"GET", "/api/v1/inbox/stats", auth.ScopeMessages, auth.RoleOperator, false, s.inboxStats},
+
+		{"GET", "/api/v1/me/inbox/status", auth.ScopeMessages, auth.RoleUser, false, s.myInboxStatus},
+		{"GET", "/api/v1/me/inbox/agents", auth.ScopeMessages, auth.RoleUser, false, s.listMyInboxAgents},
+		{"GET", "/api/v1/me/inbox/stream", auth.ScopeMessages, auth.RoleUser, false, s.streamMyInbox},
+		{"GET", "/api/v1/me/inbox/conversations", auth.ScopeMessages, auth.RoleUser, false, s.listMyInboxConversations},
+		{"GET", "/api/v1/me/inbox/conversations/{id}", auth.ScopeMessages, auth.RoleUser, false, s.getMyInboxConversation},
+		{"GET", "/api/v1/me/inbox/conversations/{id}/messages", auth.ScopeMessages, auth.RoleUser, false, s.listMyInboxMessages},
+		{"POST", "/api/v1/me/inbox/conversations/{id}/messages", auth.ScopeMessages, auth.RoleUser, false, s.sendMyInboxMessage},
+		{"POST", "/api/v1/me/inbox/conversations/{id}/notes", auth.ScopeMessages, auth.RoleUser, false, s.addMyInboxNote},
+		{"POST", "/api/v1/me/inbox/conversations/{id}/claim", auth.ScopeMessages, auth.RoleUser, false, s.claimMyInboxConversation},
+		{"POST", "/api/v1/me/inbox/conversations/{id}/assign", auth.ScopeMessages, auth.RoleUser, false, s.assignMyInboxConversation},
+		{"POST", "/api/v1/me/inbox/conversations/{id}/status", auth.ScopeMessages, auth.RoleUser, false, s.setMyInboxStatus},
+		{"POST", "/api/v1/me/inbox/conversations/{id}/tags", auth.ScopeMessages, auth.RoleUser, false, s.setMyInboxTags},
+		{"POST", "/api/v1/me/inbox/conversations/{id}/read", auth.ScopeMessages, auth.RoleUser, false, s.readMyInboxConversation},
+
 		{"GET", "/api/v1/phone-groups", auth.ScopeRead, auth.RoleViewer, false, s.listPhoneGroups},
 		{"POST", "/api/v1/phone-groups", auth.ScopeAdmin, auth.RoleAdmin, false, s.createPhoneGroup},
 		{"GET", "/api/v1/phone-groups/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneGroup},
@@ -359,9 +426,17 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/phone-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deletePhoneGroup},
 		{"POST", "/api/v1/phone-groups/{id}/resync", auth.ScopeWrite, auth.RoleOperator, false, s.pushBulk(store.PushResync, true)},
 		{"POST", "/api/v1/phone-groups/{id}/reboot", auth.ScopeWrite, auth.RoleOperator, false, s.pushBulk(store.PushReboot, true)},
+		{"GET", "/api/v1/phone-groups/{id}/settings", auth.ScopeRead, auth.RoleViewer, false, s.listSettings(prov.ScopeGroup, "phone group")},
+		{"PUT", "/api/v1/phone-groups/{id}/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.putSettings(prov.ScopeGroup, "phone group")},
 		{"PUT", "/api/v1/phone-groups/{id}/books", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupBooks},
 		{"PUT", "/api/v1/phone-groups/{id}/multicast", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupMulticast},
 		{"PUT", "/api/v1/phone-groups/{id}/ptt", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupPTT},
+		{"PUT", "/api/v1/phone-groups/{id}/account-sharing", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupAccountSharing},
+		{"POST", "/api/v1/phone-groups/{id}/account-sharing/regenerate", auth.ScopeAdmin, auth.RoleAdmin, false, s.postPhoneGroupSharingSecret},
+
+		{"PUT", "/api/v1/phone-groups/{id}/syslog", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupSyslog},
+		{"GET", "/api/v1/phones/{id}/syslog", auth.ScopeRead, auth.RoleViewer, false, s.phoneSyslog},
+		{"GET", "/api/v1/syslog/unknown", auth.ScopeRead, auth.RoleViewer, false, s.unknownSyslog},
 		{"GET", "/api/v1/phone-groups/{id}/ldap", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneGroupLDAP},
 		{"PUT", "/api/v1/phone-groups/{id}/ldap", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupLDAP},
 

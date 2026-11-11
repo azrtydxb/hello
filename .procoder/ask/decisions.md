@@ -873,6 +873,175 @@ another group) is lifted: the ring state machine can open a new ring stage.
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
 
+## Boss and secretary (pbx-gaps B2, S-18, S-19) (2026-10-27)
+
+Built to the spec (D16): one assistant per boss, an assistant for many bosses,
+both sets of phones ring and the first answer wins, the boss's forward always
+wins over the link. The choices the spec left open:
+
+- Table `boss_links` and column `cdrs.answered_by`, migration `00065` (the
+  merge captain renumbers it). `*64` is a new feature-code action
+  `boss_divert` (CHECK widened additively through `pg_temp.hello_check_values`),
+  seeded for an existing install only when the code is free, and in
+  `DefaultFeatureCodes` for a fresh one. The spec's S-1 also lists `*74` and
+  `*75` for follow-me; they are the park codes in the defaults today, so that
+  clash is for the follow-me item to settle, not this one.
+- API: `GET|PUT /api/v1/boss-links`, a whole-list replace like the feature
+  codes (the spec names GET and PUT only). Viewers read, operators write. An
+  assistant may carry `outboundAsBoss` on one link only: with two bosses the
+  caller ID to present would be a guess, so the API refuses it, and the
+  snapshot ignores the flag if it ever finds two.
+- Runtime data rides the snapshot (`snapshot.BossLink`, enabled links only,
+  `divert_on` included). The hook is in `ringExtension`, after forward always
+  and before DND, so a boss reached by a forward, an IVR option or a
+  direct dial rings the same way. Not covered: a boss that is a ring group
+  member, a queue agent or a transfer target rings as a plain extension.
+- DND on the boss, the divert and "busy with call waiting off" silence only the
+  boss's own legs; the assistant still rings. With no registered assistant
+  device the link does not apply and the boss rings as usual, so a call is
+  never lost for want of an assistant. The assistant's own forwarding and DND
+  are not consulted: the link rings the assistant's devices.
+- `assistant_first` starts the boss's legs after `bossAssistantLead` (10 s) or
+  when a screened call is put through. The pending count includes the delayed
+  legs, so a busy assistant does not end the call before the boss has rung;
+  the cost is that the boss rings after the full 10 s even if the assistant
+  declines at once.
+- A call from the assistant to the boss (or the boss to itself) skips the link,
+  so the assistant's other desk phone is not rung for the assistant's own call.
+- Screening is a gate on the assistant's leg, before the leg can claim the call
+  (`screenLeg`, in `leg.drive`): the leg is acknowledged, the relay's callee leg
+  points at it, both legs are muted against each other, and the prompt plays to
+  the assistant while the caller keeps hearing ringback. 1 releases the boss's
+  legs and drops the assistant; 2 sends the caller to the boss's box
+  (`evScreenMessage`, handled by the setup loop so it is the only goroutine
+  that answers the caller); no key after two rounds of the prompt, or the
+  assistant hanging up, is no choice. The assistant never speaks to the caller
+  on a screened call. That is what the spec says ("1 connects to the boss"); the
+  assistant who wants to talk first uses the ordinary call, with screening off.
+  Keys come from RFC 2833 (the relay's DTMF hook) and from SIP INFO (the
+  screened leg's dialog is matched while it is being screened, `matchDialog`).
+  Screening needs the anchor and an early offer; otherwise the answer is an
+  ordinary one and the trace says so. The prompt is `boss.screen` in both
+  language tables, spoken through the voicemail speaker, a tone when none is
+  configured. Only one device of the assistant is screened at a time; another
+  that answers meanwhile is dropped.
+- IVR: a menu option that dials the boss rings the assistant too, and screening
+  is offered there as on a direct call. A menu's call always rings both sets of
+  phones at once (the ring mode does not apply), so putting a screened call
+  through has nothing to release; 2 goes to the boss's box through the menu's
+  voicemail exit.
+- Transfer: a call transferred to a boss rings the assistant's phones as well
+  (no screening, no `answered_by`, the boss's own DND and divert are not applied
+  to the transfer's legs, which is how transfers treat DND today).
+- Early decline: with `assistant_first`, once every assistant leg has ended
+  without taking the call (486, 603, unreachable, hang-up, no screening choice)
+  the boss's legs start at once (`bossAssistantFailed`), not after the 10 s.
+- Not built, and why: a boss who is a ring-group member or a queue agent rings
+  as an ordinary extension. S-18 and D16 define the link for "calls to the boss";
+  a call to a group or queue is a call to the group or queue, and no spec line
+  asks for the link there. The spec excludes: "Two or more assistants on one boss,
+  and a boss-side call-screening queue" (pbx-gaps.md, Out of scope, line 287).
+- CDR: `answered_by` is the assistant's extension when the assistant answered,
+  empty otherwise (not filled with the answering extension of every call). The
+  trace reads "Answered by assistant 300 for 200" (extension numbers, no names).
+  A screened call the assistant sent to voicemail or through has no
+  `answered_by`: the assistant never took it.
+- `*64`: dialled as a call from the boss's own phone, or inside a call, it flips
+  `divert_on` of the boss's link (computed from the snapshot, written through
+  the settings sink with the audited `ApplyFeatureUpdate`, one transaction with
+  the revision bump). Two presses before the snapshot reloads send the same
+  value; the phone hears the 200. From an extension that is no boss it is 404.
+  Metric `hello_boss_divert_total{result}` (on, off, no_link, failed). The
+  screening choices are logged with the two extension numbers only, and are in
+  the call trace.
+- Calling out as the boss: `routing.Call.CallerIDExtension` selects the
+  extension whose external number and caller-ID rule the outbound decision
+  uses; the route is still matched for the assistant's own extension, so the
+  flag grants no dialling rights.
+- Not done here: the boss's BLF
+  does not show the divert; no second assistant per boss (the spec's out of
+  scope).
+
+## Syslog sink (S-27, item 36) (2026-10-27)
+
+- **Where.** In hello-control (package `internal/syslogsink`), not a sidecar: it needs the phone table
+  and Valkey, both already there. Off unless `HELLO_SYSLOG_UDP_ADDR` or `HELLO_SYSLOG_TLS_ADDR` is set.
+  The pod binds 5514 and 6514 (non-root); Services map them to 514 and 6514.
+- **Storage.** Valkey lists in `internal/livestate/syslog.go` (it owns a test database; every Valkey
+  test database is taken): `hello:syslog:phone:<id>` capped 10000 with a 24 h TTL; unknown sources
+  under `hello:syslog:ip:<ip>` capped 1000, indexed in a sorted set bounded to 200 addresses whose
+  evicted lists are deleted in the same script.
+- **Attribution.** By source IP = `phones.last_fetch_ip`. An address two phones share is treated as
+  unknown rather than guessed. Syslog carries no reliable phone identity otherwise.
+- **Rate cap.** Token bucket per phone (per address for unknown), default 20/s burst 200; drops are
+  reported by one stored notice line instead of a counter key.
+- **Redaction.** There was no shared line redactor, so `syslogsink.Redact` combines the Authorization
+  header, credential key/value, provisioning-path and 52+ char token rules (same token shape as
+  `prov.RedactPath`), plus URL passwords. It runs before truncation and storage.
+- **Config.** Group setting in two columns on `phone_groups` (migration 00064), default off, level
+  default info; `PUT /api/v1/phone-groups/{id}/syslog` (admin). Template change is Grandstream only
+  (P207/P208, as the spec says [R8x6 TPL]); other vendors are not touched. Off is written explicitly
+  (P207 empty, P208 0) so disabling reaches phones. P208 mapping debug 1, info 2, warning 3, error 4
+  is read from the template and UNVERIFIED on hardware, as is a `host:port` in P207 (kw needs it: the
+  NodePort is 30514).
+- **kw manifest.** UDP only (no TLS cert on kw yet): `hello-syslog` NodePort 30514, traffic policy
+  Local to keep the phone address; works only on a node with a hello-control pod. Not deployed.
+- **API/UI.** `GET /api/v1/phones/{id}/syslog`, `GET /api/v1/syslog/unknown`; Syslog tab on
+  PhoneDetail, toggle and level in the phone group editor. No UI for unknown sources.
+- **Follow-ups (built).** Counters received/dropped/unmatched; a minimum-level filter on the tab (a
+  line without a priority always shows); Phones > Unknown syslog page; Yealink, Poly and snom keys
+  (all marked verify; Poly has no port so it needs UDP 514; the level scales are mapped from the guides:
+  Yealink debug and info 6, warning 4, error 3; Poly 0, 1, 4, 5). Fanvil has no documented syslog keys, so
+  none. Migration number: 00065 went to PR #236 (boss links), so this one is 00064.
+
+## Messaging inbox core (2026-10-26)
+
+Delivery item 1 of `.procoder/specs/messaging-channels.md`, built LAN-only on the
+SIP text messaging of PR #165. Migration 00063 `messaging_core`; scope `messages`
+(granted to the user, operator and admin roles, never to viewer).
+
+What is in: channels (provider `sip_trunk` only) and numbers, the conversation
+model, the idempotent ingest (event ledger, one open conversation per number and
+customer under a partial unique index), Hello's own opt-out engine with the HMAC
+residue, retention and erase, supervisor-view audit, the `EventSink` (no-op),
+`/api/v1/messaging/*`, `/api/v1/inbox/*` and `/api/v1/me/inbox/*`, the SSE
+stream, browser and email notification, the Inbox, Channels, Opt-outs and
+Settings pages. Assignment is by hand and by claim; the only route kind is
+`inbox` (the shared pool).
+
+How it ties into #165:
+
+- `inboundTrunkMessage` offers a text to `sip.ConversationGateway.InboundFromTrunk`
+  before the extension route. The gateway (hello-sip, over the control store)
+  returns handled only for an enabled number of an enabled `sip_trunk` channel on
+  that trunk; every other number takes the old path unchanged. A store failure
+  answers 503 so the carrier retries. The event key is trunk, Call-ID, CSeq,
+  sender and dialled number.
+- A reply is queued in the existing `messages` table in the same transaction as
+  the conversation message (`messages.conversation_message_id`, added here), sent
+  by the trunk of its channel from the number the customer texted. `FinishMessage`
+  and `MaintainMessages` move the message to `sent` or `failed`; with no queue row
+  left after five minutes it becomes `unknown`. A reply is never `delivered`:
+  there are no receipts on this path.
+- A reply is split at 700 bytes (the store's `MaxMessageBytes`, one UDP packet),
+  not the spec's 1000, so no part is refused for its size.
+
+Deviations from the spec text, on purpose:
+
+- The live stream wakes by polling `conversation_events` once a second per open
+  stream, not by Valkey pub/sub; the table is the source of truth either way and
+  Valkey is not needed. Event writers take an advisory lock so ids commit in
+  order and a resume by `Last-Event-ID` cannot skip one.
+- An address is matched by its lookup key, or by its last nine digits when the
+  keys differ, so a carrier that dials the number without its `+` still finds it.
+- Not in this item (later items): media tables, canned responses, typing,
+  first-contact sending, queue and user routing, the provider interface and
+  Twilio, desk-phone delivery, the chat widget, AI, export, reports.
+
+The inbox navigation stays hidden until an enabled channel has an enabled number
+(`GET /api/v1/me/inbox/status`). Message text is excluded from MCP; only
+`getInboxStats` is a tool.
+
 ## Integrations P3: click-to-call (2026-10-27)
 
 Built from spec `integrations.md` I-37 to I-39. Choices the spec left open:
@@ -1706,6 +1875,483 @@ Implementation notes (template route, no migration):
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
 
+## Multiple lines and account sharing (parity item 21, S-10 and S-11) (2026-11-09)
+
+- **Data model.** Line 1 stays `phones.device_id`. Lines 2 to 6 are rows of
+  `phone_lines (phone_id, line, device_id UNIQUE)` (migration `00052_phone_lines.sql`).
+  A device is one line of one phone (the store refuses a device that is line 1
+  or another line of any phone, and a second line of a phone on the same
+  extension). One extension on several phones (the shared line appearance) is
+  each phone binding a device of its own on the extension; hello-sip already
+  forks a call to every device of an extension, so no SIP change was needed for
+  it. No bridged line appearance (dialog-state mirroring) is built: S-10 and S-11
+  do not ask for it.
+- **API.** `PUT/DELETE /phones/{id}/lines/{line}` (`setPhoneLine`,
+  `clearPhoneLine`), `lines`/`maxLines`/`sharingRole` on the phone,
+  `PUT /phone-groups/{id}/account-sharing`. Line 1 keeps `extensionId`/`deviceId`
+  on create and update, so existing clients do not change.
+- **Line counts** (`prov.MaxLines`): Grandstream from the account blocks of its
+  own templates (config-template-10212026.zip, checked 2026-11-09): WP8x6 3
+  (`wp8x6_config_1.0.3.39` has accounts 1 to 3; its header labels account 3
+  "GRP2602/2603/2604 only", a template shared with that family, while the
+  account-sharing and default-account choices list Account 3 and the spec gives
+  the WP8x6 three: confirm the third on a handset), WP810, WP820, WP822 and
+  WP825 2 (`wp810_822_825_config_1.0.11.83` and `wp820_config_1.0.7.90` have
+  accounts 1 and 2), WP856 6 (`wp856_config_1.0.3.16` has accounts 1 to 6; this
+  was 1 before, for lack of a template); other Grandstream models 1. Yealink
+  and Snom the line-key count of the key table capped at 6; Poly and Fanvil 6.
+  The cap of 6 is Hello's, not a vendor figure. A model change that would leave
+  a phone with more lines than the new model takes is refused with 409.
+- **Keys written: only those the repo's templates already confirm.**
+  Yealink `account.N.*` (the existing Yealink template states another account
+  takes the same keys), Poly `reg.N.*` and `msg.mwi.N.*`, Snom `idx="N"` on the
+  per-identity settings, Fanvil `SIPN ...` (the Fanvil template names SIP2, SIP3).
+  Each is marked unverified in the template.
+- **Grandstream lines are written** (reversing the earlier "held, not
+  written"; the templates were not in hand then). Account N of the
+  four WP templates starts at `b = 201 + 100 N` (account 2 `P401`, 3 `P501`, 4
+  `P601`) and at `b = 1201 + 100 N` for the WP856's accounts 5 and 6 (`P1701`,
+  `P1801`). Inside it, all confirmed in the templates for every family and
+  account (checked programmatically against each file): `b` Account Active,
+  `b+1` SIP Server, `b+3` SIP User ID, `b+4` SIP Authentication ID, `b+5` SIP
+  Authentication Password, `b+6` Name, `b+11` Register Expiration (minutes),
+  `b+14` SUBSCRIBE for MWI, `b+16` Account Name, `b+23` Special Feature,
+  `b+25` Voice Mail Access Number, `b+47` SIP Transport, `b+50` to `b+55`
+  Preferred Vocoder choices 1 to 6 (`P451` to `P456` for account 2: the codec
+  keys the earlier note had only from a template comment). Other keys sit
+  100 (N - 1) above account 1's: `P2325` Feature Key Synchronization (account 2
+  `P2425`), `P2347` Accept Incoming SIP from Proxy Only (`P2447`), `P26063` call
+  waiting (`P26163`; the WP820 template has no such key, only the phone-wide
+  `P91`), `P2397` OPTIONS Keep Alive (WP8x6 only, as for line 1) and `P2329`
+  SIP URI Scheme when using TLS. Values are line 1's: Special Feature 102
+  (Broadsoft, which the feature key sync needs), `P2347` = 1 so a second line
+  is as closed as the first (S-32), call waiting 1 on / 2 off (WP856 2 on / 1
+  off, as for line 1), transport 0 / 1 / 2 for UDP / TCP / TLS (the TCP value
+  needs the SIP-over-TCP item). Not written for lines: SRTP (`P443`, `P543`,
+  WP856 `P643`, `P1743`, `P1843`, with the SRTP item), DNS SRV and backup
+  (`P408`, `P2412`, `P2433`, `P29195`, `P26140`, `P60156`, with the backup
+  item: a phone in SRV mode still registers lines 2 and up by A record until
+  those are added), RTCP-XR (`P26193`, `P60187`, `P26194`, `P26195`),
+  PUBLISH/Subscribe for Registration (`P488`, `P2419`; both off by default) and
+  send anonymous (`P421`). `TestMultiLineProvisioning` pins the keys for the WP8x6
+  (two lines), WP822/825/820, and the WP856's six, and that a seventh and a
+  third on a WP822 are not written. The deny list of the setting overrides
+  covers the identity keys of accounts 2 to 6.
+- **Account sharing (S-11).** `phone_groups.account_sharing` (the group switch)
+  and `phones.sharing_role` host|guest (default host). Corrected against
+  `wp8x6_config_1.0.3.39` ("Application/Account Sharing"): `P22521` is "Enable
+  Account Sharing" (0 No, 1 Yes, default 0) and `P22522` is "Role in Account
+  Sharing" (0 Host Device, 1 Guest Device, default 1), so they are not a
+  host/guest pair of switches. The first version wrote host 1/0 and guest 0/1,
+  which was right for a host by chance and switched sharing off for a guest.
+  Now a WP8x6 in a group with the switch on gets `P22521 = 1` and `P22522` 0
+  (host) or 1 (guest); any other WP8x6 gets `P22521 = 0`, so leaving the group
+  turns sharing off. The WP810/822/825, WP820 and WP856 templates have no such
+  key. Newly found, left at their defaults: `P22527` Group Name and `P22523`
+  Group Password (both `AccountSharing`), `P22537` SIP Server Port (15060),
+  `P22524` Account (0 Account 1, 1 Account 2, 2 Account 3, default 0) and
+  `P22525` Account Name. Every Hello group therefore shares one group name and
+  password; a per-group password would need a stored secret and is a follow-up.
+  Rejected: a per-group host/guest value (a group of handsets needs a role per
+  handset).
+- **Key placement.** On a Yealink and a Snom, line key N is account N by default,
+  so BLF and the voicemail key start after the lines (`PlaceBLFLines`). Fanvil's
+  DSS keys are on the extended screen and Poly's attendant list is unbounded, so
+  they do not shift. Line keys are not written explicitly (their types are not
+  confirmed in the repo); the phones' defaults are relied on.
+- **hello-sip.** Check-sync goes to line 1's contacts and falls back to the next
+  line only while line 1 has none registered (`PushJob.Lines`), so a phone with
+  two registered lines is notified once and one with line 1 down is still
+  reached. Registration, MWI, ring tags and call handling are per device already.
+- **Unchanged and open:** an incoming INVITE has the binding's contact as
+  request URI and the dialled number in To (`b2bua.go`), so which line of a
+  multi-line phone rings depends on the phone telling its accounts apart by the
+  contact user it registered. To confirm on hardware.
+
+## Provisioning parity items 15, 18, 29, 27 and the left-out vendor keys (2026-11-09)
+
+### Item 15: setting overrides (S-12)
+
+- Table `prov_setting_overrides` (migration 00069: numbered after the 00061 to
+  00068 the open PRs use, so the PRs do not collide). One table for both scopes
+  (`group_id` or `phone_id`), secret values sealed with the scope, owner and key
+  as additional data.
+- Applied to the finished per-phone file (`ApplyOverrides`), not through the
+  template language, so an administrator's copy of a built-in gets them too.
+  Only two formats are edited: Grandstream `<Pn>` elements and Yealink
+  `key = value` lines. Poly (attributes under arbitrary element names), Snom
+  (`idx`/`perm` attributes) and Fanvil (section-scoped `KEY :value`) are
+  refused, because inserting a new key there would be a guess. They can be added
+  once their insertion rules are confirmed on a phone.
+- Deny list: the account, provisioning URL (carries the token), CA and admin
+  password keys, from what the built-in templates write for them
+  (`internal/prov/builtin/grandstream/device.xml`, `yealink/device.cfg`).
+- Grandstream keys reachable through overrides, checked 2026-11-09 against
+  Grandstream's own templates (config-template-10212026.zip): the numbers and
+  values below replace the earlier "unconfirmed" note, which was written without
+  the templates. Still no first-class fields (database, API, console) for side
+  keys or speed dials: the overrides carry them, and building fields is a
+  product decision rather than a missing key.
+  - Speed dial, WP810/822/825 (`wp810_822_825_config_1.0.11.83`, section "P
+    values not on WEB"): `P23001` account (0 Account 1, 1 Account 2) and
+    `P23003` number (up to 64 characters, must match the dial plan) for key 0;
+    keys 2 to 9 are `P23011`/`P23013`, `P23016`/`P23018`, `P23021`/`P23023`,
+    `P23026`/`P23028`, `P23031`/`P23033`, `P23036`/`P23038`,
+    `P23041`/`P23043`, `P23046`/`P23048`. The WP820 template lists the same
+    numbers commented out (`wp820_config_1.0.7.90`, "Handset/Speed Dial") and
+    adds the multi-function button: `P22258` function (0 PTT/Paging, 1 Mute, 2
+    SAFE/Panic call, 3 Speed dial, 4 Disable), `P23051` account, `P23053`
+    number. The same `P23001`/`P23003` in `wp856_config_1.0.3.16` are the
+    account and user ID of expansion key 1 (`P23000` is its mode, 0 Speed Dial,
+    1 BLF, 4 Speed Dial via active account, 5 DialDTMF, 8 Call Transfer, 9
+    CallPark, 10 Call Intercom, 13 Multicast Paging, 15 Speed Conference, 16
+    Dial prefix, 17 Send URL): a different feature, not the handset speed dial.
+    The WP8x6 template has no speed dial key.
+  - Off-hook auto dial `P71` (string, up to 512 characters) and its delay
+    `P8388` (WP810/822/825: 0 to 30, default 4; WP820: 0 to 60): in those two
+    templates and `ht813_config_1.0.19.6` (`P71`), not in the WP8x6 or WP856.
+  - Wallpaper `P2916` (0 Default, 1 Download, 2 Uploaded) and `P2917` (server
+    path): `wp810_822_825_config_1.0.11.83` and `wp820_config_1.0.7.90` only.
+  - `P82281` VoWLAN Target Delay (0 low, 1 medium, 2 high, default 0):
+    `wp8x6_config_1.0.3.39` and `wp810_822_825_config_1.0.11.83`.
+  - `P82269` Wi-Fi power saving: the two templates disagree on the values, so
+    the key is correct but the value is not portable. WP8x6: 0 Generic, 1
+    Disabled, 2 U-APSD. WP810/822/825: 0 Optimum, 1 Relaxed Fast-PS, 2 Disable
+    During Calling, 3 Disable. Not in the WP820 or WP856 templates.
+  - `P25438` Wi-Fi Band (0 5G and 2.4G, 1 2.4G, 2 5G): `wp8x6_config_1.0.3.39`
+    only. The WP820 uses two flags, `P25420` (2.4G) and `P25421` (5G), both 1 by
+    default.
+  - Side key `P82317`: `wp8x6_config_1.0.3.39` "Side Key Funtions", 0
+    PTT/Paging, 2 Alarm, 4 None (default 0; the alarm value, 2, was unknown
+    before). `wp856_config_1.0.3.16` calls it the PTT button with different
+    values (0 PTT, 1 Mute, 3 Speed Dial, 4 Disable, 5 Scan, 6 Open the app) and
+    adds `P82318` account (-1 dynamic, 0 to 5), `P82319` value and `P82320`
+    description, and the left button `P82321` to `P82324` (default 5) and right
+    button `P82325` to `P82328` (default 5). Hello writes `P82317 = 0` for a
+    WP8x6 and a WP856 with PTT, which is PTT/Paging in both.
+  - `TestOverrideWPKeys` renders each of these through the overrides. The
+    deny list now also holds the identity keys of accounts 2 to 6 (active,
+    server, user, auth ID, password, name, account name: `P401`, `P501`,
+    `P601`, `P1701`, `P1801` and the offsets 0, 1, 3, 4, 5, 6, 16 in the WP8x6,
+    WP810/822/825, WP820 and WP856 templates), which the lines of item 21 write.
+    Speed dials replacing BLF on WP stay unbuilt as a feature.
+
+### Item 18: vCard phonebook slot (S-31), partial
+
+- Already on main: the model caps (WP822 500, WP8x6 1000) in `FormatForModel`,
+  truncation of the tail of the delivery order, and P330 = 3, P331 without a
+  scheme, P332 clamped to 5 to 720 (`BookRefreshFor`), P333 = 1.
+- Built: `pb/0.vcf` (vCard 3.0, RFC 2426, folded at 75 octets) for the WP816,
+  WP826 and WP836; `GET /api/v1/phones/{id}/directory` (delivered, capacity,
+  dropped) and the warning on the phone page.
+- Source for the vCard slot: the WP816/WP826/WP836 Administration Guide
+  (documentation.grandstream.com/knowledge-base/wp8x6-administration-guide/,
+  Phonebook: "Download vCard Phonebook", "Upload vCard Phonebook"). It names a
+  web page upload only, so the slot is unused by the template (spec: "unused by
+  default"). The vCard version the phone exports is not documented; 3.0 is the
+  widest-read form and is **verify** on a phone.
+- The two settings the Administration Guide names are in Grandstream's own
+  configuration templates (config-template-10212026.zip, 2026-11-09 review), so
+  they are written: `P333` "Remove Manually-edited Entries on Download" (0 No, 1
+  Yes, default 1) is in `wp8x6_config_1.0.3.39` and
+  `wp810_822_825_config_1.0.11.83` (confirmed; already written as 1);
+  `P8462` "Import Group Method" (0 Replace, 1 Append, default 0) is in
+  `wp8x6_config_1.0.3.39` only (newly found, written 0). `wp820_config_1.0.7.90`
+  and `wp856_config_1.0.3.16` have neither; they have `P1435` "Clear The Old
+  List" (0 No, 1 Clear all, 2 Keep Local Contacts, default 0) and `P1436`
+  "Replace Duplicate Items" (WP820 default 0, WP856 default 1: 0 No, 1 by name,
+  2 by number) in "Download Contacts". `P1435 = 1` is written for those two, the
+  same effect as `P333 = 1`, and `P333` is no longer written to a WP820, which
+  has no such key (corrected). `P1436` stays at its default.
+- Corrected: `P332` on the WP820 and WP856 takes only 0, 5, 30, 60, 120, 240,
+  360, 480 or 720 (both templates), not any value from 5 to 720; the WP820 now
+  gets the WP856's rounding (`BookRefreshForPhone`). `P330` is 3 for HTTPS in
+  every WP template, though the numbers 1 and 2 differ (WP8x6 1 HTTP, 2 TFTP;
+  WP856 1 TFTP, 2 HTTP). The firmware gate "1.0.3.24 and later" is not checked:
+  the page simply does not exist on older firmware.
+
+### Item 29: backup and secondary servers (S-20), partial
+
+- Sources for the Grandstream P-values: first read from the Pvalue-annotated
+  copies of Grandstream's templates in the FusionPBX repository, then checked on
+  2026-11-09 against Grandstream's own configuration templates
+  (config-template-10212026.zip), which replace the third-party copies as the
+  source. Result per key:
+  - `P103` DNS Mode (0 A Record, 1 SRV, 2 NAPTR/SRV; the WP8x6 and WP810/822/825
+    add 3 Use Configured IP) confirmed in `wp8x6_config_1.0.3.39`,
+    `wp810_822_825_config_1.0.11.83`, `wp820_config_1.0.7.90`,
+    `wp856_config_1.0.3.16` (and `ht813_config_1.0.19.6`).
+  - `P29095` Register Before DNS SRV Fail-over (0 No, 1 Yes) confirmed in the
+    same four.
+  - `P26040` DNS SRV Failover Mode (0 Default, 1 saved one until DNS TTL, 2
+    saved one until no response, 3 failback follows the failback expiration
+    timer) confirmed in the same four, and now written `3` in SRV mode:
+    without it the failback timer of `P60056` has nothing to time (added).
+  - `P60056` Failback Timer (minutes, 1 to 64800, default 60) confirmed in the
+    WP8x6, WP820 and WP856 templates. The WP810/822/825 template lists its
+    "Failback Timer" under `P60055`, the key of "Maximum Number of SIP Request
+    Retries" (default 4) a few lines above: a mistake in that template, so
+    `P60056` is no longer written to the WP810/822/825 (corrected; it keeps its
+    default of 60 minutes).
+  - `P48` Outbound Proxy and `P2333` confirmed in all four ("Secondary Outbound
+    Proxy" in the WP8x6, WP820 and WP856; "Backup Outbound Proxy" in the
+    WP810/822/825). Newly found: `P2312` "Secondary SIP Server" in the WP8x6,
+    WP810/822/825 and WP856 templates (not the WP820), the registrar-level
+    counterpart of Yealink's `sip_server.2` and Poly's `server.2`; written with
+    the backup next to the outbound proxy pair. Also newly found: `P2308` Primary
+    IP, `P2309` Backup IP 1 and `P2310` Backup IP 2 (DNS mode 3, at most 15
+    characters, so IPv4 without a port): they would give a second backup but
+    cannot carry a port, so they are not used. Account 2 is `P402`, `P403`,
+    `P2412`, `P2433`, `P408`, `P29195`, `P60156`, `P26140` in the WP8x6 (account
+    3 `P502`...), left to item 21.
+    Every one stays **verify** on a phone.
+- Yealink `account.N.sip_server.2.address/port/transport_type/expires` and Poly
+  `reg.N.server.2.address/port/transport/expires` are confirmed the same way
+  (the T7x and VVX templates in the same repository) and are the same key
+  families the Hello templates already use for server 1.
+- Left out: Snom and Fanvil backup keys (snom `user_outbound` has an `idx` for
+  the line, not a second registrar; no Fanvil key found), SRV mode for Yealink
+  and Poly (their SRV setting is DNS-NAPTR, which is not plain SRV), the WP822's
+  RN-only keys beyond the ones above, a second backup (Grandstream has one
+  backup proxy slot and one secondary SIP server; P2308 to P2310 hold at most
+  15-character IPs), and a chart
+  that publishes DNS (Hello cannot manage DNS: the record set is documented).
+- The backup list is an explicit setting, not read from an HA node list: on main
+  hello-control has no list of the SIP nodes phones can use (the Kamailio pair
+  PRs are not merged). The default stays A-record mode; `P103 = 0` is written to
+  every Grandstream file so leaving SRV mode reverts.
+
+### Item 27: provisioning hardening (S-22, S-32)
+
+- TR-069 off is included: the user approved it explicitly on 2026-11-09 (the
+  completion plan's open question). Grandstream WP: P1409 = 0 and an empty
+  P4503; Yealink: `static.managementserver.enable = 0`.
+- Keys and values, checked on 2026-11-09 against Grandstream's own configuration
+  templates (config-template-10212026.zip: `wp8x6_config_1.0.3.39`,
+  `wp810_822_825_config_1.0.11.83`, `wp820_config_1.0.7.90`,
+  `wp856_config_1.0.3.16`), which replace the FusionPBX copies the first version
+  was written from:
+  - Confirmed in all four, value meaning as written: `P1409` Enable TR-069 (0
+    No; the WP810/822/825 default is 1), `P4503` ACS URL (written empty; the
+    WP8x6 and WP810/822/825 default is `https://acs.gdms.cloud`), `P8469` Enable
+    User Web Access (0 Disabled), `P2347` Accept Incoming SIP from Proxy Only
+    (1 Yes; the WP820 calls it "Only Accept SIP Requests from Known Servers"),
+    `P26015` Allow SIP Reset (0 No). `P276` SSH: the templates ask the question
+    both ways, "Enable SSH. 0 Yes, 1 No" in the WP8x6, WP820 and WP856 and
+    "Disable SSH. 0 No, 1 Yes" in the WP810/822/825, so `1` is SSH off in all.
+  - Corrected, written only where the template has the key: `P1357`
+    Configuration via Keypad Menu is in the WP8x6, WP810/822/825 and WP820, not
+    the WP856, and `1` is "Basic settings only" in all three (the WP810/822/825
+    has `4` Basic and Network Settings, the WP820 `3` Basic settings and Network
+    settings; either keeps Wi-Fi setup on the keypad, `1` stays per the spec and
+    the Wi-Fi question stays a hardware check). `P1310` Direct IP Call is in the
+    WP8x6 ("Enable Direct IP Call. 0 Yes, 1 No") and WP810/822/825 ("Disable
+    Direct IP Call. 0 No, 1 Yes"), both off at `1`, and in neither the WP820 nor
+    the WP856 template.
+  - `P2347` is per account (account 2 `P2447`, account 3 `P2547`, WP856 accounts
+    4 to 6 `P2647`, `P2747`, `P2847`): the lines of item 21 must write it too,
+    or a second line accepts SIP from anywhere.
+  - Newly found, added: the firmware upgrade confirmation prompt, which holds an
+    upgrade until someone presses OK. `P8375` Firmware Upgrade Confirmation (0
+    No, 1 Yes, default 1) in `wp8x6_config_1.0.3.39`, written 0; `P84988`
+    Disable Firmware Upgrade Confirmation (0 No, 1 Yes, default 0) in
+    `wp810_822_825_config_1.0.11.83`, written 1. The WP820 and WP856 templates
+    have neither.
+- Yealink TR-069 key: Yealink's own comment in the T-series templates,
+  "Enable or disable the TR069 feature; 0-Disabled (default), 1-Enabled".
+- Left out, each now with the meaning the templates give:
+  - `P2346` Authenticate Incoming INVITE (0 No, 1 Yes, default 0; in all four
+    templates, per account: account 2 `P2446`, account 3 `P2546`) and the S-22
+    requirement that Hello answer a phone's 401 on an INVITE it originates
+    (`TestAuthenticatedInviteToPhone`). With it on the phone challenges every
+    INVITE it receives. sipgo's `WaitAnswer` answers a challenge only from a
+    plaintext password and a device leg has HA1 only; a real phone challenges in
+    its own realm (`<server host:port>`, see the resync fix), so the answer needs
+    the sealed device password as `checksync.go` now uses. That is a change to
+    the call setup path that cannot be validated without a phone. Not enabling
+    `P2346` is what keeps calls working; the template test asserts it stays
+    unwritten.
+  - `P60082` Trusted Domain Name List (string up to 256 characters; WP8x6 and
+    WP810/822/825 only) belongs to `P2311` Check Domain Certificates (RFC 5922,
+    0 No, 1 Yes) in the same security block. The templates do not give the list
+    format, and a wrong list would fail TLS registration, so neither is written.
+  - `P240` Authenticate Conf File (0 No, 1 Yes; all four) and `P1359` XML Config
+    File Password (string; all four): the HT813 template says a file "would be
+    authenticated before acceptance" with `P240` on, but no template says how
+    (Grandstream ships a config encryption tool with the bundle, and `P1359` is
+    the password it uses), and Hello serves plain files over HTTPS with a token,
+    so neither is written. `P1` is in none of the WP or HT813 templates.
+  - Snom, Fanvil and Poly TR-069/SSH keys (Fanvil's text format key not found,
+    Poly and Snom none found); outside this review.
+- The group can undo any of it with a setting override (item 15).
+
+### "Vendor template keys left out" (Poly caps/pickup, record keys, Fanvil CA, Snom/Yealink EXP, pickup values)
+
+- Result: no new key. The tracker row names five gaps without the keys they
+  need, and none could be confirmed this session:
+  - Poly caps and pickup: the UC Software Administrator Guide is script-rendered
+    and not fetchable (the same finding as `keycaps.go`); the FusionPBX Poly
+    templates use `attendant.resourceList` up to 47 entries, which is a template
+    default, not a documented limit. No BLF pickup attribute on a Poly key found.
+  - Record keys: Yealink's `bw.call_recording.mode` and
+    `account.N.call_recording.enable` are BroadSoft server-side recording, not a
+    key that sends the `*1` toggle. No Poly equivalent found. The Grandstream
+    record keys checked against Grandstream's own templates (2026-11-09):
+    `P26028`/`P26029` (Call Recording On/Off codes) and `P29066` (Record Key
+    Default Function, 0 Record On, 1 Record Off) are only in
+    `wp8x6_config_1.0.3.39`, `P6760` (Record Mode, 0 Locally, 2 on UCM, 4
+    Disabled) only in `wp856_config_1.0.3.16`: confirmed for those two families,
+    absent from the WP810/822/825 and WP820 templates (nothing to write). Mode 2
+    "on UCM" for the WP856 is a hardware check.
+  - Fanvil CA: re-checked in the FusionPBX Fanvil templates (X-series, text and
+    XML forms): no CA certificate key. Still none.
+  - Yealink and Snom expansion modules: no Yealink Administrator Guide or Snom
+    page beyond what `keycaps.go` already cites.
+  - Pickup values: unchanged.
+- Documented in `docs/provisioning.md` ("Keys deliberately not written") so the
+  gaps are visible to operators. The tracker row stays open until sources are
+  found; the setting overrides (item 15) can carry a key meanwhile.
+
+## Item 26: PRACK/100rel and anonymous outbound (2026-11-09)
+
+- 100rel is negotiated hop by hop, not relayed: Hello offers `Supported: 100rel`
+  on every INVITE it originates and PRACKs any reliable 18x from a phone or
+  trunk. Toward the caller it sends reliable provisionals only when the INVITE
+  says `Require: 100rel`; `Supported` alone gets plain responses, as phones keep
+  100rel off (P272 = 0). The 2xx waits up to 64*T1 for the PRACK. A PRACK that
+  never arrives is traced and the call is answered anyway rather than failed.
+- Anonymous outbound is trunk-leg only. It triggers on the trunk policy
+  `always`, the extension flag, or a device request (Privacy id/user/header, or
+  From `anonymous`; `Privacy: none` cancels). The leg gets an anonymous From,
+  the trunk's asserted identity in PAI or PPI (trunk setting, default PAI) and
+  `Privacy: id` merged with the device's values. A device's own PAI/PPI is
+  never forwarded.
+- The spec has no feature code for per-call anonymity, so none was added: a
+  per-call request is the device's Privacy header or anonymous From.
+- The WP "Send Anonymous" setting is found in Grandstream's own templates
+  (config-template-10212026.zip, 2026-11-09 review): `P65` "Send Anonymous
+  (caller ID will be blocked if set to Yes). 0 - No, 1 - Yes. Default is 0" for
+  account 1, in `wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`,
+  `wp820_config_1.0.7.90` and `wp856_config_1.0.3.16` (also
+  `ht813_config_1.0.19.6`); account 2 is `P421`, account 3 `P521` (WP8x6,
+  WP856). It is deliberately not written: the extension flag
+  `anonymousOutbound` is applied by Hello on trunk legs only, so a phone sending
+  an anonymous From on every call, internal ones included, would add nothing the
+  flag does not already do and would blank the caller on internal calls. A site
+  that wants one phone always anonymous sets `P65 = 1` through the S-12 per-phone
+  override. `TestAnonymousKeyNotProvisioned` pins this. Related keys in the same
+  templates, left at their defaults: `P2338` Use Privacy Header (0 Default, 1
+  No, 2 Yes), `P2339` Use P-Preferred-Identity Header (0 Default, 1 No, 2 Yes),
+  `P29098` Use P-Asserted-Identity Header (0 No, 1 Yes; WP8x6 and WP856
+  templates only), `P129` Anonymous Call Rejection (0 No, 1 Yes; Hello rejects
+  anonymous callers itself, item A1) and `P272` Enable 100rel (0 No, 1 Yes,
+  default 0, confirmed as the key behind "phones keep 100rel off").
+- Migration 00051: `extensions.anonymous_outbound`, `trunks.anonymous_policy`,
+  `trunks.asserted_identity`, `trunks.identity_header`. Replaces and call
+  waiting of the same delivery-plan item are not in this PR.
+
+## RTCP-XR collector (parity-rtcpxr, item 35, S-36) (2026-11-09)
+
+- Reports live in their own table `cdr_rtcpxr` (migration 00066), not in
+  columns on `cdrs` as the spec's Data says. A phone sends its call-end
+  report within moments of the BYE, usually before the CDR is written, and
+  the report names the phone's own leg of a B2BUA call, which is not always
+  the CDR's `sip_call_id`. The CDR therefore also stores the answering callee
+  leg's Call-ID (`cdrs.peer_call_id`) and `GetCDR` joins on either. A report
+  with no CDR yet (or ever) costs nothing.
+- One row per (dialog Call-ID, device): a later report replaces the earlier,
+  an interval report never replaces the call-end one. Kept 90 days, pruned on
+  every 1000th write. A device is held to 60 reports a minute in memory per
+  node. Remote metrics (what the far end reported) are ignored; the phone's
+  own receive-side view is the figure.
+- A malformed or out-of-range report (MOS outside 0 to 5, loss outside 0 to
+  100, no dialog id, no metrics, over 4 KiB) is answered 400 and stored not at
+  all. Wrong content type 415, other Event 489 (item 34 adds presence),
+  store down 503. The sender must authenticate as a device.
+- Vendor keys, checked against Grandstream's own configuration templates
+  (config-template-10212026.zip; 2026-11-09 review). Account 1:
+  P26093 collector name, P26094 collector address and P26095 collector port
+  (default 5060) are in `wp8x6_config_1.0.3.39`,
+  `wp810_822_825_config_1.0.11.83` and `wp856_config_1.0.3.16` (confirmed;
+  account 2 is P26193, P26194, P26195 in the same three). P60087 collector
+  address selection (0 Manual, 1 Auto) is in `wp8x6_config_1.0.3.39` and
+  `wp810_822_825_config_1.0.11.83` only (confirmed; account 2 is P60187).
+  P8489 "VQ RTCP-XR Session Report" (0 Disabled, 1 Enabled, default 0) is in
+  the same two and is newly found: without it the phone sends no call-end
+  report, so the collector would stay empty. `wp820_config_1.0.7.90` has no
+  RTCP-XR key. The earlier reading that the WP8x6 and WP856 name no such keys
+  (from release notes) was wrong: corrected, they now get the keys.
+  Template (only when `HELLO_PROV_RTCPXR=true`, default off, spec "off by
+  default"): WP8x6 and WP810/822/825 get P26093 = SIP server host, P60087 = 1,
+  empty P26094, P26095 = SIP server port, P8489 = 1; the WP856 has no Auto
+  selection and no session report key, so it gets P26093 and P26094 = SIP
+  server host and P26095, and nothing else; the WP820 and non-WP Grandstream
+  phones get none. P8490 (interval report) stays at its default off, because
+  the collector keeps the call-end report. Yealink, Poly, Snom and Fanvil are
+  not provisioned (no confirmed keys read). Behaviour is not yet seen on a
+  phone (verify: Auto with an empty address; the WP856 with the address set).
+- No MCP tool added; nothing to teach in skills/. The CDR REST read gains
+  `rtcpxr`, and the call detail page shows it beside the relay figures.
+- Merge note: `handlePublish` in `internal/sip/rtcpxr.go` owns the PUBLISH
+  route and answers 489 for other events; item 34 (presence PUBLISH) should
+  dispatch its event from there.
+
+## SIP over TCP is provisioned per model, on the UDP address (2026-11-09)
+
+Phone-feature-parity S-13 (delivery item 22). hello-sip already records the
+phone leg's transport (`X-Hello-Transport`, set by Kamailio) on the binding, and
+Kamailio already shares port 5060 between UDP and TCP, reuses the phone's
+connection for requests towards it (`phones_tcp` socket, alias with the
+protocol) and closes idle connections after an hour. What was missing was
+provisioning. `HELLO_PROV_SIP_TCP_MODELS` (same format as the TLS list, default
+none, so nothing changes until a model is listed) puts the listed models on
+transport TCP with `HELLO_PROV_SIP_SERVER`: Grandstream `P130 = 1`, Yealink
+`transport_type = 1`, Poly `TCPOnly`, Fanvil `SIP1 Transport = 1`; Snom has no
+confirmed key and stays UDP. A model in both lists uses TLS while the TLS server
+is set, and falls back to TCP when it is not. The setting is per model, not per
+device: a device that needs another transport has its model taken out of the
+list (per-device overrides belong to S-12). Helm: `control.prov.sipTcpModels`.
+Keys checked against Grandstream's own configuration templates
+(config-template-10212026.zip, 2026-11-09 review): `P130` "SIP Transport. 0 -
+UDP, 1 - TCP, 2 - TLS/TCP" is the same key with the same values in
+`wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`,
+`wp820_config_1.0.7.90`, `wp856_config_1.0.3.16` and `ht813_config_1.0.19.6`
+(confirmed). Account 2 is `P448` and account 3 `P548` in the WP8x6 (account 2 in
+the WP810/822/825 and WP820, accounts 2 to 6 in the WP856 at `P448`, `P548`,
+`P648`, `P1748`, `P1848`); lines 2 and up are item 21. Newly found and left at
+their defaults: `P2331` Use Actual Ephemeral Port in Contact with TCP/TLS
+(default 0) and `P60065` Enable TCP Keep-alive (default 1), in the same
+templates. The other vendors' keys remain from vendor notes, unconfirmed on
+hardware.
+
+## Presence extensions (item 34, S-35)
+
+- Resource list URI: `sip:blf-<device username>@<domain>`. Its members are the BLF keys of the phone bound to that device (`phones.blf`), loaded into the snapshot (`WithBLFLists`); only that device may subscribe (`403` otherwise), and the phone must send `Supported: eventlist` (`421` with `Require: eventlist`). Editing a phone's BLF keys now bumps the configuration revision so the list reaches hello-sip. No migration.
+- Datagram limit: sipgo refuses UDP packets over 1300 bytes, so a list is one full-state NOTIFY plus partial ones (RFC 4662 `fullState="false"`), and a change sends only the changed resource. At about 600 body bytes a resource, that is one resource per NOTIFY. TCP/TLS toward Kamailio (#258) would allow bigger chunks; the budget constant stays until then.
+- PUBLISH event state lives in Valkey (`hello:pubpres:<ext>:<etag>`, the publication's lifetime as TTL), so both hello-sip nodes serve, refresh and remove it. Nodes learn of the other node's PUBLISH and REGISTER by a 5 s poll of the shared state (`presencePollInterval`), plus an immediate NOTIFY for changes handled locally. Kamailio needs no change: PUBLISH and SUBSCRIBE already go to any Hello node.
+- Several publications per extension are allowed (a desk phone and a softphone); the extension is "open" if any is open, the newest note wins. With none, it is "open" while a device is registered.
+- Grandstream keys, checked against Grandstream's own configuration templates
+  (config-template-10212026.zip, 2026-11-09 review). `P188` "PUBLISH for
+  Presence" (0 Disabled, 1 Enabled, default 0; account 2 `P488`, account 3
+  `P588` in the WP8x6) and `P2319` "SUBSCRIBE for Registration" (0 No, 1 Yes,
+  default 0; account 2 `P2419`, account 3 `P2519`) are in `wp8x6_config_1.0.3.39`
+  and `wp810_822_825_config_1.0.11.83` (confirmed), and in neither
+  `wp820_config_1.0.7.90` nor `wp856_config_1.0.3.16`. The spec keeps both off for
+  the WP phones [R8x6 section 4], so the template now writes `P188 = 0` and
+  `P2319 = 0` for the WP8x6 and WP810/822/825 (a phone someone switched on goes
+  back); a test asserts the rendered keys and that the WP820 and WP856, whose
+  templates lack them, get none. No WP template has an Eventlist BLF URI, a
+  Presence Eventlist URI or a PUBLISH-for-presence list key: not in the
+  templates, so `.Line.BLFListURI` is not written to a WP. The key exists only in
+  the GRP templates (`grp26xx_config_1.0.15.23`: `P134` Eventlist BLF URI,
+  `P26084` Presence Eventlist URI, `P2389` Auto Provision Eventlists, 0
+  Disabled, 1 BLF Eventlist, 2 Presence Eventlist; account 2 `P444`, `P26184`,
+  `P2489`); Hello's non-WP Grandstream BLF block writes per-key subscriptions
+  (`P323` and on), so switching to the list is a hardware decision and is not
+  written. Yealink, Snom, Fanvil and Poly keys were not in scope and stay unwritten.
+- The spec lists no UI or REST fields for S-35, so none were added.
+- PUBLISH for events other than presence answers `489`; `vq-rtcpxr` (S-36, item 35) is not served here.
+
 ## Kamailio HA: the VIP ships off, go-live is a separate step (2026-11-09)
 
 The user's deploy constraint: the PRs of kamailio-ha get merged ready, but the
@@ -1793,6 +2439,23 @@ so the VIP stage cannot sit in that file.
 - Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
 - Account sharing group password: shared default `AccountSharing`, or a per-group secret
 
+## Flow canvas P7: node badges and extensible kinds (2026-11-09)
+
+- **What was already done.** The graph side of P7, the batch ops for every
+  merged object (`TestBatchCoverage`), time conditions with override in the
+  trace (P5) and the catalogue guards were on main. The one visible gap was the
+  badges: the server sent `summary.forced` / `summary.generated` but the canvas
+  drew them as plain text.
+- **Badges are rules, not per-kind code.** `web/src/pages/flow/badges.ts` holds
+  a list of rules `(node, summary) -> badge`; `buildView` puts the result in
+  `FlowNodeData.badges` and `FlowNodeView` draws it. Override badge: a time
+  condition with `forced` shows "Override: open|closed" (tooltip says the
+  schedule is ignored). Generated badge: a TTS announcement shows "Generated".
+  A new kind (follow-me, fax, locations) adds one rule and no other web code;
+  unknown kinds already render from the catalogue.
+- **Open PRs (#272, #273, #275)** add their kinds through the checklist in
+  `internal/flow/README.md`; nothing here depends on them. No API, migration or
+  MCP change, so no conformance, count or skill update is needed.
 ## AI on the canvas may apply its own batch (2026-11-10)
 
 - Asked: should the canvas AI assistant only propose (a person applies), or may it apply?
@@ -1893,3 +2556,38 @@ Decided while building, without asking, within the spec and the brief:
   `OnPacket` / `OnDTMF` set them under it. Seen in `TestQueueCallbackReservesAgent` under `-race`.
 - Fix: the receive loop reads each hook only under the lock, as #266 and #273 already do, so
   they rebase onto this cleanly. Regression test: `relay_hook_race_test.go`.
+
+## Kamailio HA flake: "graceful loss of the active instance" (2026-11-10)
+
+- Root cause: a real handover race, not kind timing. On a graceful delete the
+  vip container releases the Lease at once, but the replacement pod is created
+  immediately and scheduled the moment the old pod frees the node's ports
+  (hostNetwork), about 1 s later. Its kube-vip starts electing while its
+  Kamailio is still starting (the startup/liveness probes do not gate the
+  election). It races the survivor, whose acquire loop retries every 1 s
+  (jitter up to 2.2 s), and sometimes wins: the VIP lands on the freshly
+  started, not yet serving instance and stays there, since it is healthy.
+- Evidence (failed runs 42784203986 and 42782832256, both TestKamailioHAChart):
+  after the graceful subtest killed the holder on node X, the next subtest's
+  holder was X again (the replacement pod); the survivor never held the VIP in
+  the 60 s the test waits ("no single holder ... skipping [X]"). In passing runs
+  the survivor took it in 0.6-2.3 s. Graceful restarts of the active pod show
+  "VIP dark at most 3.4 s" in the rolling restart for the same reason.
+- Fix (production first): `lifecycle.preStop: sleep 5` on the kamailio container
+  (chart: `kamailio.vip.handoffSeconds`, default 5, only with the VIP; same in
+  deploy/kuvryn-sync/kamailio-vip/go-live.patch). The old pod keeps the node's
+  ports for 5 s after SIGTERM, so the replacement cannot start before the
+  survivor holds the Lease. Regression test: TestKamailioHandoffPreStop.
+- kw: not affected today (the VIP is not live, kamailio pods have no vip
+  sidecar), but go-live would be, so the go-live patch carries the preStop.
+  deploy/kuvryn-sync/kw/resources.yaml itself is untouched; it needs the same
+  preStop only if the VIP is wired into it directly.
+
+## Backup tools run from PATH only (2026-11-10)
+
+- `pg_dump` and `pg_restore` are run by their names from PATH. The
+  `HELLO_BACKUP_PG_DUMP` and `HELLO_BACKUP_PG_RESTORE` overrides are removed
+  (config, README, docs/backup.md).
+- Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
+  non-static command, and no supported allow exists for it. The overrides were
+  unused: kw does not set them (checked by the user).

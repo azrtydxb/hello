@@ -97,6 +97,17 @@ func BookRefreshFor(family string, minutes int) int {
 	return minutes
 }
 
+// BookRefreshForPhone is BookRefreshFor for a phone of the given family and WP
+// model (WPFamily): the WP820 takes the WP856's set of intervals and no others
+// (wp820_config_1.0.7.90: "Number: 0, 5, 30, 60, 120, 240, 360, 480, 720"),
+// although it is in FamilyWP8xx.
+func BookRefreshForPhone(family, wp string, minutes int) int {
+	if wp == WP820 {
+		family = FamilyWP856
+	}
+	return BookRefreshFor(family, minutes)
+}
+
 // maxEmergencyNumbers bounds the list handed to a phone.
 const maxEmergencyNumbers = 10
 
