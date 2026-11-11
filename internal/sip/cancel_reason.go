@@ -61,10 +61,7 @@ func (c *call) cancelForksElsewhereExcept(except *leg) {
 		}
 		l.mu.Lock()
 		l.elsewhere = true
-		// Once the leg's 2xx is ACKed sipgo reads dcs.UA without a lock
-		// (WriteAck, Bye); the swap only matters for a CANCEL, which an
-		// ACKed leg no longer sends. l.mu orders this write before the ack.
-		if l.dcs != nil && !l.acked {
+		if l.dcs != nil {
 			l.dcs.UA = c.s.uacElsewhere
 		}
 		l.mu.Unlock()
