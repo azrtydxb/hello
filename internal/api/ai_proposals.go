@@ -42,6 +42,9 @@ func proposalJSON(p proposal.Proposal, current []json.RawMessage) map[string]any
 		if len(a.Body) > 0 {
 			m["body"] = a.Body
 		}
+		if a.Preview != nil {
+			m["preview"] = a.Preview
+		}
 		if current != nil {
 			m["current"] = raw(current[i])
 		}
@@ -53,7 +56,7 @@ func proposalJSON(p proposal.Proposal, current []json.RawMessage) map[string]any
 		"actions": actions, "hasDelete": hasDelete, "createdBy": p.CreatedBy,
 		"createdAt": p.CreatedAt, "updatedAt": p.UpdatedAt, "appliedBy": p.AppliedBy, "appliedAt": p.AppliedAt,
 		"dismissedBy": p.DismissedBy, "dismissedAt": p.DismissedAt, "dismissReason": p.DismissReason,
-		"dismissText": p.DismissText, "failure": p.Failure,
+		"dismissText": p.DismissText, "failure": p.Failure, "appliedVia": p.AppliedVia, "batchId": p.BatchID,
 	}
 }
 

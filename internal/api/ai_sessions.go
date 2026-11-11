@@ -19,7 +19,7 @@ type AIAssistant interface {
 	GetSession(ctx context.Context, u chat.User, id string) (chat.Detail, error)
 	RenameSession(ctx context.Context, u chat.User, id, title string) (chat.Session, error)
 	DeleteSession(ctx context.Context, u chat.User, id string) error
-	PostMessage(ctx context.Context, u chat.User, sessionID, content string) (messageID int64, taskID string, err error)
+	PostMessage(ctx context.Context, u chat.User, sessionID, content string, mc *chat.Context) (messageID int64, taskID string, err error)
 }
 
 // assistantUser is the caller as the assistant sees them, or false after
@@ -143,16 +143,17 @@ func (s *server) postAIMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Content string `json:"content"`
+		Content string        `json:"content"`
+		Context *chat.Context `json:"context"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	if st, ok := s.Assistant.(chat.Streamer); ok && wantsEventStream(r) {
-		s.streamAIMessage(w, r, st, u, r.PathValue("id"), in.Content)
+		s.streamAIMessage(w, r, st, u, r.PathValue("id"), in.Content, in.Context)
 		return
 	}
-	msgID, taskID, err := s.Assistant.PostMessage(r.Context(), u, r.PathValue("id"), in.Content)
+	msgID, taskID, err := s.Assistant.PostMessage(r.Context(), u, r.PathValue("id"), in.Content, in.Context)
 	if err != nil {
 		s.assistantError(w, "session", err)
 		return

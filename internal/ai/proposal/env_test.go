@@ -93,7 +93,7 @@ func newEnv(t *testing.T) *env {
 	}
 	ps := proposal.NewStore(db, val)
 	agent, _, _ := aifake.Service(t, aifake.Config())
-	h := api.Handler(api.Config{Store: st, AIAgent: agent, SIPDomain: "hello.test", SessionTTL: time.Hour, Proposals: ps})
+	h := api.Handler(api.Config{Store: st, Batches: st, AIAgent: agent, SIPDomain: "hello.test", SessionTTL: time.Hour, Proposals: ps})
 	val.SetHandler(h)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

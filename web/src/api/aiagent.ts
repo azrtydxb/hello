@@ -1,6 +1,7 @@
 // Client for the in-product AI agent (spec ai-agent): status, findings,
 // proposals, assistant sessions and tasks. Shapes follow internal/api/openapi.json.
 import { list, request } from "../api";
+import type { BatchResult, BatchWarning, FlowGraphDiff } from "./configBatch";
 
 export interface AIAgentRun {
   startedAt: string;
@@ -111,6 +112,42 @@ export interface ProposalAction {
   destructive?: boolean;
   /** For a delete: what refers to the deleted resource. */
   references?: ProposalReference[];
+  /** For applyConfigBatch: the dry run when the proposal was made. */
+  preview?: BatchPreview;
+}
+
+/** The operation of a proposal action that carries a configuration batch. */
+export const BATCH_OP = "applyConfigBatch";
+
+export interface BatchPreview {
+  baseRevision: number;
+  results: BatchResult[];
+  warnings: BatchWarning[];
+  flowDiff: FlowGraphDiff;
+}
+
+/** The batch action of a proposal, or undefined. */
+export const batchActionOf = (
+  p: AIProposal | null | undefined,
+): ProposalAction | undefined =>
+  p?.actions.find((a) => a.operationId === BATCH_OP);
+
+/** What a question asked from a call-flow canvas carries (flow-canvas S-19). */
+export interface AIMessageContext {
+  canvasId?: number;
+  nodes?: string[];
+  trace?: {
+    from: string;
+    number: string;
+    callerId?: string;
+    at?: string;
+    digits?: string;
+  };
+  /**
+   * The canvas switch "Let AI apply changes": the assistant may apply this
+   * question's change itself, as the asking user. Off (ask first) by default.
+   */
+  allowApply?: boolean;
 }
 
 export interface ProposalFailure {
@@ -142,7 +179,18 @@ export interface AIProposal {
   dismissReason: string | null;
   dismissText: string | null;
   failure: ProposalFailure | null;
+  /** `ai:<session>` when the assistant applied it for appliedBy; null when appliedBy did. */
+  appliedVia: string | null;
+  /** The configuration batch an applied batch proposal ran as (what a revert undoes). */
+  batchId: string | null;
 }
+
+/** The via of a batch the assistant applied itself for the user. */
+export const VIA_AI = "ai:";
+
+/** Whether the assistant applied this proposal itself (not a person). */
+export const appliedByAI = (p: AIProposal | null | undefined) =>
+  !!p && p.status === "applied" && !!p.appliedVia?.startsWith(VIA_AI);
 
 export type DismissReason = "not_needed" | "wrong" | "later" | "other";
 export const DISMISS_REASONS: readonly {
@@ -179,6 +227,7 @@ export interface AIMessage {
   proposalId: string | null;
   taskId: string | null;
   createdAt: string;
+  context?: AIMessageContext;
 }
 
 export type TaskState = "queued" | "running" | "succeeded" | "failed";
@@ -260,17 +309,23 @@ export const dismissProposal = (
 
 export const listSessions = (signal?: AbortSignal) =>
   list<AISession>(`${B}/sessions`, signal);
-export const createSession = () =>
-  request<AISession>("POST", `${B}/sessions`, { body: {} });
+export const createSession = (title?: string) =>
+  request<AISession>("POST", `${B}/sessions`, {
+    body: title ? { title } : {},
+  });
 export const getSession = (id: string, signal?: AbortSignal) =>
   request<AISessionDetail>("GET", `${B}/sessions/${id}`, { signal });
 export const deleteSession = (id: string) =>
   request<void>("DELETE", `${B}/sessions/${id}`);
-export const postMessage = (id: string, content: string) =>
+export const postMessage = (
+  id: string,
+  content: string,
+  context?: AIMessageContext,
+) =>
   request<{ taskId: string; messageId: number }>(
     "POST",
     `${B}/sessions/${id}/messages`,
-    { body: { content } },
+    { body: context ? { content, context } : { content } },
   );
 export const getTask = (id: string, signal?: AbortSignal) =>
   request<AITask>("GET", `${B}/tasks/${id}`, { signal });
