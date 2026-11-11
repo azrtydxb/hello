@@ -60,6 +60,11 @@ export interface Group {
   ptt?: Ptt;
   /** How the group's phones take a page and an intercom call. */
   pagingOptions?: PagingOptions;
+  /** Grandstream WP8x6 account sharing is on for the group's phones. */
+  accountSharing?: boolean;
+
+  /** Whether the group's phones send their log to Hello's syslog sink. */
+  syslog?: Syslog;
   /** The group's phones are given the LDAP directory. */
   ldapEnabled?: boolean;
   phoneCount: number;
@@ -423,6 +428,38 @@ export const setGroupMulticast = (
 ) =>
   request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/multicast`, {
     body: options ? { channels, options } : { channels },
+  });
+
+/**
+ * POST /api/v1/phone-groups/{id}/account-sharing/regenerate: replaces the
+ * group's account sharing password. The password is never returned.
+ */
+export const regenerateGroupSharingSecret = (groupId: Id) =>
+  request<Group>(
+    "POST",
+    `/api/v1/phone-groups/${seg(groupId)}/account-sharing/regenerate`,
+  );
+
+/** PUT /api/v1/phone-groups/{id}/account-sharing: switches WP8x6 account sharing on or off. */
+export const setGroupAccountSharing = (groupId: Id, enabled: boolean) =>
+  request<Group>(
+    "PUT",
+    `/api/v1/phone-groups/${seg(groupId)}/account-sharing`,
+    { body: { enabled } },
+  );
+export const SYSLOG_LEVELS = ["debug", "info", "warning", "error"] as const;
+export type SyslogLevel = (typeof SYSLOG_LEVELS)[number];
+
+/** A phone group's syslog setting; off by default. */
+export interface Syslog {
+  enabled: boolean;
+  level: SyslogLevel;
+}
+
+/** PUT /api/v1/phone-groups/{id}/syslog: sets the group's syslog setting. */
+export const setGroupSyslog = (groupId: Id, syslog: Syslog) =>
+  request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/syslog`, {
+    body: { enabled: syslog.enabled, level: syslog.level },
   });
 
 /** GET|PUT /api/v1/phone-groups/{id}/ldap (pbx-gaps S-26). */

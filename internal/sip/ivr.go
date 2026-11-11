@@ -200,6 +200,7 @@ func (c *call) soloAnswer(phase, detail, what string) bool {
 		res.AppendHeader(h)
 	}
 	s.m.response(sip.StatusOK)
+	c.settleReliable(true)
 	if err := c.dss.WriteResponse(res); err != nil {
 		if c.dss.LoadState() == sip.DialogStateEnded {
 			// The caller's BYE overtook its ACK: handleBye has accepted it
@@ -358,6 +359,8 @@ func (c *call) ivrLeave(ctx context.Context, snap *snapshot.Snapshot, m snapshot
 		return "", true
 	case snapshot.IVRVoicemail:
 		return c.ivrVoicemailExit(ctx, snap, d.Target, "ivr")
+	case snapshot.IVRVoicemailGroup:
+		return c.ivrVoicemailGroupExit(ctx, snap, d.Target)
 	case snapshot.IVRExtension, snapshot.IVRRingGroup, snapshot.IVRExternal:
 		res := c.ivrDial(ctx, snap, m, d)
 		return res.menu, res.kind == ivrConnected || res.kind == ivrFinished
@@ -996,6 +999,11 @@ func (c *call) ivrRing(ctx context.Context, forks []ivrFork, hunt bool, total ti
 				c.noteRinging(ev.leg.binding.Extension)
 			case evAnswered:
 				return ev.leg, false
+			case evScreenMessage:
+				// A screened assistant chose the boss's voicemail.
+				c.noteBossMessage()
+				giveUp()
+				return nil, false
 			case evFailed:
 				if isBusy(ev.code) {
 					busy++
@@ -1034,12 +1042,18 @@ func (c *call) ivrRing(ctx context.Context, forks []ivrFork, hunt bool, total ti
 // is already up on the relay's caller leg; the callee's answer aims the
 // relay's callee leg.
 func (c *call) ivrConnect(w *leg, ext string) ivrResult {
+	// The assistant's answer is recorded before the boss's phone is
+	// cancelled: the caller is already connected to the menu and may hang up
+	// the moment the CANCEL is seen, and the CDR written by that hangup must
+	// already name who answered.
+	c.noteBossAnswer(w)
 	c.cancelForks(w)
 	dcs := w.session()
 	bres := dcs.InviteResponse
 	w.ack(nil, "")
 	if hom := c.homed(); hom != nil && !c.ivrHomeCallee(hom, w) {
 		w.bye()
+		c.clearBossAnswer()
 		c.addTrace("IVR: the new leg could not be taken into the recovered call")
 		c.setIVRUnrecoverable()
 		return ivrResult{kind: ivrFailed}
@@ -1111,7 +1125,10 @@ func (c *call) ivrRingExtension(ctx context.Context, snap *snapshot.Snapshot, ex
 		}
 		return ivrResult{kind: ivrFailed, why: "extension " + ext + " is " + reason}
 	}
-	if e.DND {
+	// A boss's call rings the assistant too (boss.go); screening is not
+	// offered to a menu's call, where the assistant answers as for any call.
+	assist, screen, divert := c.ivrAssistant(snap, ext)
+	if e.DND && len(assist) == 0 {
 		c.addTrace(fmt.Sprintf("Extension %s is DND", ext))
 		if c.voicemailConfigured(e) {
 			return voicemail("dnd")
@@ -1121,6 +1138,12 @@ func (c *call) ivrRingExtension(ctx context.Context, snap *snapshot.Snapshot, ex
 	targets, err := c.extensionBindings(snap, ext)
 	if err != nil {
 		return ivrResult{kind: ivrFailed, why: "live state unavailable"}
+	}
+	if len(assist) > 0 {
+		if e.DND || divert {
+			targets = nil // the boss's own phones are silenced
+		}
+		targets = append(targets, assist...)
 	}
 	if len(targets) == 0 {
 		switch {
@@ -1134,7 +1157,8 @@ func (c *call) ivrRingExtension(ctx context.Context, snap *snapshot.Snapshot, ex
 	forks := make([]ivrFork, len(targets))
 	for i, b := range targets {
 		b := b
-		forks[i] = ivrFork{mk: func(stage int) *leg { return c.addLeg(&leg{binding: b, stage: stage}) }}
+		scr := screen && len(assist) > 0 && b.Extension != ext
+		forks[i] = ivrFork{mk: func(stage int) *leg { return c.addLeg(&leg{binding: b, stage: stage, screen: scr}) }}
 	}
 	c.addTrace("IVR: ringing extension " + ext)
 	w, busyAll := c.ivrRing(ctx, forks, false, c.s.cfg.RingTimeout)
@@ -1143,6 +1167,9 @@ func (c *call) ivrRingExtension(ctx context.Context, snap *snapshot.Snapshot, ex
 	}
 	if w != nil {
 		return c.ivrConnect(w, ext)
+	}
+	if c.bossMessageChosen() {
+		return voicemail("no-answer")
 	}
 	switch {
 	case busyAll && e.ForwardBusy != "":

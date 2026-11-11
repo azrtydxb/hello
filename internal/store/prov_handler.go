@@ -186,15 +186,15 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	var (
 		d                          prov.RenderData
 		tokenEnc, adminEnc, secEnc []byte
-		devID, tplID               sql.NullInt64
+		devID, tplID, groupID      sql.NullInt64
 		blfJSON                    []byte
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT p.mac, p.vendor, p.model, p.label, p.token_enc, p.admin_password_enc, p.template_id, p.blf,
-		       d.id, d.sip_username, d.secret_enc, e.name, e.number, COALESCE(e.call_waiting, TRUE), NOT COALESCE(e.voicemail_enabled, TRUE)
+		SELECT p.mac, p.vendor, p.model, p.label, p.token_enc, p.admin_password_enc, p.template_id, p.blf, p.group_id,
+		       d.id, d.sip_username, d.secret_enc, e.name, e.number, COALESCE(e.call_waiting, TRUE), NOT COALESCE(e.voicemail_enabled, TRUE), COALESCE(e.phone_send_anonymous, FALSE)
 		FROM phones p LEFT JOIN devices d ON d.id = p.device_id LEFT JOIN extensions e ON e.id = d.extension_id
 		WHERE p.id = $1`, phoneID).Scan(&d.Phone.MAC, &d.Phone.Vendor, &d.Phone.Model, &d.Phone.Label, &tokenEnc, &adminEnc,
-		&tplID, &blfJSON, &devID, nullStr(&d.Line.Username), &secEnc, nullStr(&d.Line.DisplayName), nullStr(&d.Line.Label), &d.Line.CallWaiting, &d.Line.NoVoicemail)
+		&tplID, &blfJSON, &groupID, &devID, nullStr(&d.Line.Username), &secEnc, nullStr(&d.Line.DisplayName), nullStr(&d.Line.Label), &d.Line.CallWaiting, &d.Line.NoVoicemail, &d.Line.SendAnonymous)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, prov.Template{}, prov.ErrNotFound
 	}
@@ -222,6 +222,12 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 		return d, prov.Template{}, prov.ErrSealed
 	}
 	d.Line.AuthName, d.Line.Domain = d.Line.Username, s.prov.Domain
+	if d.Lines, err = s.renderLines(ctx, phoneID); err != nil {
+		return d, prov.Template{}, err
+	}
+	if d.Sharing, err = s.phoneSharing(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
+		return d, prov.Template{}, err
+	}
 	if err := s.db.QueryRowContext(ctx, `SELECT
 		COALESCE(min(code) FILTER (WHERE action = 'voicemail' AND argument = ''), ''),
 		COALESCE(min(code) FILTER (WHERE action = 'park'), ''),
@@ -253,7 +259,13 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Multicast, d.PTT, d.Paging, err = s.multicastInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
 		return d, prov.Template{}, err
 	}
+	if d.Syslog, err = s.syslogInfo(ctx, phoneID); err != nil {
+		return d, prov.Template{}, err
+	}
 	if d.BLF, err = s.blfKeys(ctx, blfJSON); err != nil {
+		return d, prov.Template{}, err
+	}
+	if d.Overrides, err = s.renderOverrides(ctx, phoneID, groupID, d.Phone.Vendor); err != nil {
 		return d, prov.Template{}, err
 	}
 	if d.Firmware, err = s.pinnedFirmware(ctx, d.Phone.Vendor, d.Phone.Model, d.Prov.URL); err != nil {

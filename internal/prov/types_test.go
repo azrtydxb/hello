@@ -29,23 +29,56 @@ func checkList(t *testing.T, sql, table, column string) []string {
 	return out
 }
 
-// latestList is the prov_fetches list of column (kind or result) as the
-// newest migration that redefines it accepts: 00012 added the "phonebook"
-// kind, 00052 the "scep" kind and the scep_issued and scep_refused results.
-func latestList(t *testing.T, column string) []string {
+// latestKindList is the prov_fetches.kind list the newest migrations that
+// redefine it accept (00012 added "phonebook"; 00052 and 00073 widened it
+// with hello_check_values, the kinds each adds going before "other", which
+// closes the Go list).
+func latestKindList(t *testing.T) []string {
 	t.Helper()
-	// 00078 (SCEP) is the newest migration that redefines both prov_fetches
-	// lists, and it carries every value the earlier migrations added.
-	b, err := os.ReadFile("../../migrations/00078_scep_dot1x.sql")
+	b, err := os.ReadFile("../../migrations/00012_prov_fetch_phonebook.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	up, _, _ := strings.Cut(string(b), "-- +goose Down")
-	m := regexp.MustCompile(`(?s)prov_fetches_` + column + `_check\s+CHECK \(` + column + ` IN \(([^)]*)\)`).FindStringSubmatch(up)
+	m := regexp.MustCompile(`CHECK \(kind IN \(([^)]*)\)`).FindStringSubmatch(up)
 	if m == nil {
-		t.Fatalf("00078 has no %s IN list", column)
+		t.Fatal("00012 has no kind IN list")
 	}
 	var out []string
+	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
+		out = append(out, q[1])
+	}
+	for _, f := range []string{"00052_ringtones.sql", "00073_scep_dot1x.sql"} {
+		b, err = os.ReadFile("../../migrations/" + f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		up, _, _ = strings.Cut(string(b), "-- +goose Down")
+		m = regexp.MustCompile(`'prov_fetches', 'prov_fetches_kind_check',\s+ARRAY\[([^\]]*)\]`).FindStringSubmatch(up)
+		if m == nil {
+			t.Fatalf("%s does not widen the kind list", f)
+		}
+		for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
+			out = slices.Insert(out, len(out)-1, q[1])
+		}
+	}
+	return out
+}
+
+// latestResultList is the prov_fetches.result list: 00006's, then the
+// results 00073 adds with hello_check_values (the SCEP results).
+func latestResultList(t *testing.T, base []string) []string {
+	t.Helper()
+	b, err := os.ReadFile("../../migrations/00073_scep_dot1x.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, _, _ := strings.Cut(string(b), "-- +goose Down")
+	m := regexp.MustCompile(`'prov_fetches', 'prov_fetches_result_check',\s+ARRAY\[([^\]]*)\]`).FindStringSubmatch(up)
+	if m == nil {
+		t.Fatal("00073 does not widen the result list")
+	}
+	out := slices.Clone(base)
 	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
 		out = append(out, q[1])
 	}
@@ -86,8 +119,11 @@ func TestContractMatchesMigration(t *testing.T) {
 		{"prov_fetches", "result", strs(Results)},
 	} {
 		got := checkList(t, sql, tc.table, tc.column)
-		if tc.table == "prov_fetches" {
-			got = latestList(t, tc.column) // widened by later migrations
+		if tc.table == "prov_fetches" && tc.column == "kind" {
+			got = latestKindList(t) // widened by later migrations
+		}
+		if tc.table == "prov_fetches" && tc.column == "result" {
+			got = latestResultList(t, got)
 		}
 		if !slices.Equal(got, tc.want) {
 			t.Errorf("%s.%s CHECK = %v, Go contract = %v", tc.table, tc.column, got, tc.want)

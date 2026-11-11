@@ -852,12 +852,13 @@ func TestFirmwareHosting(t *testing.T) {
 func TestMaskSecrets(t *testing.T) {
 	token := strings.Repeat("a2", 26)
 	d := prov.RenderData{
-		Phone:    prov.Phone{AdminPassword: "admin-pw"},
-		Line:     prov.Line{Password: "sip-secret"},
-		Prov:     prov.ProvInfo{URL: testPublicURL + "/p/" + token + "/"},
-		Firmware: &prov.FirmwareInfo{URL: testPublicURL + "/p/" + token + "/fw/x.rom"},
-		Book:     prov.NewBookInfo(testPublicURL+"/p/"+token+"/", []string{"Extensions", "Company"}, prov.DefaultBookRefresh),
-		SCEP:     &prov.SCEPInfo{URL: testPublicURL + "/p/" + token + "/scep", Challenge: "scep-challenge"},
+		Phone:     prov.Phone{AdminPassword: "admin-pw"},
+		Line:      prov.Line{Password: "sip-secret"},
+		Overrides: []prov.Override{{Key: "P71", Value: "plain"}, {Key: "P9999", Value: "ovr-secret", Secret: true}},
+		Prov:      prov.ProvInfo{URL: testPublicURL + "/p/" + token + "/"},
+		Firmware:  &prov.FirmwareInfo{URL: testPublicURL + "/p/" + token + "/fw/x.rom"},
+		Book:      prov.NewBookInfo(testPublicURL+"/p/"+token+"/", []string{"Extensions", "Company"}, prov.DefaultBookRefresh),
+		SCEP:      &prov.SCEPInfo{URL: testPublicURL + "/p/" + token + "/scep", Challenge: "scep-challenge"},
 	}
 	wired := prov.NewDot1XProfile(1, "LAN", prov.Dot1XPEAP, "{mac}", "", "dot1x-pw", "", "", "c074ad112233", true)
 	d.Dot1X = &prov.Dot1XInfo{Wired: &wired, Profiles: []prov.Dot1XProfile{wired}}
@@ -867,10 +868,13 @@ func TestMaskSecrets(t *testing.T) {
 	if d.SCEP.URL != testPublicURL+"/p/"+mask+"/scep" || dx.Wired.Password != "dot1x-pw" || dx.Profiles[0].Password != "dot1x-pw" {
 		t.Fatalf("SCEP URL %s, or masking changed the caller's 802.1X value in place", d.SCEP.URL)
 	}
-	for _, s := range []string{token, "admin-pw", "sip-secret", "scep-challenge", "dot1x-pw"} {
+	for _, s := range []string{token, "admin-pw", "sip-secret", "ovr-secret", "scep-challenge", "dot1x-pw"} {
 		if bytes.Contains(b, []byte(s)) {
 			t.Fatalf("masked data still holds %q: %s", s, b)
 		}
+	}
+	if d.Overrides[0].Value != "plain" {
+		t.Fatalf("a plain override was masked: %+v", d.Overrides)
 	}
 	if d.Prov.URL != testPublicURL+"/p/"+mask+"/" || d.Firmware.URL != testPublicURL+"/p/"+mask+"/fw/x.rom" {
 		t.Fatalf("masked URLs = %s, %s", d.Prov.URL, d.Firmware.URL)

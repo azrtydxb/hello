@@ -85,28 +85,73 @@ ALTER TABLE phone_groups
     ADD COLUMN wired_dot1x_id     BIGINT  REFERENCES dot1x_profiles (id) ON DELETE RESTRICT;
 
 -- The SCEP endpoint is audited like every other provisioning request.
-ALTER TABLE prov_fetches DROP CONSTRAINT prov_fetches_kind_check;
-ALTER TABLE prov_fetches ADD CONSTRAINT prov_fetches_kind_check
-    CHECK (kind IN ('common','device','master','firmware','ca','boot','upload','phonebook','scep','ringtone','other'));
-ALTER TABLE prov_fetches DROP CONSTRAINT prov_fetches_result_check;
-ALTER TABLE prov_fetches ADD CONSTRAINT prov_fetches_result_check
-    CHECK (result IN ('served','not_modified','unknown_token','mac_mismatch',
-                      'not_allowlisted','plain_http','rate_limited','no_template',
-                      'render_error','boot_served','boot_handoff','boot_reclaim',
-                      'boot_denied','upload_discarded','not_found','unavailable',
-                      'scep_issued','scep_refused'));
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION pg_temp.hello_check_values(tbl regclass, cname text, add_vals text[], drop_vals text[])
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE
+    def  text;
+    col  text;
+    vals text[];
+BEGIN
+    SELECT pg_get_constraintdef(c.oid) INTO def
+      FROM pg_constraint c WHERE c.conrelid = tbl AND c.conname = cname;
+    IF def IS NULL THEN
+        RAISE EXCEPTION 'constraint % on % not found', cname, tbl;
+    END IF;
+    col := substring(def FROM '^CHECK \(+([a-z_]+) = ANY');
+    IF col IS NULL THEN
+        RAISE EXCEPTION 'constraint % on % has an unexpected form: %', cname, tbl, def;
+    END IF;
+    SELECT array_agg(m[1]) INTO vals FROM regexp_matches(def, '''([^'']*)''', 'g') AS t(m);
+    SELECT array_agg(DISTINCT v ORDER BY v) INTO vals
+      FROM unnest(vals || add_vals) AS u(v) WHERE v <> ALL (drop_vals);
+    EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', tbl, cname);
+    EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I CHECK (%I IN (%s))', tbl, cname, col,
+        (SELECT string_agg(quote_literal(v), ',') FROM unnest(vals) AS u(v)));
+END
+$fn$;
+-- +goose StatementEnd
+
+SELECT pg_temp.hello_check_values('prov_fetches', 'prov_fetches_kind_check',
+    ARRAY['scep'], ARRAY[]::text[]);
+SELECT pg_temp.hello_check_values('prov_fetches', 'prov_fetches_result_check',
+    ARRAY['scep_issued','scep_refused'], ARRAY[]::text[]);
+DROP FUNCTION pg_temp.hello_check_values(regclass, text, text[], text[]);
 
 -- +goose Down
 DELETE FROM prov_fetches WHERE kind = 'scep' OR result IN ('scep_issued', 'scep_refused');
-ALTER TABLE prov_fetches DROP CONSTRAINT prov_fetches_result_check;
-ALTER TABLE prov_fetches ADD CONSTRAINT prov_fetches_result_check
-    CHECK (result IN ('served','not_modified','unknown_token','mac_mismatch',
-                      'not_allowlisted','plain_http','rate_limited','no_template',
-                      'render_error','boot_served','boot_handoff','boot_reclaim',
-                      'boot_denied','upload_discarded','not_found','unavailable'));
-ALTER TABLE prov_fetches DROP CONSTRAINT prov_fetches_kind_check;
-ALTER TABLE prov_fetches ADD CONSTRAINT prov_fetches_kind_check
-    CHECK (kind IN ('common','device','master','firmware','ca','boot','upload','phonebook','ringtone','other'));
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION pg_temp.hello_check_values(tbl regclass, cname text, add_vals text[], drop_vals text[])
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE
+    def  text;
+    col  text;
+    vals text[];
+BEGIN
+    SELECT pg_get_constraintdef(c.oid) INTO def
+      FROM pg_constraint c WHERE c.conrelid = tbl AND c.conname = cname;
+    IF def IS NULL THEN
+        RAISE EXCEPTION 'constraint % on % not found', cname, tbl;
+    END IF;
+    col := substring(def FROM '^CHECK \(+([a-z_]+) = ANY');
+    IF col IS NULL THEN
+        RAISE EXCEPTION 'constraint % on % has an unexpected form: %', cname, tbl, def;
+    END IF;
+    SELECT array_agg(m[1]) INTO vals FROM regexp_matches(def, '''([^'']*)''', 'g') AS t(m);
+    SELECT array_agg(DISTINCT v ORDER BY v) INTO vals
+      FROM unnest(vals || add_vals) AS u(v) WHERE v <> ALL (drop_vals);
+    EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', tbl, cname);
+    EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I CHECK (%I IN (%s))', tbl, cname, col,
+        (SELECT string_agg(quote_literal(v), ',') FROM unnest(vals) AS u(v)));
+END
+$fn$;
+-- +goose StatementEnd
+
+SELECT pg_temp.hello_check_values('prov_fetches', 'prov_fetches_result_check',
+    ARRAY[]::text[], ARRAY['scep_issued','scep_refused']);
+SELECT pg_temp.hello_check_values('prov_fetches', 'prov_fetches_kind_check',
+    ARRAY[]::text[], ARRAY['scep']);
+DROP FUNCTION pg_temp.hello_check_values(regclass, text, text[], text[]);
 ALTER TABLE phone_groups DROP COLUMN wired_dot1x_id, DROP COLUMN scep_validity_days, DROP COLUMN scep_enabled;
 DROP TABLE dot1x_profiles;
 DROP TRIGGER phones_scep_revoke ON phones;

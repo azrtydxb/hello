@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/phonebook"
+	"github.com/azrtydxb/hello/internal/prov"
 )
 
 // bookCols selects a book with its entry count; the extensions book counts
@@ -479,7 +480,7 @@ const phoneGroupCols = `g.id, g.name, g.description, g.include_extensions, g.inc
 	g.ptt_enabled, g.ptt_address, g.ptt_codec, g.ptt_default_channel, g.ptt_accept_busy, g.ptt_channel_id,
 	g.ptt_priority_channel, g.ptt_emergency_channel, g.group_paging_enabled, g.group_paging_default,
 	g.group_paging_priority, g.group_paging_emergency, g.paging_allow_in_dnd, g.paging_barge,
-	g.paging_priority_active, g.paging_timeout, g.intercom_barge, g.ldap_enabled`
+	g.paging_priority_active, g.paging_timeout, g.intercom_barge, g.account_sharing, g.syslog_enabled, g.syslog_level, g.ldap_enabled`
 
 func scanPhoneGroup(r interface{ Scan(...any) error }) (phonebook.Group, error) {
 	var (
@@ -491,7 +492,8 @@ func scanPhoneGroup(r interface{ Scan(...any) error }) (phonebook.Group, error) 
 		&g.PTT.Enabled, &g.PTT.Address, &g.PTT.Codec, &g.PTT.DefaultChannel, &g.PTT.AcceptBusy, &ptt,
 		&g.PTT.PriorityChannel, &g.PTT.EmergencyChannel, &g.PTT.GroupPaging, &g.PTT.DefaultGroup,
 		&g.PTT.PriorityGroup, &g.PTT.EmergencyGroup, &g.PagingOptions.AllowInDND, &g.PagingOptions.Barge,
-		&g.PagingOptions.PriorityActive, &g.PagingOptions.Timeout, &g.PagingOptions.IntercomBarge, &g.LDAPEnabled); err != nil {
+		&g.PagingOptions.PriorityActive, &g.PagingOptions.Timeout, &g.PagingOptions.IntercomBarge, &g.AccountSharing,
+		&g.Syslog.Enabled, &g.Syslog.Level, &g.LDAPEnabled); err != nil {
 		return g, err
 	}
 	g.PTT.ChannelID = nullInt(ptt)
@@ -604,6 +606,63 @@ func loadGroupChannels(ctx context.Context, q querier, gs []phonebook.Group) err
 	return prows.Err()
 }
 
+// SetPhoneGroupAccountSharing switches WP8x6 account sharing on or off for a
+// group (phone-feature-parity S-11). The group's WP8x6 phones are given
+// P22521 = 1 (Enable Account Sharing) and P22522 by their role (0 host, 1
+// guest), at their next fetch or the automatic resync; switched off, P22521 =
+// 0.
+func (s *Store) SetPhoneGroupAccountSharing(ctx context.Context, actor string, id int64, enabled bool) (phonebook.Group, error) {
+	var out phonebook.Group
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET account_sharing = $2, updated_at = now() WHERE id = $1`, id, enabled)
+		if err != nil {
+			return err
+		}
+		if err := requireRow(res); err != nil {
+			return err
+		}
+		if enabled {
+			if err := s.ensureSharingSecret(ctx, tx, id); err != nil {
+				return err
+			}
+		}
+		if out, err = getPhoneGroup(ctx, tx, id); err != nil {
+			return err
+		}
+		return insertAudit(ctx, tx, actor, "set-account-sharing", "phone_group", strconv.FormatInt(id, 10))
+	})
+	return out, err
+}
+
+// RegeneratePhoneGroupSharingSecret replaces the group's account sharing
+// password with a new generated one. The group's WP8x6 phones take it at
+// their next fetch or resync; until then they no longer find the shared line
+// of phones that already have it. The secret is never returned.
+func (s *Store) RegeneratePhoneGroupSharingSecret(ctx context.Context, actor string, id int64) (phonebook.Group, error) {
+	var out phonebook.Group
+	if s.box == nil {
+		return out, prov.ErrSealed
+	}
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		sealed, err := s.box.Seal(newAdminPassword(), prov.SharingSecretAAD(id))
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET account_sharing_secret_enc = $2, updated_at = now() WHERE id = $1`, id, sealed)
+		if err != nil {
+			return err
+		}
+		if err := requireRow(res); err != nil {
+			return err
+		}
+		if out, err = getPhoneGroup(ctx, tx, id); err != nil {
+			return err
+		}
+		return insertAudit(ctx, tx, actor, "regenerate-account-sharing-secret", "phone_group", strconv.FormatInt(id, 10))
+	})
+	return out, err
+}
+
 // SetPhoneGroupMulticast replaces the catalog paging channels a group
 // uses, each with its role; none means every enabled paging channel. opts,
 // when not nil, replaces how the group's phones take a page. It is a
@@ -642,6 +701,27 @@ func (s *Store) SetPhoneGroupMulticast(ctx context.Context, actor string, id int
 		return id, err
 	})
 	return out, err
+}
+
+// SetPhoneGroupSyslog replaces whether a group's phones send their log to
+// the syslog sink, and at what level (phone-feature-parity S-27).
+func (s *Store) SetPhoneGroupSyslog(ctx context.Context, actor string, id int64, in phonebook.Syslog) (phonebook.Group, error) {
+	var out phonebook.Group
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET syslog_enabled = $2, syslog_level = $3, updated_at = now() WHERE id = $1`,
+			id, in.Enabled, in.Level)
+		if err != nil {
+			return err
+		}
+		if err := requireRow(res); err != nil {
+			return err
+		}
+		if out, err = getPhoneGroup(ctx, tx, id); err != nil {
+			return err
+		}
+		return insertAudit(ctx, tx, actor, "set-syslog", "phone_group", strconv.FormatInt(id, 10))
+	})
+	return out, mapErr(err)
 }
 
 // SetPhoneGroupPTT replaces a group's push-to-talk and group paging
@@ -746,6 +826,9 @@ func (s *Store) CreatePhoneGroup(ctx context.Context, actor string, in GroupInpu
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO ptt_channels (group_id, channel, label, transmit, subscribe)
 			VALUES ($1, 1, 'Channel 1', TRUE, TRUE)`, id); err != nil {
+			return err
+		}
+		if err := s.ensureSharingSecret(ctx, tx, id); err != nil {
 			return err
 		}
 		var err error

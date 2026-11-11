@@ -41,9 +41,6 @@ type Common struct {
 
 // Backup holds the backup tool settings.
 type Backup struct {
-	// PGDump and PGRestore are the pg_dump and pg_restore binaries
-	// (HELLO_BACKUP_PG_DUMP, HELLO_BACKUP_PG_RESTORE).
-	PGDump, PGRestore string
 	// Tmp is the staging directory for the dump and the archive
 	// (HELLO_BACKUP_TMP); empty means the system temporary directory.
 	Tmp string
@@ -109,6 +106,59 @@ type Control struct {
 	AI AI
 	// AIAgent is the in-product AI agent (HELLO_AI_*, spec ai-agent).
 	AIAgent AIAgent
+	// Syslog is the phone syslog sink (HELLO_SYSLOG_*).
+	Syslog Syslog
+}
+
+// Syslog configures the phone syslog sink (phone-feature-parity S-27). It is
+// off until a listen address is set.
+type Syslog struct {
+	// UDPAddr (HELLO_SYSLOG_UDP_ADDR) and TLSAddr (HELLO_SYSLOG_TLS_ADDR) are
+	// the listen addresses; empty turns that listener off. The Service maps
+	// the well-known ports 514 and 6514 onto them.
+	UDPAddr, TLSAddr string
+	// TLSCert and TLSKey (HELLO_SYSLOG_TLS_CERT, HELLO_SYSLOG_TLS_KEY) are
+	// required with TLSAddr.
+	TLSCert, TLSKey string
+	// Host (HELLO_SYSLOG_HOST) is the address phones are told to send
+	// syslog to; empty keeps syslog out of every phone configuration.
+	Host string
+	// Rate (HELLO_SYSLOG_RATE, default 20) is the sustained lines per second
+	// kept per phone and Burst (HELLO_SYSLOG_BURST, default 200) the burst;
+	// lines over it are dropped.
+	Rate, Burst int
+}
+
+// Enabled reports whether the sink listens at all.
+func (s Syslog) Enabled() bool { return s.UDPAddr != "" || s.TLSAddr != "" }
+
+// syslog reads the HELLO_SYSLOG_* settings.
+func (r *reader) syslog() Syslog {
+	s := Syslog{
+		UDPAddr: r.getenv("HELLO_SYSLOG_UDP_ADDR"),
+		TLSAddr: r.getenv("HELLO_SYSLOG_TLS_ADDR"),
+		TLSCert: r.getenv("HELLO_SYSLOG_TLS_CERT"),
+		TLSKey:  r.getenv("HELLO_SYSLOG_TLS_KEY"),
+		Host:    r.getenv("HELLO_SYSLOG_HOST"),
+		Rate:    r.positiveInt("HELLO_SYSLOG_RATE", 20),
+		Burst:   r.positiveInt("HELLO_SYSLOG_BURST", 200),
+	}
+	r.hostPort("HELLO_SYSLOG_UDP_ADDR", s.UDPAddr)
+	r.hostPort("HELLO_SYSLOG_TLS_ADDR", s.TLSAddr)
+	if s.Host != "" && !ntpRe.MatchString(s.Host) {
+		r.fail("HELLO_SYSLOG_HOST", errors.New("must be a host name or address"))
+	}
+	switch {
+	case (s.TLSCert == "") != (s.TLSKey == ""):
+		r.fail("HELLO_SYSLOG_TLS_CERT", errors.New("HELLO_SYSLOG_TLS_CERT and HELLO_SYSLOG_TLS_KEY are set together"))
+	case s.TLSAddr != "" && s.TLSCert == "":
+		r.fail("HELLO_SYSLOG_TLS_CERT", errors.New("required with HELLO_SYSLOG_TLS_ADDR"))
+	case s.TLSCert != "":
+		if _, err := tls.LoadX509KeyPair(s.TLSCert, s.TLSKey); err != nil {
+			r.fail("HELLO_SYSLOG_TLS_CERT", errors.New("cannot load the certificate and key"))
+		}
+	}
+	return s
 }
 
 // AIAgent configures the in-product AI agent: an LLM endpoint reached
@@ -221,11 +271,30 @@ type Prov struct {
 	// prefixes ("grandstream:WP8") provisioned for TLS once SIPTLSServer is
 	// set. Taking a model out switches it back to UDP at its next resync.
 	SIPTLSModels []string
+	// SIPBackupServers (HELLO_PROV_SIP_BACKUP_SERVERS, comma separated
+	// host:port, at most 2) are the backup registrars rendered configs name
+	// for the phones that can take one: Yealink and Poly (second server) and
+	// Grandstream (backup outbound proxy). The first is used; the list is
+	// the HA node list of a deployment that does not publish SRV records
+	// (phone-feature-parity S-20). Empty provisions none.
+	SIPBackupServers []string
+	// SIPSRV (HELLO_PROV_SIP_SRV, a DNS name) switches Grandstream phones to
+	// DNS SRV mode: they register with this name and resolve the SIP
+	// servers from its _sip._udp SRV records. Empty keeps A-record mode,
+	// the default until the failover lab test passes.
+	SIPSRV string
+	// SIPTCPModels (HELLO_PROV_SIP_TCP_MODELS, same format, default none)
+	// are provisioned to register over TCP with SIPServer (S-13).
+	SIPTCPModels []string
 	// DSCPSIP and DSCPRTP (HELLO_DSCP_SIP, HELLO_DSCP_RTP; defaults 26 and
 	// 46) are the QoS values rendered configs carry, the same ones hello-sip
 	// marks its sockets with (spec phone-feature-parity S-21).
 	DSCPSIP int
 	DSCPRTP int
+	// RTCPXR (HELLO_PROV_RTCPXR, default off) provisions the phones that
+	// support it (Grandstream WP8xx) to publish RTCP-XR voice-quality reports
+	// to the SIP server (phone-feature-parity S-36).
+	RTCPXR bool
 	// RegisterExpiry is the registration expiry rendered configs carry:
 	// HELLO_SIP_REGISTER_MAX_EXPIRES (default 1h), the same value hello-sip
 	// caps registrations at, so it is always inside its window.
@@ -492,14 +561,14 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	if c.SessionTTL == 0 {
 		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
 	}
-	c.Backup = Backup{PGDump: r.optional("HELLO_BACKUP_PG_DUMP", "pg_dump"),
-		PGRestore: r.optional("HELLO_BACKUP_PG_RESTORE", "pg_restore"), Tmp: r.getenv("HELLO_BACKUP_TMP")}
+	c.Backup = Backup{Tmp: r.getenv("HELLO_BACKUP_TMP")}
 	c.Prov = r.prov()
 	c.LDAP = r.ldap()
 	c.Dial = r.dialing()
 	c.VoicePromptLanguage = r.optional("HELLO_VOICEMAIL_LANGUAGE", "en")
 	c.AI = r.ai()
 	c.AIAgent = r.aiAgent()
+	c.Syslog = r.syslog()
 	return c, r.err()
 }
 
@@ -704,6 +773,9 @@ func (r *reader) prov() Prov {
 		SIPServer:          r.optional("HELLO_PROV_SIP_SERVER", r.getenv("HELLO_SIP_ADVERTISED_ADDR")),
 		SIPTLSServer:       r.getenv("HELLO_PROV_SIP_TLS_SERVER"),
 		SIPTLSModels:       r.tlsModels("HELLO_PROV_SIP_TLS_MODELS", "grandstream:WP"),
+		SIPBackupServers:   r.hostPorts("HELLO_PROV_SIP_BACKUP_SERVERS", 2),
+		SIPSRV:             r.getenv("HELLO_PROV_SIP_SRV"),
+		SIPTCPModels:       r.tlsModels("HELLO_PROV_SIP_TCP_MODELS", ""),
 		TrustedProxies:     r.prefixes("HELLO_PROV_TRUSTED_PROXIES"),
 		TokenGrace:         r.days("HELLO_PROV_TOKEN_GRACE", 7*24*time.Hour),
 		DSCPSIP:            r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP),
@@ -722,6 +794,7 @@ func (r *reader) prov() Prov {
 		BootCIDRs:          r.prefixes("HELLO_PROV_BOOT_CIDRS"),
 		AutoResync:         r.boolean("HELLO_PROV_AUTO_RESYNC"),
 		SCEP:               r.booleanDefault("HELLO_SCEP", true),
+		RTCPXR:             r.boolean("HELLO_PROV_RTCPXR"),
 	}
 	minExp := r.duration("HELLO_SIP_REGISTER_MIN_EXPIRES", 60*time.Second)
 	p.RegisterExpiry = r.duration("HELLO_SIP_REGISTER_MAX_EXPIRES", time.Hour)
@@ -742,6 +815,11 @@ func (r *reader) prov() Prov {
 		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must be an address phones can reach, not unspecified"))
 	} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must end in a port number"))
+	}
+	if p.SIPSRV != "" {
+		if _, _, err := net.SplitHostPort(p.SIPSRV); err == nil || net.ParseIP(p.SIPSRV) != nil || strings.ContainsAny(p.SIPSRV, " /:@") {
+			r.fail("HELLO_PROV_SIP_SRV", errors.New("must be a DNS name without a port"))
+		}
 	}
 	if p.SIPTLSServer != "" {
 		if host, port, err := net.SplitHostPort(p.SIPTLSServer); err != nil {
@@ -1166,6 +1244,36 @@ func (r *reader) hostPort(key, v string) {
 	if _, err := splitHost(v); err != nil {
 		r.fail(key, err)
 	}
+}
+
+// hostPorts reads a comma separated list of host:port addresses phones can
+// reach, at most max of them.
+func (r *reader) hostPorts(key string, max int) []string {
+	v := r.getenv(key)
+	if v == "" {
+		return nil
+	}
+	var out []string
+	for _, a := range strings.Split(v, ",") {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		host, port, err := net.SplitHostPort(a)
+		switch n, perr := strconv.Atoi(port); {
+		case err != nil:
+			r.fail(key, err)
+		case unspecified(host):
+			r.fail(key, errors.New("must be addresses phones can reach, not unspecified"))
+		case perr != nil || n < 1 || n > 65535:
+			r.fail(key, errors.New("each address must end in a port number"))
+		}
+		out = append(out, a)
+	}
+	if len(out) > max {
+		r.fail(key, fmt.Errorf("at most %d addresses", max))
+	}
+	return out
 }
 
 // port reads a UDP port number setting (1-65535).
