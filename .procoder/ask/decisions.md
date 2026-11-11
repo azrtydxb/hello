@@ -2597,6 +2597,70 @@ so the VIP stage cannot sit in that file.
 - Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
 - Account sharing group password: shared default `AccountSharing`, or a per-group secret
 
+## SCEP and 802.1X, item 37 (S-25) (2026-11-09)
+
+Builder's design choices, within the spec; nothing here was asked of the user.
+
+- **Hello is the SCEP server** (RFC 8894), as S-25 says, not a SCEP client
+  pointed at an outside CA. An enterprise PKI is served by importing one of
+  its intermediate CAs (certificate and RSA key) as the device CA, so RADIUS
+  already trusts what Hello issues.
+- **Library:** `github.com/smallstep/scep` (the SCEP code step-ca uses,
+  maintained, last change 2026-10-14) with its `github.com/smallstep/pkcs7`;
+  no hand-rolled PKCS#7. This amends the spec's "one new module" rule for
+  this item, on the brief's instruction to prefer a maintained SCEP library.
+- **Device CA, separate from the provisioning CA.** The provisioning CA
+  (HELLO_PROV_CA_CERT) is cert-manager's `cluster-ca` on kw and Hello holds
+  only its certificate (the SIP TLS certificate of #202 is issued by
+  cert-manager too), so it cannot sign. Hello keeps its own device CA in
+  `scep_ca`: generated (RSA 3072, self-signed, 10 years) or imported; RSA
+  because SCEP clients encrypt to the CA certificate. The key is sealed under
+  HELLO_SECRET_KEY (`scep-ca:<id>`), one CA active, a replaced one kept for
+  its certificates' rows.
+- **Switches:** SCEP is off per phone group by default (S-25);
+  `HELLO_SCEP` defaults to `true` and is a deployment-wide kill switch, so the
+  feature needs no deploy change on kw (the `/p/` path is already routed).
+- **Endpoint:** `/p/<token>/scep` (also `/scep/pkiclient.exe` and
+  `/scep/cgi-bin/pkiclient.exe`), GET and POST, HTTPS and an allowlisted phone
+  like a config fetch; a group with SCEP off answers the empty 404. The CA and
+  CRL are public at `/p/scep-ca.crt` and `/p/scep-ca.crl` (plain HTTP too,
+  for RADIUS).
+- **Challenge:** one per phone, sealed (`scep-challenge:<phone id>`), made at
+  the first render after SCEP is on, consumed by the enrolment it authorises
+  (row-locked, so two racing enrolments get one certificate), and replaced at
+  the next render. A retried transaction (same phone, CA and key) gets its
+  certificate again without a second issue.
+- **Renewal:** RenewalReq/UpdateReq signed by a live certificate Hello issued
+  to the same phone from the active CA; no challenge.
+- **Issued certificate:** CN = the phone's MAC, nothing taken from the
+  request's subject or SANs; client auth; CRL distribution point; the group's
+  lifetime (default 365 days, 30 to 1825). Weak keys refused (RSA < 2048, EC
+  other than P-256/P-384). The CertRep is encrypted with AES-128-CBC (set on
+  the pkcs7 package variable; GetCACaps advertises AES, SHA-256, POST,
+  Renewal, SCEPStandard).
+- **Revocation:** admin revokes from the API/UI; removing a phone revokes its
+  live certificates (trigger). The CRL is signed per request, valid 24 h, its
+  number the Unix time.
+- **Vendor keys, Grandstream templates only** (config-template-10212026.zip):
+  SCEP on the WP8x6 (wp8x6_config_1.0.3.39) and GRP2601-2604
+  (grp260x_config_1.0.7.74), P8647/P8648/P8653/P8654/P8655, P8647 = 0 when
+  off; P8652 (fingerprint, format undocumented), P8662 and P8663 not written.
+  Wired 802.1X on the GRP26xx (grp26xx 1.0.15.23, grp261x 1.0.13.127,
+  grp260x 1.0.7.74): P7901/P7902/P7903/P8439, written only while the group
+  names a profile (never switches 802.1X off a port), EAP-TLS only where SCEP
+  is on, P8440 not written. WP856/WP8xx have no SCEP keys; Yealink, Poly,
+  Snom and Fanvil get nothing (no confirmed vendor keys at hand).
+- **802.1X model:** `dot1x_profiles` (name, method eap-tls/peap/eap-md5,
+  identity with {mac}/{MAC}, anonymous identity, sealed write-only password
+  `dot1x:<id>`, RADIUS CA PEM, server name). A phone group names its wired
+  profile; Wi-Fi profiles (item 31) reference a profile by id with
+  `ON DELETE RESTRICT` and read the resolved profile from
+  `RenderData.Dot1X.Profiles` (WP8x6 P83004/P83016 values precomputed).
+- **API:** `GET /scep`, `PUT /scep/ca`, `GET /scep/certificates`,
+  `POST /scep/certificates/{id}/revoke`, `POST /phones/{id}/scep-challenge`,
+  `/dot1x-profiles` CRUD, `GET|PUT /phone-groups/{id}/security`; viewers read,
+  admins change (S-25 RBAC). UI: Phones > Certificates, and "New SCEP
+  challenge" on the phone page.
 ## Clients 3 and 4: web devices, coturn and ICE servers (2026-11-09)
 
 Spec: `.procoder/specs/clients-webrtc-mobile-video.md`, phases 3 and 4 (S-13 to S-17, S-21 to S-24). One PR: the two share the configuration, the credentials Secret and the chart wiring, and neither depends on the media foundation (#276) or the WSS edge.

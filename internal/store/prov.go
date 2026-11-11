@@ -73,6 +73,9 @@ type ProvSettings struct {
 	// Deployment lists the vendors whose redirect credentials the
 	// deployment sets (they count as configured whatever is stored).
 	Deployment map[prov.Vendor]bool
+	// SCEP is HELLO_SCEP: the SCEP server is on, so phones of a group with
+	// SCEP on get the SCEP settings (phone-feature-parity S-25).
+	SCEP bool
 	// LDAPBase is HELLO_LDAP_BASE while hello-control serves LDAP, empty
 	// otherwise (no phone is then given LDAP keys). LDAPPort is the port
 	// phones reach it on.
