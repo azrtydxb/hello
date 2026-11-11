@@ -1349,6 +1349,7 @@ column ("a" when both legs agree, "a → b" when they differ).
 - Not done: the trigger is acknowledged when queued, not when someone answered,
   so the doorbell cannot tell. Trigger results could be polled later if a
   doorbell needs it.
+
 ## Ring map provisioning, phone-feature-parity S-42 and S-44 (2026-10-27)
 
 - Storage: `ring_map` (migration 00051) holds explicit choices only, keyed by
@@ -2018,6 +2019,7 @@ Implementation notes (template route, no migration):
 - **Not done**: a HELD location URI, LLDP or NAI based lookup, E911 keys for other
   vendors, the door target list bypass (waits for S-45), an UI picker on the
   Phones page (the Assignments tab does it).
+
 ## Follow-me (pbx-gaps B1: S-5, S-6) (2026-11-09)
 
 - **Feature codes are `*76` (on) and `*77` (off), not `*74` and `*75`.** Those
@@ -2687,6 +2689,7 @@ so the VIP stage cannot sit in that file.
 - Minting and revoking are excluded from MCP (they hand out a public URL to
   call audio); the lookups are MCP tools, taught in the hello-troubleshoot
   skill.
+
 ## SCEP and 802.1X, item 37 (S-25) (2026-11-09)
 
 Builder's design choices, within the spec; nothing here was asked of the user.
@@ -2751,6 +2754,7 @@ Builder's design choices, within the spec; nothing here was asked of the user.
   `/dot1x-profiles` CRUD, `GET|PUT /phone-groups/{id}/security`; viewers read,
   admins change (S-25 RBAC). UI: Phones > Certificates, and "New SCEP
   challenge" on the phone page.
+
 ## Clients 3 and 4: web devices, coturn and ICE servers (2026-11-09)
 
 Spec: `.procoder/specs/clients-webrtc-mobile-video.md`, phases 3 and 4 (S-13 to S-17, S-21 to S-24). One PR: the two share the configuration, the credentials Secret and the chart wiring, and neither depends on the media foundation (#276) or the WSS edge.
@@ -2767,6 +2771,7 @@ Spec: `.procoder/specs/clients-webrtc-mobile-video.md`, phases 3 and 4 (S-13 to 
 - **coturn.** One Deployment per address, one replica, `Recreate`, `hostNetwork` by default (the relay leaves from the node address that is `externalIP`); without hostNetwork each server is a LoadBalancer Service listing at most 200 relay ports. `allowedPeers` is required, so the chart cannot render an open relay. The Prometheus exporter is off by default because the Debian build was not checked. `ct-<tree hash of docker/coturn>` is the content tag, like `kc-` for Kamailio.
 - **ICE servers.** `GET /api/v1/me/ice-servers[?deviceId=]`, 60 requests a minute per user (in-process window, per node), counted by `hello_ice_credentials_issued_total` and not audited per credential. STUN defaults to the `turn:` hosts.
 - **Migration 00075** (web devices; the highest on main is now 00074). `test/integration/migrate_{prov,ai,ai_agent}_test.go` counts bumped by one.
+
 ## Wi-Fi profiles and roaming (item 31, S-23, S-24)
 
 Keys come from Grandstream's official templates only (config-template-10212026.zip):
