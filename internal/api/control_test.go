@@ -85,6 +85,10 @@ func newEnvConfig(t *testing.T, cfg Config, box *secret.Box) *env {
 	cfg.Store, cfg.SIPDomain, cfg.SessionTTL = st, testDomain, sessionTTL
 	cfg.Phonebooks = st
 	cfg.Messages = st
+	cfg.Clients = st
+	if cfg.ClientAuth.AuthKey == "" {
+		cfg.ClientAuth = testClientAuth()
+	}
 	cfg.Inbox = st
 	cfg.Conferences = st
 	cfg.Blocklist = st

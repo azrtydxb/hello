@@ -32,10 +32,12 @@ import (
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/telemetry"
+	"github.com/azrtydxb/hello/internal/turn"
 	"github.com/azrtydxb/hello/internal/version"
 	"github.com/azrtydxb/hello/internal/vkconn"
 	"github.com/azrtydxb/hello/internal/webhook"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/valkey-io/valkey-go"
 )
 
@@ -269,6 +271,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		BatchMetrics:    api.NewBatchMetrics(metrics.Registry),
 		ConferenceLive:  vk,
 		Messages:        st,
+		Clients:         st,
+		ClientAuth:      clientConfig(cfg, metrics.Registry),
 		Inbox:           st,
 		Blocklist:       st,
 		Dialing:         cfg.Dial,
@@ -575,4 +579,25 @@ func connectValkey(ctx context.Context, c vkconn.Config, vk *api.LazyValkey, log
 		log.Warn("valkey unreachable at startup; live and cluster views unavailable until it is", "error", err)
 	}
 	vk.Set(cl)
+}
+
+// clientConfig is the browser softphone's settings: the key derived device
+// credentials come from, the cap, and the STUN and TURN servers handed out.
+// The shared TURN secret and the key stay in this process; neither is
+// logged.
+func clientConfig(cfg config.Control, reg prometheus.Registerer) api.ClientConfig {
+	c := cfg.Clients
+	stun := c.STUNURLs
+	if len(stun) == 0 {
+		stun = turn.StunFromTurn(c.TURNURLs)
+	}
+	issued := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "hello_ice_credentials_issued_total", Help: "TURN credentials handed out by /api/v1/me/ice-servers.",
+	})
+	reg.MustRegister(issued)
+	return api.ClientConfig{
+		AuthKey: c.AuthKey, MaxDevices: c.MaxDevices, WSSURL: c.WSSURL,
+		ICE:       turn.Config{STUN: stun, TURN: c.TURNURLs, Secret: c.TURNSecret, TTL: c.TURNTTL},
+		ICEIssued: issued,
+	}
 }

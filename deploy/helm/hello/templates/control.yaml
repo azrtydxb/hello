@@ -103,6 +103,19 @@ spec:
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_BASE_URL" "key" "base-url" "optional" true) | nindent 12 }}
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_MODEL" "key" "model" "optional" true) | nindent 12 }}
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_API_KEY" "key" "api-key" "optional" true) | nindent 12 }}
+            # Browser softphone (docs/webrtc.md): web devices need the key.
+            {{- include "hello.clientKeyEnv" . | nindent 12 }}
+            - name: HELLO_CLIENT_MAX_DEVICES
+              value: {{ .Values.clients.maxDevices | quote }}
+            {{- with .Values.clients.wssUrl }}
+            - name: HELLO_WSS_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.coturn.enabled }}
+            - name: HELLO_TURN_URLS
+              value: {{ include "hello.turnUrls" . | quote }}
+            {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_TURN_SECRET" "key" "turnSecret") | nindent 12 }}
+            {{- end }}
             - name: HELLO_BACKUP_TMP
               value: /var/lib/hello-backup
             - name: HELLO_VOICEMAIL_LANGUAGE

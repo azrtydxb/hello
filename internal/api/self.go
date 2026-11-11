@@ -80,11 +80,13 @@ func (s *server) updateProfile(w http.ResponseWriter, r *http.Request) {
 		DisplayName    *string    `json:"displayName"`
 		Email          *string    `json:"email"`
 		VoicemailEmail *vmPrefsIn `json:"voicemailEmail"`
+		RingWeb        *bool      `json:"ringWeb"`
+		RingMobile     *bool      `json:"ringMobile"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.DisplayName == nil && in.Email == nil && in.VoicemailEmail == nil {
+	if in.DisplayName == nil && in.Email == nil && in.VoicemailEmail == nil && in.RingWeb == nil && in.RingMobile == nil {
 		badRequest(w, "a field to change is required")
 		return
 	}
@@ -107,6 +109,7 @@ func (s *server) updateProfile(w http.ResponseWriter, r *http.Request) {
 		c.Email = in.Email
 	}
 	in.VoicemailEmail.validate(&f, "voicemailEmail")
+	c.RingWeb, c.RingMobile = in.RingWeb, in.RingMobile
 	if len(f) > 0 {
 		writeFields(w, f)
 		return
