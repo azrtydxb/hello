@@ -97,6 +97,18 @@ shows `srtpKeyEx` (none, sdes, dtls or mixed) and `ice`. Provisioning writes
 the Grandstream key exchange (`P60078`) and ICE (`P95002`) from these two
 settings; other vendors write nothing until their keys are confirmed.
 
+### Web devices (browser softphones)
+
+A user adds a browser softphone to their own extension under **My phone, Web
+devices** in the console; there is no tool for it, because its SIP password is
+minted for that user's browser session only. `listDevices` with `kind=web`
+shows every user's web devices (the `kind` field tells them from desk phones,
+`userId` and `label` say whose and which). `updateDevice` can disable one or
+enable it again, `deleteDevice` removes it. A web device cannot be moved to
+another extension and has no stored secret to rotate (both answer 409
+`derived_device`): the user revokes it and adds it again. A web device ends by
+itself when its owner is disabled, deleted or unlinked from the extension.
+
 ### Voicemail
 
 `getExtensionVoicemail` reads the box; `updateExtensionVoicemail` sets the

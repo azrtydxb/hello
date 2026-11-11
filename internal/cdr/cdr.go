@@ -101,11 +101,11 @@ type Record struct {
 	// what chose it (migration 00050); empty for a call that rang no
 	// internal device.
 	RingTag, RingRule string
-	// SRTP says which legs of the call carried SRTP (migration 00075):
+	// SRTP says which legs of the call carried SRTP (migration 00076):
 	// none (the default), caller, callee or both.
 	SRTP string
 	// SRTPKeyEx is how the encrypted legs agreed their keys (migration
-	// 00076): none (the default), sdes, dtls or mixed; ICE says a leg ran
+	// 00077): none (the default), sdes, dtls or mixed; ICE says a leg ran
 	// ICE-lite.
 	SRTPKeyEx string
 	ICE       bool

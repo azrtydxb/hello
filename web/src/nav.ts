@@ -83,6 +83,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "user",
       },
       {
+        label: "Web devices",
+        path: "/me/devices",
+        phase: 5,
+        icon: "monitor-smartphone",
+        minRole: "user",
+      },
+      {
         // Shown only once a channel has a number (see navGroupsFor).
         label: "My inbox",
         path: "/me/inbox",

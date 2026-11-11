@@ -188,7 +188,7 @@ type Store interface {
 	ListBossLinks(ctx context.Context) ([]store.BossLink, error)
 	PutBossLinks(ctx context.Context, actor string, links []store.BossLinkInput) error
 
-	ListDevices(ctx context.Context) ([]store.Device, error)
+	ListDevices(ctx context.Context, kind string) ([]store.Device, error)
 	GetDevice(ctx context.Context, id int64) (store.Device, error)
 	CreateDevice(ctx context.Context, actor string, in store.NewDevice) (store.Device, error)
 	UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, m store.DeviceMedia) (store.Device, error)
@@ -367,6 +367,11 @@ type Config struct {
 	// Messages is the SIP MESSAGE persistence; nil answers 503 on the
 	// message routes.
 	Messages MessageStore
+	// Clients is the web device persistence and ClientAuth the softphone
+	// settings (derived credentials, ICE servers); nil Clients, or an empty
+	// ClientAuth.AuthKey, answers 503 on the enrolment routes.
+	Clients    ClientStore
+	ClientAuth ClientConfig
 	// Inbox is the messaging inbox persistence (spec messaging-channels);
 	// nil answers 503 on the inbox and messaging routes.
 	Inbox InboxStore
@@ -406,6 +411,8 @@ type Config struct {
 	// are set by Handler.
 	speech    *ttscache.Cache
 	prewarmMu *sync.Mutex
+	// credLimit bounds how often a user mints device credentials.
+	credLimit *rateLimiter
 	// prewarmKick asks the background worker to pre-generate the prompts of a
 	// language a queue just set. Batchable handlers kick it rather than call
 	// the pre-generation, which uses the speech cache and must not run inside a
@@ -430,6 +437,7 @@ func Handler(c Config) http.Handler {
 	if c.TTS == nil {
 		c.TTS = &tts.Client{}
 	}
+	c.credLimit = &rateLimiter{}
 	c.speech, c.prewarmMu = newSpeechCache(c), &sync.Mutex{}
 	c.prewarmKick = make(chan struct{}, 1)
 	c.self = new(atomic.Pointer[http.Handler])

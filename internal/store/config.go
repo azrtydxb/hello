@@ -250,32 +250,45 @@ func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64, che
 // Device is a SIP endpoint of an extension. Its secret is never stored; only
 // the digest HA1 values are, and they are never returned.
 type Device struct {
-	ID          int64  `json:"id"`
-	ExtensionID int64  `json:"extensionId"`
-	SIPUsername string `json:"sipUsername"`
-	Enabled     bool   `json:"enabled"`
+	ID          int64     `json:"id"`
+	ExtensionID int64     `json:"extensionId"`
+	SIPUsername string    `json:"sipUsername"`
+	Enabled     bool      `json:"enabled"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	// Kind is desk (a phone, digest secret), web or mobile (a client of a
+	// user, derived credentials). UserID, Label, Platform, AppVersion and
+	// LastSeenAt describe a client; AuthMode is digest or derived.
+	Kind       string     `json:"kind"`
+	AuthMode   string     `json:"authMode"`
+	UserID     *int64     `json:"userId"`
+	Label      string     `json:"label"`
+	Platform   string     `json:"platform"`
+	AppVersion string     `json:"appVersion"`
+	LastSeenAt *time.Time `json:"lastSeenAt"`
 	// SRTP is the media-encryption policy: off, optional or required.
 	SRTP string `json:"srtp"`
 	// SRTPKeyEx is how Hello offers the device SRTP keys: sdes (the default)
 	// or dtls; MediaICE makes Hello offer it ICE-lite and provisions its ICE
-	// setting (migration 00076).
-	SRTPKeyEx string    `json:"srtpKeyExchange"`
-	MediaICE  bool      `json:"mediaIce"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	// setting (migration 00077).
+	SRTPKeyEx string `json:"srtpKeyExchange"`
+	MediaICE  bool   `json:"mediaIce"`
 }
 
-const deviceCols = `id, extension_id, sip_username, enabled, srtp, srtp_keyex, media_ice, created_at, updated_at`
+const deviceCols = `id, extension_id, sip_username, enabled, created_at, updated_at, kind, auth_mode, user_id, label,
+	coalesce(platform, ''), coalesce(app_version, ''), last_seen_at, srtp, srtp_keyex, media_ice`
 
 func scanDevice(r interface{ Scan(...any) error }) (Device, error) {
 	var d Device
-	err := r.Scan(&d.ID, &d.ExtensionID, &d.SIPUsername, &d.Enabled, &d.SRTP, &d.SRTPKeyEx, &d.MediaICE, &d.CreatedAt, &d.UpdatedAt)
+	err := r.Scan(&d.ID, &d.ExtensionID, &d.SIPUsername, &d.Enabled, &d.CreatedAt, &d.UpdatedAt,
+		&d.Kind, &d.AuthMode, &d.UserID, &d.Label, &d.Platform, &d.AppVersion, &d.LastSeenAt, &d.SRTP, &d.SRTPKeyEx, &d.MediaICE)
 	return d, err
 }
 
-// ListDevices returns every device ordered by SIP username.
-func (s *Store) ListDevices(ctx context.Context) ([]Device, error) {
-	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+deviceCols+` FROM devices ORDER BY sip_username`)
+// ListDevices returns every device ordered by SIP username, only those of
+// kind when kind is not empty.
+func (s *Store) ListDevices(ctx context.Context, kind string) ([]Device, error) {
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE ($1 = '' OR kind = $1) ORDER BY sip_username`, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -335,6 +348,16 @@ type DeviceMedia struct {
 func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, m DeviceMedia) (Device, error) {
 	var d Device
 	err := s.configChange(ctx, actor, "update", "device", nil, func(tx *sql.Tx) (int64, error) {
+		if extensionID != nil {
+			// A client belongs to the extension its owner is linked to.
+			var kind string
+			if err := tx.QueryRowContext(ctx, `SELECT kind FROM devices WHERE id = $1`, id).Scan(&kind); err != nil {
+				return id, err
+			}
+			if kind != "desk" {
+				return id, ErrDerivedDevice
+			}
+		}
 		var err error
 		d, err = scanDevice(tx.QueryRowContext(ctx, `
 			UPDATE devices SET enabled = COALESCE($2, enabled), extension_id = COALESCE($3, extension_id),
@@ -351,9 +374,12 @@ func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enable
 func (s *Store) RotateDeviceSecret(ctx context.Context, actor string, id int64, realm, secret string) (Device, error) {
 	var d Device
 	err := s.configChange(ctx, actor, "rotate-secret", "device", nil, func(tx *sql.Tx) (int64, error) {
-		var username string
-		if err := tx.QueryRowContext(ctx, `SELECT sip_username FROM devices WHERE id = $1 FOR UPDATE`, id).Scan(&username); err != nil {
+		var username, mode string
+		if err := tx.QueryRowContext(ctx, `SELECT sip_username, auth_mode FROM devices WHERE id = $1 FOR UPDATE`, id).Scan(&username, &mode); err != nil {
 			return id, err
+		}
+		if mode == "derived" {
+			return id, ErrDerivedDevice
 		}
 		// A device a phone provisions keeps its secret sealed for the
 		// renderer (spec S-2): re-seal it so the phone picks the new one up

@@ -81,6 +81,29 @@ async function createDevice() {
 }
 
 describe("Devices", () => {
+  it("marks a user's web device and offers no secret rotation for it", async () => {
+    api([
+      DEVICE,
+      {
+        ...DEVICE,
+        id: 9,
+        sipUsername: "w9",
+        kind: "web",
+        label: "Firefox on the desk",
+      },
+    ]);
+    renderApp("/devices");
+    const row = (await screen.findByText("w9")).closest("tr")!;
+    expect(row).toHaveTextContent("Web device: Firefox on the desk");
+    expect(
+      within(row).queryByRole("button", { name: /Rotate secret/ }),
+    ).toBeNull();
+    const desk = screen.getByText("desk-phone").closest("tr")!;
+    expect(
+      within(desk).getByRole("button", { name: /Rotate secret/ }),
+    ).toBeInTheDocument();
+  });
+
   it("shows the secret once, in a dialog, after creating a device", async () => {
     const calls = api();
     renderApp("/devices");

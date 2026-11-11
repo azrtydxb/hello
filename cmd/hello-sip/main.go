@@ -176,7 +176,8 @@ func run(args []string) error {
 	incarnation := cluster.NewIncarnation()
 	srv, err := sip.New(sip.Config{
 		NodeID: cfg.NodeID, Incarnation: incarnation, Domain: cfg.SIPDomain, AdvertisedAddr: cfg.SIPAdvertisedAddr,
-		NonceSecret: []byte(cfg.NonceSecret), MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
+		NonceSecret: []byte(cfg.NonceSecret), ClientAuthKey: cfg.ClientAuthKey, ClientAuthKeyPrevious: cfg.ClientAuthKeyPrevious,
+		MaxContacts: cfg.MaxContacts, MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
 		SessionExpires: cfg.SessionExpires, SessionMinSE: cfg.SessionMinSE, SessionTimersTrunks: cfg.SessionTimersTrunks, MediaDeadAfter: cfg.MediaDeadAfter,
