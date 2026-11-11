@@ -15,7 +15,7 @@ import (
 	"github.com/azrtydxb/hello/internal/store"
 )
 
-// cdrFilter reads the direction and failed query parameters shared by the
+// cdrFilter reads the direction, disposition and failed query parameters shared by the
 // CDR list and export, answering 400 itself when one is invalid.
 func cdrFilter(w http.ResponseWriter, r *http.Request) (store.CDRFilter, bool) {
 	q := r.URL.Query()
@@ -25,6 +25,13 @@ func cdrFilter(w http.ResponseWriter, r *http.Request) (store.CDRFilter, bool) {
 		f.Direction = d
 	default:
 		badRequest(w, "direction must be internal, inbound or outbound")
+		return f, false
+	}
+	switch d := q.Get("disposition"); d {
+	case "", "blocked":
+		f.Disposition = d
+	default:
+		badRequest(w, `disposition must be "blocked"`)
 		return f, false
 	}
 	switch q.Get("failed") {

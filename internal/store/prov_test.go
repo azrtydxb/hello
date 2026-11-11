@@ -346,6 +346,39 @@ func TestRenderInputsFirmwareAndFetches(t *testing.T) {
 	}
 }
 
+// TestRenderInputsSendAnonymous fails if the extension's phoneSendAnonymous
+// flag is not carried to the render data (off by default, on after the
+// change) or is mixed up with the trunk-only anonymousOutbound flag.
+func TestRenderInputsSendAnonymous(t *testing.T) {
+	st, _, ext := provStore(t)
+	ctx := context.Background()
+	c, err := st.CreatePhone(ctx, "test", PhoneInput{MAC: "805ec0000009", Vendor: prov.Grandstream, Model: "WP816",
+		ExtensionID: ext, Enabled: true, Realm: "hello.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _, err := st.RenderInputs(ctx, c.Phone.ID)
+	if err != nil && !errors.Is(err, prov.ErrNoTemplate) {
+		t.Fatal(err)
+	}
+	if d.Line.SendAnonymous {
+		t.Fatal("a new extension sends anonymous")
+	}
+	on := true
+	if _, err := st.UpdateExtension(ctx, "test", ext, ExtensionChange{AnonymousOutbound: &on}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if d, _, _ = st.RenderInputs(ctx, c.Phone.ID); d.Line.SendAnonymous {
+		t.Fatal("anonymousOutbound switched the phone setting on")
+	}
+	if _, err := st.UpdateExtension(ctx, "test", ext, ExtensionChange{PhoneSendAnonymous: &on}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if d, _, _ = st.RenderInputs(ctx, c.Phone.ID); !d.Line.SendAnonymous {
+		t.Fatal("phoneSendAnonymous is not in the render data")
+	}
+}
+
 // TestRenderInputsFeatureCodes fails if the render data does not carry the
 // PBX's DND and forward star codes (Snom and Fanvil dial them from the
 // phone's keys), or misses the directed-pickup code the park migration

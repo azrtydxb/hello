@@ -87,6 +87,16 @@ created or none (400 with the same rows).
 `templateId`, `blf`, `enabled`, `groupId`, `pttChannelId`), `getPhone`,
 `listPhones`, `deletePhone` (its SIP device stays).
 
+## Phone "Send Anonymous"
+
+`updateExtension` (path `id`) accepts `phoneSendAnonymous`, off by default. On,
+provisioning writes the Grandstream "Send Anonymous" setting (P65, line 1) at
+the next resync, and the phone then hides its caller ID on every call it
+makes, internal calls included. Off writes nothing. It is not
+`anonymousOutbound`, which only makes the calls Hello places through a trunk
+anonymous and leaves internal caller ID alone. Ask which one the person means
+before changing either, then `resyncPhone` and check with `previewPhoneFile`.
+
 ## Push a change and check it
 
 1. `previewPhoneFile` (query `file`) renders what the phone would get,
@@ -139,6 +149,38 @@ A group delivers address books and multicast settings to its phones.
 switches; the named books stay), `deletePhoneGroup` (phones fall back to no
 group).
 
+### Extra vendor settings (overrides)
+
+Keys the built-in templates do not write can be set per group or per phone.
+The order is the template, then the group, then the phone (the phone wins).
+
+- `listPhoneGroupSettings` and `putPhoneGroupSettings` (replaces all), and
+  `listPhoneSettings` and `putPhoneSettings` for one phone. Body:
+  `{ "overrides": [ { "key": "P71", "value": "100" } ] }`; an empty list
+  clears them.
+- A key is a Grandstream P-value (`P71`) or a Yealink dotted key
+  (`features.text_message.enable`); other vendors are refused. Keys Hello owns
+  (account, provisioning URL, CA, admin password) get a 400.
+- Mark a password-like value `"secret": true`: it is sealed and reads back as
+  `********`; send the mask, or no value, to keep it.
+- Only use a key you can confirm in the vendor's documentation; Hello does not
+  check that a phone knows it. Then `resyncPhone` or `resyncPhoneGroup`.
+
+## Phone syslog
+
+Phones can send their log to Hello's syslog sink. It is off by default, and
+no phone is told about syslog until `HELLO_SYSLOG_HOST` is set on the server.
+
+1. `setPhoneGroupSyslog` (admin) with `{ "enabled": true, "level": "warning" }`.
+   The level is debug, info, warning or error. The phone template writes the
+   sink and level, so run `resyncPhoneGroup` afterwards.
+2. `listPhoneSyslog` shows one phone's newest lines. Hello keeps the last 10000
+   lines per phone for 24 hours, with secrets redacted before storage. It
+   answers 503 while live state is unavailable.
+3. `listUnknownSyslog` lists the senders no phone owns. Pass `ip` to read that
+   address's lines. A line from an address shared through NAT lands here, not
+   on a phone.
+
 ## Phonebooks
 
 Books: the computed extensions book (read-only), the company book and up to
@@ -163,6 +205,11 @@ Books: the computed extensions book (read-only), the company book and up to
   company. Use it to explain why a name shows or does not.
 - Deliver a named book by adding it to a group with `setPhoneGroupBooks`,
   then resync.
+- `getPhoneDirectory` (path `id` of the phone) says how many contacts the
+  phone's books hold, how many its model takes (WP822 500, WP8x6 1000) and
+  how many are cut from the end of the delivery order (`dropped`). Check it
+  when a user says a contact is missing on a Grandstream handset; the fix is a
+  shorter book or a different order of books, not the phone.
 
 ## Ring tags
 
@@ -190,6 +237,42 @@ The ring map turns a ring tag into a tone on each vendor's phones.
   overrides; an empty list removes them. An override wins over the global choice
   for that group's phones.
 
+## Lines and account sharing
+
+A phone has one line per SIP account. Line 1 is the extension `createPhone`
+bound; lines 2 and up are further extensions on the same handset, each with
+its own voicemail light, BLF and ring tags.
+
+- `getPhone` shows `lines` (line 1 first, each with its extension, device user
+  name and whether the template writes it), `maxLines` for the model and
+  `sharingRole`. A WP8x6 takes three lines, a WP822 two; Yealink, Poly, Snom
+  and Fanvil up to six.
+- `setPhoneLine` (`/phones/{id}/lines/{line}`, line 2 to 6) with `{
+"extensionId": 9 }` binds the line to a device of that extension; a new device
+  is made unless `deviceId` names one, and its secret is rotated. A phone has at
+  most one line on an extension, and a device is one line of one phone. Line 1
+  has to be bound first. `clearPhoneLine` unbinds it. Resync the phone after.
+- Several phones can answer one extension: give each phone a line on it
+  (`setPhoneLine` on each). A call to the extension rings all of them, and each
+  phone has its own device and secret. This is the shared line appearance.
+- The templates of all five vendors write lines 2 and up (Grandstream's from
+  its own templates: WP8x6 three lines, WP810/820/822/825 two, WP856 six). A line
+  of a model whose template does not write it shows `provisioned` false and is
+  kept; tell the administrator it is not yet on the phone.
+- Account sharing is the other way to let handsets share one line, for
+  Grandstream WP8x6 only. `setPhoneGroupAccountSharing` (admin) switches it on
+  for a phone group; each phone of the group is the host or a guest
+  (`updatePhone` with `sharingRole`, host by default). Without the group
+  switch the phone is written account sharing off. Resync the group after.
+  Each group has its own sharing password (the phone's Group Password), which
+  Hello generates when the group is created, stores sealed and never shows,
+  so handsets of different groups on one network do not join each other's
+  line. `regeneratePhoneGroupSharingSecret` (admin, path `id`) replaces it;
+  handsets keep the old one until they are resynced, so resync the whole group
+  straight after and expect shared lines to drop in between.
+- The check-sync of a multi-line phone goes to line 1, or to the next line
+  while line 1 is not registered.
+
 ## Custom tones
 
 The tone library holds WAV files a ring map choice can play as `custom:<name>`
@@ -197,7 +280,7 @@ The tone library holds WAV files a ring map choice can play as `custom:<name>`
 
 - `listRingtones` shows each tone and how many ring map choices use it.
 - `createRingtone` (`/ringtones`) adds one: `{ "name": "bell-2", "audioBase64":
-  "..." }` with PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB. A
+"..." }` with PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB. A
   taken name is a 409.
 - `deleteRingtone` (`/ringtones/{id}`) removes a tone; a tone a ring map choice
   still uses is refused.

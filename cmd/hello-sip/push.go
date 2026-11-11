@@ -89,7 +89,7 @@ func (q pushQueue) Claim(ctx context.Context, node string, perMinute int) ([]sip
 	}
 	out := make([]sip.PushJob, len(jobs))
 	for i, j := range jobs {
-		out[i] = sip.PushJob{ID: j.ID, Kind: j.Kind, Vendor: j.Vendor, Device: j.Device}
+		out[i] = sip.PushJob{ID: j.ID, Kind: j.Kind, Vendor: j.Vendor, Device: j.Device, Lines: j.Lines}
 	}
 	return out, nil
 }

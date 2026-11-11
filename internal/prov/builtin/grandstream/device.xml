@@ -5,17 +5,37 @@
   <config version="1">
     <P271>1</P271>
     <P270>{{xml .Line.AccountLabel}}</P270>
-    <P47>{{xml .Server.Host}}:{{.Server.Port}}</P47>
+    <P47>{{xml .Server.Host}}{{if .Server.Port}}:{{.Server.Port}}{{end}}</P47>
     <P35>{{xml .Line.Username}}</P35>
     <P36>{{xml .Line.AuthName}}</P36>
     <P34>{{xml .Line.Password}}</P34>
     <P3>{{xml .Line.DisplayName}}</P3>
-{{- /* SIP transport (phone-feature-parity S-14): P130 = SIP Transport, 0 UDP, 1 TCP, 2 TLS (wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83). Server.Transport is "tls" only for a model HELLO_PROV_SIP_TLS_MODELS lists while HELLO_PROV_SIP_TLS_SERVER is set, so a model that fails its TLS lab run is switched back by removing it there. With TLS: P2329 = 1 writes the sips scheme when the transport is TLS, and P22293/P22294 are the minimum and maximum TLS version of the WP822 release notes (12 = TLS 1.2, 99 = no upper limit). The keys of P2329, P22293 and P22294 are taken from the vendor notes, not confirmed on a phone (verify, lab item 10). The Hello CA the server certificate chains to is installed through P8433 (CA URL above). */}}
+{{- /* DNS mode and backup server (phone-feature-parity S-20), account 1, keys per Grandstream's own configuration templates (config-template-10212026.zip; 2026-11-09 review). P103 = DNS Mode: 0 A Record, 1 SRV, 2 NAPTR/SRV (3 Use Configured IP takes IPv4 addresses of at most 15 characters in P2308 to P2310, no port, so it cannot carry a backup) in wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83, wp820_config_1.0.7.90 and wp856_config_1.0.3.16. Written always, so a phone taken back out of SRV mode returns to A records. In SRV mode (Server.DNSMode "srv", HELLO_PROV_SIP_SRV) P47 is the name whose _sip._udp SRV records list the servers (no port); P29095 = 1 (Register Before DNS SRV Fail-over, 0 No, 1 Yes) registers with the next server before failing calls over to it; P26040 = 3 (DNS SRV Failover Mode: 0 Default, 1 saved one until DNS TTL, 2 saved one until no response, 3 failback follows the failback expiration timer, in all four templates) makes the phone return to the first server when the timer ends; P60056 = 60 is that Failback Timer in minutes (wp8x6, wp820 and wp856 templates; the WP810/822/825 template lists the Failback Timer under P60055, the retry count's own key, which is a mistake in that template, so P60056 is not written to it and it keeps its default, 60). Otherwise, with a backup server (HELLO_PROV_SIP_BACKUP_SERVERS) three keys name it, each host:port: P2312 = Secondary SIP Server (WP8x6, WP810/822/825 and WP856 templates; the WP820 has none), and P48 = Outbound Proxy repeating the primary with P2333 = Backup Outbound Proxy ("Secondary Outbound Proxy" in the WP8x6, WP820 and WP856 templates), which every template has; the phone uses the backup when the primary fails. With none, P48, P2312 and P2333 are left as they are. Not confirmed on a phone (verify, lab item "failover"). */}}
+{{- if eq .Server.DNSMode "srv"}}
+    <P103>1</P103>
+    <P29095>1</P29095>
+    <P26040>3</P26040>
+{{- if ne .Phone.WP "WP8xx"}}
+    <P60056>60</P60056>
+{{- end}}
+{{- else}}
+    <P103>0</P103>
+{{- with .Server.Backup}}
+{{- if or (eq $.Phone.WP "WP8x6") (eq $.Phone.WP "WP8xx") (eq $.Phone.WP "WP856") (eq $.Phone.WP "")}}
+    <P2312>{{xml .Host}}:{{.Port}}</P2312>
+{{- end}}
+    <P48>{{xml $.Server.Host}}:{{$.Server.Port}}</P48>
+    <P2333>{{xml .Host}}:{{.Port}}</P2333>
+{{- end}}
+{{- end}}
+{{- /* SIP transport (phone-feature-parity S-13, S-14): P130 = SIP Transport, 0 UDP, 1 TCP, 2 TLS/TCP, account 1, same key and values in Grandstream's wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83, wp820_config_1.0.7.90, wp856_config_1.0.3.16 and ht813_config_1.0.19.6. Server.Transport is "tcp" for a model HELLO_PROV_SIP_TCP_MODELS lists (P130 = 1, no TLS-only keys; S-13). P2331 (Use Actual Ephemeral Port in Contact with TCP/TLS, default 0) and P60065 (Enable TCP Keep-alive, default 1) are in the same templates and stay at their defaults: the Contact keeps the listening port and Kamailio reuses the connection (phones_tcp alias). Server.Transport is "tls" only for a model HELLO_PROV_SIP_TLS_MODELS lists while HELLO_PROV_SIP_TLS_SERVER is set, so a model that fails its TLS lab run is switched back by removing it there. With TLS: P2329 = 1 writes the sips scheme (SIP URI Scheme when using TLS, 0 sip, 1 sips; in all five templates, default 1 in the WP8x6 and WP810/822/825 and 0 in the WP820 and WP856, hence written), and P22293/P22294 are the Minimum and Maximum TLS Version (10 to 13 = TLS 1.0 to 1.3, 99 = no upper limit; written as 12 and 99; the wp8x6_config_1.0.3.39 template lists P22293 and P22294 a second time as the DTLS versions, a duplicate in Grandstream's template). Not confirmed on a phone (verify, lab item 10). The Hello CA the server certificate chains to is installed through P8433 (CA URL above). */}}
 {{- if eq .Server.Transport "tls"}}
     <P130>2</P130>
     <P2329>1</P2329>
     <P22293>12</P22293>
     <P22294>99</P22294>
+{{- else if eq .Server.Transport "tcp"}}
+    <P130>1</P130>
 {{- else}}
     <P130>0</P130>
 {{- end}}
@@ -53,6 +73,23 @@
 {{- /* QoS marking (phone-feature-parity S-21): P1558 = Layer 3 QoS for SIP (DSCP), P1559 = Layer 3 QoS for audio (DSCP) [R8x6 TPL]; the same values hello-sip marks its own sockets with (HELLO_DSCP_SIP 26, HELLO_DSCP_RTP 46). UNVERIFIED on hardware. */}}
     <P1558>{{.Prov.DSCPSIP}}</P1558>
     <P1559>{{.Prov.DSCPRTP}}</P1559>
+{{- /* RTCP-XR voice-quality reports (phone-feature-parity S-36), only when HELLO_PROV_RTCPXR is on (off, the phone keeps its default, an empty collector = no reports). Keys, account 1, from Grandstream's own configuration templates: P26093 VQ RTCP-XR Collector Name, P26094 Collector Address, P26095 Collector Port (default 5060) in wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83 and wp856_config_1.0.3.16; P60087 Collector Address Selection (0 Manual, 1 Auto; Auto uses the registered SIP server when no address is set) in wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83 only; P8489 VQ RTCP-XR Session Report (0 Disabled, 1 Enabled, default 0; the call-end report Hello stores) in the same two. The WP856 template has no Address Selection and no Session Report key, so the WP856 gets the collector address spelled out (the SIP server host) and no P8489; the WP820 template has no RTCP-XR key at all and gets none. P8490 Interval Report stays at its default (off): the collector keeps the call-end report. Account 2 is P26193, P60187, P26194, P26195 (same templates). The phone's PUBLISH goes to the SIP server, which is Hello's collector. Behaviour not yet seen on a phone (verify: that the phone reports with Auto and an empty address, and that the WP856 reports with the address set). */}}
+{{- if and .Prov.RTCPXR (or (eq .Phone.WP "WP8x6") (eq .Phone.WP "WP8xx") (eq .Phone.WP "WP856"))}}
+    <P26093>{{xml .Server.Host}}</P26093>
+{{- if eq .Phone.WP "WP856"}}
+    <P26094>{{xml .Server.Host}}</P26094>
+{{- else}}
+    <P60087>1</P60087>
+    <P26094></P26094>
+    <P8489>1</P8489>
+{{- end}}
+    <P26095>{{.Server.Port}}</P26095>
+{{- end}}
+{{- /* Presence (phone-feature-parity S-35): the WP phones gain nothing from PUBLISH for Presence or from SUBSCRIBE for Registration [R8x6 section 4], so both stay off and are written so that a phone someone switched on goes back. P188 = PUBLISH for Presence (0 Disabled, 1 Enabled; account 2 is P488) and P2319 = SUBSCRIBE for Registration (0 No, 1 Yes, the reg event of RFC 3680; account 2 is P2419), account 1, in Grandstream's wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83. The WP820 and WP856 templates have neither key. No WP template has an Eventlist BLF URI or a Presence Eventlist URI key (those exist only in the GRP and GXP templates: P134, P26084 and P2389 "Auto Provision Eventlists" in grp26xx_config_1.0.15.23), so Line.BLFListURI is not written to a WP. */}}
+{{- if or (eq .Phone.WP "WP8x6") (eq .Phone.WP "WP8xx")}}
+    <P188>0</P188>
+    <P2319>0</P2319>
+{{- end}}
 {{- /* MWI (spec S-1): P99 = Subscribe for MWI [R8x6 TPL, R8x6 section 5; WP822 same key]; P33 = voicemail access number, defaulting to Hello's voicemail feature code. */}}
     <P99>1</P99>
     <P33>{{xml (or .Line.VoicemailCode "*97")}}</P33>
@@ -64,6 +101,10 @@
 {{- end}}
 {{- /* Text messages (SIP MESSAGE, RFC 3428): P22650 = 1 makes account 1 the designated account for instant messaging (WP8x6 Administration Guide "Instant Message" and the phone-feature-parity spec S-8, R8x6 section 5). Hello answers 202/200 and delivers to every phone of the extension. UNVERIFIED on hardware: not confirmed on a WP826 or WP822, and the value (1 = account 1) is read from the guide, not from a phone's exported configuration. Phones without the key ignore it. */}}
     <P22650>1</P22650>
+{{- /* Send Anonymous (account 1: P65; accounts 2 and 3 are P421 and P521 in wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83, wp820_config_1.0.7.90 and wp856_config_1.0.3.16: "Send Anonymous (caller ID will be blocked if set to Yes). 0 - No, 1 - Yes. Default is 0"). Written as 1 only when the operator turned on the extension's "Phone sends anonymous" setting; otherwise nothing is written and the phone keeps its own value. The phone then blanks its caller ID on every call, internal ones included, unlike the extension's trunk-only anonymous outbound flag. */}}
+{{- if .Line.SendAnonymous}}
+    <P65>1</P65>
+{{- end}}
 {{- /* Call waiting (phone-feature-parity S-18), written from the extension's flag so the phone agrees with Hello. P26063 = account 1 "Enable Call Waiting" (WP8x6) / "Disable Call Waiting" (WP822): 1 = on, 2 = off in both templates (wp8x6_config_1.0.3.39 reads 0 Default, 1 Yes, 2 No; wp810_822_825_config_1.0.11.83 reads 0 Default, 1 No, 2 Yes, the question inverted). P91 = the phone-wide switch: 0 = on, 1 = off in both. P186 = "Enable Call Waiting Tone" (WP8x6 and WP820 templates): 0 = tone, 1 = no tone; the WP822 template has no such key and ignores it, its tone is P347/P1555 which stay at the phone default. Taken from Grandstream's published config templates, not yet confirmed on a phone (verify, lab item 26). */}}
 {{- /* The WP856 template (wp856_config_1.0.3.16: "Enable Call Waiting. 0 Default, 1 No, 2 Yes") reads P26063 the other way round: 2 = on, 1 = off, and has no P91 or P186. */}}
 {{- if .Phone.CWInverted}}
@@ -130,6 +171,14 @@
 {{- end}}
 {{- if eq .Phone.Family "856"}}
     <P6760>2</P6760>
+{{- end}}
+{{- /* Syslog (phone-feature-parity S-27): P207 = Syslog Server, P208 = Syslog Level (0 None, 1 Debug, 2 Info, 3 Warning, 4 Error) [R8x6 TPL]; the same keys on the other Grandstream families. Off by default and written explicitly off so turning a group's syslog off reaches phones that had it on. The server is Hello's sink, UDP; a host:port is written as configured (UNVERIFIED on hardware, verify). */}}
+{{- if .Syslog}}
+    <P207>{{xml .Syslog.Address}}</P207>
+    <P208>{{.Syslog.Level}}</P208>
+{{- else}}
+    <P207></P207>
+    <P208>0</P208>
 {{- end}}
 {{- /* Emergency numbers from Hello's emergency routes (CALL-47): P8385 on the WP8x6, P25675 on the WP856; the WP8xx template has none. Call park and retrieve codes (CALL-16): P60069 and P2336 on the WP8x6 and WP856. */}}
 {{- if .Emergency}}
@@ -261,6 +310,63 @@
     <P22194>0</P22194>
 {{- end}}
 {{- end}}
+{{- /* Further lines (phone-feature-parity S-10), written for each further line of the phone in order: account N is the Nth SIP account. Keys per Grandstream's own configuration templates (config-template-10212026.zip; wp8x6_config_1.0.3.39 accounts 2 and 3, wp810_822_825_config_1.0.11.83 and wp820_config_1.0.7.90 account 2, wp856_config_1.0.3.16 accounts 2 to 6). The account block of account N starts at b = 201 + 100 N (account 2 at P401, 3 at P501, 4 at P601) and, for the WP856's accounts 5 and 6, at b = 1201 + 100 N (P1701, P1801); inside it: b Account Active, b+1 SIP Server, b+3 SIP User ID, b+4 SIP Authentication ID, b+5 SIP Authentication Password, b+6 Name, b+11 Register Expiration (minutes), b+14 SUBSCRIBE for MWI, b+16 Account Name, b+23 Special Feature, b+25 Voice Mail Access Number, b+47 SIP Transport (0 UDP, 1 TCP, 2 TLS), b+50 to b+55 Preferred Vocoder choices 1 to 6. A few keys sit at 100 (N - 1) above account 1's: P2325 Feature Key Synchronization (account 2 P2425), P2347 Accept Incoming SIP from Proxy Only (P2447), P26063 Call Waiting (P26163; the WP820 template has only the phone-wide P91), P2397 OPTIONS Keep Alive (WP8x6) and P2329 SIP URI Scheme when using TLS. The values are line 1's: P198/b+23 = 102 (Broadsoft, which the feature key sync needs), P2347 = 1 so a second line is as closed as the first (S-32), the call-waiting polarity of line 1 (1 on, 2 off; the WP856 reads it the other way round). A line is a device of its own extension, so its MWI, call waiting and voicemail number are its own. Not verified on a handset (verify). */}}
+{{- range .Lines}}
+{{- $n := .N}}
+{{- $b := add 201 (mul 100 $n)}}
+{{- if gt $n 4}}{{$b = add 1201 (mul 100 $n)}}{{end}}
+{{- $k := mul 100 (add $n -1)}}
+    <P{{$b}}>1</P{{$b}}>
+    <P{{add $b 16}}>{{xml .AccountLabel}}</P{{add $b 16}}>
+{{- if eq $.Server.DNSMode "srv"}}
+    <P{{add $b 1}}>{{xml $.Server.Host}}</P{{add $b 1}}>
+{{- else}}
+    <P{{add $b 1}}>{{xml $.Server.Host}}:{{$.Server.Port}}</P{{add $b 1}}>
+{{- end}}
+    <P{{add $b 3}}>{{xml .Username}}</P{{add $b 3}}>
+    <P{{add $b 4}}>{{xml .AuthName}}</P{{add $b 4}}>
+    <P{{add $b 5}}>{{xml .Password}}</P{{add $b 5}}>
+    <P{{add $b 6}}>{{xml .DisplayName}}</P{{add $b 6}}>
+    <P{{add $b 11}}>{{div $.Server.Expiry 60}}</P{{add $b 11}}>
+    <P{{add $b 14}}>1</P{{add $b 14}}>
+    <P{{add $b 25}}>{{xml (or .VoicemailCode "*97")}}</P{{add $b 25}}>
+{{- if eq $.Server.Transport "tls"}}
+    <P{{add $b 47}}>2</P{{add $b 47}}>
+    <P{{add 2329 $k}}>1</P{{add 2329 $k}}>
+{{- else if eq $.Server.Transport "tcp"}}
+    <P{{add $b 47}}>1</P{{add $b 47}}>
+{{- else}}
+    <P{{add $b 47}}>0</P{{add $b 47}}>
+{{- end}}
+{{- if $.Codecs.Opus}}
+    <P{{add $b 50}}>123</P{{add $b 50}}>
+    <P{{add $b 51}}>9</P{{add $b 51}}>
+    <P{{add $b 52}}>0</P{{add $b 52}}>
+    <P{{add $b 53}}>8</P{{add $b 53}}>
+    <P{{add $b 54}}>8</P{{add $b 54}}>
+    <P{{add $b 55}}>8</P{{add $b 55}}>
+{{- else}}
+    <P{{add $b 50}}>9</P{{add $b 50}}>
+    <P{{add $b 51}}>0</P{{add $b 51}}>
+    <P{{add $b 52}}>8</P{{add $b 52}}>
+    <P{{add $b 53}}>8</P{{add $b 53}}>
+    <P{{add $b 54}}>8</P{{add $b 54}}>
+    <P{{add $b 55}}>8</P{{add $b 55}}>
+{{- end}}
+    <P{{add $b 23}}>102</P{{add $b 23}}>
+    <P{{add 2325 $k}}>1</P{{add 2325 $k}}>
+    <P{{add 2347 $k}}>1</P{{add 2347 $k}}>
+{{- if eq $.Phone.WP "WP8x6"}}
+    <P{{add 2397 $k}}>1</P{{add 2397 $k}}>
+{{- end}}
+{{- if ne $.Phone.WP "WP820"}}
+{{- if $.Phone.CWInverted}}
+    <P{{add 26063 $k}}>{{if .CallWaiting}}2{{else}}1{{end}}</P{{add 26063 $k}}>
+{{- else}}
+    <P{{add 26063 $k}}>{{if .CallWaiting}}1{{else}}2{{end}}</P{{add 26063 $k}}>
+{{- end}}
+{{- end}}
+{{- end}}
     <P2>{{xml .Phone.AdminPassword}}</P2>
     <P212>{{urlvia .Prov.URL}}</P212>
 {{- /* P8433 (PRV-04) is defined only in the WP8x6 template; the WP856 and WP8xx templates load CAs through the web UI. */}}
@@ -282,12 +388,51 @@
 {{- /* Check-sync (spec S-5): P95030 = 0 so a plain check-sync re-provisions without a reboot (WP8x6 fw 1.0.3.20 and later) [R8x6 section 1]; P4428 = 0 authenticates the NOTIFY (ACC-16: the WP8x6 and WP856 templates say "Enable SIP NOTIFY Authentication. 0 - Yes, 1 - No" and the WP8xx one "Disable SIP NOTIFY Authentication. 0 - No, 1 - Yes"; 0 challenges in all three), which hello-sip answers from the device's HA1. */}}
     <P95030>0</P95030>
     <P4428>0</P4428>
+{{- /* Account sharing (phone-feature-parity S-11), WP8x6 only (wp8x6_config_1.0.3.39, "Application/Account Sharing"; the WP810/822/825, WP820 and WP856 templates have none). P22521 = Enable Account Sharing (0 No, 1 Yes, default 0) and P22522 = Role in Account Sharing (0 Host Device, 1 Guest Device, default 1). RenderData.Sharing is set for a WP8x6 in a phone group that enabled account sharing: P22521 = 1 and P22522 by role, 0 for the host that holds the shared line and 1 for a guest. Any other WP8x6 is written P22521 = 0, so taking a phone out of the group (or switching the group off) turns sharing off. The same section has the group name P22527 (default AccountSharing), group password P22523 (Group Password, a String, default AccountSharing; wp8x6_config_1.0.3.39 and _1.0.3.35), SIP server port P22537 (15060), shared Account P22524 (0 Account 1, 1 Account 2, 2 Account 3; default 0) and Account Name P22525; the group name and the others stay at their defaults, but the password is the group's own secret that Hello generated and stores sealed (SharingInfo.Password; written only into the group's WP8x6 phones, masked in previews), so handsets of different Hello groups on one network do not join each other's shared line. To confirm on two handsets (verify). */}}
+{{- if eq .Phone.WP "WP8x6"}}
+{{- with .Sharing}}
+    <P22521>1</P22521>
+    <P22522>{{if .Guest}}1{{else}}0{{end}}</P22522>
+{{- if .Password}}
+    <P22523>{{xml .Password}}</P22523>
+{{- end}}
+{{- else}}
+    <P22521>0</P22521>
+{{- end}}
+{{- end}}
+{{- /* Provisioning hardening (phone-feature-parity S-22, S-32), every Grandstream WP model. Keys, values and meanings per Grandstream's own configuration templates (config-template-10212026.zip; 2026-11-09 review: wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83, wp820_config_1.0.7.90, wp856_config_1.0.3.16). Every WP template: P1409 Enable TR-069 (0 No; the WP810/822/825 default is 1 with ACS https://acs.gdms.cloud), P4503 ACS URL (written empty), P276 SSH (the question is inverted between templates, "Enable SSH. 0 Yes, 1 No" in the WP8x6, WP820 and WP856 and "Disable SSH. 0 No, 1 Yes" in the WP810/822/825, so 1 switches SSH off in all), P8469 Enable User Web Access (0 Disabled; the admin login Hello sets with P2 stays), P2347 Accept Incoming SIP from Proxy Only (1 Yes; the WP820 calls it "Only Accept SIP Requests from Known Servers"; also the "Accept only from server" cell of the auto-answer restriction, S-32; per account, account 2 is P2447), P26015 Allow SIP Reset (0 No). Only where the template has the key: P1357 Configuration via Keypad Menu (1 Basic settings only; WP8x6, WP810/822/825 and WP820, not the WP856; the WP810/822/825 and WP820 also have a value that adds the network settings, 4 and 3, which keeps Wi-Fi setup on the keypad), P1310 Direct IP Call (1 off: "Enable Direct IP Call. 0 Yes, 1 No" in the WP8x6, "Disable Direct IP Call. 0 No, 1 Yes" in the WP810/822/825; not in the WP820 or WP856), and the firmware upgrade confirmation prompt, which would hold an upgrade until someone presses OK: P8375 Firmware Upgrade Confirmation (0 No, default 1) in the WP8x6 and P84988 Disable Firmware Upgrade Confirmation (1 Yes, default 0) in the WP810/822/825, neither in the WP820 or WP856. TR-069 is turned off here on the user's explicit decision of 2026-11-09 (the ACS URL of a TR-069 phone would otherwise be a way around Hello). Not written, on purpose: P2346 Authenticate Incoming INVITE (0 No, 1 Yes, all four templates, per account: Hello does not yet answer a phone's challenge on an INVITE it originates; on, every call to the phone would fail), P60082 Trusted Domain Name List (WP8x6 and WP810/822/825; used with P2311 Check Domain Certificates, RFC 5922, string up to 256 characters: a wrong list would fail TLS registration), P240 Authenticate Conf File (0 No, 1 Yes, all four; the HT813 template says the file is authenticated before acceptance, without saying how) and P1359 XML Config File Password (string): Hello's files are plain, protected by HTTPS and the token, and a phone told to authenticate files could refuse them; P1 is in no WP template. A group or phone can set any of them through the setting overrides. Not confirmed on a phone (verify, in particular that incoming calls still arrive with P2347 = 1 behind the Kamailio edge). */}}
+{{- if .Phone.Family}}
+    <P1409>0</P1409>
+    <P4503></P4503>
+    <P276>1</P276>
+    <P8469>0</P8469>
+{{- if ne .Phone.WP "WP856"}}
+    <P1357>1</P1357>
+{{- end}}
+{{- if or (eq .Phone.WP "WP8x6") (eq .Phone.WP "WP8xx")}}
+    <P1310>1</P1310>
+{{- end}}
+{{- if eq .Phone.WP "WP8x6"}}
+    <P8375>0</P8375>
+{{- else if eq .Phone.WP "WP8xx"}}
+    <P84988>1</P84988>
+{{- end}}
+    <P2347>1</P2347>
+    <P26015>0</P26015>
+{{- end}}
+{{- /* Phonebook download (phone-feature-parity S-31), keys per Grandstream's own templates (2026-11-09 review). P330 = Enable Phonebook XML Download, 3 = HTTPS in every WP template (the WP856 numbers 1 TFTP, 2 HTTP, 3 HTTPS and the WP8x6 1 HTTP, 2 TFTP, 3 HTTPS); P331 = server path (host/path, no scheme); P332 = download interval in minutes (WP8x6 and WP810/822/825: 0 or 5 to 720; WP820 and WP856: only 0, 5, 30, 60, 120, 240, 360, 480, 720, see BookRefreshForPhone). What the download does to entries already in the phone: P333 = Remove Manually-edited Entries on Download (0 No, 1 Yes, default 1) is in wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83 and written 1, as Hello's directory is the source of truth; P8462 = Import Group Method (0 Replace, 1 Append, default 0) is in the WP8x6 template only and written 0, so a group in the downloaded XML replaces the phone's; the WP820 and WP856 templates have neither, but "Clear The Old List" P1435 (0 No, 1 Clear all, 2 Keep Local Contacts, default 0), which is written 1 for the same effect. P1436 (Replace Duplicate Items) stays at its default. */}}
 {{- with .Book}}
     <P330>3</P330>
     <P331>{{xml .HostPath}}</P331>
     <P332>{{.RefreshMinutes}}</P332>
-{{- if ne $.Phone.Family "856"}}
+{{- if and (ne $.Phone.Family "856") (ne $.Phone.WP "WP820")}}
     <P333>1</P333>
+{{- end}}
+{{- if eq $.Phone.WP "WP8x6"}}
+    <P8462>0</P8462>
+{{- end}}
+{{- if or (eq $.Phone.WP "WP820") (eq $.Phone.WP "WP856")}}
+    <P1435>1</P1435>
 {{- end}}
 {{- end}}
 {{- /* LDAP phonebook (pbx-gaps S-26): no template or guide in the references on hand lists the LDAP P-values for the WP8x6, WP856 or WP8xx, so P8020 to P8032 below are not confirmed on a phone (verify, needs hardware). They are written only to a phone in a group that turned LDAP on. */}}
@@ -306,7 +451,7 @@
     <P8031>(|(telephoneNumber=%)(mobile=%)(homePhone=%))</P8031>
     <P8032>2</P8032>
 {{- end}}
-{{- /* HT813 FXO disconnect supervision. Without it a PSTN caller who hangs up first leaves the FXO off-hook and it answers 486 to every later call. Keys and meanings from Grandstream's ht813_config_1.0.19.6 template (config-template-10212026.zip), section "FXO PORT Settings" / "FXO Termination Settings" (not the FXS-side P892/P856 loop-current keys): P893 Enable Current Disconnect, P764 Current Disconnect Threshold (50-800 ms, default 100), P28101 Enable Polarity Reversal, P712 Enable PSTN Disconnect Tone Detection, P841 PSTN Disconnect Tone (f1=<Hz>@<dB>,c=<on>/<off> ms; UAE busy tone 400 Hz, 375 ms on / 375 ms off, level -32 dB as in Grandstream's example). The template has no silence-timeout key, so none is written. TR-069 is not touched. */}}
+{{- /* HT813 FXO disconnect supervision. Without it a PSTN caller who hangs up first leaves the FXO off-hook and it answers 486 to every later call. Keys and meanings from Grandstream's ht813_config_1.0.19.6 template (config-template-10212026.zip), section "FXO PORT Settings" / "FXO Termination Settings" (not the FXS-side P892/P856 loop-current keys): P893 Enable Current Disconnect, P764 Current Disconnect Threshold (50-800 ms, default 100), P28101 Enable Polarity Reversal, P712 Enable PSTN Disconnect Tone Detection, P841 PSTN Disconnect Tone (f1=<Hz>@<dB>,c=<on>/<off> ms; UAE busy tone 400 Hz, 375 ms on / 375 ms off, level -32 dB as in Grandstream's example). The template has no silence-timeout key, so none is written. TR-069 is not touched on the HT813. */}}
 {{- if .Phone.FXO}}
     <P893>1</P893>
     <P764>100</P764>

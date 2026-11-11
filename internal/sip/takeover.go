@@ -515,10 +515,17 @@ func (s *Server) haReap(members []cluster.Member, m cluster.Member, self string)
 	if e.counted || time.Now().Before(e.deadline) || !s.haAmReaper(members, self) {
 		return
 	}
+	// Claim the count: the takeover loop and any other pass may be here at
+	// once, and each would otherwise see counted=false and add the same
+	// lost calls again.
+	if !s.haOfflineClaim(m.ID) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.StateTimeout)
 	taken, err := s.deps.HAState.TakenOver(ctx, m.ID)
 	cancel()
 	if err != nil {
+		s.haOfflineRelease(m.ID)
 		return
 	}
 	s.haOfflineCount(m.ID)
@@ -560,6 +567,7 @@ func (s *Server) haAmReaper(members []cluster.Member, self string) bool {
 type haOfflineNode struct {
 	active   int
 	counted  bool
+	counting bool // a pass is counting it right now
 	deadline time.Time
 }
 
@@ -585,6 +593,29 @@ func (s *Server) haOfflineCount(id string) {
 	defer s.haOfflineMu.Unlock()
 	if e, ok := s.haOffline[id]; ok {
 		e.counted = true
+		e.counting = false
+	}
+}
+
+// haOfflineClaim reserves the node's count for the calling pass: false when
+// another pass already counted it or is counting it.
+func (s *Server) haOfflineClaim(id string) bool {
+	s.haOfflineMu.Lock()
+	defer s.haOfflineMu.Unlock()
+	e, ok := s.haOffline[id]
+	if !ok || e.counted || e.counting {
+		return false
+	}
+	e.counting = true
+	return true
+}
+
+// haOfflineRelease gives a claim back when the count could not be made.
+func (s *Server) haOfflineRelease(id string) {
+	s.haOfflineMu.Lock()
+	defer s.haOfflineMu.Unlock()
+	if e, ok := s.haOffline[id]; ok {
+		e.counting = false
 	}
 }
 

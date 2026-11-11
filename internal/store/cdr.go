@@ -43,6 +43,9 @@ type CDR struct {
 	CalleeCodec *string `json:"calleeCodec"`
 	// Kind is call, page or intercom (migration 00013).
 	Kind string `json:"kind"`
+	// AnsweredBy is the assistant's extension when a boss's call was answered
+	// by the assistant (migration 00065); empty otherwise.
+	AnsweredBy string `json:"answeredBy"`
 	// Origin is phone (dialled at a phone) or api (click-to-call), and
 	// OriginClient the OAuth client or token id behind an api call (migration
 	// 00057).
@@ -56,7 +59,7 @@ type CDR struct {
 	// (migration 00052).
 	SRTP string `json:"srtp"`
 	// SRTPKeyEx is how the encrypted legs agreed their keys: none, sdes, dtls
-	// or mixed, and ICE whether a leg ran ICE-lite (migration 00053).
+	// or mixed, and ICE whether a leg ran ICE-lite (migration 00073).
 	SRTPKeyEx string `json:"srtpKeyEx"`
 	ICE       bool   `json:"ice"`
 	// PageLegs is a page's outcome per member (migration 00014); set by
@@ -65,6 +68,9 @@ type CDR struct {
 	// QueueLegs is what the call did in a call queue (migration 00040); set
 	// by GetCDR.
 	QueueLegs []QueueLeg `json:"queueLegs,omitempty"`
+	// RTCPXR is what the phones on the call reported (migration 00066); set
+	// by GetCDR, empty when no phone sent a report.
+	RTCPXR []RTCPXRQuality `json:"rtcpxr,omitempty"`
 }
 
 // QueueLeg is one event of a call in a queue: enter, agent, answered, wait,
@@ -89,14 +95,14 @@ type PageLeg struct {
 const cdrCols = `id, correlation_id, sip_call_id, source, destination, start_time, ring_time, answer_time,
 	end_time, duration_ms, billable_ms, sip_node, media_mode, final_status, termination_side, failure_reason,
 	direction, original_destination, rewritten_destination, route_name, trunk_name,
-	rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client, srtp, srtp_keyex, ice`
+	rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client, answered_by, srtp, srtp_keyex, ice`
 
 func scanCDR(r interface{ Scan(...any) error }, extra ...any) (CDR, error) {
 	var c CDR
 	var ring, answer sql.NullTime
 	dest := append([]any{&c.ID, &c.CorrelationID, &c.SIPCallID, &c.Source, &c.Destination, &c.StartTime, &ring, &answer,
 		&c.EndTime, &c.DurationMs, &c.BillableMs, &c.SIPNode, &c.MediaMode, &c.FinalStatus, &c.TerminationSide, &c.FailureReason,
-		&c.Direction, &c.OriginalDestination, &c.RewrittenDestination, &c.Route, &c.Trunk, &c.RTPPackets, &c.RTPLost, &c.RTPJitterMs, &c.Kind, &c.RingTag, &c.RingRule, &c.CallerCodec, &c.CalleeCodec, &c.Origin, &c.OriginClient, &c.SRTP, &c.SRTPKeyEx, &c.ICE,
+		&c.Direction, &c.OriginalDestination, &c.RewrittenDestination, &c.Route, &c.Trunk, &c.RTPPackets, &c.RTPLost, &c.RTPJitterMs, &c.Kind, &c.RingTag, &c.RingRule, &c.CallerCodec, &c.CalleeCodec, &c.Origin, &c.OriginClient, &c.AnsweredBy, &c.SRTP, &c.SRTPKeyEx, &c.ICE,
 	}, extra...)
 	if err := r.Scan(dest...); err != nil {
 		return c, err
@@ -113,7 +119,14 @@ type CDRFilter struct {
 	// Failed keeps only calls whose final status is outside 2xx, the same
 	// rule the CDR detail's explanation uses.
 	Failed bool
+	// Disposition keeps one disposition: "blocked" is the calls a trunk's
+	// screening turned away (blocklist, anonymous reject, country
+	// restriction; pbx-gaps S-7, S-8). Empty keeps all.
+	Disposition string
 }
+
+// blockedReasonPrefix starts the failure reason of a screened call.
+const blockedReasonPrefix = "blocked: "
 
 // ListCDRs returns up to limit CDRs matching f with id below before (0
 // means from the newest), newest first, and the cursor for the next page
@@ -122,7 +135,8 @@ func (s *Store) ListCDRs(ctx context.Context, f CDRFilter, before int64, limit i
 	rows, err := s.db.QueryContext(ctx, `SELECT `+cdrCols+`
 		FROM cdrs WHERE ($1 = 0 OR id < $1) AND ($3::text = '' OR direction = $3::text)
 			AND (NOT $4::boolean OR final_status NOT BETWEEN 200 AND 299)
-		ORDER BY id DESC LIMIT $2`, before, limit+1, f.Direction, f.Failed)
+			AND ($5::text = '' OR ($5::text = 'blocked' AND left(failure_reason, length($6::text)) = $6::text))
+		ORDER BY id DESC LIMIT $2`, before, limit+1, f.Direction, f.Failed, f.Disposition, blockedReasonPrefix)
 	if err != nil {
 		return nil, "", err
 	}
@@ -223,5 +237,9 @@ func (s *Store) GetCDR(ctx context.Context, id int64) (CDR, routing.Trace, error
 		}
 		c.QueueLegs = append(c.QueueLegs, l)
 	}
-	return c, trace, rows.Err()
+	if err := rows.Err(); err != nil {
+		return c, trace, err
+	}
+	c.RTCPXR, err = s.rtcpxrOf(ctx, id)
+	return c, trace, err
 }

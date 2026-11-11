@@ -282,8 +282,8 @@ func TestTrunkSessionTimersOutbound(t *testing.T) {
 				waitReq(t, cr.acks, "ACK to the carrier")
 				refreshWithin(t, cr.reinvites, 4*time.Second, "the carrier")
 			} else {
-				if got != "" || headerOfReq(inv, "Supported") != "" {
-					t.Fatalf("INVITE asks for a session timer: Session-Expires = %q", got)
+				if got != "" || strings.Contains(headerOfReq(inv, "Supported"), "timer") {
+					t.Fatalf("INVITE asks for a session timer: Session-Expires = %q Supported = %q", got, headerOfReq(inv, "Supported"))
 				}
 				noReq(t, cr.reinvites, 2500*time.Millisecond, "a refresh of a trunk without session timers")
 			}
