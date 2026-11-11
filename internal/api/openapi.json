@@ -7536,6 +7536,747 @@
         }
       }
     },
+    "/api/v1/integrations/crm": {
+      "get": {
+        "operationId": "listCRMConnectors",
+        "summary": "List CRM connectors",
+        "description": "Lists the CRM connectors with their capabilities and connection state (connected, needs_reauth, revoked). Client secrets and tokens are never returned; hasClientSecret says whether the secret is set.",
+        "tags": [
+          "integrations"
+        ],
+        "responses": {
+          "200": {
+            "description": "CRM connectors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMConnectorList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createCRMConnector",
+        "summary": "Create a CRM connector",
+        "description": "Adds a connector of a registered kind (hubspot). The customer creates the CRM app in their own account; this stores its client id (config.clientId) and, write-only, its client secret. A new connector is not connected until an administrator signs in with connect. Validation failures list each failing field in error.fields.",
+        "tags": [
+          "integrations"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CRMConnectorInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMConnector"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/{id}": {
+      "get": {
+        "operationId": "getCRMConnector",
+        "summary": "Get a CRM connector",
+        "description": "Returns one connector with its connection state and the redirect URI to register in the CRM app.",
+        "tags": [
+          "integrations"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The connector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMConnector"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "patch": {
+        "operationId": "updateCRMConnector",
+        "summary": "Update a CRM connector",
+        "description": "Changes the settings you send. The kind cannot change. Changing config.clientId requires clientSecret in the same request, so a secret is never sent to another app. Switching recordings off or disabling the connector revokes the recording links it minted.",
+        "tags": [
+          "integrations"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CRMConnectorInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated connector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMConnector"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteCRMConnector",
+        "summary": "Delete a CRM connector",
+        "description": "Deletes the connector, its connection and its logging jobs, revokes the refresh token at the CRM when it can and revokes the recording links it minted. Calls already written to the CRM stay there.",
+        "tags": [
+          "integrations"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/{id}/connect": {
+      "post": {
+        "operationId": "connectCRMConnector",
+        "summary": "Start the CRM sign-in",
+        "description": "Starts the OAuth authorization of the connector and returns the CRM address to send the browser to. The CRM returns to /api/v1/integrations/crm/oauth/callback, which finishes the connection and redirects to the console. Needs HELLO_PUBLIC_URL and the client id and secret.",
+        "tags": [
+          "integrations"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Where to send the browser",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMAuthorize"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/{id}/connection": {
+      "delete": {
+        "operationId": "disconnectCRMConnector",
+        "summary": "Disconnect a CRM connector",
+        "description": "Removes the connection and its stored tokens, revokes the refresh token at the CRM when it can and revokes the recording links the connector minted. Logging jobs wait until the connector is connected again.",
+        "tags": [
+          "integrations"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Disconnected"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/{id}/test": {
+      "post": {
+        "operationId": "testCRMConnector",
+        "summary": "Test a CRM connection",
+        "description": "Makes a harmless call to the CRM with the stored token (refreshing it when needed) and reports whether it worked. At most 6 tests per minute per connector.",
+        "tags": [
+          "integrations"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMTestResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/oauth/callback": {
+      "get": {
+        "operationId": "crmOAuthCallback",
+        "summary": "CRM sign-in callback",
+        "description": "Where the CRM returns the browser after the sign-in. It needs no credential: the single-use state in the query, minted for an administrator who started the sign-in, is the only credential. It always redirects to /integrations/crm with connected=<id> or error=<denied|state|failed>.",
+        "tags": [
+          "integrations"
+        ],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The state the sign-in was started with."
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The authorization code the CRM issued."
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Set by the CRM when the administrator declined."
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the console",
+            "headers": {
+              "Location": {
+                "description": "The console page that shows the result.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "security": [],
+        "x-hello-mcp": {
+          "exclude": "a browser redirect target of the CRM sign-in, not an operation an agent calls",
+          "category": "session"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/{id}/logs": {
+      "get": {
+        "operationId": "listCRMLogs",
+        "summary": "List CRM logging jobs",
+        "description": "Lists the jobs that write calls into the CRM, newest first: pending, logged, waiting for a recording, skipped (no CRM user for the call) and dead (out of attempts, with the last error). Numbers and names of callers are not part of a job.",
+        "tags": [
+          "integrations"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "waiting",
+                "pending",
+                "logged",
+                "update",
+                "dead",
+                "skipped"
+              ]
+            },
+            "description": "Only jobs in this state; dead jobs are the dead letters."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "description": "Page size, 1 to 200 (default 50)."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Return jobs older than this log id; pass nextBefore of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of jobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMLogPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/integrations/crm/logs/{id}/retry": {
+      "post": {
+        "operationId": "retryCRMLog",
+        "summary": "Retry a CRM logging job",
+        "description": "Puts a dead or skipped job back in the queue with a fresh series of attempts. A job in any other state answers 409.",
+        "tags": [
+          "integrations"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requeued job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMLog"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "requeueing a CRM job is done from the console",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/{id}/users": {
+      "get": {
+        "operationId": "listCRMUsers",
+        "summary": "List the CRM user mapping",
+        "description": "Lists every Hello user with the CRM user their calls are logged for. A user is matched by the verified email of the Hello account against the CRM, never by display name; source says whether the mapping was found by email or set by hand.",
+        "tags": [
+          "integrations"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Users and their CRM users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMUserList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/integrations/crm/{id}/users/{userId}": {
+      "put": {
+        "operationId": "putCRMUser",
+        "summary": "Map a user to a CRM user",
+        "description": "Sets the CRM user id the Hello user's calls are logged for (a manual mapping that automatic matching never replaces). An empty externalUserId clears it.",
+        "tags": [
+          "integrations"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Numeric id of the Hello user, as the users list returns it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CRMUserMappingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Saved"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "CRM connector settings, the sign-in and the connection are managed in the console; an agent reads them but does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/hubspot/engagements": {
+      "post": {
+        "operationId": "recordHubSpotEngagement",
+        "summary": "Record the HubSpot engagement of a call",
+        "description": "The HubSpot calling iframe tells the server which engagement it created for a call, so the server patches that engagement (duration, status, recording link) instead of creating a second one. If the server already logged the call itself, its engagement is kept and adopted is false. A user may only record calls of their own extensions.",
+        "tags": [
+          "integrations"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CRMEngagementInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Whether the engagement was adopted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMEngagementResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "calls",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "called by the HubSpot iframe, not by an agent",
+          "category": "credentials"
+        }
+      }
+    },
     "/api/v1/conferences": {
       "get": {
         "operationId": "listConferences",
@@ -24052,6 +24793,469 @@
             "items": {
               "$ref": "#/components/schemas/PagingGroup"
             }
+          }
+        }
+      },
+      "CRMCapabilities": {
+        "type": "object",
+        "required": [
+          "lookup",
+          "logCalls",
+          "recordings",
+          "clickToCall",
+          "screenPop",
+          "ticket"
+        ],
+        "properties": {
+          "lookup": {
+            "type": "boolean",
+            "description": "The connector finds a contact by phone number."
+          },
+          "logCalls": {
+            "type": "boolean",
+            "description": "The connector writes calls into the CRM."
+          },
+          "recordings": {
+            "type": "boolean",
+            "description": "The connector can carry a recording link."
+          },
+          "clickToCall": {
+            "type": "boolean",
+            "description": "The CRM has a click-to-call integration point."
+          },
+          "screenPop": {
+            "type": "boolean",
+            "description": "The CRM can show the caller on an incoming call."
+          },
+          "ticket": {
+            "type": "boolean",
+            "description": "The connector can open a ticket from a call."
+          }
+        }
+      },
+      "CRMConnection": {
+        "type": "object",
+        "required": [
+          "status",
+          "grantedScopes",
+          "updatedAt"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "needs_reauth",
+              "revoked"
+            ],
+            "description": "needs_reauth means the CRM refused the refresh token: jobs wait until an administrator connects again."
+          },
+          "externalAccount": {
+            "type": "string",
+            "description": "The CRM account the tokens belong to (the HubSpot portal id)."
+          },
+          "grantedScopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The scopes the CRM granted."
+          },
+          "lastError": {
+            "type": "string",
+            "description": "Why the connection stopped working, when it did."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the access token expires; it is refreshed before that."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the connection last changed."
+          }
+        }
+      },
+      "CRMConnector": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "enabled",
+          "config",
+          "hasClientSecret",
+          "recordings",
+          "linkTtlHours",
+          "logMissed",
+          "fallbackOwner",
+          "createdAt",
+          "capabilities",
+          "connection"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "description": "The connector kind, for example hubspot."
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "A disabled connector looks nothing up and logs nothing."
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The connector's settings: clientId and, for HubSpot, region (na or eu)."
+          },
+          "hasClientSecret": {
+            "type": "boolean",
+            "description": "Whether the OAuth client secret is set. The secret itself is never returned."
+          },
+          "recordings": {
+            "type": "boolean",
+            "description": "Whether recording links are written into the CRM. Off by default."
+          },
+          "linkTtlHours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8760,
+            "description": "How long a recording link lives; links of recent calls are renewed before they expire."
+          },
+          "logMissed": {
+            "type": "boolean",
+            "description": "Whether missed calls are logged as no-answer calls."
+          },
+          "fallbackOwner": {
+            "type": "string",
+            "description": "The CRM user id that owns the calls of a user with no CRM user. Empty skips those calls."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/CRMCapabilities"
+          },
+          "connection": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CRMConnection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The connection, null while the connector is not connected."
+          },
+          "redirectUri": {
+            "type": "string",
+            "description": "The redirect URI to register in the CRM app; absent without HELLO_PUBLIC_URL."
+          }
+        }
+      },
+      "CRMConnectorList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CRMConnector"
+            }
+          }
+        }
+      },
+      "CRMConnectorInput": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "The connector kind (hubspot); required on create, immutable afterwards."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "A unique name for the console."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Defaults to true."
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "clientId and, for HubSpot, region (na or eu, default na); keys you leave out are kept."
+          },
+          "clientSecret": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The OAuth client secret of the customer's CRM app. Write-only; an empty string clears it."
+          },
+          "recordings": {
+            "type": "boolean",
+            "description": "Write recording links into the CRM (default false)."
+          },
+          "linkTtlHours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8760,
+            "description": "Recording link lifetime in hours (default 720, 30 days)."
+          },
+          "logMissed": {
+            "type": "boolean",
+            "description": "Log missed calls (default true)."
+          },
+          "fallbackOwner": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "CRM user id owning calls of unmapped users; empty skips them."
+          }
+        }
+      },
+      "CRMAuthorize": {
+        "type": "object",
+        "required": [
+          "authorizeUrl"
+        ],
+        "properties": {
+          "authorizeUrl": {
+            "type": "string",
+            "description": "The CRM address that asks the administrator to approve the app."
+          }
+        }
+      },
+      "CRMTestResult": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Whether the CRM accepted the call."
+          },
+          "error": {
+            "type": "string",
+            "description": "Why it did not, without secrets."
+          }
+        }
+      },
+      "CRMLog": {
+        "type": "object",
+        "required": [
+          "id",
+          "connectorId",
+          "callId",
+          "direction",
+          "status",
+          "externalId",
+          "attempts",
+          "nextAttemptAt",
+          "lastError",
+          "eventType",
+          "ownerExtension",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "connectorId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "callId": {
+            "type": "string",
+            "description": "The call's correlation id, as in the call events and the CDR."
+          },
+          "direction": {
+            "type": "string",
+            "description": "inbound or outbound."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "pending",
+              "logged",
+              "update",
+              "dead",
+              "skipped"
+            ],
+            "description": "waiting has no call data yet, pending is due, logged is in the CRM, update needs a patch, dead ran out of attempts, skipped was deliberately not logged."
+          },
+          "externalId": {
+            "type": "string",
+            "description": "The CRM's id of the logged call."
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Failed attempts in the current series."
+          },
+          "nextAttemptAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastError": {
+            "type": "string",
+            "description": "The last failure or the reason the call was skipped."
+          },
+          "eventType": {
+            "type": "string",
+            "description": "The call event the job was made from."
+          },
+          "ownerExtension": {
+            "type": "string",
+            "description": "The extension whose user owns the call in the CRM."
+          },
+          "recordingId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The recording linked into the CRM record, when there is one."
+          },
+          "linkExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the recording link written into the CRM expires."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CRMLogPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "nextBefore"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CRMLog"
+            }
+          },
+          "nextBefore": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Pass as before for the next page; 0 when this was the last."
+          }
+        }
+      },
+      "CRMUserMapping": {
+        "type": "object",
+        "required": [
+          "userId",
+          "username",
+          "email"
+        ],
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "username": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "description": "The account's email, used to find the CRM user."
+          },
+          "extension": {
+            "type": "string",
+            "description": "The user's extension."
+          },
+          "externalUserId": {
+            "type": "string",
+            "description": "The CRM user id; absent while unmapped."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "email",
+              "manual"
+            ],
+            "description": "How the mapping was made."
+          }
+        }
+      },
+      "CRMUserList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CRMUserMapping"
+            }
+          }
+        }
+      },
+      "CRMUserMappingInput": {
+        "type": "object",
+        "required": [
+          "externalUserId"
+        ],
+        "properties": {
+          "externalUserId": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "The CRM user id; empty clears the mapping."
+          }
+        }
+      },
+      "CRMEngagementInput": {
+        "type": "object",
+        "required": [
+          "callId",
+          "engagementId"
+        ],
+        "properties": {
+          "callId": {
+            "type": "string",
+            "description": "The call's correlation id from the call events."
+          },
+          "engagementId": {
+            "type": "string",
+            "pattern": "^[0-9]{1,32}$",
+            "description": "The id of the HubSpot call engagement the iframe created."
+          }
+        }
+      },
+      "CRMEngagementResult": {
+        "type": "object",
+        "required": [
+          "adopted"
+        ],
+        "properties": {
+          "adopted": {
+            "type": "boolean",
+            "description": "False when the server had already logged the call and keeps its own engagement."
           }
         }
       },

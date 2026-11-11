@@ -276,6 +276,10 @@ current.
 | `getFlowRevision`                   | read     | `GET /api/v1/flow/revision`                                 | Read the configuration revision                                                                                                          |
 | `traceFlow`                         | read     | `GET /api/v1/flow/trace`                                    | Trace the path a call would take through the call flow                                                                                   |
 | `getInboxStats`                     | messages | `GET /api/v1/inbox/stats`                                   | Inbox counts                                                                                                                             |
+| `listCRMConnectors`                 | admin    | `GET /api/v1/integrations/crm`                              | List CRM connectors                                                                                                                      |
+| `getCRMConnector`                   | admin    | `GET /api/v1/integrations/crm/{id}`                         | Get a CRM connector                                                                                                                      |
+| `listCRMLogs`                       | write    | `GET /api/v1/integrations/crm/{id}/logs`                    | List CRM logging jobs                                                                                                                    |
+| `listCRMUsers`                      | admin    | `GET /api/v1/integrations/crm/{id}/users`                   | List the CRM user mapping                                                                                                                |
 | `listIVRMenus`                      | read     | `GET /api/v1/ivr-menus`                                     | List IVR menus                                                                                                                           |
 | `createIVRMenu`                     | write    | `POST /api/v1/ivr-menus`                                    | Create an IVR menu                                                                                                                       |
 | `getIVRMenu`                        | read     | `GET /api/v1/ivr-menus/{id}`                                | One IVR menu                                                                                                                             |
@@ -490,7 +494,8 @@ conditions, announcements, music on hold), `hello-call-handling` (queues and
 agents, conferences, park and pickup, paging and multicast, messaging,
 presence, voicemail messages, recordings), `hello-phones` (provisioning,
 bulk import, onboarding, phone groups, firmware, phonebooks),
-`hello-flow-graph` (read and verify the call flow) and `hello-troubleshoot`
+`hello-flow-graph` (read and verify the call flow), `hello-crm` (CRM
+connection state, user mapping and logging jobs) and `hello-troubleshoot`
 (a call that failed, a phone that does not register, cluster and AI
 findings). Download them under **AI access → Agent skills**, or with
 `GET /api/v1/skills/{name}/download` (a zip), and unpack each into:
