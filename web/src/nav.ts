@@ -69,10 +69,32 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "user",
       },
       {
+        label: "Faxes",
+        path: "/me/faxes",
+        phase: 5,
+        icon: "printer",
+        minRole: "user",
+      },
+      {
         label: "Messages",
         path: "/me/messages",
         phase: 5,
         icon: "message-square",
+        minRole: "user",
+      },
+      {
+        label: "Web devices",
+        path: "/me/devices",
+        phase: 5,
+        icon: "monitor-smartphone",
+        minRole: "user",
+      },
+      {
+        // Shown only once a channel has a number (see navGroupsFor).
+        label: "My inbox",
+        path: "/me/inbox",
+        phase: 5,
+        icon: "inbox",
         minRole: "user",
       },
       {
@@ -117,6 +139,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { label: "Call flows", path: "/flow", phase: 5, icon: "workflow" },
       { label: "Trunks", path: "/trunks", phase: 2, icon: "cable" },
+      { label: "Blocklist", path: "/blocklist", phase: 5, icon: "shield-ban" },
       { label: "Routes", path: "/routes", phase: 2, icon: "route" },
       {
         label: "Route tester",
@@ -159,12 +182,24 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         phase: 5,
         icon: "square-parking",
       },
+      {
+        label: "Boss and assistant",
+        path: "/boss",
+        phase: 5,
+        icon: "briefcase-business",
+      },
     ],
   },
   {
     label: "Media",
     items: [
       { label: "Voicemail", path: "/voicemail", phase: 4, icon: "voicemail" },
+      {
+        label: "Voicemail groups",
+        path: "/voicemail/groups",
+        phase: 5,
+        icon: "users-round",
+      },
       { label: "Recordings", path: "/recordings", phase: 5, icon: "mic" },
       {
         label: "Announcements",
@@ -186,6 +221,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "gauge",
       },
       { label: "Call history", path: "/history", phase: 1, icon: "history" },
+      { label: "Faxes", path: "/faxes", phase: 5, icon: "printer" },
       {
         label: "Messages",
         path: "/messages",
@@ -193,6 +229,40 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "messages-square",
         // Sending is a write; reading the text is admin only (the page says so).
         minRole: "operator",
+      },
+    ],
+  },
+  {
+    label: "Messaging",
+    items: [
+      // The inbox stays hidden until a channel has a number (navGroupsFor).
+      {
+        label: "Inbox",
+        path: "/inbox",
+        phase: 5,
+        icon: "inbox",
+        minRole: "operator",
+      },
+      {
+        label: "Channels",
+        path: "/messaging/channels",
+        phase: 5,
+        icon: "radio-tower",
+        minRole: "admin",
+      },
+      {
+        label: "Opt-outs",
+        path: "/messaging/optouts",
+        phase: 5,
+        icon: "ban",
+        minRole: "admin",
+      },
+      {
+        label: "Messaging settings",
+        path: "/messaging/settings",
+        phase: 5,
+        icon: "settings",
+        minRole: "admin",
       },
     ],
   },
@@ -252,6 +322,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         phase: 5,
         icon: "radio-tower",
       },
+      {
+        label: "CRM",
+        path: "/integrations/crm",
+        phase: 5,
+        icon: "contact",
+        minRole: "admin",
+      },
     ],
   },
   {
@@ -302,6 +379,9 @@ export const NAV_GROUPS: readonly NavGroup[] = [
 /** The sidebar group of the extension self-service pages. */
 export const MY_PHONE_GROUP = "My phone";
 
+/** The nav items of the inbox, hidden until a channel has a number. */
+const INBOX_PATHS: ReadonlySet<string> = new Set(["/inbox", "/me/inbox"]);
+
 /**
  * The groups and items `role` may see; empty groups are dropped. The AI
  * group shows in full only while AI is enabled; while it is off, only its
@@ -313,15 +393,21 @@ export function navGroupsFor(
   role: string | undefined,
   aiEnabled = false,
   hasExtensions = false,
+  inboxEnabled = false,
 ): NavGroup[] {
+  const inboxOk = (i: NavItem) => !INBOX_PATHS.has(i.path) || inboxEnabled;
   if (role === "user") {
-    return NAV_GROUPS.filter((g) => g.label === MY_PHONE_GROUP);
+    return NAV_GROUPS.filter((g) => g.label === MY_PHONE_GROUP).map((g) => ({
+      ...g,
+      items: g.items.filter(inboxOk),
+    }));
   }
   return NAV_GROUPS.map((g) => ({
     ...g,
     items: g.items.filter(
       (i) =>
         atLeast(role, i.minRole ?? "viewer") &&
+        inboxOk(i) &&
         (g.label !== "AI" || aiEnabled || i.path === "/ai/status") &&
         (g.label !== MY_PHONE_GROUP || hasExtensions),
     ),

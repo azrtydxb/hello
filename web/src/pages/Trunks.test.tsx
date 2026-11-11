@@ -21,8 +21,16 @@ const TRUNK = {
   destinations: [{ host: "10.0.0.5", port: 5060, priority: 0, weight: 1 }],
   internalDialing: { mode: "off", patterns: [] },
   messaging: false,
+  faxMode: "passthrough",
+  anonymousPolicy: "honour",
+  assertedIdentity: "",
+  identityHeader: "pai",
   sessionTimers: "default",
   codecs: ["PCMU", "PCMA"],
+  rejectAnonymous: false,
+  allowedCountryCodes: [],
+  unknownCallerAction: "block",
+  rejectCode: 603,
   createdAt: "2026-10-01T10:00:00Z",
   updatedAt: "2026-10-01T10:00:00Z",
 };
@@ -148,6 +156,41 @@ describe("Trunks", () => {
     });
   });
 
+  it("sets the anonymous call policy, asserted identity and identity header", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [TRUNK] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+      "PATCH /api/v1/trunks/4": () => json(TRUNK),
+    });
+    renderApp("/trunks");
+    const primary = await card(/carrier-primary/);
+    expect(within(primary).getByText("Anonymous calls")).toBeVisible();
+    fireEvent.click(
+      within(primary).getByRole("button", {
+        name: "Edit trunk carrier-primary",
+      }),
+    );
+    fireEvent.change(screen.getByLabelText("Anonymous calls"), {
+      target: { value: "always" },
+    });
+    fireEvent.change(screen.getByLabelText("Asserted identity"), {
+      target: { value: "+97142000999" },
+    });
+    fireEvent.change(screen.getByLabelText("Identity header"), {
+      target: { value: "ppi" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(
+      await screen.findByText("Trunk carrier-primary saved."),
+    ).toBeVisible();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      anonymousPolicy: "always",
+      assertedIdentity: "+97142000999",
+      identityHeader: "ppi",
+    });
+  });
+
   it("sets a trunk's session timers to on, off or the default", async () => {
     const calls = mockApi({
       ...ME,
@@ -173,6 +216,33 @@ describe("Trunks", () => {
     ).toBeVisible();
     expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
       sessionTimers: "on",
+    });
+  });
+
+  it("sets the fax mode of a trunk: passthrough by default, T.38 on request", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [TRUNK] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+      "PATCH /api/v1/trunks/4": () => json({ ...TRUNK, faxMode: "t38" }),
+    });
+    renderApp("/trunks");
+    const primary = await card(/carrier-primary/);
+    expect(within(primary).getByText("Passthrough (G.711)")).toBeVisible();
+    fireEvent.click(
+      within(primary).getByRole("button", {
+        name: "Edit trunk carrier-primary",
+      }),
+    );
+    const fax = screen.getByLabelText("Fax") as HTMLSelectElement;
+    expect(fax.value).toBe("passthrough");
+    fireEvent.change(fax, { target: { value: "t38" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(
+      await screen.findByText("Trunk carrier-primary saved."),
+    ).toBeVisible();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      faxMode: "t38",
     });
   });
 
@@ -204,6 +274,64 @@ describe("Trunks", () => {
     expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
       codecs: ["PCMU", "PCMA", "G722"],
     });
+  });
+
+  it("sets the caller screening of a trunk: anonymous reject, countries, reject code", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [TRUNK] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+      "PATCH /api/v1/trunks/4": () =>
+        json({
+          ...TRUNK,
+          rejectAnonymous: true,
+          allowedCountryCodes: ["41", "49"],
+          rejectCode: 486,
+        }),
+    });
+    renderApp("/trunks");
+    const primary = await card(/carrier-primary/);
+    expect(within(primary).getByText("Caller screening")).toBeVisible();
+    fireEvent.click(
+      within(primary).getByRole("button", {
+        name: "Edit trunk carrier-primary",
+      }),
+    );
+    expect(
+      screen.getByRole("switch", { name: /Reject anonymous/ }),
+    ).not.toBeChecked();
+    fireEvent.click(screen.getByRole("switch", { name: /Reject anonymous/ }));
+    field("Allowed country codes", "41, +49");
+    field("Answer a screened call with", "486");
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(
+      await screen.findByText("Trunk carrier-primary saved."),
+    ).toBeVisible();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      rejectAnonymous: true,
+      allowedCountryCodes: ["41", "49"],
+      unknownCallerAction: "block",
+      rejectCode: 486,
+    });
+  });
+
+  it("refuses a country code that is not a calling code", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [TRUNK] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+    });
+    renderApp("/trunks");
+    const primary = await card(/carrier-primary/);
+    fireEvent.click(
+      within(primary).getByRole("button", {
+        name: "Edit trunk carrier-primary",
+      }),
+    );
+    field("Allowed country codes", "041");
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(await screen.findByText(/without a leading 0/)).toBeVisible();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
   });
 
   it("refuses a trunk with no codec ticked", async () => {

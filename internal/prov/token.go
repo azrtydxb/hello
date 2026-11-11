@@ -53,7 +53,7 @@ func RedactPath(p string) string {
 	if rest, ok := strings.CutPrefix(p, "/p/"); ok {
 		seg, tail, _ := strings.Cut(rest, "/")
 		switch seg {
-		case "boot", "ca.crt", "ca.der", "":
+		case "boot", "ca.crt", "ca.der", "scep-ca.crt", "scep-ca.crl", "":
 		default:
 			sep := ""
 			if strings.Contains(rest, "/") {

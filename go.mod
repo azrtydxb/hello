@@ -17,9 +17,12 @@ require (
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3
+	github.com/smallstep/pkcs7 v0.2.1
+	github.com/smallstep/scep v0.0.0-20261014185058-63893dadfda8
 	github.com/valkey-io/valkey-go v1.0.79
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/crypto v0.58.0
+	golang.org/x/image v0.47.0
 	golang.org/x/net v0.62.0
 )
 

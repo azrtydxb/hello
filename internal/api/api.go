@@ -129,6 +129,15 @@ type Store interface {
 	ReplaceRingRules(ctx context.Context, actor string, in []store.RingRuleInput) ([]store.RingRule, error)
 	GetRingMap(ctx context.Context) (store.RingMap, error)
 	ReplaceRingMap(ctx context.Context, actor string, groupID *int64, in []store.RingMapEntry) (store.RingMap, error)
+	ListWifiProfiles(ctx context.Context) ([]store.WifiProfile, error)
+	GetWifiProfile(ctx context.Context, id int64) (store.WifiProfile, error)
+	CreateWifiProfile(ctx context.Context, actor string, in store.WifiProfileInput) (store.WifiProfile, error)
+	UpdateWifiProfile(ctx context.Context, actor string, id int64, in store.WifiProfileInput) (store.WifiProfile, error)
+	DeleteWifiProfile(ctx context.Context, actor string, id int64) error
+	GetWifiGroup(ctx context.Context, groupID int64) (store.WifiScope, error)
+	PutWifiGroup(ctx context.Context, actor string, groupID int64, ids []int64, radio prov.WifiRadio) (store.WifiScope, error)
+	GetWifiPhone(ctx context.Context, phoneID int64) (store.WifiScope, error)
+	PutWifiPhone(ctx context.Context, actor string, phoneID int64, ids []int64) (store.WifiScope, error)
 	ListRingtones(ctx context.Context) ([]store.RingtoneFile, error)
 	RingtoneExists(ctx context.Context, name string) (bool, error)
 	CreateRingtone(ctx context.Context, actor, name string, info prov.ToneInfo, size int64, sha256 string) (store.RingtoneFile, error)
@@ -152,6 +161,11 @@ type Store interface {
 	UpdateParkLot(ctx context.Context, actor string, id int64, in store.ParkLotInput, check store.Check) (store.ParkLot, error)
 	DeleteParkLot(ctx context.Context, actor string, id int64, check store.Check) error
 
+	ListVoicemailGroups(ctx context.Context) ([]store.VoicemailGroup, error)
+	GetVoicemailGroup(ctx context.Context, id int64) (store.VoicemailGroup, error)
+	CreateVoicemailGroup(ctx context.Context, actor string, in store.VoicemailGroupInput, check store.Check) (store.VoicemailGroup, error)
+	UpdateVoicemailGroup(ctx context.Context, actor string, id int64, in store.VoicemailGroupInput, check store.Check) (store.VoicemailGroup, error)
+	DeleteVoicemailGroup(ctx context.Context, actor string, id int64, check store.Check) error
 	ListPickupGroups(ctx context.Context) ([]store.PickupGroup, error)
 	GetPickupGroup(ctx context.Context, id int64) (store.PickupGroup, error)
 	CreatePickupGroup(ctx context.Context, actor string, in store.PickupGroupInput, check store.Check) (store.PickupGroup, error)
@@ -173,7 +187,10 @@ type Store interface {
 	ListFeatureCodes(ctx context.Context) ([]store.FeatureCode, error)
 	PutFeatureCodes(ctx context.Context, actor string, codes []store.FeatureCode, check store.Check) error
 
-	ListDevices(ctx context.Context) ([]store.Device, error)
+	ListBossLinks(ctx context.Context) ([]store.BossLink, error)
+	PutBossLinks(ctx context.Context, actor string, links []store.BossLinkInput) error
+
+	ListDevices(ctx context.Context, kind string) ([]store.Device, error)
 	GetDevice(ctx context.Context, id int64) (store.Device, error)
 	CreateDevice(ctx context.Context, actor string, in store.NewDevice) (store.Device, error)
 	UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64) (store.Device, error)
@@ -188,6 +205,13 @@ type Store interface {
 	ListRecordings(ctx context.Context, extension string, before int64, limit int) ([]store.Recording, string, error)
 	GetRecording(ctx context.Context, id int64) (store.Recording, error)
 	DeleteRecording(ctx context.Context, actor string, id int64) (string, error)
+	CreateRecordingLink(ctx context.Context, actor string, recordingID int64, hash []byte, expires time.Time, maxUses int) (store.RecordingLink, error)
+	GetRecordingLink(ctx context.Context, id int64) (store.RecordingLink, error)
+	RevokeRecordingLink(ctx context.Context, actor string, id int64) error
+	UseRecordingLink(ctx context.Context, hash []byte) (object string, id int64, res store.LinkResult, err error)
+	RecordingParties(ctx context.Context, id int64) ([]string, error)
+	LookupCalls(ctx context.Context, f store.LookupFilter, before int64, limit int) ([]store.CallMatch, string, error)
+	LookupRecordings(ctx context.Context, f store.LookupFilter, before int64, limit int) ([]store.Recording, string, error)
 
 	ListAnnouncements(ctx context.Context) ([]store.Announcement, error)
 	GetAnnouncement(ctx context.Context, id int64) (store.Announcement, error)
@@ -288,6 +312,12 @@ type Config struct {
 	TwoFactor      TwoFactorStore
 	TwoFALogins    *prometheus.CounterVec
 	ConferenceLive ConferenceLive
+	// LinkMetrics counts recording link requests; nil counts nothing.
+	LinkMetrics *LinkMetrics
+	links       *linkLimiter
+	// CRM is the CRM connector administration (spec integrations I-47); nil
+	// answers 503 on the CRM routes.
+	CRM CRMService
 	// Events is the call-event pipeline (stream, history, tickets); nil
 	// answers 503 on the event routes.
 	Events EventService
@@ -309,13 +339,18 @@ type Config struct {
 	// call; nil answers 503. DoorOpenWait bounds the wait (0 means 5 s).
 	DoorCalls    DoorControl
 	DoorOpenWait time.Duration
+	// Fax is the fax feature (destinations, the fax list, sending a PDF); the
+	// zero value answers 503 on its routes.
+	Fax FaxConfig
 	// Objects is the voicemail audio store; nil makes the audio routes and
 	// greeting uploads answer 503 instead of touching MinIO.
 	Objects Objects
 	// Diagnostics reads REGISTER attempts and the failed-auth throttle for
 	// the Diagnostics view; nil answers 503. AuthFailLimit is hello-sip's
 	// HELLO_SIP_AUTH_FAIL_LIMIT (0 means its default, 10).
-	Diagnostics   DiagnosticsLive
+	Diagnostics DiagnosticsLive
+	// Syslog reads the lines of the phone syslog sink; nil answers 503.
+	Syslog        SyslogLive
 	AuthFailLimit int
 	// EmailDelivery is whether voicemail-to-email can send (SMTP_HOST is
 	// set); the voicemail box responses carry it so the console can say
@@ -342,9 +377,20 @@ type Config struct {
 	// lookup keys of stored numbers are built in.
 	Phonebooks PhonebookStore
 	Dialing    phonebook.Dialing
+	// Blocklist is the call blocklist persistence; nil answers 503 on the
+	// blocklist routes.
+	Blocklist BlocklistStore
 	// Messages is the SIP MESSAGE persistence; nil answers 503 on the
 	// message routes.
 	Messages MessageStore
+	// Clients is the web device persistence and ClientAuth the softphone
+	// settings (derived credentials, ICE servers); nil Clients, or an empty
+	// ClientAuth.AuthKey, answers 503 on the enrolment routes.
+	Clients    ClientStore
+	ClientAuth ClientConfig
+	// Inbox is the messaging inbox persistence (spec messaging-channels);
+	// nil answers 503 on the inbox and messaging routes.
+	Inbox InboxStore
 	// AI is the OAuth authorization server (spec ai-external-access); nil
 	// without HELLO_PUBLIC_URL, when the consent, grant and service-account
 	// routes answer 404 and bearer tokens get no audience check.
@@ -381,6 +427,8 @@ type Config struct {
 	// are set by Handler.
 	speech    *ttscache.Cache
 	prewarmMu *sync.Mutex
+	// credLimit bounds how often a user mints device credentials.
+	credLimit *rateLimiter
 	// prewarmKick asks the background worker to pre-generate the prompts of a
 	// language a queue just set. Batchable handlers kick it rather than call
 	// the pre-generation, which uses the speech cache and must not run inside a
@@ -405,9 +453,11 @@ func Handler(c Config) http.Handler {
 	if c.TTS == nil {
 		c.TTS = &tts.Client{}
 	}
+	c.credLimit = &rateLimiter{}
 	c.speech, c.prewarmMu = newSpeechCache(c), &sync.Mutex{}
 	c.prewarmKick = make(chan struct{}, 1)
 	c.self = new(atomic.Pointer[http.Handler])
+	c.links = newLinkLimiter()
 	s := &server{c}
 	go s.runPrewarmKicks()
 	opts := auth.Options{Cookies: true}
@@ -430,6 +480,9 @@ func Handler(c Config) http.Handler {
 		}
 		mux.Handle(rt.Method+" "+rt.Pattern, h)
 	}
+	// The recording link route is public (the token is the credential) and
+	// outside /api/v1, so it is not in the route table or the OpenAPI document.
+	mux.HandleFunc("GET /r/{token}", s.publicRecording)
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.

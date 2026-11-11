@@ -53,6 +53,22 @@ export interface RedirectStatus {
 
 // --- phones ------------------------------------------------------------------------
 
+/** One line of a phone: the device it registers and that device's extension. */
+export interface PhoneLine {
+  /** 1 for the phone's first line, 2 and up for the others. */
+  line: number;
+  deviceId: Id;
+  extensionId: Id;
+  extensionNumber: string;
+  extensionName: string;
+  sipUsername: string;
+  /** False while the phone's template does not write the line (Grandstream lines 2 and up). */
+  provisioned: boolean;
+}
+
+/** The role of a phone in a group with account sharing (Grandstream WP8x6). */
+export type SharingRole = "host" | "guest";
+
 /** A phone as returned. Fetch-state fields are null until the first fetch. */
 export interface Phone {
   id: Id;
@@ -74,6 +90,12 @@ export interface Phone {
    * Grandstream WP phones only.
    */
   pttChannelId?: Id | null;
+  /** The phone's lines in order, line 1 first. */
+  lines?: PhoneLine[];
+  /** How many lines the model takes. */
+  maxLines?: number;
+  /** Host or guest while the phone's group has account sharing on. */
+  sharingRole?: SharingRole;
   /** BLF keys: extension numbers, in key order. */
   blf: string[];
   enabled: boolean;
@@ -127,6 +149,7 @@ export type PhonePatch = Partial<
     templateId: Id | null;
     groupId: Id | null;
     pttChannelId: Id | null;
+    sharingRole: SharingRole;
   }
 >;
 
@@ -161,6 +184,23 @@ export const createPhone = (input: PhoneInput) =>
 
 export const updatePhone = (phoneId: Id, patch: PhonePatch) =>
   request<Phone>("PATCH", `/api/v1/phones/${seg(phoneId)}`, { body: patch });
+
+/**
+ * PUT /api/v1/phones/{id}/lines/{line}: binds line 2 or up to a device of
+ * the extension (a new device without `deviceId`).
+ */
+export const setPhoneLine = (
+  phoneId: Id,
+  line: number,
+  input: { extensionId: Id; deviceId?: Id },
+) =>
+  request<Phone>("PUT", `/api/v1/phones/${seg(phoneId)}/lines/${line}`, {
+    body: input,
+  });
+
+/** DELETE /api/v1/phones/{id}/lines/{line}: unbinds line 2 or up. */
+export const clearPhoneLine = (phoneId: Id, line: number) =>
+  request<Phone>("DELETE", `/api/v1/phones/${seg(phoneId)}/lines/${line}`);
 
 export const deletePhone = (phoneId: Id) =>
   request<void>("DELETE", `/api/v1/phones/${seg(phoneId)}`);
@@ -298,6 +338,66 @@ export async function listPhoneFetches(
   const page = listItems<Fetch>(body, path);
   const next = (body as Record<string, unknown>).next;
   return { items: page, next: typeof next === "string" ? next : "" };
+}
+
+/** One syslog line a phone sent, after redaction. */
+export interface SyslogLine {
+  at: string;
+  source: string;
+  /** 0 (emergency) to 7 (debug); -1 when the line had no priority. */
+  severity: number;
+  message: string;
+}
+
+export interface SyslogPage {
+  items: SyslogLine[];
+  cap: number;
+  retentionSeconds: number;
+}
+
+/** GET /api/v1/phones/{id}/syslog?limit=, newest first. */
+export async function listPhoneSyslog(
+  phoneId: Id,
+  limit = 200,
+  signal?: AbortSignal,
+): Promise<SyslogPage> {
+  const path = `/api/v1/phones/${seg(phoneId)}/syslog?limit=${limit}`;
+  const body = await request<unknown>("GET", path, { signal });
+  const b = body as Record<string, unknown>;
+  return {
+    items: listItems<SyslogLine>(body, path),
+    cap: typeof b.cap === "number" ? b.cap : 0,
+    retentionSeconds:
+      typeof b.retentionSeconds === "number" ? b.retentionSeconds : 0,
+  };
+}
+
+/** GET /api/v1/syslog/unknown: addresses that sent lines no phone owns. */
+export async function listUnknownSyslogSources(
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const path = "/api/v1/syslog/unknown";
+  return listItems<string>(
+    await request<unknown>("GET", path, { signal }),
+    path,
+  );
+}
+
+/** GET /api/v1/syslog/unknown?ip=: the lines of one unknown address. */
+export async function listUnknownSyslog(
+  ip: string,
+  limit = 200,
+  signal?: AbortSignal,
+): Promise<SyslogPage> {
+  const path = `/api/v1/syslog/unknown?ip=${encodeURIComponent(ip)}&limit=${limit}`;
+  const body = await request<unknown>("GET", path, { signal });
+  const b = body as Record<string, unknown>;
+  return {
+    items: listItems<SyslogLine>(body, path),
+    cap: typeof b.cap === "number" ? b.cap : 0,
+    retentionSeconds:
+      typeof b.retentionSeconds === "number" ? b.retentionSeconds : 0,
+  };
 }
 
 /**

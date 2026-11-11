@@ -47,11 +47,18 @@ func newElsewhereUA(ua *sipgo.UserAgent, client *sipgo.Client, base *sipgo.Dialo
 // cancelForksElsewhere cancels every ringing leg as cancelForks does, with
 // the CANCELs saying the call was completed elsewhere. A leg whose INVITE
 // is still being sent switches when its dialog exists (drive).
-func (c *call) cancelForksElsewhere() {
+func (c *call) cancelForksElsewhere() { c.cancelForksElsewhereExcept(nil) }
+
+// cancelForksElsewhereExcept is cancelForksElsewhere sparing one leg, the
+// one that answered.
+func (c *call) cancelForksElsewhereExcept(except *leg) {
 	c.mu.Lock()
 	legs := c.legs
 	c.mu.Unlock()
 	for _, l := range legs {
+		if l == except {
+			continue
+		}
 		l.mu.Lock()
 		l.elsewhere = true
 		if l.dcs != nil {

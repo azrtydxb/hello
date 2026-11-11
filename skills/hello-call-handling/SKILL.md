@@ -1,6 +1,6 @@
 ---
 name: hello-call-handling
-description: Configure and run the call-handling features of a Kuvryn Hello PBX through its MCP server - call queues and their agents (log in, pause, live wallboard), conference rooms and their live controls, call park lots and parked calls, pickup groups, paging groups and multicast channels, text messaging, presence, voicemail messages and call recordings. Use when someone asks for a support queue, a meeting room, to park or pick up a call, to page a warehouse, to see who is busy or what is waiting in a queue, or to clean up voicemail and recordings.
+description: Configure and run the call-handling features of a Kuvryn Hello PBX through its MCP server - call queues and their agents (log in, pause, live wallboard), conference rooms and their live controls, fax (receive to email, send a PDF, fax destinations and trunk fax mode), call park lots and parked calls, pickup groups, paging groups and multicast channels, text messaging, presence, voicemail messages and call recordings. Use when someone asks for a support queue, a meeting room, to park or pick up a call, to page a warehouse, to see who is busy or what is waiting in a queue, to receive or send a fax, or to clean up voicemail and recordings.
 license: Apache-2.0
 metadata:
   hello-version: "v1"
@@ -125,6 +125,44 @@ within half a second; read `getConference` again to confirm. Ask before
   (409 while an IVR menu names the group). An `emergency` priority group
   overrides do-not-disturb: confirm with the user first.
 
+## Fax
+
+Faxes are received by a fax destination and sent from an uploaded PDF. The
+fax engine (hello-fax) must be on: when it is not, a fax call is refused with
+488 and `sendFax` answers 503.
+
+1. `listExtensions` for the owner, then `createFaxDestination`:
+   `{"name": "main", "extension": "101", "email": ""}`. The owner extension
+   owns what arrives there; with an `email` the PDF goes to that address,
+   otherwise to the users linked to the owner. The name cannot change later
+   (`updateFaxDestination` changes the owner and the email only).
+2. Point something at it: an inbound route with `destinationKind` `fax` and
+   the destination name (`createInboundRoute`), or an IVR key of kind `fax`
+   (see `hello-routing` and `hello-ivr-and-hours`). `getFlowGraph` shows a
+   "Fax destination" node.
+3. Trunks carry a fax as G.711 passthrough by default. Set a trunk's `faxMode`
+   to `t38` (through `updateTrunk`) to move the call to T.38 when the carrier
+   offers it or when the fax tone is heard; a carrier that refuses with 488
+   leaves the call on G.711. `off` refuses fax calls on the trunk.
+4. `listFaxes` (filter `direction` and `status`) and `getFax` show the state:
+   `received`, `partial` (some pages arrived before the call failed; the pages
+   are kept), `failed`, `sent`, `queued`, `sending`, with the T.30 result,
+   the pages, the mode (`g711` or `t38`) and the email state. The PDF itself
+   is downloaded in the console.
+5. `sendFax` queues a PDF: `to` in E.164, optional `callerId`, and either the
+   PDF as `pdfBase64` (at most 700 KiB; larger files go through the console)
+   or multipart. A PDF that cannot be rasterised is refused with 422. Hello
+   dials through an outbound route that applies to every extension and
+   retries three times, five minutes apart, on busy, no answer or no carrier.
+   `deleteFax` removes a fax and its PDF, or cancels one being sent.
+6. Faxes are kept 90 days (HELLO_FAX_RETENTION_DAYS). Fax calls appear in the
+   call history with kind `fax`; the fax row carries the call's
+   `correlationId`.
+
+Failure modes worth knowing: `fax is off on trunk` and `the fax engine is
+unavailable` in a call's trace mean a 488; a fax on a trunk with `faxMode`
+`passthrough` never switches to T.38, whatever the carrier offers.
+
 ## Messaging
 
 - `getMessageSettings` and `updateMessageSettings` (admin, whole object:
@@ -136,6 +174,27 @@ within half a second; read `getConference` again to confirm. Ask before
   messaging on). It answers 202 and is queued; an unregistered recipient gets it
   when the phone registers, until the TTL ends. Message contents of other
   people are never readable through MCP.
+- `getInboxStats` for the customer inbox's load: the conversations by state,
+  the unassigned pool, and how long the longest-waiting one has waited. It
+  carries no customer text; conversations and messages are never exposed
+  through MCP.
+
+## Boss and assistant
+
+A boss and an assistant can share a line.
+
+1. `listBossLinks` shows the links. A boss has at most one assistant, and an
+   assistant may serve several bosses.
+2. `putBossLinks` replaces the whole list: a link whose boss is not in the
+   list is removed. Send `ringMode` (`both` rings the boss's and the
+   assistant's devices together; `assistant_first` rings the assistant's
+   devices for 10 seconds, then both), `screening` (the assistant hears a prompt
+   naming the boss: 1 puts the call through, 2 sends it to the boss's
+   voicemail), and `outboundAsBoss` (the assistant presents the boss's caller
+   ID, for one boss only).
+3. `divertOn` silences the boss's own devices so that only the assistant
+   rings. The `*64` feature code toggles it from the boss's phone, and a
+   forward set on the boss still wins over the link.
 
 ## Presence, voicemail and recordings
 

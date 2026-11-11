@@ -157,12 +157,17 @@ type meView struct {
 	VoicemailEmail store.VoicemailEmailPrefs `json:"voicemailEmail"`
 	// EmailDelivery is whether the system can send email at all.
 	EmailDelivery bool `json:"emailDelivery"`
+	// RingWeb and RingMobile are whether the user's web and mobile clients
+	// ring for calls to their extension.
+	RingWeb    bool `json:"ringWeb"`
+	RingMobile bool `json:"ringMobile"`
 }
 
 func (s *server) me(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
 	v := meView{Username: a.Username, Role: string(a.Role), AuthMethod: "local", MustChangePassword: a.MustChangePassword,
-		MustEnrollMFA: a.MustEnrollMFA, Extensions: []meExtension{}, VoicemailEmail: store.VoicemailEmailPrefs{After: "none"}}
+		MustEnrollMFA: a.MustEnrollMFA, Extensions: []meExtension{}, VoicemailEmail: store.VoicemailEmailPrefs{After: "none"},
+		RingWeb: true, RingMobile: true}
 	if a.UserID > 0 && a.Kind != auth.KindService {
 		u, err := s.Store.GetUser(r.Context(), a.UserID)
 		if err != nil {
@@ -170,6 +175,7 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		v.DisplayName, v.Email, v.AuthMethod, v.VoicemailEmail = u.DisplayName, u.Email, u.AuthMethod, u.VoicemailEmail
+		v.RingWeb, v.RingMobile = u.RingWeb, u.RingMobile
 		exts, err := s.Store.UserExtensions(r.Context(), a.UserID)
 		if err != nil {
 			s.internal(w, "me: extensions", err)
@@ -434,18 +440,20 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Number           *string `json:"number"`
-		Name             *string `json:"name"`
-		ExternalNumber   *string `json:"externalNumber"`
-		DND              *bool   `json:"dnd"`
-		ForwardAlways    *string `json:"forwardAlways"`
-		ForwardBusy      *string `json:"forwardBusy"`
-		ForwardNoAnswer  *string `json:"forwardNoAnswer"`
-		VoicemailEnabled *bool   `json:"voicemailEnabled"`
-		RecordDefault    *bool   `json:"recordDefault"`
-		AllowIntercom    *bool   `json:"allowIntercom"`
-		DirectoryHidden  *bool   `json:"directoryHidden"`
-		CallWaiting      *bool   `json:"callWaiting"`
+		Number            *string `json:"number"`
+		Name              *string `json:"name"`
+		ExternalNumber    *string `json:"externalNumber"`
+		DND               *bool   `json:"dnd"`
+		ForwardAlways     *string `json:"forwardAlways"`
+		ForwardBusy       *string `json:"forwardBusy"`
+		ForwardNoAnswer   *string `json:"forwardNoAnswer"`
+		VoicemailEnabled  *bool   `json:"voicemailEnabled"`
+		RecordDefault     *bool   `json:"recordDefault"`
+		AllowIntercom     *bool   `json:"allowIntercom"`
+		DirectoryHidden   *bool   `json:"directoryHidden"`
+		CallWaiting       *bool   `json:"callWaiting"`
+		AnonymousOutbound *bool   `json:"anonymousOutbound"`
+		PhoneSendAnon     *bool   `json:"phoneSendAnonymous"`
 		// MOHClassID is null to clear (use the global default).
 		MOHClassID    nullable[int64] `json:"mohClassId"`
 		NoAnswerRings *int            `json:"noAnswerRings"`
@@ -459,7 +467,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Number == nil && in.Name == nil && in.ExternalNumber == nil && in.DND == nil && in.NoAnswerRings == nil &&
 		in.ForwardAlways == nil && in.ForwardBusy == nil && in.ForwardNoAnswer == nil &&
-		in.VoicemailEnabled == nil && in.RecordDefault == nil && in.AllowIntercom == nil && in.DirectoryHidden == nil && in.CallWaiting == nil &&
+		in.VoicemailEnabled == nil && in.RecordDefault == nil && in.AllowIntercom == nil && in.DirectoryHidden == nil && in.CallWaiting == nil && in.AnonymousOutbound == nil && in.PhoneSendAnon == nil &&
 		in.Kind == nil && in.DoorTargets == nil && !in.MOHClassID.Set {
 		badRequest(w, "a field to change is required")
 		return
@@ -490,7 +498,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		Number: in.Number, Name: in.Name, ExternalNumber: in.ExternalNumber,
 		DND: in.DND, ForwardAlways: in.ForwardAlways, ForwardBusy: in.ForwardBusy,
 		ForwardNoAnswer: in.ForwardNoAnswer, VoicemailEnabled: in.VoicemailEnabled,
-		RecordDefault: in.RecordDefault, AllowIntercom: in.AllowIntercom, DirectoryHidden: in.DirectoryHidden, CallWaiting: in.CallWaiting,
+		RecordDefault: in.RecordDefault, AllowIntercom: in.AllowIntercom, DirectoryHidden: in.DirectoryHidden, CallWaiting: in.CallWaiting, AnonymousOutbound: in.AnonymousOutbound, PhoneSendAnonymous: in.PhoneSendAnon,
 		MOHClassID: in.MOHClassID.Value, ClearMOHClass: in.MOHClassID.Set && in.MOHClassID.Value == nil,
 		NoAnswerRings: in.NoAnswerRings, Kind: in.Kind, DoorTargets: in.DoorTargets,
 	}, s.check())
@@ -525,7 +533,12 @@ type deviceWithSecret struct {
 }
 
 func (s *server) listDevices(w http.ResponseWriter, r *http.Request) {
-	ds, err := s.Store.ListDevices(r.Context())
+	kind := r.URL.Query().Get("kind")
+	if kind != "" && kind != "desk" && kind != auth.KindWeb && kind != auth.KindMobile {
+		badRequest(w, "kind must be desk, web or mobile")
+		return
+	}
+	ds, err := s.Store.ListDevices(r.Context(), kind)
 	if err != nil {
 		s.internal(w, "list devices", err)
 		return
@@ -597,6 +610,10 @@ func (s *server) updateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, err := s.Store.UpdateDevice(r.Context(), actor(r).String(), id, in.Enabled, in.ExtensionID)
+	if errors.Is(err, store.ErrDerivedDevice) {
+		writeError(w, http.StatusConflict, "derived_device", "a web device stays on the extension its owner is linked to; revoke it and enrol again")
+		return
+	}
 	if err != nil {
 		s.storeError(w, "device", err)
 		return
@@ -611,6 +628,10 @@ func (s *server) rotateSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	secret := auth.NewDeviceSecret()
 	d, err := s.Store.RotateDeviceSecret(r.Context(), actor(r).String(), id, s.SIPDomain, secret)
+	if errors.Is(err, store.ErrDerivedDevice) {
+		writeError(w, http.StatusConflict, "derived_device", "a web device has no stored secret to rotate; revoke it and enrol again")
+		return
+	}
 	if err != nil {
 		s.storeError(w, "device", err)
 		return

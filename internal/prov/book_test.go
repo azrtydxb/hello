@@ -253,3 +253,54 @@ func TestPhonebookEveryVendorServed(t *testing.T) {
 		}
 	}
 }
+
+// TestPhonebookVCardSlot fails if a WP8x6 is not served its directory as
+// vCards at pb/0.vcf (merged, ETag, fetch audited), if a model without the
+// slot, an unknown token or plain HTTP is served, or if the template points
+// a phone at the slot (it is unused by default, S-31).
+func TestPhonebookVCardSlot(t *testing.T) {
+	e := newEnv(t)
+	p, tok := e.s.addPhone(Grandstream, "WP836", macA)
+	p.books = twoBooks()
+	w := e.do(req{path: devPath(tok, "pb/0.vcf")})
+	if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/vcard") {
+		t.Fatalf("vcf: %d %q", w.Code, w.Header().Get("Content-Type"))
+	}
+	body := w.Body.String()
+	if !strings.HasPrefix(body, "BEGIN:VCARD\r\nVERSION:3.0\r\n") || strings.Count(body, "BEGIN:VCARD") != 3 ||
+		!strings.Contains(body, "TEL;TYPE=WORK:+32470123456") || strings.Count(body, "TEL;TYPE=WORK:1002") != 1 {
+		t.Fatalf("vcf body: %q", body)
+	}
+	if got := e.s.phone(p.id); got.lastFile != "pb/0.vcf" || got.fetched == 0 {
+		t.Errorf("fetch not recorded: %+v", got)
+	}
+	etag := w.Header().Get("ETag")
+	if w = e.do(req{path: devPath(tok, "pb/0.vcf"), inm: etag}); w.Code != http.StatusNotModified {
+		t.Errorf("If-None-Match: %d", w.Code)
+	}
+	// The XML directory is a different body under the same token.
+	if x := e.do(req{path: devPath(tok, "pb/0.xml")}); !strings.Contains(x.Body.String(), "<AddressBook>") {
+		t.Errorf("xml slot: %s", x.Body.String())
+	}
+	expectEmpty(t, e, e.do(req{path: devPath(tok, "pb/0.vcf"), proto: "http"}), http.StatusNotFound, ResultPlainHTTP)
+	expectEmpty(t, e, e.do(req{path: devPath("a2345678a2345678a2345678a2345678a2345678a2345678abcd", "pb/0.vcf")}), http.StatusNotFound, ResultUnknownToken)
+	for _, name := range []string{"pb/1.vcf", "pb/0.vcf/x", "pb/0.vcard"} {
+		if w = e.do(req{path: devPath(tok, name)}); w.Code != http.StatusNotFound || w.Body.Len() != 0 {
+			t.Errorf("%s: %d", name, w.Code)
+		}
+	}
+
+	for _, c := range []struct {
+		v Vendor
+		m string
+	}{{Grandstream, "WP822"}, {Grandstream, "WP856"}, {Grandstream, "GRP2614"}, {Yealink, "T54W"}} {
+		q, qtok := e.s.addPhone(c.v, c.m, macB)
+		q.books = twoBooks()
+		if w = e.do(req{path: devPath(qtok, "pb/0.vcf")}); w.Code != http.StatusNotFound || w.Body.Len() != 0 {
+			t.Errorf("%s %s: %d with %d bytes", c.v, c.m, w.Code, w.Body.Len())
+		}
+	}
+	if strings.Contains(builtinBody("grandstream/device.xml"), "0.vcf") {
+		t.Error("the template points a phone at the vCard slot")
+	}
+}

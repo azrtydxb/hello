@@ -102,6 +102,84 @@ describe("Phone detail", () => {
     ).toHaveLength(2);
   });
 
+  it("shows the syslog lines of the phone and an empty state", async () => {
+    api(phone(), {
+      "GET /api/v1/phones/5/syslog?limit=200": () =>
+        json({
+          items: [
+            {
+              at: "2026-10-02T10:05:00Z",
+              source: "192.0.2.10",
+              severity: 3,
+              message: "sip: registration failed",
+            },
+            {
+              at: "2026-10-02T10:04:00Z",
+              source: "192.0.2.10",
+              severity: 6,
+              message: "sip: registered",
+            },
+          ],
+          cap: 10000,
+          retentionSeconds: 86400,
+        }),
+    });
+    renderApp("/phones/5");
+    await screen.findByRole("table", { name: "Fetch log" });
+    fireEvent.click(screen.getByRole("tab", { name: "Syslog" }));
+    const table = await screen.findByRole("table", { name: "Syslog" });
+    expect(within(table).getByText("sip: registration failed")).toBeVisible();
+    expect(within(table).getByText("error")).toHaveClass("az-badge--bad");
+    expect(within(table).getByText("info")).toHaveClass("az-badge--neutral");
+    expect(screen.getByText(/kept for 24 h/)).toBeInTheDocument();
+  });
+
+  it("filters the syslog by severity", async () => {
+    const line = (severity: number, message: string) => ({
+      at: "2026-10-02T10:05:00Z",
+      source: "192.0.2.10",
+      severity,
+      message,
+    });
+    api(phone(), {
+      "GET /api/v1/phones/5/syslog?limit=200": () =>
+        json({
+          items: [
+            line(3, "boom"),
+            line(4, "careful"),
+            line(6, "chatty"),
+            line(7, "noisy"),
+            line(-1, "[hello] 4 lines dropped"),
+          ],
+          cap: 10000,
+          retentionSeconds: 86400,
+        }),
+    });
+    renderApp("/phones/5");
+    await screen.findByRole("table", { name: "Fetch log" });
+    fireEvent.click(screen.getByRole("tab", { name: "Syslog" }));
+    await screen.findByText("noisy");
+    fireEvent.change(screen.getByLabelText("Show"), { target: { value: "4" } });
+    expect(screen.getByText("boom")).toBeInTheDocument();
+    expect(screen.getByText("careful")).toBeInTheDocument();
+    expect(screen.queryByText("chatty")).toBeNull();
+    expect(screen.queryByText("noisy")).toBeNull();
+    expect(screen.getByText(/lines dropped/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Show"), { target: { value: "3" } });
+    expect(screen.queryByText("careful")).toBeNull();
+  });
+
+  it("explains an empty syslog", async () => {
+    api(phone(), {
+      "GET /api/v1/phones/5/syslog?limit=200": () =>
+        json({ items: [], cap: 10000, retentionSeconds: 86400 }),
+    });
+    renderApp("/phones/5");
+    await screen.findByRole("table", { name: "Fetch log" });
+    fireEvent.click(screen.getByRole("tab", { name: "Syslog" }));
+    expect(await screen.findByText(/No syslog lines yet/)).toBeInTheDocument();
+  });
+
   it("previews a file, encoding its name in the URL", async () => {
     const calls = api(phone(), {
       "GET /api/v1/phones/5/preview?file=a+b%26c%3D1.cfg": () =>
@@ -153,6 +231,33 @@ describe("Phone detail", () => {
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent(/^\/phones$/),
     );
+  });
+
+  it("discards the SCEP challenge after asking", async () => {
+    const calls = api(phone(), {
+      "POST /api/v1/phones/5/scep-challenge": noContent,
+    });
+    renderApp("/phones/5");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New SCEP challenge" }),
+    );
+    const confirm = screen.getByRole("dialog", {
+      name: "Discard the SCEP challenge of Front desk?",
+    });
+    fireEvent.click(
+      within(confirm).getByRole("button", { name: "Discard challenge" }),
+    );
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.method === "POST" && c.url === "/api/v1/phones/5/scep-challenge",
+        ),
+      ).toBe(true),
+    );
+    expect(
+      await screen.findByText(/SCEP challenge discarded/),
+    ).toBeInTheDocument();
   });
 
   it("queues a resync and shows the result the phone gave", async () => {
@@ -250,10 +355,12 @@ describe("Phone detail", () => {
     });
     renderApp("/phones/5");
     const effective = await screen.findByTestId("phone-ptt-effective");
-    await waitFor(() =>
-      expect(effective).toHaveTextContent("224.0.1.116:5001"),
-    );
     const pick = screen.getByLabelText("PTT channel");
+    // The effective address starts at the built-in default, which is the same
+    // 224.0.1.116:5001 as the first catalog channel, so it cannot tell that
+    // the catalog has loaded. Wait for the catalog options instead.
+    await within(pick).findByRole("option", { name: /^Floor \(/ });
+    expect(effective).toHaveTextContent("224.0.1.116:5001");
     expect(
       Array.from(pick.querySelectorAll("option")).map((o) => o.textContent),
     ).toEqual([

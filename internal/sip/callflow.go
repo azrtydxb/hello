@@ -86,6 +86,11 @@ func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *s
 		c.forward(req, tx, snap, e.ForwardAlways, c.stages.visited)
 		return
 	}
+	// A boss's call rings the assistant too; the boss's forwarding always has
+	// won above (S-18). DND silences only the boss's own devices.
+	if link, ok := snap.BossLinkOf(ext); ok && c.ringBoss(req, tx, snap, ext, e, link) {
+		return
+	}
 	if e.DND {
 		if c.voicemailConfigured(e) {
 			c.addTrace(fmt.Sprintf("Extension %s is DND: to voicemail", ext))
@@ -186,6 +191,11 @@ func (c *call) bindingsFor(snap *snapshot.Snapshot, ext string) ([]livestate.Bin
 	var targets []livestate.Binding
 	for _, d := range snap.DevicesForExtension(ext) {
 		if d.Username == c.callerDevice {
+			continue
+		}
+		// The owner's ring_web / ring_mobile preference: a client kind set to
+		// off is skipped before any fork (S-15).
+		if d.RingOff {
 			continue
 		}
 		ctx, cancel := s.stateCtx()

@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ComponentType } from "react";
+import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import {
   Navigate,
   NavLink,
@@ -37,6 +37,7 @@ import {
   IntegrationsOverview,
 } from "./pages/Integrations";
 import { IntegrationEvents } from "./pages/IntegrationEvents";
+import { IntegrationsCRM } from "./pages/IntegrationsCRM";
 import { Webhooks } from "./pages/Webhooks";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
@@ -58,11 +59,19 @@ import { PhoneDetail } from "./pages/PhoneDetail";
 import { PhoneGroups } from "./pages/PhoneGroups";
 import { MyContacts } from "./pages/MyContacts";
 import { MyMessages } from "./pages/MyMessages";
+import { Inbox, MyInbox } from "./pages/Inbox";
+import { MessagingChannels } from "./pages/MessagingChannels";
+import { MessagingOptOuts } from "./pages/MessagingOptOuts";
+import { MessagingSettings } from "./pages/MessagingSettings";
+import { getInboxStatus } from "./api/inbox";
 import { Messages } from "./pages/Messages";
 import { Phonebooks } from "./pages/Phonebooks";
+import { Blocklist } from "./pages/Blocklist";
 import { Onboarding } from "./pages/Onboarding";
 import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
+import { PhoneSecurity } from "./pages/PhoneSecurity";
+import { Wifi } from "./pages/Wifi";
 import { ProvSettings } from "./pages/ProvSettings";
 import { ProvTemplates } from "./pages/ProvTemplates";
 import { Dial } from "./pages/Dial";
@@ -74,6 +83,7 @@ import { EmailSettings } from "./pages/EmailSettings";
 import { MyForwarding } from "./pages/myphone/MyForwarding";
 import { MyHistory } from "./pages/myphone/MyHistory";
 import { MyPhoneHome } from "./pages/myphone/MyPhoneHome";
+import { MyDevices } from "./pages/myphone/MyDevices";
 import { MyProfile } from "./pages/myphone/MyProfile";
 import { MyVoicemail } from "./pages/myphone/MyVoicemail";
 import { Can } from "./role";
@@ -93,12 +103,16 @@ import { Conferences } from "./pages/Conferences";
 import { Ivr } from "./pages/Ivr";
 import { Queues } from "./pages/Queues";
 import { QueueCallbacks } from "./pages/QueueCallbacks";
+import { Faxes, MyFaxes } from "./pages/Faxes";
 import { Wallboard } from "./pages/Wallboard";
 import { TimeConditions } from "./pages/TimeConditions";
+import { BossAssistant } from "./pages/BossAssistant";
 import { ParkPickup } from "./pages/ParkPickup";
+import { VoicemailGroups } from "./pages/VoicemailGroups";
 import { RingGroups } from "./pages/RingGroups";
 import { RingTags } from "./pages/RingTags";
 import { System } from "./pages/System";
+import { UnknownSyslog } from "./pages/UnknownSyslog";
 import { Trunks } from "./pages/Trunks";
 import { Voicemail } from "./pages/Voicemail";
 import { useControlPlane } from "./useControlPlane";
@@ -115,9 +129,16 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/me/contacts": MyContacts,
   "/me/messages": MyMessages,
   "/messages": Messages,
+  "/me/inbox": MyInbox,
+  "/inbox": Inbox,
+  "/messaging/channels": MessagingChannels,
+  "/messaging/optouts": MessagingOptOuts,
+  "/messaging/settings": MessagingSettings,
   "/me/voicemail": MyVoicemail,
   "/me/forwarding": MyForwarding,
   "/me/history": MyHistory,
+  "/me/devices": MyDevices,
+  "/me/faxes": MyFaxes,
   "/me/profile": MyProfile,
   "/settings/backups": Backups,
   "/settings/email": EmailSettings,
@@ -125,19 +146,23 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/calls": Calls,
   "/history": History,
   "/trunks": Trunks,
+  "/blocklist": Blocklist,
   "/routes": RoutesPage,
   "/cluster": Cluster,
   "/diagnostics": Diagnostics,
   "/voicemail": Voicemail,
+  "/voicemail/groups": VoicemailGroups,
   "/ring-groups": RingGroups,
   "/ringing": RingTags,
   "/paging": Paging,
   "/conferences": Conferences,
   "/ivr": Ivr,
   "/queues": Queues,
+  "/faxes": Faxes,
   "/wallboard": Wallboard,
   "/time-conditions": TimeConditions,
   "/park": ParkPickup,
+  "/boss": BossAssistant,
   "/recordings": Recordings,
   "/announcements": Announcements,
   "/moh": MusicOnHold,
@@ -153,6 +178,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/integrations": IntegrationsOverview,
   "/integrations/api-access": IntegrationsApiAccess,
   "/integrations/events": IntegrationEvents,
+  "/integrations/crm": IntegrationsCRM,
   "/integrations/webhooks": Webhooks,
 };
 
@@ -177,7 +203,23 @@ function Shell() {
   const isUser = state.status === "signedIn" && state.role === "user";
   const platformBadges = usePlatformBadges(!isUser);
   const onboardingBadges = useOnboardingBadge();
-  const badges = { ...platformBadges, ...onboardingBadges };
+  // The inbox shows once a channel has a number; its badge counts the
+  // caller's conversations with unread customer text.
+  const inbox = usePolling(getInboxStatus, 30_000);
+  const inboxEnabled = inbox.status === "ready" && inbox.data.enabled;
+  const inboxUnread = inbox.status === "ready" ? inbox.data.unread : 0;
+  const unreadBadge =
+    inboxUnread > 0 ? (
+      <>
+        <span aria-hidden="true">{inboxUnread}</span>
+        <span className="visually-hidden">, {inboxUnread} unread</span>
+      </>
+    ) : null;
+  const badges: Record<string, ReactNode> = {
+    ...platformBadges,
+    ...onboardingBadges,
+    ...(unreadBadge ? { "/inbox": unreadBadge, "/me/inbox": unreadBadge } : {}),
+  };
   // The AI status is a viewer-level read; a self-service user has no access.
   const aiStatus = usePolling(isUser ? idleStatus : getAIStatus, 60_000);
   const aiEnabled = aiStatus.status !== "loading" && !!aiStatus.data?.enabled;
@@ -192,6 +234,7 @@ function Shell() {
     state.status === "signedIn" ? state.role : undefined,
     aiEnabled,
     hasExtensions,
+    inboxEnabled,
   );
   const { isExpanded, toggle } = useNavGroups(
     state.status === "signedIn" ? state.username : "",
@@ -347,6 +390,9 @@ export function App() {
             <Route path="/phones/groups" element={<PhoneGroups />} />
             <Route path="/phones/templates" element={<ProvTemplates />} />
             <Route path="/phones/firmware" element={<ProvFirmware />} />
+            <Route path="/phones/security" element={<PhoneSecurity />} />
+            <Route path="/phones/wifi" element={<Wifi />} />
+            <Route path="/phones/syslog" element={<UnknownSyslog />} />
             <Route path="/phones/settings" element={<ProvSettings />} />
             <Route path="/phones/:id" element={<PhoneDetail />} />
             <Route path="*" element={<NotFound />} />

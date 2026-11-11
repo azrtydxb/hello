@@ -49,6 +49,9 @@ export interface Me {
   mustEnrollMfa?: boolean;
   /** The user's own two-factor state. */
   twoFactor?: TwoFactorState;
+  /** Whether the user's web softphones ring for calls to their extension. */
+  ringWeb?: boolean;
+  ringMobile?: boolean;
 }
 
 /** GET /api/v1/me/2fa */
@@ -113,6 +116,18 @@ export interface Extension {
    * setting is switched off at the next resync.
    */
   callWaiting?: boolean;
+  /**
+   * Anonymous outbound; false by default. On: every trunk call from the
+   * extension carries Privacy: id, an anonymous From and the trunk's asserted
+   * identity.
+   */
+  anonymousOutbound?: boolean;
+  /**
+   * The phone's own "Send Anonymous" (Grandstream P65); false by default. On:
+   * the provisioned phone blanks its caller ID on every call, internal ones
+   * included. Not the trunk-only anonymousOutbound.
+   */
+  phoneSendAnonymous?: boolean;
   /** Rings before the no-answer forward (the phone's ring count); 0 = the system default. */
   noAnswerRings?: number;
   /** The extension's voicemail box, when it has one. */
@@ -135,6 +150,10 @@ export interface Device {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+  /** desk (a phone), web or mobile (a user's softphone); absent from older servers. */
+  kind?: "desk" | "web" | "mobile";
+  /** The name the owner gave a web or mobile device. */
+  label?: string;
 }
 
 /** Device create / rotate-secret response. */
@@ -199,16 +218,35 @@ export interface Cdr {
   rewrittenDestination: string;
   route: string;
   trunk: string;
+  /** The assistant's extension when the call to a boss was answered by the assistant. */
+  answeredBy?: string;
   /** Call quality of an anchored call; null when not measured. */
   rtpPackets?: number | null;
   rtpLost?: number | null;
   rtpJitterMs?: number | null;
+  /** What the phones on the call reported (RTCP-XR); single-CDR read only. */
+  rtcpxr?: RtcpxrQuality[];
   /**
    * The audio codec each leg ended on, as "name/clock rate" ("PCMU/8000");
    * null when none was negotiated, and for calls recorded before it was kept.
    */
   callerCodec?: string | null;
   calleeCodec?: string | null;
+}
+
+/** One phone's own view of a call's voice quality (RFC 6035 report). */
+export interface RtcpxrQuality {
+  device: string;
+  extension: string;
+  /** True for the call-end report. */
+  final: boolean;
+  mosLq: number | null;
+  mosCq: number | null;
+  jitterMs: number | null;
+  lossPct: number | null;
+  discardPct: number | null;
+  roundTripMs: number | null;
+  reportedAt: string;
 }
 
 /** One line of a routing trace (routing.Step). */
@@ -303,6 +341,17 @@ export interface TrunkFields {
   internalDialing: InternalDialing;
   /** SMS over SIP: text messages may be sent and received through it. */
   messaging: boolean;
+  /** How a fax call is carried: G.711 passthrough, T.38, or refused. */
+  faxMode: "passthrough" | "t38" | "off";
+  /**
+   * Anonymous calls: "honour" carries a device's privacy request (default),
+   * "always" makes every call through the trunk anonymous.
+   */
+  anonymousPolicy: "honour" | "always";
+  /** The number asserted for an anonymous call; empty uses the caller ID. */
+  assertedIdentity: string;
+  /** Header carrying it: P-Asserted-Identity (pai) or P-Preferred-Identity (ppi). */
+  identityHeader: "pai" | "ppi";
   /**
    * RFC 4028 session timers on the trunk's calls: "on" asks for and keeps
    * one, "off" never does, "default" follows Hello's own setting
@@ -315,6 +364,14 @@ export interface TrunkFields {
    * accept G.711 only.
    */
   codecs: string[];
+  /** Turn away calls from a withheld caller (anonymous, Privacy: id). */
+  rejectAnonymous: boolean;
+  /** Calling codes callers must come from; empty is no restriction. */
+  allowedCountryCodes: string[];
+  /** What a restricted trunk does with a number it cannot place. */
+  unknownCallerAction: "allow" | "block";
+  /** The final response of a screened call: 603 Decline or 486 Busy Here. */
+  rejectCode: 603 | 486;
 }
 
 /** A trunk as returned: the password is never returned, only hasPassword. */
@@ -406,10 +463,12 @@ export interface InboundRouteFields {
     | "time_condition"
     | "ring_group"
     | "voicemail"
+    | "voicemail_group"
     | "announcement"
     | "paging"
     | "conference"
-    | "directory";
+    | "directory"
+    | "fax";
   destination: string;
   enabled: boolean;
   /** Music on hold class of the calls this route delivers; null = the default. */
@@ -797,6 +856,9 @@ export const updateExtension = (
     directoryHidden?: boolean;
     allowIntercom?: boolean;
     callWaiting?: boolean;
+    anonymousOutbound?: boolean;
+    phoneSendAnonymous?: boolean;
+
     kind?: "user" | "door";
     doorTargets?: DoorTargets;
     /** null clears the pick (the global default plays). */
@@ -1454,6 +1516,7 @@ export const IVR_DESTINATION_KINDS = [
   "extension",
   "ring_group",
   "voicemail",
+  "voicemail_group",
   "announcement",
   "paging",
   "ivr",
@@ -1461,6 +1524,7 @@ export const IVR_DESTINATION_KINDS = [
   "queue",
   "time_condition",
   "directory",
+  "fax",
 ] as const;
 
 export type IvrDestinationKind = (typeof IVR_DESTINATION_KINDS)[number];
@@ -1474,6 +1538,7 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   extension: "Extension",
   ring_group: "Ring group",
   voicemail: "Voicemail box",
+  voicemail_group: "Voicemail group",
   announcement: "Announcement, then hang up",
   paging: "Paging group",
   ivr: "Another IVR menu",
@@ -1481,12 +1546,13 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   queue: "Call queue",
   time_condition: "Time condition",
   directory: "Dial-by-name directory",
+  fax: "Fax destination",
 };
 
 /**
  * A destination. The target is an extension number (extension, voicemail), a
- * name (ring_group, announcement, ivr), a page code (paging) or a number
- * (external); empty for hangup.
+ * name (ring_group, announcement, ivr), a page code (paging), a group number
+ * (voicemail_group) or a number (external); empty for hangup.
  */
 export interface IvrDestination {
   kind: IvrDestinationKind;
@@ -1855,6 +1921,8 @@ export const FEATURE_CODE_ACTIONS = [
   "queue_logout",
   "queue_pause",
   "queue_unpause",
+  "boss_divert",
+  "voicemail_broadcast",
   "call_waiting_on",
   "call_waiting_off",
   "park",
@@ -1886,6 +1954,8 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   queue_logout: "Queue agent logout",
   queue_pause: "Queue agent pause (argument: reason)",
   queue_unpause: "Queue agent unpause",
+  boss_divert: "Boss divert on or off (assistant only rings)",
+  voicemail_broadcast: "Voicemail group broadcast (code plus group number)",
   call_waiting_on: "Call waiting on",
   call_waiting_off: "Call waiting off",
   park: "Park the call",
@@ -1904,6 +1974,52 @@ export const listFeatureCodes = (signal?: AbortSignal) =>
 /** PUT /api/v1/feature-codes: the full list, replacing what is stored. */
 export const updateFeatureCodes = (codes: readonly FeatureCode[]) =>
   request<void>("PUT", "/api/v1/feature-codes", { body: { items: codes } });
+
+/** How a boss's call rings: both sets of phones, or the assistant's first. */
+export type BossRingMode = "both" | "assistant_first";
+
+/** One boss with their assistant (GET /api/v1/boss-links). */
+export interface BossLink {
+  id: Id;
+  bossExtensionId: Id;
+  bossNumber: string;
+  bossName: string;
+  assistantExtensionId: Id;
+  assistantNumber: string;
+  assistantName: string;
+  ringMode: BossRingMode;
+  /** The assistant who answers hears a prompt and presses 1 or 2. */
+  screening: boolean;
+  enabled: boolean;
+  /** Only the assistant rings; *64 on the boss's phone toggles it. */
+  divertOn: boolean;
+  /** The assistant's outbound calls present the boss's caller ID. */
+  outboundAsBoss: boolean;
+}
+
+/** The writable fields of a link. */
+export type BossLinkInput = Pick<
+  BossLink,
+  | "bossExtensionId"
+  | "assistantExtensionId"
+  | "ringMode"
+  | "screening"
+  | "enabled"
+  | "divertOn"
+  | "outboundAsBoss"
+>;
+
+export const listBossLinks = (signal?: AbortSignal) =>
+  list<BossLink>("/api/v1/boss-links", signal);
+
+/** PUT /api/v1/boss-links: the full list, replacing what is stored. */
+export const putBossLinks = async (links: readonly BossLinkInput[]) =>
+  items<BossLink>(
+    await request<unknown>("PUT", "/api/v1/boss-links", {
+      body: { items: links },
+    }),
+    "/api/v1/boss-links",
+  );
 
 /** livestate DeviceState (GET /api/v1/presence). */
 export interface DeviceState {

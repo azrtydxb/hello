@@ -19,12 +19,17 @@ import (
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/config"
+	"github.com/azrtydxb/hello/internal/crm"
+	_ "github.com/azrtydxb/hello/internal/crm/hubspot" // registers the HubSpot connector
 	"github.com/azrtydxb/hello/internal/events"
+	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/lifecycle"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/ops"
 	"github.com/azrtydxb/hello/internal/queue"
+	"github.com/azrtydxb/hello/internal/safehttp"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/sip"
 	"github.com/azrtydxb/hello/internal/snapshot"
@@ -155,6 +160,13 @@ func run(args []string) error {
 	controlStore.WithSecretBox(box)
 	live := livestate.New(vk)
 	members := cluster.New(vk)
+	// CRM caller names (spec integrations I-47): a cache-first lookup that
+	// the SIP path bounds to a few hundred milliseconds. The CRM query runs
+	// in the background, so a slow CRM never holds a call.
+	crmRepo := &crm.PG{DB: sipDB, Box: box}
+	crmTokens := &crm.TokenManager{Repo: crmRepo, Providers: crm.DefaultProvider(safehttp.NewClient(safehttp.Options{Timeout: crm.LookupTimeout})),
+		Log: log.With("component", "crm")}
+	crmLookup := &crm.Lookup{Repo: crmRepo, Tokens: crmTokens, Cache: crm.ValkeyCache{Client: func() valkey.Client { return vk }}, Log: log.With("component", "crm")}
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
 		ReloadFailures: reloadFailures, Box: box, ConfigInvalid: routingInvalid, InvalidRevision: routingInvalidRev, Revision: configRevision,
 		DNSFailures: dnsFailures}
@@ -164,13 +176,14 @@ func run(args []string) error {
 	incarnation := cluster.NewIncarnation()
 	srv, err := sip.New(sip.Config{
 		NodeID: cfg.NodeID, Incarnation: incarnation, Domain: cfg.SIPDomain, AdvertisedAddr: cfg.SIPAdvertisedAddr,
-		NonceSecret: []byte(cfg.NonceSecret), MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
+		NonceSecret: []byte(cfg.NonceSecret), ClientAuthKey: cfg.ClientAuthKey, ClientAuthKeyPrevious: cfg.ClientAuthKeyPrevious,
+		MaxContacts: cfg.MaxContacts, MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
 		SessionExpires: cfg.SessionExpires, SessionMinSE: cfg.SessionMinSE, SessionTimersTrunks: cfg.SessionTimersTrunks, MediaDeadAfter: cfg.MediaDeadAfter,
 		DoorHangup: cfg.DoorHangup, PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
 		PageMulticastIface: cfg.PageMulticastIface, PageMulticastTTL: cfg.PageMulticastTTL,
-		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax,
+		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax, Dialing: cfg.Dial,
 		MediaForceAnchor: cfg.MediaForceAnchor, MediaRecordingNotice: cfg.MediaRecordingNotice,
 		PromptLanguage: cfg.VoicePromptLanguage, Timezone: cfg.Timezone,
 		HADialogHeartbeat: cfg.MemberHeartbeat, HATakeoverEnabled: cfg.HATakeoverEnabled,
@@ -179,15 +192,18 @@ func run(args []string) error {
 		Snapshots: watcher, State: live, Trunks: live,
 		Throttle: sip.ValkeyThrottle{Client: vk, Window: cfg.AuthFailWindow},
 		CDRs:     cdrs, Events: emitter, Metrics: sipMetrics, Log: log.With("component", "sip"),
-		Presence:      sip.ValkeyPresence{Client: vk},
-		MailboxEvents: mailboxEvents{cfg: cfg.Database, log: log.With("component", "mailbox")},
-		Pushes:        pushQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "checksync")},
-		Messages:      messageQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "messages")},
-		Voicemails:    voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings, TimeConditions: timeConditions{st: controlStore},
+		Presence:       sip.ValkeyPresence{Client: vk},
+		MailboxEvents:  mailboxEvents{cfg: cfg.Database, log: log.With("component", "mailbox")},
+		Pushes:         pushQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "checksync")},
+		QualityReports: controlStore,
+		Messages:       messageQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "messages")},
+		Conversations:  conversations{st: controlStore, dial: cfg.Dial, log: log.With("component", "inbox"), metrics: messaging.NewMetrics(metrics.Registry)},
+		Voicemails:     voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings, TimeConditions: timeConditions{st: controlStore},
 		Speech:     newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
-		HAState: live, Membership: members, PageTests: live, Originates: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Park: live,
+		HAState: live, Membership: members, PageTests: live, Originates: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Fax: faxDeps(cfg, controlStore), Park: live, Published: live,
 		Conferences: live, ConferenceAudit: controlStore,
+		CallerNames: crmLookup,
 	})
 	if err != nil {
 		return err
@@ -338,4 +354,18 @@ func primaryOf(vk valkey.Client) string {
 		return addr
 	}
 	return ""
+}
+
+// faxDeps wires the fax feature (pbx-gaps S-15): nil, so fax calls are
+// answered 488 and nothing is sent, unless HELLO_FAX_ENABLED is true and the
+// PDF store can be built.
+func faxDeps(cfg config.SIP, st *store.Store) *sip.FaxDeps {
+	if !cfg.Fax.Enabled {
+		return nil
+	}
+	objs, err := fax.NewObjects(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioSecure)
+	if err != nil {
+		return nil
+	}
+	return &sip.FaxDeps{Enabled: true, Client: &fax.Client{Addr: cfg.Fax.Addr, Token: cfg.Fax.Token}, Store: st.Faxes(), Objects: objs}
 }
