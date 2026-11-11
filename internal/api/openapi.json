@@ -2548,8 +2548,8 @@
       },
       "patch": {
         "operationId": "updateDevice",
-        "summary": "Enable, disable or move a device",
-        "description": "Enables, disables or moves a device to another extension.",
+        "summary": "Enable, disable or move a device, or set its media encryption",
+        "description": "Enables, disables or moves a device to another extension, or sets its SRTP policy (off, optional or required). SRTP is offered only on a TLS leg.",
         "tags": ["devices"],
         "parameters": [
           {
@@ -31017,6 +31017,11 @@
           "updatedAt"
         ],
         "properties": {
+          "srtp": {
+            "type": "string",
+            "enum": ["off", "optional", "required"],
+            "description": "Media-encryption policy of the device: off (plain RTP), optional (SDES SRTP is offered on a TLS leg and used when the phone answers with it) or required (SRTP only; a call that cannot be encrypted is refused with 488). Crypto is never offered on a leg that is not TLS."
+          },
           "id": {
             "type": "integer",
             "format": "int64"
@@ -31088,6 +31093,11 @@
           "sipDomain"
         ],
         "properties": {
+          "srtp": {
+            "type": "string",
+            "enum": ["off", "optional", "required"],
+            "description": "Media-encryption policy of the device: off (plain RTP), optional (SDES SRTP is offered on a TLS leg and used when the phone answers with it) or required (SRTP only; a call that cannot be encrypted is refused with 488). Crypto is never offered on a leg that is not TLS."
+          },
           "id": {
             "type": "integer",
             "format": "int64"
@@ -31184,6 +31194,11 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "srtp": {
+            "type": "string",
+            "enum": ["off", "optional", "required"],
+            "description": "Media-encryption policy of the device: off (plain RTP), optional (SDES SRTP is offered on a TLS leg and used when the phone answers with it) or required (SRTP only; a call that cannot be encrypted is refused with 488). Crypto is never offered on a leg that is not TLS."
+          },
           "enabled": {
             "type": "boolean",
             "description": "Whether the device may register."
@@ -31337,6 +31352,11 @@
           "kind"
         ],
         "properties": {
+          "srtp": {
+            "type": "string",
+            "enum": ["none", "caller", "callee", "both"],
+            "description": "Which legs of the call carried SRTP: none, caller, callee or both. Direct-media calls are none."
+          },
           "id": {
             "type": "integer",
             "format": "int64"
@@ -31643,6 +31663,11 @@
           "geolocation"
         ],
         "properties": {
+          "srtp": {
+            "type": "string",
+            "enum": ["off", "optional", "required"],
+            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are not TLS today, so optional behaves as off and required refuses calls over the trunk."
+          },
           "id": {
             "type": "integer",
             "format": "int64"
@@ -31800,6 +31825,12 @@
         "additionalProperties": false,
         "required": ["name", "mode", "destinations"],
         "properties": {
+          "srtp": {
+            "type": "string",
+            "enum": ["off", "optional", "required"],
+            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are not TLS today, so optional behaves as off and required refuses calls over the trunk.",
+            "default": "off"
+          },
           "name": {
             "type": "string",
             "pattern": "^[A-Za-z0-9._-]{1,64}$",
@@ -31956,6 +31987,11 @@
         "additionalProperties": false,
         "minProperties": 1,
         "properties": {
+          "srtp": {
+            "type": "string",
+            "enum": ["off", "optional", "required"],
+            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are not TLS today, so optional behaves as off and required refuses calls over the trunk."
+          },
           "name": {
             "type": "string",
             "pattern": "^[A-Za-z0-9._-]{1,64}$",

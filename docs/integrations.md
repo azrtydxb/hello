@@ -296,6 +296,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 Outbound webhooks with signed, retried delivery (P2), click-to-call (P3)
 and the CRM connectors build on these events: the ingest
 transaction already has a hook point where webhook deliveries are queued.
+
 ## Webhooks
 
 A **webhook endpoint** receives the events it subscribes to as signed HTTP

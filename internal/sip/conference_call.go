@@ -808,7 +808,8 @@ func (c *call) confRehome(cfg snapshot.Conference, f *confFwd) {
 		c.endBoth("conference owner lost")
 		return
 	}
-	loop := off.Narrow(off.PayloadType).Build("127.0.0.1", relay.LegPort(legCallee), "sendrecv")
+	relay.ResetCrypto(legCallee) // the room's loopback party speaks plain RTP
+	loop := off.Narrow(off.PayloadType).PlainOffer().Build("127.0.0.1", relay.LegPort(legCallee), "sendrecv")
 	own, err := s.confResolve(cfg.Number)
 	if err != nil || !own.self {
 		c.addTrace("Conference owner lost and the room could not be moved here")

@@ -39,6 +39,19 @@ type call struct {
 	callerName   string
 	callerDevice string
 	dialled      string
+	// trunkSRTP is the SRTP policy of the trunk an inbound call came in on
+	// (S-15); srtpA and srtpB record which relay legs were ever encrypted
+	// (the CDR's srtp column), srtpGauge how many the node gauge counts for
+	// this call and srtpNoted which legs' negotiation result was counted.
+	// All guarded by mu.
+	trunkSRTP string
+	srtpA     bool
+	srtpB     bool
+	srtpGauge int
+	// srtpClosed is set once the call's media ended: the gauge is released.
+	srtpClosed bool
+	srtpNoted  map[string]bool
+	srtpSnap   *snapshot.Snapshot
 	// rel is the reliable provisional response toward the caller (S-17).
 	rel relState
 	// secure marks a sips: call: it forks only onto bindings registered over
@@ -506,6 +519,9 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	c := s.newCall(req)
 	c.callerNum, c.callerName, c.callerDevice = dev.Extension, dev.ExtensionName, dev.Username
+	if !c.srtpGate(tx, snap) {
+		return
+	}
 	c.takeGeolocation()
 	s.routeCaller(c, req, tx, snap, dev)
 }
@@ -1046,6 +1062,14 @@ func (c *call) answer(w *leg) {
 		c.abortCaller()
 		return
 	}
+	if !c.calleeCryptoOK(w, bres) {
+		w.bye()
+		why := "SRTP is required on the callee leg but its answer did not deliver it"
+		c.addTrace("Call refused: " + why)
+		c.respondA(sip.StatusNotAcceptableHere, "Not Acceptable Here")
+		c.end(sip.StatusNotAcceptableHere, cdr.SideSystem, why, ResultFailed)
+		return
+	}
 	c.addTrace("Call established")
 	c.publish()
 	c.noteAnswered(w.binding.Extension)
@@ -1069,6 +1093,8 @@ func (c *call) answer(w *leg) {
 		// callee's body (spec S-2); the callee's answer aims leg b.
 		if len(bres.Body()) > 0 {
 			if ans, err := media.ParseAudioSDP(bres.Body()); err == nil {
+				// The leg's keys went in above, before its target is set, so
+				// no packet goes to the callee in the clear.
 				c.relay.SetTarget(legCallee, udpAddr(ans.Address, ans.Port))
 				allowSignalSource(c.relay, legCallee, bres.Source())
 				calleeAns = ans
@@ -1510,6 +1536,7 @@ func (c *call) record(status int, side, reason, result string) {
 	if media != "" {
 		r.MediaMode = media
 	}
+	r.SRTP = c.srtpCDR()
 	if r.MediaMode == "anchored" && !answer.IsZero() {
 		if p, l, j, ok := c.qualityStats(); ok {
 			r.RTPPackets, r.RTPLost, r.RTPJitterMs = &p, &l, &j
@@ -1622,6 +1649,14 @@ func (l *leg) run() {
 
 func (l *leg) drive(report func(legEvent)) {
 	s := l.c.s
+	if l.c.isAnchored() && l.pl == nil && l.c.calleeSRTP(l).required() && !l.c.calleeSRTP(l).tls {
+		// A device or trunk that demands SRTP cannot be rung over a leg that
+		// is not TLS: the crypto would travel in clear signalling.
+		l.c.addTrace("Leg skipped: " + errSRTPRequired.Error())
+		l.c.srtpNote("refused")
+		report(legEvent{leg: l, kind: evFailed, code: sip.StatusNotAcceptableHere})
+		return
+	}
 	req, err := l.invite()
 	if err != nil {
 		s.log.Warn("bad binding contact", "contact", l.binding.ContactURI, "error", err)
@@ -1784,7 +1819,7 @@ func (l *leg) invite() (*sip.Request, error) {
 	// leg-b port, not the caller's SDP (spec S-2).
 	if l.c.isAnchored() {
 		if off, err := media.ParseAudioSDP(c.offerSDP()); err == nil {
-			if body := l.c.anchoredOfferB(off, legCodecs(l)); len(body) > 0 {
+			if body := l.c.anchoredOfferB(off, legCodecs(l), l); len(body) > 0 {
 				req.SetBody(body)
 				req.RemoveHeader("Content-Type")
 				req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))

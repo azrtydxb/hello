@@ -1934,6 +1934,97 @@ Implementation notes (template route, no migration):
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
 
+## SRTP SDES on the anchor (phone-feature-parity item 24, S-15) (2026-11-09)
+
+Built in `internal/media/srtp.go` (keys, SDES, protect/unprotect on the relay
+legs) and `internal/sip/srtp.go` (policy and negotiation). Choices:
+
+- **Library: `github.com/pion/srtp/v3` v3.0.10.** Maintained, pure Go (keeps
+  `CGO_ENABLED=0`), same Pion family as the decided anchor modules. It brings
+  `pion/rtp`, `pion/rtcp`, `pion/transport` and `pion/logging` as indirect
+  modules; the spec's "one new module" limit was amended for S-16 and this is
+  the same family. Measured on a laptop: protect plus unprotect of a 160-byte
+  packet is about 0.75 µs, far under the 50 µs p99 bound (`TestSRTPPacketP99`).
+- **Per-leg keys.** A relay leg has a local key (Hello sends with it, written
+  in the SDP for that leg) and a remote key (the far end sends with it). The
+  relay decrypts with the receiving leg's remote key, rewrites as plain RTP,
+  and encrypts with the sending leg's local key, so the legs never share a key
+  and the recording tap, DTMF and announcements see clear audio. Every write
+  to a leg (pump, `PlayTo`, MOH) goes through one `write` that protects when
+  the leg is encrypted and drops, never sends in clear, if it cannot.
+- **Offer shape follows the policy.** `optional` offers `RTP/AVP` with the
+  crypto lines (a phone without SRTP ignores them and answers plain, which is
+  what Grandstream "enabled but not forced" does); `required` offers `RTP/SAVP`.
+  An answer mirrors the offer's profile, and later SDPs for a leg keep the
+  profile it negotiated (a transport profile must not change inside a dialog).
+  The suites offered are `AES_CM_128_HMAC_SHA1_80` then `_32`; `AES_256_CM_..._80`
+  is accepted when asked for, never offered (the spec calls it optional; no
+  phone in scope needs it). Lines with an MKI or unsupported session
+  parameters are skipped. A lifetime is accepted and ignored.
+- **TLS only.** A leg is eligible when its policy is not `off` and its signalling
+  is TLS: the caller's `clientTransport`, a callee binding's `bindingOnTLS`
+  (the decision "SIP over TLS terminates at the edge"). Trunk legs and external
+  URIs are UDP, so they are never eligible: a trunk's `optional` behaves as
+  `off`, and `required` refuses calls over it (the trunk policy is stored so it
+  takes effect once trunk TLS exists). It does not depend on SIP TCP (#258).
+- **Policy storage.** Migration `00052_srtp_policy.sql`: `devices.srtp`
+  (default `optional`), `trunks.srtp` (default `off`), `cdrs.srtp` (`none`,
+  `caller`, `callee`, `both`). The device default is optional because the spec
+  provisions WP phones optional once TLS is deployed, and nothing is offered
+  off TLS anyway.
+- **Refusals (488).** The caller gate runs before routing: a `required` caller
+  not on TLS or without usable crypto, or an `RTP/SAVP`-only offer on a leg
+  Hello cannot encrypt (UDP, or policy off). A `required` callee is not rung
+  when it is not on TLS, and a `required` callee whose answer lacks crypto is
+  BYEd and the caller gets 488. `optional` falls back to plain RTP per leg and
+  counts `hello_srtp_negotiations_total{result="plain"}`. The previous
+  behaviour for `RTP/SAVP` offers (not parsed, so the call went direct with the
+  crypto passed through) is kept only where a call is direct, which is only the
+  anchor-failure fallback now that every call anchors.
+- **No downgrade after a re-INVITE or a takeover.** Hold, resume and refresh
+  answers and offers repeat the leg's key (`keepSecurity`). Replicated dialog
+  state carries the leg's mode (`DialogLeg.SRTP`: `savp` or `avp`) and the
+  far end's SDP with its `a=crypto` lines removed, so no key is stored in
+  Valkey; a taker offers fresh keys in the same profile, and a leg that does not
+  answer with crypto fails (one-sided close) instead of continuing in clear.
+- **Handed-over legs restart plain.** A transfer target, a retrieved parked
+  call, a pickup and the conference loopback take over a relay leg from
+  another endpoint, so the leg's keys are reset (`ResetCrypto`) and that party
+  is offered plain RTP. Negotiating crypto with those parties is not built.
+  Voicemail, paging and the conference mixer (their own media objects, not
+  relay legs) answer plain RTP too. A phone forced to SRTP cannot use them;
+  recorded here as a known gap, not a hidden one.
+- **Provisioning.** Only Grandstream is written: `P183` for a phone on TLS
+  (`0` off, `1` optional, `2` required), plus `P60078 = 0` (SDES) where the
+  template has it. Checked against Grandstream's own configuration templates
+  (config-template-10212026.zip, 2026-11-09 review): `P183` "SRTP Mode" with
+  `0` disabled, `1` enabled but not forced and `2` enabled and forced is in
+  `wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`,
+  `wp820_config_1.0.7.90` and `wp856_config_1.0.3.16` (confirmed; also
+  `ht813_config_1.0.19.6`). The WP8x6 and WP810/822/825 add `3` Optional and
+  `4` Follow SIP Transport; the WP820 has `3` Follow SIP transport and no
+  Optional; the WP856 stops at `2`. Hello writes only `0`, `1` and `2`, so the
+  mapping holds on every WP. Which of `1` ("enabled but not forced") and `3`
+  ("Optional") is the mode that offers `a=crypto` on an RTP/AVP line is not
+  stated by a template, so the choice of `1` stays a hardware check. Newly
+  found: `P60078` "SRTP Key Exchange" (`0` SDES, `1` DTLS, default 0) in the
+  WP8x6 and WP856 templates, written `0` next to `P183`; the WP810/822/825 and
+  WP820 templates have no such key. `P2383` SRTP Key Length (default `0`, both
+  AES-128 and AES-256) and `P2363` Crypto Life Time stay at their defaults:
+  Hello offers AES_CM_128, accepts AES-256 and ignores a lifetime. Account 2 is
+  `P443` and account 3 `P543` (WP856: `P643`, `P1743`, `P1843`), written with
+  the lines of item 21. No vendor documentation file for Yealink, Poly, Fanvil
+  and Snom is in the repository, so they write nothing until their key is
+  confirmed (the Snom TLS precedent).
+- **Metrics and CDR.** `hello_srtp_legs` (gauge of encrypted legs, moved with
+  the relay across a transfer), `hello_srtp_negotiations_total{result}`
+  (`srtp`, `plain`, `refused`); the CDR `srtp` column, the CallDetail card and
+  the CSV export. A packet that fails authentication is counted per direction
+  in the relay stats (`AuthFailed`) and never latches the leg.
+- **Keys are never logged.** `media.Crypto` redacts itself under every fmt verb
+  and in slog; traces name the leg and suite only (`TestSRTPKeysNeverFormatted`,
+  and the call test checks the CDR trace).
+
 ## Locations, HELD, Geolocation, callback tag and alarm `*55`, phone-feature-parity S-28 and S-29 (2026-11-09)
 
 - **Already built, left as it was.** The emergency flag on outbound routes and

@@ -6,10 +6,12 @@ import {
   fieldErrors,
   listTrunks,
   listTrunkStatus,
+  SRTP_POLICIES,
   updateTrunk,
   type FieldError,
   type InternalDialing,
   type InternalDialingInput,
+  type SrtpPolicy,
   type Trunk,
   type TrunkInput,
   type TrunkStatus,
@@ -111,6 +113,8 @@ interface TrunkDraft {
   dialingConfirm: boolean;
   /** The codecs offered to the trunk, as codecs[]. */
   codecs: string[];
+  /** Media-encryption policy, as srtp. */
+  srtp: SrtpPolicy;
   /** Caller screening (pbx-gaps S-8). */
   rejectAnonymous: boolean;
   /** Country calling codes, comma or space separated. */
@@ -184,6 +188,7 @@ const NEW_TRUNK: TrunkDraft = {
   dialingPatterns: "",
   dialingConfirm: false,
   codecs: DEFAULT_TRUNK_CODECS,
+  srtp: "off",
   rejectAnonymous: false,
   allowedCountryCodes: "",
   unknownCallerAction: "block",
@@ -234,6 +239,7 @@ function toDraft(t: Trunk): TrunkDraft {
     dialingPatterns: (dialing?.patterns ?? []).join("\n"),
     dialingConfirm: false,
     codecs: t.codecs?.length ? t.codecs : DEFAULT_TRUNK_CODECS,
+    srtp: t.srtp ?? "off",
     rejectAnonymous: t.rejectAnonymous === true,
     allowedCountryCodes: (t.allowedCountryCodes ?? []).join(", "),
     unknownCallerAction: t.unknownCallerAction === "allow" ? "allow" : "block",
@@ -360,6 +366,7 @@ function toInput(d: TrunkDraft): TrunkInput {
     faxMode: d.faxMode,
     sessionTimers: d.sessionTimers,
     codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
+    srtp: d.srtp,
     rejectAnonymous: d.rejectAnonymous,
     allowedCountryCodes: countryCodes(d.allowedCountryCodes),
     unknownCallerAction: d.unknownCallerAction,
@@ -400,6 +407,7 @@ function knownKeys(d: TrunkDraft): string[] {
     "destinations",
     "internalDialing",
     "codecs",
+    "srtp",
     "internalDialing.mode",
     "internalDialing.patterns",
     "internalDialing.confirm",
@@ -666,6 +674,7 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          { label: "Media encryption", value: t.srtp ?? "off" },
           { label: "Caller screening", value: screeningLabel(t) },
           {
             label: "Anonymous calls",
@@ -700,6 +709,7 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          { label: "Media encryption", value: t.srtp ?? "off" },
           { label: "Caller screening", value: screeningLabel(t) },
           {
             label: "Anonymous calls",
@@ -1130,6 +1140,24 @@ function TrunkDrawer({
               set("faxMode", e.target.value as TrunkDraft["faxMode"])
             }
           />
+        </fieldset>
+
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">Media encryption</legend>
+          <Select
+            id={fid("srtp")}
+            label="SRTP"
+            value={draft.srtp}
+            error={errors.srtp}
+            options={SRTP_POLICIES}
+            onChange={(e) => set("srtp", e.target.value as SrtpPolicy)}
+          />
+          <p className="cf-form__note">
+            SRTP keys travel in the call setup, so Hello offers them only on a
+            leg whose signalling is TLS. Trunk legs are UDP today: Optional
+            behaves as Off, and Required refuses calls over this trunk. Off
+            keeps plain RTP.
+          </p>
         </fieldset>
 
         <fieldset className="cf-form__section">

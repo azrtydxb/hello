@@ -196,6 +196,20 @@ export function timeline(cdr: CallRecord): Moment[] {
   ];
 }
 
+/** Which legs of the call carried SRTP, for the detail card. */
+function srtpText(srtp: CallRecord["srtp"]): string {
+  switch (srtp) {
+    case "both":
+      return "SRTP on both legs";
+    case "caller":
+      return "SRTP on the caller leg only";
+    case "callee":
+      return "SRTP on the callee leg only";
+    default:
+      return "None (plain RTP)";
+  }
+}
+
 /** Loss percent and jitter of an anchored call, or "not measured". */
 function qualityText(cdr: CallRecord): string {
   const { rtpPackets: packets, rtpLost: lost, rtpJitterMs: jitter } = cdr;
@@ -256,6 +270,7 @@ function Detail({ cdr }: { cdr: CallRecord }) {
     { label: "Billable", value: formatDuration(cdr.billableMs) },
     { label: "SIP node", value: cdr.sipNode || "—", mono: true },
     { label: "Media", value: cdr.mediaMode || "—" },
+    { label: "Media encryption", value: srtpText(cdr.srtp) },
     { label: "Caller codec", value: cdr.callerCodec || "—", mono: true },
     { label: "Callee codec", value: cdr.calleeCodec || "—", mono: true },
     { label: "Call quality", value: qualityText(cdr) },

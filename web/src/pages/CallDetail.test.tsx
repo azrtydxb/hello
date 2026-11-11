@@ -155,6 +155,28 @@ describe("CallDetail", () => {
     expect(await screen.findByText("not measured")).toBeVisible();
   });
 
+  it("says which legs of a call carried SRTP", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/90": () =>
+        json({ ...BASE, id: 90, finalStatus: 200, srtp: "both", trace: [] }),
+      "GET /api/v1/cdrs/91": () =>
+        json({ ...BASE, id: 91, finalStatus: 200, srtp: "caller", trace: [] }),
+      "GET /api/v1/cdrs/92": () =>
+        json({ ...BASE, id: 92, finalStatus: 200, trace: [] }),
+    });
+    const first = renderApp("/history/90");
+    expect(await screen.findByText("SRTP on both legs")).toBeVisible();
+    first.unmount();
+    const second = renderApp("/history/91");
+    expect(
+      await screen.findByText("SRTP on the caller leg only"),
+    ).toBeVisible();
+    second.unmount();
+    renderApp("/history/92");
+    expect(await screen.findByText("None (plain RTP)")).toBeVisible();
+  });
+
   it("shows what the phones reported next to the relay's figures", async () => {
     mockApi({
       ...ME,

@@ -223,7 +223,7 @@ func (c *call) attachParty(leg string, offer media.AudioSDP, source string) ([]b
 	}
 	handOverLeg(relay, leg, udpAddr(offer.Address, offer.Port), source)
 	c.logCodec("retrieve", leg, "anchored", "", base)
-	return base.Build(host, relay.LegPort(leg), "sendrecv"), true
+	return base.PlainOffer().Build(host, relay.LegPort(leg), "sendrecv"), true
 }
 
 // --- parking --------------------------------------------------------------
@@ -695,7 +695,7 @@ func (c *call) parkReturnLegs(snap *snapshot.Snapshot, pk *parkState, relay *med
 	if !pk.parkedIsCaller {
 		from, fromName = c.dialled, ""
 	}
-	sdp := base.Build(host, relay.LegPort(parkerLeg), "sendrecv")
+	sdp := keepSecurity(relay, parkerLeg, base).Build(host, relay.LegPort(parkerLeg), "sendrecv")
 	c.logCodec("park return", parkerLeg, "anchored", "", base)
 	req := sip.NewRequest(sip.INVITE, sip.Uri{Scheme: "sip", User: pk.parker, Host: s.cfg.Domain})
 	callID := sip.CallIDHeader(newID())
@@ -871,9 +871,13 @@ func (s *Server) linkedReinvite(c *call, req *sip.Request, tx sip.ServerTransact
 		relay, host := owner.relay, owner.anchorHost
 		owner.mu.Unlock()
 		if off, err := media.ParseAudioSDP(body); err == nil && relay != nil {
+			learnCrypto(relay, lk.relayLeg, off)
 			relay.SetTarget(lk.relayLeg, udpAddr(off.Address, off.Port))
 			ans = media.BuildAudioSDPDir(host, relay.LegPort(lk.relayLeg), off.PayloadType, off.DTMFPayloadType,
 				off.DTMFRate, mirrorDirection(dir))
+			if built, err := media.ParseAudioSDP(ans); err == nil {
+				ans = keepSecurity(relay, lk.relayLeg, built).Build(host, relay.LegPort(lk.relayLeg), mirrorDirection(dir))
+			}
 		}
 	} else if lk != nil {
 		ans = withDirection(lk.answer, mirrorDirection(dir))
@@ -960,7 +964,7 @@ func (c *call) holdParty(dir string) {
 		if relay == nil || len(base.Codecs) == 0 {
 			return
 		}
-		body = base.Build(host, relay.LegPort(lk.relayLeg), dir)
+		body = keepSecurity(relay, lk.relayLeg, base).Build(host, relay.LegPort(lk.relayLeg), dir)
 	} else {
 		body = withDirection(lk.answer, dir)
 	}

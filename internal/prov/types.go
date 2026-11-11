@@ -315,6 +315,11 @@ type Server struct {
 	// with a fixed address, nil when none is configured or the phone
 	// resolves its servers by SRV (S-20).
 	Backup *Backup
+	// SRTP is the phone's media-encryption policy ("off", "optional" or
+	// "required") on a TLS phone; empty on a phone that registers over UDP,
+	// where Hello offers no crypto and the templates leave the phone's SRTP
+	// setting alone (phone-feature-parity S-15).
+	SRTP   string
 	Expiry int // registration expiry, seconds
 }
 

@@ -49,7 +49,9 @@ Read the trace back to the user in plain words.
 2. `createTrunk`: mode registration (Hello registers with a username and
    password) or ip (the carrier sends from known source ranges). Give the
    destinations (host, port, priority, weight). The password is accepted but
-   never returned.
+   never returned. `srtp` (off by default) is the trunk's media-encryption
+   policy; trunk legs are UDP today, so `optional` behaves as `off` and
+   `required` makes calls over the trunk fail with 488.
 3. `listTrunkStatus` until the registration is registered (registration
    mode) and the destinations are up.
 4. Nothing uses a new trunk until a route lists it: add or change an

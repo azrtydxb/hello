@@ -215,7 +215,7 @@ type Store interface {
 	ListDevices(ctx context.Context, kind string) ([]store.Device, error)
 	GetDevice(ctx context.Context, id int64) (store.Device, error)
 	CreateDevice(ctx context.Context, actor string, in store.NewDevice) (store.Device, error)
-	UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64) (store.Device, error)
+	UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, srtp *string) (store.Device, error)
 	RotateDeviceSecret(ctx context.Context, actor string, id int64, realm, secret string) (store.Device, error)
 	DeleteDevice(ctx context.Context, actor string, id int64) error
 
