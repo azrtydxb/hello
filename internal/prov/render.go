@@ -153,6 +153,11 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 			d.Book = &b
 		}
 	}
+	if d.Wifi != nil {
+		w := *d.Wifi
+		w.Keys = WifiKeys(WifiFamily(d.Phone.Vendor, d.Phone.Model), w)
+		d.Wifi = &w
+	}
 	d.Prov.CACertBase64 = pemBase64(d.Prov.CACertPEM)
 	d.Line.N = 1
 	d.Lines = renderLines(d)
