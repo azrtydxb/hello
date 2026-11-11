@@ -13,6 +13,10 @@ func ConferencePINAAD(roomID int64, which string) string {
 // secret copied to another user's row does not open.
 func TOTPAAD(userID int64) string { return fmt.Sprintf("user:%d:totp", userID) }
 
+// DoorWebhookAAD is the additional data a doorbell webhook's secret is sealed
+// under, so a value copied to another webhook's row does not open.
+func DoorWebhookAAD(id int64) string { return fmt.Sprintf("door-webhook:%d", id) }
+
 // CRMSecretAAD is the additional data a CRM connector's OAuth client secret
 // is sealed under.
 func CRMSecretAAD(connectorID int64) string { return fmt.Sprintf("crm:%d:client_secret", connectorID) }

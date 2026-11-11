@@ -152,6 +152,7 @@ var NonFlowResources = map[string]string{
 	"ringtones":                     "custom tones phones download for the ring map, not call routing",
 	"ring-tags":                     "names the tone a phone plays, sent to it as Alert-Info; the tag a call gets does not change where it goes",
 	"phonebooks/{id}/entries":       "directory data shown on phones, not call routing",
+	"door/webhooks":                 "signed triggers from non-SIP doorbells; they start a ring or a chime, not a route a caller takes",
 	"me/contacts":                   "a user's personal contacts, not call routing",
 	"me/devices":                    "a user's own browser softphones, managed by the user, not call routing",
 	"calls/originate":               "click-to-call requests (a call placed on demand, not call routing)",
