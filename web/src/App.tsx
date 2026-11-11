@@ -37,6 +37,7 @@ import {
   IntegrationsOverview,
 } from "./pages/Integrations";
 import { IntegrationEvents } from "./pages/IntegrationEvents";
+import { IntegrationsCRM } from "./pages/IntegrationsCRM";
 import { Webhooks } from "./pages/Webhooks";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
@@ -170,6 +171,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/integrations": IntegrationsOverview,
   "/integrations/api-access": IntegrationsApiAccess,
   "/integrations/events": IntegrationEvents,
+  "/integrations/crm": IntegrationsCRM,
   "/integrations/webhooks": Webhooks,
 };
 
