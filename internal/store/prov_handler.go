@@ -290,6 +290,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Firmware, err = s.pinnedFirmware(ctx, d.Phone.Vendor, d.Phone.Model, d.Prov.URL); err != nil {
 		return d, prov.Template{}, err
 	}
+	if d.SCEP, d.Dot1X, err = s.securityInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model, d.Phone.MAC, token); err != nil {
+		return d, prov.Template{}, err
+	}
 	stored, err := s.ListProvTemplates(ctx)
 	if err != nil {
 		return d, prov.Template{}, err

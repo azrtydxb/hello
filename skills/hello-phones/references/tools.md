@@ -73,6 +73,18 @@
 | `getRingMap`                        | read  | The ring map: ringer lists, defaults, choices, overrides.          |
 | `putRingMap`                        | write | Replace the global ring map choices.                               |
 | `putRingMapGroup`                   | write | Replace one phone group's ring map overrides.                      |
+| `getSCEP`                           | read  | The SCEP server, the device CA and its CRL URL.                    |
+| `setSCEPCA`                         | admin | Generate or import the device CA.                                  |
+| `listSCEPCertificates`              | read  | Issued device certificates.                                        |
+| `revokeSCEPCertificate`             | admin | Revoke a certificate (CRL).                                        |
+| `rotatePhoneSCEPChallenge`          | admin | Discard a phone's one-time SCEP challenge.                         |
+| `getPhoneGroupSecurity`             | read  | A group's SCEP switch and wired 802.1X profile.                    |
+| `setPhoneGroupSecurity`             | admin | Set them.                                                          |
+| `listDot1XProfiles`                 | read  | 802.1X profiles.                                                   |
+| `getDot1XProfile`                   | read  | One 802.1X profile.                                                |
+| `createDot1XProfile`                | admin | Add an 802.1X profile.                                             |
+| `updateDot1XProfile`                | admin | Replace an 802.1X profile.                                         |
+| `deleteDot1XProfile`                | admin | Delete an unused 802.1X profile.                                   |
 | `listWifiProfiles`                  | read  | Wi-Fi profiles, secrets never shown.                               |
 | `createWifiProfile`                 | admin | Create a Wi-Fi profile.                                            |
 | `getWifiProfile`                    | read  | One Wi-Fi profile.                                                 |

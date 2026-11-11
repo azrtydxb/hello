@@ -6,7 +6,7 @@ import (
 )
 
 // TestSRTPPolicyStorage fails if a device or trunk does not carry its SRTP
-// policy through the database (migration 00076): devices start optional,
+// policy through the database (migration 00077): devices start optional,
 // trunks off, PATCH replaces only what is sent, and an unknown value is
 // refused by the column's CHECK. Needs HELLO_TEST_DATABASE_URL.
 func TestSRTPPolicyStorage(t *testing.T) {
@@ -60,7 +60,7 @@ func TestSRTPPolicyStorage(t *testing.T) {
 }
 
 // TestDeviceKeyExchangeStorage fails if a device does not carry its key
-// exchange and ICE setting through the database (migration 00077): new devices
+// exchange and ICE setting through the database (migration 00078): new devices
 // are sdes with ICE off, an update replaces only what is sent, an unknown
 // exchange is refused by the column's CHECK, and a CDR carries its key
 // exchange and ICE flag. Needs HELLO_TEST_DATABASE_URL.
