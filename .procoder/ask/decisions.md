@@ -2597,6 +2597,44 @@ so the VIP stage cannot sit in that file.
 - Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
 - Account sharing group password: shared default `AccountSharing`, or a per-group secret
 
+## Integrations P4: recording links and lookup (2026-11-09)
+
+- Links are Hello-signed proxy URLs (`/r/<token>.wav`), not MinIO presigned
+  URLs: the object store endpoint is cluster-internal. The token is 256
+  random bits, base64url (43 characters); only its SHA-256 is stored.
+- All refusals of `/r/` (unknown, expired, revoked, used up, malformed) are
+  the same 404, so a token's history is not revealed; the reason is counted
+  in `hello_recording_link_hits_total{result}`. Rate limit is 30 requests per
+  minute per token and address, plus 300 per address, in memory per replica.
+- `maxUses` counts every request, including a player's Range requests, so a
+  forged `Range` cannot get past the limit. Default is 0 (unlimited).
+- Who may mint: a user or any credential with an `extensionScope` only for
+  calls involving its extensions; a viewer likewise (their linked
+  extensions), since the spec says operator/admin for any call. A recording
+  whose CDR is not written yet can only be linked by an unrestricted
+  credential. Revoking needs the same, or being the creator.
+- Links die with their recording through `ON DELETE CASCADE` (migration 00052)
+  rather than a trigger. `connector_id` is a plain column until the CRM tables
+  exist (P6).
+- The lookup API is two operations, `GET /lookup/calls` (scope `calls`) and
+  `GET /lookup/recordings` (scope `recordings`), both with the `user` role and
+  the extension restriction in SQL. The spec's contact lookup
+  `GET /lookup/number` (I-43) is a separate feature (phonebook, not calls) and
+  is not part of this PR. Number matching is digits-only with a last-eight-digit
+  suffix match from eight digits (not `phonebook.Dialing.Key`, which needs the
+  dial context and would hide calls recorded in another format; eight, not the
+  phonebook's nine, because the national form's trunk prefix 0 is dropped in
+  the international one, so a 9-digit national number shares only 8 digits).
+- Not built because they cannot work as written: `GET /cdrs/{id}/recording-link`
+  (a token cannot be shown again, only its hash is stored; the lookup returns
+  `recordingId` and `POST /recordings/{id}/links` mints) and the CDR fields
+  `origin` and `origin_client` (they belong to P3, click-to-call, which
+  is unmerged). `recordingId` is on the lookup results and on
+  `GET /cdrs/{id}` (not on the list).
+- Minting and revoking are excluded from MCP (they hand out a public URL to
+  call audio); the lookups are MCP tools, taught in the hello-troubleshoot
+  skill.
+
 ## SCEP and 802.1X, item 37 (S-25) (2026-11-09)
 
 Builder's design choices, within the spec; nothing here was asked of the user.
@@ -2661,6 +2699,7 @@ Builder's design choices, within the spec; nothing here was asked of the user.
   `/dot1x-profiles` CRUD, `GET|PUT /phone-groups/{id}/security`; viewers read,
   admins change (S-25 RBAC). UI: Phones > Certificates, and "New SCEP
   challenge" on the phone page.
+
 ## Clients 3 and 4: web devices, coturn and ICE servers (2026-11-09)
 
 Spec: `.procoder/specs/clients-webrtc-mobile-video.md`, phases 3 and 4 (S-13 to S-17, S-21 to S-24). One PR: the two share the configuration, the credentials Secret and the chart wiring, and neither depends on the media foundation (#276) or the WSS edge.
@@ -2677,6 +2716,7 @@ Spec: `.procoder/specs/clients-webrtc-mobile-video.md`, phases 3 and 4 (S-13 to 
 - **coturn.** One Deployment per address, one replica, `Recreate`, `hostNetwork` by default (the relay leaves from the node address that is `externalIP`); without hostNetwork each server is a LoadBalancer Service listing at most 200 relay ports. `allowedPeers` is required, so the chart cannot render an open relay. The Prometheus exporter is off by default because the Debian build was not checked. `ct-<tree hash of docker/coturn>` is the content tag, like `kc-` for Kamailio.
 - **ICE servers.** `GET /api/v1/me/ice-servers[?deviceId=]`, 60 requests a minute per user (in-process window, per node), counted by `hello_ice_credentials_issued_total` and not audited per credential. STUN defaults to the `turn:` hosts.
 - **Migration 00075** (web devices; the highest on main is now 00074). `test/integration/migrate_{prov,ai,ai_agent}_test.go` counts bumped by one.
+
 ## Wi-Fi profiles and roaming (item 31, S-23, S-24)
 
 Keys come from Grandstream's official templates only (config-template-10212026.zip):
@@ -2730,6 +2770,7 @@ Nothing here is confirmed on a handset.
   changed render data.
 - Migration 00052 (`wifi_profiles`, `wifi_assignments`, `wifi_radio`); the
   migrate test counts follow it.
+
 ## Fax (pbx-gaps B5 and B6, S-15 to S-17) (2026-11-09)
 
 Built in one change: the engine, passthrough, T.38, email, API, page and docs.
