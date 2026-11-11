@@ -257,6 +257,18 @@ func (s *Store) configChangeID(ctx context.Context, actor, action, resource stri
 	})
 }
 
+// bumpConfigRevision moves the configuration revision and tells the nodes,
+// for a change made outside configChange that hello-sip's snapshot reads.
+func bumpConfigRevision(ctx context.Context, tx *sql.Tx) error {
+	var rev int64
+	if err := tx.QueryRowContext(ctx,
+		`UPDATE schema_info SET config_revision = config_revision + 1 RETURNING config_revision`).Scan(&rev); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, NotifyChannel, strconv.FormatInt(rev, 10))
+	return err
+}
+
 // itemRe matches the slice-indexed head of a routing.Config error path.
 var itemRe = regexp.MustCompile(`^(trunks|outbound|inbound)\[([0-9]+)\]`)
 
