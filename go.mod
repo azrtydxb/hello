@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	github.com/azrtydxb/go-ai-sdk v0.8.0
+	github.com/azrtydxb/momo v0.8.0
 	github.com/emiago/sipgo v1.7.2
 	github.com/go-asn1-ber/asn1-ber v1.5.8
 	github.com/go-ldap/ldap/v3 v3.4.15
