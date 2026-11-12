@@ -27,6 +27,14 @@ type Metrics struct {
 	// RTPJitter is the RFC 3550 interarrival jitter estimate per
 	// direction, observed once per stats interval per live session.
 	RTPJitter *prometheus.HistogramVec
+	// SRTPLegs is the number of call legs this node's anchor currently
+	// encrypts with SRTP (SDES, phone-feature-parity S-15).
+	SRTPLegs prometheus.Gauge
+	// SRTPNegotiations counts leg negotiations by result: srtp (the leg is
+	// encrypted), plain (crypto was not offered or the far end declined and
+	// the policy allowed plain RTP), refused (the policy required SRTP and
+	// the call was refused with 488).
+	SRTPNegotiations *prometheus.CounterVec
 	// RecordingStorage is what this node stored (the cluster total lives
 	// in MinIO, like voicemail's).
 	RecordingStorage prometheus.Gauge
@@ -76,13 +84,21 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			},
 			[]string{"direction"},
 		),
+		SRTPLegs: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "hello_srtp_legs",
+			Help: "Call legs the anchor currently encrypts with SRTP.",
+		}),
+		SRTPNegotiations: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "hello_srtp_negotiations_total",
+			Help: "SRTP leg negotiations by result (srtp, plain, refused).",
+		}, []string{"result"}),
 		RecordingStorage: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "hello_recording_storage_bytes",
 			Help: "Recording audio bytes this node stored (cluster total lives in MinIO).",
 		}),
 	}
 	reg.MustRegister(m.RTPSessions, m.AnchoredCalls, m.AnchorFailures,
-		m.RTPPackets, m.RTPOctets, m.RTPLoss, m.RTPJitter, m.RecordingStorage)
+		m.RTPPackets, m.RTPOctets, m.RTPLoss, m.RTPJitter, m.SRTPLegs, m.SRTPNegotiations, m.RecordingStorage)
 	return m
 }
 

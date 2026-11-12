@@ -126,7 +126,28 @@ func (c *call) answerPickup(req *pickupReq) {
 	handOverLeg(relay, legCallee, udpAddr(req.offer.Address, req.offer.Port), req.source)
 	ans := media.AnswerFor(off, req.offer)
 	c.applyNegotiated(ans, "pickup", "")
-	takerAns := ans.Build(c.anchorHost, relay.LegPort(legCallee), "sendrecv")
+	// The picker is a new endpoint on the callee leg: it is answered under
+	// its own SRTP policy, and one that demands SRTP and cannot have it is
+	// refused.
+	takerSDP := ans.PlainOffer()
+	if req.taker != nil {
+		var ok bool
+		if takerSDP, ok = req.taker.cryptoAnswerOn(relay, legCallee, req.taker.callerSRTP(), takerSDP, req.offer); !ok {
+			c.syncSRTP()
+			fail(sip.StatusNotAcceptableHere, "the picker requires SRTP and could not negotiate it")
+			return
+		}
+		c.syncSRTP()
+	}
+	takerAns := takerSDP.Build(c.anchorHost, relay.LegPort(legCallee), "sendrecv")
+	// The caller that was ringing a phone is answered now, so this is where
+	// its SDES offer is accepted (a leg that was already negotiated repeats
+	// its key).
+	callerSDP, callerOK := c.cryptoAnswerOn(relay, legCaller, c.callerSRTP(), ans.PlainOffer(), off)
+	if !callerOK {
+		fail(sip.StatusNotAcceptableHere, "the caller requires SRTP and could not negotiate it")
+		return
+	}
 	c.mu.Lock()
 	c.connected = true
 	c.answerTime = time.Now()
@@ -137,7 +158,7 @@ func (c *call) answerPickup(req *pickupReq) {
 	c.publish()
 	c.noteAnswered(req.retriever)
 	req.res <- pickupRes{ok: true, answer: takerAns, callID: c.callID}
-	body := ans.Build(c.anchorHost, relay.LegPort(legCaller), "sendrecv")
+	body := callerSDP.Build(c.anchorHost, relay.LegPort(legCaller), "sendrecv")
 	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", body)
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.NewHeader("Allow", allow))
@@ -145,6 +166,7 @@ func (c *call) answerPickup(req *pickupReq) {
 		res.AppendHeader(h)
 	}
 	s.m.response(sip.StatusOK)
+	c.settleReliable(true)
 	if err := c.dss.WriteResponse(res); err != nil {
 		s.log.Info("caller did not acknowledge the picked-up call", "correlation_id", c.id, "error", err)
 		c.linkedHangup(cdr.SideSystem, "no ACK from caller")
@@ -255,6 +277,7 @@ func (c *call) pickupFrom(tx sip.ServerTransaction, snap *snapshot.Snapshot, can
 		return
 	}
 	lk := &callLink{selfSide: cdr.SideCaller, byeSelf: c.byeCallerRaw}
+	acrossNodes := false // a candidate on another node was skipped for SRTP
 	for _, cand := range cands {
 		var res pickupRes
 		if cand.local != nil {
@@ -263,8 +286,13 @@ func (c *call) pickupFrom(tx sip.ServerTransaction, snap *snapshot.Snapshot, can
 				lk.peer = cand.local
 			}
 		} else {
+			body, ok := c.crossNodeOffer(offer)
+			if !ok {
+				acrossNodes = true
+				continue
+			}
 			rep, ok := s.parkCommand(cand.live.Node, livestate.ParkCommand{Op: livestate.ParkOpPickup,
-				Correlation: cand.live.ID, Offer: string(c.inv.Body()), PeerCallID: c.callID, Retriever: c.callerNum,
+				Correlation: cand.live.ID, Offer: body, PeerCallID: c.callID, Retriever: c.callerNum,
 				Source: c.inv.Source()})
 			res = pickupRes{ok: ok, answer: []byte(rep.Answer), code: rep.Code, why: rep.Reason, callID: rep.CallID}
 			if ok {
@@ -287,7 +315,29 @@ func (c *call) pickupFrom(tx sip.ServerTransaction, snap *snapshot.Snapshot, can
 		c.answerSelf(res.answer)
 		return
 	}
+	if acrossNodes {
+		c.srtpNote("refused")
+		c.pickupFail(tx, sip.StatusNotAcceptableHere, "the call is on another node and SRTP cannot be negotiated across nodes")
+		return
+	}
 	c.pickupFail(tx, sip.StatusNotFound, "nothing to pick up")
+}
+
+// crossNodeOffer is the caller's SDP as it is sent to another node in a
+// retrieve or pickup command. SDES keys never travel between nodes (the
+// command goes through the shared store), so the a=crypto lines are dropped
+// and the other node answers plain RTP; ok is false when that would be a
+// downgrade the caller's leg cannot take: its policy requires SRTP, or it
+// offered SRTP only.
+func (c *call) crossNodeOffer(offer media.AudioSDP) (body string, ok bool) {
+	if offer.SRTPOnly || c.callerSRTP().required() {
+		return "", false
+	}
+	if offer.OffersCrypto() {
+		c.srtpNoteOnce(legCaller, "plain")
+		c.addTrace("The call is on another node: its media is plain RTP")
+	}
+	return media.StripCrypto(string(c.inv.Body())), true
 }
 
 // handleReplacesPickup serves an INVITE with Replaces naming an early dialog

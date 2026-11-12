@@ -50,7 +50,7 @@ func newProvEnvLog(t *testing.T, pc ProvConfig, log *slog.Logger) *provEnv {
 	box := testBox(t)
 	pc.Settings = store.ProvSettings{
 		PublicURL: testPublicURL, SIPServer: "192.0.2.10:5060", Domain: testDomain, Expiry: time.Hour,
-		Resync: 24 * time.Hour, Timezone: "UTC", NTP: "pool.ntp.org", TokenGrace: 7 * 24 * time.Hour,
+		Resync: 24 * time.Hour, Timezone: "UTC", NTP: "pool.ntp.org", TokenGrace: 7 * 24 * time.Hour, SCEP: true,
 		LDAPBase: pc.Settings.LDAPBase, LDAPPort: pc.Settings.LDAPPort,
 	}
 	e := newEnvConfig(t, Config{Prov: pc, Log: log}, box)
@@ -846,24 +846,35 @@ func TestFirmwareHosting(t *testing.T) {
 }
 
 // TestMaskSecrets fails if any secret survives in the render data a
-// preview renders from: the SIP secret, the admin password, or the token
-// in the provisioning or firmware URL.
+// preview renders from: the SIP secret, the admin password, the SCEP
+// challenge, an 802.1X password, or the token in the provisioning,
+// firmware or SCEP URL.
 func TestMaskSecrets(t *testing.T) {
 	token := strings.Repeat("a2", 26)
 	d := prov.RenderData{
-		Phone:    prov.Phone{AdminPassword: "admin-pw"},
-		Line:     prov.Line{Password: "sip-secret"},
-		Prov:     prov.ProvInfo{URL: testPublicURL + "/p/" + token + "/"},
-		Firmware: &prov.FirmwareInfo{URL: testPublicURL + "/p/" + token + "/fw/x.rom"},
-		Book:     prov.NewBookInfo(testPublicURL+"/p/"+token+"/", []string{"Extensions", "Company"}, prov.DefaultBookRefresh),
+		Phone:     prov.Phone{AdminPassword: "admin-pw"},
+		Line:      prov.Line{Password: "sip-secret"},
+		Overrides: []prov.Override{{Key: "P71", Value: "plain"}, {Key: "P9999", Value: "ovr-secret", Secret: true}},
+		Prov:      prov.ProvInfo{URL: testPublicURL + "/p/" + token + "/"},
+		Firmware:  &prov.FirmwareInfo{URL: testPublicURL + "/p/" + token + "/fw/x.rom"},
+		Book:      prov.NewBookInfo(testPublicURL+"/p/"+token+"/", []string{"Extensions", "Company"}, prov.DefaultBookRefresh),
+		SCEP:      &prov.SCEPInfo{URL: testPublicURL + "/p/" + token + "/scep", Challenge: "scep-challenge"},
 	}
-	fw, book := d.Firmware, d.Book
+	wired := prov.NewDot1XProfile(1, "LAN", prov.Dot1XPEAP, "{mac}", "", "dot1x-pw", "", "", "c074ad112233", true)
+	d.Dot1X = &prov.Dot1XInfo{Wired: &wired, Profiles: []prov.Dot1XProfile{wired}}
+	fw, book, dx := d.Firmware, d.Book, d.Dot1X
 	maskSecrets(&d)
 	b, _ := json.Marshal(d)
-	for _, s := range []string{token, "admin-pw", "sip-secret"} {
+	if d.SCEP.URL != testPublicURL+"/p/"+mask+"/scep" || dx.Wired.Password != "dot1x-pw" || dx.Profiles[0].Password != "dot1x-pw" {
+		t.Fatalf("SCEP URL %s, or masking changed the caller's 802.1X value in place", d.SCEP.URL)
+	}
+	for _, s := range []string{token, "admin-pw", "sip-secret", "ovr-secret", "scep-challenge", "dot1x-pw"} {
 		if bytes.Contains(b, []byte(s)) {
 			t.Fatalf("masked data still holds %q: %s", s, b)
 		}
+	}
+	if d.Overrides[0].Value != "plain" {
+		t.Fatalf("a plain override was masked: %+v", d.Overrides)
 	}
 	if d.Prov.URL != testPublicURL+"/p/"+mask+"/" || d.Firmware.URL != testPublicURL+"/p/"+mask+"/fw/x.rom" {
 		t.Fatalf("masked URLs = %s, %s", d.Prov.URL, d.Firmware.URL)

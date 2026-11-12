@@ -107,12 +107,12 @@ func (c *call) ivrPageGroup(ctx context.Context, snap *snapshot.Snapshot, code s
 	relay.SetTarget(legCallee, udpAddr("127.0.0.1", fan.CallerPort()))
 	offer := media.BuildAudioSDPDir(ps.host, fan.MemberPort(), off.PayloadType, 0, 0, "sendonly")
 	c.addTrace(fmt.Sprintf("IVR: paging group %s (%s): %d legs", g.Name, g.Priority, len(targets)))
+	prepared := c.pageLegs(ps, targets, offer)
 	c.mu.Lock()
-	for _, t := range targets {
-		pl := &pageLeg{ext: t.ext, offer: offer}
-		pl.l = c.addLeg(&leg{binding: t.b, pl: pl})
+	for _, t := range prepared {
+		t.pl.l = c.addLeg(&leg{binding: t.b, pl: t.pl})
 		ps.mu.Lock()
-		ps.legs = append(ps.legs, pl)
+		ps.legs = append(ps.legs, t.pl)
 		ps.mu.Unlock()
 	}
 	legs := slices.Clone(ps.legs)

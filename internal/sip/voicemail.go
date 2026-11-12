@@ -47,6 +47,11 @@ type VoicemailStore interface {
 	// InsertMessage stores one message and returns its id. callerName is the
 	// caller-ID display name the call carried ("" for none).
 	InsertMessage(ctx context.Context, boxID int64, object, caller, callerName string, durationMs int64) (int64, error)
+	// InsertGroupMessage stores one message for every box of boxIDs, all
+	// rows referencing the same object (a voicemail group, copy on
+	// delivery), and returns the boxes that received a copy. A box that no
+	// longer exists is skipped.
+	InsertGroupMessage(ctx context.Context, boxIDs []int64, object, caller, callerName string, durationMs int64) ([]int64, error)
 	// MessageCounts returns the unread and total message counts.
 	MessageCounts(ctx context.Context, boxID int64) (unread, total int, err error)
 	// ListMessages returns the box's messages, newest first.
@@ -154,7 +159,13 @@ func (c *call) mailboxExt(mode int) string {
 // comes from the snapshot, so no database call precedes the 200.
 func (c *call) startVoicemail(mode int, reason string) {
 	s := c.s
-	answer, sess, err := s.answerAnchored(c.inv.Body())
+	answer, sess, err := s.answerAnchored(c.inv.Body(), c.soloPolicy())
+	if errors.Is(err, media.ErrSRTPRequired) {
+		// The caller's policy demands SRTP and the offer cannot deliver it:
+		// voicemail is never answered in the clear.
+		c.soloRefuseSRTP("SRTP is required but voicemail could not negotiate it")
+		return
+	}
 	if err != nil {
 		// No anchor: the call still completes, without recording (spec
 		// failure mode); the flow notes it in the CDR.
@@ -165,6 +176,9 @@ func (c *call) startVoicemail(mode int, reason string) {
 	c.mediaMode = "anchored"
 	c.vmSession = sess
 	c.mu.Unlock()
+	if ss, ok := sess.(media.SecureSession); ok {
+		c.setSoloSecure(ss.Secure())
+	}
 	// The answer goes out before the INVITE handler returns (sipgo
 	// terminates the transaction then); only the application runs on after
 	// it, in its own goroutine.
@@ -180,7 +194,9 @@ func (c *call) startVoicemail(mode int, reason string) {
 		// application from the greeting.
 		c.haSoloRefresh(string(answer))
 		c.mu.Lock()
-		c.haPhase, c.haDetail = haPhaseVoicemail, voicemailDetail(mode, reason, c.mailboxExtLocked(mode))
+		if mode < vmGroupLeave {
+			c.haPhase, c.haDetail = haPhaseVoicemail, voicemailDetail(mode, reason, c.mailboxExtLocked(mode))
+		}
 		c.mu.Unlock()
 		go c.haLoop()
 	}
@@ -203,12 +219,12 @@ func (c *call) mailboxExtLocked(mode int) string {
 
 // answerAnchored binds the media anchor for this call and builds the answer
 // SDP from the caller's offer.
-func (s *Server) answerAnchored(offer []byte) ([]byte, media.Session, error) {
+func (s *Server) answerAnchored(offer []byte, pol media.SecurePolicy) ([]byte, media.Session, error) {
 	anchor := s.voicemailAnchor(offer)
 	if s.deps.Objects == nil || anchor == nil {
 		return nil, nil, errors.New("voicemail media disabled")
 	}
-	return anchor.Answer(offer)
+	return anchor.AnswerSecure(offer, pol)
 }
 
 // voicemailAnchor is the node's media anchor; without an advertised anchor
@@ -316,6 +332,16 @@ func (c *call) voicemailFlow(mode int, reason string, sess media.Session) {
 	}
 	ctx, cancel := c.vmCtx()
 	defer cancel()
+	if mode == vmGroupLeave || mode == vmGroupBroadcast {
+		c.mu.Lock()
+		g := c.vmGroup
+		c.mu.Unlock()
+		if g != nil {
+			c.vmGroupLeave(ctx, sess, *g, mode == vmGroupBroadcast)
+		}
+		c.vmFinish()
+		return
+	}
 	ext := c.mailboxExt(mode)
 	box := c.boxDetails(ext)
 	switch mode {
@@ -324,7 +350,11 @@ func (c *call) voicemailFlow(mode int, reason string, sess media.Session) {
 	default:
 		c.vmLeave(ctx, sess, box, reason)
 	}
-	// The call is over for the caller once the application has run.
+	c.vmFinish()
+}
+
+// vmFinish ends the call for the caller once the application has run.
+func (c *call) vmFinish() {
 	c.mu.Lock()
 	done := c.hungUp || c.ended
 	c.mu.Unlock()
@@ -538,6 +568,12 @@ func (c *call) playDefaultGreeting(ctx context.Context, sess media.Session, box 
 // watcher decides — '#' and '*' both cancel the take, and the last digit
 // says which.
 func (c *call) recordMessage(ctx context.Context, sess media.Session) ([]byte, time.Duration, bool) {
+	return c.recordMessageMax(ctx, sess, time.Minute)
+}
+
+// recordMessageMax is recordMessage with the longest take set to max (a
+// voicemail group sets its own, spec S-14).
+func (c *call) recordMessageMax(ctx context.Context, sess media.Session, max time.Duration) ([]byte, time.Duration, bool) {
 	dtmf := make(chan byte, 16)
 	start := time.Now()
 	for attempt := 0; attempt < 3; attempt++ {
@@ -559,8 +595,7 @@ func (c *call) recordMessage(ctx context.Context, sess media.Session) ([]byte, t
 				}
 			}
 		}()
-		const maxMessage = time.Minute
-		audio, _ := sess.Record(rctx, maxMessage, dtmf)
+		audio, _ := sess.Record(rctx, max, dtmf)
 		rcancel()
 		<-watch
 		dur := time.Since(start)

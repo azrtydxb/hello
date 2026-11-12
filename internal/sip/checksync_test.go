@@ -354,3 +354,47 @@ func TestCheckSyncChallengeInPhoneRealm(t *testing.T) {
 		})
 	}
 }
+
+// TestCheckSyncLines fails if a phone whose first line is not registered is
+// not reached through its second line, if a phone with both lines registered
+// is notified on more than one of them, or if a phone with no line
+// registered is not reported as not registered (phone-feature-parity S-10).
+func TestCheckSyncLines(t *testing.T) {
+	old := checkSyncTimeout
+	checkSyncTimeout = 600 * time.Millisecond
+	t.Cleanup(func() { checkSyncTimeout = old })
+	oldPoll := pushPollInterval
+	pushPollInterval = 20 * time.Millisecond
+	t.Cleanup(func() { pushPollInterval = oldPoll })
+
+	q := newFakePushes()
+	pbx := startPBX(t, callerDevices(), withPushes(q, 7))
+	line1, line2 := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
+	var id int64
+	push := func() PushResult {
+		id++
+		q.queue(PushJob{ID: id, Kind: PushResync, Vendor: "grandstream", Device: "a1", Lines: []string{"b1"}})
+		return q.result(t, id)
+	}
+
+	if r := push(); r.Status != PushNotRegistered {
+		t.Fatalf("no line registered: %+v, want not_registered", r)
+	}
+
+	line2.register(t)
+	if r := push(); r.Status != PushOK || r.Contacts != 1 {
+		t.Fatalf("only line 2 registered: %+v, want ok to 1 contact", r)
+	}
+	waitReq(t, line2.notifies, "NOTIFY on line 2")
+
+	line1.register(t)
+	if r := push(); r.Status != PushOK || r.Contacts != 1 {
+		t.Fatalf("both lines registered: %+v, want ok to 1 contact", r)
+	}
+	waitReq(t, line1.notifies, "NOTIFY on line 1")
+	select {
+	case <-line2.notifies:
+		t.Fatal("line 2 was notified as well: a phone with two registered lines gets one NOTIFY")
+	case <-time.After(150 * time.Millisecond):
+	}
+}

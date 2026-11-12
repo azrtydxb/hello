@@ -15,6 +15,16 @@ implementation detail lives in `internal/media`.
 | Voicemail is involved     | unanswered/busy/DND call with a voicemail box         |
 | The operator forces it    | `HELLO_MEDIA_FORCE_ANCHOR=true`                       |
 
+## Fax and T.38
+
+A fax call is anchored by a relay of its own whose far leg is the hello-fax
+service (see [fax.md](fax.md)). It carries G.711 (PCMU or PCMA) only; there is
+no echo cancellation, silence suppression, comfort noise or recording on it,
+and the engine's receive buffer is fixed. On a trunk whose fax mode is `t38`
+the same relay switches to **UDPTL** after a re-INVITE to `m=image udptl t38`:
+the datagrams cross the relay unmodified (no sequence or timestamp rewrite, no
+RTP parsing), and a carrier answering 488 leaves the call on G.711.
+
 An anchored call keeps its anchor until it ends — a mid-call re-INVITE can
 add the anchor, but Hello does not remove it mid-call.
 
@@ -195,6 +205,77 @@ anchored call:
 The signalling half of roaming (the re-REGISTER from the new address replacing
 the old contact, and session timers) is in [phones.md](phones.md#roaming-keep-alive-and-dead-calls).
 
+## SRTP (SDES)
+
+Anchored calls can be encrypted per leg (phone-feature-parity S-15). The
+caller leg and the callee leg are separate SRTP sessions with their own keys:
+the anchor decrypts what one leg sends, rewrites the RTP, and encrypts it for
+the other leg, so recording, DTMF and announcements work as on plain RTP and a
+phone never learns the other phone's key.
+
+- **Key exchange** is SDES (RFC 4568), `a=crypto` lines in the SDP, with
+  `AES_CM_128_HMAC_SHA1_80` first and `AES_CM_128_HMAC_SHA1_32` second.
+  `AES_256_CM_HMAC_SHA1_80` is accepted when a phone asks for it but never
+  offered. Lines with an MKI or session parameters Hello does not implement
+  are ignored. Keys are generated per leg with the system random source and
+  are never logged, shown or stored; replicated call state carries no key
+  (a node that takes a call over negotiates fresh ones).
+- **TLS only.** The keys travel in the SDP, so Hello offers or accepts crypto
+  only on a leg whose signalling is TLS (a phone registered through the
+  Kamailio TLS listener, see [tls.md](tls.md)). On a UDP leg the crypto lines
+  are dropped and plain RTP is answered. Trunk legs are UDP (SIP over TLS for
+  trunks is a later phase of the trunks-routing spec), so a trunk never carries
+  SRTP today.
+- **Policy** per device (`PATCH /api/v1/devices/{id}`, **Devices** page) and per
+  trunk (**Trunks** page, `off` or `optional`; see below): `off` offers nothing; `optional` (device default)
+  offers `RTP/AVP` with crypto lines, which a phone without SRTP ignores, and
+  uses SRTP when the answer carries it; `required` offers `RTP/SAVP` only. A
+  `required` leg that cannot be encrypted refuses the call with 488 (a caller
+  on UDP or without crypto, a callee that answers without crypto), and a
+  required callee that is not on TLS is not rung. An `RTP/SAVP` offer on a leg
+  Hello cannot encrypt is also refused with 488.
+- **Trunks cannot be `required`.** A trunk's legs are UDP, so `required` would
+  refuse every call over it. The API (`POST`/`PATCH /api/v1/trunks`, so the
+  MCP tools too) answers 422 on the `srtp` field when a trunk is set to
+  `required`, and the Trunks page offers `off` and `optional` only, with the
+  reason. `optional` on a trunk behaves as `off` until trunks gain a TLS
+  transport. A trunk already stored as `required` from before the rule still
+  refuses its calls with 488 (never silently carried in clear); the Trunks page
+  flags it and saving it with another policy fixes it.
+- **Per leg.** One leg can be encrypted and the other plain (a TLS phone calling
+  a UDP phone). The CDR's `srtp` says `none`, `caller`, `callee` or `both`, and
+  the call's trace names the legs and suite (never the key).
+- **Mid-call.** Hold, resume and refreshes keep the leg's keys and its media
+  profile; a phone that rekeys in a re-INVITE is followed, and a phone that
+  roams to a new media address keeps its keys. A leg handed to another party
+  (a blind or attended transfer target, a retrieved parked call, a pickup, the
+  parker's device when a parked call returns) drops the previous endpoint's
+  keys and negotiates new ones with the new party under the new party's own
+  policy and transport: it is offered (or, when it offers, answered with)
+  crypto when its policy allows and its contact is on TLS. A party whose policy
+  is `required` that cannot be encrypted is refused (488, or not rung, or the
+  call ends), never carried in the clear; an `optional` party that does not
+  answer with crypto is plain RTP and counted as `plain`. A retrieve or pickup
+  that crosses nodes (the call is held on another node) cannot carry keys
+  through the shared store, so it is plain RTP for an `optional` phone and is
+  refused with 488 for a `required` one.
+- **Authentication.** A packet on an encrypted leg that fails authentication or
+  replay checks is dropped, counted (`auth_failed` in the call's stats) and
+  never latches the leg's address. RTCP multiplexed on the RTP port is checked
+  (SRTCP) and consumed.
+- **Voicemail, paging and conference rooms** follow the same policy. Voicemail
+  and a conference participant answer a caller's `a=crypto` offer with their own
+  key (one SRTP session per caller, so the mixer encrypts the mix per
+  participant); a call parked then sent to voicemail keeps the encryption it had.
+  A page encrypts its caller leg the same way and each member leg separately:
+  every member is offered its own keys under its device's policy and transport,
+  a member that requires SRTP and is not on TLS is skipped
+  (`srtp_required` in the page legs), and one that answers without crypto is
+  hung up. A page's multicast group is always plain RTP (the stream is
+  one-to-many by design). An HA takeover of voicemail or a conference call
+  offers the caller fresh keys and ends the call if it does not answer with
+  them. DTLS-SRTP and ICE are the next item (S-16).
+
 ## Metrics
 
 `hello_sip_session_teardowns_total{reason}` counts the calls ended for a dead
@@ -205,7 +286,9 @@ The anchor's own series:
 `hello_rtp_sessions`, `hello_rtp_packets_total{direction}`,
 `hello_rtp_octets_total{direction}`, `hello_rtp_loss_total{direction}`,
 `hello_rtp_jitter_ms{direction}`, `hello_media_anchored_calls`,
-`hello_media_anchor_failures_total`, `hello_recording_storage_bytes`.
+`hello_media_anchor_failures_total`, `hello_recording_storage_bytes`, and for
+SRTP `hello_srtp_legs` (legs encrypted now) and
+`hello_srtp_negotiations_total{result}` (`srtp`, `plain`, `refused`).
 
 ## RTP port range
 

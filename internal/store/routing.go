@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/routing"
+	"github.com/azrtydxb/hello/internal/secmedia"
 )
 
 // querier is what both *sql.DB and *sql.Tx offer.
@@ -56,11 +57,26 @@ type Trunk struct {
 	// Codecs is the audio codec allow-list offered to the trunk, in order.
 	Codecs    []string `json:"codecs"`
 	Messaging bool     `json:"messaging"`
+	// SRTP is the media-encryption policy: off, optional or required.
+	SRTP string `json:"srtp"`
+	// AnonymousPolicy, AssertedIdentity and IdentityHeader are the trunk's
+	// anonymous-call handling (migration 00067, spec S-19).
+	AnonymousPolicy  string `json:"anonymousPolicy"`
+	AssertedIdentity string `json:"assertedIdentity"`
+	IdentityHeader   string `json:"identityHeader"`
+	// CallerPolicy is the trunk's own screening of inbound calls (anonymous
+	// reject, country restriction); its fields are the trunk's own in JSON.
+	routing.CallerPolicy
+	// Geolocation sends the caller's Geolocation header and PIDF-LO body on
+	// the emergency calls this trunk carries (RFC 6442, migration 00080).
+	Geolocation bool `json:"geolocation"`
 	// SessionTimers is the trunk's RFC 4028 setting: "default" (follow
 	// Hello's own), "on" or "off".
-	SessionTimers string    `json:"sessionTimers"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	SessionTimers string `json:"sessionTimers"`
+	// FaxMode is passthrough (default), t38 or off (migration 00072).
+	FaxMode   string    `json:"faxMode"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // TrunkInput is the writable part of a trunk, without its password.
@@ -80,7 +96,27 @@ type TrunkInput struct {
 	InternalDialing Dialing
 	Codecs          []string
 	Messaging       bool
-	SessionTimers   string
+	// AnonymousPolicy is "honour" or "always"; AssertedIdentity the number
+	// asserted for an anonymous call; IdentityHeader "pai" or "ppi". Empty
+	// policy and header mean the defaults.
+	AnonymousPolicy  string
+	CallerPolicy     routing.CallerPolicy
+	SRTP             string
+	AssertedIdentity string
+	IdentityHeader   string
+	Geolocation      bool
+	SessionTimers    string
+	FaxMode          string
+}
+
+// anonymousDefaults fills the defaults of the anonymous-call fields.
+func (in *TrunkInput) anonymousDefaults() {
+	if in.AnonymousPolicy == "" {
+		in.AnonymousPolicy = routing.AnonymousHonour
+	}
+	if in.IdentityHeader == "" {
+		in.IdentityHeader = routing.IdentityPAI
+	}
 }
 
 // Input returns t's writable fields.
@@ -93,8 +129,30 @@ func (t Trunk) Input() TrunkInput {
 		InternalDialing: Dialing{Mode: t.InternalDialing.Mode, Patterns: slices.Clone(t.InternalDialing.Patterns)},
 		Codecs:          slices.Clone(t.Codecs),
 		Messaging:       t.Messaging,
-		SessionTimers:   t.SessionTimers,
+		AnonymousPolicy: t.AnonymousPolicy, AssertedIdentity: t.AssertedIdentity, IdentityHeader: t.IdentityHeader,
+		Geolocation:   t.Geolocation,
+		CallerPolicy:  clonePolicy(t.CallerPolicy),
+		SRTP:          t.SRTP,
+		SessionTimers: t.SessionTimers,
+		FaxMode:       t.FaxMode,
 	}
+}
+
+// policyAction is the stored unknown-caller action: "block" when unset.
+func policyAction(p routing.CallerPolicy) string {
+	if p.UnknownCallerAction == "" {
+		return routing.UnknownBlock
+	}
+	return p.UnknownCallerAction
+}
+
+// policyCode is the stored reject code: 603 when unset.
+func policyCode(p routing.CallerPolicy) int { return p.Code() }
+
+// clonePolicy copies p so a caller may change its list.
+func clonePolicy(p routing.CallerPolicy) routing.CallerPolicy {
+	p.AllowedCountryCodes = slices.Clone(p.AllowedCountryCodes)
+	return p
 }
 
 // PasswordChange says what an update does to a trunk password: nothing
@@ -106,14 +164,19 @@ type PasswordChange struct {
 
 const trunkCols = `id, name, mode, username, password_enc IS NOT NULL, realm, from_domain, register_expires,
 	options_interval, to_json(source_cidrs::text[]), max_calls, default_caller_id, enabled, to_json(internal_dialing),
-	to_json(codecs), messaging, session_timers, created_at, updated_at`
+	to_json(codecs), messaging, geolocation, anonymous_policy, asserted_identity, identity_header, reject_anonymous, to_json(allowed_country_codes), unknown_caller_action, reject_code, srtp, session_timers, fax_mode, created_at, updated_at`
 
 func scanTrunk(r interface{ Scan(...any) error }) (Trunk, error) {
 	var t Trunk
-	var cidrs, dialing, codecs []byte
+	var cidrs, dialing, codecs, countries []byte
 	if err := r.Scan(&t.ID, &t.Name, &t.Mode, &t.Username, &t.HasPassword, &t.Realm, &t.FromDomain, &t.RegisterExpires,
-		&t.OptionsInterval, &cidrs, &t.MaxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging, &t.SessionTimers, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&t.OptionsInterval, &cidrs, &t.MaxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging, &t.Geolocation, &t.AnonymousPolicy, &t.AssertedIdentity, &t.IdentityHeader,
+		&t.RejectAnonymous, &countries, &t.UnknownCallerAction, &t.RejectCode, &t.SRTP, &t.SessionTimers, &t.FaxMode, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return t, err
+	}
+	t.AllowedCountryCodes = []string{}
+	if err := json.Unmarshal(countries, &t.AllowedCountryCodes); err != nil || t.AllowedCountryCodes == nil {
+		t.AllowedCountryCodes = []string{}
 	}
 	if err := json.Unmarshal(codecs, &t.Codecs); err != nil || len(t.Codecs) == 0 {
 		t.Codecs = slices.Clone(routing.DefaultTrunkCodecs)
@@ -255,14 +318,18 @@ func writeDestinations(ctx context.Context, tx *sql.Tx, id int64, ds []routing.D
 // the same transaction.
 func (s *Store) CreateTrunk(ctx context.Context, actor string, in TrunkInput, password string, check Check) (Trunk, error) {
 	var t Trunk
+	in.anonymousDefaults()
 	err := s.configChange(ctx, actor, "create", "trunk", check, func(tx *sql.Tx) (int64, error) {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO trunks (name, mode, username, realm, from_domain, register_expires,
-				options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging, session_timers)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11, $12::jsonb, $13::jsonb, $14, $15) RETURNING id`,
+				options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging, geolocation,
+				anonymous_policy, asserted_identity, identity_header, reject_anonymous, allowed_country_codes, unknown_caller_action, reject_code, srtp, session_timers, fax_mode)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11, $12::jsonb, $13::jsonb, $14, $15, $16, $17, $18, $19, $20::text[], $21, $22, $23, $24, $25) RETURNING id`,
 			in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires, in.OptionsInterval,
 			nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled, dialingArg(in.InternalDialing),
-			codecsArg(in.Codecs), in.Messaging, sessionTimersArg(in.SessionTimers)).Scan(&id); err != nil {
+			codecsArg(in.Codecs), in.Messaging, in.Geolocation,
+			in.AnonymousPolicy, in.AssertedIdentity, in.IdentityHeader, in.CallerPolicy.RejectAnonymous, nonNil(in.CallerPolicy.AllowedCountryCodes),
+			policyAction(in.CallerPolicy), policyCode(in.CallerPolicy), string(secmedia.Normalize(in.SRTP, secmedia.Off)), sessionTimersArg(in.SessionTimers), faxModeArg(in.FaxMode)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := s.setPassword(ctx, tx, id, password); err != nil {
@@ -298,13 +365,18 @@ func (s *Store) UpdateTrunk(ctx context.Context, actor string, id int64, pw Pass
 		if fields := apply(&in, has); len(fields) > 0 {
 			return id, &ValidationError{Fields: fields}
 		}
+		in.anonymousDefaults()
 		if _, err := tx.ExecContext(ctx, `UPDATE trunks SET name = $2, mode = $3, username = $4, realm = $5,
 				from_domain = $6, register_expires = $7, options_interval = $8, source_cidrs = $9::cidr[],
 				max_calls = $10, default_caller_id = $11, enabled = $12, internal_dialing = $13::jsonb,
-				codecs = $14::jsonb, messaging = $15, session_timers = $16, updated_at = now()
+				codecs = $14::jsonb, messaging = $15, geolocation = $16, anonymous_policy = $17,
+				asserted_identity = $18, identity_header = $19, reject_anonymous = $20, allowed_country_codes = $21::text[],
+				unknown_caller_action = $22, reject_code = $23, srtp = $24, session_timers = $25, fax_mode = $26, updated_at = now()
 			WHERE id = $1`, id, in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires,
 			in.OptionsInterval, nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled,
-			dialingArg(in.InternalDialing), codecsArg(in.Codecs), in.Messaging, sessionTimersArg(in.SessionTimers)); err != nil {
+			dialingArg(in.InternalDialing), codecsArg(in.Codecs), in.Messaging, in.Geolocation,
+			in.AnonymousPolicy, in.AssertedIdentity, in.IdentityHeader, in.CallerPolicy.RejectAnonymous,
+			nonNil(in.CallerPolicy.AllowedCountryCodes), policyAction(in.CallerPolicy), policyCode(in.CallerPolicy), string(secmedia.Normalize(in.SRTP, secmedia.Off)), sessionTimersArg(in.SessionTimers), faxModeArg(in.FaxMode)); err != nil {
 			return id, err
 		}
 		if pw.Set {
@@ -1020,7 +1092,9 @@ func (s *Store) loadRouting(ctx context.Context, q querier) (RoutingSnapshot, er
 	nrows, err := q.QueryContext(ctx, `SELECT 'ring_group', name FROM ring_groups
 		UNION ALL SELECT 'announcement', name FROM announcements
 		UNION ALL SELECT 'paging', code FROM paging_groups
-		UNION ALL SELECT 'voicemail', e.number FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id`)
+		UNION ALL SELECT 'voicemail', e.number FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id
+		UNION ALL SELECT 'voicemail_group', number FROM voicemail_groups
+		UNION ALL SELECT 'fax', name FROM fax_destinations`)
 	if err != nil {
 		return snap, err
 	}
@@ -1066,7 +1140,9 @@ func routingTrunks(s *Store, trunks []Trunk, sealed map[int64][]byte, snap Routi
 			OptionsInterval: time.Duration(t.OptionsInterval) * time.Second,
 			MaxCalls:        t.MaxCalls, DefaultCallerID: t.DefaultCallerID, Enabled: t.Enabled, Destinations: t.Destinations,
 			InternalDialing: t.InternalDialing.dialing(),
-			Codecs:          slices.Clone(t.Codecs), Messaging: t.Messaging, SessionTimers: t.SessionTimers,
+			Codecs:          slices.Clone(t.Codecs), Messaging: t.Messaging,
+			AnonymousPolicy: t.AnonymousPolicy, AssertedIdentity: t.AssertedIdentity, IdentityHeader: t.IdentityHeader,
+			CallerPolicy: clonePolicy(t.CallerPolicy), Geolocation: t.Geolocation, SRTP: string(secmedia.Normalize(t.SRTP, secmedia.Off)), SessionTimers: t.SessionTimers, FaxMode: t.FaxMode,
 		}
 		if errs := routing.CompileDialing(rt.InternalDialing); len(errs) > 0 {
 			snap.Misconfigured[t.ID] = true
@@ -1111,4 +1187,12 @@ func sealedPasswords(ctx context.Context, q querier) (map[int64][]byte, error) {
 		out[id] = enc
 	}
 	return out, rows.Err()
+}
+
+// faxModeArg stores a trunk's fax mode; empty is the default, passthrough.
+func faxModeArg(m string) string {
+	if m == "" {
+		return "passthrough"
+	}
+	return m
 }

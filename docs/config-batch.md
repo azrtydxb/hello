@@ -106,7 +106,11 @@ The `200` answer has `applied`, `batchId`, `baseRevision`, `revision`,
 `results` (per operation: `status` `created|updated|deleted|unchanged`, `id`,
 `node`, `before`, `after` and the field-level `diff`) and `warnings`: the flow
 warnings (`unreachable`, `loop`, `dangling_reference`, ...) the batch
-introduces. Warnings never block an apply.
+introduces. Warnings never block an apply. A dry run also answers `flowDiff`:
+what the batch would do to the drawn flow graph (`added` and `changed` nodes as
+they would be drawn, `removed` node ids, `edgesAdded`, `edgesRemoved`; an edge
+whose details change is in both). The call-flow canvas draws an AI proposal's
+batch from it (see [the flow canvas guide](flow-canvas.md)).
 
 Credential values (`password`, `pin`, `secret` and names ending in them) are
 withheld from the stored operations.

@@ -52,6 +52,9 @@ type DirectionStats struct {
 	// Rejected counts packets refused because their source address did
 	// not match the leg's peer (see relayLeg.sourceOK).
 	Rejected uint64
+	// AuthFailed counts packets an SRTP leg refused because they failed
+	// authentication or replay checks.
+	AuthFailed uint64
 	// JitterMs is the RFC 3550 interarrival jitter estimate in ms.
 	JitterMs float64
 }
@@ -78,6 +81,9 @@ type Relay struct {
 	observe ObserveFunc
 	// onFail counts a failed session (panic recovery); nil is fine.
 	onFail func(what string)
+	// udptl switches the relay to T.38: the datagrams are UDPTL, not RTP, and
+	// cross between the legs unmodified (pbx-gaps S-16).
+	udptl atomic.Bool
 	// onDTMF and onPacket are the tap hooks (nil disables).
 	onDTMF   func(leg string, digit byte)
 	onPacket func(leg string, pkt *RTPPacket)
@@ -138,6 +144,11 @@ type relayLeg struct {
 
 	// stats is the leg's inbound-stream counters (locked).
 	stats legStats
+
+	// secure is the leg's SDES negotiation and SRTP state (plain RTP until
+	// negotiated); the packet path reads it without a lock.
+	secure   Secure
+	authFail atomic.Uint64
 
 	// muted drops what this leg receives instead of forwarding it to the
 	// peer (a holder's stream while music plays to the held party).
@@ -513,9 +524,30 @@ func (r *Relay) recv(l *relayLeg) {
 			l.rejected.Add(1)
 			continue // not the leg's peer: never counted, tapped or relayed
 		}
+		data := buf[:n]
+		// An SRTP leg: nothing that fails authentication is latched,
+		// counted, tapped or relayed. RTCP on the RTP port (rtcp-mux) is
+		// checked and consumed; Hello sends no RTCP of its own.
+		plain, ok, failed := l.secure.Unprotect(data)
+		if failed {
+			l.authFail.Add(1)
+		}
+		if !ok {
+			continue
+		}
+		data = plain
 		r.lastRx.Store(time.Now().UnixNano())
 		r.latch(l, from)
-		pkt, ok := ParseRTP(buf[:n])
+		if r.udptl.Load() {
+			// UDPTL (T.38) is relayed unmodified except for its addresses:
+			// no sequence rewrite, no payload inspection. The fax endpoint
+			// reads the packets; the relay only keeps the legs apart.
+			if len(data) > 0 && !l.muted.Load() {
+				r.forward(l, data)
+			}
+			continue
+		}
+		pkt, ok := ParseRTP(data)
 		if !ok {
 			continue // a malformed datagram is a dropped packet, never fatal
 		}
@@ -547,7 +579,7 @@ func (r *Relay) recv(l *relayLeg) {
 		if l.muted.Load() {
 			continue
 		}
-		r.forward(l, buf[:n])
+		r.forward(l, data)
 	}
 }
 
@@ -717,15 +749,29 @@ func (l *relayLeg) send(data []byte) {
 	if dst == nil {
 		return // nothing latched and no SDP target yet: drop silently
 	}
-	// A write error is a transient ICMP or the teardown race; the next
-	// packet retries and Close stops the loop either way.
-	_, _ = l.conn.WriteToUDP(data, dst)
+	l.write(data, dst)
+}
+
+// write sends one plain RTP packet to dst, protecting it first when the leg
+// is SRTP. A write error is a transient ICMP or the teardown race; the next
+// packet retries and Close stops the loop either way. A packet that cannot be
+// protected is dropped, never sent in the clear.
+func (l *relayLeg) write(pkt []byte, dst *net.UDPAddr) {
+	enc, ok := l.secure.Protect(pkt)
+	if !ok {
+		return
+	}
+	pkt = enc
+	_, _ = l.conn.WriteToUDP(pkt, dst)
 }
 
 // rewrite maps a packet from the peer leg into leg l's outbound stream:
 // sequence, timestamp and SSRC are rewritten (contract 3), the payload is
 // untouched (no transcoding).
 func (r *Relay) rewrite(l *relayLeg, data []byte) ([]byte, bool) {
+	if r.udptl.Load() {
+		return data, true
+	}
 	return l.out.rewritePacket(data)
 }
 
@@ -820,12 +866,13 @@ func (r *Relay) Metrics() RelayStats {
 		}
 		l.stats.mu.Lock()
 		st := DirectionStats{
-			Packets:  l.stats.packets,
-			Octets:   l.stats.octets,
-			Lost:     l.stats.lost,
-			JitterMs: l.stats.jitter * 1000,
-			Dropped:  l.dropped.Load(),
-			Rejected: l.rejected.Load(),
+			Packets:    l.stats.packets,
+			Octets:     l.stats.octets,
+			Lost:       l.stats.lost,
+			JitterMs:   l.stats.jitter * 1000,
+			Dropped:    l.dropped.Load(),
+			Rejected:   l.rejected.Load(),
+			AuthFailed: l.authFail.Load(),
 		}
 		l.stats.mu.Unlock()
 		// Audio arriving into leg l is l's party speaking: the direction
@@ -952,7 +999,7 @@ func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate 
 		dst := l.remote
 		l.remoteMu.Unlock()
 		if dst != nil {
-			_, _ = l.conn.WriteToUDP(pkt, dst)
+			l.write(pkt, dst)
 		}
 		select {
 		case <-ticker.C:
@@ -964,3 +1011,15 @@ func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate 
 	}
 	return nil
 }
+
+// SetUDPTL switches the relay between RTP (false, the default) and UDPTL
+// (true) for the rest of the call, the media side of a T.38 re-INVITE. The
+// sockets and peer addresses stay; only how a datagram is treated changes.
+// Datagrams already queued as RTP are dropped by the receiving end of the
+// leg, which expects the new kind.
+func (r *Relay) SetUDPTL(on bool) {
+	r.udptl.Store(on)
+}
+
+// UDPTL reports whether the relay is in T.38 mode.
+func (r *Relay) UDPTL() bool { return r.udptl.Load() }

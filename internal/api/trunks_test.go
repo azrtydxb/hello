@@ -187,6 +187,67 @@ func TestTrunkCodecs(t *testing.T) {
 	}
 }
 
+// TestTrunkSRTPPolicy covers the trunk media-encryption policy: off by
+// default, the spellings Hello can honour, the refusal of anything else and
+// of required (trunks are SIP over UDP, so required would refuse every call),
+// and PATCH keeping or replacing it.
+func TestTrunkSRTPPolicy(t *testing.T) {
+	p := newP2Env(t, nil, false)
+	c := p.login()
+	plain := func(extra map[string]any) map[string]any {
+		b := map[string]any{"name": trunkName(), "mode": "ip", "destinations": []map[string]any{{"host": "10.0.0.5"}}}
+		for k, v := range extra {
+			b[k] = v
+		}
+		return b
+	}
+	created := c.must(http.StatusCreated, "POST", "/api/v1/trunks", plain(nil)).json(t)
+	if got := created["srtp"]; got != "off" {
+		t.Fatalf("default srtp = %v, want off", got)
+	}
+	if got := fieldPaths(t, c.do("POST", "/api/v1/trunks", plain(map[string]any{"srtp": "required"}))); !slices.Contains(got, "srtp") {
+		t.Errorf("a trunk created as required: fields %v lack srtp", got)
+	}
+	opt := c.must(http.StatusCreated, "POST", "/api/v1/trunks", plain(map[string]any{"srtp": "optional"})).json(t)
+	if got := opt["srtp"]; got != "optional" {
+		t.Fatalf("srtp = %v, want optional", got)
+	}
+	id := fmt.Sprint(opt["id"])
+	if got := fieldPaths(t, c.do("POST", "/api/v1/trunks", plain(map[string]any{"srtp": "maybe"}))); !slices.Contains(got, "srtp") {
+		t.Errorf("fields %v lack srtp", got)
+	}
+	kept := c.must(http.StatusOK, "PATCH", "/api/v1/trunks/"+id, map[string]any{"maxCalls": 2}).json(t)
+	if got := kept["srtp"]; got != "optional" {
+		t.Fatalf("PATCH of maxCalls changed srtp to %v", got)
+	}
+	if got := fieldPaths(t, c.do("PATCH", "/api/v1/trunks/"+id, map[string]any{"srtp": "required"})); !slices.Contains(got, "srtp") {
+		t.Errorf("a trunk patched to required: fields %v lack srtp", got)
+	}
+	changed := c.must(http.StatusOK, "PATCH", "/api/v1/trunks/"+id, map[string]any{"srtp": "off"}).json(t)
+	if got := changed["srtp"]; got != "off" {
+		t.Fatalf("PATCH of srtp = %v", got)
+	}
+}
+
+// TestTrunkSRTPRequiredRefused is the pure check behind that rule (the test
+// above needs the database): required is refused with a message that says
+// why, off and optional are accepted.
+func TestTrunkSRTPRequiredRefused(t *testing.T) {
+	for _, tc := range []struct {
+		srtp string
+		bad  bool
+	}{{"required", true}, {"Required", true}, {" required ", true}, {"optional", false}, {"off", false}, {"", false}} {
+		var f fieldErrs
+		trunkSRTP(&f, tc.srtp)
+		if got := len(f) > 0; got != tc.bad {
+			t.Errorf("trunkSRTP(%q) refused = %v, want %v", tc.srtp, got, tc.bad)
+		}
+		if tc.bad && !strings.Contains(f[0].Message, "TLS") {
+			t.Errorf("message %q does not say why", f[0].Message)
+		}
+	}
+}
+
 // TestTrunkSessionTimers covers the trunk's RFC 4028 setting: the default,
 // the three values, the refusal of any other, and PATCH keeping or replacing
 // it.

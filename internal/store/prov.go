@@ -42,12 +42,23 @@ type ProvSettings struct {
 	// register with SIPTLSServer over TLS (S-14).
 	SIPTLSServer string
 	SIPTLSModels []string
+	// SIPBackupServers (HELLO_PROV_SIP_BACKUP_SERVERS) are backup registrars
+	// and SIPSRV (HELLO_PROV_SIP_SRV) the DNS name Grandstream phones
+	// resolve by SRV; see config.Prov (S-20).
+	SIPBackupServers []string
+	SIPSRV           string
+	// SIPTCPModels is HELLO_PROV_SIP_TCP_MODELS: the phones
+	// prov.TLSModelMatch selects register over TCP with SIPServer (S-13).
+	// A model also in SIPTLSModels (with SIPTLSServer set) uses TLS.
+	SIPTCPModels []string
 	// Domain is HELLO_SIP_DOMAIN.
 	Domain string
 	Expiry time.Duration
 	Resync time.Duration
 	// DSCPSIP and DSCPRTP are the QoS values written to phones (S-21).
 	DSCPSIP, DSCPRTP int
+	// RTCPXR provisions the quality-report collector (HELLO_PROV_RTCPXR, S-36).
+	RTCPXR bool
 	// BookRefresh is HELLO_PROV_BOOK_REFRESH; zero means 15 minutes.
 	BookRefresh time.Duration
 	Timezone    string
@@ -56,9 +67,15 @@ type ProvSettings struct {
 	// CACertFile is HELLO_PROV_CA_CERT, read per render into
 	// ProvInfo.CACertPEM.
 	CACertFile string
+	// SyslogHost is HELLO_SYSLOG_HOST: the address phones send syslog to
+	// (UDP 514); empty leaves syslog out of every configuration.
+	SyslogHost string
 	// Deployment lists the vendors whose redirect credentials the
 	// deployment sets (they count as configured whatever is stored).
 	Deployment map[prov.Vendor]bool
+	// SCEP is HELLO_SCEP: the SCEP server is on, so phones of a group with
+	// SCEP on get the SCEP settings (phone-feature-parity S-25).
+	SCEP bool
 	// LDAPBase is HELLO_LDAP_BASE while hello-control serves LDAP, empty
 	// otherwise (no phone is then given LDAP keys). LDAPPort is the port
 	// phones reach it on.
@@ -70,13 +87,26 @@ type ProvSettings struct {
 // TLS address for a model HELLO_PROV_SIP_TLS_MODELS selects while
 // HELLO_PROV_SIP_TLS_SERVER is set, the UDP address otherwise.
 func (p ProvSettings) server(v prov.Vendor, model string) prov.Server {
-	srv := prov.Server{Transport: "udp", Expiry: int(p.Expiry / time.Second)}
+	srv := prov.Server{Transport: "udp", DNSMode: prov.DNSA, Expiry: int(p.Expiry / time.Second)}
 	if p.SIPTLSServer != "" && prov.TLSModelMatch(p.SIPTLSModels, v, model) {
 		srv.Host, srv.Port = splitHostPort(p.SIPTLSServer)
 		srv.Transport = "tls"
 		return srv
 	}
 	srv.Host, srv.Port = splitHostPort(p.SIPServer)
+	if len(p.SIPBackupServers) > 0 {
+		h, port := splitHostPort(p.SIPBackupServers[0])
+		srv.Backup = &prov.Backup{Host: h, Port: port}
+	}
+	if p.SIPSRV != "" && v == prov.Grandstream {
+		// SRV mode: the phone resolves the SIP servers from the name's SRV
+		// records, so it needs the name and no port; the backup proxy is
+		// then the SRV set's job.
+		srv.DNSMode, srv.Host, srv.Port, srv.Backup = prov.DNSSRV, p.SIPSRV, 0, nil
+	}
+	if prov.TLSModelMatch(p.SIPTCPModels, v, model) {
+		srv.Transport = "tcp"
+	}
 	return srv
 }
 
@@ -115,7 +145,7 @@ func (p ProvSettings) plainBase() string {
 // info is the ProvInfo of a phone whose current token is token.
 func (p ProvSettings) info(token, mac string) prov.ProvInfo {
 	return prov.ProvInfo{URL: p.phoneBase(token), CAURL: p.CAURL(), ResyncSeconds: p.resyncSeconds(mac),
-		CACertPEM: prov.CACertPEM(p.CACertFile), DSCPSIP: p.DSCPSIP, DSCPRTP: p.DSCPRTP}
+		CACertPEM: prov.CACertPEM(p.CACertFile), DSCPSIP: p.DSCPSIP, DSCPRTP: p.DSCPRTP, RTCPXR: p.RTCPXR}
 }
 
 // CAURL is the plain-HTTP URL of Hello's provisioning CA.
@@ -165,7 +195,14 @@ type Phone struct {
 	GroupID         *int64      `json:"groupId"`
 	// PTTChannelID overrides the phone group's push-to-talk channel (a
 	// catalog channel of kind ptt); nil uses the group's.
-	PTTChannelID   *int64          `json:"pttChannelId"`
+	PTTChannelID *int64 `json:"pttChannelId"`
+	// Lines are the phone's lines in order, line 1 first (its own binding);
+	// MaxLines is how many the model takes (S-10). SharingRole is host or
+	// guest, and matters only while the phone's group has account sharing
+	// on (S-11).
+	Lines          []PhoneLine     `json:"lines"`
+	MaxLines       int             `json:"maxLines"`
+	SharingRole    string          `json:"sharingRole"`
 	BLF            []string        `json:"blf"`
 	Enabled        bool            `json:"enabled"`
 	TokenExposed   bool            `json:"tokenExposed"`
@@ -198,7 +235,7 @@ const phoneSelect = `
 	       COALESCE(p.firmware_seen, ''),
 	       COALESCE((SELECT f.result = 'render_error' FROM prov_fetches f WHERE f.phone_id = p.id
 	                 ORDER BY f.at DESC, f.id DESC LIMIT 1), FALSE),
-	       p.created_at, p.updated_at, p.group_id, p.ptt_channel_id
+	       p.created_at, p.updated_at, p.group_id, p.ptt_channel_id, p.sharing_role
 	FROM phones p LEFT JOIN devices d ON d.id = p.device_id LEFT JOIN extensions e ON e.id = d.extension_id`
 
 func scanPhone(r interface{ Scan(...any) error }) (Phone, error) {
@@ -211,7 +248,7 @@ func scanPhone(r interface{ Scan(...any) error }) (Phone, error) {
 	)
 	err := r.Scan(&p.ID, &p.MAC, &p.Serial, &p.Vendor, &p.Model, &p.Label, &dev, &ext, &p.ExtensionNumber, &tpl,
 		&blf, &p.Enabled, &p.TokenExposed, &p.UAMismatch, &p.BootArmed, &p.BootReclaimed, &status, &first, &last,
-		&p.LastFetchIP, &p.LastFetchUA, &p.LastFetchFile, &p.FirmwareSeen, &p.RenderError, &p.CreatedAt, &p.UpdatedAt, &group, &ptt)
+		&p.LastFetchIP, &p.LastFetchUA, &p.LastFetchFile, &p.FirmwareSeen, &p.RenderError, &p.CreatedAt, &p.UpdatedAt, &group, &ptt, &p.SharingRole)
 	if err != nil {
 		return p, err
 	}
@@ -260,20 +297,34 @@ func listPhones(ctx context.Context, q querier, suffix string, args ...any) ([]P
 		}
 		out = append(out, p)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	_ = rows.Close()
+	return out, attachLines(ctx, q, out)
 }
 
 // GetPhone returns one phone.
 func (s *Store) GetPhone(ctx context.Context, id int64) (Phone, error) {
-	p, err := scanPhone(s.q(ctx).QueryRowContext(ctx, phoneSelect+` WHERE p.id = $1`, id))
+	p, err := getPhone(ctx, s.q(ctx), id)
 	if err != nil {
-		return p, mapErr(err)
+		return p, err
 	}
 	one := []Phone{p}
 	if err := s.withFirmwareState(ctx, one); err != nil {
 		return p, err
 	}
 	return one[0], nil
+}
+
+func getPhone(ctx context.Context, q querier, id int64) (Phone, error) {
+	ps := make([]Phone, 1)
+	var err error
+	if ps[0], err = scanPhone(q.QueryRowContext(ctx, phoneSelect+` WHERE p.id = $1`, id)); err != nil {
+		return ps[0], mapErr(err)
+	}
+	err = attachLines(ctx, q, ps)
+	return ps[0], err
 }
 
 // PhoneInput creates a phone. DeviceID 0 creates a device for the
@@ -449,7 +500,7 @@ func (s *Store) createPhone(ctx context.Context, tx *sql.Tx, actor string, in Ph
 		hash, tokenEnc, adminEnc, string(statusJSON), in.GroupID); err != nil {
 		return out, err
 	}
-	p, err := scanPhone(tx.QueryRowContext(ctx, phoneSelect+` WHERE p.id = $1`, id))
+	p, err := getPhone(ctx, tx, id)
 	return CreatedPhone{Phone: p, Token: token, SecretRotated: rotated}, err
 }
 
@@ -499,6 +550,12 @@ func checkPhoneRefs(ctx context.Context, tx *sql.Tx, blf []string, templateID *i
 // reuses an unbound one of that name on it (a phone deleted and added
 // again). It reports whether an existing device's secret was rotated.
 func (s *Store) bindDevice(ctx context.Context, tx *sql.Tx, actor string, extensionID, deviceID int64, mac, realm string, phone int64) (int64, bool, error) {
+	return s.bindDeviceLine(ctx, tx, actor, extensionID, deviceID, mac, realm, phone, 1)
+}
+
+// bindDeviceLine is bindDevice for line 1 or a further line of the phone
+// (S-10): a device is one line of one phone.
+func (s *Store) bindDeviceLine(ctx context.Context, tx *sql.Tx, actor string, extensionID, deviceID int64, mac, realm string, phone int64, line int) (int64, bool, error) {
 	var number string
 	if err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1`, extensionID).Scan(&number); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -539,11 +596,7 @@ func (s *Store) bindDevice(ctx context.Context, tx *sql.Tx, actor string, extens
 			return 0, false, fieldError("deviceId", "the device belongs to another extension")
 		}
 	}
-	var other int64
-	switch err := tx.QueryRowContext(ctx, `SELECT id FROM phones WHERE device_id = $1 AND id <> $2`, deviceID, phone).Scan(&other); {
-	case err == nil:
-		return 0, false, conflict("device %d is already bound to phone %d", deviceID, other)
-	case !errors.Is(err, sql.ErrNoRows):
+	if err := boundElsewhere(ctx, tx, deviceID, phone, line); err != nil {
 		return 0, false, err
 	}
 	if err := s.sealDeviceSecret(ctx, tx, deviceID, realm, auth.NewDeviceSecret()); err != nil {
@@ -640,9 +693,11 @@ type PhoneChange struct {
 	// PTTChannelID sets the phone's PTT channel override; a pointer to nil
 	// removes it.
 	PTTChannelID **int64
-	Bind         *Binding
-	Unbind       bool
-	Realm        string
+	// SharingRole is host or guest (account sharing, S-11).
+	SharingRole *string
+	Bind        *Binding
+	Unbind      bool
+	Realm       string
 }
 
 // Binding names the device a phone provisions: an existing one, or 0 to
@@ -728,6 +783,22 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 			}
 			enabled = false
 		}
+		if c.Vendor != nil || c.Model != nil {
+			nv, model := cur.Vendor, cur.Model
+			if c.Vendor != nil {
+				nv = *c.Vendor
+			}
+			if c.Model != nil {
+				model = *c.Model
+			}
+			var extra int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM phone_lines WHERE phone_id = $1`, id).Scan(&extra); err != nil {
+				return sid, false, err
+			}
+			if extra > 0 && 1+extra > prov.MaxLines(nv, model) {
+				return sid, false, conflict("the phone has %d lines and the %s %s takes %d: clear a line first", 1+extra, nv, model, prov.MaxLines(nv, model))
+			}
+		}
 		vendor := cur.Vendor
 		if c.Vendor != nil && *c.Vendor != cur.Vendor {
 			vendor = *c.Vendor
@@ -746,6 +817,11 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 		if c.BLF != nil {
 			b, _ := json.Marshal(nonNil(*c.BLF))
 			blfArg = string(b)
+			// hello-sip serves a phone's BLF keys as a resource list
+			// (S-35), so a changed list reaches it with the revision.
+			if !slices.Equal(nonNil(*c.BLF), nonNil(cur.BLF)) {
+				bumped = true
+			}
 		}
 		setTpl, tplArg := c.TemplateID != nil, any(nil)
 		if tpl != nil {
@@ -762,12 +838,13 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 			       template_id = CASE WHEN $8 THEN $9::bigint ELSE template_id END,
 			       group_id = CASE WHEN $11 THEN $12::bigint ELSE group_id END,
 			       ptt_channel_id = CASE WHEN $13 THEN $14::bigint ELSE ptt_channel_id END,
+			       sharing_role = COALESCE($15, sharing_role),
 			       device_id = $10, updated_at = now()
 			WHERE id = $1`, id, serial, vendor, c.Model, c.Label, blfArg, enabled, setTpl, tplArg, device,
-			setGroup, groupArg, setPTT, pttArg); err != nil {
+			setGroup, groupArg, setPTT, pttArg, c.SharingRole); err != nil {
 			return sid, false, err
 		}
-		p, err = scanPhone(tx.QueryRowContext(ctx, phoneSelect+` WHERE p.id = $1`, id))
+		p, err = getPhone(ctx, tx, id)
 		return sid, bumped, err
 	})
 	return p, secretRotated, err
@@ -787,15 +864,24 @@ func (s *Store) DeletePhone(ctx context.Context, actor string, id int64) error {
 			Scan(&mac, &vendor, &device); err != nil {
 			return sid, false, err
 		}
+		lineDevs, err := lineDeviceIDs(ctx, tx, id)
+		if err != nil {
+			return sid, false, err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM phones WHERE id = $1`, id); err != nil {
 			return sid, false, err
+		}
+		for _, d := range lineDevs {
+			if err := unbindDevice(ctx, tx, d); err != nil {
+				return sid, false, err
+			}
 		}
 		if device.Valid {
 			if err := unbindDevice(ctx, tx, device.Int64); err != nil {
 				return sid, false, err
 			}
 		}
-		_, err := s.queueRedirect(ctx, tx, vendor, mac, redirect.OpUnregister)
+		_, err = s.queueRedirect(ctx, tx, vendor, mac, redirect.OpUnregister)
 		return sid, false, err
 	})
 }
@@ -860,7 +946,7 @@ func (s *Store) newToken(ctx context.Context, actor, action string, id int64, im
 				return sid, false, err
 			}
 		}
-		p, err := scanPhone(tx.QueryRowContext(ctx, phoneSelect+` WHERE p.id = $1`, id))
+		p, err := getPhone(ctx, tx, id)
 		out = CreatedPhone{Phone: p, Token: token}
 		return sid, false, err
 	})
@@ -1004,7 +1090,8 @@ func boundPhone(ctx context.Context, tx *sql.Tx, where string, arg int64) error 
 		mac string
 		id  int64
 	)
-	err := tx.QueryRowContext(ctx, `SELECT p.id, p.mac FROM phones p JOIN devices d ON d.id = p.device_id WHERE `+where+` LIMIT 1`, arg).Scan(&id, &mac) //nolint:gosec // G202: where is a caller's constant condition
+	err := tx.QueryRowContext(ctx, `SELECT p.id, p.mac FROM phones p JOIN devices d ON d.id = p.device_id
+		OR d.id IN (SELECT device_id FROM phone_lines WHERE phone_id = p.id) WHERE `+where+` LIMIT 1`, arg).Scan(&id, &mac) //nolint:gosec // G202: where is a caller's constant condition
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil

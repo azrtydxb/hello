@@ -69,6 +69,7 @@ type fakeVMStore struct {
 	contacts  map[string]string // number -> phonebook name
 	greetings map[int64]map[string]string
 	deleted   []int64
+	noBox     map[int64]bool // boxes InsertGroupMessage skips
 }
 
 func newVMStore() *fakeVMStore {
@@ -108,6 +109,26 @@ func (f *fakeVMStore) InsertMessage(_ context.Context, boxID int64, object, call
 	}
 	f.counts = append(f.counts, [2]int{unread, len(f.msgs)})
 	return m.ID, nil
+}
+
+// InsertGroupMessage records one row per box; boxes in noBox are skipped, like
+// a box deleted after the snapshot.
+func (f *fakeVMStore) InsertGroupMessage(_ context.Context, boxIDs []int64, object, caller, callerName string, durationMs int64) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failIns {
+		return nil, errDown
+	}
+	var out []int64
+	for _, b := range boxIDs {
+		if f.noBox[b] {
+			continue
+		}
+		f.nextID++
+		f.msgs = append(f.msgs, VoicemailMessage{ID: f.nextID, BoxID: b, MinioObject: object, Caller: caller, CallerName: callerName, DurationMs: durationMs, CreatedAt: time.Now()})
+		out = append(out, b)
+	}
+	return out, nil
 }
 
 func (f *fakeVMStore) MessageCounts(_ context.Context, boxID int64) (int, int, error) {
@@ -875,6 +896,10 @@ type rtpFeed struct {
 	ssrc  uint32
 	audio uint8 // the negotiated payload type
 	dtmf  uint8
+	// protect, when set, encrypts every packet (an SRTP phone); unprotect
+	// decrypts what the phone receives.
+	protect   func([]byte) []byte
+	unprotect func([]byte) ([]byte, error)
 }
 
 func startRTPFeed(t *testing.T, answer []byte) *rtpFeed {
@@ -895,6 +920,9 @@ func startRTPFeed(t *testing.T, answer []byte) *rtpFeed {
 func (f *rtpFeed) packet(pt uint8, payload []byte, marker bool) {
 	f.seq++
 	pkt := media.BuildRTP(pt, f.seq, f.ts, f.ssrc, marker, payload)
+	if f.protect != nil {
+		pkt = f.protect(pkt)
+	}
 	_, _ = f.conn.WriteTo(pkt, net.UDPAddrFromAddrPort(f.dst))
 }
 

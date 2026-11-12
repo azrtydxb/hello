@@ -183,7 +183,7 @@ func (r *Relay) PlayStream(ctx context.Context, legName string, next func() Trac
 			dst := l.remote
 			l.remoteMu.Unlock()
 			if dst != nil {
-				_, _ = l.conn.WriteToUDP(pkt, dst)
+				l.write(pkt, dst)
 			}
 			select {
 			case <-ticker.C:

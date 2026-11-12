@@ -100,7 +100,9 @@ func (f *Fanout) PlayCaller(ctx context.Context, pcm []byte, dst *net.UDPAddr, l
 			to = a
 		}
 		if to != nil {
-			_, _ = f.caller.WriteToUDP(pkt, to)
+			if enc, ok := f.callerSec.Protect(pkt); ok {
+				_, _ = f.caller.WriteToUDP(enc, to)
+			}
 		}
 	})
 }
@@ -111,13 +113,46 @@ func (f *Fanout) PlayCaller(ctx context.Context, pcm []byte, dst *net.UDPAddr, l
 func (f *Fanout) PlayMembers(ctx context.Context, pcm []byte) error {
 	return streamPCM(ctx, f.tonePCM(pcm), f.codec, false, func(pkt []byte) {
 		f.mu.Lock()
-		targets := make([]*net.UDPAddr, 0, len(f.targets))
+		targets := make([]fanTarget, 0, len(f.targets))
 		for _, a := range f.targets {
 			targets = append(targets, a)
 		}
 		f.mu.Unlock()
-		for _, a := range targets {
-			_, _ = f.member.WriteToUDP(pkt, a)
+		for _, t := range targets {
+			t.write(f.member, pkt)
 		}
 	})
+}
+
+// ChimePCM returns the built-in doorbell chime: a falling two-note "ding
+// dong" (784 Hz for 350 ms, then 659 Hz for 700 ms, each decaying), about
+// 1.05 s of 16-bit mono at 8 kHz. Like the other tones it is computed, not
+// stored.
+func ChimePCM() []byte {
+	const (
+		rate      = sampleRateHz
+		amplitude = 9000
+		fadeMs    = 8
+	)
+	notes := []struct {
+		freq float64
+		ms   int
+	}{{784, 350}, {659, 700}}
+	var out []byte
+	for _, n := range notes {
+		samples := n.ms * rate / 1000
+		fade := fadeMs * rate / 1000
+		for i := range samples {
+			t := float64(i) / float64(rate)
+			v := amplitude * math.Exp(-4*t/(float64(n.ms)/1000)) * math.Sin(2*math.Pi*n.freq*t)
+			if i < fade {
+				v *= float64(i) / float64(fade)
+			}
+			var b [2]byte
+			//nolint:gosec // G115: the byte pattern of the sample, not a bounded value.
+			binary.LittleEndian.PutUint16(b[:], uint16(int16(v)))
+			out = append(out, b[:]...)
+		}
+	}
+	return out
 }
