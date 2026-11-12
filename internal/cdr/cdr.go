@@ -112,7 +112,7 @@ type Record struct {
 	// PageLegs is a page's outcome per member (migration 00014), one row
 	// each; empty for any other call.
 	PageLegs []PageLeg
-	// FollowMeLegs is what each follow-me target did (migration 00080), one
+	// FollowMeLegs is what each follow-me target did (migration 00079), one
 	// row each in cdr_legs with the role follow_me; empty for a call that
 	// ran no follow-me.
 	FollowMeLegs []FollowMeLeg

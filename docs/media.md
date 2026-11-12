@@ -175,7 +175,7 @@ from the start of the playlist toward the same leg (`TestMusicOnHoldTakeover`).
 
 API: `GET/POST /api/v1/moh-classes`, `GET/PUT/DELETE /api/v1/moh-classes/{id}`;
 `mohClassId` on extensions, ring groups and inbound routes, and `mohRingback`
-on the last two. Migration `00021_music_on_hold`.
+on the last two. Migration `00029_music_on_hold`.
 
 The one exception is a [conference room](conference.md): it decodes every
 participant to a common 8 kHz mixing rate, mixes, and encodes each

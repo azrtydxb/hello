@@ -32,7 +32,7 @@ type Extension struct {
 	// 486 (migration 00026, spec S-18).
 	CallWaiting bool `json:"callWaiting"`
 	// AnonymousOutbound makes every trunk call from the extension anonymous
-	// (migration 00051, spec S-19): Privacy: id and an anonymous From, the
+	// (migration 00067, spec S-19): Privacy: id and an anonymous From, the
 	// identity asserted by the trunk.
 	AnonymousOutbound bool `json:"anonymousOutbound"`
 	// PhoneSendAnonymous is the phone's own "Send Anonymous" setting
@@ -47,7 +47,7 @@ type Extension struct {
 	// book (spec P-1).
 	DirectoryHidden bool `json:"directoryHidden"`
 	// MOHClassID is the music on hold class callers hear while this
-	// extension holds them (migration 00021); nil uses the global default.
+	// extension holds them (migration 00029); nil uses the global default.
 	MOHClassID *int64 `json:"mohClassId"`
 	// Kind is user (default) or door (migration 00053, spec S-45): a door
 	// station has no voicemail, joins no group, receives no pickup, page,

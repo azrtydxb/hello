@@ -83,10 +83,10 @@ type Extension struct {
 	// built without the flag) on the default, call waiting on.
 	NoCallWaiting bool
 	// AnonymousOutbound makes the extension's trunk calls anonymous
-	// (migration 00051, spec S-19).
+	// (migration 00067, spec S-19).
 	AnonymousOutbound bool
 	// MOHClassID is the music on hold class callers hear while this
-	// extension holds them (migration 00021); 0 uses the global default.
+	// extension holds them (migration 00029); 0 uses the global default.
 	MOHClassID int64
 	// NoAnswerRings is the ring count before the no-answer forward
 	// (migration 00035); 0 uses the system ring timeout.
@@ -120,7 +120,7 @@ type RingGroup struct {
 	FailureKind, FailureTarget string
 	// MOHClassID is the music on hold class of calls to the group (0: the
 	// global default); MOHRingback plays it instead of ringback while the
-	// group rings (migration 00021).
+	// group rings (migration 00029).
 	MOHClassID  int64
 	MOHRingback bool
 	// RingTag overrides the ringgroup ring tag for calls through the group
