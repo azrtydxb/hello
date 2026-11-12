@@ -79,7 +79,11 @@ on a leg whose signalling is TLS, so a phone on UDP stays plain RTP whatever
 the policy says, and a `required` device on UDP cannot call or be called. After
 a change, `getCDR` shows `srtp` (none, caller, callee or both) on the next
 call, and the call's trace says which legs were encrypted. Keys are never
-shown.
+shown. Voicemail, conference rooms and paging follow the same policy, and a
+call moved to another party (transfer target, retrieved park, pickup) is
+negotiated again with that party's own policy; a `required` party that cannot
+be encrypted is refused, never carried in clear.
+
 ### Web devices (browser softphones)
 
 A user adds a browser softphone to their own extension under **My phone, Web

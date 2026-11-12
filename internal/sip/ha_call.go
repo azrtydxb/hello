@@ -199,8 +199,8 @@ func (c *call) haSoloRefresh(sdp string) {
 		localID:      uriString(*c.inv.To().Address.Clone()),
 		remoteID:     uriString(*c.inv.From().Address.Clone()),
 		remoteTarget: uriString(c.target()), endpoint: c.s.aor(c.callerNum),
-		source: c.inv.Source(), sdp: sdp, remoteSDP: media.StripCrypto(string(c.inv.Body())),
-		srtp: haSRTP(c.anchorRelay(), legCaller),
+		source: c.inv.Source(), sdp: media.StripCrypto(sdp), remoteSDP: media.StripCrypto(string(c.inv.Body())),
+		srtp: c.haSoloSRTP(),
 	}
 	c.mu.Lock()
 	c.haLegs = [2]haLegSnap{snap}
@@ -379,14 +379,17 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 		}
 		l.mu.Lock()
 		sdp := l.sdp
+		mode := haSRTP(relay, legName(i == 0))
 		if relay != nil {
 			sdp = relaySDPDir(host, relay, legName(i == 0), off, media.SDPDirection([]byte(l.sdp)))
+		} else if i == 0 {
+			mode = c.haSoloSRTP() // voicemail or a conference room: no relay
 		}
 		leg := livestate.DialogLeg{
 			CallID: l.callID, LocalTag: l.localTag, RemoteTag: l.remoteTag,
 			LocalCSeq: l.localCSeq, RemoteCSeq: l.remoteCSeq,
 			RouteSet: l.routes, Contact: contact,
-			RemoteTarget: l.remoteTarget, SDP: sdp, RemoteSDP: l.remoteSDP, SRTP: haSRTP(relay, legName(i == 0)),
+			RemoteTarget: l.remoteTarget, SDP: sdp, RemoteSDP: l.remoteSDP, SRTP: mode,
 			Endpoint: l.endpoint, Source: l.source,
 			LocalIdentity: l.localID, RemoteIdentity: l.remoteID,
 		}

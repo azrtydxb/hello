@@ -261,7 +261,14 @@ func (s *confSeat) hear(d time.Duration) int {
 		if err != nil {
 			break
 		}
-		pkt, ok := media.ParseRTP(buf[:n])
+		data := buf[:n]
+		if s.feed.unprotect != nil {
+			var err error
+			if data, err = s.feed.unprotect(data); err != nil {
+				continue // not SRTP for this phone's key
+			}
+		}
+		pkt, ok := media.ParseRTP(data)
 		if !ok || pkt.PayloadType != s.feed.audio {
 			continue
 		}

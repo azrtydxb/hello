@@ -25,9 +25,14 @@ type Fanout struct {
 	pt     uint8
 
 	mu       sync.Mutex
-	targets  map[string]*net.UDPAddr
-	fallback map[string]*net.UDPAddr // G.711 (PCMU) members of a G.722 page
+	targets  map[string]fanTarget
+	fallback map[string]fanTarget // G.711 (PCMU) members of a G.722 page
 	closed   bool
+
+	// callerSec is the caller leg's SRTP state: the caller's audio is
+	// authenticated and decrypted on its way in and the page tone is
+	// encrypted on its way out. Members each carry their own (fanTarget).
+	callerSec Secure
 
 	out   rewriteState
 	fbOut rewriteState
@@ -49,6 +54,29 @@ type Fanout struct {
 	// mc, once set by EnableMulticast, is where the fanned-out stream is
 	// also sent.
 	mc atomic.Pointer[multicastOut]
+}
+
+// fanTarget is one member's media address and SRTP state; sec is nil for a
+// plain RTP member. Each encrypted member has its own keys, the page's audio
+// is protected once per member.
+type fanTarget struct {
+	addr *net.UDPAddr
+	sec  *Secure
+}
+
+// write sends one plain RTP packet to the member, protected when the member
+// is encrypted. A packet that cannot be protected is dropped, never sent in
+// the clear.
+func (t fanTarget) write(conn *net.UDPConn, pkt []byte) {
+	if t.sec != nil {
+		enc, ok := t.sec.Protect(pkt)
+		if !ok {
+			return
+		}
+		pkt = enc
+	}
+	// A write error is a transient ICMP or the teardown race.
+	_, _ = conn.WriteToUDP(pkt, t.addr)
 }
 
 // multicastOut is a page's multicast destination and its G.711 payload type.
@@ -78,7 +106,7 @@ func NewFanoutCodec(minPort, maxPort int, c Codec) (*Fanout, error) {
 	}
 	f := &Fanout{
 		codec: c, pt: c.PT,
-		targets: map[string]*net.UDPAddr{}, fallback: map[string]*net.UDPAddr{},
+		targets: map[string]fanTarget{}, fallback: map[string]fanTarget{},
 	}
 	if c.Kind() == nameG722 {
 		f.g722, f.down = NewG722Decoder(), NewDown2()
@@ -131,27 +159,41 @@ func (f *Fanout) MemberPort() int { return f.member.LocalAddr().(*net.UDPAddr).P
 
 // AddTarget starts sending the caller's audio to addr under id; a second
 // call with the same id re-aims it.
-func (f *Fanout) AddTarget(id string, addr *net.UDPAddr) {
+func (f *Fanout) AddTarget(id string, addr *net.UDPAddr) { f.AddSecureTarget(id, addr, nil) }
+
+// AddSecureTarget is AddTarget for a member whose leg negotiated SRTP: the
+// page's audio is encrypted with sec's keys on its way to this member. A nil
+// sec is a plain RTP member.
+func (f *Fanout) AddSecureTarget(id string, addr *net.UDPAddr, sec *Secure) {
 	if addr == nil {
 		return
 	}
 	f.mu.Lock()
 	if !f.closed {
-		f.targets[id] = addr
+		f.targets[id] = fanTarget{addr, sec}
 	}
 	f.mu.Unlock()
 }
+
+// CallerSecure is the caller leg's SRTP state, for the SDP exchanges with
+// the caller.
+func (f *Fanout) CallerSecure() *Secure { return &f.callerSec }
 
 // AddFallbackTarget starts sending a G.711 (PCMU) rendition of the caller's
 // G.722 audio to addr under id. It is how a member that answered the page
 // with PCMU is served; it does nothing when the caller speaks G.711.
 func (f *Fanout) AddFallbackTarget(id string, addr *net.UDPAddr) {
+	f.AddSecureFallbackTarget(id, addr, nil)
+}
+
+// AddSecureFallbackTarget is AddFallbackTarget for an SRTP member.
+func (f *Fanout) AddSecureFallbackTarget(id string, addr *net.UDPAddr, sec *Secure) {
 	if addr == nil || f.g722 == nil {
 		return
 	}
 	f.mu.Lock()
 	if !f.closed {
-		f.fallback[id] = addr
+		f.fallback[id] = fanTarget{addr, sec}
 	}
 	f.mu.Unlock()
 }
@@ -204,30 +246,35 @@ func (f *Fanout) recvCaller() {
 		if err != nil {
 			return // closed
 		}
-		pkt, ok := ParseRTP(buf[:n])
+		// An encrypted caller is authenticated first; a packet that fails
+		// is dropped before it is parsed, followed or fanned out.
+		data, ok, _ := f.callerSec.Unprotect(buf[:n])
+		if !ok {
+			continue
+		}
+		pkt, ok := ParseRTP(data)
 		if !ok || pkt.PayloadType != f.pt {
 			continue
 		}
 		if cur := f.callerAddr.Load(); cur == nil || !cur.IP.Equal(from.IP) || cur.Port != from.Port {
 			f.callerAddr.Store(from)
 		}
-		out, ok := f.out.rewritePacket(buf[:n])
+		out, ok := f.out.rewritePacket(data)
 		if !ok {
 			continue
 		}
 		f.mu.Lock()
-		targets := make([]*net.UDPAddr, 0, len(f.targets))
+		targets := make([]fanTarget, 0, len(f.targets))
 		for _, a := range f.targets {
 			targets = append(targets, a)
 		}
-		fallback := make([]*net.UDPAddr, 0, len(f.fallback))
+		fallback := make([]fanTarget, 0, len(f.fallback))
 		for _, a := range f.fallback {
 			fallback = append(fallback, a)
 		}
 		f.mu.Unlock()
-		for _, a := range targets {
-			// A write error is a transient ICMP or the teardown race.
-			_, _ = f.member.WriteToUDP(out, a)
+		for _, t := range targets {
+			t.write(f.member, out)
 		}
 		mc := f.mc.Load()
 		if f.g722 != nil && (len(fallback) > 0 || mc != nil) {
@@ -237,8 +284,8 @@ func (f *Fanout) recvCaller() {
 			if len(fallback) > 0 {
 				g711 := BuildRTP(0, pkt.Sequence, pkt.Timestamp, pkt.SSRC, pkt.Marker, EncodePCMU(pcm8))
 				if o, ok := f.fbOut.rewritePacket(g711); ok {
-					for _, a := range fallback {
-						_, _ = f.member.WriteToUDP(o, a)
+					for _, t := range fallback {
+						t.write(f.member, o)
 					}
 				}
 			}
@@ -280,8 +327,8 @@ func (f *Fanout) Close() {
 		return
 	}
 	f.closed = true
-	f.targets = map[string]*net.UDPAddr{}
-	f.fallback = map[string]*net.UDPAddr{}
+	f.targets = map[string]fanTarget{}
+	f.fallback = map[string]fanTarget{}
 	f.mu.Unlock()
 	_ = f.caller.Close()
 	_ = f.member.Close()
