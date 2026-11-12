@@ -100,7 +100,9 @@ func (f *Fanout) PlayCaller(ctx context.Context, pcm []byte, dst *net.UDPAddr, l
 			to = a
 		}
 		if to != nil {
-			_, _ = f.caller.WriteToUDP(pkt, to)
+			if enc, ok := f.callerSec.Protect(pkt); ok {
+				_, _ = f.caller.WriteToUDP(enc, to)
+			}
 		}
 	})
 }
@@ -111,13 +113,13 @@ func (f *Fanout) PlayCaller(ctx context.Context, pcm []byte, dst *net.UDPAddr, l
 func (f *Fanout) PlayMembers(ctx context.Context, pcm []byte) error {
 	return streamPCM(ctx, f.tonePCM(pcm), f.codec, false, func(pkt []byte) {
 		f.mu.Lock()
-		targets := make([]*net.UDPAddr, 0, len(f.targets))
+		targets := make([]fanTarget, 0, len(f.targets))
 		for _, a := range f.targets {
 			targets = append(targets, a)
 		}
 		f.mu.Unlock()
-		for _, a := range targets {
-			_, _ = f.member.WriteToUDP(pkt, a)
+		for _, t := range targets {
+			t.write(f.member, pkt)
 		}
 	})
 }

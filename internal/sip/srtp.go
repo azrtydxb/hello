@@ -14,6 +14,7 @@ import (
 	"fmt"
 
 	"github.com/azrtydxb/hello/internal/cdr"
+	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/secmedia"
 	"github.com/azrtydxb/hello/internal/snapshot"
@@ -87,7 +88,13 @@ func (c *call) calleeSRTP(l *leg) srtpLeg {
 	case l.uri != nil:
 		return srtpLeg{policy: secmedia.Off}
 	}
-	return srtpLeg{policy: devicePolicy(c.srtpSnapshot(), l.binding.Device), tls: bindingOnTLS(l.binding)}
+	return c.bindingSRTP(l.binding)
+}
+
+// bindingSRTP is the SRTP capability of a phone's registered contact: its
+// device's policy over the transport the contact registered on.
+func (c *call) bindingSRTP(b livestate.Binding) srtpLeg {
+	return srtpLeg{policy: devicePolicy(c.srtpSnapshot(), b.Device), tls: bindingOnTLS(b)}
 }
 
 // srtpNote counts a negotiation result.
@@ -140,28 +147,35 @@ func (c *call) srtpGate(tx sip.ServerTransaction, snap *snapshot.Snapshot) bool 
 // answer's profile follows the offer (RTP/SAVP answers RTP/SAVP; an RTP/AVP
 // offer carrying crypto, SRTP optional, is answered the same way).
 func (c *call) cryptoAnswer(ans, offer media.AudioSDP) media.AudioSDP {
-	r := c.anchorRelay()
+	out, _ := c.cryptoAnswerOn(c.anchorRelay(), legCaller, c.callerSRTP(), ans, offer)
+	return out
+}
+
+// cryptoAnswerOn is cryptoAnswer for any relay leg and the capability lg of
+// the endpoint that offered (a caller, a retriever, a picker). ok is false
+// only when lg requires SRTP and the offer did not deliver it: the party
+// must be refused, never answered in clear.
+func (c *call) cryptoAnswerOn(r *media.Relay, leg string, lg srtpLeg, ans, offer media.AudioSDP) (media.AudioSDP, bool) {
 	if r == nil {
-		return ans
+		return ans, !lg.required()
 	}
-	lg := c.callerSRTP()
 	if !offer.OffersCrypto() {
-		return ans
+		return ans, !lg.required()
 	}
 	if !lg.allowed() {
 		// SRTP offered on a leg that is not TLS (or whose policy is off):
 		// the crypto lines are dropped and plain RTP is answered.
-		c.srtpNoteOnce(legCaller, "plain")
-		return ans
+		c.srtpNoteOnce(leg, "plain")
+		return ans, !lg.required()
 	}
-	local, err := r.AcceptCrypto(legCaller, offer.Crypto, offer.SRTPOnly)
+	local, err := r.AcceptCrypto(leg, offer.Crypto, offer.SRTPOnly)
 	if err != nil {
-		c.addTrace("The caller's SRTP offer was not usable; the leg stays plain RTP")
-		c.srtpNoteOnce(legCaller, "plain")
-		return ans
+		c.addTrace("The " + leg + " party's SRTP offer was not usable; the leg stays plain RTP")
+		c.srtpNoteOnce(leg, "plain")
+		return ans, !lg.required()
 	}
 	c.syncSRTP()
-	return ans.WithCrypto(offer.SRTPOnly, local)
+	return ans.WithCrypto(offer.SRTPOnly, local), true
 }
 
 // srtpNoteOnce counts a leg's result once per call.
@@ -182,15 +196,15 @@ func (c *call) srtpNoteOnce(leg, result string) {
 // policy allows it and the leg is TLS. RTP/SAVP when the policy requires
 // SRTP, RTP/AVP with crypto lines (SRTP optional) otherwise.
 func (c *call) cryptoOffer(offer media.AudioSDP, l *leg) media.AudioSDP {
-	r := c.anchorRelay()
-	if r == nil {
+	return c.cryptoOfferOn(c.anchorRelay(), legCallee, c.calleeSRTP(l), offer)
+}
+
+// cryptoOfferOn is cryptoOffer for any relay leg and endpoint capability.
+func (c *call) cryptoOfferOn(r *media.Relay, leg string, lg srtpLeg, offer media.AudioSDP) media.AudioSDP {
+	if r == nil || !lg.allowed() {
 		return offer
 	}
-	lg := c.calleeSRTP(l)
-	if !lg.allowed() {
-		return offer
-	}
-	keys, err := r.LocalCrypto(legCallee)
+	keys, err := r.LocalCrypto(leg)
 	if err != nil {
 		return offer
 	}
@@ -201,14 +215,18 @@ func (c *call) cryptoOffer(offer media.AudioSDP, l *leg) media.AudioSDP {
 // reports whether the call may go on: false only when the fork's policy
 // requires SRTP and the answer does not deliver it.
 func (c *call) learnCalleeCrypto(l *leg, ans media.AudioSDP) bool {
-	r := c.anchorRelay()
+	return c.learnCryptoOn(c.anchorRelay(), legCallee, c.calleeSRTP(l), ans)
+}
+
+// learnCryptoOn is learnCalleeCrypto for any relay leg and the capability lg
+// of the endpoint that answered.
+func (c *call) learnCryptoOn(r *media.Relay, leg string, lg srtpLeg, ans media.AudioSDP) bool {
 	if r == nil {
 		return true
 	}
-	lg := c.calleeSRTP(l)
 	secure := false
 	if lg.allowed() {
-		secure = r.ApplyAnswerCrypto(legCallee, ans.Crypto, lg.required())
+		secure = r.ApplyAnswerCrypto(leg, ans.Crypto, lg.required())
 	}
 	if secure {
 		c.syncSRTP()
@@ -219,7 +237,7 @@ func (c *call) learnCalleeCrypto(l *leg, ans media.AudioSDP) bool {
 		return false
 	}
 	if lg.allowed() {
-		c.srtpNoteOnce(legCallee, "plain") // offered, and the callee declined
+		c.srtpNoteOnce(leg, "plain") // offered, and the endpoint declined
 	}
 	return true
 }
@@ -227,13 +245,25 @@ func (c *call) learnCalleeCrypto(l *leg, ans media.AudioSDP) bool {
 // syncSRTP records which legs are encrypted (for the CDR and the trace) and
 // moves the node's SRTP leg gauge; it is cheap and idempotent.
 func (c *call) syncSRTP() {
-	r := c.anchorRelay()
-	if r == nil {
+	var (
+		sa, sb media.CryptoSuite
+		a, b   bool
+		n      int
+	)
+	if sec := c.soloSecure(); sec != nil {
+		// A call Hello answers itself (voicemail, a conference room, a
+		// page): the caller's leg is the only one, whatever relay the ring
+		// phase left behind.
+		if sa, a = sec.Suite(); a {
+			n = 1
+		}
+	} else if r := c.anchorRelay(); r != nil {
+		sa, a = r.Secure(legCaller)
+		sb, b = r.Secure(legCallee)
+		n = r.SecureLegs()
+	} else {
 		return
 	}
-	sa, a := r.Secure(legCaller)
-	sb, b := r.Secure(legCallee)
-	n := r.SecureLegs()
 	c.mu.Lock()
 	newA, newB := a && !c.srtpA, b && !c.srtpB
 	c.srtpA, c.srtpB = c.srtpA || a, c.srtpB || b
@@ -365,4 +395,63 @@ func haLegSDP(host string, r *media.Relay, leg string, off media.AudioSDP, dir, 
 		}
 	}
 	return string(off.Build(host, r.LegPort(leg), dir))
+}
+
+// soloPolicy is what the caller's leg may do about SRTP, for a call Hello
+// answers itself (voicemail, a conference room, a page): crypto is accepted
+// when the caller's policy is not off and the leg is TLS, and demanded when
+// the policy is required.
+func (c *call) soloPolicy() media.SecurePolicy {
+	lg := c.callerSRTP()
+	return media.SecurePolicy{Allow: lg.allowed(), Require: lg.required()}
+}
+
+// setSoloSecure records the SRTP state of the media Hello answered the caller
+// with (a voicemail session, a conference participant, a page's caller leg),
+// so the CDR, the gauge, the trace and the replicated mode follow it.
+func (c *call) setSoloSecure(sec *media.Secure) {
+	c.mu.Lock()
+	c.soloSec = sec
+	c.mu.Unlock()
+	c.syncSRTP()
+}
+
+// soloSecure is the SRTP state of the media Hello answered the caller with,
+// nil when the call has none.
+func (c *call) soloSecure() *media.Secure {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.soloSec
+}
+
+// haSoloSRTP is the replicated SRTP mode of the caller's leg of a call Hello
+// answers itself (see haSRTP).
+func (c *call) haSoloSRTP() string {
+	if sec := c.soloSecure(); sec != nil {
+		return secureMode(sec)
+	}
+	return haSRTP(c.anchorRelay(), legCaller)
+}
+
+// secureMode is the replicated mode of an endpoint: "" (plain), "savp" or
+// "avp".
+func secureMode(sec *media.Secure) string {
+	savp, on := sec.Profile()
+	switch {
+	case !on:
+		return ""
+	case savp:
+		return "savp"
+	}
+	return "avp"
+}
+
+// soloRefuseSRTP refuses, with 488, a call whose caller demands SRTP that the
+// media Hello answers itself cannot negotiate. The call has begun (its
+// dialog is set up).
+func (c *call) soloRefuseSRTP(why string) {
+	c.srtpNote("refused")
+	c.addTrace("Call refused: " + why)
+	c.respondA(sip.StatusNotAcceptableHere, "Not Acceptable Here")
+	c.end(sip.StatusNotAcceptableHere, cdr.SideSystem, why, ResultFailed)
 }

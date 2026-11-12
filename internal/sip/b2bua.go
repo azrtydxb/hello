@@ -52,6 +52,9 @@ type call struct {
 	srtpClosed bool
 	srtpNoted  map[string]bool
 	srtpSnap   *snapshot.Snapshot
+	// soloSec is the SRTP state of the media a call Hello answers itself
+	// uses (voicemail, a conference room, a page's caller leg).
+	soloSec *media.Secure
 	// rel is the reliable provisional response toward the caller (S-17).
 	rel relState
 	// secure marks a sips: call: it forks only onto bindings registered over
@@ -393,8 +396,12 @@ type leg struct {
 	c       *call
 	binding livestate.Binding
 	callID  string
-	ctx     context.Context
-	cancel  context.CancelFunc
+	// offerBody, when set, is the SDP offer this leg is sent instead of the
+	// call's own.
+	offerBody []byte
+
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	mu    sync.Mutex
 	dcs   *sipgo.DialogClientSession
@@ -1831,6 +1838,11 @@ func (l *leg) invite() (*sip.Request, error) {
 			req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 		}
 		req.SetBody(body)
+	}
+	if l.offerBody != nil {
+		// A leg with an offer of its own (a returned parked call, whose
+		// device is offered keys under its own SRTP policy).
+		req.SetBody(l.offerBody)
 	}
 	// An anchored call terminates media: the fork's offer is the anchor's
 	// leg-b port, not the caller's SDP (spec S-2).

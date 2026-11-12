@@ -22,6 +22,9 @@ func Fingerprint(source string, actions []Action) string {
 	cs := make([]core, len(actions))
 	for i, a := range actions {
 		body, _ := decode(a.Body)
+		if a.OperationID == BatchOp {
+			body = batchCore(a.Body)
+		}
 		cs[i] = core{a.OperationID, a.PathParams, body}
 		if cs[i].PathParams == nil {
 			cs[i].PathParams = map[string]string{}
@@ -39,26 +42,38 @@ func Fingerprint(source string, actions []Action) string {
 func Targets(actions []Action) []string {
 	var out []string
 	for _, a := range actions {
-		if strings.HasPrefix(a.OperationID, "create") {
+		if a.OperationID == BatchOp {
+			// A batch names the objects its operations change.
+			out = append(out, batchTargets(a.Body)...)
 			continue
 		}
-		res := a.OperationID
-		for _, p := range []string{"update", "delete", "put"} {
-			res = strings.TrimPrefix(res, p)
+		if t, ok := target(a.OperationID, a.PathParams); ok {
+			out = append(out, t)
 		}
-		keys := make([]string, 0, len(a.PathParams))
-		for k := range a.PathParams {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		t := res
-		for _, k := range keys {
-			t += "/" + a.PathParams[k]
-		}
-		out = append(out, t)
 	}
 	sort.Strings(out)
 	return out
+}
+
+// target is the resource an operation changes, or false for a create.
+func target(operationID string, params map[string]string) (string, bool) {
+	if strings.HasPrefix(operationID, "create") {
+		return "", false
+	}
+	res := operationID
+	for _, p := range []string{"update", "delete", "put"} {
+		res = strings.TrimPrefix(res, p)
+	}
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	t := res
+	for _, k := range keys {
+		t += "/" + params[k]
+	}
+	return t, true
 }
 
 func intersects(a, b []string) bool {

@@ -42,6 +42,34 @@ const (
 	RoleAssistant = "assistant"
 )
 
+// Context is what the console showed when a question was asked (spec
+// flow-canvas S-19): a call-flow canvas, the nodes selected on it and a call
+// traced there. The model receives it as data with the question, never as
+// instructions; it reads the graph and traces the call with its own tools.
+type Context struct {
+	// CanvasID is the canvas the question was asked from.
+	CanvasID *int64 `json:"canvasId,omitempty"`
+	// Nodes are the selected flow node ids, such as "ivr:3".
+	Nodes []string `json:"nodes,omitempty"`
+	// Trace is a call traced on the canvas (traceFlow's parameters).
+	Trace *TraceContext `json:"trace,omitempty"`
+	// AllowApply is the canvas switch "Let AI apply changes" as it stood
+	// when the question was asked (flow canvas decision of 2026-11-10):
+	// only then does the assistant get its write tool for this question,
+	// and the batch it applies is audited as applied by the AI for the
+	// user. Off (ask first) by default: a change is a proposal.
+	AllowApply bool `json:"allowApply,omitempty"`
+}
+
+// TraceContext is a traced call: traceFlow's query parameters.
+type TraceContext struct {
+	From     string `json:"from"`
+	Number   string `json:"number"`
+	CallerID string `json:"callerId,omitempty"`
+	At       string `json:"at,omitempty"`
+	Digits   string `json:"digits,omitempty"`
+}
+
 // Message is one stored message.
 type Message struct {
 	ID         int64      `json:"id"`
@@ -53,6 +81,9 @@ type Message struct {
 	ProposalID *string    `json:"proposalId"`
 	TaskID     *string    `json:"taskId"`
 	CreatedAt  time.Time  `json:"createdAt"`
+	// Context is what the console showed with a user message; nil when
+	// nothing was sent.
+	Context *Context `json:"context,omitempty"`
 }
 
 // Task is a session's task as getAISession shows it.
@@ -110,8 +141,8 @@ type Store interface {
 	// while a task is queued or running for it, stores the user message,
 	// names an untitled session title, marks it active, and calls start
 	// (which records the task) before releasing the session; the message
-	// is linked to the task.
-	PostAIMessage(ctx context.Context, sessionID, content, title string, window int, start StartFunc) (messageID int64, taskID string, err error)
+	// is linked to the task. mc, when set, is stored with the message.
+	PostAIMessage(ctx context.Context, sessionID, content string, mc *Context, title string, window int, start StartFunc) (messageID int64, taskID string, err error)
 	// AddAIMessage stores an assistant message and marks the session active.
 	AddAIMessage(ctx context.Context, m Message) (int64, error)
 	// OpenAIFindings lists open and acknowledged findings, most severe and
