@@ -1373,6 +1373,23 @@ func (c *call) byeA() {
 	if c.dss == nil {
 		return // a call Hello placed has no caller dialog
 	}
+	if res := c.dss.InviteResponse; res == nil || !res.IsSuccess() {
+		// The 200 went out through the raw transaction (voicemail, feature
+		// codes), so sipgo's session never recorded it: its InviteResponse
+		// is nil (Bye dereferences it and panics) or only the last
+		// provisional (Bye refuses). The dialog is real, though:
+		// end it with the raw BYE, or the caller's phone stays in a call
+		// nobody answers.
+		c.mu.Lock()
+		raw := c.vmTag != "" && c.inv != nil
+		c.mu.Unlock()
+		if raw {
+			c.byeCallerRaw()
+		} else {
+			c.s.log.Warn("no BYE sent to caller: the call was never answered on its dialog", "correlation_id", c.id)
+		}
+		return
+	}
 	ctx, cancel := c.s.timeoutUntilShutdown(byeTimeout)
 	defer cancel()
 	if err := c.dss.Bye(ctx); err != nil {
