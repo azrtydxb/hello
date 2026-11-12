@@ -241,6 +241,7 @@ func (s *server) createTrunk(w http.ResponseWriter, r *http.Request) {
 	password := ""
 	setIf(&password, b.Password)
 	f := validateTrunk(&in, password != "")
+	trunkSRTP(&f, in.SRTP)
 	validPassword(&f, b.Password)
 	if len(f) > 0 {
 		writeFields(w, f)
@@ -285,7 +286,13 @@ func (s *server) updateTrunk(w http.ResponseWriter, r *http.Request) {
 			}
 			in.InternalDialing = d
 		}
-		return validateTrunk(in, has)
+		f := validateTrunk(in, has)
+		if b.SRTP != nil {
+			// Only a policy being set is checked: a trunk already stored as
+			// required (from before this rule) can still be edited and fixed.
+			trunkSRTP(&f, *b.SRTP)
+		}
+		return f
 	}, s.check())
 	if err != nil {
 		s.configError(w, "trunk", err)

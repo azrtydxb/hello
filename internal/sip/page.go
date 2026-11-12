@@ -41,6 +41,9 @@ const (
 	PageLegDND            = "dnd"
 	PageLegNoAnswer       = "no_answer"
 	PageLegNoRegistration = "no_registration"
+	// PageLegSRTP is a member whose policy requires SRTP and which cannot
+	// have it: its contact is not on TLS, or it answered without crypto.
+	PageLegSRTP = "srtp_required"
 )
 
 // pageResult is one member's outcome that never became a leg.
@@ -51,7 +54,9 @@ type pageLeg struct {
 	ext      string
 	l        *leg
 	offer    []byte
-	result   string // "" while the leg may still answer
+	sec      *media.Secure // the member's own SRTP keys, nil when it is offered plain RTP
+	required bool          // the member's policy demands SRTP
+	result   string        // "" while the leg may still answer
 	answered bool
 	ended    bool // the member hung up
 }
@@ -401,6 +406,15 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 		return
 	}
 	ps.fan = fan
+	if err := c.pageCallerCrypto(ps, fan, off); err != nil {
+		fan.Close()
+		ps.fan = nil
+		c.srtpNote("refused")
+		c.addTrace("Page refused: SRTP is required but the page could not negotiate it")
+		c.respondA(sip.StatusNotAcceptableHere, "Not Acceptable Here")
+		c.end(sip.StatusNotAcceptableHere, cdr.SideSystem, "SRTP is required but the page could not negotiate it", ResultFailed)
+		return
+	}
 	if mc := g.Multicast; mc != nil {
 		err := fan.EnableMulticast(udpAddr(mc.Address, mc.Port), mc.PT, s.cfg.PageMulticastIface, s.cfg.PageMulticastTTL)
 		if err != nil {
@@ -419,12 +433,12 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 	if g.Multicast == nil {
 		c.pageEarlyMedia(ps)
 	}
+	prepared := c.pageLegs(ps, targets, offer)
 	c.mu.Lock()
-	for _, t := range targets {
-		pl := &pageLeg{ext: t.ext, offer: offer}
-		pl.l = c.addLeg(&leg{binding: t.b, pl: pl})
+	for _, t := range prepared {
+		t.pl.l = c.addLeg(&leg{binding: t.b, pl: t.pl})
 		ps.mu.Lock()
-		ps.legs = append(ps.legs, pl)
+		ps.legs = append(ps.legs, t.pl)
 		ps.mu.Unlock()
 	}
 	legs := slices.Clone(ps.legs)
@@ -440,6 +454,20 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 		return
 	}
 	c.pageSetup(len(legs))
+}
+
+// pageCallerCrypto settles the caller leg's SRTP: a caller that offered
+// crypto on an allowed leg gets Hello's key in both the early-media and the
+// final answer, and its audio is decrypted on its way into the fan-out. An
+// error only when the caller's policy demands SRTP and it cannot be had.
+func (c *call) pageCallerCrypto(ps *pageState, fan *media.Fanout, off media.AudioSDP) error {
+	ans, err := fan.CallerSecure().AnswerSDP(off, ps.codec, c.soloPolicy())
+	if err != nil {
+		return err
+	}
+	ps.codec = ans
+	c.setSoloSecure(fan.CallerSecure())
+	return nil
 }
 
 // pageEarlyMedia answers the caller's INVITE with 183 Session Progress and
@@ -670,12 +698,24 @@ func (c *call) pageLegAnswered(l *leg) {
 	ps, pl := c.page, l.pl
 	ans, err := media.ParseAudioSDP(l.session().InviteResponse.Body())
 	addr := udpAddr(ans.Address, ans.Port)
+	// A member offered keys settles on its answer's key; one whose policy
+	// demands SRTP and which answered without crypto never hears the page.
+	secure := false
+	if pl.sec != nil && err == nil {
+		secure = pl.sec.ApplyAnswer(ans.Crypto, pl.required)
+		if secure {
+			c.srtpNote("srtp")
+		} else if !pl.required {
+			c.srtpNote("plain")
+		}
+	}
+	srtpRefused := pl.required && !secure
 	ps.mu.Lock()
 	closedNow := ps.closed
 	// A member answers with the page's codec or, on a G.722 page, PCMU.
 	native := err == nil && ans.PayloadType == ps.pt
 	g711 := err == nil && ps.pt == 9 && ans.PayloadType == 0
-	usable := addr != nil && (native || g711)
+	usable := addr != nil && (native || g711) && !srtpRefused
 	if !closedNow && usable {
 		pl.answered, pl.result = true, PageLegAnswered
 	}
@@ -683,7 +723,12 @@ func (c *call) pageLegAnswered(l *leg) {
 	if closedNow || !usable {
 		l.bye()
 		if !closedNow {
-			c.pageLegFailed(pl, PageLegNoAnswer)
+			result := PageLegNoAnswer
+			if srtpRefused {
+				result = PageLegSRTP
+				c.srtpNote("refused")
+			}
+			c.pageLegFailed(pl, result)
 		}
 		return
 	}
@@ -691,10 +736,14 @@ func (c *call) pageLegAnswered(l *leg) {
 	if err == nil {
 		c.logCodec("answer", legCallee, "terminated", "paging", ans)
 	}
+	var memberSec *media.Secure
+	if secure {
+		memberSec = pl.sec
+	}
 	if g711 {
-		ps.fan.AddFallbackTarget(l.callID, addr)
+		ps.fan.AddSecureFallbackTarget(l.callID, addr, memberSec)
 	} else {
-		ps.fan.AddTarget(l.callID, addr)
+		ps.fan.AddSecureTarget(l.callID, addr, memberSec)
 	}
 	select {
 	case ps.events <- pageEvent{answered: true}:
@@ -899,6 +948,66 @@ func (c *call) pageMemberGone(l *leg) {
 // pageMemberOffer is the sendonly SDP offered to page members: the page's
 // codec and, on a G.722 page, PCMU as the fallback for a phone without
 // G.722 (the fan-out renders it from the G.722 stream).
+// pageLegs builds the member legs of a page, each with the offer its device's
+// SRTP policy allows; a member that demands SRTP and cannot have it is
+// skipped. It takes no lock the caller holds.
+func (c *call) pageLegs(ps *pageState, targets []pageBinding, offer []byte) []preparedPageLeg {
+	var out []preparedPageLeg
+	for _, t := range targets {
+		pl, ok := c.newPageLeg(t.ext, t.b, offer)
+		if !ok {
+			ps.mu.Lock()
+			ps.skipped = append(ps.skipped, pageResult{t.ext, PageLegSRTP})
+			ps.mu.Unlock()
+			c.s.m.PagingLegs.WithLabelValues(PageLegSRTP).Inc()
+			c.addTrace("Page member " + t.ext + " skipped: " + PageLegSRTP)
+			continue
+		}
+		out = append(out, preparedPageLeg{pageBinding: t, pl: pl})
+	}
+	return out
+}
+
+// preparedPageLeg is a member contact with its leg state, before the leg is
+// added to the call.
+type preparedPageLeg struct {
+	pageBinding
+	pl *pageLeg
+}
+
+// newPageLeg is the member's leg state: the offer carries the member's own
+// keys when its policy allows SRTP on its contact.
+func (c *call) newPageLeg(ext string, b livestate.Binding, base []byte) (*pageLeg, bool) {
+	offer, sec, ok := memberOffer(c.bindingSRTP(b), base)
+	if !ok {
+		return nil, false
+	}
+	return &pageLeg{ext: ext, offer: offer, sec: sec, required: sec != nil && c.bindingSRTP(b).required()}, true
+}
+
+// memberOffer is the offer a page member's contact is sent: base with the
+// member's own SRTP keys when lg allows them (RTP/SAVP when it requires
+// SRTP). ok is false for a member that demands SRTP and cannot have it, which
+// is never offered plain RTP. sec is nil for a plain member.
+func memberOffer(lg srtpLeg, base []byte) (offer []byte, sec *media.Secure, ok bool) {
+	if lg.required() && !lg.tls {
+		return nil, nil, false
+	}
+	if !lg.allowed() {
+		return base, nil, true
+	}
+	a, err := media.ParseAudioSDP(base)
+	if err != nil {
+		return base, nil, !lg.required()
+	}
+	sec = &media.Secure{}
+	keyed, err := sec.OfferSDP(a, media.SecurePolicy{Allow: true, Require: lg.required()})
+	if err != nil {
+		return base, nil, !lg.required()
+	}
+	return keyed.Build(a.Address, a.Port, "sendonly"), sec, true
+}
+
 func pageMemberOffer(ps *pageState, port int) []byte {
 	codecs := ps.codec.Codecs
 	if ps.pt == 9 {

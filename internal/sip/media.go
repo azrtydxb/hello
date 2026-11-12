@@ -612,8 +612,10 @@ func (c *call) closeMedia() {
 			c.storeRecording(r, by)
 		}
 	}
-	if relay != nil {
+	if relay != nil || c.soloSecure() != nil {
 		c.srtpGaugeRelease()
+	}
+	if relay != nil {
 		if m := c.s.deps.Media; m != nil {
 			m.NoteEnd()
 		}
@@ -1200,6 +1202,7 @@ func (c *call) byeCallerRaw() {
 	inv, tag := c.inv, c.vmTag
 	c.mu.Unlock()
 	if inv == nil {
+		c.s.log.Warn("no BYE sent to caller: the call has no INVITE", "correlation_id", c.id)
 		return
 	}
 	target := inv.Recipient
@@ -1224,7 +1227,7 @@ func (c *call) byeCallerRaw() {
 	defer cancel()
 	res, err := c.s.do(ctx, req)
 	if err != nil {
-		c.s.log.Debug("announcement BYE failed", "error", err)
+		c.s.log.Warn("BYE to caller on the raw dialog failed", "correlation_id", c.id, "error", err)
 		return
 	}
 	c.s.m.response(res.StatusCode)
@@ -1248,6 +1251,14 @@ func allowSignalSource(relay *media.Relay, leg, source string) {
 // private address) still has its media accepted.
 func handOverLeg(relay *media.Relay, leg string, target *net.UDPAddr, source string) {
 	relay.ResetCrypto(leg) // the previous endpoint's keys are not the new one's
+	moveLeg(relay, leg, target, source)
+}
+
+// moveLeg is handOverLeg for the same endpoint at a new address (or an
+// endpoint whose keys were negotiated already): the leg's source policy
+// starts over from the new address and the SRTP state is left alone, so a
+// phone that roams mid-call keeps its encryption.
+func moveLeg(relay *media.Relay, leg string, target *net.UDPAddr, source string) {
 	host, _ := splitHostPort(source)
 	if ip := net.ParseIP(host); ip != nil {
 		relay.ResetSources(leg, ip)

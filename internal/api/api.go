@@ -497,7 +497,7 @@ func Handler(c Config) http.Handler {
 	for _, rt := range s.routes() {
 		h := s.aiGuard(rt.Pattern, rt.H)
 		if !rt.Public {
-			guarded := auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, h))
+			guarded := auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, agentGuard(rt.Method, rt.Pattern, h)))
 			h = authed(guarded)
 			if rt.Pattern == "/api/v1/events/stream" {
 				// A client that cannot send an Authorization header
@@ -518,6 +518,52 @@ func Handler(c Config) http.Handler {
 	h := maintenance(c.Maintenance, wrapForTest(http.NewCrossOriginProtection().Handler(mux)))
 	c.self.Store(&h)
 	return h
+}
+
+// batchRoute is the configuration batch's route.
+const batchRoute = "/api/v1/config/batch"
+
+// isPreview reports whether the request is the dry run of an AI proposal's
+// batch (auth.Agent.Preview): the agent then holds write scopes, which only
+// a dry-run batch may use.
+func isPreview(r *http.Request) bool {
+	a, _ := auth.ActorFrom(r.Context())
+	ag, ok := auth.AgentFrom(r.Context())
+	return a.Kind == auth.KindAgent && ok && ag.Preview
+}
+
+// isAgentApply reports whether the request is the assistant applying its
+// own batch for the user (auth.Agent.Apply): it holds write scopes, which
+// only a configuration batch may use.
+func isAgentApply(r *http.Request) bool {
+	a, _ := auth.ActorFrom(r.Context())
+	ag, ok := auth.AgentFrom(r.Context())
+	return a.Kind == auth.KindAgent && ok && ag.Apply && !ag.Preview
+}
+
+// agentGuard confines the agent identities that hold write scopes. A batch
+// preview (spec flow-canvas S-19) may write only POST /api/v1/config/batch,
+// whose handler accepts only a dry run, and the operations replayed inside
+// a dry-run batch, which roll back. The assistant applying its own batch
+// (decision of 2026-11-10) may write only POST /api/v1/config/batch and
+// the operations replayed inside that batch: never an object directly, a
+// layout, or a revert. Reads pass; the user's role is checked before this.
+func agentGuard(method, pattern string, next http.Handler) http.Handler {
+	if method == http.MethodGet || method == http.MethodHead {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inBatch := store.BatchFrom(r.Context())
+		switch {
+		case isPreview(r) && pattern != batchRoute && !inBatch.DryRun():
+			writeError(w, http.StatusForbidden, "insufficient_scope", "an AI preview may only dry-run a configuration batch")
+			return
+		case isAgentApply(r) && (pattern != batchRoute || method != http.MethodPost) && inBatch == nil:
+			writeError(w, http.StatusForbidden, "insufficient_scope", "the assistant may only change configuration through a configuration batch")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // passwordGate refuses every route but the few a user needs to choose their

@@ -108,6 +108,9 @@ type Party struct {
 	dtmf   chan byte
 	filter DTMFFilter // recv goroutine only
 
+	// sec is the participant's SRTP state (plain RTP until SDES settles).
+	sec *Secure
+
 	closeOnce sync.Once
 	done      chan struct{}
 
@@ -122,6 +125,15 @@ type Party struct {
 // (Opus when offered and built in, else G.722, else G.711)
 // and returns the answer SDP advertising host.
 func NewParty(host string, minPort, maxPort int, offer []byte) ([]byte, *Party, error) {
+	return NewPartySecure(host, minPort, maxPort, offer, SecurePolicy{})
+}
+
+// NewPartySecure is NewParty for a participant whose leg may carry SRTP
+// (SDES): with pol.Allow the party accepts the participant's a=crypto offer,
+// the answer carries Hello's key, and the mixer's audio is encrypted per
+// participant; a policy that requires SRTP and an offer that cannot deliver
+// it fails with ErrSRTPRequired and binds nothing.
+func NewPartySecure(host string, minPort, maxPort int, offer []byte, pol SecurePolicy) ([]byte, *Party, error) {
 	ip := net.ParseIP(host)
 	if ip == nil || ip.To4() == nil {
 		return nil, nil, fmt.Errorf("media: advertised host %q is not an IPv4 address", host)
@@ -133,6 +145,11 @@ func NewParty(host string, minPort, maxPort int, offer []byte) ([]byte, *Party, 
 	off, ok := parsed.Terminated()
 	if !ok {
 		return nil, nil, errors.New("media: the offer has no codec a conference can mix")
+	}
+	var sec Secure
+	ansSDP, err := sec.AnswerSDP(parsed, off, pol)
+	if err != nil {
+		return nil, nil, err
 	}
 	codec, err := newPartyCodec(off.Codec)
 	if err != nil {
@@ -157,12 +174,12 @@ func NewParty(host string, minPort, maxPort int, offer []byte) ([]byte, *Party, 
 	p := &Party{
 		conn: conn, codec: codec, offer: off, target: target,
 		seq: binary.BigEndian.Uint16(b[0:2]), ts: binary.BigEndian.Uint32(b[2:6]), ssrc: binary.BigEndian.Uint32(b[6:10]),
-		marker: true,
-		dtmf:   make(chan byte, partyDTMFQueue), done: make(chan struct{}),
+		marker: true, sec: &sec,
+		dtmf: make(chan byte, partyDTMFQueue), done: make(chan struct{}),
 	}
 	go p.recv()
 	port := conn.LocalAddr().(*net.UDPAddr).Port //nolint:forcetypeassert // always a UDPAddr
-	return off.Build(host, port, "sendrecv"), p, nil
+	return ansSDP.Build(host, port, "sendrecv"), p, nil
 }
 
 // bindPartySocket takes the first free port of the range; with no range it
@@ -200,6 +217,9 @@ func (p *Party) Retarget(host string, port int) {
 	p.remote = nil
 	p.remoteMu.Unlock()
 }
+
+// Secure is the participant's SRTP state, for the SDP exchanges of the call.
+func (p *Party) Secure() *Secure { return p.sec }
 
 // Offer is the negotiated audio description (the participant's side).
 func (p *Party) Offer() AudioSDP { return p.offer }
@@ -253,7 +273,13 @@ func (p *Party) recv() {
 		if err != nil {
 			return // socket closed
 		}
-		pkt, ok := ParseRTP(buf[:n])
+		// An encrypted participant's packets are authenticated first; one
+		// that fails is dropped before it is latched, decoded or mixed.
+		data, ok, _ := p.sec.Unprotect(buf[:n])
+		if !ok {
+			continue
+		}
+		pkt, ok := ParseRTP(data)
 		if !ok {
 			continue
 		}
@@ -350,6 +376,10 @@ func (p *Party) send(frame []int16) error {
 	p.ts += p.codec.codec.TimestampStep()
 	p.marker = false
 	p.sendMu.Unlock()
+	pkt, ok := p.sec.Protect(pkt)
+	if !ok {
+		return errors.New("media: SRTP protect failed")
+	}
 	if _, err := p.conn.WriteToUDP(pkt, p.peer()); err != nil {
 		return fmt.Errorf("media: write conference RTP: %w", err)
 	}

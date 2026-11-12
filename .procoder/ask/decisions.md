@@ -2077,6 +2077,73 @@ legs) and `internal/sip/srtp.go` (policy and negotiation). Choices:
   and in slog; traces name the leg and suite only (`TestSRTPKeysNeverFormatted`,
   and the call test checks the CDR trace).
 
+## SRTP SDES: the known gaps of #266 closed (2026-11-09)
+
+Follow-up to "SRTP SDES on the anchor". Choices:
+
+- **One SRTP state type for every media object.** `media.Secure` (SDES
+  negotiation plus the SRTP contexts, with `Protect`/`Unprotect`) is what each
+  relay leg already was; the relay leg now embeds it and a voicemail session
+  (`Anchor.AnswerSecure`), a conference participant (`NewPartySecure`) and a
+  page (`Fanout.CallerSecure`, one `Secure` per member via `AddSecureTarget`)
+  carry their own. Same keys-per-leg rule, same redaction, same drop of anything
+  that fails authentication, no second implementation to keep in step.
+- **Voicemail, conference and paging use the caller leg's policy**
+  (`call.soloPolicy`: allowed = policy not off and the leg is TLS, required =
+  policy required). The answer mirrors the offer's profile. A caller that
+  requires SRTP and cannot get it is refused with 488, never answered in clear.
+  A conference participant has its own SRTP session, so the mixer encrypts the
+  mix per participant. A page encrypts per member: each member's contact is
+  offered its own keys under its device's policy and transport (RTP/SAVP when it
+  requires them), a required member that is not on TLS is skipped
+  (`srtp_required`), one that answers without crypto is hung up. A page's
+  multicast copy stays plain RTP: one stream to a group address cannot carry
+  per-listener keys; multicast paging is a deliberate plain-RTP feature.
+  The test page (`pagetest.go`) follows the same member rule.
+- **A parked call sent to voicemail keeps its encryption**: the voicemail
+  session is offered keys in the profile the party's relay leg had, and the
+  call ends if the party does not answer with crypto.
+- **HA for solo calls.** The replicated mode (`avp`/`savp`) now covers
+  voicemail and conference calls (`call.soloSec`); the taker offers fresh keys
+  and a caller that does not answer with crypto ends the call (zombie count)
+  instead of continuing in clear. Hello's own key (the `SDP` of the leg, which
+  now carries one) is stripped before replication, as the far end's was.
+- **Hand-over legs negotiate again** instead of restarting plain. A transfer
+  target (blind and attended), a retrieved park, a pickup and the parker's
+  device on a park return are new endpoints on a relay leg: the previous
+  endpoint's keys are dropped (`ResetCrypto`) and the new party is offered, or
+  answered with, keys under its own policy and transport (`cryptoOfferOn`,
+  `cryptoAnswerOn`, `learnCryptoOn`). A party whose policy is `required` and
+  that cannot be encrypted is refused (488, or the call ends); an `optional`
+  party that does not answer with crypto is plain RTP, counted as `plain` and
+  traced. A pickup now also answers the ringing caller's SDES offer (the caller
+  had only been given a key when the leg was already negotiated).
+- **Roaming is not a hand-over.** `relearnMedia` (the same phone at a new media
+  address after a re-INVITE) called the hand-over helper and so dropped the
+  leg's keys, silently continuing in clear. It now uses `moveLeg`, which
+  re-aims the leg and keeps the SRTP state.
+- **Across nodes, retrieve and pickup are plain or refused.** The retriever's
+  offer travels to the holding node through the shared store, and a key must
+  not be written there (the replication rule), so its `a=crypto` lines are
+  dropped: an `optional` phone is plain RTP (counted, traced), a phone that
+  requires SRTP or offers `RTP/SAVP` only is refused with 488 before it takes
+  the slot. Same-node retrieve and pickup negotiate fully.
+- **A trunk cannot be set to `required`** (gap 3). The trunks-routing spec lists
+  SIP over TLS for trunks as a later phase, so there is no trunk TLS transport
+  to require. Rather than build one inside an SRTP change, the state is made
+  impossible: `POST`/`PATCH /api/v1/trunks` answer 422 on `srtp` when it is set
+  to `required` (only the value being set is checked, so a trunk stored as
+  `required` earlier can still be edited and fixed), the Trunks page offers
+  `off` and `optional` only and says why, a stored `required` is flagged on its
+  card and refuses to save as it is, and the OpenAPI text and the skills say
+  so. No migration: existing rows are not rewritten, since turning `required`
+  into `off` behind the operator's back would be a silent downgrade. Calls over
+  such a trunk keep failing with 488, and the CDR trace says why. When trunk TLS
+  exists this check becomes "required needs a TLS trunk".
+- **Not changed.** An in-dialog re-INVITE that rekeys a voicemail or conference
+  caller is answered with the call's existing key (a phone that rekeys on its
+  own re-INVITE is followed on relay legs only). AES-256 is still not offered.
+
 ## Locations, HELD, Geolocation, callback tag and alarm `*55`, phone-feature-parity S-28 and S-29 (2026-11-09)
 
 - **Already built, left as it was.** The emergency flag on outbound routes and
@@ -2795,6 +2862,69 @@ so the VIP stage cannot sit in that file.
 - Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
 - Account sharing group password: shared default `AccountSharing`, or a per-group secret
 
+## Flow canvas P6: AI on the canvas (2026-11-09)
+
+Built per `.procoder/specs/flow-canvas.md` (P6, S-17, S-19, S-20). Choices the
+spec left open, and one deviation:
+
+- **The assistant may apply its own batch (decision 2, user decision of
+  2026-11-10 below).** It has one write tool, `applyConfigBatch`, offered only
+  for a question asked with the canvas switch "Let AI apply changes" on;
+  otherwise a change is a proposal whose batch the operator previews on the
+  canvas and applies or discards. Write-scoped MCP clients keep
+  `applyConfigBatch` as before.
+- **A batch proposal is one action.** `applyConfigBatch` joins
+  `proposal.Allowlist`; a proposal that carries it has no other action, so the
+  whole change is one transaction. The inner allowlist is the batch's own
+  table (`configbatch.Ops`, every object type the canvas draws); `createDevice`,
+  `createPhone`, credential, multipart and external-effect operations stay
+  out. At most 50 inner operations.
+- **Credentials stay out of proposals.** Decision 2 allows the AI to set
+  secrets with redacted reads; a proposal's body is stored and shown to
+  people and to the model, so an inner operation that sets a password, PIN or
+  secret is refused, as for every other proposal (S-12).
+- **The dry run runs as the user, rolled back.** The validator dry-runs the
+  batch through the API as the user's agent identity with a new `Preview`
+  flag (`auth.Agent.Preview`): it then holds write scopes with the user's own
+  role, but the API admits its writes only on `POST /api/v1/config/batch`
+  with `dryRun` and inside a dry-run store batch (`agentGuard`,
+  `Batch.DryRun`). A viewer's or an operator's admin-only batch is refused
+  there and the model is told the user cannot make the change.
+- **Hello fills the staleness tokens.** The model does not send
+  `baseRevision` or `expect`: the validator reads the graph (devices
+  included) and sets `baseRevision` to its revision and each update or
+  delete's `expect` to the node's version. A configuration that moves under
+  the proposal makes the batch's own check answer 409, which makes the
+  proposal `stale`; changes to other objects do not.
+- **The preview is stored.** The dry run's results (redacted), warnings and a
+  new `flowDiff` (added, changed, removed nodes, edges added and removed,
+  `flow.Diff`) are kept on the action as `preview`, so the overlay and the
+  proposal page need no write scope and viewers see them. Every dry-run batch
+  answer now carries `flowDiff` (documented in `openapi.json` and
+  `docs/config-batch.md`).
+- **Overlay placement.** Created nodes have dry-run ids (sequences do not roll
+  back), so the canvas draws them as ghosts placed next to a connected node
+  (not draggable) and, after apply, places the real nodes at the ghost
+  positions by matching kind and label (`placementsAfterApply`).
+- **Canvas context.** A question carries a `context` with `canvasId`,
+  `nodes` and `trace`, stored in `ai_messages.context` (migration `00057`) so the task and
+  the history see it, and given to the model as data (`canvas`), never as
+  instructions. The panel sends the canvas, the selected node and the traced
+  call.
+- **`describeOperation`.** One assistant tool that is not an API read: it
+  answers the request schema of an operation a proposal may carry, from the
+  embedded document, so the model writes valid batch bodies. It is not an MCP
+  tool and reads no PBX data.
+- **`getFlowGraph` `fields=summary`** (S-17) empties node summaries and drops
+  edge `data`, keeping ids, labels, versions, ports and owners.
+- **Roles.** Asking needs operator (the chat already did); viewers see the
+  panel's proposal list and the overlay, without Apply. Discard is
+  `dismissAIProposal` with reason `not_needed`. With the agent off the panel
+  shows the same reason as every AI page.
+- **Import cycle.** `configbatch` used `proposal.Change`; the JSON diff moved
+  to `internal/jsondiff` (proposal keeps aliases) so `proposal` can use
+  `configbatch`.
+
 ## Integrations P4: recording links and lookup (2026-11-09)
 
 - Links are Hello-signed proxy URLs (`/r/<token>.wav`), not MinIO presigned
@@ -3088,6 +3218,44 @@ Built in one change: the engine, passthrough, T.38, email, API, page and docs.
 - Answer (user): the AI may apply. Give the assistant a write tool that applies its batch,
   audited and revertible, in line with the earlier AI-access decision. Operators still see
   and can revert every applied batch.
+
+Built on #280 (choices the decision left open):
+
+- **The write tool.** `applyConfigBatch` in the assistant (go-ai-sdk tool,
+  `internal/ai/assistant/apply.go`). Its batch is validated exactly as a
+  proposal's batch (inner allowlist, no credential property, at most 50 ops,
+  `baseRevision` and `expect` from the graph, the dry run as the user), stored
+  as a proposal (so the overlay, the proposal page and the session link show
+  it), then applied with `proposal.DBStore.ApplyAsAgent`:
+  `POST /api/v1/config/batch` replayed as the user under a new
+  `auth.Agent.Apply` identity. That identity holds write and admin scopes with the user's own
+  role, so a viewer's batch is `403 forbidden_role` and an operator's
+  admin-only op is refused; `agentGuard` admits its writes only on the batch
+  route and inside that batch (no direct object write, layout or revert). One
+  applied batch per question; an answer may not add a proposal after it.
+  Credentials stay out, as for every proposal.
+- **Audit.** The actor is the user (`user:<name>`), the via `ai:<session>`
+  (decision 2's form) on the `config_batches` row, on the proposal
+  (`ai_proposals.applied_via`, new) and on the proposal's `apply_applied`
+  audit row (now with its via); each object's row carries `batch:<id>` as for
+  every batch. The proposal also keeps `batch_id` (new, set for a person's
+  apply too) so the console reverts it with the ordinary
+  `revertConfigBatch`. Migration `00086_ai_proposal_applied_via.sql`,
+  additive.
+- **The switch: per session, ask first by default (chosen).** Decision 2 lets
+  the AI apply but sets no default, so the canvas panel's "Let AI apply
+  changes" starts off each time the panel opens and holds for the questions
+  sent while it stays open; each question stores it (`context.allowApply` in
+  `ai_messages.context`), and only that question gets the write tool. Viewers
+  see no switch. Not a stored per-user setting: no setting outlives the panel,
+  so nothing applies without the user turning it on where they are looking.
+- **UI.** An AI-applied batch is drawn as what was applied: the canvas
+  reloads, places the new nodes and marks new and changed nodes; the panel
+  shows "Applied by the assistant for you" with the operations and a
+  Revert (dry run, then confirm). History and the proposal page label it
+  "by the assistant for <user>".
+- **No new API status codes.** The refusals are the existing
+  `403 forbidden_role` and `403 insufficient_scope`.
 
 ## Integrations P6: HubSpot and the internal/crm framework (2026-11-10)
 

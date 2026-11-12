@@ -209,8 +209,12 @@ func (s *Server) notifyPeer(from *call, lk *callLink) {
 
 // attachParty points relay leg at a phone's SDP offer and returns the answer
 // to give that phone: the relay port for the leg with the held party's
-// codec. Callers hold no lock.
-func (c *call) attachParty(leg string, offer media.AudioSDP, source string) ([]byte, bool) {
+// codec. The phone is a new endpoint on the leg: the previous endpoint's keys
+// are dropped and the phone is answered under its own SRTP policy (taker is
+// its call; nil when it is on another node, which is plain RTP). A phone that
+// demands SRTP and cannot have it is refused, never answered in the clear.
+// Callers hold no lock.
+func (c *call) attachParty(leg string, offer media.AudioSDP, source string, taker *call) ([]byte, int, string, bool) {
 	c.mu.Lock()
 	relay, host := c.relay, c.anchorHost
 	var base media.AudioSDP
@@ -219,11 +223,19 @@ func (c *call) attachParty(leg string, offer media.AudioSDP, source string) ([]b
 	}
 	c.mu.Unlock()
 	if relay == nil || len(base.Codecs) == 0 {
-		return nil, false
+		return nil, sip.StatusServiceUnavailable, "the parked call lost its media", false
 	}
 	handOverLeg(relay, leg, udpAddr(offer.Address, offer.Port), source)
+	ans := base.PlainOffer()
+	if taker != nil {
+		var ok bool
+		if ans, ok = taker.cryptoAnswerOn(relay, leg, taker.callerSRTP(), ans, offer); !ok {
+			return nil, sip.StatusNotAcceptableHere, "the retriever requires SRTP and could not negotiate it", false
+		}
+	}
+	c.syncSRTP()
 	c.logCodec("retrieve", leg, "anchored", "", base)
-	return base.PlainOffer().Build(host, relay.LegPort(leg), "sendrecv"), true
+	return ans.Build(host, relay.LegPort(leg), "sendrecv"), 0, "", true
 }
 
 // --- parking --------------------------------------------------------------
@@ -518,9 +530,9 @@ func (c *call) parkRetrieved(offer media.AudioSDP, retriever, source string, tak
 	if lk.relayLeg == legCallee {
 		leg = legCaller
 	}
-	answer, ok := c.attachParty(leg, offer, source)
+	answer, code, why, ok := c.attachParty(leg, offer, source, taker)
 	if !ok {
-		return nil, sip.StatusServiceUnavailable, "the parked call lost its media", false
+		return nil, code, why, false
 	}
 	c.mu.Lock()
 	c.park = nil
@@ -555,6 +567,19 @@ func (c *call) handleRetrieve(tx sip.ServerTransaction, snap *snapshot.Snapshot,
 		fail(sip.StatusNotAcceptableHere, "retrieve needs an SDP offer")
 		return
 	}
+	// SDES keys never travel between nodes, so a parked call held on another
+	// node can only be retrieved in plain RTP: a retriever that demands SRTP
+	// is refused before it takes the slot.
+	pctx, pcancel := s.stateCtx()
+	held, found, gerr := s.deps.Park.ParkGet(pctx, slot)
+	pcancel()
+	if gerr == nil && found && held.Node != s.cfg.NodeID {
+		if _, ok := c.crossNodeOffer(offer); !ok {
+			c.srtpNote("refused")
+			fail(sip.StatusNotAcceptableHere, "the parked call is on another node and SRTP cannot be negotiated across nodes")
+			return
+		}
+	}
 	ctx, cancel := s.stateCtx()
 	p, got, err := s.deps.Park.ParkClaim(ctx, slot)
 	cancel()
@@ -585,8 +610,9 @@ func (c *call) handleRetrieve(tx sip.ServerTransaction, snap *snapshot.Snapshot,
 		answer, code, why, ok = ref.c.parkRetrieved(offer, c.callerNum, c.inv.Source(), s.cfg.NodeID, c.callID, c)
 	} else {
 		var rep livestate.ParkReply
+		body, _ := c.crossNodeOffer(offer) // refused before the claim, below
 		rep, ok = s.parkCommand(p.Node, livestate.ParkCommand{Op: livestate.ParkOpRetrieve, Slot: slot, CallID: p.CallID,
-			Offer: string(c.inv.Body()), PeerCallID: c.callID, Retriever: c.callerNum, Source: c.inv.Source()})
+			Offer: body, PeerCallID: c.callID, Retriever: c.callerNum, Source: c.inv.Source()})
 		answer, peerID, code, why = []byte(rep.Answer), rep.CallID, rep.Code, rep.Reason
 		lk.node, lk.callID = p.Node, rep.CallID
 	}
@@ -663,7 +689,14 @@ func (c *call) parkReturn(ctx context.Context, pk *parkState, relay *media.Relay
 			switch ev.kind {
 			case evAnswered:
 				rc.cancelForks(ev.leg)
-				c.parkReturnAnswered(rc, ev.leg, pk, partyLeg, parkerLeg)
+				if !c.parkReturnAnswered(rc, ev.leg, pk, partyLeg, parkerLeg) {
+					// The parker's device demands SRTP and did not answer with
+					// it: the returned call is dropped, never carried in clear.
+					rc.closeSetup()
+					rc.end(sip.StatusNotAcceptableHere, cdr.SideSystem, "the parker's device would not take SRTP", ResultFailed)
+					c.parkVoicemail(ctx, pk, relay)
+					return
+				}
 				return
 			case evFailed:
 				left--
@@ -695,7 +728,10 @@ func (c *call) parkReturnLegs(snap *snapshot.Snapshot, pk *parkState, relay *med
 	if !pk.parkedIsCaller {
 		from, fromName = c.dialled, ""
 	}
-	sdp := keepSecurity(relay, parkerLeg, base).Build(host, relay.LegPort(parkerLeg), "sendrecv")
+	// The parker's earlier keys belonged to its earlier dialog: the returned
+	// call's devices are offered fresh ones, each under its own policy.
+	relay.ResetCrypto(parkerLeg)
+	sdp := base.PlainOffer().Build(host, relay.LegPort(parkerLeg), "sendrecv")
 	c.logCodec("park return", parkerLeg, "anchored", "", base)
 	req := sip.NewRequest(sip.INVITE, sip.Uri{Scheme: "sip", User: pk.parker, Host: s.cfg.Domain})
 	callID := sip.CallIDHeader(newID())
@@ -719,8 +755,15 @@ func (c *call) parkReturnLegs(snap *snapshot.Snapshot, pk *parkState, relay *med
 			continue
 		}
 		for _, b := range bs {
+			lg := c.bindingSRTP(b)
+			if lg.required() && !lg.tls {
+				rc.addTrace("Returned call not offered to " + d.Username + ": it requires SRTP and its contact is not on TLS")
+				c.srtpNote("refused")
+				continue
+			}
+			offer := c.cryptoOfferOn(relay, parkerLeg, lg, base.PlainOffer()).Build(host, relay.LegPort(parkerLeg), "sendrecv")
 			rc.mu.Lock()
-			legs = append(legs, rc.addLeg(&leg{binding: b}))
+			legs = append(legs, rc.addLeg(&leg{binding: b, offerBody: offer}))
 			rc.mu.Unlock()
 		}
 	}
@@ -731,7 +774,7 @@ func (c *call) parkReturnLegs(snap *snapshot.Snapshot, pk *parkState, relay *med
 // returned call is connected before its ACK goes out, so a BYE the parker
 // sends right after answering finds the dialog; the music stops last, as
 // stopping it can wait for the player.
-func (c *call) parkReturnAnswered(rc *call, l *leg, pk *parkState, partyLeg, parkerLeg string) {
+func (c *call) parkReturnAnswered(rc *call, l *leg, pk *parkState, partyLeg, parkerLeg string) bool {
 	s := c.s
 	if res := l.session().InviteResponse; res != nil {
 		if ans, err := media.ParseAudioSDP(res.Body()); err == nil {
@@ -739,7 +782,14 @@ func (c *call) parkReturnAnswered(rc *call, l *leg, pk *parkState, partyLeg, par
 			relay := c.relay
 			c.mu.Unlock()
 			if relay != nil {
-				handOverLeg(relay, parkerLeg, udpAddr(ans.Address, ans.Port), res.Source())
+				// The leg was reset when the call was offered; the answer's
+				// key settles it, and a device that demands SRTP and did not
+				// answer with it is dropped.
+				moveLeg(relay, parkerLeg, udpAddr(ans.Address, ans.Port), res.Source())
+				if !c.learnCryptoOn(relay, parkerLeg, c.bindingSRTP(l.binding), ans) {
+					l.bye()
+					return false
+				}
 			}
 		}
 	}
@@ -762,6 +812,7 @@ func (c *call) parkReturnAnswered(rc *call, l *leg, pk *parkState, partyLeg, par
 	c.stopParkMusic(pk)
 	c.addTrace(fmt.Sprintf("Returned to %s from slot %s", pk.parker, pk.slot))
 	s.parkMetric("return", "answered")
+	return true
 }
 
 // parkVoicemail hands the held party to the parker's voicemail: the party is
@@ -804,19 +855,46 @@ func (c *call) parkVoicemail(ctx context.Context, pk *parkState, relay *media.Re
 		}
 		offer = w.session().InviteResponse.Body()
 	}
-	answer, sess, err := s.answerAnchored(offer)
+	answer, sess, err := s.answerAnchored(offer, media.SecurePolicy{})
 	if err != nil || sess == nil {
 		end("No voicemail media on this node: the parked call is ended")
 		return
 	}
-	var ok bool
+	// The parked party keeps the encryption its relay leg had: it is offered
+	// the voicemail session's own keys, in the profile it negotiated, and a
+	// party that does not answer with crypto is ended rather than carried in
+	// the clear.
+	partyLeg := legCallee
+	if pk.parkedIsCaller {
+		partyLeg = legCaller
+	}
+	var sec *media.Secure
+	savp, secure := relay.SecureProfile(partyLeg)
+	if ss, isSec := sess.(media.SecureSession); isSec && secure {
+		sec = ss.Secure()
+		keyed, err := sec.ReSDP(answer, savp)
+		if err != nil {
+			_ = sess.Close()
+			end("The parked party's encryption could not be kept: the parked call is ended")
+			return
+		}
+		answer = keyed
+	}
+	var (
+		ok      bool
+		ansBody []byte
+	)
 	switch {
 	case hom != nil:
-		_, ok = s.haReinvite(hom.leg(false), answer)
+		var res *sip.Response
+		res, ok = s.haReinvite(hom.leg(false), answer)
+		if res != nil {
+			ansBody = res.Body()
+		}
 	case pk.parkedIsCaller:
-		_, ok = reinviteA(c.dss, answer)
+		ansBody, ok = reinviteA(c.dss, answer)
 	default:
-		_, ok = reinvite(w.session(), answer)
+		ansBody, ok = reinvite(w.session(), answer)
 		if ok {
 			ackLate(w.session(), nil)
 		}
@@ -826,6 +904,16 @@ func (c *call) parkVoicemail(ctx context.Context, pk *parkState, relay *media.Re
 		end("The parked party did not accept the voicemail media")
 		return
 	}
+	if sec != nil {
+		if a, err := media.ParseAudioSDP(ansBody); err == nil {
+			sec.LearnSDP(a)
+		}
+		if _, on := sec.Suite(); !on {
+			_ = sess.Close()
+			end("The parked party did not keep SRTP for the voicemail media: the parked call is ended")
+			return
+		}
+	}
 	c.mu.Lock()
 	c.relay, c.anchored = nil, false
 	c.dialled = pk.parker
@@ -833,6 +921,9 @@ func (c *call) parkVoicemail(ctx context.Context, pk *parkState, relay *media.Re
 	c.mediaMode = "anchored"
 	c.park = nil
 	c.mu.Unlock()
+	if sec != nil {
+		c.setSoloSecure(sec)
+	}
 	relay.Close()
 	if m := s.deps.Media; m != nil {
 		m.NoteEnd()

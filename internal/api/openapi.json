@@ -3903,6 +3903,16 @@
               "type": "string",
               "enum": ["devices"]
             }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "description": "`all` (default) or `summary`: every node's `summary` is empty and edges carry no `data`, a compact read that keeps an AI tool result of a small PBX under 16 KiB.",
+            "schema": {
+              "type": "string",
+              "enum": ["all", "summary"]
+            }
           }
         ],
         "responses": {
@@ -29073,6 +29083,57 @@
               "type": "string"
             },
             "description": "What a revert could not put back."
+          },
+          "flowDiff": {
+            "$ref": "#/components/schemas/FlowGraphDiff"
+          }
+        }
+      },
+      "FlowGraphDiff": {
+        "type": "object",
+        "description": "Only on a dry run: what the batch would do to the drawn flow graph, so a client can show it as an overlay before it applies.",
+        "required": [
+          "added",
+          "changed",
+          "removed",
+          "edgesAdded",
+          "edgesRemoved"
+        ],
+        "properties": {
+          "added": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowNode"
+            },
+            "description": "Nodes the batch creates, as they would be drawn."
+          },
+          "changed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowNode"
+            },
+            "description": "Nodes whose object the batch changes, as they would be after it."
+          },
+          "removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the nodes the batch deletes."
+          },
+          "edgesAdded": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowEdge"
+            },
+            "description": "Connections the batch makes; an edge whose details change is listed here and in edgesRemoved."
+          },
+          "edgesRemoved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the connections the batch drops."
           }
         }
       },
@@ -29138,7 +29199,7 @@
           },
           "via": {
             "type": "string",
-            "description": "The origin: an OAuth client id, ai-proposal:<id> or ai-assistant; empty for the console and API tokens."
+            "description": "The origin: an OAuth client id, ai-proposal:<id> (a person applied an AI proposal), ai:<session> (the assistant applied its own batch for the actor) or ai-assistant; empty for the console and API tokens."
           },
           "baseRevision": {
             "type": "integer",
@@ -31877,7 +31938,7 @@
           "srtp": {
             "type": "string",
             "enum": ["off", "optional", "required"],
-            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are not TLS today, so optional behaves as off and required refuses calls over the trunk."
+            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are SIP over UDP today, so optional behaves as off, and required is refused with 422 because it needs a TLS trunk transport that Hello does not have yet (a trunk stored as required before that rule refuses its calls until it is changed)."
           },
           "id": {
             "type": "integer",
@@ -32039,7 +32100,7 @@
           "srtp": {
             "type": "string",
             "enum": ["off", "optional", "required"],
-            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are not TLS today, so optional behaves as off and required refuses calls over the trunk.",
+            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are SIP over UDP today, so optional behaves as off, and required is refused with 422 because it needs a TLS trunk transport that Hello does not have yet (a trunk stored as required before that rule refuses its calls until it is changed).",
             "default": "off"
           },
           "name": {
@@ -32201,7 +32262,7 @@
           "srtp": {
             "type": "string",
             "enum": ["off", "optional", "required"],
-            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are not TLS today, so optional behaves as off and required refuses calls over the trunk."
+            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are SIP over UDP today, so optional behaves as off, and required is refused with 422 because it needs a TLS trunk transport that Hello does not have yet (a trunk stored as required before that rule refuses its calls until it is changed)."
           },
           "name": {
             "type": "string",
@@ -34658,6 +34719,33 @@
             "type": "boolean",
             "description": "Whether the action deletes a resource; the console marks it and asks for confirmation."
           },
+          "preview": {
+            "type": "object",
+            "description": "For applyConfigBatch: what the batch's dry run answered when the proposal was made, so the console can show it on the call-flow canvas.",
+            "required": ["baseRevision", "results", "warnings", "flowDiff"],
+            "properties": {
+              "baseRevision": {
+                "type": "integer",
+                "format": "int64",
+                "description": "The configuration revision the batch is based on."
+              },
+              "results": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ConfigBatchResult"
+                }
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FlowWarning"
+                }
+              },
+              "flowDiff": {
+                "$ref": "#/components/schemas/FlowGraphDiff"
+              }
+            }
+          },
           "references": {
             "type": "array",
             "description": "For a delete, what it takes with it or leaves dangling: members of a ring group, the inbound routes sending calls to it, a route's trunks and destination.",
@@ -34737,7 +34825,9 @@
           "dismissedAt",
           "dismissReason",
           "dismissText",
-          "failure"
+          "failure",
+          "appliedVia",
+          "batchId"
         ],
         "properties": {
           "id": {
@@ -34845,6 +34935,15 @@
               }
             ],
             "description": "Why a failed proposal stopped."
+          },
+          "appliedVia": {
+            "type": ["string", "null"],
+            "description": "How an applied proposal was applied: `ai:<session>` when the assistant applied its own batch for appliedBy (the user turned on \"Let AI apply changes\"); null when appliedBy applied it."
+          },
+          "batchId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The configuration batch an applied batch proposal ran as: revertConfigBatch undoes it. Null otherwise, and once the batch is pruned."
           }
         }
       },
@@ -34997,6 +35096,62 @@
             "type": "string",
             "format": "date-time",
             "description": "When it was written."
+          },
+          "context": {
+            "$ref": "#/components/schemas/AIMessageContext"
+          }
+        }
+      },
+      "AIMessageContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "What the console showed when the question was asked from a call-flow canvas. The model receives it as data with the question and reads the graph and traces the call with its own tools.",
+        "properties": {
+          "allowApply": {
+            "type": "boolean",
+            "default": false,
+            "description": "The canvas switch \"Let AI apply changes\". When true the assistant may apply the change asked for itself: its batch is validated and dry-run as a proposal, then applied through applyConfigBatch as the asking user with their role (a viewer never can), audited with via `ai:<session>` and revertible. False (ask first): a change is a proposal a person applies."
+          },
+          "canvasId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "The canvas the question was asked from."
+          },
+          "nodes": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string"
+            },
+            "description": "The flow node ids selected on it, such as `ivr:3`."
+          },
+          "trace": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["from", "number"],
+            "description": "A call traced on the canvas, with the parameters of traceFlow.",
+            "properties": {
+              "from": {
+                "type": "string",
+                "description": "An extension number or `trunk:<id>`."
+              },
+              "number": {
+                "type": "string",
+                "description": "The dialled number."
+              },
+              "callerId": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "digits": {
+                "type": "string",
+                "description": "Keys pressed in IVR menus, at most 32 of 0-9, * and #."
+              }
+            }
           }
         }
       },
@@ -35060,6 +35215,9 @@
             "minLength": 1,
             "maxLength": 4000,
             "description": "The question, at most 4000 characters."
+          },
+          "context": {
+            "$ref": "#/components/schemas/AIMessageContext"
           }
         },
         "additionalProperties": false

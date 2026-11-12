@@ -1009,6 +1009,7 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		body      []byte
 		sess      media.Session
 		confMedia *media.Party
+		soloSec   *media.Secure // the SRTP state of the taker's own media object
 	)
 	switch st.State {
 	case haPhaseConference:
@@ -1017,7 +1018,7 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 			s.haAbandon(st, from, "conference media: "+err.Error())
 			return
 		}
-		body, confMedia = ans, party
+		body, confMedia, soloSec = ans, party, party.Secure()
 	case haPhaseVoicemail:
 		anchor := s.voicemailAnchor([]byte(a.remoteSDP))
 		if anchor == nil {
@@ -1030,6 +1031,9 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 			return
 		}
 		body, sess = ans, vs
+		if ss, ok := vs.(media.SecureSession); ok {
+			soloSec = ss.Secure()
+		}
 		c.vmSession = vs
 	default: // an announcement destination
 		off, err := media.ParseAudioSDP([]byte(a.remoteSDP))
@@ -1064,6 +1068,22 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		}
 		body = []byte(haLegSDP(c.anchorHost, relay, legCaller, ansSDP, "sendrecv", a.srtp))
 	}
+	if soloSec != nil && a.srtp != "" {
+		// The caller was encrypted: it is offered the taker's own keys, in
+		// the profile it had, and must answer with crypto.
+		keyed, err := soloSec.ReSDP(body, a.srtp == "savp")
+		if err != nil {
+			if sess != nil {
+				_ = sess.Close()
+			}
+			if confMedia != nil {
+				confMedia.Close()
+			}
+			s.haAbandon(st, from, "SRTP keys: "+err.Error())
+			return
+		}
+		body = keyed
+	}
 	s.log.Info("takeover re-INVITE", "call_id", st.CallID, "leg", legCaller, "to", a.destination(s), "app", st.State)
 	res, ok := s.haReinvite(a, body)
 	if !ok {
@@ -1088,8 +1108,30 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		s.m.ZombieCalls.Inc()
 		return
 	}
+	if soloSec != nil && a.srtp != "" {
+		if ans, err := media.ParseAudioSDP(res.Body()); err == nil {
+			soloSec.LearnSDP(ans)
+		}
+		if _, on := soloSec.Suite(); !on {
+			// No silent downgrade to clear media.
+			if sess != nil {
+				_ = sess.Close()
+			}
+			if confMedia != nil {
+				confMedia.Close()
+			}
+			s.log.Warn("takeover leg failed", "call_id", st.CallID, "leg", legCaller, "reason", "srtp not renegotiated")
+			c.addTrace(fmt.Sprintf("Takeover from %s failed: the caller did not renegotiate SRTP", from))
+			c.end(sip.StatusServiceUnavailable, cdr.SideSystem, "takeover failed: the caller did not renegotiate SRTP", ResultFailed)
+			s.m.ZombieCalls.Inc()
+			return
+		}
+	}
+	if soloSec != nil {
+		c.setSoloSecure(soloSec)
+	}
 	a.mu.Lock()
-	a.sdp = string(body)
+	a.sdp = media.StripCrypto(string(body)) // Hello's own key is never replicated
 	a.mu.Unlock()
 	now := time.Now()
 	took := now.Sub(start)

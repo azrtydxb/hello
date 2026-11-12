@@ -14,7 +14,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 13  | Door station extension kind, Door group (S-45, S-46)                          | done (#225)            |
 | 14  | Door-open DTMF `*50` (S-47)                                                   | wip (#283)              |
 | 15  | Setting overrides and WP extras (S-12)                                        | todo                   |
-| 16  | Doorbell webhook (S-48)                                                       | wip (#284)              |
+| 16  | Doorbell webhook (S-48)                                                       | wip (#284)             |
 | 17  | Door video preview (S-49)                                                     | todo (code), hw (test) |
 | 18  | vCard phonebook slot (S-31), partial                                          | todo                   |
 | 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)    | done (#232)            |
@@ -159,7 +159,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P3  | Batch backend                                             | done (#214)             |
 | P4  | Editing UI                                                | done (#227)             |
 | P5  | traceFlow, trace mode                                     | done (#224)             |
-| P6  | AI on the canvas                                          | todo (after P4)         |
+| P6  | AI on the canvas                                          | wip (#280)              |
 | P7  | New node types: batch ops, trace, override badge          | wip (#277)              |
 | D3  | Every call output accepts every target kind               | done (#196)             |
 | -   | Routes form `conference` destination chooser              | wip (routes-conference) |
@@ -174,20 +174,20 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 ## Competitor gaps (spec pbx-gaps, #199)
 
-| Item                                          | Status                |
-| --------------------------------------------- | --------------------- |
-| Backup and restore                            | wip (#219, A2)        |
-| Follow-me                                     | wip (#272)            |
-| Blocklist, anonymous reject, country limits   | done (#210, A1)       |
-| Queue callback                                | done (#237)           |
-| 2FA                                           | done (#209)           |
-| Dial-by-name                                  | done (#229, B3)       |
-| Voicemail groups                              | done (#220, A6)       |
-| Fax                                           | wip (#273)            |
-| Boss/secretary                                | done (#236, B2)       |
-| Multi-language prompts (Dutch option per box) | done (#208, A5)       |
-| Codec in call history                         | done (#206)           |
-| Phone LDAP directory                          | wip (#223, A7)        |
+| Item                                          | Status          |
+| --------------------------------------------- | --------------- |
+| Backup and restore                            | wip (#219, A2)  |
+| Follow-me                                     | wip (#272)      |
+| Blocklist, anonymous reject, country limits   | done (#210, A1) |
+| Queue callback                                | done (#237)     |
+| 2FA                                           | done (#209)     |
+| Dial-by-name                                  | done (#229, B3) |
+| Voicemail groups                              | done (#220, A6) |
+| Fax                                           | wip (#273)      |
+| Boss/secretary                                | done (#236, B2) |
+| Multi-language prompts (Dutch option per box) | done (#208, A5) |
+| Codec in call history                         | done (#206)     |
+| Phone LDAP directory                          | wip (#223, A7)  |
 
 ## Other
 

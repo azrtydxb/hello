@@ -2,7 +2,7 @@
 // .../messages with Accept: text/event-stream answers with server-sent
 // events. EventSource cannot POST, so the stream is read with fetch.
 import { responseJson } from "../api";
-import type { AIMessage } from "./aiagent";
+import type { AIMessage, AIMessageContext } from "./aiagent";
 
 /** Tokens one answer cost. */
 export interface StreamUsage {
@@ -113,6 +113,7 @@ export async function streamMessage(
   content: string,
   onEvent: (e: StreamEvent) => void,
   signal?: AbortSignal,
+  context?: AIMessageContext,
 ): Promise<StreamOutcome> {
   const path = `/api/v1/ai/sessions/${encodeURIComponent(sessionId)}/messages`;
   const res = await fetch(path, {
@@ -121,7 +122,7 @@ export async function streamMessage(
       Accept: "text/event-stream",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(context ? { content, context } : { content }),
     credentials: "same-origin",
     signal,
   });

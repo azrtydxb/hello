@@ -22,6 +22,8 @@ const BASE = {
   dismissReason: null,
   dismissText: null,
   failure: null,
+  appliedVia: null,
+  batchId: null,
 };
 const UPDATE = {
   ...BASE,

@@ -52,6 +52,9 @@ type call struct {
 	srtpClosed bool
 	srtpNoted  map[string]bool
 	srtpSnap   *snapshot.Snapshot
+	// soloSec is the SRTP state of the media a call Hello answers itself
+	// uses (voicemail, a conference room, a page's caller leg).
+	soloSec *media.Secure
 	// rel is the reliable provisional response toward the caller (S-17).
 	rel relState
 	// secure marks a sips: call: it forks only onto bindings registered over
@@ -396,8 +399,12 @@ type leg struct {
 	c       *call
 	binding livestate.Binding
 	callID  string
-	ctx     context.Context
-	cancel  context.CancelFunc
+	// offerBody, when set, is the SDP offer this leg is sent instead of the
+	// call's own.
+	offerBody []byte
+
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	mu    sync.Mutex
 	dcs   *sipgo.DialogClientSession
@@ -1369,6 +1376,23 @@ func (c *call) byeA() {
 	if c.dss == nil {
 		return // a call Hello placed has no caller dialog
 	}
+	if res := c.dss.InviteResponse; res == nil || !res.IsSuccess() {
+		// The 200 went out through the raw transaction (voicemail, feature
+		// codes), so sipgo's session never recorded it: its InviteResponse
+		// is nil (Bye dereferences it and panics) or only the last
+		// provisional (Bye refuses). The dialog is real, though:
+		// end it with the raw BYE, or the caller's phone stays in a call
+		// nobody answers.
+		c.mu.Lock()
+		raw := c.vmTag != "" && c.inv != nil
+		c.mu.Unlock()
+		if raw {
+			c.byeCallerRaw()
+		} else {
+			c.s.log.Warn("no BYE sent to caller: the call was never answered on its dialog", "correlation_id", c.id)
+		}
+		return
+	}
 	ctx, cancel := c.s.timeoutUntilShutdown(byeTimeout)
 	defer cancel()
 	if err := c.dss.Bye(ctx); err != nil {
@@ -1818,6 +1842,11 @@ func (l *leg) invite() (*sip.Request, error) {
 			req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 		}
 		req.SetBody(body)
+	}
+	if l.offerBody != nil {
+		// A leg with an offer of its own (a returned parked call, whose
+		// device is offered keys under its own SRTP policy).
+		req.SetBody(l.offerBody)
 	}
 	// An anchored call terminates media: the fork's offer is the anchor's
 	// leg-b port, not the caller's SDP (spec S-2).

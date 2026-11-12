@@ -243,7 +243,7 @@ func (m *memStore) ActiveAITask(_ context.Context, id string) (*Task, error) {
 	return nil, nil
 }
 
-func (m *memStore) PostAIMessage(ctx context.Context, sessionID, content, title string, window int, start StartFunc) (int64, string, error) {
+func (m *memStore) PostAIMessage(ctx context.Context, sessionID, content string, mc *Context, title string, window int, start StartFunc) (int64, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.sessions[sessionID]
@@ -257,7 +257,7 @@ func (m *memStore) PostAIMessage(ctx context.Context, sessionID, content, title 
 		s.Title = title
 	}
 	id := int64(len(m.messages) + 1)
-	m.messages = append(m.messages, Message{ID: id, SessionID: sessionID, Role: RoleUser, Content: content, CreatedAt: time.Now()})
+	m.messages = append(m.messages, Message{ID: id, SessionID: sessionID, Role: RoleUser, Content: content, CreatedAt: time.Now(), Context: mc})
 	var history []Message
 	for _, msg := range m.messages {
 		if msg.SessionID == sessionID {
@@ -458,7 +458,7 @@ func (r *rig) ask(t *testing.T, content string) (Session, taskOutcome) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, task, err := r.a.PostMessage(t.Context(), u, s.ID, content)
+	_, task, err := r.a.PostMessage(t.Context(), u, s.ID, content, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
