@@ -36,6 +36,7 @@ import { formatTime } from "../format";
 import { Can } from "../role";
 import { usePolling } from "../usePolling";
 import { peerLabel, smsSegments } from "./inbox/sms";
+import { StartConversation } from "./inbox/StartConversation";
 import { useInboxStream, type InboxEvent } from "./inbox/useInboxStream";
 import "./inbox/inbox.css";
 
@@ -747,6 +748,9 @@ function InboxView({ api, supervisor }: ViewProps) {
 
 function Shell({ api, supervisor }: ViewProps) {
   const status = usePolling(getInboxStatus, REFRESH_MS);
+  const toast = useToast();
+  const [starting, setStarting] = useState(false);
+  const senders = status.status === "ready" ? (status.data.senders ?? []) : [];
   return (
     <section aria-labelledby="page-title">
       <PageHeader
@@ -770,8 +774,28 @@ function Shell({ api, supervisor }: ViewProps) {
           }
         />
       ) : (
-        <InboxView api={api} supervisor={supervisor} />
+        <>
+          {supervisor && senders.length > 0 && (
+            <div className="msg-toolbar">
+              <Button icon="send" onClick={() => setStarting(true)}>
+                Text a customer
+              </Button>
+            </div>
+          )}
+          <InboxView api={api} supervisor={supervisor} />
+        </>
       )}
+      {starting && (
+        <StartConversation
+          senders={senders}
+          onClose={() => setStarting(false)}
+          onStarted={() => {
+            setStarting(false);
+            toast.show("The text is queued and will be sent in a moment.");
+          }}
+        />
+      )}
+      {toast.node}
     </section>
   );
 }
