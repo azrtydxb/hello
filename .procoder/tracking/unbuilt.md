@@ -140,6 +140,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | --- | ------------------------------------------- | ---------------------------- |
 | 1   | Media foundation (pion)                     | blocked (parity 23-25)       |
 | 2   | WSS on Kamailio                             | blocked (parity 23)          |
+| 2b  | Kamailio to hello-sip TLS hop (S-12)        | wip (#340)                   |
 | 3   | Web devices and credentials                 | wip (#282)                   |
 | 4   | coturn, ICE servers                         | wip (#282)                   |
 | 5   | Web softphone, audio                        | blocked (1-4)                |
