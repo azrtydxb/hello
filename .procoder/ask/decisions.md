@@ -3555,6 +3555,45 @@ Decided while building, without asking, within the spec and the brief:
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
 
+## Integrations P7: Zapier private integration (2026-11-10)
+
+Built per spec `integrations.md` I-52 and the P7 phase line. Choices the spec left
+open; each was chosen by default (the conservative option), not by the user.
+
+- **`GET /api/v1/lookup/number` (I-43) is built here.** The Find Contact search
+  needs it, and neither main nor the P4 PR (#281, which carries only the call
+  and recording lookups) has it. It is a thin wrapper over the existing
+  caller-name lookup (extensions, then company, no callee) and adds the
+  credential's own personal contacts only when nothing there names the number.
+  Chosen by default: no `extension`/`callee` parameter (the named books of a
+  phone group need a callee; a connector has none), the personal book is the
+  last resort (so the answer for a number does not depend on who asks when the
+  company already names it), and a service account never reads a personal book.
+  Scope `read`, role `user` (listed as self-service in `TestRoutesTable`).
+  `PhonebookLookup.source` gains `personal`.
+- **Webhooks API unchanged.** I-42 already made `POST /api/v1/webhooks`
+  idempotent on `(url, events)` and `DELETE` by id, which is all a Zapier REST
+  hook needs. Subscribing therefore keeps the existing requirement: an
+  administrator credential with the `secrets` scope. Chosen by default over
+  letting a user subscribe to their own events; widening webhook access to
+  non-admins is a separate product decision. Actions and searches need no admin.
+- **Zapier does not store the signing secret and Hello's signature is not checked
+  on this route.** Zapier hook URLs are unguessable and cannot verify an HMAC;
+  the docs say so.
+- **Find Call has no server-side number filter.** `GET /cdrs` has no number
+  parameter, and adding one is not in the P7 text. The search takes a CDR ID
+  (exact, `GET /cdrs/{id}`) or a number, matched in the app against the latest
+  200 calls (caller, called and original destination, as written or on the last
+  nine digits). `lookup/calls` of P4 is not used because it is unmerged.
+- **Place Call input**: destination, optional extension, optional idempotency
+  key; nothing else (no caller ID, no auto-answer), so the originate limits and
+  the emergency refusal are the only policy.
+- **The app is plain JavaScript with no installed dependencies** and its tests
+  run with `node --test` against a fake Zapier runtime (CI job `zapier`). The
+  `zapier-platform-core` version in `package.json` is the current release at the
+  time of writing and is only needed by `zapier push`. Not tested here: a real
+  Zapier account (invite, a Zap run end to end).
+
 ## 2026-11-13: per-line Grandstream keys (feat/prov-perline-keys)
 
 - Lines 2 and up now get SRTP mode and key exchange, presence, RTCP-XR collector and backup server keys, at the account offsets found in the official templates (wp8x6 1.0.3.39, wp810_822_825 1.0.11.83, wp820 1.0.7.90, wp856 1.0.3.16).

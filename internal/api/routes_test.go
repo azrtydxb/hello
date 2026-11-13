@@ -52,7 +52,7 @@ func TestRoutesTable(t *testing.T) {
 			return false
 		}
 		switch r.Pattern {
-		case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password":
+		case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password", "/api/v1/lookup/number":
 			return true
 		case "/api/v1/calls/{id}/door-open":
 			// Open the door of the user's own answered door call (spec

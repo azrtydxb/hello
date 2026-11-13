@@ -203,6 +203,10 @@ Books: the computed extensions book (read-only), the company book and up to
 - `lookupPhonebook` (admin) with a `number` (and optionally `callee`) shows
   which entry would name that caller, in the order extensions, named books,
   company. Use it to explain why a name shows or does not.
+- `lookupNumber` (read, any role) with a `number` gives the one best name for
+  it, for an integration: extensions, then company, then the caller's own
+  personal contacts (only when the credential belongs to a user). `result` is
+  `match`, `ambiguous`, `none` or `unresolvable`; no match is still a 200.
 - Deliver a named book by adding it to a group with `setPhoneGroupBooks`,
   then resync.
 - `getPhoneDirectory` (path `id` of the phone) says how many contacts the

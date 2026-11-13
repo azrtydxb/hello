@@ -372,6 +372,7 @@ func (s *server) routes() []route {
 
 		{"GET", "/api/v1/phonebooks", auth.ScopeRead, auth.RoleViewer, false, s.listPhonebooks},
 		{"GET", "/api/v1/phonebooks/lookup", auth.ScopeAdmin, auth.RoleAdmin, false, s.lookupPhonebook},
+		{"GET", "/api/v1/lookup/number", auth.ScopeRead, auth.RoleUser, false, s.lookupNumber},
 		{"POST", "/api/v1/phonebooks", auth.ScopeAdmin, auth.RoleAdmin, false, s.createPhonebook},
 		{"GET", "/api/v1/phonebooks/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getPhonebook},
 		{"PUT", "/api/v1/phonebooks/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updatePhonebook},

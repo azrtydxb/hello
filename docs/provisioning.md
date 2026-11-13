@@ -1751,10 +1751,10 @@ Wi-Fi handset), so leave both off until it has.
 registrars, at most two; the first is written to the phones that take one. List
 the other HA nodes here.
 
-| Vendor      | Keys written                                                                                                                                                                                                                                  |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.1.sip_server.2.address`, `.port`, `.transport_type = 0`, `.expires`                                                                                                                                                                  |
-| Poly        | `reg.1.server.2.address`, `.port`, `.transport = "UDPOnly"`, `.expires`                                                                                                                                                                       |
+| Vendor      | Keys written                                                                                                                                                                                                                 |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.1.sip_server.2.address`, `.port`, `.transport_type = 0`, `.expires`                                                                                                                                                 |
+| Poly        | `reg.1.server.2.address`, `.port`, `.transport = "UDPOnly"`, `.expires`                                                                                                                                                      |
 | Grandstream | `P48` Outbound Proxy (the primary, `host:port`), `P2333` Backup Outbound Proxy (the backup) and `P2312` Secondary SIP Server (the backup; `P50602` on the WP820); the phone uses the backup when the primary does not answer |
 
 Snom and Fanvil get none: no key for a second registrar is in a vendor
