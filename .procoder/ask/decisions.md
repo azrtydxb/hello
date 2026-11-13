@@ -3594,6 +3594,12 @@ open; each was chosen by default (the conservative option), not by the user.
   time of writing and is only needed by `zapier push`. Not tested here: a real
   Zapier account (invite, a Zap run end to end).
 
+## 2026-11-13: per-line Grandstream keys (feat/prov-perline-keys)
+
+- Lines 2 and up now get SRTP mode and key exchange, presence, RTCP-XR collector and backup server keys, at the account offsets found in the official templates (wp8x6 1.0.3.39, wp810_822_825 1.0.11.83, wp820 1.0.7.90, wp856 1.0.3.16).
+- Correction to #262: the WP820 template does have a Secondary SIP Server, at P50602 (account 1) and P51102 (account 2); line 1 now writes it.
+- Send Anonymous (P421, P521, ...) for further lines stays unwritten, as decided before.
+
 ## HubSpot calling iframe and recording links (2026-11-13, feat/hubspot-iframe)
 
 Completes the part of P6 (#289) that waited for the originate API and the first-party clients (decisions of 2026-11-10).
