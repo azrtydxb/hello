@@ -94,7 +94,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P19 | Dynamics 365 CIF                               | todo        |
 | P20 | ConnectWise, Autotask, HaloPSA, Clio           | todo        |
 | P21 | Odoo, Bitrix24                                 | todo        |
-| P22 | Teams Direct Routing guide (shared with WR 13) | todo        |
+| P22 | Teams Direct Routing guide (shared with WR 13) | wip (#326)  |
 | #   | Item                                           | Status      |
 | --- | ---------------------------------------------- | ----------- |
 | P1  | Call events: stream, integration_events, SSE   | done (#205) |
@@ -118,7 +118,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P19 | Dynamics 365 CIF                               | todo        |
 | P20 | ConnectWise, Autotask, HaloPSA, Clio           | todo        |
 | P21 | Odoo, Bitrix24                                 | todo        |
-| P22 | Teams Direct Routing guide (shared with WR 13) | todo        |
+| P22 | Teams Direct Routing guide (shared with WR 13) | wip (#326)  |
 
 ## messaging-channels
 
@@ -139,7 +139,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | #   | Item                                        | Status                       |
 | --- | ------------------------------------------- | ---------------------------- |
 | 1   | Media foundation (pion)                     | blocked (parity 23-25)       |
-| 2   | WSS on Kamailio                             | blocked (parity 23)          |
+| 2   | WSS on Kamailio                             | wip (#326)                   |
 | 3   | Web devices and credentials                 | wip (#282)                   |
 | 4   | coturn, ICE servers                         | wip (#282)                   |
 | 5   | Web softphone, audio                        | blocked (1-4)                |
@@ -147,7 +147,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 6b  | Video recording                             | blocked (6)                  |
 | 10  | Video phones and door stations              | todo (code), hw (test)       |
 | 11  | Conference-room video                       | blocked (6)                  |
-| 13  | Teams SBC-peer trunk profile, docs/teams.md | wip (#225)                   |
+| 13  | Teams SBC-peer trunk profile, docs/teams.md | wip (#326)                   |
 | 7-9 | Push gateway, mobile apps, mobile video     | not now                      |
 | 12  | Public reach                                | not now (user decides later) |
 
@@ -222,3 +222,5 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - Parity lab items 1-7 and 14
 - Hello MCP "Connected apps" end-to-end (after #189)
 - Real-account lab lists for integrations, messaging, clients (after those phases)
+- Teams Direct Routing run (item 13, P22): a Microsoft 365 tenant with Teams Phone, a certified SBC or DRaaS contract, and a public SBC name and certificate; the cmdlet steps in docs/teams.md are unverified until then
+- WSS in a browser through the kw Ingress (item 2): needs the kw manifests, the image with the websocket module and a real browser
