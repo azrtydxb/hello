@@ -1,6 +1,6 @@
 ---
 name: hello-crm
-description: Inspect the CRM connectors of a Kuvryn Hello PBX through its MCP server - HubSpot connection state, which Hello users map to which CRM users, and the logging jobs that write calls into the CRM, including dead letters and skipped calls. Use when someone asks why a call is missing from HubSpot, why a caller shows no name, whether the CRM connection still works, who owns calls in the CRM, or why a recording link is not on a CRM record.
+description: Inspect the CRM connectors of a Kuvryn Hello PBX through its MCP server - HubSpot connection state, which Hello users map to which CRM users, and the logging jobs that write calls into the CRM, including dead letters and skipped calls. Also covers the Slack notification channels and the personal Outlook and Google accounts (contacts naming callers, calendar Do Not Disturb). Use when someone asks why a call is missing from HubSpot, why nothing reached Slack, why a caller is not named from the user's contacts, why Do Not Disturb came on during a meeting, why a caller shows no name, whether the CRM connection still works, who owns calls in the CRM, or why a recording link is not on a CRM record.
 license: Apache-2.0
 metadata:
   hello-version: "v1"
@@ -79,3 +79,36 @@ the connector's `fallbackOwner`, or are skipped when that is empty.
   could not be minted: check that recording links are available.
 
 See [tools](references/tools.md) and [failures](references/failures.md).
+
+## Slack notifications
+
+Missed calls and new voicemail messages can be posted to a Slack channel. A
+destination is an incoming webhook or a bot token plus a channel; the
+credential is write-only and managed in the console under Integrations, Slack.
+`getSlackDestination` (scope `admin`) shows `enabled`, `disabledReason`,
+`lastError`, `pending` and `dead`; `listSlackPosts` lists its posts newest first,
+filterable by `status`.
+
+| `disabledReason`       | Meaning and what to do                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| `auth_failed`          | Slack refused the token or webhook (revoked, app removed). Enter a new credential in the console. |
+| `destination_gone`     | The incoming webhook no longer exists. Create a new one in Slack and enter it in the console.     |
+| `consecutive_failures` | 50 posts failed in a row; read `lastError`, fix it and switch the channel on in the console.      |
+| `manual`               | Switched off by an administrator.                                                                 |
+
+A `dead` post with `slack: not_in_channel` means the bot must be invited to the
+channel; `channel_not_found` means the channel name or id is wrong. Retry a dead
+post in the console.
+
+## Personal Outlook and Google accounts
+
+Each user can connect their own Outlook or Google account so their contacts name
+the people who call them and their calendar switches Do Not Disturb on while
+they are busy. `listMyConnections` (scope `read`, role `user`) shows, for the
+asking user, each available connector with `connection.status`
+(`needs_reauth` means they must press Connect again under Connected accounts),
+`calendarDnd` (their choice), `calendarActive` (the calendar is holding DND now,
+until `calendarBusyUntil`) and `calendarError`. An extension's `dndSource` is
+`calendar` for a DND the calendar set and `manual` for one a person set; the
+calendar never changes a manual DND. Connecting and the calendar choice are made
+by the user in the console.
