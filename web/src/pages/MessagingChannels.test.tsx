@@ -70,6 +70,87 @@ function api(more: Routes = {}) {
   });
 }
 
+// Built at run time: a literal looks like a real key to secret scanners.
+const API_KEY = "KEY" + "0123456789".repeat(3);
+const PROFILE_ID = "4001932a-6b2d-4a0c-8f7e-9d5a1c2b3e4f";
+
+const registration = (over: Record<string, unknown> = {}) => ({
+  provider: "telnyx",
+  supported: true,
+  readAt: STAMP,
+  brands: [
+    {
+      id: "B1",
+      name: "Acme",
+      type: "private_profit",
+      state: "approved",
+      detail: "",
+    },
+  ],
+  campaigns: [
+    {
+      id: "C1",
+      brandId: "B1",
+      useCase: "customer_care",
+      state: "approved",
+      detail: "",
+    },
+  ],
+  numbers: [
+    {
+      number: "+12125550100",
+      kind: "10dlc",
+      state: "approved",
+      detail: "",
+      added: true,
+    },
+    {
+      number: "+18005550100",
+      kind: "toll_free",
+      state: "rejected",
+      detail: "missing opt-in",
+      added: false,
+    },
+  ],
+  unavailable: [],
+  checklist: [
+    {
+      id: "brand",
+      title: "Register the brand (A2P 10DLC)",
+      state: "done",
+      detail: "A brand is approved.",
+      link: "https://developers.telnyx.com/docs/messaging/10dlc/quickstart",
+    },
+    {
+      id: "tollfree",
+      title: "Verify toll-free numbers",
+      state: "attention",
+      detail: "A toll-free verification was rejected.",
+      link: "https://developers.telnyx.com/docs/messaging",
+    },
+  ],
+  ...over,
+});
+
+const telnyxChannel = channel({
+  id: 7,
+  name: "Telnyx",
+  provider: "telnyx",
+  trunkId: null,
+  trunkName: "",
+  hasCredentials: true,
+  accountHint: "3e4f",
+  messagingService: true,
+});
+
+const telnyxAddress = {
+  ...address,
+  id: 8,
+  channelId: 7,
+  channelName: "Telnyx",
+  address: "+12125550100",
+};
+
 describe("Messaging channels", () => {
   it("lists channels and numbers, never a credential", async () => {
     api();
@@ -300,5 +381,171 @@ describe("Messaging channels", () => {
     await waitFor(() =>
       expect(calls.some((c) => c.method === "DELETE")).toBe(true),
     );
+  });
+
+  it("adds a Telnyx channel and never shows the key again", async () => {
+    const calls = api({
+      "POST /api/v1/messaging/channels": () => json(telnyxChannel, 201),
+    });
+    renderApp("/messaging/channels");
+    fireEvent.click(await screen.findByRole("button", { name: "Add channel" }));
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "Telnyx" },
+    });
+    fireEvent.change(screen.getByLabelText("Carrier"), {
+      target: { value: "telnyx" },
+    });
+    expect(screen.queryByLabelText("SIP trunk")).toBeNull();
+    expect(screen.queryByLabelText("Account SID")).toBeNull();
+    const key = screen.getByLabelText("API key");
+    expect(key).toHaveAttribute("type", "password");
+    fireEvent.change(key, { target: { value: API_KEY } });
+    fireEvent.change(screen.getByLabelText(/Messaging profile ID/), {
+      target: { value: PROFILE_ID },
+    });
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Add channel" }).at(-1)!,
+    );
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+        name: "Telnyx",
+        enabled: true,
+        kind: "sms",
+        provider: "telnyx",
+        apiKey: API_KEY,
+        messagingProfileId: PROFILE_ID,
+      }),
+    );
+    await waitFor(() => expect(screen.queryByLabelText("API key")).toBeNull());
+    expect(screen.queryByText(API_KEY)).toBeNull();
+  });
+
+  it("keeps the stored Telnyx key when only the name changes", async () => {
+    const calls = api({
+      "GET /api/v1/messaging/channels": () => json({ items: [telnyxChannel] }),
+      "GET /api/v1/messaging/addresses": () => json({ items: [] }),
+      "GET /api/v1/messaging/channels/7/registration": () =>
+        json(registration()),
+      "PUT /api/v1/messaging/channels/7": () => json(telnyxChannel),
+    });
+    renderApp("/messaging/channels");
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Telnyx" }));
+    expect(screen.queryByLabelText("Carrier")).toBeNull();
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "Telnyx two" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save channel" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PUT")?.body).toEqual({
+        name: "Telnyx two",
+        enabled: true,
+      }),
+    );
+  });
+
+  it("shows each carrier number's registration state and a checklist", async () => {
+    api({
+      "GET /api/v1/messaging/channels": () =>
+        json({ items: [channel(), telnyxChannel] }),
+      "GET /api/v1/messaging/addresses": () =>
+        json({ items: [address, telnyxAddress] }),
+      "GET /api/v1/messaging/channels/7/registration": () =>
+        json(registration()),
+    });
+    renderApp("/messaging/channels");
+    const numbers = await screen.findByRole("table", { name: "Numbers" });
+    expect(
+      await within(numbers).findByText("10DLC approved"),
+    ).toBeInTheDocument();
+    // A SIP trunk number has no registration to show.
+    const sipRow = within(numbers).getByText("+3270123456").closest("tr")!;
+    expect(within(sipRow).queryByText(/approved|pending/i)).toBeNull();
+    // Only a carrier channel has the panel.
+    expect(
+      screen.queryByRole("button", { name: "Registration of Main" }),
+    ).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Registration of Telnyx" }),
+    );
+    const checklist = await screen.findByRole("table", { name: "Checklist" });
+    expect(
+      within(checklist).getByText("Register the brand (A2P 10DLC)"),
+    ).toBeInTheDocument();
+    expect(within(checklist).getByText("Needs attention")).toBeInTheDocument();
+    const link = within(checklist).getAllByRole("link")[0];
+    expect(link).toHaveAttribute(
+      "href",
+      "https://developers.telnyx.com/docs/messaging/10dlc/quickstart",
+    );
+    expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
+    expect(screen.getByRole("table", { name: "Brands" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("table", { name: "Campaigns" }),
+    ).toBeInTheDocument();
+    const carrierNumbers = screen.getByRole("table", {
+      name: "Carrier numbers",
+    });
+    expect(
+      within(carrierNumbers).getByText("missing opt-in"),
+    ).toBeInTheDocument();
+  });
+
+  it("says when the carrier would not answer part of the registration", async () => {
+    api({
+      "GET /api/v1/messaging/channels": () => json({ items: [telnyxChannel] }),
+      "GET /api/v1/messaging/addresses": () => json({ items: [telnyxAddress] }),
+      "GET /api/v1/messaging/channels/7/registration": () =>
+        json(
+          registration({
+            unavailable: ["brands", "campaigns"],
+            numbers: [
+              {
+                number: "+12125550100",
+                kind: "10dlc",
+                state: "unknown",
+                detail: "",
+                added: true,
+              },
+            ],
+          }),
+        ),
+    });
+    renderApp("/messaging/channels");
+    const numbers = await screen.findByRole("table", { name: "Numbers" });
+    expect(
+      await within(numbers).findByText("10DLC unknown"),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Registration of Telnyx" }),
+    );
+    expect(
+      await screen.findByText("Part of the registration cannot be read"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/brands, campaigns/)).toBeInTheDocument();
+  });
+
+  it("leaves the numbers unknown and explains when the carrier is unreachable", async () => {
+    api({
+      "GET /api/v1/messaging/channels": () => json({ items: [telnyxChannel] }),
+      "GET /api/v1/messaging/addresses": () => json({ items: [telnyxAddress] }),
+      "GET /api/v1/messaging/channels/7/registration": () =>
+        apiError(
+          502,
+          "provider_unreachable",
+          "the carrier could not be reached or did not answer as expected",
+        ),
+    });
+    renderApp("/messaging/channels");
+    const numbers = await screen.findByRole("table", { name: "Numbers" });
+    expect(await within(numbers).findByText("Unknown")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Registration of Telnyx" }),
+    );
+    expect(
+      await screen.findByText("Could not read the registration"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/the carrier could not be reached/).length,
+    ).toBeGreaterThan(0);
   });
 });

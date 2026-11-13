@@ -4098,3 +4098,73 @@ Not testable without a Twilio account (hardware/accounts list in the PR): a real
 send and delivery receipt, error code mapping against live Twilio, 10DLC and
 toll-free registration state, Messaging Service sends, what carriers do to an
 unregistered sender.
+
+## Messaging item 6: Telnyx and sender registration (2026-11-13)
+
+1. **Telnyx is one more adapter on the framework,** `internal/messaging/provider/telnyx`,
+   registered by `cmd/hello-control` like Twilio. Credentials are an API key and
+   an optional messaging profile ID (UUID), added to `provider.Config` as
+   `APIKey` and `MessagingProfileID`; `Secret()`, `Hint()` and `Pooled()` replace
+   the Twilio-only reads in the store. No migration: `msg_channels.provider` is
+   free text and the sealed blob is JSON, so the placeholder 00130 is unused.
+2. **Credentials are replaced as a whole,** as for Twilio: `apiKey` and
+   `messagingProfileId` together after Telnyx accepts the key (a `PUT` with only
+   `apiKey` drops the profile). The channel's `accountHint` is the last four
+   characters of the profile ID (never of the key); empty without a profile.
+3. **Validation lists the account's messaging numbers**
+   (`GET /phone_numbers/messaging`), paged to 20 pages of 250, so `Validate` and
+   `Numbers` are the same call and a key without messaging access is refused.
+4. **Telnyx's 403 is split by code before status.** Error `40300` ("blocked due
+   to STOP") is mapped to Hello's `CodeOptedOut` (the same constant Twilio's
+   21610 uses), on send and on a status read, and so records a provider opt-out.
+   Any other 403 (or 401) is refused credentials. 40300 is from Telnyx's docs,
+   not a live account (on the accounts list).
+5. **Status polling uses a 48 hour window for Telnyx too,** inside Telnyx's 10
+   day limit, so M-9a's "never poll past 10 days" holds by construction.
+   `delivery_unconfirmed` is shown as `sent` (it is carrier silence, not a
+   failure); `sending_failed` and `delivery_failed` are `failed`.
+6. **Registration is an optional `provider.Registrar`** with
+   `Registration(ctx, numbers)`, not the spec's per-number `Registration(ctx, n)`:
+   one call per carrier reads the brands, campaigns and verifications once and
+   answers for every number, instead of N reads. Both adapters implement it.
+7. **Registration states are the same five for every carrier** (`approved`,
+   `pending`, `rejected`, `unregistered`, `unknown`) and the kind comes from the
+   number (+1 toll-free prefixes, other +1, rest of the world). A number outside
+   the US and Canada is `other`/`unknown`: this follows the spec's out-of-scope
+   line (no country-specific registration, no UK/EU alphanumeric sender IDs, no
+   India DLT). Sender IDs are therefore not read or managed.
+8. **A section the carrier will not answer degrades, it does not fail.** The
+   route names it under `unavailable` and its numbers are `unknown`; only when
+   nothing at all can be read is it the carrier's error (`422` refused, `502`
+   unreachable). A 403 on a registration read does not mark the channel
+   `credentials_invalid` (the send path alone decides that).
+9. **Twilio reads:** `BrandRegistrations` (brands), each Messaging Service's
+   `UsAppToPerson` (campaigns, at most 20 services) and `PhoneNumbers` (which
+   numbers are on a service), and `Tollfree/Verifications` keyed by the number's
+   SID (`Number.ID`). A long code is approved only when it sits in a service whose
+   campaign is verified. Twilio's `messaging.twilio.com/v1` root is a second API
+   root in the adapter (`WithMessagingURL`, tests only).
+10. **Telnyx reads:** `/10dlc/brand`, `/10dlc/campaign`,
+    `/10dlc/phone_number_campaigns` and
+    `/messaging_tollfree/verification/requests`. Field names are from Telnyx's
+    published API and have not been checked on a live account.
+11. **The checklist is derived server-side** (`buildChecklist`) so the console and
+    any other client agree: brand, campaign, numbers on a campaign, toll-free,
+    sample messages (always `manual`: Hello cannot read what a carrier reviews)
+    and an answer to HELP (Hello's own `helpText`, done when every enabled number
+    has one). Steps that do not apply to the account's numbers are
+    `not_applicable`. Links point at each carrier's documentation; the Telnyx
+    toll-free link is the messaging docs root because no stable page was verified.
+12. **The numbers table loads registrations on its own,** one best-effort read per
+    enabled carrier channel when the page opens (not for a SIP trunk channel or a
+    channel with refused credentials); a failure leaves "Unknown". Nothing is
+    cached or stored server-side.
+13. **MCP:** the registration route is excluded like the other messaging routes
+    (`private-data`); the doctable is unchanged.
+
+Not testable without accounts (accounts list in the PR): a real Telnyx send,
+delivery receipt and the 40300 STOP block; the exact fields of Telnyx's 10DLC and
+toll-free reads and Twilio's `UsAppToPerson`/`Tollfree` reads; what a limited key
+returns (403 vs 404) for each registration read; a Twilio account with several
+Messaging Services.
+

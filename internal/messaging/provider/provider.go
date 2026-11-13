@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -28,7 +29,38 @@ type Config struct {
 	// MessagingServiceSID, when set, sends through the carrier's sender pool
 	// instead of the number the conversation is on.
 	MessagingServiceSID string `json:"messagingServiceSid,omitempty"`
+	// APIKey is a Telnyx v2 API key; Twilio uses AccountSID and AuthToken.
+	APIKey string `json:"apiKey,omitempty"`
+	// MessagingProfileID, when set, sends through that Telnyx messaging
+	// profile (its sender pool and settings) instead of the number alone.
+	MessagingProfileID string `json:"messagingProfileId,omitempty"`
 }
+
+// Secret is the part of the configuration that must never be shown or
+// logged: the auth token of a Twilio account, the API key of a Telnyx one.
+func (c Config) Secret() string {
+	if c.APIKey != "" {
+		return c.APIKey
+	}
+	return c.AuthToken
+}
+
+// Hint is a non-secret tail that tells accounts apart: the last four
+// characters of the Twilio account SID or of the Telnyx messaging profile.
+func (c Config) Hint() string {
+	h := c.AccountSID
+	if h == "" {
+		h = c.MessagingProfileID
+	}
+	if len(h) > 4 {
+		h = h[len(h)-4:]
+	}
+	return h
+}
+
+// Pooled reports whether texts leave through a carrier sender pool (a Twilio
+// Messaging Service or a Telnyx messaging profile).
+func (c Config) Pooled() bool { return c.MessagingServiceSID != "" || c.MessagingProfileID != "" }
 
 // Caps are what a carrier can do.
 type Caps struct {
@@ -82,6 +114,9 @@ func (s State) Final() bool { return s.Status == StatusDelivered || s.Status == 
 
 // Number is a number the account owns.
 type Number struct {
+	// ID is the carrier's own identifier of the number; it is used to look
+	// the number up in the carrier's registration records.
+	ID    string `json:"-"`
 	E164  string `json:"number"`
 	Label string `json:"label"`
 	SMS   bool   `json:"sms"`
@@ -102,6 +137,119 @@ type SMSProvider interface {
 	Status(ctx context.Context, providerID string) (State, error)
 	// Numbers lists the numbers of the account.
 	Numbers(ctx context.Context) ([]Number, error)
+}
+
+// Registrar is implemented by an adapter that can read the state of the
+// customer's sender registration (spec M-1, "Registration"): A2P 10DLC brand
+// and campaign for US long codes, toll-free verification. Hello only reports
+// it; the customer registers in the carrier's own console.
+type Registrar interface {
+	// Registration reads the account's brands, campaigns and verifications
+	// and says where each of the given numbers stands. A section the
+	// carrier would not answer is named in Unavailable and its numbers are
+	// RegUnknown; the call fails only when nothing could be read.
+	Registration(ctx context.Context, numbers []Number) (Registration, error)
+}
+
+// Registration states, the same for every carrier.
+const (
+	RegApproved     = "approved"
+	RegPending      = "pending"
+	RegRejected     = "rejected"
+	RegUnregistered = "unregistered"
+	RegUnknown      = "unknown"
+)
+
+// Number kinds a registration is about.
+const (
+	// RegKind10DLC is a US long code: it needs a brand and a campaign.
+	RegKind10DLC = "10dlc"
+	// RegKindTollFree is a US or Canadian toll-free number: it needs
+	// toll-free verification.
+	RegKindTollFree = "toll_free"
+	// RegKindOther is a number no registration API is read for (other
+	// countries); its state is always RegUnknown.
+	RegKindOther = "other"
+)
+
+// Brand is an A2P 10DLC brand.
+type Brand struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	State  string `json:"state"`
+	Detail string `json:"detail"`
+}
+
+// Campaign is an A2P 10DLC campaign.
+type Campaign struct {
+	ID      string `json:"id"`
+	BrandID string `json:"brandId"`
+	UseCase string `json:"useCase"`
+	State   string `json:"state"`
+	Detail  string `json:"detail"`
+}
+
+// NumberReg is where one number stands.
+type NumberReg struct {
+	Number string `json:"number"`
+	Kind   string `json:"kind"`
+	State  string `json:"state"`
+	Detail string `json:"detail"`
+}
+
+// Registration is the carrier's view of the customer's sender registration.
+type Registration struct {
+	Brands    []Brand     `json:"brands"`
+	Campaigns []Campaign  `json:"campaigns"`
+	Numbers   []NumberReg `json:"numbers"`
+	// Unavailable names the sections the carrier did not answer (brands,
+	// campaigns, tollfree), for instance because the API key lacks the
+	// permission.
+	Unavailable []string `json:"unavailable"`
+}
+
+// IsTollFree reports whether e164 is a North American toll-free number.
+func IsTollFree(e164 string) bool {
+	if len(e164) != 12 || !strings.HasPrefix(e164, "+1") {
+		return false
+	}
+	switch e164[2:5] {
+	case "800", "833", "844", "855", "866", "877", "888":
+		return true
+	}
+	return false
+}
+
+// KindOf says which registration a number needs: toll-free verification for
+// a North American toll-free number, 10DLC for any other +1 number, and
+// nothing Hello can read for the rest of the world.
+func KindOf(e164 string) string {
+	switch {
+	case IsTollFree(e164):
+		return RegKindTollFree
+	case strings.HasPrefix(e164, "+1") && len(e164) == 12:
+		return RegKind10DLC
+	}
+	return RegKindOther
+}
+
+// Clean bounds free text a carrier sent (a failure reason, a brand name) to
+// n printable characters before it is stored or shown.
+func Clean(s string, n int) string {
+	var b strings.Builder
+	count := 0
+	for _, r := range strings.TrimSpace(s) {
+		if r < ' ' || r == 0x7f {
+			continue
+		}
+		if count >= n {
+			break
+		}
+		b.WriteRune(r)
+		count++
+	}
+	return b.String()
 }
 
 // Errors an adapter returns.

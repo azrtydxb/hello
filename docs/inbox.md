@@ -15,11 +15,14 @@ This is the first phase of the messaging channels. What works now:
   notes, tags, states, search, live updates and notifications;
 - Hello's own opt-out handling, retention and erasing a customer.
 
-- sending SMS through a **Twilio** account (see "Sending through Twilio"):
-  outbound only.
+- sending SMS through a **Twilio** or **Telnyx** account (see "Sending through
+  Twilio", "Sending through Telnyx"): outbound only;
+- reading the state of your US **sender registration** (A2P 10DLC brand and
+  campaign, toll-free verification) from the carrier (see "Sender
+  registration").
 
 Not yet: receiving texts from a carrier's web API (needs an Internet-facing
-address), Telnyx, WhatsApp, the chat widget, texts on desk phones, queues and
+address), WhatsApp, the chat widget, texts on desk phones, queues and
 automatic assignment, and AI. None of the providers that need an
 Internet-facing address is possible while Hello is reachable only on the LAN.
 
@@ -73,6 +76,7 @@ listener, which is not built; do not plan on replies arriving.
    toll-free verification if you want it) in your Twilio account. Hello only
    sends; the registration, the carrier fees and what Twilio filters are
    Twilio's. Unregistered US traffic is filtered or surcharged by carriers.
+   Hello reads where it stands: see "Sender registration".
 
 **First contact.** Off by default. An administrator turns it on in **Messaging
 settings** ("Allowed with a consent attestation"). An operator or
@@ -116,6 +120,78 @@ working token is entered.
 Metrics: `hello_msg_outbound_total{provider,result}` (sent, failed, unknown).
 The send, status and settle workers run on every control replica; the store
 hands each text to one attempt, so two replicas never send the same text.
+
+## Sending through Telnyx
+
+A **Telnyx** channel works exactly like a Twilio one (the same first-contact
+rules, queue, at-most-once send, status polling, opt-out and failure states,
+all described above); only the account differs. Telnyx numbers **cannot
+receive** texts yet, for the same reason: Telnyx delivers an inbound text by
+calling a public webhook.
+
+1. **Messaging > Channels > Add channel**, carrier **Telnyx**: a Telnyx v2 API
+   key (from the Telnyx portal) and optionally a **messaging profile ID** (a
+   UUID) when texts should leave through that profile's sender pool and
+   settings. Hello lists the account's messaging numbers with Telnyx before it
+   saves anything (a refused key is `422`, an unreachable Telnyx `502`), then
+   seals the key with `HELLO_SECRET_KEY`. **The key is never shown again.** To
+   change it, enter the key and the profile together; they replace the stored
+   ones after Telnyx accepts them. **Test** and
+   `GET /api/v1/messaging/channels/{id}/numbers` work as for Twilio.
+2. **Add number**: the Telnyx number in international format.
+3. Register the sender in the Telnyx portal as for Twilio (below).
+
+Differences worth knowing:
+
+- Status is read with `GET /v2/messages/{id}`, which Telnyx answers for ten
+  days after the send. Hello polls for 48 hours, so the limit never applies.
+- A carrier that cannot confirm delivery reports `delivery_unconfirmed`; Hello
+  shows it as **sent** and keeps asking until 48 hours have passed.
+- Telnyx blocks a recipient who replied STOP and fails the send with error
+  `40300`. Hello records it as an opt-out with source "carrier", like Twilio's 21610. This code was taken from Telnyx's documentation and has not been
+  checked on a live account.
+- A Telnyx `403` that carries a documented error code is that error, not
+  refused credentials; a `403` without one is a refused key.
+
+## Sender registration
+
+Texting US numbers from a long code needs an **A2P 10DLC** brand and campaign
+registered with your carrier, and a toll-free number needs **toll-free
+verification**; carriers filter or surcharge texts from an unregistered
+sender. Hello does not register anything (that is done in the Twilio or Telnyx
+console, with your business details). It **reads** where each number stands, so
+you can see what is left before go-live.
+
+**Messaging > Channels**: the numbers table has a **Registration** column for
+numbers on a Twilio or Telnyx channel, and **Registration of &lt;channel&gt;**
+opens the full picture: a checklist, the account's brands, its campaigns and
+every number of the account (also those not added to Hello) with its state.
+`GET /api/v1/messaging/channels/{id}/registration` returns the same (admin
+only; nothing is stored, each call reads the carrier).
+
+- A number's **kind** says which registration it needs: `10dlc` for a US
+  long code (+1 and not toll-free), `toll_free` for a North American toll-free
+  number (800, 833, 844, 855, 866, 877, 888), `other` for the rest of the
+  world. Hello reads no registration outside the US and Canada: those numbers
+  are **unknown** (country rules such as UK or EU sender IDs and India DLT are
+  not read at all).
+- A number's **state** is `approved`, `pending`, `rejected`, `unregistered` or
+  `unknown`. A long code is approved when it sits on an approved campaign
+  (Twilio: in a Messaging Service with a verified campaign; Telnyx: assigned
+  to an active campaign); a toll-free number is approved when its
+  verification is.
+- If the carrier will not answer part of it (an API key without the 10DLC
+  permission, say), that part is listed under `unavailable` and the numbers
+  that depend on it are **unknown**, not unregistered. If it answers nothing,
+  the route is `422` (refused) or `502` (unreachable).
+- The **checklist** has six steps: brand, campaign, numbers on a campaign,
+  toll-free verification, sample messages, and an answer to HELP. A step that
+  does not apply to the account's numbers is "not needed". Hello cannot read
+  the sample messages a carrier reviews, so that step is always "check
+  yourself": carriers reject a campaign whose samples lack opt-out language
+  such as "Reply STOP to opt out". The HELP step is Hello's own setting: it is
+  done when every enabled number has an answer to HELP. Each step links to the
+  carrier's documentation.
 
 ## Conversations
 

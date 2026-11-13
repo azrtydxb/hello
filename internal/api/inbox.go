@@ -24,6 +24,7 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/messaging/provider"
+	"github.com/azrtydxb/hello/internal/messaging/provider/telnyx"
 	"github.com/azrtydxb/hello/internal/messaging/provider/twilio"
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/store"
@@ -160,6 +161,10 @@ type msgChannelBody struct {
 	AccountSID          *string `json:"accountSid"`
 	AuthToken           *string `json:"authToken"`
 	MessagingServiceSID *string `json:"messagingServiceSid"`
+	// A Telnyx channel's account: the API key is write-only like the token,
+	// and the messaging profile is optional.
+	APIKey             *string `json:"apiKey"`
+	MessagingProfileID *string `json:"messagingProfileId"`
 }
 
 func (b msgChannelBody) input(create bool, cur store.MsgChannel) (store.MsgChannelInput, fieldErrs) {
@@ -178,8 +183,8 @@ func (b msgChannelBody) input(create bool, cur store.MsgChannel) (store.MsgChann
 		in.Kind = *b.Kind
 	}
 	if b.Provider != nil {
-		if *b.Provider != messaging.ProviderSIPTrunk && *b.Provider != messaging.ProviderTwilio {
-			f.add("provider", "must be sip_trunk or twilio")
+		if *b.Provider != messaging.ProviderSIPTrunk && *b.Provider != messaging.ProviderTwilio && *b.Provider != messaging.ProviderTelnyx {
+			f.add("provider", "must be sip_trunk, twilio or telnyx")
 		}
 		if !create && *b.Provider != cur.Provider {
 			f.add("provider", "cannot be changed")
@@ -206,11 +211,15 @@ func (b msgChannelBody) input(create bool, cur store.MsgChannel) (store.MsgChann
 	if b.TrunkID != nil {
 		in.TrunkID = b.TrunkID
 	}
-	if in.Provider == messaging.ProviderTwilio {
+	switch in.Provider {
+	case messaging.ProviderTwilio:
 		if b.TrunkID != nil {
 			f.add("trunkId", "a Twilio channel does not use a SIP trunk")
 		}
 		in.TrunkID = nil
+		if b.APIKey != nil || b.MessagingProfileID != nil {
+			f.add("accountSid", "a Twilio channel has an account SID and token, not a Telnyx API key")
+		}
 		given := b.AccountSID != nil || b.AuthToken != nil || b.MessagingServiceSID != nil
 		if create || given {
 			cfg := provider.Config{}
@@ -234,8 +243,32 @@ func (b msgChannelBody) input(create bool, cur store.MsgChannel) (store.MsgChann
 			}
 			in.Credentials = &cfg
 		}
-	} else {
+	case messaging.ProviderTelnyx:
+		if b.TrunkID != nil {
+			f.add("trunkId", "a Telnyx channel does not use a SIP trunk")
+		}
+		in.TrunkID = nil
 		if b.AccountSID != nil || b.AuthToken != nil || b.MessagingServiceSID != nil {
+			f.add("apiKey", "a Telnyx channel has an API key and a messaging profile, not a Twilio account")
+		}
+		if create || b.APIKey != nil || b.MessagingProfileID != nil {
+			cfg := provider.Config{}
+			if b.APIKey != nil {
+				cfg.APIKey = strings.TrimSpace(*b.APIKey)
+			}
+			if b.MessagingProfileID != nil {
+				cfg.MessagingProfileID = strings.TrimSpace(*b.MessagingProfileID)
+			}
+			if cfg.APIKey == "" || len(cfg.APIKey) > 256 || !printable(cfg.APIKey, 256, false) {
+				f.add("apiKey", "is required (at most 256 characters, no spaces)")
+			}
+			if cfg.MessagingProfileID != "" && !telnyx.ValidID(cfg.MessagingProfileID) {
+				f.add("messagingProfileId", "must be a messaging profile ID (a UUID), or empty")
+			}
+			in.Credentials = &cfg
+		}
+	default:
+		if b.AccountSID != nil || b.AuthToken != nil || b.MessagingServiceSID != nil || b.APIKey != nil || b.MessagingProfileID != nil {
 			f.add("accountSid", "only a carrier channel has an account")
 		}
 		if in.TrunkID == nil || *in.TrunkID <= 0 {

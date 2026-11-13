@@ -14607,7 +14607,7 @@
       "post": {
         "operationId": "createMessagingChannel",
         "summary": "Add a messaging channel",
-        "description": "Adds a channel. A sip_trunk channel reads customer texts from a SIP trunk with SMS over SIP turned on and sends replies through it. A twilio channel sends through a Twilio account: the credentials are checked against Twilio first (422 when refused, 502 when Twilio cannot be reached), then sealed. A Twilio number cannot receive texts while Hello has no public listener, so a conversation on it starts with a first-contact message. Add its numbers next. Admin only.",
+        "description": "Adds a channel. A sip_trunk channel reads customer texts from a SIP trunk with SMS over SIP turned on and sends replies through it. A twilio channel sends through a Twilio account and a telnyx channel through a Telnyx account (apiKey, optional messagingProfileId): the credentials are checked with the carrier first (422 when refused, 502 when it cannot be reached), then sealed. A carrier number cannot receive texts while Hello has no public listener, so a conversation on it starts with a first-contact message. Add its numbers next. Admin only.",
         "tags": ["messaging"],
         "requestBody": {
           "required": true,
@@ -14711,7 +14711,7 @@
       "put": {
         "operationId": "updateMessagingChannel",
         "summary": "Replace a messaging channel's settings",
-        "description": "Changes a channel's name, its switch and its trunk; its kind and provider stay. Turning it off stops new texts and replies, and the numbers keep their history. For a Twilio channel, sending accountSid and authToken replaces the stored credentials after Twilio accepts them (422 when refused, 502 when unreachable); leaving them out keeps the stored ones.",
+        "description": "Changes a channel's name, its switch and its trunk; its kind and provider stay. Turning it off stops new texts and replies, and the numbers keep their history. For a Twilio channel, sending accountSid and authToken replaces the stored credentials after Twilio accepts them; for a Telnyx channel, sending apiKey (and messagingProfileId) does the same (422 when refused, 502 when unreachable); leaving them out keeps the stored ones.",
         "tags": ["messaging"],
         "parameters": [
           {
@@ -14815,11 +14815,66 @@
         }
       }
     },
+    "/api/v1/messaging/channels/{id}/registration": {
+      "get": {
+        "operationId": "getMessagingChannelRegistration",
+        "summary": "Read a carrier channel's sender registration",
+        "description": "Reads, from the carrier's own API, where the account's sender registration stands: the A2P 10DLC brands and campaigns, toll-free verifications, and the state of each carrier number (approved, pending, rejected, unregistered or unknown), with a checklist of what is left. Hello only reads it; the customer registers in the carrier's console. A section the carrier will not answer for the stored key is named in unavailable and its numbers are unknown. Numbers outside the US and Canada have kind other and state unknown. Nothing is sent and nothing is stored. A SIP trunk channel is 409. Admin only.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The registration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingRegistration"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/Carrier"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
     "/api/v1/messaging/channels/{id}/test": {
       "post": {
         "operationId": "testMessagingChannel",
         "summary": "Check that a channel can work",
-        "description": "Checks that the channel can work, and sends nothing. A sip_trunk channel: the channel is on, its trunk exists, is enabled and has SMS over SIP turned on, and it has an enabled number. A Twilio channel: the channel is on, Twilio accepts the stored credentials and lists the numbers, and it has an enabled number.",
+        "description": "Checks that the channel can work, and sends nothing. A sip_trunk channel: the channel is on, its trunk exists, is enabled and has SMS over SIP turned on, and it has an enabled number. A Twilio or Telnyx channel: the channel is on, the carrier accepts the stored credentials and lists the numbers, and it has an enabled number.",
         "tags": ["messaging"],
         "parameters": [
           {
@@ -40229,7 +40284,7 @@
           },
           "provider": {
             "type": "string",
-            "description": "How texts reach Hello: sip_trunk is a SIP trunk that carries SMS as SIP MESSAGE, twilio is a Twilio account reached over its web API (sending only: a Twilio number cannot receive texts while Hello has no public listener)."
+            "description": "How texts reach Hello: sip_trunk is a SIP trunk that carries SMS as SIP MESSAGE, twilio and telnyx are a Twilio or Telnyx account reached over its web API (sending only: a carrier number cannot receive texts while Hello has no public listener)."
           },
           "name": {
             "type": "string"
@@ -40293,8 +40348,8 @@
           },
           "provider": {
             "type": "string",
-            "description": "How texts reach Hello: sip_trunk or twilio.",
-            "enum": ["sip_trunk", "twilio"]
+            "description": "How texts reach Hello: sip_trunk, twilio or telnyx.",
+            "enum": ["sip_trunk", "twilio", "telnyx"]
           },
           "name": {
             "type": "string",
@@ -40308,7 +40363,7 @@
           },
           "trunkId": {
             "type": "integer",
-            "description": "The SIP trunk a sip_trunk channel reads texts from and sends through; the trunk needs SMS over SIP turned on. A Twilio channel takes none.",
+            "description": "The SIP trunk a sip_trunk channel reads texts from and sends through; the trunk needs SMS over SIP turned on. A Twilio or Telnyx channel takes none.",
             "format": "int64"
           },
           "accountSid": {
@@ -40326,6 +40381,17 @@
             "type": "string",
             "description": "Optional Twilio Messaging Service SID (MG and 32 hex digits): texts leave through its sender pool instead of the number they were received on. Empty sends from the number.",
             "pattern": "^(MG[0-9a-fA-F]{32})?$"
+          },
+          "apiKey": {
+            "type": "string",
+            "description": "A Telnyx channel's v2 API key. Required when creating a Telnyx channel. Write-only: it is checked against Telnyx, sealed with HELLO_SECRET_KEY and never returned or logged. Sending apiKey or messagingProfileId on an update replaces both, so send them together.",
+            "maxLength": 256,
+            "writeOnly": true
+          },
+          "messagingProfileId": {
+            "type": "string",
+            "description": "Optional Telnyx messaging profile ID (a UUID): texts leave through that profile's sender pool and settings. Empty sends from the number alone.",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?$"
           }
         }
       },
@@ -40351,6 +40417,151 @@
                 },
                 "detail": {
                   "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "MessagingRegistration": {
+        "type": "object",
+        "required": [
+          "provider",
+          "supported",
+          "readAt",
+          "brands",
+          "campaigns",
+          "numbers",
+          "unavailable",
+          "checklist"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "supported": {
+            "type": "boolean",
+            "description": "Whether the carrier's adapter can read registrations."
+          },
+          "readAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "brands": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "type", "state", "detail"],
+              "properties": {
+                "id": { "type": "string" },
+                "name": { "type": "string" },
+                "type": { "type": "string" },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "approved",
+                    "pending",
+                    "rejected",
+                    "unregistered",
+                    "unknown"
+                  ]
+                },
+                "detail": { "type": "string" }
+              }
+            }
+          },
+          "campaigns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "brandId", "useCase", "state", "detail"],
+              "properties": {
+                "id": { "type": "string" },
+                "brandId": { "type": "string" },
+                "useCase": { "type": "string" },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "approved",
+                    "pending",
+                    "rejected",
+                    "unregistered",
+                    "unknown"
+                  ]
+                },
+                "detail": { "type": "string" }
+              }
+            }
+          },
+          "numbers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["number", "kind", "state", "detail", "added"],
+              "properties": {
+                "number": { "type": "string" },
+                "kind": {
+                  "type": "string",
+                  "enum": ["10dlc", "toll_free", "other"],
+                  "description": "Which registration the number needs: 10dlc for a US long code, toll_free for a North American toll-free number, other where no registration API is read."
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "approved",
+                    "pending",
+                    "rejected",
+                    "unregistered",
+                    "unknown"
+                  ]
+                },
+                "detail": { "type": "string" },
+                "added": {
+                  "type": "boolean",
+                  "description": "Whether the number is one of the channel's numbers in Hello."
+                }
+              }
+            }
+          },
+          "unavailable": {
+            "type": "array",
+            "description": "Sections the carrier would not answer: brands, campaigns or tollfree.",
+            "items": { "type": "string" }
+          },
+          "checklist": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "title", "state", "detail", "link"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "enum": [
+                    "brand",
+                    "campaign",
+                    "numbers",
+                    "tollfree",
+                    "samples",
+                    "stophelp"
+                  ]
+                },
+                "title": { "type": "string" },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "done",
+                    "pending",
+                    "todo",
+                    "attention",
+                    "unknown",
+                    "manual",
+                    "not_applicable"
+                  ]
+                },
+                "detail": { "type": "string" },
+                "link": {
+                  "type": "string",
+                  "description": "The carrier's documentation of the step."
                 }
               }
             }
