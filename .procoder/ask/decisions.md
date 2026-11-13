@@ -1291,6 +1291,58 @@ column ("a" when both legs agree, "a → b" when they differ).
   `haNewCall` restores them, so a taken-over door call keeps the trunk ban and CDR
   kind door (`TestDoorCallerSurvivesTakeover`).
 
+## Door-open DTMF `*50` (2026-11-09) — phone-feature-parity item 14 (S-47)
+
+- Migration `00078_door_open` (after #225's 00053; the number is a gap-numbered
+  slot like the others, goose does not need it contiguous): table `door_open`
+  (`extension_id` primary key, cascade; `code_enc` BYTEA sealed under
+  HELLO_SECRET_KEY with AAD `door-open:<extension id>`; `hangup_after_open`).
+  A separate table, not columns on `extensions`, so none of the extension
+  queries scan or return the code. A station that becomes a user loses its row.
+- The code rides the configuration snapshot (opened at load, unexported and
+  redacting its `String`), so the SIP path reads no PostgreSQL. A code that does
+  not open is logged by extension number only and treated as no code.
+- Settings API: `GET` (viewer) says `codeSet` and `hangupAfterOpen`; `PUT` is
+  admin (scope `admin`, role admin). It could not use the `secrets` scope: that
+  list is pinned by spec S-5 and `TestRoutesTable`. The code is write-only, an
+  empty string clears it, a user extension answers `409`. `GET` is an MCP tool
+  (`getDoorOpen`, taught in hello-setup); `PUT` and the open request are
+  excluded from MCP (a code must be set in the console; opening a physical door
+  is a user action).
+- `*50` is matched as the end of the call's digit buffer, in `dispatchDigit`
+  after the feature codes, so a stale digit before it does not hide it; a
+  feature code row named `*50` wins. It acts only on a connected call with a door
+  station, only for keys from the far side of the station (the station's own
+  keys never open its door), and otherwise does nothing: the keys were already
+  relayed as ordinary DTMF.
+- The code goes out through `Relay.SendDTMF`: 5 packets of 20 ms per digit and 3
+  end packets, a 60 ms gap between digits, as its own RTP stream (fresh SSRC)
+  like `PlayTo`, using the leg's negotiated telephone-event type. Without one the
+  trace says so and nothing is sent. Door calls are always anchored today (every
+  call is), which `*50` needs. Open: whether GDS/2N/Akuvox accept events on a
+  different SSRC than the call's audio; hardware check.
+- The user's own `*`, `5`, `0` events still reach the door before the code
+  (the relay forwards DTMF); suppressing them would need the relay to hold back
+  events, which is not done.
+- Only one open at a time per call (`doorOpening`); a second press while the
+  first is going out is refused with a trace line.
+- API open: `POST /api/v1/calls/{id}/door-open` (user role, write scope; added
+  to the self-service allowlist of `TestRoutesTable`, the spec fixes the path).
+  The API checks the caller's extension is the one that answered (live call
+  `callee`), or placed the call to a station, queues a park-command
+  `door_open` to the call's node and waits for the reply (the existing
+  Valkey park command channel); the node checks again against the live dialog.
+  `403` has error code `not_your_call`, `404` no such call, `409` not an answered
+  door call, no code, or media unusable, `502` node error, `504` no node
+  answered. `GET /api/v1/me/door-calls` lists the user's own for the console;
+  live calls gained `door` (the station's number).
+- Hang-up-after-open: `HELLO_DOOR_HANGUP_SECONDS` (default 3, positive) after
+  the code finished sending, both legs get BYE (`endBoth`, CDR side system).
+- Not done: provisioning an "Open door" key on the phones (Yealink DSS DTMF,
+  Grandstream WP DialDTMF softkey, Poly/Snom/Fanvil soft keys). The spec marks
+  each **verify**, and no vendor key was confirmed from the templates in this
+  change; it stays with the hardware pass.
+
 ## Doorbell webhook (2026-11-09) — phone-feature-parity item 16 (S-48)
 
 - Independent of #222 (outbound event webhooks: signing, retries, dead

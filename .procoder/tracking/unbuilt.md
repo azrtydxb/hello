@@ -12,7 +12,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | done (#226)            |
 | 12  | Tone library (S-43)                                                           | done (#238)            |
 | 13  | Door station extension kind, Door group (S-45, S-46)                          | done (#225)            |
-| 14  | Door-open DTMF `*50` (S-47)                                                   | todo (after 13)        |
+| 14  | Door-open DTMF `*50` (S-47)                                                   | wip (#283)              |
 | 15  | Setting overrides and WP extras (S-12)                                        | todo                   |
 | 16  | Doorbell webhook (S-48)                                                       | wip (#284)             |
 | 17  | Door video preview (S-49)                                                     | todo (code), hw (test) |

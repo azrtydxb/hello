@@ -276,6 +276,10 @@ func (s *server) routes() []route {
 
 		{"GET", "/api/v1/registrations", auth.ScopeRead, auth.RoleViewer, false, s.registrations},
 		{"GET", "/api/v1/calls", auth.ScopeRead, auth.RoleViewer, false, s.calls},
+		{"POST", "/api/v1/calls/{id}/door-open", auth.ScopeWrite, auth.RoleUser, false, s.doorOpenCall},
+		{"GET", "/api/v1/me/door-calls", auth.ScopeRead, auth.RoleUser, false, s.listMyDoorCalls},
+		{"GET", "/api/v1/extensions/{id}/door-open", auth.ScopeRead, auth.RoleViewer, false, s.getDoorOpen},
+		{"PUT", "/api/v1/extensions/{id}/door-open", auth.ScopeAdmin, auth.RoleAdmin, false, s.putDoorOpen},
 		{"GET", "/api/v1/cdrs", auth.ScopeRead, auth.RoleViewer, false, s.cdrs},
 		{"GET", "/api/v1/cdrs/counts", auth.ScopeRead, auth.RoleViewer, false, s.cdrCounts},
 		{"GET", "/api/v1/cdrs/concurrency", auth.ScopeRead, auth.RoleViewer, false, s.cdrConcurrency},
