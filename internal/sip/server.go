@@ -317,6 +317,11 @@ type Server struct {
 	// a test can inject the fork failure that races the abort.
 	abortHook atomic.Pointer[func(*call)]
 
+	// takeoverMu serializes takeover passes: a pass reads the membership
+	// once and acts on that snapshot, so a pass holding an older snapshot
+	// must not run after a newer one (it would forget an OFFLINE node the
+	// newer pass already counted, and the next pass would count it again).
+	takeoverMu sync.Mutex
 	// haOffline tracks OFFLINE nodes for the zombie reaper (guarded by
 	// haOfflineMu).
 	haOfflineMu sync.Mutex
