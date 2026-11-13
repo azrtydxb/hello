@@ -188,15 +188,20 @@ func TestLabTLSHop(t *testing.T) {
 			case <-time.After(20 * time.Second):
 				t.Log("the caller's dial is still running")
 			}
-			time.Sleep(3 * time.Second) // the CDR is written after the call
+			for _, b := range bindingsFor(lc.registrations(), ext.User) {
+				t.Logf("binding: contact %s source %s transport %s path %q expires %s", b.ContactURI, b.Source, b.Transport, b.Path, b.Expires.Format(time.RFC3339))
+			}
+			time.Sleep(15 * time.Second) // the CDR is written after the call
 			var recent struct{ Items []labCDR }
-			if err := lc.do("GET", "/api/v1/cdrs?limit=4", nil, &recent, 200); err == nil {
+			if err := lc.do("GET", "/api/v1/cdrs?limit=200", nil, &recent, 200); err == nil {
 				for _, c := range recent.Items {
-					t.Logf("CDR %d %s -> %s status %d trace: %q", c.ID, c.Source, c.Destination, c.FinalStatus, lc.cdrTrace(c.ID))
+					if c.Destination == ext.Extension {
+						t.Logf("CDR %d %s -> %s status %d trace: %q", c.ID, c.Source, c.Destination, c.FinalStatus, lc.cdrTrace(c.ID))
+					}
 				}
 			}
 			for _, svc := range []string{"kamailio", "hello-sip-1", "hello-sip-2"} {
-				out, _ := compose("logs", "--no-color", "--tail", "120", svc).CombinedOutput()
+				out, _ := compose("logs", "--no-color", "--since", "70s", svc).CombinedOutput()
 				var keep []string
 				for _, l := range strings.Split(string(out), "\n") {
 					if svc == "kamailio" && !strings.Contains(l, "INFO: tls") && !strings.Contains(l, "INFO: <core>") || svc != "kamailio" && !strings.Contains(l, "snapshot") {
