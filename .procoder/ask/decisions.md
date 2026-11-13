@@ -3714,9 +3714,8 @@ default; each is a one-line change if the user decides otherwise.
 - The page script is registered dynamically only for sites the user lists and
   the browser has granted (`optional_host_permissions`), so there is no
   `<all_urls>` grant and no always-on content script.
-- Not built here: `GET /api/v1/lookup/number` (I-43) is not on main, so the
-  incoming-call notification shows the name in the `call.ringing` event itself.
-  A CRM contact lookup belongs to the connectors.
+- The incoming-call notification looks the caller up through
+  `GET /api/v1/lookup/number` (I-43, #304); see "Extension caller lookup" below.
 
 ## Integrations P17: Slack, n8n and Make (2026-11-13)
 
@@ -4183,3 +4182,24 @@ Not testable without a Twilio account (hardware/accounts list in the PR): a real
 send and delivery receipt, error code mapping against live Twilio, 10DLC and
 toll-free registration state, Messaging Service sends, what carriers do to an
 unregistered sender.
+
+## Extension caller lookup (2026-11-13, feat/extension-lookup)
+
+- **No new scope.** The lookup route needs `read` and the `hello-extension`
+  client already asks for `calls events read`; the preregistered client and the
+  scope rules are unchanged.
+- **The route gains the fields the notification needs.** It returned only a
+  name, so it now also returns `company` (the matching book entry's company)
+  and `crm`: `{id, name, company, url}` from the CRM connectors (organisation
+  connectors first, then the caller's own Outlook/Google), via
+  `crm.Service.FindContact` and the 1.5 s budget and 5 min/60 s cache of the
+  existing CRM lookup. `crm` is independent of `result`: a number can be `none`
+  in the books and known to the CRM. A service account gets only organisation
+  connectors. Additive; no other consumer changes.
+- **Name precedence:** CRM contact, then an address-book match, then the name in
+  the event. An ambiguous or unresolvable answer names nobody.
+- **Quiet failure:** 404, no match, errors and a 2 s timeout all fall back to the
+  event name. Cache in the worker's memory (5 min hit, 60 s miss and 404, 10 s
+  failure); it is not persisted, and sign-out clears it.
+- **CRM link** is an "Open in CRM" notification button (only http and https
+  links), not a click on the body, which still just dismisses.

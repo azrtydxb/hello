@@ -495,3 +495,16 @@ func DisplayName(s string) string {
 	}
 	return strings.TrimSpace(b.String())
 }
+
+// FindContact is the contact for number as the CRM connectors know it: the
+// organisation's connectors first, then the per-user ones of userID (0 for
+// none). It waits at most LookupTimeout and answers nil when nothing is found.
+func (s *Service) FindContact(ctx context.Context, userID int64, number string) *Contact {
+	if s == nil || s.Lookup == nil {
+		return nil
+	}
+	if c := s.Lookup.Find(ctx, number, 0); c != nil {
+		return c
+	}
+	return s.Lookup.FindForUser(ctx, userID, number, 0)
+}

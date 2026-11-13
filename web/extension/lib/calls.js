@@ -45,21 +45,28 @@ export function applyProgress(call, ev) {
   return { ...call, state: d.state, reason: d.reason, updatedAt: ev.createdAt };
 }
 
-/** The pop for a call.ringing event: who is calling, or null when the event is not one. */
-export function ringingPop(ev) {
+/**
+ * The pop for a call.ringing event: who is calling, or null when the event is
+ * not one. contact (from lib/lookup.js, optional) names the caller better than
+ * the event does; without it the event's own name is shown.
+ */
+export function ringingPop(ev, contact = null) {
   if (ev.type !== "call.ringing") return null;
   const d = ev.data ?? {};
   const from = d.from ?? {};
-  const who = from.name || from.number || "Unknown caller";
+  const name = contact?.name || from.name || "";
+  const who = name || from.number || "Unknown caller";
   return {
     id: ev.id,
     callId: d.callId,
     title: `Call from ${who}`,
     message: [
-      from.name ? from.number : "",
+      name ? from.number : "",
+      contact?.company,
       d.extension ? `Ringing extension ${d.extension}` : "",
     ]
       .filter(Boolean)
       .join("\n"),
+    url: contact?.url ?? "",
   };
 }

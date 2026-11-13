@@ -4,10 +4,12 @@ package api
 // best name Hello has for it.
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/crm"
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/store"
 )
@@ -46,7 +48,39 @@ func (s *server) lookupNumber(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, res)
+	out := numberLookup{LookupResult: res}
+	if f, ok := s.CRM.(ContactFinder); ok && res.Result != phonebook.LookupUnresolvable {
+		var uid int64
+		if a := actor(r); a.Kind != auth.KindService {
+			uid = a.UserID
+		}
+		if c := f.FindContact(r.Context(), uid, number); c != nil {
+			out.CRM = &crmContact{ID: c.ID, Name: c.Name, Company: c.Company, URL: c.URL}
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// ContactFinder is the CRM's contact lookup by number (the CRM service
+// implements it); nil or a connector-less setup finds nothing.
+type ContactFinder interface {
+	FindContact(ctx context.Context, userID int64, number string) *crm.Contact
+}
+
+// crmContact is the CRM's answer for a number: who it is and where the
+// record is.
+type crmContact struct {
+	ID      string `json:"id"`
+	Name    string `json:"name,omitempty"`
+	Company string `json:"company,omitempty"`
+	URL     string `json:"url,omitempty"`
+}
+
+// numberLookup is the answer of GET /lookup/number: the address-book result
+// and, apart from it, the CRM contact when a connector knows the number.
+type numberLookup struct {
+	phonebook.LookupResult
+	CRM *crmContact `json:"crm,omitempty"`
 }
 
 // lookupPersonal completes res from the user's personal book. A user with no
@@ -77,7 +111,7 @@ func (s *server) lookupPersonal(r *http.Request, userID int64, res *phonebook.Lo
 	switch {
 	case found:
 		res.Result, res.Via, res.Source, res.Book = phonebook.LookupMatch, via, string(phonebook.KindPersonal), "Personal"
-		res.BookID, res.EntryID, res.Name = e.BookID, e.ID, e.DisplayName()
+		res.BookID, res.EntryID, res.Name, res.Company = e.BookID, e.ID, e.DisplayName(), e.Company
 	case matches > 1:
 		res.Result, res.Matches = phonebook.LookupAmbiguous, matches
 	}
