@@ -77,7 +77,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P2  | Webhooks: signing, retries, DLQ                | done (#222) |
 | P3  | Click-to-call: originate API, /dial, tel:      | done (#234) |
 | P4  | Recording links and lookup API                 | todo        |
-| P5  | Browser extension (MV3), fixed signing key     | todo        |
+| P5  | Browser extension (MV3), fixed signing key     | wip (#327)  |
 | P6  | HubSpot and internal/crm framework             | todo        |
 | P7  | Zapier                                         | todo        |
 | P8  | Directory engine, AD/LDAP                      | todo        |
@@ -101,7 +101,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P2  | Webhooks: signing, retries, DLQ                | wip (#222)  |
 | P3  | Click-to-call: originate API, /dial, tel:      | wip (#234)  |
 | P4  | Recording links and lookup API                 | wip (#281)  |
-| P5  | Browser extension (MV3), fixed signing key     | todo        |
+| P5  | Browser extension (MV3), fixed signing key     | wip (#327)  |
 | P6  | HubSpot and internal/crm framework             | wip (#289)  |
 | P7  | Zapier                                         | todo        |
 | P8  | Directory engine, AD/LDAP                      | todo        |
