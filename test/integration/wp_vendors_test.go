@@ -146,6 +146,7 @@ func TestWPPhonesAsVendors(t *testing.T) {
 			e.provision(t, pc)
 			e.register(t)
 			t.Run("transport", e.checkTransport)
+			e.relaxSRTP(t)
 			t.Run("lines", e.checkLines)
 			t.Run("wifi", e.checkWifi)
 			t.Run("held", e.checkHELD)
@@ -379,7 +380,6 @@ func (e *wpEnv) checkTransport(t *testing.T) {
 	switch e.transp {
 	case "tcp":
 		e.want(t, "P130", "1")
-		e.want(t, "P348", "1") // account 1's own transport key
 		e.absent(t, "P183")    // SRTP is a TLS-only setting
 		// The backup registrar: P2312 and P2333 name it, P48 repeats the primary.
 		e.want(t, "P2312", "127.0.0.1:5082")
@@ -387,7 +387,6 @@ func (e *wpEnv) checkTransport(t *testing.T) {
 		e.want(t, "P48", e.server)
 	case "tls":
 		e.want(t, "P130", "2")
-		e.want(t, "P348", "2")
 		e.want(t, "P183", "2") // the device's "required"
 		e.absent(t, "P2312")   // a TLS phone has no UDP backup
 	}
@@ -406,12 +405,28 @@ func (e *wpEnv) checkTransport(t *testing.T) {
 	}
 }
 
+// relaxSRTP drops the WP836's device policy from required to optional once the
+// file has been checked: the sweep's calls offer plain RTP, and the SRTP
+// call path has its own lab and unit tests.
+func (e *wpEnv) relaxSRTP(t *testing.T) {
+	if e.transp != "tls" {
+		return
+	}
+	e.lc.must("PATCH", fmt.Sprintf("/api/v1/devices/%d", e.wp.ID), map[string]string{"srtp": "optional"}, nil, 200)
+	e.lc.waitSnapshots(10 * time.Second)
+}
+
 // checkLines covers the second account.
 func (e *wpEnv) checkLines(t *testing.T) {
-	e.want(t, "P301", "1")
-	e.want(t, "P304", e.wp.User)
+	// Line 1 is the file's own account block (P35 and the keys beside it,
+	// checked by provision); the account blocks of lines 2 and up follow.
 	e.want(t, "P401", "1")
 	e.want(t, "P404", e.line2.User)
+	if e.transp == "tls" {
+		e.want(t, "P448", "2")
+	} else {
+		e.want(t, "P448", "1")
+	}
 	if !t.Failed() {
 		wpProve("lines")
 	}
@@ -661,6 +676,8 @@ func (e *wpEnv) callWP(t *testing.T, caller labDevice, reliable bool) (*sipua.In
 // response: Hello offers 100rel, PRACKs the 180 and still connects, and the
 // INVITE carries the ring tag's Alert-Info, which the CDR records.
 func (e *wpEnv) checkRingTagAndPRACK(t *testing.T) {
+	sip.SIPDebug = true
+	defer func() { sip.SIPDebug = false }()
 	call, out, _ := e.callWP(t, e.other, true)
 	if h := call.Request.GetHeader("Supported"); h == nil || !strings.Contains(strings.ToLower(h.Value()), "100rel") {
 		t.Errorf("the INVITE to the WP carries Supported %v, want 100rel", h)
