@@ -59,6 +59,10 @@ type CDR struct {
 	// SRTP is which legs carried SRTP: none, caller, callee or both
 	// (migration 00081).
 	SRTP string `json:"srtp"`
+	// SRTPKeyEx is how the encrypted legs agreed their keys: none, sdes, dtls
+	// or mixed, and ICE whether a leg ran ICE-lite (migration 00084).
+	SRTPKeyEx string `json:"srtpKeyEx"`
+	ICE       bool   `json:"ice"`
 	// RecordingID is the call's recording; set by GetCDR when it has one.
 	RecordingID *int64 `json:"recordingId,omitempty"`
 	// PageLegs is a page's outcome per member (migration 00014); set by
@@ -67,7 +71,7 @@ type CDR struct {
 	// QueueLegs is what the call did in a call queue (migration 00040); set
 	// by GetCDR.
 	QueueLegs []QueueLeg `json:"queueLegs,omitempty"`
-	// FollowMeLegs is what each follow-me target did (migration 00079); set
+	// FollowMeLegs is what each follow-me target did (migration 00084); set
 	// by GetCDR.
 	FollowMeLegs []FollowMeLeg `json:"followMeLegs,omitempty"`
 	// RTCPXR is what the phones on the call reported (migration 00066); set
@@ -108,14 +112,14 @@ type PageLeg struct {
 const cdrCols = `id, correlation_id, sip_call_id, source, destination, start_time, ring_time, answer_time,
 	end_time, duration_ms, billable_ms, sip_node, media_mode, final_status, termination_side, failure_reason,
 	direction, original_destination, rewritten_destination, route_name, trunk_name,
-	rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client, answered_by, srtp`
+	rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client, answered_by, srtp, srtp_keyex, ice`
 
 func scanCDR(r interface{ Scan(...any) error }, extra ...any) (CDR, error) {
 	var c CDR
 	var ring, answer sql.NullTime
 	dest := append([]any{&c.ID, &c.CorrelationID, &c.SIPCallID, &c.Source, &c.Destination, &c.StartTime, &ring, &answer,
 		&c.EndTime, &c.DurationMs, &c.BillableMs, &c.SIPNode, &c.MediaMode, &c.FinalStatus, &c.TerminationSide, &c.FailureReason,
-		&c.Direction, &c.OriginalDestination, &c.RewrittenDestination, &c.Route, &c.Trunk, &c.RTPPackets, &c.RTPLost, &c.RTPJitterMs, &c.Kind, &c.RingTag, &c.RingRule, &c.CallerCodec, &c.CalleeCodec, &c.Origin, &c.OriginClient, &c.AnsweredBy, &c.SRTP,
+		&c.Direction, &c.OriginalDestination, &c.RewrittenDestination, &c.Route, &c.Trunk, &c.RTPPackets, &c.RTPLost, &c.RTPJitterMs, &c.Kind, &c.RingTag, &c.RingRule, &c.CallerCodec, &c.CalleeCodec, &c.Origin, &c.OriginClient, &c.AnsweredBy, &c.SRTP, &c.SRTPKeyEx, &c.ICE,
 	}, extra...)
 	if err := r.Scan(dest...); err != nil {
 		return c, err

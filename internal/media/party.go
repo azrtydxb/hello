@@ -146,11 +146,6 @@ func NewPartySecure(host string, minPort, maxPort int, offer []byte, pol SecureP
 	if !ok {
 		return nil, nil, errors.New("media: the offer has no codec a conference can mix")
 	}
-	var sec Secure
-	ansSDP, err := sec.AnswerSDP(parsed, off, pol)
-	if err != nil {
-		return nil, nil, err
-	}
 	codec, err := newPartyCodec(off.Codec)
 	if err != nil {
 		return nil, nil, fmt.Errorf("media: conference codec %s: %w", off.Codec.Name, err)
@@ -165,16 +160,35 @@ func NewPartySecure(host string, minPort, maxPort int, offer []byte, pol SecureP
 		codec.close()
 		return nil, nil, err
 	}
+	// The socket carries STUN and DTLS as well as RTP when the participant
+	// negotiates ICE or DTLS-SRTP; p exists before the first datagram is
+	// read.
+	var p *Party
+	sec := &Secure{}
+	sec.Bind(conn.LocalAddr(), func(b []byte, to *net.UDPAddr) { _, _ = conn.WriteToUDP(b, to) },
+		func(from *net.UDPAddr, _ bool) {
+			if p != nil {
+				p.latch(from)
+			}
+		})
+	ansSDP, err := sec.AnswerSDP(parsed, off, pol)
+	if err != nil {
+		_ = conn.Close() // nothing received yet; the close error is irrelevant
+		sec.Close()
+		codec.close()
+		return nil, nil, err
+	}
 	var b [10]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		_ = conn.Close() // nothing received yet; the close error is irrelevant
+		sec.Close()
 		codec.close()
 		return nil, nil, fmt.Errorf("media: party RTP identifiers: %w", err)
 	}
-	p := &Party{
+	p = &Party{
 		conn: conn, codec: codec, offer: off, target: target,
 		seq: binary.BigEndian.Uint16(b[0:2]), ts: binary.BigEndian.Uint32(b[2:6]), ssrc: binary.BigEndian.Uint32(b[6:10]),
-		marker: true, sec: &sec,
+		marker: true, sec: sec,
 		dtmf: make(chan byte, partyDTMFQueue), done: make(chan struct{}),
 	}
 	go p.recv()
@@ -216,6 +230,7 @@ func (p *Party) Retarget(host string, port int) {
 	p.target = &net.UDPAddr{IP: ip, Port: port}
 	p.remote = nil
 	p.remoteMu.Unlock()
+	p.sec.SetPeer(&net.UDPAddr{IP: ip, Port: port})
 }
 
 // Secure is the participant's SRTP state, for the SDP exchanges of the call.
@@ -243,6 +258,7 @@ func (p *Party) Done() <-chan struct{} { return p.done }
 func (p *Party) Close() {
 	p.closeOnce.Do(func() {
 		close(p.done)
+		p.sec.Close()
 		_ = p.conn.Close() // teardown: nothing depends on the close error
 		// The receive goroutine owns the decoder and frees it on its way out.
 		p.sendMu.Lock()
@@ -275,7 +291,7 @@ func (p *Party) recv() {
 		}
 		// An encrypted participant's packets are authenticated first; one
 		// that fails is dropped before it is latched, decoded or mixed.
-		data, ok, _ := p.sec.Unprotect(buf[:n])
+		data, ok, _ := p.sec.UnprotectFrom(buf[:n], from)
 		if !ok {
 			continue
 		}

@@ -152,6 +152,19 @@ export interface Extension {
  */
 export type SrtpPolicy = "off" | "optional" | "required";
 
+/**
+ * How Hello agrees SRTP keys with a device when it is the offerer (S-16):
+ * SDES puts the keys in the SDP, DTLS-SRTP runs a handshake on the media
+ * path. Either way only on a TLS leg; an offer from the phone is answered in
+ * kind.
+ */
+export type SrtpKeyExchange = "sdes" | "dtls";
+
+export const SRTP_KEY_EXCHANGES: { value: SrtpKeyExchange; label: string }[] = [
+  { value: "sdes", label: "SDES (keys in the SDP)" },
+  { value: "dtls", label: "DTLS-SRTP" },
+];
+
 export const SRTP_POLICIES: { value: SrtpPolicy; label: string }[] = [
   { value: "off", label: "Off (plain RTP)" },
   { value: "optional", label: "Optional" },
@@ -165,6 +178,10 @@ export interface Device {
   enabled: boolean;
   /** Media-encryption policy; optional for a device that predates it. */
   srtp?: SrtpPolicy;
+  /** Key exchange Hello offers the device; SDES when absent. */
+  srtpKeyExchange?: SrtpKeyExchange;
+  /** Hello offers the device ICE-lite and provisions its ICE setting. */
+  mediaIce?: boolean;
   createdAt: string;
   updatedAt: string;
   /** desk (a phone), web or mobile (a user's softphone); absent from older servers. */
@@ -229,6 +246,9 @@ export interface Cdr {
   mediaMode: string;
   /** Which legs carried SRTP: none, caller, callee or both. */
   srtp?: "none" | "caller" | "callee" | "both";
+  /** How the encrypted legs agreed their keys; ice says a leg ran ICE-lite. */
+  srtpKeyEx?: "none" | "sdes" | "dtls" | "mixed";
+  ice?: boolean;
   finalStatus: number;
   terminationSide: string;
   failureReason: string;
@@ -931,7 +951,13 @@ export const createDevice = (input: {
 
 export const updateDevice = (
   deviceId: Id,
-  patch: { enabled?: boolean; extensionId?: Id; srtp?: SrtpPolicy },
+  patch: {
+    enabled?: boolean;
+    extensionId?: Id;
+    srtp?: SrtpPolicy;
+    srtpKeyExchange?: SrtpKeyExchange;
+    mediaIce?: boolean;
+  },
 ) =>
   request<Device>("PATCH", `/api/v1/devices/${id(deviceId)}`, { body: patch });
 
