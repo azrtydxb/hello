@@ -168,6 +168,10 @@ type RenderData struct {
 	// nil when there are none.
 	SCEP  *SCEPInfo
 	Dot1X *Dot1XInfo
+	// DoorStations are the door stations that can call the phone's
+	// extension (at most MaxDoorStations), for the Grandstream WP door
+	// system entries (spec phone-feature-parity S-49).
+	DoorStations []DoorStation
 }
 
 // E911Info is what a WP8x6 needs to ask Hello for its location (RFC 5985).
@@ -218,6 +222,16 @@ func NewSyslogInfo(address, level string) *SyslogInfo {
 		i.Level, i.YealinkLevel, i.PolyLevel = 2, 6, 1
 	}
 	return i
+}
+
+// MaxDoorStations is how many door system entries a WP takes (10).
+const MaxDoorStations = 10
+
+// DoorStation is a door station as a phone lists it: the number it calls
+// from and the name the phone shows.
+type DoorStation struct {
+	Number string
+	Name   string
 }
 
 // Phone is the phone itself, as templates and resolution see it.

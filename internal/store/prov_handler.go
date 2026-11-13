@@ -245,6 +245,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Emergency, err = s.emergencyNumbers(ctx); err != nil {
 		return d, prov.Template{}, err
 	}
+	if d.DoorStations, err = s.DoorStationsFor(ctx, d.Line.Label); err != nil {
+		return d, prov.Template{}, err
+	}
 	if d.Codes, err = s.featureCodes(ctx); err != nil {
 		return d, prov.Template{}, err
 	}

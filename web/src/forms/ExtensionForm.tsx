@@ -30,6 +30,7 @@ import { FollowMeEditor } from "../pages/followme/FollowMeEditor";
 import { MOHSelect } from "../pages/media/MohSelect";
 import { DoorTargetsField } from "../pages/directory/DoorTargetsField";
 import { DoorOpenField } from "../pages/directory/DoorOpenField";
+import { DoorCameraField } from "../pages/directory/DoorCameraField";
 
 export const NUMBER_HINT = "2 to 10 digits.";
 export const EXTERNAL_PATTERN = /^(\+?[0-9]{2,20})?$/;
@@ -441,6 +442,7 @@ export function ExtensionDrawer({
             />
           )}
           {door && ext.kind === "door" && <DoorOpenField id={ext.id} />}
+          {door && ext.kind === "door" && <DoorCameraField id={ext.id} />}
 
           <div
             className="dir-section"

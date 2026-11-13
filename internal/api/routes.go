@@ -272,6 +272,11 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/door/webhooks/{id}/rotate-secret", auth.ScopeAdmin, auth.RoleAdmin, false, s.rotateDoorWebhookSecret},
 		{"POST", "/api/v1/door/webhooks/{id}/trigger", "", "", true, s.triggerDoorWebhook},
 
+		{"GET", "/api/v1/extensions/{id}/camera", auth.ScopeRead, auth.RoleViewer, false, s.getDoorCamera},
+		{"PUT", "/api/v1/extensions/{id}/camera", auth.ScopeAdmin, auth.RoleAdmin, false, s.putDoorCamera},
+		{"DELETE", "/api/v1/extensions/{id}/camera", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteDoorCamera},
+		{"GET", "/api/v1/extensions/{id}/camera/view", auth.ScopeRead, auth.RoleViewer, false, s.viewDoorCamera},
+
 		{"GET", "/api/v1/presence", auth.ScopeRead, auth.RoleViewer, false, s.presence},
 
 		{"GET", "/api/v1/registrations", auth.ScopeRead, auth.RoleViewer, false, s.registrations},
