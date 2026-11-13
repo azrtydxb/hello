@@ -647,8 +647,11 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	go func() { errc <- srv.ServeUDP(conn) }()
 	if s.cfg.TLSListener != nil {
 		go func() {
-			if err := srv.ServeTLS(s.cfg.TLSListener); err != nil && ctx.Err() == nil && s.serving.Load() {
-				// The TLS hop is down; UDP still serves everything else.
+			// ServeTLS returns only when the listener stops. During shutdown that
+			// is expected; otherwise the TLS hop is down while UDP still serves
+			// everything else.
+			err := srv.ServeTLS(s.cfg.TLSListener)
+			if ctx.Err() == nil && s.serving.Load() {
 				s.log.Error("SIP over TLS stopped", "error", err)
 			}
 		}()

@@ -1,6 +1,7 @@
 package sip
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -107,7 +108,7 @@ func ListenTLS(addr, certFile, keyFile, caFile string) (*TLSHop, error) {
 		RootCAs:              pool,
 		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return rc.get() },
 	}
-	ln, err := net.Listen("tcp", addr)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
