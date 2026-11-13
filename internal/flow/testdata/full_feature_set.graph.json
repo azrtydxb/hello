@@ -52,7 +52,7 @@
         "record": false,
         "waitForLeader": false
       },
-      "version": "2fd61b01f3734199"
+      "version": "bf4376c4c20e9b1a"
     },
     {
       "id": "extension:10",
@@ -65,7 +65,7 @@
         "number": "101",
         "voicemail": true
       },
-      "version": "fb9752f29521390f"
+      "version": "1e9719f90b854540"
     },
     {
       "id": "extension:11",
@@ -78,7 +78,7 @@
         "number": "102",
         "voicemail": true
       },
-      "version": "0bcb414b9083cdf3"
+      "version": "e6d0d3dfd791c5d2"
     },
     {
       "id": "featureCode:*50",
