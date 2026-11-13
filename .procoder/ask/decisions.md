@@ -3555,6 +3555,12 @@ Decided while building, without asking, within the spec and the brief:
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
 
+## 2026-11-13: per-line Grandstream keys (feat/prov-perline-keys)
+
+- Lines 2 and up now get SRTP mode and key exchange, presence, RTCP-XR collector and backup server keys, at the account offsets found in the official templates (wp8x6 1.0.3.39, wp810_822_825 1.0.11.83, wp820 1.0.7.90, wp856 1.0.3.16).
+- Correction to #262: the WP820 template does have a Secondary SIP Server, at P50602 (account 1) and P51102 (account 2); line 1 now writes it.
+- Send Anonymous (P421, P521, ...) for further lines stays unwritten, as decided before.
+
 ## HubSpot calling iframe and recording links (2026-11-13, feat/hubspot-iframe)
 
 Completes the part of P6 (#289) that waited for the originate API and the first-party clients (decisions of 2026-11-10).
