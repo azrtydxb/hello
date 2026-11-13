@@ -72,7 +72,7 @@ func TestKamailioWSSIsOptIn(t *testing.T) {
 		t.Error("route[WSS_HANDSHAKE] does not refuse an origin that is not allowed with 403")
 	}
 	// An unset allow-list must allow nothing, not everything.
-	if !strings.Contains(hs, `$env(KAMAILIO_WS_ORIGINS) == $null ||`) {
+	if !strings.Contains(hs, `$env(KAMAILIO_WS_ORIGINS) != $null`) || !strings.Contains(hs, `$var(allowed) != 1`) {
 		t.Error("route[WSS_HANDSHAKE] must refuse every origin when KAMAILIO_WS_ORIGINS is unset")
 	}
 
