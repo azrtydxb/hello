@@ -168,17 +168,40 @@ func TestLabTLSHop(t *testing.T) {
 		register(t, a)
 		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 		defer cancel()
-		go func() { _, _ = a.Dial(ctx, ext.Extension, sdpOffer) }()
+		dialDone := make(chan string, 1)
+		go func() {
+			out, err := a.Dial(ctx, ext.Extension, sdpOffer)
+			if err != nil {
+				dialDone <- "dial error: " + err.Error()
+				return
+			}
+			dialDone <- fmt.Sprintf("dial answered %d", out.Status)
+		}()
 		t.Cleanup(func() {
 			if !t.Failed() {
 				return
 			}
-			// What the edge and the nodes saw, for the CI log.
+			// What the call did and what the edge and the nodes saw, for the CI log.
+			select {
+			case r := <-dialDone:
+				t.Logf("the caller's dial: %s", r)
+			case <-time.After(20 * time.Second):
+				t.Log("the caller's dial is still running")
+			}
+			eventually(t, 15*time.Second, "a CDR for the call", func() error {
+				if len(lc.cdrsTo(ext.Extension)) == 0 {
+					return fmt.Errorf("none yet")
+				}
+				return nil
+			})
+			for _, c := range lc.cdrsTo(ext.Extension) {
+				t.Logf("CDR %d trace: %q", c.ID, lc.cdrTrace(c.ID))
+			}
 			for _, svc := range []string{"kamailio", "hello-sip-1", "hello-sip-2"} {
 				out, _ := compose("logs", "--no-color", "--tail", "120", svc).CombinedOutput()
 				var keep []string
 				for _, l := range strings.Split(string(out), "\n") {
-					if svc == "kamailio" || strings.Contains(strings.ToLower(l), "tls") || strings.Contains(l, "5073") || strings.Contains(l, `"level":"WARN"`) || strings.Contains(l, `"level":"ERROR"`) {
+					if svc == "kamailio" && !strings.Contains(l, "INFO: tls") && !strings.Contains(l, "INFO: <core>") || svc != "kamailio" && !strings.Contains(l, "snapshot") {
 						keep = append(keep, l)
 					}
 				}
