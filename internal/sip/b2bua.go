@@ -92,6 +92,11 @@ type call struct {
 	setupClosed bool // no fork may win any more
 	isCancelled bool
 	connected   bool
+	// answerWrite is held while the 200 goes to the caller: WriteResponse
+	// records the response on the dialog and blocks for the ACK, and byeA
+	// reads that record, so a BYE (drain timeout, API hangup) that lands
+	// while the answer is going out waits for it instead of racing it.
+	answerWrite sync.Mutex
 	ended       bool
 	hungUp      bool
 	// gfDepth counts ring group failovers and gfChain the groups rung, so a
@@ -1124,7 +1129,9 @@ func (c *call) answer(w *leg) {
 	// 64*T1).
 	c.s.m.response(sip.StatusOK)
 	c.settleReliable(true) // the 2xx follows the PRACK of a reliable 18x
+	c.answerWrite.Lock()
 	err := c.dss.WriteResponse(res)
+	c.answerWrite.Unlock()
 	if err == nil {
 		c.mu.Lock()
 		if !c.ended {
@@ -1373,7 +1380,10 @@ func (c *call) byeA() {
 	if c.dss == nil {
 		return // a call Hello placed has no caller dialog
 	}
-	if res := c.dss.InviteResponse; res == nil || !res.IsSuccess() {
+	c.answerWrite.Lock() // the 200 may still be going out (see answerWrite)
+	res := c.dss.InviteResponse
+	c.answerWrite.Unlock()
+	if res == nil || !res.IsSuccess() {
 		// The 200 went out through the raw transaction (voicemail, feature
 		// codes), so sipgo's session never recorded it: its InviteResponse
 		// is nil (Bye dereferences it and panics) or only the last
