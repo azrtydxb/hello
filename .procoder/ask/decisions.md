@@ -3930,6 +3930,24 @@ Reconciles the Wi-Fi profiles (#278, migration 00074) with the 802.1X and SCEP p
 - **EAP-TLS on Wi-Fi** is now possible (P83004 = 1, P83007 CA, P83009 identity) where the phone has a SCEP certificate; the client certificate (P83008) is not written, as P8440 is not on the wired port (verify on a handset). EAP-MD5 is refused for a Wi-Fi profile (the API, and a 802.1X profile in use cannot be changed to it); a network whose 802.1X profile is missing, EAP-MD5 or EAP-TLS without SCEP is skipped at render, and its slot goes to the next profile.
 - **Template re-check of #278** against config-template-10212026.zip: WP8x6 slots 1 to 10 at P83000 + 100 (n - 1) (SSID +0, security +2, key +3, EAP +4, priority +49, preferred account +85), security codes 0, 4, 5, 11, 12, 14, EAP codes 1 TLS and 2 PEAP, CA type 0 skip / 1 system / 2 TOFU / 3 uploaded, phase 2 0 MSCHAPv2, and the network-5 EAP key at P83304: all confirmed. WP810/822/825: SSID +0, enabled +1, security +2, key +3, 802.11r +48, hidden +50 per slot for 17 slots; slots 18 to 20 have security at +72: confirmed. WP856: P7812, P7814 (0, 1 WEP, 2 WPA/WPA2 PSK; the template calls it "Security Mode for Hidden SSID"), P7830: confirmed. Radio keys P25438, P82332, P22232, P22231, P82334 (WP8x6), P84992 (WP810), P25420, P25421, P22443, P22230, P25315, P82333 (WP856): confirmed. No mismatch found. Not written because #278 did not know them: P83018 and P83019 (domain validation, now written), P83086 and P83087 (management frame protection and transition mode), P83051 and P83052 (IP mode, IPv4 mode).
 
+## WP lab sweep runs against a third control replica (2026-11-13)
+
+- `TestWPPhonesAsVendors` (S-38) needs the server-wide provisioning settings
+  that are environment variables (TCP models, TLS models and server, backup
+  registrar, RTCP-XR) rendered into WP files, without changing what the
+  other lab tests' phones get. The compose lab therefore gains
+  `hello-control-wp` (host 8444) with those settings; phones are bound through
+  the API on hello-control-1 and fetch their files from it.
+- The WP822 is provisioned for TCP (with a backup server), the WP836 for TLS
+  with SRTP required, because a model has one transport; between them every
+  transport key is read back. The emulated phones register over UDP direct to
+  hello-sip-1, as the park test does; TLS and TCP signalling stay covered by
+  the TLS lab test and the unit tests.
+- 802.1X on a WP is the Wi-Fi enterprise (PEAP) profile on the WP836; wired
+  802.1X is GRP26xx only, so the sweep asserts a WP file carries no P7901.
+- The hardware lab list is printed at the end as "confirmed" (Hello's side
+  proven by a subtest of the run) or "needs hardware".
+
 ## Messaging item 2: outbound sending on Twilio (2026-11-10)
 
 Delivery item 2 of `.procoder/specs/messaging-channels.md`, on the inbox core
