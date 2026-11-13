@@ -463,7 +463,7 @@ func TestTakeoverKeepsEventState(t *testing.T) {
 	if st.Events.Seq < 2 {
 		t.Fatalf("replicated event state = %+v", st.Events)
 	}
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	owner.stop()
 	mem.set(
 		cluster.Member{ID: "sip-1", Kind: cluster.KindSIP, State: cluster.Offline, ActiveCalls: 1},

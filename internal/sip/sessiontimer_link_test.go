@@ -458,7 +458,7 @@ func parkTakeoverWithTimer(t *testing.T, sessionExpires string) (rec livestate.D
 	rec = waitRecord(t, ha, "the parked call is replicated with its session timer", "sip-1", func(s livestate.DialogState) bool {
 		return s.State == haPhasePark && s.Session != nil && s.Session.Legs[sessCallee] != nil
 	})
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	waitReq(t, b.reinvites, "takeover re-INVITE to the parked party")

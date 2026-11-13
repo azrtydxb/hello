@@ -369,7 +369,7 @@ func TestSRTPVoicemailTakeover(t *testing.T) {
 		if !answerWithCrypto {
 			a.dropCrypto()
 		}
-		haReinviteTimeout = time.Second
+		haReinviteTimeout.Set(time.Second)
 		killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 		taker.srv.takeoverPass(t.Context())
 		ra := waitReq(t, a.reinvites, "takeover re-INVITE to the voicemail caller")

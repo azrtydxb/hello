@@ -50,6 +50,11 @@ func withCallbackSweep(every time.Duration) pbxOpt {
 	return func(c *Config, _ *Deps) { c.CallbackInterval = every }
 }
 
+// withCallbackTimers sets the offer check and the cancel watch per server.
+func withCallbackTimers(offer, watch time.Duration) pbxOpt {
+	return func(c *Config, _ *Deps) { c.CallbackOfferCheck, c.CallbackWatchEvery = offer, watch }
+}
+
 func withPromptLanguage(l string) pbxOpt {
 	return func(c *Config, _ *Deps) { c.PromptLanguage = l }
 }
@@ -70,14 +75,9 @@ func callbackQueue(members ...snapshot.QueueMember) snapshot.Queue {
 // speech stand-in, sweeping every 50 ms.
 func callbackPBX(t *testing.T, q snapshot.Queue, st queue.Store, cbs queue.CallbackStore, sp Speaker, opts ...pbxOpt) *testPBX {
 	t.Helper()
-	oldOffer := callbackOfferCheck
-	callbackOfferCheck = 50 * time.Millisecond
-	oldWatch := callbackWatchEvery
-	callbackWatchEvery = 100 * time.Millisecond
-	t.Cleanup(func() { callbackOfferCheck, callbackWatchEvery = oldOffer, oldWatch })
 	feats := func(s *snapshot.Snapshot) { s.WithQueues([]snapshot.Queue{q}) }
 	base := []pbxOpt{shortRing(3 * time.Second), withMedia(false), withFeatures(feats),
-		withVoicemail(newVMStore(), &fakeObjects{}), withQueues(st), withCallbacks(cbs), withSpeech(sp), withCallbackSweep(50 * time.Millisecond)}
+		withVoicemail(newVMStore(), &fakeObjects{}), withQueues(st), withCallbacks(cbs), withSpeech(sp), withCallbackSweep(50 * time.Millisecond), withCallbackTimers(50*time.Millisecond, 100*time.Millisecond)}
 	return startPBX(t, threeDevices(), append(base, opts...)...)
 }
 
@@ -539,7 +539,7 @@ func TestQueueCallbackSurvivesNodeFailover(t *testing.T) {
 		t.Fatalf("the replicated dialog is %s, want the customer's %s", rec.Legs[0].CallID, inv.CallID().Value())
 	}
 
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	re := reinviteOn(t, a, inv.CallID().Value(), "the survivor re-INVITEs the customer")
