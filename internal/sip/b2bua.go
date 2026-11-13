@@ -1712,7 +1712,7 @@ func (l *leg) drive(report func(legEvent)) {
 	}
 	dcs, err := s.uac.WriteInvite(context.Background(), req)
 	if err != nil {
-		s.log.Debug("fork INVITE failed", "contact", l.binding.ContactURI, "error", err)
+		s.log.Warn("fork INVITE could not be sent", "contact", l.binding.ContactURI, "path", l.binding.Path, "trunk", l.trunk != nil, "error", err)
 		report(legEvent{leg: l, kind: evFailed, code: sip.StatusServiceUnavailable})
 		return
 	}
@@ -2333,5 +2333,24 @@ func routeViaPath(req *sip.Request, b livestate.Binding) error {
 		req.AppendHeader(sip.NewHeader("Route", p))
 	}
 	req.SetDestination(hostPort(first))
+	// The hop to the edge: UDP unless the Path names a TLS socket of the edge
+	// (the TLS hop, S-12). The transport of the phone's own leg, which the
+	// Path carries after received=, says nothing about it.
+	req.SetTransport(pathHopTransport(b.Path[0]))
 	return nil
+}
+
+// pathHopTransport is the transport Hello uses to reach the edge socket a Path
+// header names: TLS when the Path's own URI says transport=tls, else UDP.
+// Kamailio writes the phone's transport after received=, as a parameter of the
+// same header, so only what comes before it describes the Path's own socket.
+func pathHopTransport(path string) string {
+	own := path
+	if i := strings.Index(strings.ToLower(own), ";received="); i >= 0 {
+		own = own[:i]
+	}
+	if strings.Contains(strings.ToLower(own), "transport=tls") {
+		return "TLS"
+	}
+	return "UDP"
 }

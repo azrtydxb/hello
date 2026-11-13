@@ -2,6 +2,7 @@ package sip
 
 import (
 	"bufio"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -102,18 +103,30 @@ func (p *hopPKI) clientConfig(t *testing.T, certFile, keyFile string) *tls.Confi
 }
 
 func hopRegister(user, callID string, cseq int, auth string) string {
+	return hopRegisterPath(user, callID, cseq, auth, "")
+}
+
+// hopRegisterPath is hopRegister with the Path the edge adds (empty: none).
+func hopRegisterPath(user, callID string, cseq int, auth, path string) string {
 	r := fmt.Sprintf("REGISTER sip:%s SIP/2.0\r\n"+
 		"Via: SIP/2.0/TLS 127.0.0.1:5073;branch=z9hG4bK%s%d;rport\r\n"+
 		"Max-Forwards: 70\r\n"+
 		"From: <sip:%s@%s>;tag=t%s\r\nTo: <sip:%s@%s>\r\n"+
 		"Call-ID: %s\r\nCSeq: %d REGISTER\r\n"+
 		"Contact: <sip:%s@192.0.2.5:5999;transport=ws>\r\nExpires: 120\r\n"+
-		"X-Hello-Transport: tls\r\nX-Hello-Client: 198.51.100.7:4000\r\n",
-		testDomain, callID, cseq, user, testDomain, callID, user, testDomain, callID, cseq, user)
+		"X-Hello-Transport: tls\r\nX-Hello-Client: 198.51.100.7:4000\r\n%s",
+		testDomain, callID, cseq, user, testDomain, callID, user, testDomain, callID, cseq, user, pathHdr(path))
 	if auth != "" {
 		r += "Authorization: " + auth + "\r\n"
 	}
 	return r + "Content-Length: 0\r\n\r\n"
+}
+
+func pathHdr(path string) string {
+	if path == "" {
+		return ""
+	}
+	return "Path: " + path + "\r\n"
 }
 
 // hopRoundTrip sends one request on c and returns the first final response.
@@ -264,4 +277,113 @@ func hopHandshakeFails(addr string, cfg *tls.Config) error {
 		return nil
 	}
 	return err
+}
+
+// registerThroughHop registers user b1 over mutual TLS with the given Path
+// header, as the edge would, and fails the test on anything but 200.
+func registerThroughHop(t *testing.T, pki *hopPKI, addr, edgeCert, edgeKey, user, pass, path string) {
+	t.Helper()
+	c, err := tls.Dial("tcp", addr, pki.clientConfig(t, edgeCert, edgeKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	br := bufio.NewReader(c)
+	callID := "hoppath@test"
+	_, h := hopRoundTrip(t, c, br, hopRegisterPath(user, callID, 1, "", path))
+	var chal *digest.Challenge
+	for _, v := range h["Www-Authenticate"] {
+		if ch, err := digest.ParseChallenge(v); err == nil && (chal == nil || strings.EqualFold(ch.Algorithm, "SHA-256")) {
+			chal = ch
+		}
+	}
+	if chal == nil {
+		t.Fatalf("no digest challenge in %v", h["Www-Authenticate"])
+	}
+	cred, err := digest.Digest(chal, digest.Options{Method: "REGISTER", URI: "sip:" + testDomain, Username: user, Password: pass})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := hopRoundTrip(t, c, br, hopRegisterPath(user, callID, 2, cred.String(), path)); !strings.Contains(status, " 200 ") {
+		t.Fatalf("REGISTER through the hop: %q, want 200", status)
+	}
+}
+
+// TestSIPCallsPhoneThroughTLSPath fails if Hello cannot ring a phone whose
+// binding's Path names the edge's TLS socket (transport=tls): the INVITE must
+// leave over TLS to that socket, verifying the edge's certificate and
+// presenting Hello's, carrying the Route of the Path. A fork whose send fails
+// must be logged at warn with the reason, not dropped quietly.
+func TestSIPCallsPhoneThroughTLSPath(t *testing.T) {
+	pki := newHopPKI(t)
+	srvCert, srvKey := pki.leaf(t, "hello-sip", nil)
+	edgeCert, edgeKey := pki.leaf(t, "kamailio", nil)
+	hop, err := ListenTLS("127.0.0.1:0", srvCert, srvKey, pki.caFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = hop.Listener.Close() })
+
+	// The edge's hello_tls socket: a TLS server the INVITE should reach.
+	edgeC, _ := tls.LoadX509KeyPair(edgeCert, edgeKey)
+	pool := x509.NewCertPool()
+	pool.AddCert(pki.ca)
+	edge, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{edgeC}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool, MinVersion: tls.VersionTLS12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = edge.Close() })
+	got := make(chan string, 1)
+	go func() {
+		c, err := edge.Accept()
+		if err != nil {
+			got <- "accept: " + err.Error()
+			return
+		}
+		defer func() { _ = c.Close() }()
+		_ = c.SetDeadline(time.Now().Add(8 * time.Second))
+		line, err := bufio.NewReader(c).ReadString('\n')
+		if err != nil {
+			got <- "read: " + err.Error()
+			return
+		}
+		got <- strings.TrimSpace(line)
+	}()
+
+	pbx := startPBX(t, ringAllDevices(), trustLoopback, func(c *Config, _ *Deps) { c.TLSListener, c.TLSClient = hop.Listener, hop.Client })
+	path := fmt.Sprintf("<sip:%s;transport=tls;lr;received=sip:192.0.2.5:5999;transport=tls>", edge.Addr().String())
+	registerThroughHop(t, pki, hop.Listener.Addr().String(), edgeCert, edgeKey, "b1", "pb1", path)
+	if len(bindings(t, pbx, "sip:b1@"+testDomain)) != 1 {
+		t.Fatalf("the binding is not stored: %v", bindings(t, pbx, "sip:b1@"+testDomain))
+	}
+
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Second)
+	defer cancel()
+	go func() { _, _ = a.callReq(ctx, a.inviteReq("200")) }()
+	select {
+	case line := <-got:
+		if !strings.HasPrefix(line, "INVITE ") {
+			t.Fatalf("the edge's TLS socket received %q, want an INVITE", line)
+		}
+	case <-time.After(7 * time.Second):
+		t.Fatal("the INVITE to a phone behind a transport=tls Path never reached the edge's TLS socket")
+	}
+}
+
+// TestPathHopTransport fails if a Path is read wrongly: only its own
+// transport parameter, before received=, picks TLS to the edge.
+func TestPathHopTransport(t *testing.T) {
+	for path, want := range map[string]string{
+		"<sip:10.89.53.10:5073;transport=tls;lr;received=sip:10.0.0.9:5999;transport=tls>": "TLS",
+		"<sip:10.89.53.10:5073;lr;transport=TLS;received=sip:10.0.0.9:5999>":               "TLS",
+		"<sip:10.89.53.10:5070;lr;received=sip:10.0.0.9:5999;transport=tls>":               "UDP", // a TLS phone behind the UDP hello socket
+		"<sip:10.89.53.10:5070;lr;received=sip:10.0.0.9:5999>":                             "UDP",
+		"<sip:10.89.53.10:5070;lr>":                                                        "UDP",
+	} {
+		if got := pathHopTransport(path); got != want {
+			t.Errorf("pathHopTransport(%q) = %s, want %s", path, got, want)
+		}
+	}
 }
