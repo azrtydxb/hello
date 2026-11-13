@@ -144,9 +144,9 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 4   | coturn, ICE servers                         | wip (#282)                   |
 | 5   | Web softphone, audio                        | wip (#343)                   |
 | 6   | Web video                                   | wip (#343)                   |
-| 6b  | Video recording                             | blocked (6)                  |
-| 10  | Video phones and door stations              | todo (code), hw (test)       |
-| 11  | Conference-room video                       | blocked (6)                  |
+| 6b  | Video recording                             | wip (#344)                   |
+| 10  | Video phones and door stations              | wip (#344), hw (test)        |
+| 11  | Conference-room video                       | wip (#344)                   |
 | 13  | Teams SBC-peer trunk profile, docs/teams.md | wip (#326)                   |
 | 7-9 | Push gateway, mobile apps, mobile video     | not now                      |
 | 12  | Public reach                                | not now (user decides later) |
