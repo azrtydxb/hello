@@ -1,0 +1,15 @@
+v=0
+o=root 1731409441 1731409441 IN IP4 10.0.0.5
+s=Asterisk
+c=IN IP4 10.0.0.5
+t=0 0
+m=audio 14120 RTP/AVP 111 0 8 101
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 useinbandfec=1;maxplaybackrate=16000
+a=rtpmap:0 PCMU/8000
+a=rtpmap:8 PCMA/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-16
+a=ptime:20
+a=maxptime:150
+a=sendrecv

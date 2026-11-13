@@ -174,7 +174,13 @@ export function Door() {
         description="A doorbell that cannot register as a SIP phone posts a signed request to a webhook here. Hello then rings the Door group with the doorbell tone, or plays a chime to a paging group."
         actions={
           <Can min="admin">
-            <Button icon="plus" onClick={() => setEditing("new")}>
+            {/* A webhook created before the list arrives would be wiped
+                when the list lands, so wait for it. */}
+            <Button
+              icon="plus"
+              disabled={list.status === "loading"}
+              onClick={() => setEditing("new")}
+            >
               New webhook
             </Button>
           </Can>

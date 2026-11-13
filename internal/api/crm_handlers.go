@@ -34,6 +34,8 @@ type CRMService interface {
 	Mappings(ctx context.Context, id int64) ([]crm.UserMapping, error)
 	SetMapping(ctx context.Context, actor string, id, userID int64, externalID string) error
 	Engagement(ctx context.Context, actor, kind, callID, ref string, exts []string, restricted bool) (bool, error)
+	Setup(ctx context.Context, id int64) ([]crm.SetupItem, error)
+	SidebarApp(ctx context.Context, actor string, id int64) (name string, data []byte, err error)
 }
 
 func (s *server) crmReady(w http.ResponseWriter) bool {
@@ -69,6 +71,8 @@ func (s *server) crmError(w http.ResponseWriter, what string, err error) {
 		writeError(w, http.StatusConflict, "conflict", "this connector does not sign in with OAuth")
 	case errors.Is(err, crm.ErrNoCredentials):
 		writeError(w, http.StatusConflict, "conflict", "set the client id and client secret first")
+	case errors.Is(err, crm.ErrNoApp):
+		writeError(w, http.StatusConflict, "conflict", "this connector has no sidebar app")
 	case errors.Is(err, crm.ErrNotConnected):
 		writeError(w, http.StatusConflict, "conflict", "the connector is not connected")
 	case errors.Is(err, crm.ErrRateLimited):
@@ -182,6 +186,27 @@ func (s *server) deleteCRMConnector(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// downloadCRMApp is GET /integrations/crm/{id}/app: the ticket-sidebar app of
+// a helpdesk connector, as a zip the customer uploads to their own account.
+func (s *server) downloadCRMApp(w http.ResponseWriter, r *http.Request) {
+	if !s.crmReady(w) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	name, data, err := s.CRM.SidebarApp(r.Context(), actor(r).String(), id)
+	if err != nil {
+		s.crmError(w, "CRM sidebar app", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
+}
+
 func (s *server) connectCRMConnector(w http.ResponseWriter, r *http.Request) {
 	if !s.crmReady(w) {
 		return
@@ -195,7 +220,28 @@ func (s *server) connectCRMConnector(w http.ResponseWriter, r *http.Request) {
 		s.crmError(w, "CRM connector", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"authorizeUrl": u})
+	// A connector that signs in with client credentials is connected by now:
+	// there is no browser step and the address is empty.
+	writeJSON(w, http.StatusOK, map[string]any{"authorizeUrl": u, "connected": u == ""})
+}
+
+// getCRMSetup answers what the customer configures in the CRM for a
+// connector: the Salesforce Call Center definition, the Dynamics channel
+// provider values. None of it is secret.
+func (s *server) getCRMSetup(w http.ResponseWriter, r *http.Request) {
+	if !s.crmReady(w) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	it, err := s.CRM.Setup(r.Context(), id)
+	if err != nil {
+		s.crmError(w, "CRM connector", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items(it))
 }
 
 func (s *server) disconnectCRMConnector(w http.ResponseWriter, r *http.Request) {
@@ -376,18 +422,30 @@ func (s *server) putCRMUser(w http.ResponseWriter, r *http.Request) {
 // HubSpot engagement it created for a call, so the server patches that
 // engagement instead of creating a second one.
 func (s *server) hubspotEngagement(w http.ResponseWriter, r *http.Request) {
+	s.crmEngagement(w, r, "hubspot", "engagementId", func(v string) bool { return digitsOnly(v) && len(v) <= 32 })
+}
+
+// salesforceEngagement is the Open CTI softphone's handshake: the Task its
+// saveLog created for a call, which the server then patches (duration,
+// recording link) instead of creating a second one.
+func (s *server) salesforceEngagement(w http.ResponseWriter, r *http.Request) {
+	s.crmEngagement(w, r, "salesforce", "recordId", func(v string) bool { return v != "" && len(v) <= 18 })
+}
+
+// crmEngagement records the CRM reference an embedded app created for a
+// call. field names the reference in the body; the connector checks its
+// shape.
+func (s *server) crmEngagement(w http.ResponseWriter, r *http.Request, kind, field string, valid func(string) bool) {
 	if !s.crmReady(w) {
 		return
 	}
-	var b struct {
-		CallID       string `json:"callId"`
-		EngagementID string `json:"engagementId"`
-	}
+	var b map[string]string
 	if !decode(w, r, &b) {
 		return
 	}
-	if b.CallID == "" || len(b.CallID) > 128 || !digitsOnly(b.EngagementID) || len(b.EngagementID) > 32 {
-		badRequest(w, "callId and a numeric engagementId are required")
+	callID, ref := b["callId"], b[field]
+	if callID == "" || len(callID) > 128 || !valid(ref) {
+		badRequest(w, "callId and a valid "+field+" are required")
 		return
 	}
 	a := actor(r)
@@ -397,9 +455,9 @@ func (s *server) hubspotEngagement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	restricted := exts != nil || a.Role == auth.RoleUser
-	adopted, err := s.CRM.Engagement(r.Context(), a.String(), "hubspot", b.CallID, b.EngagementID, exts, restricted)
+	adopted, err := s.CRM.Engagement(r.Context(), a.String(), kind, callID, ref, exts, restricted)
 	if err != nil {
-		s.crmError(w, "HubSpot connector", err)
+		s.crmError(w, kind+" connector", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"adopted": adopted})

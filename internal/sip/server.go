@@ -59,6 +59,9 @@ type Config struct {
 	RecountInterval time.Duration
 	// MaxCallDuration ends a connected call with BYE to both legs (4h).
 	MaxCallDuration time.Duration
+	// DoorHangup is how long a door call stays up after the door-open code
+	// was sent, when the station hangs up after open (3s; spec S-47).
+	DoorHangup time.Duration
 	// SessionExpires is the RFC 4028 interval Hello requests on legs to
 	// phones and applies when a phone's call names none (30m); 0 turns
 	// session timers off. SessionMinSE is the smallest interval accepted
@@ -314,6 +317,11 @@ type Server struct {
 	// a test can inject the fork failure that races the abort.
 	abortHook atomic.Pointer[func(*call)]
 
+	// takeoverMu serializes takeover passes: a pass reads the membership
+	// once and acts on that snapshot, so a pass holding an older snapshot
+	// must not run after a newer one (it would forget an OFFLINE node the
+	// newer pass already counted, and the next pass would count it again).
+	takeoverMu sync.Mutex
 	// haOffline tracks OFFLINE nodes for the zombie reaper (guarded by
 	// haOfflineMu).
 	haOfflineMu sync.Mutex
@@ -450,6 +458,7 @@ func New(cfg Config, deps Deps) (*Server, error) {
 	setDefault(&cfg.RingTimeout, 30*time.Second)
 	setDefault(&cfg.MaxCallDuration, 4*time.Hour)
 	setDefault(&cfg.PageMaxDuration, 120*time.Second)
+	setDefault(&cfg.DoorHangup, 3*time.Second)
 	setDefault(&cfg.PageAnswerTimeout, 10*time.Second)
 	if cfg.PageFanout <= 0 {
 		cfg.PageFanout = 200
