@@ -49,6 +49,10 @@ type Backup struct {
 // Control is hello-control's configuration.
 type Control struct {
 	Common
+	// DoorCameraAllow are the private networks the door camera proxy may
+	// reach (HELLO_DOOR_CAMERA_ALLOW, CIDRs); public addresses need no entry
+	// and loopback and link-local ones are never reachable.
+	DoorCameraAllow []netip.Prefix
 	// Fax is the fax feature (HELLO_FAX_*); disabled unless HELLO_FAX_ENABLED.
 	Fax         Fax
 	DatabaseURL string
@@ -575,6 +579,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	}
 	c.IntegrationsAllowedCIDRs = r.allowedCIDRs("HELLO_INTEGRATIONS_ALLOWED_CIDRS")
 	c.Database = r.database(c.DatabaseURL)
+	c.DoorCameraAllow = r.cameraAllow()
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
 	c.SecretKey = r.secretKey()
 	r.minio(&c.MinioEndpoint, &c.MinioAccessKey, &c.MinioSecretKey, &c.MinioSecure)
@@ -598,6 +603,21 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	c.Clients = r.clients()
 	c.Syslog = r.syslog()
 	return c, r.err()
+}
+
+// cameraAllow reads HELLO_DOOR_CAMERA_ALLOW. The error names the key and
+// never echoes the value.
+func (r *reader) cameraAllow() []netip.Prefix {
+	v := r.getenv("HELLO_DOOR_CAMERA_ALLOW")
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	p, err := safehttp.ParseAllow(v)
+	if err != nil {
+		r.fail("HELLO_DOOR_CAMERA_ALLOW", errors.New("must list private CIDR prefixes such as 192.168.10.0/24 (not loopback or link-local)"))
+		return nil
+	}
+	return p
 }
 
 // Clients is the browser softphone's settings on hello-control.

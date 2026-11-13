@@ -1268,9 +1268,7 @@
         "operationId": "getMyFollowMe",
         "summary": "Get my extension's follow-me profile",
         "description": "Returns the follow-me profile of one of the signed-in user's own extensions. An extension that is not the user's answers 404, exactly like one that does not exist.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1311,9 +1309,7 @@
         "operationId": "putMyFollowMe",
         "summary": "Change my extension's follow-me profile",
         "description": "Changes the follow-me profile of one of the signed-in user's own extensions, with the same fields and rules as the operator route. An extension that is not the user's answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4749,9 +4745,7 @@
         "operationId": "getFollowMe",
         "summary": "Get an extension's follow-me profile",
         "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Returns the profile; an extension that has none reads as the defaults, off with no targets.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4789,9 +4783,7 @@
         "operationId": "putFollowMe",
         "summary": "Change an extension's follow-me profile",
         "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Fields left out keep their stored value; targets, when sent, replace the whole list (at most 5, in ring order). A profile can be turned on only with at least one target. A target cannot be the extension itself, an external target is 2 to 32 digits with an optional leading +, and an extension or ring group target must exist.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -25465,6 +25457,222 @@
         "x-hello-role": "admin",
         "x-hello-mcp": true
       }
+    },
+    "/api/v1/extensions/{id}/camera": {
+      "get": {
+        "operationId": "getDoorCamera",
+        "summary": "Show a door station's camera",
+        "description": "Shows where a door station's camera picture comes from. The password is never returned. An ordinary user extension answers 409.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Camera settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorCamera"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "credentials"
+        }
+      },
+      "put": {
+        "operationId": "updateDoorCamera",
+        "summary": "Set a door station's camera",
+        "description": "Sets the address of a door station's camera, an MJPEG stream or a snapshot, with its credentials. hello-control fetches the picture itself, and only from addresses it may reach (public ones and the networks in HELLO_DOOR_CAMERA_ALLOW). An ordinary user extension answers 409.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DoorCameraUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Camera settings after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorCamera"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteDoorCamera",
+        "summary": "Remove a door station's camera",
+        "description": "Removes the camera and its stored password.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/extensions/{id}/camera/view": {
+      "get": {
+        "operationId": "viewDoorCamera",
+        "summary": "Show a door station's camera picture",
+        "description": "Fetches the door station's picture from its camera and passes it on: image/jpeg for a snapshot camera, multipart/x-mixed-replace for an MJPEG stream (ended after ten minutes; at most eight pictures at a time per node). 404 when the station has no camera, 502 when the camera cannot be reached or does not answer with a picture (its address may be outside HELLO_DOOR_CAMERA_ALLOW), 429 when too many pictures are shown.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The picture",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "multipart/x-mixed-replace": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "description": "Too many pictures are being shown; see Retry-After",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "binary-download"
+        }
+      }
     }
   },
   "components": {
@@ -33449,21 +33657,11 @@
                 "description": "For a call that rang a follow-me profile, what each leg did, in the order they rang: own (the extension's own devices), extension, ring_group or external, and how it ended (answered, declined: an external target did not press 1, busy, no_answer, failed, skipped, cancelled)",
                 "items": {
                   "type": "object",
-                  "required": [
-                    "kind",
-                    "extension",
-                    "trunk",
-                    "result"
-                  ],
+                  "required": ["kind", "extension", "trunk", "result"],
                   "properties": {
                     "kind": {
                       "type": "string",
-                      "enum": [
-                        "own",
-                        "extension",
-                        "ring_group",
-                        "external"
-                      ]
+                      "enum": ["own", "extension", "ring_group", "external"]
                     },
                     "extension": {
                       "type": "string",
@@ -36644,10 +36842,7 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "simultaneous",
-              "sequential"
-            ]
+            "enum": ["simultaneous", "sequential"]
           },
           "ringOwnDevices": {
             "type": "boolean",
@@ -36679,19 +36874,11 @@
       "FollowMeTarget": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "target",
-          "delaySeconds"
-        ],
+        "required": ["kind", "target", "delaySeconds"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "external",
-              "extension",
-              "ring_group"
-            ],
+            "enum": ["external", "extension", "ring_group"],
             "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
           },
           "target": {
@@ -36709,18 +36896,11 @@
       "FollowMeTargetInput": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "target"
-        ],
+        "required": ["kind", "target"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "external",
-              "extension",
-              "ring_group"
-            ],
+            "enum": ["external", "extension", "ring_group"],
             "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
           },
           "target": {
@@ -36746,10 +36926,7 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "simultaneous",
-              "sequential"
-            ],
+            "enum": ["simultaneous", "sequential"],
             "description": "simultaneous rings everything at once; sequential starts the targets one after another."
           },
           "ringOwnDevices": {
@@ -43139,6 +43316,60 @@
             "type": "string",
             "pattern": "^[0-9A-Za-z._-]{0,64}$",
             "description": "The ring group told of every emergency call; empty for none."
+          }
+        }
+      },
+      "DoorCamera": {
+        "type": "object",
+        "required": ["configured", "kind", "url", "username", "passwordSet"],
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "Whether the station has a camera"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["mjpeg", "snapshot", ""],
+            "description": "mjpeg: a multipart/x-mixed-replace stream; snapshot: one JPEG per request"
+          },
+          "url": {
+            "type": "string",
+            "description": "The camera address, without credentials"
+          },
+          "username": {
+            "type": "string"
+          },
+          "passwordSet": {
+            "type": "boolean",
+            "description": "Whether a password is stored. The password itself is never returned."
+          }
+        }
+      },
+      "DoorCameraUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "url"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["mjpeg", "snapshot"],
+            "description": "mjpeg: a multipart/x-mixed-replace stream; snapshot: one JPEG per request"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "An absolute http:// or https:// address without credentials. rtsp:// cannot be shown in a browser."
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The camera's user name for HTTP basic authentication"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 256,
+            "x-hello-secret": true,
+            "description": "The camera's password, stored sealed and never returned. Absent keeps the stored one, an empty string clears it."
           }
         }
       }
