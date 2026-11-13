@@ -123,6 +123,31 @@ export interface InboxApi {
   ): Promise<Conversation>;
   setTags(id: number, tags: string[]): Promise<Conversation>;
   read(id: number): Promise<void>;
+  /** Saves the customer's number as a contact and returns the renamed conversation. */
+  addContact(id: number, contact: ContactInput): Promise<Conversation>;
+  /** The customer's most recent calls, newest first (an agent sees their own). */
+  calls(id: number, signal?: AbortSignal): Promise<{ items: InboxCall[] }>;
+}
+
+/** One call to or from the customer's number. */
+export interface InboxCall {
+  id: number;
+  startTime: string;
+  durationMs: number;
+  direction: string;
+  kind: string;
+  source: string;
+  destination: string;
+  answered: boolean;
+}
+
+/** The name an "Add to contacts" saves the customer under. */
+export interface ContactInput {
+  firstName?: string;
+  lastName?: string;
+  company?: string;
+  /** personal (the caller's own contacts, the default) or company (supervisors). */
+  book?: "personal" | "company";
 }
 
 function area(base: string): InboxApi {
@@ -143,6 +168,9 @@ function area(base: string): InboxApi {
       request("POST", at(id, "/status"), { body: { status, snoozedUntil } }),
     setTags: (id, tags) => request("POST", at(id, "/tags"), { body: { tags } }),
     read: (id) => request("POST", at(id, "/read")),
+    addContact: (id, contact) =>
+      request("POST", at(id, "/contact"), { body: contact }),
+    calls: (id, signal) => request("GET", at(id, "/calls"), { signal }),
   };
 }
 
@@ -231,6 +259,10 @@ export interface MessagingAddress {
   optOutKeywords: string[];
   helpText: string;
   optOutText: string;
+  /** Customer texts also go to the desk phones of the assigned user's extension. */
+  deskPhoneDelivery: boolean;
+  /** The extension whose phone may reply into a conversation on this number. */
+  ownerExtensionId: number | null;
   sendsPerMinute: number;
   conversations: number;
   createdAt: string;
@@ -244,6 +276,8 @@ export interface AddressInput {
   optOutKeywords?: string[];
   helpText?: string;
   optOutText?: string;
+  deskPhoneDelivery?: boolean;
+  ownerExtensionId?: number | null;
   sendsPerMinute?: number;
 }
 

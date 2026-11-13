@@ -126,7 +126,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | ----- | ------------------------------------------------------------ | ----------- |
 | 1     | Inbox core                                                   | done (#211) |
 | 2     | Twilio sending                                               | todo        |
-| 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | todo        |
+| 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | in review   |
 | 4     | LAN chat widget                                              | todo        |
 | 5     | Message routing and ACD                                      | todo        |
 | 6     | Telnyx, sender registration                                  | todo        |

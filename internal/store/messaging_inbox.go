@@ -223,6 +223,9 @@ func (s *Store) ListConversations(ctx context.Context, acc InboxAccess, f ConvFi
 		out = out[:limit]
 		next = ConvCursor{At: out[limit-1].LastMessageAt, ID: out[limit-1].ID}.String()
 	}
+	if err := s.nameConversations(ctx, acc.UserID, out); err != nil {
+		return nil, "", err
+	}
 	return out, next, nil
 }
 
@@ -235,7 +238,16 @@ func (s *Store) GetConversation(ctx context.Context, acc InboxAccess, id int64) 
 		return c, mapErr(err)
 	}
 	s.auditSupervisorView(ctx, acc, c)
-	return c, nil
+	return s.namedConversation(ctx, acc.UserID, c)
+}
+
+// namedConversation applies the reader's contact names to one conversation.
+func (s *Store) namedConversation(ctx context.Context, userID int64, c Conversation) (Conversation, error) {
+	cs := []Conversation{c}
+	if err := s.nameConversations(ctx, userID, cs); err != nil {
+		return c, err
+	}
+	return cs[0], nil
 }
 
 // auditSupervisorView records that a supervisor read a conversation that is
@@ -589,6 +601,9 @@ func (s *Store) ClaimConversation(ctx context.Context, acc InboxAccess, convID i
 		if _, err := addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", acc.Name+" took the conversation"); err != nil {
 			return err
 		}
+		if err := s.deliverLastToDeskPhone(ctx, tx, c.ID, acc.UserID); err != nil {
+			return err
+		}
 		// The supervisors saw it as unassigned, so they are told it moved.
 		return emitPoolEvent(ctx, tx, c.ID, "conversation.assigned", acc.UserID)
 	})
@@ -655,6 +670,11 @@ func (s *Store) AssignConversation(ctx context.Context, acc InboxAccess, convID,
 		if _, err := addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", acc.Name+" assigned the conversation to "+name); err != nil {
 			return err
 		}
+		if toUser > 0 {
+			if err := s.deliverLastToDeskPhone(ctx, tx, c.ID, toUser); err != nil {
+				return err
+			}
+		}
 		extra := []int64{acc.UserID}
 		if c.Assignee.Valid {
 			extra = append(extra, c.Assignee.Int64)
@@ -680,7 +700,10 @@ func (s *Store) AssignConversation(ctx context.Context, acc InboxAccess, convID,
 // access check beyond the change's own and no audit row.
 func (s *Store) conversationByID(ctx context.Context, userID int64, all bool, id int64) (Conversation, error) {
 	c, err := scanConversation(s.db.QueryRowContext(ctx, convSelect+` WHERE c.id = $3 AND `+visible, userID, all, id))
-	return c, mapErr(err)
+	if err != nil {
+		return c, mapErr(err)
+	}
+	return s.namedConversation(ctx, userID, c)
 }
 
 // SetConversationStatus changes a conversation's state. Snoozing needs a
@@ -1055,6 +1078,15 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *sql.Tx, in TrunkText, r
 	if in.FromName != "" {
 		peerName, peerNameSrc = in.FromName, "provider"
 	}
+	if peerName == "" {
+		// A name from a shared book (never a personal one, which only its
+		// owner sees, at read time).
+		if n, src, err := resolveContactName(ctx, tx, 0, in.FromKey); err != nil {
+			return err
+		} else if n != "" {
+			peerName, peerNameSrc = n, src
+		}
+	}
 	// The open conversation of this peer on this number, if any.
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, status, assignee_user_id FROM conversations
@@ -1124,6 +1156,11 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *sql.Tx, in TrunkText, r
 		return err
 	}
 	res.ConversationID, res.MessageID = conv, msgID
+	if convAssignee.Valid {
+		if err := s.deliverToDeskPhone(ctx, tx, conv, msgID, convAssignee.Int64); err != nil {
+			return err
+		}
+	}
 	row := convRow{ID: conv, ChannelID: channelID, AddressID: addressID, PeerKey: in.FromKey}
 
 	switch messaging.ClassifyKeyword(in.Body, words) {

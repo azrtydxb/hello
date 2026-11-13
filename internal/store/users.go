@@ -49,6 +49,10 @@ type User struct {
 	TOTPEnabled  bool      `json:"totpEnabled"`
 	TOTPRequired bool      `json:"totpRequired"`
 	CreatedAt    time.Time `json:"createdAt"`
+	// DeskphoneDelivery sends the customer texts of conversations assigned to
+	// the user to the phones of their extension (spec messaging-channels
+	// M-26); it also needs the number's own switch.
+	DeskphoneDelivery bool `json:"-"`
 	// RingWeb and RingMobile are whether the user's web and mobile clients
 	// ring for calls to their extension. They are the user's own profile
 	// settings (/me), not part of the account an admin manages.
@@ -58,7 +62,7 @@ type User struct {
 
 const userCols = `id, username, display_name, email, auth_method, role, enabled, must_change_password, extension_id,
 	coalesce((SELECT json_agg(extension_id ORDER BY position, extension_id) FROM user_extensions WHERE user_id = users.id), '[]'::json)::text,
-	vm_email_notify, vm_email_attach, vm_email_after, totp_enabled_at IS NOT NULL, totp_required, created_at, ring_web, ring_mobile`
+	vm_email_notify, vm_email_attach, vm_email_after, totp_enabled_at IS NOT NULL, totp_required, created_at, ring_web, ring_mobile, deskphone_delivery`
 
 func scanUser(r interface{ Scan(...any) error }) (User, error) {
 	var (
@@ -66,7 +70,7 @@ func scanUser(r interface{ Scan(...any) error }) (User, error) {
 		exts string
 	)
 	err := r.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.AuthMethod, &u.Role, &u.Enabled, &u.MustChangePassword,
-		&u.ExtensionID, &exts, &u.VoicemailEmail.Notify, &u.VoicemailEmail.Attach, &u.VoicemailEmail.After, &u.TOTPEnabled, &u.TOTPRequired, &u.CreatedAt, &u.RingWeb, &u.RingMobile)
+		&u.ExtensionID, &exts, &u.VoicemailEmail.Notify, &u.VoicemailEmail.Attach, &u.VoicemailEmail.After, &u.TOTPEnabled, &u.TOTPRequired, &u.CreatedAt, &u.RingWeb, &u.RingMobile, &u.DeskphoneDelivery)
 	if err != nil {
 		return u, err
 	}
@@ -485,6 +489,9 @@ type ProfileChange struct {
 	DisplayName *string
 	Email       *string
 	Voicemail   *VoicemailEmailPrefs
+	// DeskphoneDelivery turns desk-phone delivery of the user's conversations
+	// on or off.
+	DeskphoneDelivery *bool
 	// RingWeb and RingMobile choose whether the user's web and mobile
 	// clients ring for calls to their extension.
 	RingWeb    *bool
@@ -503,9 +510,10 @@ func (s *Store) UpdateProfile(ctx context.Context, actor string, id int64, c Pro
 				vm_email_attach = COALESCE($5, vm_email_attach),
 				vm_email_after = COALESCE($6, vm_email_after),
 				ring_web = COALESCE($7, ring_web),
-				ring_mobile = COALESCE($8, ring_mobile)
+				ring_mobile = COALESCE($8, ring_mobile),
+				deskphone_delivery = COALESCE($9, deskphone_delivery)
 			WHERE id = $1`, id, c.DisplayName, c.Email, prefNotify(c.Voicemail), prefAttach(c.Voicemail), prefAfter(c.Voicemail),
-			c.RingWeb, c.RingMobile)
+			c.RingWeb, c.RingMobile, c.DeskphoneDelivery)
 		if err != nil {
 			return err
 		}

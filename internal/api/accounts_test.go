@@ -26,6 +26,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/mailer"
+	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
 )
@@ -159,6 +160,9 @@ func (f *acctFake) UpdateProfile(_ context.Context, _ string, id int64, c store.
 	if c.Voicemail != nil {
 		u.VoicemailEmail = *c.Voicemail
 	}
+	if c.DeskphoneDelivery != nil {
+		u.DeskphoneDelivery = *c.DeskphoneDelivery
+	}
 	if c.RingWeb != nil {
 		u.RingWeb = *c.RingWeb
 	}
@@ -260,6 +264,9 @@ func (f *acctFake) DeleteUser(_ context.Context, _ string, id int64) error {
 
 // owns mirrors the user_extensions join every self-service read goes through.
 func (f *acctFake) owns(uid, ext int64) bool { return slices.Contains(f.links[uid], ext) }
+
+// UserPhoneVendors: the fake has no phones.
+func (f *acctFake) UserPhoneVendors(context.Context, int64) ([]prov.Vendor, error) { return nil, nil }
 
 func (f *acctFake) UserExtensions(_ context.Context, uid int64) ([]store.Extension, error) {
 	f.mu.Lock()
@@ -935,6 +942,21 @@ func TestSelfServiceActions(t *testing.T) {
 		if rec := acctCall(h, "alice", "GET", "/api/v1/me/calls?limit=0", nil); rec.Code != 400 {
 			t.Errorf("limit 0 = %d", rec.Code)
 		}
+	})
+
+	t.Run("desk phone delivery switch", func(t *testing.T) {
+		before := wantJSON(t, acctCall(h, "alice", "GET", "/api/v1/auth/me", nil), 200, "me")
+		if before["deskphoneDelivery"] != false || before["deskphoneCapable"] != true {
+			t.Fatalf("me = %v; the switch is off by default and an extension with no phone is capable", before)
+		}
+		got := wantJSON(t, acctCall(h, "alice", "PATCH", "/api/v1/me/profile", map[string]any{"deskphoneDelivery": true}), 200, "profile")
+		if got["deskphoneDelivery"] != true {
+			t.Fatalf("profile = %v, want the switch on", got)
+		}
+		if rec := acctCall(h, "alice", "PATCH", "/api/v1/me/profile", map[string]any{"deskphoneDelivery": "yes"}); rec.Code != 400 {
+			t.Errorf("a switch that is not a boolean = %d, want 400", rec.Code)
+		}
+		wantJSON(t, acctCall(h, "alice", "PATCH", "/api/v1/me/profile", map[string]any{"deskphoneDelivery": false}), 200, "profile")
 	})
 
 	t.Run("profile and voicemail email options", func(t *testing.T) {

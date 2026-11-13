@@ -1,5 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { errorMessage, fieldErrors, listTrunks, type Trunk } from "../api";
+import {
+  errorMessage,
+  fieldErrors,
+  listExtensions,
+  listTrunks,
+  type Extension,
+  type Trunk,
+} from "../api";
 import {
   createAddress,
   createChannel,
@@ -226,6 +233,11 @@ function AddressDialog({
   const [words, setWords] = useState(address?.optOutKeywords.join(", ") ?? "");
   const [help, setHelp] = useState(address?.helpText ?? "");
   const [optOut, setOptOut] = useState(address?.optOutText ?? "");
+  const [desk, setDesk] = useState(address?.deskPhoneDelivery ?? false);
+  const [owner, setOwner] = useState(
+    address?.ownerExtensionId == null ? "" : String(address.ownerExtensionId),
+  );
+  const [extensions, setExtensions] = useState<Extension[]>([]);
   const [perMinute, setPerMinute] = useState(
     String(address?.sendsPerMinute ?? 60),
   );
@@ -235,6 +247,17 @@ function AddressDialog({
   const chosenChannel = channels.find((c) => String(c.id) === channelId);
   const carrierNumber = chosenChannel?.provider === "twilio";
 
+  useEffect(() => {
+    const controller = new AbortController();
+    listExtensions(controller.signal).then(
+      (list) => {
+        if (!controller.signal.aborted) setExtensions(list);
+      },
+      () => undefined,
+    );
+    return () => controller.abort();
+  }, []);
+
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -242,6 +265,8 @@ function AddressDialog({
     setFields({});
     try {
       const body = {
+        deskPhoneDelivery: desk,
+        ownerExtensionId: owner === "" ? null : Number(owner),
         sendsPerMinute: carrierNumber ? Number(perMinute) : undefined,
         label: label.trim(),
         enabled,
@@ -355,6 +380,27 @@ function AddressDialog({
             onChange={(e) => setPerMinute(e.target.value)}
           />
         )}
+        <Switch
+          label="Deliver to desk phones"
+          hint="A customer text of a conversation assigned to a user who turned this on in their profile is also sent to the phones of their extension. Replies typed there go back to the customer."
+          labelPosition="end"
+          checked={desk}
+          onChange={(e) => setDesk(e.target.checked)}
+        />
+        <Select
+          label="Owner extension"
+          hint="Its phone may reply into an existing conversation on this number that is unassigned or its user's."
+          value={owner}
+          error={fields.ownerExtensionId}
+          options={[
+            { value: "", label: "None" },
+            ...extensions.map((x) => ({
+              value: String(x.id),
+              label: `${x.number} ${x.name}`.trim(),
+            })),
+          ]}
+          onChange={(e) => setOwner(e.target.value)}
+        />
         <Switch
           label="Number on"
           hint="Off hands texts to this number back to the normal extension route."

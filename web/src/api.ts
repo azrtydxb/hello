@@ -45,6 +45,10 @@ export interface Me {
   voicemailEmail?: VoicemailEmailPrefs;
   /** Whether the system can send email at all. */
   emailDelivery?: boolean;
+  /** Customer texts of the user's conversations also go to their desk phone. */
+  deskphoneDelivery?: boolean;
+  /** False when no phone of the user's extension has a text UI. */
+  deskphoneCapable?: boolean;
   /** 2FA is required of the user and not enrolled: only the enrolment works. */
   mustEnrollMfa?: boolean;
   /** The user's own two-factor state. */
