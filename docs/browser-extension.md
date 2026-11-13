@@ -84,7 +84,16 @@ re-registered; keep the key.
   popup shows the same and has a field to dial a number.
 - **Incoming calls.** `call.ringing` from the [event stream](integrations.md)
   becomes a desktop notification with the caller's name and number, for your own
-  extensions. The service worker keeps one stream open, resumes it with
+  extensions. The service worker first looks the number up
+  (`GET /api/v1/lookup/number`, with the extension's own token and its existing
+  `read` scope, so no new permission or sign-in is needed) and shows the best
+  name Hello has: a CRM contact, an address-book match, or one of your own
+  contacts, with the company underneath. When a CRM connector knows the caller
+  the notification has an **Open in CRM** button. With no match, a 404 from an
+  older server, a failure or no answer within 2 seconds, the notification shows
+  the name in the event, as before. Results are remembered in the service worker
+  for 5 minutes (a match) or 1 minute (no match), and a failed lookup for 10
+  seconds; nothing is written to disk. The service worker keeps one stream open, resumes it with
   `Last-Event-ID` after a drop, and an alarm every 30 seconds reopens it when the
   browser put the worker to sleep.
 
@@ -113,5 +122,6 @@ person may do: own extensions only, the click-to-call limits and refusals in
   1); the package is self-hosted.
 - Sites with a strict Content-Security-Policy are fine: the page script runs in
   an isolated world and its box lives in a closed shadow root.
-- Screen-pop shows the name Hello already knows (extensions, phonebooks, the
-  caller's own contacts). A CRM contact lookup is the CRM connectors' job.
+- The incoming-call notification names the caller through `GET /api/v1/lookup/number`
+  (see below). Hello must be reachable for the lookup; without it the
+  notification shows the name in the event.
