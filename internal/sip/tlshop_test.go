@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -258,7 +259,8 @@ func hopHandshakeFails(addr string, cfg *tls.Config) error {
 	defer func() { _ = c.Close() }()
 	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
 	_, err = c.Read(make([]byte, 1))
-	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
 		return nil
 	}
 	return err

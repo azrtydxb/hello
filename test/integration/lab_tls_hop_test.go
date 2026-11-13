@@ -169,6 +169,22 @@ func TestLabTLSHop(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 		defer cancel()
 		go func() { _, _ = a.Dial(ctx, ext.Extension, sdpOffer) }()
+		t.Cleanup(func() {
+			if !t.Failed() {
+				return
+			}
+			// What the edge and the nodes saw, for the CI log.
+			for _, svc := range []string{"kamailio", "hello-sip-1", "hello-sip-2"} {
+				out, _ := compose("logs", "--no-color", "--tail", "120", svc).CombinedOutput()
+				var keep []string
+				for _, l := range strings.Split(string(out), "\n") {
+					if svc == "kamailio" || strings.Contains(strings.ToLower(l), "tls") || strings.Contains(l, "5073") || strings.Contains(l, `"level":"WARN"`) || strings.Contains(l, `"level":"ERROR"`) {
+						keep = append(keep, l)
+					}
+				}
+				t.Logf("=== %s (tail)\n%s", svc, strings.Join(keep, "\n"))
+			}
+		})
 		line, h := c.readRequest()
 		if !strings.HasPrefix(line, "INVITE ") {
 			t.Fatalf("the TLS phone received %q, want an INVITE", line)
