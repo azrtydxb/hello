@@ -28,7 +28,7 @@ func TestWifiAPI(t *testing.T) {
 		"name": "Office", "ssid": "corp-wifi", "security": "wpa2-psk", "psk": wifiTestKey, "priority": 5,
 	}).json(t)
 	id := fmt.Sprint(office["id"])
-	if office["pskSet"] != true || office["passwordSet"] != false || office["verified"] != false {
+	if office["pskSet"] != true || office["dot1xProfileId"] != nil || office["verified"] != false {
 		t.Fatalf("created = %v", office)
 	}
 	if _, ok := office["psk"]; ok {
