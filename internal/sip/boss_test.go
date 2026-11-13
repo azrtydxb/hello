@@ -561,8 +561,10 @@ func TestBossOutboundAsBoss(t *testing.T) {
 // too, and the assistant answering is recorded. It fails if only the boss's
 // phone rings or the CDR does not name the assistant.
 func TestBossLinkFromIVR(t *testing.T) {
-	pbx, _ := ivrPBX(t, 1, ivrMenu("main", "800", map[string]snapshot.IVRDest{"1": ext("200")}))
-	pbx.snaps.p.Load().WithBossLinks([]snapshot.BossLink{bossLink()})
+	// The links go in before the server serves: the With* helpers write the
+	// snapshot in place, which races the INVITE handlers reading a live one.
+	pbx, _ := ivrPBXWith(t, 1, func(s *snapshot.Snapshot) { s.WithBossLinks([]snapshot.BossLink{bossLink()}) },
+		ivrMenu("main", "800", map[string]snapshot.IVRDest{"1": ext("200")}))
 	a, b, c := registerABC(t, pbx)
 	b.setCallee(ringForever())
 	c.setCallee(answerAfter(nil))
