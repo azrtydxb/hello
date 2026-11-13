@@ -119,6 +119,11 @@ func (m *TokenManager) Conn(ctx context.Context, row ConnectorRow) (Connector, C
 	if cr.Status != StatusConnected {
 		return nil, Conn{}, ErrNeedsReauth
 	}
+	if _, static := conn.(StaticAuth); static {
+		// The stored client secret is the credential; it never expires and
+		// is never copied into the connection.
+		return conn, Conn{Config: cfg, AccessToken: cfg.ClientSecret, ExternalAcct: t.Account}, nil
+	}
 	if !t.ExpiresAt.IsZero() && !t.ExpiresAt.After(m.now().Add(m.skew())) {
 		if t, err = m.refresh(ctx, row, conn, cfg, false); err != nil {
 			return nil, Conn{}, err

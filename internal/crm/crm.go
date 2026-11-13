@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"sync"
@@ -29,6 +30,12 @@ type Capabilities struct {
 	ClickToCall bool `json:"clickToCall"`
 	ScreenPop   bool `json:"screenPop"`
 	Ticket      bool `json:"ticket"`
+	// RecordingUpload means the connector stores the audio file itself
+	// (Pipedrive): Hello hands it the bytes instead of a link, once.
+	RecordingUpload bool `json:"recordingUpload,omitempty"`
+	// RecordingCopy means the CRM fetches a link once and keeps its own
+	// copy (Bitrix24): the link is short-lived and never renewed.
+	RecordingCopy bool `json:"recordingCopy,omitempty"`
 }
 
 // Contact is a CRM contact found by phone number.
@@ -37,6 +44,9 @@ type Contact struct {
 	Name    string `json:"name"`
 	Company string `json:"company,omitempty"`
 	URL     string `json:"url,omitempty"`
+	// CompanyID is the CRM's id of the company or organisation, when the
+	// connector links calls to it.
+	CompanyID string `json:"companyId,omitempty"`
 }
 
 // Outcome is how a call ended, in the CRM-neutral terms connectors map onto
@@ -74,7 +84,36 @@ type CallLog struct {
 	Contact *Contact
 	// RecordingURL is a recording link, empty while there is none.
 	RecordingURL string
+	// Recording is the audio of the call for a connector with
+	// Capabilities.RecordingUpload; the worker opens and closes it around
+	// UpdateCallLog.
+	Recording *RecordingFile
 }
+
+// RecordingFile is a recording's audio.
+type RecordingFile struct {
+	Body        io.ReadCloser
+	Size        int64
+	Name        string
+	ContentType string
+}
+
+// AudioSource opens a recording's audio for a connector that uploads it.
+type AudioSource interface {
+	// Open returns the audio; ErrAudioGone means the recording no longer
+	// exists.
+	Open(ctx context.Context, recordingID int64) (RecordingFile, error)
+}
+
+// ErrAudioGone is a recording that was deleted before it could be sent.
+var ErrAudioGone = errors.New("crm: the recording no longer exists")
+
+// SkipError is returned by UpdateCallLog when a recording is deliberately
+// not sent (too large for the CRM): the call stays logged and the reason is
+// shown on the job.
+type SkipError struct{ Reason string }
+
+func (e *SkipError) Error() string { return "crm: recording not sent: " + e.Reason }
 
 // Conn is what a connector needs to call its CRM: the connector's settings
 // and a valid access token.

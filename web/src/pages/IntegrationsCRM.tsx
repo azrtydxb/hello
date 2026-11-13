@@ -41,14 +41,10 @@ import { formatTime } from "../format";
 import { usePolling } from "../usePolling";
 import "./platform/platform.css";
 
-/** The connector kinds the console can create. */
-const KINDS = [{ value: "hubspot", label: "HubSpot" }];
+import { buildConfig, KIND_SPECS, kindSpec, type KindSpec } from "./crmKinds";
 
-const HUBSPOT_SCOPES = [
-  "crm.objects.contacts.read",
-  "crm.objects.contacts.write",
-  "crm.objects.owners.read",
-];
+/** The connector kinds the console can create. */
+const KINDS = KIND_SPECS.map((k) => ({ value: k.value, label: k.label }));
 
 const CONNECTION_TONE: Record<string, BadgeTone> = {
   connected: "good",
@@ -123,7 +119,7 @@ export function IntegrationsCRM() {
           <EmptyState
             icon="plug"
             title="No CRM connected"
-            description="Add the HubSpot app you created in your own HubSpot developer account."
+            description="Add the CRM app you created in your own account: HubSpot, Pipedrive or Zoho CRM, or an Odoo API key or Bitrix24 webhook."
           />
         )}
         {items?.map((c) => (
@@ -150,12 +146,19 @@ function NewConnector({
 }) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState(KINDS[0]!.value);
-  const [name, setName] = useState("HubSpot");
+  const spec = kindSpec(kind);
+  const [name, setName] = useState(spec.defaultName);
   const [clientId, setClientId] = useState("");
   const [secret, setSecret] = useState("");
-  const [region, setRegion] = useState("na");
+  const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  function pickKind(next: string) {
+    setKind(next);
+    setName(kindSpec(next).defaultName);
+    setValues({});
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -166,7 +169,7 @@ function NewConnector({
         kind,
         name,
         clientSecret: secret,
-        config: { clientId, region },
+        config: buildConfig(spec, clientId, values),
       });
       setOpen(false);
       setSecret("");
@@ -195,7 +198,7 @@ function NewConnector({
         label="CRM"
         value={kind}
         options={KINDS}
-        onChange={(e) => setKind(e.target.value)}
+        onChange={(e) => pickKind(e.target.value)}
       />
       <Input
         label="Name"
@@ -204,30 +207,31 @@ function NewConnector({
         required
         onChange={(e) => setName(e.target.value)}
       />
+      {spec.clientIdLabel && (
+        <Input
+          label={spec.clientIdLabel}
+          value={clientId}
+          required
+          onChange={(e) => setClientId(e.target.value)}
+        />
+      )}
       <Input
-        label="Client ID"
-        value={clientId}
-        required
-        onChange={(e) => setClientId(e.target.value)}
-      />
-      <Input
-        label="Client secret"
+        label={spec.secretLabel}
         type="password"
         autoComplete="off"
         value={secret}
         required
         onChange={(e) => setSecret(e.target.value)}
-        hint="Kept sealed; it is never shown again."
+        hint={spec.secretHint}
       />
-      <Select
-        label="HubSpot data centre"
-        value={region}
-        options={[
-          { value: "na", label: "United States / default" },
-          { value: "eu", label: "Europe (app-eu1)" },
-        ]}
-        onChange={(e) => setRegion(e.target.value)}
-      />
+      {spec.fields.map((f) => (
+        <KindFieldInput
+          key={f.key}
+          field={f}
+          value={values[f.key] ?? f.defaultValue ?? ""}
+          onChange={(v) => setValues({ ...values, [f.key]: v })}
+        />
+      ))}
       {err && (
         <Alert tone="bad" title="Could not add the connector">
           {err}
@@ -297,9 +301,15 @@ function ConnectionTab({
   say: (m: string) => void;
 }) {
   const [name, setName] = useState(c.name);
+  const spec = kindSpec(c.kind);
+  const credential = c.auth === "credential";
   const [clientId, setClientId] = useState(c.config.clientId ?? "");
   const [secret, setSecret] = useState("");
-  const [region, setRegion] = useState(c.config.region ?? "na");
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      spec.fields.map((f) => [f.key, c.config[f.key] ?? f.defaultValue ?? ""]),
+    ),
+  );
   const [enabled, setEnabled] = useState(c.enabled);
   const [recordings, setRecordings] = useState(c.recordings);
   const [ttlDays, setTtlDays] = useState(
@@ -310,7 +320,16 @@ function ConnectionTab({
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<"disconnect" | "delete" | null>(null);
-  const idChanged = clientId !== (c.config.clientId ?? "");
+  // Changing where the secret goes asks for the secret again.
+  const idChanged =
+    (spec.clientIdLabel !== undefined &&
+      clientId !== (c.config.clientId ?? "")) ||
+    spec.fields.some(
+      (f) =>
+        f.key !== "region" &&
+        (values[f.key] ?? "") !== (c.config[f.key] ?? f.defaultValue ?? ""),
+    ) ||
+    (c.kind === "zoho" && values.region !== (c.config.region ?? "us"));
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -324,7 +343,7 @@ function ConnectionTab({
         logMissed,
         fallbackOwner: fallback,
         linkTtlHours: Math.max(1, Math.round(Number(ttlDays) * 24)),
-        config: { clientId, region },
+        config: buildConfig(spec, clientId, values),
         ...(secret !== "" ? { clientSecret: secret } : {}),
       });
       setSecret("");
@@ -340,7 +359,14 @@ function ConnectionTab({
   async function connect() {
     setErr(null);
     try {
-      window.location.assign(await connectCRMConnector(c.id));
+      const url = await connectCRMConnector(c.id);
+      if (url === "") {
+        // A credential connector is verified and connected on the spot.
+        reload();
+        say("Connected. Calls that were waiting are written now.");
+        return;
+      }
+      window.location.assign(url);
     } catch (x: unknown) {
       setErr(errorMessage(x));
     }
@@ -372,33 +398,42 @@ function ConnectionTab({
             label: "Last change",
             value: conn ? formatTime(conn.updatedAt) : "—",
           },
-          {
-            label: "Redirect URI",
-            value: c.redirectUri ?? "needs HELLO_PUBLIC_URL",
-            mono: true,
-          },
+          ...(credential
+            ? []
+            : [
+                {
+                  label: "Redirect URI",
+                  value: c.redirectUri ?? "needs HELLO_PUBLIC_URL",
+                  mono: true,
+                },
+              ]),
         ]}
       />
-      {c.kind === "hubspot" && (
-        <details>
-          <summary>HubSpot app settings</summary>
-          <p>
-            In your HubSpot developer account, create a private (unlisted) app
-            and set these under Auth. HubSpot rejects a sign-in whose redirect
-            URI differs by a character.
-          </p>
+      <details>
+        <summary>{spec.setup.title}</summary>
+        <p>{spec.setup.intro}</p>
+        {spec.setup.redirect && (
           <CodeBlock
             title="Redirect URL"
             code={c.redirectUri ?? "Set HELLO_PUBLIC_URL first"}
           />
-          <CodeBlock title="Scopes" code={HUBSPOT_SCOPES.join("\n")} />
-        </details>
-      )}
+        )}
+        {spec.setup.list && (
+          <CodeBlock
+            title={spec.setup.listTitle ?? "Settings"}
+            code={spec.setup.list.join("\n")}
+          />
+        )}
+      </details>
       <p>
         <Button
           icon="link"
           onClick={() => void connect()}
-          disabled={!c.redirectUri || !c.hasClientSecret || !c.config.clientId}
+          disabled={
+            credential
+              ? !c.hasClientSecret
+              : !c.redirectUri || !c.hasClientSecret || !c.config.clientId
+          }
         >
           {conn ? "Connect again" : "Connect"}
         </Button>{" "}
@@ -433,14 +468,20 @@ function ConnectionTab({
           required
           onChange={(e) => setName(e.target.value)}
         />
+        {spec.clientIdLabel && (
+          <Input
+            label={
+              spec.clientIdLabel === "Client ID"
+                ? "Client ID"
+                : spec.clientIdLabel
+            }
+            value={clientId}
+            required
+            onChange={(e) => setClientId(e.target.value)}
+          />
+        )}
         <Input
-          label="Client ID"
-          value={clientId}
-          required
-          onChange={(e) => setClientId(e.target.value)}
-        />
-        <Input
-          label="Client secret"
+          label={spec.secretLabel}
           type="password"
           autoComplete="off"
           value={secret}
@@ -449,21 +490,18 @@ function ConnectionTab({
           onChange={(e) => setSecret(e.target.value)}
           hint={
             idChanged
-              ? "A new client ID needs its secret again."
+              ? "A change of account or address needs the secret again."
               : "Write-only."
           }
         />
-        {c.kind === "hubspot" && (
-          <Select
-            label="HubSpot data centre"
-            value={region}
-            options={[
-              { value: "na", label: "United States / default" },
-              { value: "eu", label: "Europe (app-eu1)" },
-            ]}
-            onChange={(e) => setRegion(e.target.value)}
+        {spec.fields.map((f) => (
+          <KindFieldInput
+            key={f.key}
+            field={f}
+            value={values[f.key] ?? ""}
+            onChange={(v) => setValues({ ...values, [f.key]: v })}
           />
-        )}
+        ))}
         <Switch
           label="Enabled"
           checked={enabled}
@@ -475,22 +513,28 @@ function ConnectionTab({
           onChange={(e) => setLogMissed(e.target.checked)}
         />
         <Switch
-          label="Attach recording links"
-          hint="Off by default. A link to the recording is written into the CRM record; anyone with the link can play it until it expires."
+          label={
+            c.capabilities.recordingUpload
+              ? "Attach recordings"
+              : "Attach recording links"
+          }
+          hint={spec.recordingHint}
           checked={recordings}
           onChange={(e) => setRecordings(e.target.checked)}
         />
-        {recordings && (
-          <Input
-            label="Recording link lifetime (days)"
-            type="number"
-            min={1}
-            max={365}
-            value={ttlDays}
-            onChange={(e) => setTtlDays(e.target.value)}
-            hint="Links of recent calls are renewed before they expire."
-          />
-        )}
+        {recordings &&
+          !c.capabilities.recordingUpload &&
+          !c.capabilities.recordingCopy && (
+            <Input
+              label="Recording link lifetime (days)"
+              type="number"
+              min={1}
+              max={365}
+              value={ttlDays}
+              onChange={(e) => setTtlDays(e.target.value)}
+              hint="Links of recent calls are renewed before they expire."
+            />
+          )}
         <Input
           label="Fallback owner (CRM user id)"
           value={fallback}
@@ -757,5 +801,36 @@ function CallsTab({
         />
       )}
     </div>
+  );
+}
+
+function KindFieldInput({
+  field,
+  value,
+  onChange,
+}: {
+  field: KindSpec["fields"][number];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  if (field.options) {
+    return (
+      <Select
+        label={field.label}
+        value={value}
+        options={field.options}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+  return (
+    <Input
+      label={field.label}
+      value={value}
+      placeholder={field.placeholder}
+      hint={field.hint}
+      required
+      onChange={(e) => onChange(e.target.value)}
+    />
   );
 }

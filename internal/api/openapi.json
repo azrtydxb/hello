@@ -1268,9 +1268,7 @@
         "operationId": "getMyFollowMe",
         "summary": "Get my extension's follow-me profile",
         "description": "Returns the follow-me profile of one of the signed-in user's own extensions. An extension that is not the user's answers 404, exactly like one that does not exist.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1311,9 +1309,7 @@
         "operationId": "putMyFollowMe",
         "summary": "Change my extension's follow-me profile",
         "description": "Changes the follow-me profile of one of the signed-in user's own extensions, with the same fields and rules as the operator route. An extension that is not the user's answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4749,9 +4745,7 @@
         "operationId": "getFollowMe",
         "summary": "Get an extension's follow-me profile",
         "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Returns the profile; an extension that has none reads as the defaults, off with no targets.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4789,9 +4783,7 @@
         "operationId": "putFollowMe",
         "summary": "Change an extension's follow-me profile",
         "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Fields left out keep their stored value; targets, when sent, replace the whole list (at most 5, in ring order). A profile can be turned on only with at least one target. A target cannot be the extension itself, an external target is 2 to 32 digits with an optional leading +, and an extension or ring group target must exist.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -23004,7 +22996,7 @@
       "post": {
         "operationId": "createCRMConnector",
         "summary": "Create a CRM connector",
-        "description": "Adds a connector of a registered kind (hubspot). The customer creates the CRM app in their own account; this stores its client id (config.clientId) and, write-only, its client secret. A new connector is not connected until an administrator signs in with connect. Validation failures list each failing field in error.fields.",
+        "description": "Adds a connector of a registered kind (hubspot, pipedrive, zoho, odoo, bitrix24). The customer creates the CRM app (or the Odoo API key, or the Bitrix24 inbound webhook) in their own account; this stores its client id (config.clientId; the login for Odoo, none for Bitrix24) and, write-only, its client secret (the API key for Odoo, the webhook address for Bitrix24). Settings per kind: hubspot region na or eu; zoho region us, eu, in, au, jp, ca, sa or cn; odoo url and db. A new connector is not connected until an administrator signs in with connect. Validation failures list each failing field in error.fields.",
         "tags": ["integrations"],
         "requestBody": {
           "required": true,
@@ -23198,7 +23190,7 @@
       "post": {
         "operationId": "connectCRMConnector",
         "summary": "Start the CRM sign-in",
-        "description": "Starts the OAuth authorization of the connector and returns the CRM address to send the browser to. The CRM returns to /api/v1/integrations/crm/oauth/callback, which finishes the connection and redirects to the console. Needs HELLO_PUBLIC_URL and the client id and secret.",
+        "description": "Starts the OAuth authorization of the connector and returns the CRM address to send the browser to. The CRM returns to /api/v1/integrations/crm/oauth/callback, which finishes the connection and redirects to the console. Needs HELLO_PUBLIC_URL and the client id and secret. A credential connector (Odoo, Bitrix24) needs neither: the stored secret is verified with the CRM and the connection is made at once (connected true, empty authorizeUrl); a refused secret is 502.",
         "tags": ["integrations"],
         "parameters": [
           {
@@ -23230,6 +23222,9 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
@@ -33202,21 +33197,11 @@
                 "description": "For a call that rang a follow-me profile, what each leg did, in the order they rang: own (the extension's own devices), extension, ring_group or external, and how it ended (answered, declined: an external target did not press 1, busy, no_answer, failed, skipped, cancelled)",
                 "items": {
                   "type": "object",
-                  "required": [
-                    "kind",
-                    "extension",
-                    "trunk",
-                    "result"
-                  ],
+                  "required": ["kind", "extension", "trunk", "result"],
                   "properties": {
                     "kind": {
                       "type": "string",
-                      "enum": [
-                        "own",
-                        "extension",
-                        "ring_group",
-                        "external"
-                      ]
+                      "enum": ["own", "extension", "ring_group", "external"]
                     },
                     "extension": {
                       "type": "string",
@@ -36397,10 +36382,7 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "simultaneous",
-              "sequential"
-            ]
+            "enum": ["simultaneous", "sequential"]
           },
           "ringOwnDevices": {
             "type": "boolean",
@@ -36432,19 +36414,11 @@
       "FollowMeTarget": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "target",
-          "delaySeconds"
-        ],
+        "required": ["kind", "target", "delaySeconds"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "external",
-              "extension",
-              "ring_group"
-            ],
+            "enum": ["external", "extension", "ring_group"],
             "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
           },
           "target": {
@@ -36462,18 +36436,11 @@
       "FollowMeTargetInput": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "target"
-        ],
+        "required": ["kind", "target"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "external",
-              "extension",
-              "ring_group"
-            ],
+            "enum": ["external", "extension", "ring_group"],
             "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
           },
           "target": {
@@ -36499,10 +36466,7 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "simultaneous",
-              "sequential"
-            ],
+            "enum": ["simultaneous", "sequential"],
             "description": "simultaneous rings everything at once; sequential starts the targets one after another."
           },
           "ringOwnDevices": {
@@ -41570,6 +41534,14 @@
           "ticket": {
             "type": "boolean",
             "description": "The connector can open a ticket from a call."
+          },
+          "recordingUpload": {
+            "type": "boolean",
+            "description": "The CRM stores the audio file itself (Pipedrive): Hello uploads the recording once instead of writing a link."
+          },
+          "recordingCopy": {
+            "type": "boolean",
+            "description": "The CRM fetches a short-lived link once and keeps a copy (Bitrix24); the link is not renewed."
           }
         }
       },
@@ -41624,7 +41596,8 @@
           "fallbackOwner",
           "createdAt",
           "capabilities",
-          "connection"
+          "connection",
+          "auth"
         ],
         "properties": {
           "id": {
@@ -41633,7 +41606,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "The connector kind, for example hubspot."
+            "description": "The connector kind: hubspot, pipedrive, zoho, odoo or bitrix24."
           },
           "name": {
             "type": "string"
@@ -41647,7 +41620,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "The connector's settings: clientId and, for HubSpot, region (na or eu)."
+            "description": "The connector's settings: clientId (the Odoo login; none for Bitrix24) and per kind: region (HubSpot na or eu; Zoho us, eu, in, au, jp, ca, sa, cn), url and db (Odoo). A change of clientId, region, url or db needs the client secret in the same request, so a secret is never sent to another account or server."
           },
           "hasClientSecret": {
             "type": "boolean",
@@ -41691,7 +41664,12 @@
           },
           "redirectUri": {
             "type": "string",
-            "description": "The redirect URI to register in the CRM app; absent without HELLO_PUBLIC_URL."
+            "description": "The redirect URI to register in the CRM app; absent without HELLO_PUBLIC_URL and for a credential connector."
+          },
+          "auth": {
+            "type": "string",
+            "enum": ["oauth", "credential"],
+            "description": "oauth signs in through the browser. credential (Odoo, Bitrix24) has no browser step: connect verifies the stored secret with the CRM and connects at once."
           }
         }
       },
@@ -41712,7 +41690,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "description": "The connector kind (hubspot); required on create, immutable afterwards."
+            "description": "The connector kind (hubspot, pipedrive, zoho, odoo, bitrix24); required on create, immutable afterwards."
           },
           "name": {
             "type": "string",
@@ -41759,11 +41737,15 @@
       },
       "CRMAuthorize": {
         "type": "object",
-        "required": ["authorizeUrl"],
+        "required": ["authorizeUrl", "connected"],
         "properties": {
           "authorizeUrl": {
             "type": "string",
-            "description": "The CRM address that asks the administrator to approve the app."
+            "description": "The CRM address that asks the administrator to approve the app. Empty for a credential connector."
+          },
+          "connected": {
+            "type": "boolean",
+            "description": "True when the connector was verified and connected on the spot (a credential connector); then there is no address to follow."
           }
         }
       },

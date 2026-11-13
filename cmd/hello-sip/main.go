@@ -20,7 +20,11 @@ import (
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/crm"
-	_ "github.com/azrtydxb/hello/internal/crm/hubspot" // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/bitrix24"  // registers the Bitrix24 connector
+	_ "github.com/azrtydxb/hello/internal/crm/hubspot"   // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/odoo"      // registers the Odoo connector
+	_ "github.com/azrtydxb/hello/internal/crm/pipedrive" // registers the Pipedrive connector
+	_ "github.com/azrtydxb/hello/internal/crm/zoho"      // registers the Zoho CRM connector
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/lifecycle"
@@ -164,7 +168,7 @@ func run(args []string) error {
 	// the SIP path bounds to a few hundred milliseconds. The CRM query runs
 	// in the background, so a slow CRM never holds a call.
 	crmRepo := &crm.PG{DB: sipDB, Box: box}
-	crmTokens := &crm.TokenManager{Repo: crmRepo, Providers: crm.DefaultProvider(safehttp.NewClient(safehttp.Options{Timeout: crm.LookupTimeout})),
+	crmTokens := &crm.TokenManager{Repo: crmRepo, Providers: crm.DefaultProvider(safehttp.NewClient(safehttp.Options{Timeout: crm.LookupTimeout, Allow: cfg.IntegrationsAllowedCIDRs})),
 		Log: log.With("component", "crm")}
 	crmLookup := &crm.Lookup{Repo: crmRepo, Tokens: crmTokens, Cache: crm.ValkeyCache{Client: func() valkey.Client { return vk }}, Log: log.With("component", "crm")}
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),

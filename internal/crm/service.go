@@ -37,6 +37,20 @@ type (
 	Pinger interface {
 		Ping(ctx context.Context, c Conn) error
 	}
+	// StaticAuth is implemented by connectors that need no OAuth round
+	// trip: the stored client secret (an API key, a webhook URL) is the
+	// credential. Authenticate checks it with the CRM and returns the
+	// connection to store; Tokens.Access is the credential and has no
+	// expiry.
+	StaticAuth interface {
+		Authenticate(ctx context.Context, c Config) (Tokens, error)
+	}
+	// SecretBinder lists the settings that decide where the stored secret
+	// is sent; changing one asks for the secret again. Without it the
+	// client id is the only one.
+	SecretBinder interface {
+		SecretBoundKeys() []string
+	}
 	// Revoker revokes a refresh token at the CRM when a connection is
 	// removed.
 	Revoker interface {
@@ -97,6 +111,9 @@ type ConnectorView struct {
 	Capabilities Capabilities `json:"capabilities"`
 	Connection   *Connection  `json:"connection"`
 	RedirectURI  string       `json:"redirectUri,omitempty"`
+	// Auth is how the connector signs in: "oauth" or "credential" (the
+	// secret is the credential; Connect verifies it).
+	Auth string `json:"auth"`
 }
 
 func (s *Service) redirectURI() string {
@@ -107,9 +124,15 @@ func (s *Service) redirectURI() string {
 }
 
 func (s *Service) view(ctx context.Context, r ConnectorRow) (ConnectorView, error) {
-	v := ConnectorView{ConnectorRow: r, RedirectURI: s.redirectURI()}
+	v := ConnectorView{ConnectorRow: r, Auth: "oauth"}
 	if c, ok := s.Tokens.Providers(r.Kind); ok {
 		v.Capabilities = c.Capabilities()
+		if _, static := c.(StaticAuth); static {
+			v.Auth = "credential"
+		}
+	}
+	if v.Auth == "oauth" {
+		v.RedirectURI = s.redirectURI()
 	}
 	cr, _, err := s.Repo.OrgConnection(ctx, r.ID)
 	switch {
@@ -266,8 +289,18 @@ func (s *Service) Update(ctx context.Context, actor string, id int64, in Setting
 	if verr != nil {
 		return ConnectorView{}, verr
 	}
-	if ci.Config["clientId"] != cur.Config["clientId"] && in.ClientSecret == nil {
-		return ConnectorView{}, &ValidationError{map[string]string{"clientSecret": "required when the client id changes"}}
+	if in.ClientSecret == nil {
+		keys := []string{"clientId"}
+		if conn, ok := s.Tokens.Providers(cur.Kind); ok {
+			if sb, ok := conn.(SecretBinder); ok {
+				keys = sb.SecretBoundKeys()
+			}
+		}
+		for _, k := range keys {
+			if ci.Config[k] != cur.Config[k] {
+				return ConnectorView{}, &ValidationError{map[string]string{"clientSecret": "required when " + k + " changes"}}
+			}
+		}
 	}
 	r, err := s.Repo.UpdateConnector(ctx, id, ci, in.ClientSecret)
 	if err != nil {
@@ -334,10 +367,13 @@ func (s *Service) Connect(ctx context.Context, actor string, id int64) (string, 
 	if err != nil {
 		return "", err
 	}
+	conn, ok := s.Tokens.Providers(cur.Kind)
+	if sa, isStatic := conn.(StaticAuth); ok && isStatic {
+		return "", s.connectStatic(ctx, actor, cur, sa)
+	}
 	if s.PublicURL == "" {
 		return "", ErrNoPublicURL
 	}
-	conn, ok := s.Tokens.Providers(cur.Kind)
 	oa, isOA := conn.(OAuth)
 	if !ok || !isOA {
 		return "", ErrNotOAuth
@@ -355,6 +391,36 @@ func (s *Service) Connect(ctx context.Context, actor string, id int64) (string, 
 	}
 	return oa.AuthURL(cfg, s.redirectURI(), state), nil
 }
+
+// connectStatic verifies a connector's stored secret with the CRM and keeps
+// the connection; there is no browser round trip.
+func (s *Service) connectStatic(ctx context.Context, actor string, cur ConnectorRow, sa StaticAuth) error {
+	cfg, err := s.Tokens.Config(ctx, cur)
+	if err != nil {
+		return err
+	}
+	if cfg.ClientSecret == "" {
+		return ErrNoCredentials
+	}
+	vctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	t, err := sa.Authenticate(vctx, cfg)
+	if err != nil {
+		_ = s.Repo.Audit(ctx, actor, "connect_failed", "crm_connector", strconv.FormatInt(cur.ID, 10))
+		return &ConnectError{Msg: scrub(err.Error())}
+	}
+	if _, err := s.Repo.SaveOrgConnection(ctx, cur.ID, t); err != nil {
+		return err
+	}
+	_ = s.Repo.Audit(ctx, actor, "connect", "crm_connector", strconv.FormatInt(cur.ID, 10))
+	s.Lookup.Invalidate()
+	return nil
+}
+
+// ConnectError is a credential the CRM refused; Msg is safe to show.
+type ConnectError struct{ Msg string }
+
+func (e *ConnectError) Error() string { return "crm: the CRM refused the credentials: " + e.Msg }
 
 // Callback completes the OAuth flow: the state names the connector and the
 // administrator who started it. It returns the connector id.

@@ -47,6 +47,7 @@ func (s *server) crmReady(w http.ResponseWriter) bool {
 // crmError answers a failed CRM operation.
 func (s *server) crmError(w http.ResponseWriter, what string, err error) {
 	var ve *crm.ValidationError
+	var ce *crm.ConnectError
 	switch {
 	case errors.As(err, &ve):
 		keys := make([]string, 0, len(ve.Fields))
@@ -63,6 +64,8 @@ func (s *server) crmError(w http.ResponseWriter, what string, err error) {
 		writeError(w, http.StatusNotFound, "not_found", what+": not found")
 	case errors.Is(err, crm.ErrConflict):
 		writeError(w, http.StatusConflict, "conflict", what+": a connector with that name exists, or the job is not dead or skipped")
+	case errors.As(err, &ce):
+		writeError(w, http.StatusBadGateway, "upstream", "the CRM refused the credentials: "+ce.Msg)
 	case errors.Is(err, crm.ErrNoPublicURL):
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "HELLO_PUBLIC_URL is not set, so the CRM sign-in cannot return to Hello")
 	case errors.Is(err, crm.ErrNotOAuth):
@@ -195,7 +198,9 @@ func (s *server) connectCRMConnector(w http.ResponseWriter, r *http.Request) {
 		s.crmError(w, "CRM connector", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"authorizeUrl": u})
+	// A credential connector (Odoo, Bitrix24) is verified and connected on
+	// the spot: there is no address to send the browser to.
+	writeJSON(w, http.StatusOK, map[string]any{"authorizeUrl": u, "connected": u == ""})
 }
 
 func (s *server) disconnectCRMConnector(w http.ResponseWriter, r *http.Request) {
