@@ -453,6 +453,11 @@ func (s *Server) dispatchDigit(c *call, fromCaller bool, d byte) {
 		if string(all) == recordToggle {
 			buf.take()
 			c.toggleRecording()
+			return
+		}
+		// *50 on a door call sends the station's door-open code (S-47).
+		if c.doorOpenPressed(all, fromCaller) {
+			buf.take()
 		}
 		return
 	}
