@@ -107,12 +107,12 @@ that place calls or follow them:
 `admin` implies `write`, which implies `read`; `secrets`, `calls`, `events`,
 `recordings` and `messages` stand alone.
 
-| Role       | May grant                                                                        |
-| ---------- | -------------------------------------------------------------------------------- |
-| `user`     | `read`, `write` (own extensions only), `messages` (own conversations)            |
-| `viewer`   | `read`, `events`                                                                 |
-| `operator` | `read`, `write`, `calls`, `events`, `recordings`, `messages`                     |
-| `admin`    | `read`, `write`, `admin`, `secrets`, `calls`, `events`, `recordings`, `messages` |
+| Role       | May grant                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------------ |
+| `user`     | `read`, `write`, `calls`, `events`, `recordings` (own extensions only), `messages` (own conversations) |
+| `viewer`   | `read`, `events`                                                                                       |
+| `operator` | `read`, `write`, `calls`, `events`, `recordings`, `messages`                                           |
+| `admin`    | `read`, `write`, `admin`, `secrets`, `calls`, `events`, `recordings`, `messages`                       |
 
 An agent never has more than its user: the role is read on every request,
 so demoting a user (System → Users, admin only) narrows every app they

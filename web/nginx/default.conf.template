@@ -170,6 +170,20 @@ server {
         try_files /index.html =404;
     }
 
+    # The browser extension package (docs/browser-extension.md): built into
+    # the image, never cached, always downloaded rather than shown.
+    location /downloads/ {
+        types {
+            application/zip zip;
+            application/x-chrome-extension crx;
+            application/json json;
+        }
+        add_header Cache-Control "no-cache" always;
+        add_header Content-Disposition "attachment" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        try_files $uri =404;
+    }
+
     # Hello inside another product's frame (docs/crm.md): the Salesforce Open
     # CTI softphone and the Dynamics 365 CIF widget are static pages that only
     # the named CRM hosts may frame. They run no inline script and talk only to
