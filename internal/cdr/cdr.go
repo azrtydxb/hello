@@ -110,6 +110,8 @@ type Record struct {
 	// ICE-lite.
 	SRTPKeyEx string
 	ICE       bool
+	// Video says the call carried video at some point (migration 00120).
+	Video bool
 	// PeerCallID is the Call-ID of the answering callee leg (migration
 	// 00066), so an RTCP-XR report from the callee's phone finds the record;
 	// empty when no leg answered.
@@ -265,9 +267,9 @@ const insert = `WITH c AS (INSERT INTO cdrs (correlation_id, sip_call_id, source
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason,
     direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
-    rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client, peer_call_id, answered_by, srtp, srtp_keyex, ice)
+    rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client, peer_call_id, answered_by, srtp, srtp_keyex, ice, video)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $40)
 ON CONFLICT (correlation_id) DO NOTHING RETURNING id),
 p AS (INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
 SELECT c.id, l.ord, l.leg->>'extension', l.leg->>'device', l.leg->>'result'
@@ -396,7 +398,7 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
 		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, r.RingTag, r.RingRule,
-		nullString(r.CallerCodec), nullString(r.CalleeCodec), origin, r.OriginClient, r.PeerCallID, r.AnsweredBy, srtp, keyex, r.ICE, string(lj), string(qj), string(fj))
+		nullString(r.CallerCodec), nullString(r.CalleeCodec), origin, r.OriginClient, r.PeerCallID, r.AnsweredBy, srtp, keyex, r.ICE, string(lj), string(qj), string(fj), r.Video)
 	if err != nil {
 		return err
 	}

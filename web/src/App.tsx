@@ -118,6 +118,8 @@ import { UnknownSyslog } from "./pages/UnknownSyslog";
 import { Trunks } from "./pages/Trunks";
 import { Voicemail } from "./pages/Voicemail";
 import { useControlPlane } from "./useControlPlane";
+import { SoftphoneProvider } from "./softphone/SoftphoneProvider";
+import { SoftphoneDock } from "./softphone/SoftphoneDock";
 
 /** Pages that have content; any other nav item renders a placeholder. */
 const PAGES: Readonly<Record<string, ComponentType>> = {
@@ -252,7 +254,19 @@ function Shell() {
     void signOut();
   }
 
-  return (
+  const phone = (page: ReactNode) =>
+    hasExtensions ? (
+      <SoftphoneProvider
+        displayName={state.status === "signedIn" ? state.username : ""}
+      >
+        {page}
+        <SoftphoneDock />
+      </SoftphoneProvider>
+    ) : (
+      page
+    );
+
+  return phone(
     <div className="app-shell" data-pillar="operate">
       <a className="skip-link" href="#main">
         Skip to content
@@ -324,7 +338,7 @@ function Shell() {
           </div>
         </main>
       </div>
-    </div>
+    </div>,
   );
 }
 

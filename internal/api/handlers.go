@@ -455,6 +455,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		CallWaiting       *bool   `json:"callWaiting"`
 		AnonymousOutbound *bool   `json:"anonymousOutbound"`
 		PhoneSendAnon     *bool   `json:"phoneSendAnonymous"`
+		VideoAllowed      *bool   `json:"videoAllowed"`
 		// MOHClassID is null to clear (use the global default).
 		MOHClassID    nullable[int64] `json:"mohClassId"`
 		NoAnswerRings *int            `json:"noAnswerRings"`
@@ -468,7 +469,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Number == nil && in.Name == nil && in.ExternalNumber == nil && in.DND == nil && in.NoAnswerRings == nil &&
 		in.ForwardAlways == nil && in.ForwardBusy == nil && in.ForwardNoAnswer == nil &&
-		in.VoicemailEnabled == nil && in.RecordDefault == nil && in.AllowIntercom == nil && in.DirectoryHidden == nil && in.CallWaiting == nil && in.AnonymousOutbound == nil && in.PhoneSendAnon == nil &&
+		in.VoicemailEnabled == nil && in.RecordDefault == nil && in.AllowIntercom == nil && in.DirectoryHidden == nil && in.CallWaiting == nil && in.AnonymousOutbound == nil && in.PhoneSendAnon == nil && in.VideoAllowed == nil &&
 		in.Kind == nil && in.DoorTargets == nil && !in.MOHClassID.Set {
 		badRequest(w, "a field to change is required")
 		return
@@ -499,7 +500,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		Number: in.Number, Name: in.Name, ExternalNumber: in.ExternalNumber,
 		DND: in.DND, ForwardAlways: in.ForwardAlways, ForwardBusy: in.ForwardBusy,
 		ForwardNoAnswer: in.ForwardNoAnswer, VoicemailEnabled: in.VoicemailEnabled,
-		RecordDefault: in.RecordDefault, AllowIntercom: in.AllowIntercom, DirectoryHidden: in.DirectoryHidden, CallWaiting: in.CallWaiting, AnonymousOutbound: in.AnonymousOutbound, PhoneSendAnonymous: in.PhoneSendAnon,
+		RecordDefault: in.RecordDefault, AllowIntercom: in.AllowIntercom, DirectoryHidden: in.DirectoryHidden, CallWaiting: in.CallWaiting, AnonymousOutbound: in.AnonymousOutbound, PhoneSendAnonymous: in.PhoneSendAnon, VideoAllowed: in.VideoAllowed,
 		MOHClassID: in.MOHClassID.Value, ClearMOHClass: in.MOHClassID.Set && in.MOHClassID.Value == nil,
 		NoAnswerRings: in.NoAnswerRings, Kind: in.Kind, DoorTargets: in.DoorTargets,
 	}, s.check())

@@ -1,0 +1,207 @@
+/* The softphone dock (S-18). Fixed bottom left so it clears the toast stack. */
+.sp-dock {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(380px, calc(100vw - 32px));
+}
+.sp-chip {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--az-border, #c8ccd2);
+  background: var(--az-surface, #fff);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 15%);
+}
+.sp-chip--registered {
+  border-color: var(--az-good, #2f9e5b);
+}
+.sp-chip--failed {
+  border-color: var(--az-bad, #c0392b);
+}
+.sp-chip--call {
+  background: var(--az-good, #2f9e5b);
+  color: #fff;
+}
+.sp-chip__badge {
+  background: var(--az-accent, #d9822b);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 7px;
+  font-size: 12px;
+}
+.sp-panel,
+.sp-toast {
+  background: var(--az-surface, #fff);
+  border: 1px solid var(--az-border, #c8ccd2);
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 22%);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sp-toast {
+  border-color: var(--az-accent, #d9822b);
+}
+.sp-toast__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sp-toast__who {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+.sp-toast__sub {
+  opacity: 0.75;
+}
+.sp-toast__actions,
+.sp-controls,
+.sp-dial__go {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+.sp-field input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--az-border, #c8ccd2);
+  font: inherit;
+}
+.sp-call__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.sp-call__who {
+  font-weight: 600;
+}
+.sp-call__state {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+.sp-quality {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+.sp-quality--good {
+  color: var(--az-good, #2f9e5b);
+}
+.sp-quality--fair {
+  color: var(--az-warn, #b7791f);
+}
+.sp-quality--poor {
+  color: var(--az-bad, #c0392b);
+}
+.sp-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.sp-pad__key {
+  padding: 10px 0;
+  border-radius: 8px;
+  border: 1px solid var(--az-border, #c8ccd2);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.sp-xfer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sp-lines {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.sp-lines__tab {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--az-border, #c8ccd2);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sp-lines__tab[aria-selected="true"] {
+  background: var(--az-accent, #d9822b);
+  color: #fff;
+}
+.sp-ended {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+.sp-devices summary {
+  cursor: pointer;
+}
+.sp-vm {
+  font-size: 0.9rem;
+}
+.sp-video {
+  position: relative;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+}
+.sp-video__remote {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.sp-video__self {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 28%;
+  border-radius: 6px;
+  border: 2px solid #fff;
+  transform: scaleX(-1);
+}
+.sp-video__stats {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  color: #fff;
+  font-size: 0.75rem;
+  background: rgb(0 0 0 / 55%);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sp-toast {
+    animation: sp-pop 0.18s ease-out;
+  }
+}
+@keyframes sp-pop {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+}
