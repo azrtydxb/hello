@@ -97,18 +97,34 @@ What Hello leaves alone:
 
 ## Wi-Fi (enterprise networks)
 
-Wi-Fi profiles (phone-feature-parity S-23) reference an 802.1X profile by id
-for WPA2/WPA3-Enterprise networks; the profile is not copied. Every profile is
+A Wi-Fi profile for a WPA2/WPA3-Enterprise network has no EAP settings of its
+own: it names an 802.1X profile (`dot1xProfileId`, migration 00112) and the
+profile is not copied, so a network and a wired port share one model. Every profile is
 in the render data as `.Dot1X.Profiles`, with the identity filled in for the
 phone, the password opened, and the WP8x6 values already worked out:
 `GSWifiEAP` for `P83004` (1 EAP-TLS, 2 PEAP), `GSWifiCAType` for `P83016` (3
 with a CA, else 1; never 0, which skips verification) and `Usable` (false for
 EAP-TLS on a phone without SCEP). Phase 2 of PEAP is MSCHAPv2 (`P83013 = 0`).
-A Wi-Fi profile stores the profile id; a template finds it with
-`{{range .Dot1X.Profiles}}{{if eq .ID $wifi.Dot1XID}}...`. Deleting an 802.1X
-profile a group uses is refused; the Wi-Fi profiles table references
-`dot1x_profiles (id)` with `ON DELETE RESTRICT` and the delete check names its
-profiles too.
+The keys of a PEAP network are `P83004 = 2`, `P83016`, `P83011` (the uploaded
+CA, only with a CA), `P83018 = 1` and `P83019` (the server name, only when the
+profile has one), `P83013 = 0`, `P83012` (anonymous identity), `P83014`
+(identity) and `P83015` (password); of an EAP-TLS network `P83004 = 1`,
+`P83007` (CA) and `P83009` (identity). The client certificate `P83008` is not
+written, as `P8440` is not on the wired port: which certificate the phone
+presents after SCEP is to be confirmed on a handset. A network whose 802.1X
+profile is EAP-MD5 (a wired method), EAP-TLS on a phone with no SCEP
+certificate, or missing, is not written to that phone. The server certificate
+check is the system certificates, or the profile's CA when it has one; "trust
+on first use" and "skip verification" are not offered.
+
+Deleting an 802.1X profile a group or a Wi-Fi profile uses is refused, and so
+is changing it to EAP-MD5 while a Wi-Fi profile uses it; the table references
+`dot1x_profiles (id)` with `ON DELETE RESTRICT`. `usedByWifiProfiles` lists
+them. Enterprise Wi-Fi profiles created before this (which had their own
+identity and password) are moved into 802.1X profiles named "Wi-Fi <name> #<id>"
+when hello-control starts, with the password re-sealed; one whose identity has
+spaces or is longer than 64 characters stays as it is, is logged, and writes no
+network until an 802.1X profile is named for it.
 
 ## Configuration
 

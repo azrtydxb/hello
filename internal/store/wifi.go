@@ -1,6 +1,6 @@
 package store
 
-// Wi-Fi profiles and roaming (migration 00052, spec phone-feature-parity S-23
+// Wi-Fi profiles and roaming (migration 00074, spec phone-feature-parity S-23
 // and S-24). Profiles are sealed with the secret box and never leave the
 // store as plain text except into the provisioning render data. A change does
 // not bump the configuration revision: only provisioning reads it, so the
@@ -20,36 +20,35 @@ import (
 
 // WifiProfile is a profile as the API shows it: the secrets only as flags.
 type WifiProfile struct {
-	ID                int64     `json:"id"`
-	Name              string    `json:"name"`
-	SSID              string    `json:"ssid"`
-	Security          string    `json:"security"`
-	PSKSet            bool      `json:"pskSet"`
-	EAPMethod         string    `json:"eapMethod"`
-	Identity          string    `json:"identity"`
-	AnonymousIdentity string    `json:"anonymousIdentity"`
-	PasswordSet       bool      `json:"passwordSet"`
-	CACert            string    `json:"caCert"`
-	Priority          int       `json:"priority"`
-	Hidden            bool      `json:"hidden"`
-	PreferAccount     int       `json:"preferAccount"`
-	Verified          bool      `json:"verified"`
-	Groups            int       `json:"groups"`
-	Phones            int       `json:"phones"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	SSID     string `json:"ssid"`
+	Security string `json:"security"`
+	PSKSet   bool   `json:"pskSet"`
+	// Dot1XID is the 802.1X profile (S-25, migration 00112) an enterprise
+	// profile authenticates with; nil for any other. The EAP method, identity,
+	// password and CA are that profile's.
+	Dot1XID       *int64    `json:"dot1xProfileId"`
+	Priority      int       `json:"priority"`
+	Hidden        bool      `json:"hidden"`
+	PreferAccount int       `json:"preferAccount"`
+	Verified      bool      `json:"verified"`
+	Groups        int       `json:"groups"`
+	Phones        int       `json:"phones"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
-// WifiProfileInput is a profile to store. PSK and Password are nil to keep
-// the stored secret, "" to clear it, else the new value.
+// WifiProfileInput is a profile to store. PSK is nil to keep the stored
+// secret, "" to clear it, else the new value. Dot1XID is 0 for a profile that
+// is not an enterprise one.
 type WifiProfileInput struct {
-	Name, SSID, Security                   string
-	EAPMethod, Identity, AnonymousIdentity string
-	CACert                                 string
-	Priority                               int
-	Hidden                                 bool
-	PreferAccount                          int
-	Verified                               bool
-	PSK, Password                          *string
+	Name, SSID, Security string
+	Dot1XID              int64
+	Priority             int
+	Hidden               bool
+	PreferAccount        int
+	Verified             bool
+	PSK                  *string
 }
 
 // WifiScope is the Wi-Fi setup of a phone group or a phone.
@@ -65,20 +64,19 @@ type WifiScope struct {
 	Radio *prov.WifiRadio `json:"radio,omitempty"`
 }
 
-const (
-	wifiSetPSK       = `UPDATE wifi_profiles SET psk_enc = $2 WHERE id = $1`
-	wifiSetEAPSecret = `UPDATE wifi_profiles SET password_enc = $2 WHERE id = $1` //nolint:gosec // G101: SQL text, not a credential
-)
+const wifiSetPSK = `UPDATE wifi_profiles SET psk_enc = $2 WHERE id = $1`
 
-const wifiProfileCols = `p.id, p.name, p.ssid, p.security, p.psk_enc IS NOT NULL, p.eap_method, p.identity, p.anonymous_identity,
-	p.password_enc IS NOT NULL, p.ca_cert, p.priority, p.hidden, p.prefer_account, p.verified,
+const wifiProfileCols = `p.id, p.name, p.ssid, p.security, p.psk_enc IS NOT NULL, p.dot1x_id, p.priority, p.hidden, p.prefer_account, p.verified,
 	(SELECT count(*) FROM wifi_assignments a WHERE a.profile_id = p.id AND a.group_id IS NOT NULL),
 	(SELECT count(*) FROM wifi_assignments a WHERE a.profile_id = p.id AND a.phone_id IS NOT NULL), p.updated_at`
 
 func scanWifiProfile(sc interface{ Scan(...any) error }) (WifiProfile, error) {
 	var p WifiProfile
-	err := sc.Scan(&p.ID, &p.Name, &p.SSID, &p.Security, &p.PSKSet, &p.EAPMethod, &p.Identity, &p.AnonymousIdentity,
-		&p.PasswordSet, &p.CACert, &p.Priority, &p.Hidden, &p.PreferAccount, &p.Verified, &p.Groups, &p.Phones, &p.UpdatedAt)
+	var d sql.NullInt64
+	err := sc.Scan(&p.ID, &p.Name, &p.SSID, &p.Security, &p.PSKSet, &d, &p.Priority, &p.Hidden, &p.PreferAccount, &p.Verified, &p.Groups, &p.Phones, &p.UpdatedAt)
+	if d.Valid {
+		p.Dot1XID = &d.Int64
+	}
 	return p, err
 }
 
@@ -116,8 +114,34 @@ func wifiNameError(err error, name string) error {
 	return err
 }
 
+// checkWifiDot1X refuses an enterprise profile whose 802.1X profile does not
+// exist or uses EAP-MD5, a method Wi-Fi does not offer.
+func checkWifiDot1X(ctx context.Context, tx *sql.Tx, in WifiProfileInput) error {
+	if in.Dot1XID == 0 {
+		return nil
+	}
+	var method string
+	err := tx.QueryRowContext(ctx, `SELECT method FROM dot1x_profiles WHERE id = $1`, in.Dot1XID).Scan(&method)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return fieldError("dot1xProfileId", "no such 802.1X profile")
+	case err != nil:
+		return err
+	case method == prov.Dot1XEAPMD5:
+		return fieldError("dot1xProfileId", "EAP-MD5 is a wired method; a Wi-Fi network takes a PEAP or EAP-TLS profile")
+	}
+	return nil
+}
+
+func nullID(id int64) any {
+	if id == 0 {
+		return nil
+	}
+	return id
+}
+
 // sealWifi stores the sealed secret of a profile column with the update
-// statement (wifiSetPSK or wifiSetEAPSecret): nil keeps it, "" clears it.
+// statement (wifiSetPSK): nil keeps it, "" clears it.
 func (s *Store) sealWifi(ctx context.Context, tx *sql.Tx, id int64, update, aad string, v *string) error {
 	if v == nil {
 		return nil
@@ -144,17 +168,15 @@ func (s *Store) CreateWifiProfile(ctx context.Context, actor string, in WifiProf
 			return "", false, err
 		}
 		rid := strconv.FormatInt(id, 10)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO wifi_profiles (id, name, ssid, security, eap_method, identity, anonymous_identity,
-				ca_cert, priority, hidden, prefer_account, verified)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-			id, in.Name, in.SSID, in.Security, in.EAPMethod, in.Identity, in.AnonymousIdentity,
-			in.CACert, in.Priority, in.Hidden, in.PreferAccount, in.Verified); err != nil {
-			return rid, false, wifiNameError(err, in.Name)
-		}
-		if err := s.sealWifi(ctx, tx, id, wifiSetPSK, prov.WifiPSKAAD(id), in.PSK); err != nil {
+		if err := checkWifiDot1X(ctx, tx, in); err != nil {
 			return rid, false, err
 		}
-		return rid, false, s.sealWifi(ctx, tx, id, wifiSetEAPSecret, prov.WifiPasswordAAD(id), in.Password)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO wifi_profiles (id, name, ssid, security, dot1x_id, priority, hidden, prefer_account, verified)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			id, in.Name, in.SSID, in.Security, nullID(in.Dot1XID), in.Priority, in.Hidden, in.PreferAccount, in.Verified); err != nil {
+			return rid, false, wifiNameError(err, in.Name)
+		}
+		return rid, false, s.sealWifi(ctx, tx, id, wifiSetPSK, prov.WifiPSKAAD(id), in.PSK)
 	})
 	if err != nil {
 		return WifiProfile{}, err
@@ -162,26 +184,25 @@ func (s *Store) CreateWifiProfile(ctx context.Context, actor string, in WifiProf
 	return s.GetWifiProfile(ctx, id)
 }
 
-// UpdateWifiProfile replaces a profile's settings; a nil PSK or Password keeps
-// the stored secret.
+// UpdateWifiProfile replaces a profile's settings; a nil PSK keeps the stored
+// secret.
 func (s *Store) UpdateWifiProfile(ctx context.Context, actor string, id int64, in WifiProfileInput) (WifiProfile, error) {
 	err := s.provChange(ctx, actor, "update", "wifi_profile", func(tx *sql.Tx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
-		res, err := tx.ExecContext(ctx, `UPDATE wifi_profiles SET name = $2, ssid = $3, security = $4, eap_method = $5, identity = $6,
-				anonymous_identity = $7, ca_cert = $8, priority = $9, hidden = $10, prefer_account = $11, verified = $12, updated_at = now()
+		if err := checkWifiDot1X(ctx, tx, in); err != nil {
+			return rid, false, err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE wifi_profiles SET name = $2, ssid = $3, security = $4, dot1x_id = $5, priority = $6,
+				hidden = $7, prefer_account = $8, verified = $9, updated_at = now()
 			WHERE id = $1`,
-			id, in.Name, in.SSID, in.Security, in.EAPMethod, in.Identity, in.AnonymousIdentity,
-			in.CACert, in.Priority, in.Hidden, in.PreferAccount, in.Verified)
+			id, in.Name, in.SSID, in.Security, nullID(in.Dot1XID), in.Priority, in.Hidden, in.PreferAccount, in.Verified)
 		if err != nil {
 			return rid, false, wifiNameError(err, in.Name)
 		}
 		if err := requireRow(res); err != nil {
 			return rid, false, err
 		}
-		if err := s.sealWifi(ctx, tx, id, wifiSetPSK, prov.WifiPSKAAD(id), in.PSK); err != nil {
-			return rid, false, err
-		}
-		return rid, false, s.sealWifi(ctx, tx, id, wifiSetEAPSecret, prov.WifiPasswordAAD(id), in.Password)
+		return rid, false, s.sealWifi(ctx, tx, id, wifiSetPSK, prov.WifiPSKAAD(id), in.PSK)
 	})
 	if err != nil {
 		return WifiProfile{}, err
@@ -407,8 +428,7 @@ func (s *Store) wifiInfo(ctx context.Context, phoneID int64, v prov.Vendor, mode
 		return nil, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.id, p.name, p.ssid, p.security, p.psk_enc, p.eap_method, p.identity, p.anonymous_identity, p.password_enc,
-		       p.ca_cert, p.priority, p.hidden, p.prefer_account, p.verified, a.phone_id IS NOT NULL
+		SELECT p.id, p.name, p.ssid, p.security, p.psk_enc, p.dot1x_id, p.priority, p.hidden, p.prefer_account, p.verified, a.phone_id IS NOT NULL
 		FROM wifi_assignments a JOIN wifi_profiles p ON p.id = a.profile_id
 		WHERE a.phone_id = $1 OR a.group_id = (SELECT group_id FROM phones WHERE id = $1)
 		ORDER BY p.id`, phoneID)
@@ -421,26 +441,19 @@ func (s *Store) wifiInfo(ctx context.Context, phoneID int64, v prov.Vendor, mode
 		var (
 			p        prov.WifiProfile
 			pskEnc   []byte
-			passEnc  []byte
+			dot1x    sql.NullInt64
 			isPhones bool
 		)
-		if err := rows.Scan(&p.ID, &p.Name, &p.SSID, &p.Security, &pskEnc, &p.EAPMethod, &p.Identity, &p.AnonymousIdentity, &passEnc,
-			&p.CACert, &p.Priority, &p.Hidden, &p.PreferAccount, &p.Verified, &isPhones); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.SSID, &p.Security, &pskEnc, &dot1x, &p.Priority, &p.Hidden, &p.PreferAccount,
+			&p.Verified, &isPhones); err != nil {
 			return nil, err
 		}
+		p.Dot1XID = dot1x.Int64
 		if pskEnc != nil {
 			if s.box == nil {
 				return nil, prov.ErrSealed
 			}
 			if p.PSK, err = s.box.Open(pskEnc, prov.WifiPSKAAD(p.ID)); err != nil {
-				return nil, prov.ErrSealed
-			}
-		}
-		if passEnc != nil {
-			if s.box == nil {
-				return nil, prov.ErrSealed
-			}
-			if p.Password, err = s.box.Open(passEnc, prov.WifiPasswordAAD(p.ID)); err != nil {
 				return nil, prov.ErrSealed
 			}
 		}
@@ -472,4 +485,89 @@ func (s *Store) wifiInfo(ctx context.Context, phoneID int64, v prov.Vendor, mode
 		return nil, nil
 	}
 	return info, nil
+}
+
+// legacyWifiEAP is an enterprise Wi-Fi profile that still carries its own
+// EAP settings (migration 00074) and names no 802.1X profile.
+type legacyWifiEAP struct {
+	id                        int64
+	name, identity, anonymous string
+	passEnc                   []byte
+}
+
+// AdoptWifiEAP moves the EAP settings of every enterprise Wi-Fi profile that
+// predates the shared 802.1X model (migration 00112) into an 802.1X profile
+// named "Wi-Fi <name>" and points the profile at it, re-sealing the password
+// under the 802.1X profile's context. It is idempotent and runs at start-up.
+// The legacy columns stay (a later release drops them), unread. A profile
+// whose identity is not valid for an 802.1X profile (more than 64 characters
+// or with spaces) stays as it is and is listed in skipped: its networks are
+// not written to a phone until an administrator names an 802.1X profile. The
+// legacy server certificate check "trust on first use" or "skip" becomes the
+// system certificates: the 802.1X model offers only those and an uploaded CA.
+func (s *Store) AdoptWifiEAP(ctx context.Context) (adopted int, skipped []string, err error) {
+	err = s.provChange(ctx, "system", "adopt", "wifi_profile", func(tx *sql.Tx) (string, bool, error) {
+		rows, err := tx.QueryContext(ctx, `SELECT id, name, identity, anonymous_identity, password_enc FROM wifi_profiles
+			WHERE dot1x_id IS NULL AND security IN ('wpa2-enterprise', 'wpa3-enterprise') ORDER BY id FOR UPDATE`)
+		if err != nil {
+			return "", false, err
+		}
+		var legacy []legacyWifiEAP
+		for rows.Next() {
+			var l legacyWifiEAP
+			if err := rows.Scan(&l.id, &l.name, &l.identity, &l.anonymous, &l.passEnc); err != nil {
+				_ = rows.Close()
+				return "", false, err
+			}
+			legacy = append(legacy, l)
+		}
+		_ = rows.Close()
+		if err := rows.Err(); err != nil {
+			return "", false, err
+		}
+		skipped, adopted = nil, 0
+		for _, l := range legacy {
+			if f := prov.ValidateDot1X("x", prov.Dot1XPEAP, l.identity, l.anonymous, "", "", true, false); len(f) > 0 {
+				skipped = append(skipped, l.name)
+				continue
+			}
+			var newID int64
+			if err := tx.QueryRowContext(ctx, `SELECT nextval('dot1x_profiles_id_seq')`).Scan(&newID); err != nil {
+				return "", false, err
+			}
+			var enc []byte
+			if l.passEnc != nil {
+				if s.box == nil {
+					return "", false, prov.ErrSealed
+				}
+				pw, err := s.box.Open(l.passEnc, prov.WifiLegacyPasswordAAD(l.id))
+				if err != nil {
+					return "", false, prov.ErrSealed
+				}
+				if enc, err = s.sealDot1X(newID, &pw); err != nil {
+					return "", false, err
+				}
+			}
+			if err := s.adoptInsert(ctx, tx, newID, l, enc); err != nil {
+				return "", false, err
+			}
+			adopted++
+		}
+		return "", false, nil
+	})
+	return adopted, skipped, err
+}
+
+func (s *Store) adoptInsert(ctx context.Context, tx *sql.Tx, id int64, l legacyWifiEAP, enc []byte) error {
+	name := "Wi-Fi " + l.name
+	if len([]rune(name)) > 56 {
+		name = string([]rune(name)[:56])
+	}
+	name += " #" + strconv.FormatInt(l.id, 10)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO dot1x_profiles (id, name, method, identity, anonymous_identity, password_enc)
+		VALUES ($1, $2, 'peap', $3, $4, $5)`, id, name, l.identity, l.anonymous, enc); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE wifi_profiles SET dot1x_id = $2, updated_at = now() WHERE id = $1`, l.id, id)
+	return err
 }
