@@ -191,7 +191,7 @@ func run(args []string) error {
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
 		SessionExpires: cfg.SessionExpires, SessionMinSE: cfg.SessionMinSE, SessionTimersTrunks: cfg.SessionTimersTrunks, MediaDeadAfter: cfg.MediaDeadAfter,
-		PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
+		DoorHangup: cfg.DoorHangup, PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
 		PageMulticastIface: cfg.PageMulticastIface, PageMulticastTTL: cfg.PageMulticastTTL,
 		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax, Dialing: cfg.Dial,
 		MediaForceAnchor: cfg.MediaForceAnchor, MediaRecordingNotice: cfg.MediaRecordingNotice,
@@ -222,8 +222,21 @@ func run(args []string) error {
 	// into anchored SDP answers, so LAN phones send RTP to a reachable
 	// node address instead of mirroring the offer's own c= line. Empty
 	// keeps the tests'/lab's offer-mirroring behaviour.
+	media.SetFeatures(cfg.MediaDTLS, cfg.MediaICE)
 	if cfg.MediaAnchorHost != "" {
 		srv.SetMediaAnchor(media.NewAnchor(cfg.MediaAnchorHost, log.With("component", "media")))
+	}
+	// The WebRTC side of the anchor (clients S-4): one shared UDP port for
+	// browser and app legs, off unless HELLO_MEDIA_WEBRTC_ENABLED.
+	if cfg.MediaWebRTCEnabled {
+		node, err := media.StartWebRTC(cfg.MediaWebRTCPort, cfg.MediaAnchorHost, cfg.MediaWebRTCPublicIP)
+		if err != nil {
+			return err
+		}
+		node.Register(metrics.Registry)
+		media.SetWebRTCNode(node)
+		defer func() { media.SetWebRTCNode(nil); _ = node.Close() }()
+		log.Info("webrtc media enabled", "port", node.Mux().Port(), "candidates", node.Hosts())
 	}
 	watcher.OnReload = srv.SnapshotChanged
 

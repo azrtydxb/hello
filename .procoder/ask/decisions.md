@@ -1291,6 +1291,111 @@ column ("a" when both legs agree, "a → b" when they differ).
   `haNewCall` restores them, so a taken-over door call keeps the trunk ban and CDR
   kind door (`TestDoorCallerSurvivesTakeover`).
 
+## Door-open DTMF `*50` (2026-11-09) — phone-feature-parity item 14 (S-47)
+
+- Migration `00078_door_open` (after #225's 00053; the number is a gap-numbered
+  slot like the others, goose does not need it contiguous): table `door_open`
+  (`extension_id` primary key, cascade; `code_enc` BYTEA sealed under
+  HELLO_SECRET_KEY with AAD `door-open:<extension id>`; `hangup_after_open`).
+  A separate table, not columns on `extensions`, so none of the extension
+  queries scan or return the code. A station that becomes a user loses its row.
+- The code rides the configuration snapshot (opened at load, unexported and
+  redacting its `String`), so the SIP path reads no PostgreSQL. A code that does
+  not open is logged by extension number only and treated as no code.
+- Settings API: `GET` (viewer) says `codeSet` and `hangupAfterOpen`; `PUT` is
+  admin (scope `admin`, role admin). It could not use the `secrets` scope: that
+  list is pinned by spec S-5 and `TestRoutesTable`. The code is write-only, an
+  empty string clears it, a user extension answers `409`. `GET` is an MCP tool
+  (`getDoorOpen`, taught in hello-setup); `PUT` and the open request are
+  excluded from MCP (a code must be set in the console; opening a physical door
+  is a user action).
+- `*50` is matched as the end of the call's digit buffer, in `dispatchDigit`
+  after the feature codes, so a stale digit before it does not hide it; a
+  feature code row named `*50` wins. It acts only on a connected call with a door
+  station, only for keys from the far side of the station (the station's own
+  keys never open its door), and otherwise does nothing: the keys were already
+  relayed as ordinary DTMF.
+- The code goes out through `Relay.SendDTMF`: 5 packets of 20 ms per digit and 3
+  end packets, a 60 ms gap between digits, as its own RTP stream (fresh SSRC)
+  like `PlayTo`, using the leg's negotiated telephone-event type. Without one the
+  trace says so and nothing is sent. Door calls are always anchored today (every
+  call is), which `*50` needs. Open: whether GDS/2N/Akuvox accept events on a
+  different SSRC than the call's audio; hardware check.
+- The user's own `*`, `5`, `0` events still reach the door before the code
+  (the relay forwards DTMF); suppressing them would need the relay to hold back
+  events, which is not done.
+- Only one open at a time per call (`doorOpening`); a second press while the
+  first is going out is refused with a trace line.
+- API open: `POST /api/v1/calls/{id}/door-open` (user role, write scope; added
+  to the self-service allowlist of `TestRoutesTable`, the spec fixes the path).
+  The API checks the caller's extension is the one that answered (live call
+  `callee`), or placed the call to a station, queues a park-command
+  `door_open` to the call's node and waits for the reply (the existing
+  Valkey park command channel); the node checks again against the live dialog.
+  `403` has error code `not_your_call`, `404` no such call, `409` not an answered
+  door call, no code, or media unusable, `502` node error, `504` no node
+  answered. `GET /api/v1/me/door-calls` lists the user's own for the console;
+  live calls gained `door` (the station's number).
+- Hang-up-after-open: `HELLO_DOOR_HANGUP_SECONDS` (default 3, positive) after
+  the code finished sending, both legs get BYE (`endBoth`, CDR side system).
+- Not done: provisioning an "Open door" key on the phones (Yealink DSS DTMF,
+  Grandstream WP DialDTMF softkey, Poly/Snom/Fanvil soft keys). The spec marks
+  each **verify**, and no vendor key was confirmed from the templates in this
+  change; it stays with the hardware pass.
+
+## Door video preview (2026-11-10) — phone-feature-parity item 17 (S-49)
+
+- Three parts, all optional like the spec says: video in the call, a camera
+  picture in the console, and the Grandstream WP door-system entries.
+- Migration `00086_door_cameras` (after item 14's 00085): `door_cameras` keyed by the station, kind mjpeg or snapshot, URL, user
+  name, password sealed with AAD `door-camera:<extension id>`.
+- **Video in the call.** Only when a door station is a party and the caller's
+  SDP offers H.264 over plain RTP/AVP(F). The anchor adds a `VideoRelay`: a
+  second RTP `Relay` on an even/odd port pair per leg plus an RTCP bridge on the
+  odd ports, so a phone's PLI/FIR reaches the door. RTCP is accepted only from
+  the sources the RTP leg accepts. Each SDP gets one video m-line on Hello's
+  ports with the H.264 payload types, fmtp and feedback lines of the other side,
+  and an explicit `a=rtcp`; the callee gets the caller's section, the caller
+  the callee's. A callee with no video gets none and the door's offer is
+  answered with port 0 (RFC 3264). A call with no door station is untouched
+  (video beyond S-49 is out of scope, as the spec says). Re-INVITEs on an
+  anchored call keep the section on both sides; hold does not touch the video
+  direction. Not carried: takeover (HA), transfer, re-anchor, SRTP, VP8. A phone
+  that sends RTCP on the RTP port (rtcp-mux) is not supported; the section does
+  not offer it.
+- **Camera in the console.** Hello fetches the picture itself and the browser
+  gets it from `GET /extensions/{id}/camera/view` (viewer), so neither the
+  browser nor a user needs a route to the camera or its credentials. Settings
+  are admin (`PUT`, `DELETE`); `GET` (viewer) never returns the password. MJPEG
+  is passed through (10 minutes at most, eight pictures at once per node, `429`
+  above), a snapshot is fetched per request (10 s, 4 MiB). The console polls a
+  snapshot every 2 s. `rtsp://` is refused with a field error: a browser cannot
+  show it and transcoding H.264 to MJPEG is out of scope. Basic authentication
+  only (no digest). No redirects are followed.
+- SSRF: the client is `safehttp.NewTransport`, so loopback, link-local and
+  metadata addresses are never reachable and private networks only when listed
+  in the new `HELLO_DOOR_CAMERA_ALLOW` (hello-control, CIDRs, validated by
+  `safehttp.ParseAllow`; the error names the key and not the value). Empty by
+  default: a camera on a LAN needs its network listed. kw's values are not set
+  here (deploy/kuvryn-sync is out of scope); the parent task must add the camera
+  network there.
+- The phone's own copy of the stream is the first part (SDP video); no camera
+  URL is provisioned to phones, and there is no phone-side RTSP.
+- **WP door systems.** The WP8x6 (`wp8x6_config_1.0.3.39`, Settings/External
+  Service/Door System) and WP810/820/822/825 (`wp810_822_825_config_1.0.11.83`,
+  Settings/External Service) take ten entries of five P-values from P32000: type
+  (0 GDS), account (0), system identification (name), system number (the
+  station's number), access password. Hello writes the first four per station
+  that can call the phone's extension (target, listed group, or a Door group it
+  belongs to). It never writes the access password: the sealed door-open code
+  stays on the server and `*50` (item 14) opens the door. The WP856 uses
+  P32001 for another meaning and gets none; other vendors get none. The key
+  meaning is from the official templates; what a WP does with an entry that has
+  no access password is a bench check.
+- Open-door softkeys (item 14's "Open door" key) are not provisioned: the
+  WP8x6 key P-values for DialDTMF/GDS Opendoor are listed in the templates but
+  need a key-placement design and a WP to try; left for the bench.
+
 ## Doorbell webhook (2026-11-09) — phone-feature-parity item 16 (S-48)
 
 - Independent of #222 (outbound event webhooks: signing, retries, dead
@@ -2091,6 +2196,122 @@ Follow-up to "SRTP SDES on the anchor". Choices:
 - **Not changed.** An in-dialog re-INVITE that rekeys a voicemail or conference
   caller is answered with the call's existing key (a phone that rekeys on its
   own re-INVITE is followed on relay legs only). AES-256 is still not offered.
+
+## DTLS-SRTP and ICE-lite on the anchor (phone-feature-parity item 25, S-16) (2026-11-09)
+
+Spec: `phone-feature-parity.md` S-16, with `clients-webrtc-mobile-video.md` S-4
+(same code, delivered once). Stacked on the SRTP gaps PR (#274). Choices:
+
+- **Modules.** `pion/dtls/v3` v3.1.5 (the handshake, over a packet conn fed from
+  the leg's receive loop) and `pion/stun/v3` v3.1.6 (STUN parsing, integrity,
+  fingerprint) join `pion/srtp/v3`; `pion/transport/v4` moves to v4.0.2 as they
+  require. The spec names `pion/ice` too. It is not used here: ICE-lite is a
+  fixed answer (host candidate out, authenticated binding requests answered),
+  and `pion/ice`'s agent gathers, runs its own sockets and wants to own the
+  UDP port, which fights the relay's per-leg sockets. The WebRTC phase decides
+  about `pion/ice` and its UDP mux when it needs one shared port; nothing here
+  blocks it.
+- **One per-leg crypto layer.** The DTLS handshake fills the same `legKeys` SDES
+  fills (`Secure`), so the relay, recording, announcements, voicemail, the
+  conference mixer and the page caller keep one `Protect`/`Unprotect`. A
+  leg's socket now carries STUN, DTLS and RTP, told apart by the first byte
+  (RFC 7983); `Secure.UnprotectFrom` is the one place that does it. A DTLS leg
+  with no keys yet carries nothing in either direction: it can never fall back
+  to plain RTP.
+- **What to offer and accept when.**
+  - Answering mirrors the offer: `UDP/TLS/RTP/SAVP(F)` with a fingerprint gets
+    DTLS-SRTP, `RTP/AVP` or `RTP/SAVP` with `a=crypto` gets SDES (S-15). A
+    fingerprint on an `RTP/AVP` line is ignored, not read as an offer.
+  - Offering follows the device: new `devices.srtp_keyex` (`sdes` default,
+    `dtls`). `off` offers nothing; `optional` and `required` offer the chosen
+    exchange (`required` = SAVP-only semantics as before). A DTLS transport
+    cannot carry a plain fallback inside the same offer, so a device set to
+    `dtls` is for phones that do DTLS-SRTP; there is no dual SDES+DTLS offer
+    (no vendor documentation says phones accept one).
+  - **TLS only, as SDES.** DTLS carries no key in the SDP, but the fingerprint
+    is the only thing that authenticates the peer certificate, so it is trusted
+    only when it arrived over protected signalling (the decision recorded under
+    S-14: SRTP and DTLS-SRTP are offered only where `bindingOnTLS` or the
+    caller's `clientTransport` is TLS). The same `off`/`optional`/`required`
+    policy gates it. A DTLS-only offer on a UDP leg, with policy `off`, without a
+    usable fingerprint, or on a node with `HELLO_MEDIA_DTLS=false` is refused
+    with 488.
+  - A required callee that answers without DTLS ends the call (488), as for
+    SDES. A trunk never carries DTLS (trunk legs are UDP).
+- **Roles.** Hello answers `active` (client) to `actpass` and `passive`, and
+  `passive` to `active`, as RFC 5763 section 5 says (SHOULD be active); when it
+  offers it sends `actpass` and takes the role the answer leaves. A client waits
+  until the peer address is known and, with ICE, authenticated.
+- **Fingerprints.** `sha-1`, `sha-256`, `sha-384`, `sha-512` accepted for the
+  peer (matching any listed one; sha-1 is only compared against a certificate
+  the peer must already hold, a second-preimage problem, and some phone stacks
+  only send it); md5/md2 refused. Hello's own is sha-256. The extended master
+  secret is requested, not required (phones on an old TLS stack lack it, and the
+  certificate is pinned by fingerprint either way); the WebRTC leg should
+  require it. SRTP profiles offered: AEAD_AES_128_GCM, AES128_CM_HMAC_SHA1_80,
+  AES128_CM_HMAC_SHA1_32. GCM is a DTLS-only suite: SDES still offers the two
+  CM suites and refuses a GCM `a=crypto` line.
+- **Certificate.** One self-signed ECDSA P-256 certificate per hello-sip process,
+  made on first use and replaced for new sessions after 30 days (valid 90),
+  never stored or shared (a restart or takeover gives a new fingerprint; the
+  taker's re-INVITE carries it). A session keeps the certificate it started
+  with. The peer sees only the fingerprint.
+- **Failure.** A handshake that times out (8 s), presents a certificate that
+  does not match, or fails is counted, traced and ends the call (BYE to both
+  legs, or an abort during setup). There is nothing to fall back to: the offer
+  or answer was DTLS only. (The spec's "otherwise falls back to RTP" is read as
+  the negotiation: an answer without DTLS from an `optional` device is plain
+  RTP, as with SDES.) Voicemail greetings and announcements wait for the
+  handshake instead of losing their first frames.
+- **ICE-lite.** Answers an offer's ICE credentials with `a=ice-lite`, its own
+  ufrag and pwd per leg, one host candidate (the relay address, component 1) and
+  `a=rtcp-mux`; always controlled (487 to a peer that is also controlled);
+  binding requests are answered only with the right USERNAME and
+  MESSAGE-INTEGRITY, everything else is dropped silently (no oracle). A valid
+  check vouches for its source address (the leg then accepts media from it) and
+  the first or nominated pair becomes where media goes. Remote `a=candidate`
+  lines are parsed and kept, never checked. ICE does not need TLS (it carries
+  no secret) and does not encrypt. Answering ICE has no per-device switch: a
+  phone that sends ICE credentials expects an answer, and `HELLO_MEDIA_ICE=false`
+  turns it off node-wide. The device's `media_ice` only decides whether Hello
+  offers ICE-lite and what provisioning writes. The far end's ICE password is not
+  replicated for HA.
+- **rtcp-mux** is answered on DTLS and ICE legs only (RTCP on the media port is
+  consumed). Plain legs are unchanged: no mux claimed, nothing to drop.
+- **Hosts.** The relay legs, the voicemail/IVR session, the conference
+  participant and the page caller leg all bind their socket to their `Secure`.
+  Page members are offered SDES, never DTLS (a member socket only sends). A
+  retrieve or pickup that crosses nodes with a DTLS leg is refused with 488 (the
+  shared-store command carries neither the retriever's policy nor its
+  transport), like a required SDES one. The replicated leg mode gains `dtls`.
+- **Provisioning (vendor docs, Grandstream WP8x6 config templates).** `P60078`
+  SRTP Key Exchange of account 1 (`0` SDES, `1` DTLS; WP826, WP836, WP856),
+  written with `P183` for a TLS phone; `P95002` Media NAT Traversal of account 1
+  (`1` Auto, the documented default, `4` ICE; WP826 and WP836, the WP856
+  template does not list it), written for a phone of those models whatever its
+  transport. No other vendor's key is confirmed, so none is written.
+- **Migration 00079** (highest on #266 is 00078): `devices.srtp_keyex`,
+  `devices.media_ice`, `cdrs.srtp_keyex` (`none`, `sdes`, `dtls`, `mixed`),
+  `cdrs.ice`.
+- **Metrics.** `hello_dtls_handshakes_total{result}`,
+  `hello_dtls_handshake_seconds`, `hello_ice_checks_total{result}`;
+  `hello_srtp_negotiations_total` gains `dtls` and `dtls_failed`.
+- **What the WebRTC phase gets.** The ICE-lite agent, the DTLS handshake over a
+  demultiplexed socket, the node certificate and fingerprint, the GCM profile,
+  `a=rtcp-mux` and the SDP parsing of `fingerprint`, `setup`, `ice-*`,
+  `candidate` and SAVPF. Still to build there: the multi-section SDP model,
+  BUNDLE, `a=mid`, the shared WebRTC UDP port with a ufrag demultiplexer, the
+  public candidate address, trickle/`end-of-candidates` and the Kamailio
+  WebSocket and TURN pieces. No port or chart change is needed for phones.
+- **Needs hardware (lab item 10, WP822/WP836).** That `P60078 = 1` makes the
+  phone offer `UDP/TLS/RTP/SAVP` with a fingerprint and `a=setup:actpass`, which
+  fingerprint hash and SRTP profile it uses, that it handshakes as client against
+  Hello's `active` answer and as server against Hello's offer, what its answer
+  to Hello's offer says in `a=setup`, and what "enabled but not forced"
+  (`P183 = 1`) does together with DTLS; that `P95002 = 4` makes it send ICE
+  credentials and candidates, accept the lite answer and send its checks to the
+  relay address (Trickle ICE `P95003` on and off); that hold, resume and a
+  re-INVITE keep the session; and that a WP822 ignores the keys it does not have.
 
 ## Locations, HELD, Geolocation, callback tag and alarm `*55`, phone-feature-parity S-28 and S-29 (2026-11-09)
 
@@ -3338,7 +3559,7 @@ Decided while building, without asking, within the spec and the brief:
 
 Decided while building, without asking, within the spec and the brief:
 
-- **One migration, 00104 (placeholder).** `crm_call_logs.state TEXT NOT NULL DEFAULT ''`
+- **One migration, 00087.** `crm_call_logs.state TEXT NOT NULL DEFAULT ''`
   (additive). The connector settings live in the existing `config` JSON and `kind` has no CHECK.
   The migrate counts in `test/integration/migrate_{prov,ai,ai_agent}_test.go` are main's plus one.
 - **Sign-in follows #328's names.** Odoo (API key) and Bitrix24 (inbound webhook) are `crm.Direct`
@@ -3429,3 +3650,28 @@ Decided while building, without asking, within the spec and the brief:
   used and the migrate counts are unchanged.
 - **Clio revoke on disconnect is not done:** Clio's deauthorize takes the access token, the
   framework's `Revoker` passes the refresh token; the administrator revokes in Clio.
+
+## Clients item 1: media foundation on pion (2026-11-13)
+
+Spec: `clients-webrtc-mobile-video.md` S-2 to S-6. Built on main without
+waiting for #276 (DTLS-SRTP, ICE-lite per leg). Choices:
+
+- **The SDP model wraps pion/sdp and keeps every attribute in order.** A parse
+  then build is a no-op, tested over a corpus of vendor and browser SDPs
+  (`testdata/sdp`). `ParseAudioSDP` is not re-implemented on it: the spec says
+  "where trivial", it is not, and #276 changes that code. `AudioSection`
+  bridges a section to it instead.
+- **The shared port is a mux that routes by ufrag, then by source address.** It
+  does not authenticate: the leg's ICE-lite agent does. Addresses per leg are
+  capped at 8 so a forged check cannot grow the table. This replaces pion/ice's
+  UDP mux, which assumes a full agent per connection.
+- **Relay legs read a `LegConn`** (a UDP socket or a mux endpoint) so the relay,
+  recorder and announcements are untouched.
+- **The thin seam to #276** is three calls after it merges: bind the leg's
+  `Secure` to the endpoint (`Bind(ep.LocalAddr(), ep.WriteToUDP, ...)`), call
+  `ep.SetUfrag` with the ufrag its `iceLocal` made, and pass `Fingerprint()` and
+  the answered setup into `WebRTCNode.Local`. The mux and SDP code use no #276
+  names (`muxIsSTUN`, `fingerprintUsable`), so the two merge without clashes.
+  `TestWebRTCToPhoneAudio`, `TestDTLSFingerprintMismatch` and the plaintext
+  check need #276's handshake and follow with that glue.
+- Video is rejected in the answer; accepting it is item 6.

@@ -110,8 +110,8 @@ func TestMigrateAIAccessRollback(t *testing.T) {
 	if n := present(); n != 0 {
 		t.Fatalf("after rollback: %d AI access objects left", n)
 	}
-	if n, err := migrate.Up(ctx, db); err != nil || n != 70 { // 00008 to 00017, 00019, 00026 to 00083 and 00104
-		t.Fatalf("re-apply = %d, %v; want 69, nil", n, err)
+	if n, err := migrate.Up(ctx, db); err != nil || n != 73 { // 00008 to 00017, 00019 and 00026 to 00087
+		t.Fatalf("re-apply = %d, %v; want 73, nil", n, err)
 	}
 	if n := present(); n != want {
 		t.Fatalf("after re-apply: %d of %d AI access objects present", n, want)
