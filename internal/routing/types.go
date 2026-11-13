@@ -80,10 +80,31 @@ type Trunk struct {
 	// ways. Off by default; an inbound MESSAGE from a trunk is refused
 	// unless this is on and the source is the trunk's.
 	Messaging bool
+	// Geolocation adds the caller's Geolocation header and PIDF-LO body to
+	// an emergency call sent through this trunk (RFC 6442; spec S-28 e).
+	Geolocation bool
 	// Codecs is the audio codec allow-list offered to the trunk, in the
 	// caller's order (names: PCMU, PCMA, G722, opus). Empty means the
 	// default, PCMU and PCMA: most carriers accept G.711 only.
 	Codecs []string
+	// SRTP is the trunk's media-encryption policy: "off" (the default),
+	// "optional" or "required" (internal/secmedia). Crypto is offered only on
+	// a leg whose signalling is TLS, which no trunk leg is yet, so "required"
+	// today refuses calls over the trunk and the other two are plain RTP.
+	SRTP string
+	// FaxMode is how the trunk carries a fax (pbx-gaps S-16): "passthrough"
+	// (G.711, the default; empty reads as passthrough), "t38" or "off".
+	FaxMode string
+	// AnonymousPolicy is AnonymousHonour (carry a device's privacy request
+	// to the carrier) or AnonymousAlways (every call out is anonymous);
+	// empty is honour.
+	AnonymousPolicy string
+	// AssertedIdentity is the number asserted for an anonymous call (empty:
+	// the call's caller ID) and IdentityHeader the header carrying it,
+	// IdentityPAI or IdentityPPI (empty: PAI).
+	AssertedIdentity string
+	IdentityHeader   string
+
 	// CallerPolicy screens inbound calls from this trunk: anonymous reject
 	// and a country restriction (pbx-gaps S-8). The zero value screens
 	// nothing.
@@ -110,6 +131,14 @@ func ValidSessionTimers(v string) bool {
 	}
 	return false
 }
+
+// Trunk anonymous-call policies and identity headers (spec S-19).
+const (
+	AnonymousHonour = "honour"
+	AnonymousAlways = "always"
+	IdentityPAI     = "pai"
+	IdentityPPI     = "ppi"
+)
 
 // OutboundRoute matches calls from extensions to external numbers.
 type OutboundRoute struct {
@@ -141,12 +170,12 @@ type InboundRoute struct {
 	HeaderRegex     string
 	Schedule        *Schedule
 	CallerID        Transform
-	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition" | "ring_group" | "voicemail" | "announcement" | "paging" | "directory"
+	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition" | "ring_group" | "voicemail" | "announcement" | "paging" | "fax" | "directory"
 	Destination     string // empty for "internal" (the DID names the target); the menu name for "ivr", the room number for "conference", the queue name for "queue"
 	Enabled         bool
 	// MOHClassID is the music on hold class of calls the route delivers
 	// (0 = the global default); MOHRingback plays it to the caller instead
-	// of ringback while the destination rings (migration 00021).
+	// of ringback while the destination rings (migration 00029).
 	MOHClassID  int64
 	MOHRingback bool
 }

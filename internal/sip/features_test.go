@@ -896,6 +896,10 @@ type rtpFeed struct {
 	ssrc  uint32
 	audio uint8 // the negotiated payload type
 	dtmf  uint8
+	// protect, when set, encrypts every packet (an SRTP phone); unprotect
+	// decrypts what the phone receives.
+	protect   func([]byte) []byte
+	unprotect func([]byte) ([]byte, error)
 }
 
 func startRTPFeed(t *testing.T, answer []byte) *rtpFeed {
@@ -916,6 +920,9 @@ func startRTPFeed(t *testing.T, answer []byte) *rtpFeed {
 func (f *rtpFeed) packet(pt uint8, payload []byte, marker bool) {
 	f.seq++
 	pkt := media.BuildRTP(pt, f.seq, f.ts, f.ssrc, marker, payload)
+	if f.protect != nil {
+		pkt = f.protect(pkt)
+	}
 	_, _ = f.conn.WriteTo(pkt, net.UDPAddrFromAddrPort(f.dst))
 }
 

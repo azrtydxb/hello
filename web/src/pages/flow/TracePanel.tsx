@@ -9,6 +9,7 @@ import type { FlowGraph } from "../../api/flow";
 import {
   traceFlow,
   type FlowTrace,
+  type FlowTraceQuery,
   type FlowTraceStep,
 } from "../../api/flowTrace";
 import {
@@ -24,7 +25,8 @@ import { toRFC3339 } from "./traceHighlight";
 export interface TracePanelProps {
   graph: FlowGraph;
   trace: FlowTrace | null;
-  onTrace: (trace: FlowTrace | null) => void;
+  /** The trace and the query that produced it (the AI panel sends it). */
+  onTrace: (trace: FlowTrace | null, query?: FlowTraceQuery) => void;
   /** Brings a node into view; the id may not be on this canvas. */
   onFocusNode: (id: string) => void;
   onClose: () => void;
@@ -90,15 +92,14 @@ export function TracePanel({
     setBusy(true);
     setError("");
     try {
-      onTrace(
-        await traceFlow({
-          from,
-          number: number.trim(),
-          callerId: callerId.trim() || undefined,
-          at: toRFC3339(at),
-          digits: digits || undefined,
-        }),
-      );
+      const query: FlowTraceQuery = {
+        from,
+        number: number.trim(),
+        callerId: callerId.trim() || undefined,
+        at: toRFC3339(at),
+        digits: digits || undefined,
+      };
+      onTrace(await traceFlow(query), query);
     } catch (err) {
       onTrace(null);
       setError(errorMessage(err));

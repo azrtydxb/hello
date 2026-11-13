@@ -254,7 +254,7 @@ func (s *Server) cancelFor(inv *sip.Request) *sip.Request {
 
 func (s *Server) sendCancel(c *sip.Request) {
 	defer contain(s.log, "edge cancel")
-	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
+	ctx, cancel := s.timeoutUntilShutdown(byeTimeout)
 	defer cancel()
 	tx, err := s.client.TransactionRequest(ctx, c, s.fromListener)
 	if err != nil {
@@ -294,7 +294,7 @@ func (s *Server) endOrphan(inv *sip.Request, res *sip.Response) {
 	if err := s.client.WriteRequest(build(sip.ACK, seq), s.addViaFromListener); err != nil {
 		s.log.Debug("edge: orphan ACK failed", "error", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
+	ctx, cancel := s.timeoutUntilShutdown(byeTimeout)
 	defer cancel()
 	tx, err := s.client.TransactionRequest(ctx, build(sip.BYE, seq+1), s.addViaFromListener)
 	if err != nil {

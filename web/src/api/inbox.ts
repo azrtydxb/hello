@@ -91,12 +91,22 @@ export interface InboxAgent {
   displayName: string;
 }
 
+/** A carrier number a supervisor may start a conversation from. */
+export interface InboxSender {
+  addressId: number;
+  address: string;
+  label: string;
+  channel: string;
+}
+
 export interface InboxStatus {
   enabled: boolean;
   unread: number;
   unassigned: number;
   /** Whether email is configured, so an offline chat can be answered by email. */
   emailReply?: boolean;
+  /** Empty for an agent and while first contact is off. */
+  senders: InboxSender[];
 }
 
 function query(params: Record<string, string | number | undefined>): string {
@@ -141,6 +151,31 @@ export interface InboxApi {
   ): Promise<InboxMessage>;
   /** Tells the visitor an agent is typing. */
   typing(id: number): Promise<void>;
+  /** Saves the customer's number as a contact and returns the renamed conversation. */
+  addContact(id: number, contact: ContactInput): Promise<Conversation>;
+  /** The customer's most recent calls, newest first (an agent sees their own). */
+  calls(id: number, signal?: AbortSignal): Promise<{ items: InboxCall[] }>;
+}
+
+/** One call to or from the customer's number. */
+export interface InboxCall {
+  id: number;
+  startTime: string;
+  durationMs: number;
+  direction: string;
+  kind: string;
+  source: string;
+  destination: string;
+  answered: boolean;
+}
+
+/** The name an "Add to contacts" saves the customer under. */
+export interface ContactInput {
+  firstName?: string;
+  lastName?: string;
+  company?: string;
+  /** personal (the caller's own contacts, the default) or company (supervisors). */
+  book?: "personal" | "company";
 }
 
 function area(base: string): InboxApi {
@@ -166,6 +201,9 @@ function area(base: string): InboxApi {
     emailReply: (id, body, clientMsgId) =>
       request("POST", at(id, "/email-reply"), { body: { body, clientMsgId } }),
     typing: (id) => request("POST", at(id, "/typing")),
+    addContact: (id, contact) =>
+      request("POST", at(id, "/contact"), { body: contact }),
+    calls: (id, signal) => request("GET", at(id, "/calls"), { signal }),
   };
 }
 
@@ -207,6 +245,9 @@ export interface MessagingChannel {
   trunkId: number | null;
   trunkName: string;
   hasCredentials: boolean;
+  /** The last four characters of a carrier account's SID; never the token. */
+  accountHint: string;
+  messagingService: boolean;
   status: "ok" | "degraded" | "credentials_invalid";
   statusDetail: string;
   lastEventAt: string | null;
@@ -217,10 +258,23 @@ export interface MessagingChannel {
 
 export interface ChannelInput {
   kind?: "sms";
-  provider?: "sip_trunk";
+  provider?: "sip_trunk" | "twilio";
   name?: string;
   enabled?: boolean;
   trunkId?: number;
+  /** A Twilio channel's account; the token is write-only. */
+  accountSid?: string;
+  authToken?: string;
+  messagingServiceSid?: string;
+}
+
+/** A number a carrier account owns. */
+export interface CarrierNumber {
+  number: string;
+  label: string;
+  sms: boolean;
+  mms: boolean;
+  voice: boolean;
 }
 
 export interface ChannelTest {
@@ -239,6 +293,11 @@ export interface MessagingAddress {
   optOutKeywords: string[];
   helpText: string;
   optOutText: string;
+  /** Customer texts also go to the desk phones of the assigned user's extension. */
+  deskPhoneDelivery: boolean;
+  /** The extension whose phone may reply into a conversation on this number. */
+  ownerExtensionId: number | null;
+  sendsPerMinute: number;
   conversations: number;
   createdAt: string;
 }
@@ -251,6 +310,9 @@ export interface AddressInput {
   optOutKeywords?: string[];
   helpText?: string;
   optOutText?: string;
+  deskPhoneDelivery?: boolean;
+  ownerExtensionId?: number | null;
+  sendsPerMinute?: number;
 }
 
 export interface MessagingSettings {
@@ -258,6 +320,18 @@ export interface MessagingSettings {
   retentionChatDays: number;
   reopenDays: number;
   emailNotify: boolean;
+  firstContact: "off" | "attested";
+  firstContactPerUserHour: number;
+  firstContactPerAddressDay: number;
+}
+
+/** A first-contact text: one customer, one message, one attestation. */
+export interface StartConversationInput {
+  addressId: number;
+  to: string;
+  body: string;
+  consentAttestation: boolean;
+  consentNote: string;
 }
 
 export interface OptOut {
@@ -296,6 +370,13 @@ export const deleteChannel = (id: Id) =>
   request<void>("DELETE", `${MESSAGING}/channels/${id}`);
 export const testChannel = (id: Id) =>
   request<ChannelTest>("POST", `${MESSAGING}/channels/${id}/test`);
+export const listChannelNumbers = (id: Id) =>
+  request<{ items: CarrierNumber[] }>(
+    "GET",
+    `${MESSAGING}/channels/${id}/numbers`,
+  );
+export const startConversation = (body: StartConversationInput) =>
+  request<Conversation>("POST", "/api/v1/inbox/conversations", { body });
 
 export const listAddresses = (signal?: AbortSignal) =>
   itemsOf(

@@ -10,6 +10,12 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build
+# The browser extension (web/extension, docs/browser-extension.md): a zip
+# always, and a signed crx when the extension_key build secret holds the PEM
+# private key of the manifest's fixed key. The key never enters the image.
+RUN --mount=type=secret,id=extension_key \
+    if [ -s /run/secrets/extension_key ]; then export HELLO_EXTENSION_KEY_FILE=/run/secrets/extension_key; fi; \
+    node extension/tools/build.mjs dist/downloads
 
 # ---- runtime ----
 FROM nginxinc/nginx-unprivileged:alpine

@@ -66,7 +66,7 @@ const msg = (over: Record<string, unknown>) => ({
 
 const STATUS = {
   "GET /api/v1/me/inbox/status": () =>
-    json({ enabled: true, unread: 0, unassigned: 1 }),
+    json({ enabled: true, unread: 0, unassigned: 1, senders: [] }),
   "GET /api/v1/me/inbox/agents": () =>
     json({ items: [{ id: 2, username: "agnes", displayName: "Agnes" }] }),
 };
@@ -129,6 +129,32 @@ function inbox(role: string, more: Routes = {}) {
         next: "",
       }),
     "POST /api/v1/inbox/conversations/7/read": () => noContent(),
+    "GET /api/v1/inbox/conversations/7/calls": () =>
+      json({
+        items: [
+          {
+            id: 40,
+            startTime: "2026-10-01T09:00:00Z",
+            durationMs: 65000,
+            direction: "inbound",
+            kind: "call",
+            source: "+32475123456",
+            destination: "101",
+            answered: true,
+          },
+          {
+            id: 39,
+            startTime: "2026-09-30T09:00:00Z",
+            durationMs: 0,
+            direction: "outbound",
+            kind: "call",
+            source: "101",
+            destination: "+32475123456",
+            answered: false,
+          },
+        ],
+        next: "",
+      }),
     ...more,
   });
 }
@@ -295,6 +321,99 @@ describe("Inbox", () => {
     });
   });
 
+  it("saves the customer as a contact and shows the new name", async () => {
+    const calls = inbox("operator", {
+      "POST /api/v1/inbox/conversations/7/contact": () =>
+        json(conv({ peerName: "Carla Peeters", peerNameSource: "personal" })),
+    });
+    await open();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Add to contacts" }),
+    );
+    fireEvent.change(screen.getByLabelText("First name"), {
+      target: { value: "Carla" },
+    });
+    fireEvent.change(screen.getByLabelText("Last name"), {
+      target: { value: "Peeters" },
+    });
+    // A supervisor may share it; the default is their own contacts.
+    expect(screen.getByLabelText("Save to")).toHaveValue("personal");
+    fireEvent.click(screen.getByRole("button", { name: "Save contact" }));
+    await waitFor(() => {
+      expect(calls.find((c) => c.url.endsWith("/contact"))?.body).toEqual({
+        firstName: "Carla",
+        lastName: "Peeters",
+        company: "",
+        book: "personal",
+      });
+    });
+    expect(await screen.findByText("Carla Peeters")).toBeInTheDocument();
+  });
+
+  it("offers a call to the customer through click-to-call and lists recent calls", async () => {
+    inbox("operator");
+    await open();
+    const call = await screen.findByRole("link", {
+      name: "Call +32475123456",
+    });
+    expect(call).toHaveAttribute("href", "/dial?n=%2B32475123456");
+    const recent = await screen.findByRole("list", { name: "Recent calls" });
+    const rows = within(recent).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("Incoming, 65 s");
+    expect(rows[1]).toHaveTextContent("Outgoing, not answered");
+  });
+
+  it("says so when the customer has no recent calls", async () => {
+    inbox("operator", {
+      "GET /api/v1/inbox/conversations/7/calls": () =>
+        json({ items: [], next: "" }),
+    });
+    await open();
+    expect(await screen.findByText("No recent calls.")).toBeInTheDocument();
+  });
+
+  it("offers no call and asks for no calls for a chat visitor", async () => {
+    const visitor = conv({ peerKind: "visitor", peer: "+32475123456" });
+    const calls = inbox("operator", {
+      "GET /api/v1/inbox/conversations?view=all": () =>
+        json({ items: [visitor], next: "" }),
+      "GET /api/v1/inbox/conversations/7": () => json(visitor),
+    });
+    await open();
+    await screen.findByText("Details");
+    expect(screen.queryByRole("link", { name: /^Call / })).toBeNull();
+    expect(calls.some((c) => c.url.endsWith("/calls"))).toBe(false);
+  });
+
+  it("reads an agent's calls from their own route", async () => {
+    const calls = mockApi({
+      "GET /api/v1/auth/me": () => json({ username: "u", role: "user" }),
+      ...STATUS,
+      "GET /api/v1/me/inbox/conversations?view=all": () =>
+        json({
+          items: [conv({ assigneeUserId: 5, assigneeName: "u" })],
+          next: "",
+        }),
+      "GET /api/v1/me/inbox/conversations/7": () =>
+        json(conv({ assigneeUserId: 5, assigneeName: "u" })),
+      "GET /api/v1/me/inbox/conversations/7/messages": () =>
+        json({ items: [msg({ id: 1 })], next: "" }),
+      "GET /api/v1/me/inbox/conversations/7/calls": () =>
+        json({ items: [], next: "" }),
+    });
+    renderApp("/me/inbox");
+    const list = await screen.findByRole("list", { name: "Conversations" });
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /\+32475123456/ }),
+    );
+    expect(await screen.findByText("No recent calls.")).toBeInTheDocument();
+    expect(
+      calls.some((c) => c.url === "/api/v1/me/inbox/conversations/7/calls"),
+    ).toBe(true);
+    expect(calls.some((c) => c.url.startsWith("/api/v1/inbox/"))).toBe(false);
+  });
+
   it("refreshes on a stream event and notifies without the text", async () => {
     const shown: { title: string; options?: NotificationOptions }[] = [];
     class FakeNotification {
@@ -339,10 +458,75 @@ describe("Inbox", () => {
     expect(FakeEventSource.instances[0]!.closed).toBe(true);
   });
 
+  it("starts a first-contact text only with an attestation", async () => {
+    const calls = inbox("operator", {
+      "GET /api/v1/me/inbox/status": () =>
+        json({
+          enabled: true,
+          unread: 0,
+          unassigned: 0,
+          senders: [
+            {
+              addressId: 9,
+              address: "+3270999000",
+              label: "",
+              channel: "Twilio",
+            },
+          ],
+        }),
+      "POST /api/v1/inbox/conversations": () =>
+        json(conv({ id: 12, peer: "+32475123456" }), 201),
+    });
+    renderApp("/inbox");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Text a customer" }),
+    );
+    fireEvent.change(await screen.findByLabelText("Customer's number"), {
+      target: { value: "+32475123456" },
+    });
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Your appointment is tomorrow" },
+    });
+    fireEvent.change(screen.getByLabelText("How did they agree?"), {
+      target: { value: "asked on the web form" },
+    });
+    // Without the attestation the send button stays off.
+    expect(screen.getByRole("button", { name: "Send text" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Send text" }));
+    await waitFor(() =>
+      expect(
+        calls.find(
+          (c) => c.method === "POST" && c.url.endsWith("/inbox/conversations"),
+        )?.body,
+      ).toEqual({
+        addressId: 9,
+        to: "+32475123456",
+        body: "Your appointment is tomorrow",
+        consentAttestation: true,
+        consentNote: "asked on the web form",
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "The text is queued and will be sent in a moment.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("offers no first-contact button when first contact is off", async () => {
+    inbox("operator");
+    renderApp("/inbox");
+    await screen.findByRole("list", { name: "Conversations" });
+    expect(
+      screen.queryByRole("button", { name: "Text a customer" }),
+    ).toBeNull();
+  });
+
   it("says so when no channel has a number", async () => {
     inbox("operator", {
       "GET /api/v1/me/inbox/status": () =>
-        json({ enabled: false, unread: 0, unassigned: 0 }),
+        json({ enabled: false, unread: 0, unassigned: 0, senders: [] }),
     });
     renderApp("/inbox");
     expect(

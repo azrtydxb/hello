@@ -12,6 +12,7 @@ import {
   type Id,
 } from "../api";
 import { bindingsOf, type LiveDirectory } from "../api/directory";
+import { getFollowMe, putFollowMe } from "../api/followme";
 import {
   Alert,
   Button,
@@ -25,8 +26,11 @@ import {
 import { mapFieldErrors } from "../forms";
 import "../pages/directory/directory.css";
 import { Can } from "../role";
+import { FollowMeEditor } from "../pages/followme/FollowMeEditor";
 import { MOHSelect } from "../pages/media/MohSelect";
 import { DoorTargetsField } from "../pages/directory/DoorTargetsField";
+import { DoorOpenField } from "../pages/directory/DoorOpenField";
+import { DoorCameraField } from "../pages/directory/DoorCameraField";
 
 export const NUMBER_HINT = "2 to 10 digits.";
 export const EXTERNAL_PATTERN = /^(\+?[0-9]{2,20})?$/;
@@ -252,6 +256,8 @@ export function ExtensionDrawer({
   const [record, setRecord] = useState(ext.recordDefault ?? false);
   const [intercom, setIntercom] = useState(ext.allowIntercom !== false);
   const [callWaiting, setCallWaiting] = useState(ext.callWaiting !== false);
+  const [anonymous, setAnonymous] = useState(ext.anonymousOutbound === true);
+  const [phoneAnon, setPhoneAnon] = useState(ext.phoneSendAnonymous === true);
   const [mohClass, setMohClass] = useState<Id | null>(ext.mohClassId ?? null);
   const [door, setDoor] = useState(ext.kind === "door");
   const [targets, setTargets] = useState<DoorTargets>({
@@ -306,6 +312,12 @@ export function ExtensionDrawer({
     }
     if (callWaiting !== (ext.callWaiting !== false)) {
       patch.callWaiting = callWaiting;
+    }
+    if (anonymous !== (ext.anonymousOutbound === true)) {
+      patch.anonymousOutbound = anonymous;
+    }
+    if (phoneAnon !== (ext.phoneSendAnonymous === true)) {
+      patch.phoneSendAnonymous = phoneAnon;
     }
     if (String(mohClass ?? "") !== String(ext.mohClassId ?? "")) {
       patch.mohClassId = mohClass;
@@ -429,6 +441,8 @@ export function ExtensionDrawer({
               onChange={setTargets}
             />
           )}
+          {door && ext.kind === "door" && <DoorOpenField id={ext.id} />}
+          {door && ext.kind === "door" && <DoorCameraField id={ext.id} />}
 
           <div
             className="dir-section"
@@ -476,6 +490,20 @@ export function ExtensionDrawer({
               labelPosition="end"
               checked={callWaiting}
               onChange={(e) => setCallWaiting(e.target.checked)}
+            />
+            <Switch
+              label="Anonymous outbound"
+              hint="Every call this extension places through a trunk hides its number: Privacy: id, an anonymous From and the trunk's asserted identity. Off: only when the phone asks for it or the trunk is set to always. Trunk calls only; internal caller ID is untouched"
+              labelPosition="end"
+              checked={anonymous}
+              onChange={(e) => setAnonymous(e.target.checked)}
+            />
+            <Switch
+              label="Phone sends anonymous"
+              hint="Switches on the desk phone's own Send Anonymous setting (Grandstream, line 1), pushed at the next resync: the phone hides its caller ID on every call, internal calls included. This differs from Anonymous outbound, which only hides the number on calls Hello places through a trunk and leaves internal caller ID alone. Off writes nothing to the phone"
+              labelPosition="end"
+              checked={phoneAnon}
+              onChange={(e) => setPhoneAnon(e.target.checked)}
             />
             <MOHSelect
               id="ext-moh"
@@ -541,6 +569,13 @@ export function ExtensionDrawer({
               onChange={set("noAnswerRings")}
             />
           </div>
+
+          <FollowMeEditor
+            id={ext.id}
+            ownNumber={ext.number}
+            load={getFollowMe}
+            save={putFollowMe}
+          />
 
           <section
             className="dir-section dir-section--tight"

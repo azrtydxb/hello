@@ -169,3 +169,23 @@ func TestGrandstreamWPSequences(t *testing.T) {
 		})
 	}
 }
+
+// TestGrandstreamPValues fails if the WP profiles' P-value parser loses a
+// key (the phone-parity sweep reads transport, SRTP, backup server, Wi-Fi and
+// RTCP-XR keys through it), or reports a key the file does not set.
+func TestGrandstreamPValues(t *testing.T) {
+	gs := "<gs_provision><mac>" + mac + "</mac><config><P35>101</P35><P47>pbx:5060</P47>" +
+		"<P130>1</P130><P183>2</P183><P2312>10.0.0.9:5060</P2312><P83000>Office</P83000><P26093></P26093></config></gs_provision>"
+	cfg, err := ParseGrandstream([]byte(gs), mac)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"P130": "1", "P183": "2", "P2312": "10.0.0.9:5060", "P83000": "Office", "P26093": ""} {
+		if got, ok := cfg.Value(name); !ok || got != want {
+			t.Errorf("%s = %q, %v; want %q, true", name, got, ok, want)
+		}
+	}
+	if v, ok := cfg.Value("P188"); ok {
+		t.Errorf("P188 = %q, but the file does not set it", v)
+	}
+}

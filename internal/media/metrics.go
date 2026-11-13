@@ -3,6 +3,9 @@
 package media
 
 import (
+	"sync/atomic"
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -27,6 +30,22 @@ type Metrics struct {
 	// RTPJitter is the RFC 3550 interarrival jitter estimate per
 	// direction, observed once per stats interval per live session.
 	RTPJitter *prometheus.HistogramVec
+	// SRTPLegs is the number of call legs this node's anchor currently
+	// encrypts with SRTP (SDES, phone-feature-parity S-15).
+	SRTPLegs prometheus.Gauge
+	// SRTPNegotiations counts leg negotiations by result: srtp (the leg is
+	// encrypted), plain (crypto was not offered or the far end declined and
+	// the policy allowed plain RTP), refused (the policy required SRTP and
+	// the call was refused with 488).
+	SRTPNegotiations *prometheus.CounterVec
+	// DTLSHandshakes counts DTLS-SRTP handshakes by result (ok, timeout,
+	// fingerprint, failed) and DTLSSeconds times the successful ones
+	// (phone-feature-parity S-16).
+	DTLSHandshakes *prometheus.CounterVec
+	DTLSSeconds    prometheus.Histogram
+	// ICEChecks counts the STUN binding requests ICE-lite received by
+	// result (ok, bad_credentials, role_conflict).
+	ICEChecks *prometheus.CounterVec
 	// RecordingStorage is what this node stored (the cluster total lives
 	// in MinIO, like voicemail's).
 	RecordingStorage prometheus.Gauge
@@ -76,14 +95,60 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			},
 			[]string{"direction"},
 		),
+		SRTPLegs: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "hello_srtp_legs",
+			Help: "Call legs the anchor currently encrypts with SRTP.",
+		}),
+		SRTPNegotiations: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "hello_srtp_negotiations_total",
+			Help: "SRTP leg negotiations by result (srtp, plain, refused).",
+		}, []string{"result"}),
+		DTLSHandshakes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "hello_dtls_handshakes_total",
+			Help: "DTLS-SRTP handshakes on the anchor by result (ok, timeout, fingerprint, failed).",
+		}, []string{"result"}),
+		DTLSSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "hello_dtls_handshake_seconds",
+			Help:    "Duration of successful DTLS-SRTP handshakes.",
+			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8},
+		}),
+		ICEChecks: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "hello_ice_checks_total",
+			Help: "STUN binding requests the ICE-lite agent received by result (ok, bad_credentials, role_conflict).",
+		}, []string{"result"}),
 		RecordingStorage: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "hello_recording_storage_bytes",
 			Help: "Recording audio bytes this node stored (cluster total lives in MinIO).",
 		}),
 	}
 	reg.MustRegister(m.RTPSessions, m.AnchoredCalls, m.AnchorFailures,
-		m.RTPPackets, m.RTPOctets, m.RTPLoss, m.RTPJitter, m.RecordingStorage)
+		m.RTPPackets, m.RTPOctets, m.RTPLoss, m.RTPJitter, m.SRTPLegs, m.SRTPNegotiations,
+		m.DTLSHandshakes, m.DTLSSeconds, m.ICEChecks, m.RecordingStorage)
+	activeMetrics.Store(m)
 	return m
+}
+
+// activeMetrics is the registered series the endpoint code counts into (the
+// last Metrics made); nil in a process that never made one.
+var activeMetrics atomic.Pointer[Metrics]
+
+// noteDTLS counts one DTLS handshake.
+func noteDTLS(result string, d time.Duration) {
+	m := activeMetrics.Load()
+	if m == nil {
+		return
+	}
+	m.DTLSHandshakes.WithLabelValues(result).Inc()
+	if result == "ok" {
+		m.DTLSSeconds.Observe(d.Seconds())
+	}
+}
+
+// noteICE counts one STUN check.
+func noteICE(result string) {
+	if m := activeMetrics.Load(); m != nil {
+		m.ICEChecks.WithLabelValues(result).Inc()
+	}
 }
 
 // ObserveStats feeds one relay's snapshot into the RTP series; it runs on

@@ -47,6 +47,19 @@ function api(extensions: unknown[], more: Routes = {}) {
     ...ME,
     "GET /api/v1/extensions": () => json({ items: extensions }),
     "GET /api/v1/devices": () => json({ items: [] }),
+    // The follow-me section of the drawer; extension 1 is the one opened.
+    "GET /api/v1/extensions/1/follow-me": () =>
+      json({
+        extensionId: 1,
+        number: "100",
+        enabled: false,
+        strategy: "simultaneous",
+        ringOwnDevices: true,
+        timeoutSeconds: 30,
+        confirmExternal: true,
+        dndBlocks: true,
+        targets: [],
+      }),
     ...more,
   });
 }
@@ -240,6 +253,219 @@ describe("Extensions", () => {
       url: "/api/v1/extensions/9",
       body: { doorTargets: { extensions: [1], ringGroups: [6] } },
     });
+  });
+
+  it("sets a door station's door-open code without ever showing it", async () => {
+    const door = {
+      ...EXT,
+      id: 9,
+      number: "900",
+      name: "Front door",
+      kind: "door",
+      voicemailEnabled: false,
+      doorTargets: { extensions: [], ringGroups: [] },
+    };
+    const calls = api([EXT, door], {
+      "GET /api/v1/ring-groups": () => json({ items: [] }),
+      "GET /api/v1/extensions/9/door-open": () =>
+        json({ codeSet: false, hangupAfterOpen: false }),
+      "PUT /api/v1/extensions/9/door-open": () =>
+        json({ codeSet: true, hangupAfterOpen: true }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer("900");
+    expect(await within(drawer).findByText("No code is set.")).toBeVisible();
+
+    const field = within(drawer).getByLabelText("New code");
+    expect(field).toHaveAttribute("type", "password");
+    fireEvent.change(field, { target: { value: "12ab" } });
+    fireEvent.click(
+      within(drawer).getByRole("button", { name: "Save door-open settings" }),
+    );
+    expect(
+      await within(drawer).findByText("1 to 8 characters of 0-9, * and #."),
+    ).toBeVisible();
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
+
+    fireEvent.change(field, { target: { value: "8#42" } });
+    fireEvent.click(
+      within(drawer).getByRole("switch", { name: /Hang up after opening/ }),
+    );
+    fireEvent.click(
+      within(drawer).getByRole("button", { name: "Save door-open settings" }),
+    );
+    expect(
+      await within(drawer).findByText("Door-open settings saved."),
+    ).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PUT",
+      url: "/api/v1/extensions/9/door-open",
+      body: { code: "8#42", hangupAfterOpen: true },
+    });
+    // The code is gone from the field and from the page.
+    expect(within(drawer).getByLabelText("New code")).toHaveValue("");
+    expect(within(drawer).getByText("A code is set.")).toBeVisible();
+    expect(document.body.textContent).not.toContain("8#42");
+  });
+
+  it("offers no door-open code on a user extension", async () => {
+    const calls = api([EXT]);
+    renderApp("/extensions");
+    const drawer = await openDrawer("100");
+    expect(within(drawer).queryByLabelText("New code")).toBeNull();
+    expect(calls.filter((c) => c.url.endsWith("/door-open"))).toHaveLength(0);
+  });
+
+  it("hides the door-open code from an operator", async () => {
+    const door = {
+      ...EXT,
+      id: 9,
+      number: "900",
+      name: "Front door",
+      kind: "door",
+      doorTargets: { extensions: [], ringGroups: [] },
+    };
+    const calls = mockApi({
+      "GET /api/v1/auth/me": () => json({ username: "ops", role: "operator" }),
+      "GET /api/v1/extensions": () => json({ items: [door] }),
+      "GET /api/v1/devices": () => json({ items: [] }),
+      "GET /api/v1/ring-groups": () => json({ items: [] }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer("900");
+    expect(within(drawer).queryByLabelText("New code")).toBeNull();
+    expect(
+      within(drawer).queryByRole("button", { name: "Save door-open settings" }),
+    ).toBeNull();
+    expect(calls.filter((c) => c.url.endsWith("/door-open"))).toHaveLength(0);
+  });
+
+  it("sets a door station's camera, keeps the password write-only and shows the picture", async () => {
+    const door = {
+      ...EXT,
+      id: 9,
+      number: "900",
+      name: "Front door",
+      kind: "door",
+      voicemailEnabled: false,
+      doorTargets: { extensions: [], ringGroups: [] },
+    };
+    const none = {
+      configured: false,
+      kind: "",
+      url: "",
+      username: "",
+      passwordSet: false,
+    };
+    const set = {
+      configured: true,
+      kind: "snapshot",
+      url: "http://192.168.10.40/snap.jpg",
+      username: "hello",
+      passwordSet: true,
+    };
+    const calls = api([EXT, door], {
+      "GET /api/v1/ring-groups": () => json({ items: [] }),
+      "GET /api/v1/extensions/9/camera": () => json(none),
+      "PUT /api/v1/extensions/9/camera": () => json(set),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer("900");
+    const address = await within(drawer).findByLabelText("Address");
+    expect(
+      within(drawer).queryByRole("button", { name: "Show picture" }),
+    ).toBeNull();
+
+    fireEvent.change(address, { target: { value: "rtsp://192.168.10.40/s1" } });
+    fireEvent.click(
+      within(drawer).getByRole("button", { name: "Save camera" }),
+    );
+    expect(
+      await within(drawer).findByText(
+        "An absolute http:// or https:// address.",
+      ),
+    ).toBeVisible();
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
+
+    fireEvent.change(address, { target: { value: set.url } });
+    fireEvent.change(within(drawer).getByLabelText("User name"), {
+      target: { value: "hello" },
+    });
+    const password = within(drawer).getByLabelText("Password");
+    expect(password).toHaveAttribute("type", "password");
+    fireEvent.change(password, { target: { value: "cam-s3cret-pw" } });
+    fireEvent.click(
+      within(drawer).getByRole("button", { name: "Save camera" }),
+    );
+    expect(await within(drawer).findByText("Camera saved.")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PUT",
+      url: "/api/v1/extensions/9/camera",
+      body: {
+        kind: "snapshot",
+        url: set.url,
+        username: "hello",
+        password: "cam-s3cret-pw",
+      },
+    });
+    // The password is gone from the field and the page.
+    expect(within(drawer).getByLabelText("Password")).toHaveValue("");
+    expect(document.body.textContent).not.toContain("cam-s3cret-pw");
+    expect(within(drawer).getByText(/A password is set/)).toBeVisible();
+
+    fireEvent.click(
+      within(drawer).getByRole("button", { name: "Show picture" }),
+    );
+    const img = within(drawer).getByRole("img", { name: "Door camera" });
+    expect(img.getAttribute("src")).toMatch(
+      /^\/api\/v1\/extensions\/9\/camera\/view\?t=\d+$/,
+    );
+    fireEvent.error(img);
+    expect(
+      await within(drawer).findByText(/The camera gave no picture/),
+    ).toBeVisible();
+  });
+
+  it("lets an operator look at the picture but not change the camera", async () => {
+    const door = {
+      ...EXT,
+      id: 9,
+      number: "900",
+      name: "Front door",
+      kind: "door",
+      doorTargets: { extensions: [], ringGroups: [] },
+    };
+    mockApi({
+      "GET /api/v1/auth/me": () => json({ username: "ops", role: "operator" }),
+      "GET /api/v1/extensions": () => json({ items: [door] }),
+      "GET /api/v1/devices": () => json({ items: [] }),
+      "GET /api/v1/ring-groups": () => json({ items: [] }),
+      "GET /api/v1/extensions/9/camera": () =>
+        json({
+          configured: true,
+          kind: "mjpeg",
+          url: "http://192.168.10.40/v.mjpg",
+          username: "u",
+          passwordSet: true,
+        }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer("900");
+    fireEvent.click(
+      await within(drawer).findByRole("button", { name: "Show picture" }),
+    );
+    expect(
+      within(drawer)
+        .getByRole("img", { name: "Door camera" })
+        .getAttribute("src"),
+    ).toBe("/api/v1/extensions/9/camera/view");
+    expect(within(drawer).queryByLabelText("Address")).toBeNull();
+    expect(
+      within(drawer).queryByRole("button", { name: "Save camera" }),
+    ).toBeNull();
+    expect(
+      within(drawer).queryByRole("button", { name: "Remove camera" }),
+    ).toBeNull();
   });
 
   it("keeps an extension created before the list finished loading", async () => {
@@ -519,6 +745,54 @@ describe("Extensions", () => {
       method: "PATCH",
       url: "/api/v1/extensions/1",
       body: { callWaiting: false },
+    });
+  });
+
+  it("turns anonymous outbound on, off by default", async () => {
+    const calls = api([EXT], {
+      "GET /api/v1/devices": () => json({ items: [DEVICE] }),
+      "GET /api/v1/registrations": () => json({ items: [] }),
+      "GET /api/v1/presence": () => json({ items: [] }),
+      "PATCH /api/v1/extensions/1": () =>
+        json({ ...EXT, anonymousOutbound: true }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer();
+    const sw = within(drawer).getByRole("switch", {
+      name: /^Anonymous outbound/,
+    });
+    expect(sw).not.toBeChecked();
+    fireEvent.click(sw);
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Extension 100 saved.")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/extensions/1",
+      body: { anonymousOutbound: true },
+    });
+  });
+
+  it("turns the phone's send anonymous on, off by default", async () => {
+    const calls = api([EXT], {
+      "GET /api/v1/devices": () => json({ items: [DEVICE] }),
+      "GET /api/v1/registrations": () => json({ items: [] }),
+      "GET /api/v1/presence": () => json({ items: [] }),
+      "PATCH /api/v1/extensions/1": () =>
+        json({ ...EXT, phoneSendAnonymous: true }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer();
+    const sw = within(drawer).getByRole("switch", {
+      name: /Phone sends anonymous/,
+    });
+    expect(sw).not.toBeChecked();
+    fireEvent.click(sw);
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Extension 100 saved.")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/extensions/1",
+      body: { phoneSendAnonymous: true },
     });
   });
 

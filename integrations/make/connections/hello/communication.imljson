@@ -1,0 +1,15 @@
+{
+  "url": "{{parameters.url}}/api/v1/auth/me",
+  "method": "GET",
+  "headers": {
+    "Authorization": "Bearer {{parameters.token}}"
+  },
+  "log": {
+    "sanitize": ["request.headers.authorization"]
+  },
+  "response": {
+    "temp": {
+      "username": "{{body.username}}"
+    }
+  }
+}

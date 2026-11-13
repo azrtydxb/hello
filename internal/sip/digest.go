@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/emiago/sipgo/sip"
 	"github.com/icholy/digest"
 )
@@ -42,6 +43,8 @@ const (
 	CheckURI       = "uri"
 	CheckResponse  = "response"
 	CheckNonce     = "nonce"
+	CheckExpired   = "expired"
+	CheckUsername  = "username"
 )
 
 // Verdict is the outcome of checking digest credentials.
@@ -173,6 +176,35 @@ func (d *Digest) Verify(c *digest.Credentials, method string, ruri sip.Uri, ip, 
 	default:
 		return OK, ""
 	}
+}
+
+// VerifyDerived checks credentials of a derived device (a web client,
+// clients-webrtc-mobile-video S-14). The username must be the device's base
+// name plus an expiry, <base>.<expiryUnix>, still in the future; the digest
+// secret is derived from the username and each of keys in turn (the current
+// key first, then the previous one, so a key change drops no registered
+// client). No HA1 is stored: it is computed here, per request.
+func (d *Digest) VerifyDerived(c *digest.Credentials, method string, ruri sip.Uri, ip, base string, keys [][]byte) (Verdict, string) {
+	b, exp, ok := auth.SplitDerived(c.Username)
+	if !ok || b != base {
+		return Bad, CheckUsername
+	}
+	if !exp.After(d.now()) {
+		return Bad, CheckExpired
+	}
+	verdict, check := Bad, CheckHA1
+	for _, k := range keys {
+		if len(k) == 0 {
+			continue
+		}
+		md5Hex, shaHex := auth.DerivedHA1(k, c.Username, d.Realm)
+		if v, ch := d.Verify(c, method, ruri, ip, md5Hex, shaHex); v != Bad {
+			return v, ch
+		} else {
+			verdict, check = v, ch
+		}
+	}
+	return verdict, check
 }
 
 func hexHash(h hash.Hash, s string) string {

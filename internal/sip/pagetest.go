@@ -81,6 +81,10 @@ type testContact struct {
 	b   livestate.Binding
 	res livestate.PageTestContact
 	l   *leg
+	// ext is the extension the contact belongs to (the emergency notice pages
+	// several), name and num the caller identity of its INVITE; empty name and
+	// num are the page test's own.
+	ext, name, num string
 }
 
 // testPage pages one member of a group and reports what happened.
@@ -193,6 +197,14 @@ func summarizeTest(cs []livestate.PageTestContact) string {
 // answered contact is acknowledged, added to the fan-out and left for
 // testPage to play the tone and hang up.
 func (s *Server) testContact(ctx context.Context, c *testContact, ext string, offer []byte, fan *media.Fanout) {
+	// The contact is offered keys under its device's SRTP policy, like a
+	// page member: one that demands SRTP never gets plain RTP.
+	lg := srtpLeg{policy: devicePolicy(s.deps.Snapshots.Current(), c.res.Device), tls: bindingOnTLS(c.b)}
+	offer, sec, ok := memberOffer(lg, offer)
+	if !ok {
+		c.res.Result = PageLegSRTP
+		return
+	}
 	req, err := s.testInvite(c, ext, offer)
 	if err != nil {
 		c.res.Result = "failed"
@@ -217,13 +229,18 @@ func (s *Server) testContact(ctx context.Context, c *testContact, ext string, of
 	if res := dcs.InviteResponse; err == nil || (res != nil && res.IsSuccess()) {
 		ans, perr := media.ParseAudioSDP(res.Body())
 		addr := udpAddr(ans.Address, ans.Port)
-		if perr != nil || addr == nil || ans.PayloadType != 0 {
+		secure := sec != nil && perr == nil && sec.ApplyAnswer(ans.Crypto, lg.required())
+		if perr != nil || addr == nil || ans.PayloadType != 0 || (lg.required() && !secure) {
 			l.bye()
 			c.res.Result = "failed"
 			return
 		}
 		l.ack(nil, "")
-		fan.AddTarget(c.b.ContactURI, addr)
+		if secure {
+			fan.AddSecureTarget(c.b.ContactURI, addr, sec)
+		} else {
+			fan.AddTarget(c.b.ContactURI, addr)
+		}
 		c.l, c.res.Result = l, PageLegAnswered
 		return
 	}
@@ -246,7 +263,7 @@ func (s *Server) testInvite(c *testContact, ext string, offer []byte) (*sip.Requ
 	if err := sip.ParseUri(c.b.ContactURI, &ruri); err != nil {
 		return nil, err
 	}
-	const name, num = "Hello paging test", "paging-test"
+	name, num := orDefault(c.name, "Hello paging test"), orDefault(c.num, "paging-test")
 	req := sip.NewRequest(sip.INVITE, ruri)
 	callID := sip.CallIDHeader(newID())
 	maxFwd := sip.MaxForwardsHeader(70)

@@ -110,6 +110,9 @@ describe("live pages", () => {
   });
 
   it("Active Calls badges a taken-over call and marks the others owned", async () => {
+    // The Duration column counts up from startedAt on the system clock; on
+    // the real one it grows past "101…" hours and matches the row names.
+    vi.setSystemTime(new Date("2026-10-01T10:06:55Z"));
     mockApi({
       "GET /api/v1/calls": json({
         items: [
@@ -128,9 +131,9 @@ describe("live pages", () => {
     render(<Calls />);
     await flush();
     expect(screen.getByRole("columnheader", { name: "HA" })).toBeVisible();
-    const taken = screen.getByRole("row", { name: /103/ });
+    const taken = screen.getByRole("row", { name: /^103 / });
     expect(within(taken).getByText("Taken over")).toHaveClass("az-badge");
-    const owned = screen.getByRole("row", { name: /101/ });
+    const owned = screen.getByRole("row", { name: /^101 / });
     expect(within(owned).getByText("Owned")).toBeVisible();
     expect(within(owned).queryByText("Taken over")).toBeNull();
   });

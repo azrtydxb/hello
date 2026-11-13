@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -55,15 +56,38 @@ type CDR struct {
 	// (migration 00050); empty when no internal device rang.
 	RingTag  string `json:"ringTag"`
 	RingRule string `json:"ringRule"`
+	// SRTP is which legs carried SRTP: none, caller, callee or both
+	// (migration 00081).
+	SRTP string `json:"srtp"`
+	// SRTPKeyEx is how the encrypted legs agreed their keys: none, sdes, dtls
+	// or mixed, and ICE whether a leg ran ICE-lite (migration 00084).
+	SRTPKeyEx string `json:"srtpKeyEx"`
+	ICE       bool   `json:"ice"`
+	// RecordingID is the call's recording; set by GetCDR when it has one.
+	RecordingID *int64 `json:"recordingId,omitempty"`
 	// PageLegs is a page's outcome per member (migration 00014); set by
 	// GetCDR for a page only.
 	PageLegs []PageLeg `json:"pageLegs,omitempty"`
 	// QueueLegs is what the call did in a call queue (migration 00040); set
 	// by GetCDR.
 	QueueLegs []QueueLeg `json:"queueLegs,omitempty"`
+	// FollowMeLegs is what each follow-me target did (migration 00084); set
+	// by GetCDR.
+	FollowMeLegs []FollowMeLeg `json:"followMeLegs,omitempty"`
 	// RTCPXR is what the phones on the call reported (migration 00066); set
 	// by GetCDR, empty when no phone sent a report.
 	RTCPXR []RTCPXRQuality `json:"rtcpxr,omitempty"`
+}
+
+// FollowMeLeg is one follow-me leg of a call: the target's kind (own,
+// extension, ring_group or external), the extension it rang or the trunk it
+// left on, and how it ended (answered, declined, busy, no_answer, failed,
+// skipped or cancelled).
+type FollowMeLeg struct {
+	Kind      string `json:"kind"`
+	Extension string `json:"extension"`
+	Trunk     string `json:"trunk"`
+	Result    string `json:"result"`
 }
 
 // QueueLeg is one event of a call in a queue: enter, agent, answered, wait,
@@ -88,14 +112,14 @@ type PageLeg struct {
 const cdrCols = `id, correlation_id, sip_call_id, source, destination, start_time, ring_time, answer_time,
 	end_time, duration_ms, billable_ms, sip_node, media_mode, final_status, termination_side, failure_reason,
 	direction, original_destination, rewritten_destination, route_name, trunk_name,
-	rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client, answered_by`
+	rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client, answered_by, srtp, srtp_keyex, ice`
 
 func scanCDR(r interface{ Scan(...any) error }, extra ...any) (CDR, error) {
 	var c CDR
 	var ring, answer sql.NullTime
 	dest := append([]any{&c.ID, &c.CorrelationID, &c.SIPCallID, &c.Source, &c.Destination, &c.StartTime, &ring, &answer,
 		&c.EndTime, &c.DurationMs, &c.BillableMs, &c.SIPNode, &c.MediaMode, &c.FinalStatus, &c.TerminationSide, &c.FailureReason,
-		&c.Direction, &c.OriginalDestination, &c.RewrittenDestination, &c.Route, &c.Trunk, &c.RTPPackets, &c.RTPLost, &c.RTPJitterMs, &c.Kind, &c.RingTag, &c.RingRule, &c.CallerCodec, &c.CalleeCodec, &c.Origin, &c.OriginClient, &c.AnsweredBy,
+		&c.Direction, &c.OriginalDestination, &c.RewrittenDestination, &c.Route, &c.Trunk, &c.RTPPackets, &c.RTPLost, &c.RTPJitterMs, &c.Kind, &c.RingTag, &c.RingRule, &c.CallerCodec, &c.CalleeCodec, &c.Origin, &c.OriginClient, &c.AnsweredBy, &c.SRTP, &c.SRTPKeyEx, &c.ICE,
 	}, extra...)
 	if err := r.Scan(dest...); err != nil {
 		return c, err
@@ -217,6 +241,13 @@ func (s *Store) GetCDR(ctx context.Context, id int64) (CDR, routing.Trace, error
 	if err := json.Unmarshal(raw, &trace); err != nil {
 		return c, nil, fmt.Errorf("store: decode trace of cdr %d: %w", id, err)
 	}
+	var rec int64
+	switch err := s.db.QueryRowContext(ctx, `SELECT id FROM recordings WHERE correlation_id = $1`, c.CorrelationID).Scan(&rec); {
+	case err == nil:
+		c.RecordingID = &rec
+	case !errors.Is(err, sql.ErrNoRows):
+		return c, trace, fmt.Errorf("store: recording of cdr %d: %w", id, err)
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT event, queue, extension, wait_ms, result, at
 		FROM cdr_queue_legs WHERE cdr_id = $1 ORDER BY position`, id)
 	if err != nil {
@@ -234,5 +265,21 @@ func (s *Store) GetCDR(ctx context.Context, id int64) (CDR, routing.Trace, error
 		return c, trace, err
 	}
 	c.RTCPXR, err = s.rtcpxrOf(ctx, id)
-	return c, trace, err
+	if err != nil {
+		return c, trace, err
+	}
+	frows, err := s.db.QueryContext(ctx, `SELECT target_kind, extension, trunk, result
+		FROM cdr_legs WHERE cdr_id = $1 AND role = 'follow_me' ORDER BY position`, id)
+	if err != nil {
+		return c, trace, fmt.Errorf("store: follow-me legs of cdr %d: %w", id, err)
+	}
+	defer func() { _ = frows.Close() }()
+	for frows.Next() {
+		var l FollowMeLeg
+		if err := frows.Scan(&l.Kind, &l.Extension, &l.Trunk, &l.Result); err != nil {
+			return c, trace, err
+		}
+		c.FollowMeLegs = append(c.FollowMeLegs, l)
+	}
+	return c, trace, frows.Err()
 }

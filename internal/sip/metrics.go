@@ -63,6 +63,7 @@ type Metrics struct {
 	Forwarded             *prometheus.CounterVec // kind
 	GroupCalls            *prometheus.CounterVec // group, strategy, result
 	RingTags              *prometheus.CounterVec // tag: calls that rang an internal device with the tag (S-39)
+	Emergency             *prometheus.CounterVec // kind (emergency, callback, alarm, notify), result: emergency and alarm handling (S-28, S-29)
 	PresenceSubscriptions prometheus.Gauge
 	// MWINotify counts message-summary NOTIFYs by kind and result (S-1).
 	MWINotify  *prometheus.CounterVec // kind, result
@@ -113,6 +114,13 @@ type Metrics struct {
 	// CallbackTotal counts queue callback outcomes: requested, coalesced,
 	// full, dialled, connected, no_answer, busy, failed, abandoned, no_agent.
 	CallbackTotal *prometheus.CounterVec // result
+	// FollowMeLegs counts follow-me legs by target kind (external, extension,
+	// ring_group, own) and result (answered, declined, busy, no_answer,
+	// failed, skipped, cancelled).
+	FollowMeLegs *prometheus.CounterVec // kind, result
+	// FaxTotal counts fax calls by direction (inbound, outbound) and result
+	// (received, sent, partial, failed, refused, retry, cancelled).
+	FaxTotal *prometheus.CounterVec // direction, result
 	// TimeConditionTotal counts time condition decisions: open, closed,
 	// holiday, forced_open, forced_closed, loop, missing and toggled.
 	TimeConditionTotal *prometheus.CounterVec // result
@@ -172,6 +180,9 @@ const (
 	// ForwardBossScreen is an assistant sending a screened call to the boss's
 	// voicemail.
 	ForwardBossScreen = "boss_screen"
+
+	// ForwardFollowMe is a call that rang an extension's follow-me profile.
+	ForwardFollowMe = "follow_me"
 )
 
 // Trunk attempt results for hello_trunk_calls_total.
@@ -264,6 +275,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.RingTags = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_ring_tag_total", Help: "Calls that rang an internal device, by ring tag.",
 	}, []string{"tag"})
+	m.Emergency = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_emergency_total", Help: "Emergency calls, emergency callbacks, alarm calls and emergency notifications by kind and result.",
+	}, []string{"kind", "result"})
 	m.PresenceSubscriptions = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hello_presence_subscriptions", Help: "Live dialog (BLF) subscriptions served by this node.",
 	})
@@ -321,6 +335,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.CallbackTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_callback_total", Help: "Queue callback outcomes (requested, coalesced, full, dialled, connected, no_answer, busy, failed, abandoned, no_agent).",
 	}, []string{"result"})
+	m.FollowMeLegs = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_follow_me_legs_total", Help: "Follow-me legs by target kind (own, extension, ring_group, external) and result (answered, declined, busy, no_answer, failed, skipped, cancelled).",
+	}, []string{"kind", "result"})
+	m.FaxTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_fax_total", Help: "Fax calls by direction (inbound, outbound) and result (received, sent, partial, failed, refused, retry, cancelled).",
+	}, []string{"direction", "result"})
 	m.TimeConditionTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_time_condition_total", Help: "Time condition decisions (open, closed, holiday, forced_open, forced_closed, loop, missing, toggled).",
 	}, []string{"result"})
@@ -344,9 +364,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	})
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
-		m.VoicemailMessages, m.VoicemailGroupDeliveries, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Originates, m.OriginateSetup, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags,
+		m.VoicemailMessages, m.VoicemailGroupDeliveries, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Originates, m.OriginateSetup, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags, m.Emergency,
 		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.BossDivert, m.DirectoryTotal, m.TimeConditionTotal, m.BlockedCalls,
-		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal,
+		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal, m.FaxTotal, m.FollowMeLegs,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	m.Conf = newConfMetrics(reg)
 	m.Session = newSessionMetrics(reg)

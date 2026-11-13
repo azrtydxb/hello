@@ -49,11 +49,19 @@ Read the trace back to the user in plain words.
 2. `createTrunk`: mode registration (Hello registers with a username and
    password) or ip (the carrier sends from known source ranges). Give the
    destinations (host, port, priority, weight). The password is accepted but
-   never returned.
+   never returned. `srtp` (off by default) is the trunk's media-encryption
+   policy; trunk legs are UDP today, so `optional` behaves as `off`, and
+   `required` is refused with 422 (it needs a TLS trunk transport, which
+   Hello does not have yet).
 3. `listTrunkStatus` until the registration is registered (registration
    mode) and the destinations are up.
 4. Nothing uses a new trunk until a route lists it: add or change an
    outbound route next.
+5. `geolocation` (default false) makes an emergency call through the trunk
+   carry the caller's location (a Geolocation header and a PIDF-LO body, RFC
+   6442): the phone's own, else the location assigned under `hello-phones`
+   (locations). Turn it on only for a carrier that accepts them; the request is
+   larger than a usual SIP datagram.
 
 ### Outbound: send a pattern out of a trunk
 

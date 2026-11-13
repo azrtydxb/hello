@@ -829,6 +829,27 @@ type fakeGateway struct {
 	ours   map[string]bool
 	err    error
 	offers []TrunkText
+	// replies maps a dialled number to what OutboundFromDevice answers; a
+	// number not in it is not the inbox's. deviceOffers records "ext|to|body".
+	replies      map[string]DeviceReply
+	deviceErr    error
+	deviceOffers []string
+}
+
+func (g *fakeGateway) OutboundFromDevice(_ context.Context, ext, to, _ string, body []byte) (DeviceReply, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.deviceOffers = append(g.deviceOffers, ext+"|"+to+"|"+string(body))
+	if g.deviceErr != nil {
+		return DeviceReply{}, g.deviceErr
+	}
+	return g.replies[to], nil
+}
+
+func (g *fakeGateway) deviceSeen() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.deviceOffers...)
 }
 
 func (g *fakeGateway) InboundFromTrunk(_ context.Context, in TrunkText) (bool, error) {
@@ -984,4 +1005,92 @@ func TestMessageEdgeRefusalIsRetried(t *testing.T) {
 	waitReq(t, b.messages, "MESSAGE once n1 trusts n2")
 	eventually(t, "row delivered", func() bool { return slices.Equal(q.statusOf("200"), []string{"delivered"}) })
 	noReq(t, b.messages, 300*time.Millisecond, "a second copy of the message")
+}
+
+// TestDeviceReplyGateway fails if a phone's text to a customer of the inbox
+// is not offered to the gateway with the authenticated extension (never the
+// From header), is also queued for the trunk path, if a refusal is not
+// answered to the phone as a text from the system with 403 (429 for a rate
+// limit), if a number the inbox does not own stops taking the existing
+// external path, if an extension or a typing indication is offered to the
+// gateway, or if a gateway failure is answered as success.
+func TestDeviceReplyGateway(t *testing.T) {
+	fastMessages(t)
+	rig := func(t *testing.T, gw *fakeGateway) (*fakeMsgs, *phone) {
+		t.Helper()
+		q := newFakeMsgs("100", "200")
+		pbx := startPBX(t, msgDevices(), withMessages(q), func(_ *Config, d *Deps) { d.Conversations = gw })
+		a := newPhone(t, pbx, "a1", "pa")
+		a.register(t)
+		return q, a
+	}
+	const customer = "+971555000111"
+
+	t.Run("a reply into a conversation", func(t *testing.T) {
+		gw := &fakeGateway{replies: map[string]DeviceReply{customer: {Handled: true}}}
+		q, a := rig(t, gw)
+		if res := a.sendMessage(customer, "text/plain", "on my way"); res.StatusCode != 202 {
+			t.Fatalf("a reply the inbox took = %d, want 202", res.StatusCode)
+		}
+		if got := gw.deviceSeen(); len(got) != 1 || got[0] != "100|"+customer+"|on my way" {
+			t.Fatalf("offers = %q, want the authenticated extension 100", got)
+		}
+		if q.rowCount() != 0 {
+			t.Fatal("a reply the inbox took was also queued for the trunk path")
+		}
+	})
+
+	t.Run("a refusal is told to the phone", func(t *testing.T) {
+		why := "The customer opted out of this number."
+		gw := &fakeGateway{replies: map[string]DeviceReply{customer: {Handled: true, Refusal: why}}}
+		_, a := rig(t, gw)
+		if res := a.sendMessage(customer, "text/plain", "hi"); res.StatusCode != 403 {
+			t.Fatalf("a refused reply = %d, want 403", res.StatusCode)
+		}
+		m := waitReq(t, a.messages, "the reason at the phone")
+		if bodyOf(m) != why {
+			t.Fatalf("the phone was told %q, want %q", bodyOf(m), why)
+		}
+	})
+
+	t.Run("a rate limit is 429", func(t *testing.T) {
+		gw := &fakeGateway{replies: map[string]DeviceReply{customer: {Handled: true, Refusal: "slow down", Limited: true}}}
+		_, a := rig(t, gw)
+		if res := a.sendMessage(customer, "text/plain", "hi"); res.StatusCode != 429 {
+			t.Fatalf("a rate limited reply = %d, want 429", res.StatusCode)
+		}
+	})
+
+	t.Run("a number that is not the inbox's", func(t *testing.T) {
+		gw := &fakeGateway{}
+		_, a := rig(t, gw)
+		if res := a.sendMessage("+971501234567", "text/plain", "x"); res.StatusCode != 404 && res.StatusCode != 403 {
+			t.Fatalf("a text to a number no route reaches = %d, want 404 or 403 as before", res.StatusCode)
+		}
+		if len(gw.deviceSeen()) != 1 {
+			t.Fatalf("the gateway was offered %d texts, want 1", len(gw.deviceSeen()))
+		}
+	})
+
+	t.Run("not offered", func(t *testing.T) {
+		gw := &fakeGateway{replies: map[string]DeviceReply{"200": {Handled: true}, customer: {Handled: true}}}
+		_, a := rig(t, gw)
+		a.sendMessage("200", "text/plain", "to an extension")
+		typing := a.messageReq(customer, "", "application/im-iscomposing+xml", "<isComposing/>")
+		a.do(typing)
+		if got := gw.deviceSeen(); len(got) != 0 {
+			t.Fatalf("the gateway was offered %q; an extension or a typing indication is never the inbox's", got)
+		}
+	})
+
+	t.Run("a failure is a failure", func(t *testing.T) {
+		gw := &fakeGateway{deviceErr: errors.New("database is down")}
+		q, a := rig(t, gw)
+		if res := a.sendMessage(customer, "text/plain", "hi"); res.StatusCode != 503 {
+			t.Fatalf("a reply the gateway could not store = %d, want 503", res.StatusCode)
+		}
+		if q.rowCount() != 0 {
+			t.Fatal("a failed reply was queued")
+		}
+	})
 }

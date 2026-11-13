@@ -138,6 +138,9 @@ type batchResponse struct {
 	Warnings     []flow.Warning       `json:"warnings"`
 	// Skipped lists what a revert could not put back.
 	Skipped []string `json:"skipped,omitempty"`
+	// FlowDiff is, for a dry run, what the batch would do to the drawn
+	// graph: the canvas shows an AI proposal's batch with it.
+	FlowDiff *flow.GraphDiff `json:"flowDiff,omitempty"`
 }
 
 // batchPlan is one batch to run.
@@ -231,6 +234,10 @@ func (s *server) applyConfigBatch(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "baseRevision is required")
 		return
 	}
+	if isPreview(r) && !req.DryRun {
+		writeError(w, http.StatusForbidden, "insufficient_scope", "an AI preview may only dry-run a configuration batch")
+		return
+	}
 	if len(req.Ops) > configbatch.MaxOps {
 		s.BatchMetrics.count("invalid", len(req.Ops))
 		writeError(w, http.StatusRequestEntityTooLarge, "too_large", fmt.Sprintf("a batch has at most %d operations", configbatch.MaxOps))
@@ -294,6 +301,7 @@ func (s *server) runBatch(r *http.Request, p batchPlan) (batchResponse, *batchFa
 		actor: actor(r).String(), refs: configbatch.Refs{}, revive: map[string]configbatch.Revive{},
 	}
 	var warnings []flow.Warning
+	var diff *flow.GraphDiff
 	var ops []configbatch.Op
 	base := p.base
 	out, err := s.Batches.RunBatch(r.Context(), p.dryRun, func(ctx context.Context, b *store.Batch) (store.BatchRecord, error) {
@@ -331,6 +339,10 @@ func (s *server) runBatch(r *http.Request, p batchPlan) (batchResponse, *batchFa
 			return store.BatchRecord{}, err
 		}
 		warnings = newWarnings(before.Warnings, after.Warnings)
+		if p.dryRun {
+			d := flow.Diff(before, after)
+			diff = &d
+		}
 		if !p.dryRun {
 			live := make([]string, 0, len(after.Nodes))
 			for _, n := range after.Nodes {
@@ -361,7 +373,7 @@ func (s *server) runBatch(r *http.Request, p batchPlan) (batchResponse, *batchFa
 	}
 	return batchResponse{
 		Applied: out.Applied, BatchID: out.ID, BaseRevision: base, Revision: out.Revision,
-		Results: results, Warnings: warnings, Skipped: br.skipped,
+		Results: results, Warnings: warnings, Skipped: br.skipped, FlowDiff: diff,
 	}, nil, nil
 }
 

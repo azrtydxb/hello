@@ -1,0 +1,5 @@
+{
+  "label": "Hello call event",
+  "type": "web",
+  "note": "Make's hook URL is unguessable and Make cannot verify the Hello-Signature, so the signature is not checked on this route; keep the hook URL private (docs/n8n-make.md)."
+}

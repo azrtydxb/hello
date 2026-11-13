@@ -61,6 +61,7 @@ function ProfileForm({ onSaved }: { onSaved: () => void | Promise<void> }) {
   const [after, setAfter] = useState<VoicemailEmailAfter>(
     me?.voicemailEmail?.after ?? "none",
   );
+  const [desk, setDesk] = useState(me?.deskphoneDelivery ?? false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -76,6 +77,7 @@ function ProfileForm({ onSaved }: { onSaved: () => void | Promise<void> }) {
         displayName: name.trim(),
         email: email.trim(),
         voicemailEmail: { notify, attach, after },
+        ...(me?.deskphoneCapable === false ? {} : { deskphoneDelivery: desk }),
       });
       await onSaved();
     } catch (err) {
@@ -146,6 +148,17 @@ function ProfileForm({ onSaved }: { onSaved: () => void | Promise<void> }) {
           onChange={(e) => setAfter(e.target.value as VoicemailEmailAfter)}
         />
       </fieldset>
+      {me?.deskphoneCapable !== false && (
+        <fieldset className="pf-stack">
+          <legend className="az-field__label">Customer texts</legend>
+          <Switch
+            label="Show customer texts on my desk phone"
+            hint="A customer text of a conversation assigned to you is also sent to your desk phone, and a text you type there goes back to the customer. It works for numbers an administrator turned this on for."
+            checked={desk}
+            onChange={(e) => setDesk(e.target.checked)}
+          />
+        </fieldset>
+      )}
       <div>
         <Button type="submit" icon="save" disabled={busy}>
           Save profile

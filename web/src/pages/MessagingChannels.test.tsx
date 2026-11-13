@@ -10,6 +10,8 @@ import {
 } from "../test/api";
 
 const STAMP = "2026-10-01T10:00:00Z";
+// Built at run time: a literal looks like a real Twilio SID to secret scanners.
+const ACCOUNT_SID = "AC" + "ab".repeat(16);
 
 const channel = (over: Record<string, unknown> = {}) => ({
   id: 1,
@@ -20,6 +22,8 @@ const channel = (over: Record<string, unknown> = {}) => ({
   trunkId: 3,
   trunkName: "carrier",
   hasCredentials: false,
+  accountHint: "",
+  messagingService: false,
   status: "ok",
   statusDetail: "",
   lastEventAt: null,
@@ -40,6 +44,9 @@ const address = {
   optOutKeywords: ["stop"],
   helpText: "",
   optOutText: "",
+  deskPhoneDelivery: false,
+  ownerExtensionId: null,
+  sendsPerMinute: 60,
   conversations: 2,
   createdAt: STAMP,
 };
@@ -57,6 +64,8 @@ function api(more: Routes = {}) {
     "GET /api/v1/messaging/channels": () => json({ items: [channel()] }),
     "GET /api/v1/messaging/addresses": () => json({ items: [address] }),
     "GET /api/v1/trunks": () => json(trunks),
+    "GET /api/v1/extensions": () =>
+      json({ items: [{ id: 10, number: "101", name: "Reception" }] }),
     ...more,
   });
 }
@@ -141,6 +150,57 @@ describe("Messaging channels", () => {
     );
   });
 
+  it("adds a Twilio channel and never shows the token again", async () => {
+    const calls = api({
+      "POST /api/v1/messaging/channels": () =>
+        json(
+          channel({
+            id: 3,
+            name: "Twilio",
+            provider: "twilio",
+            trunkId: null,
+            trunkName: "",
+            hasCredentials: true,
+            accountHint: "cdef",
+          }),
+          201,
+        ),
+    });
+    renderApp("/messaging/channels");
+    fireEvent.click(await screen.findByRole("button", { name: "Add channel" }));
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "Twilio" },
+    });
+    fireEvent.change(screen.getByLabelText("Carrier"), {
+      target: { value: "twilio" },
+    });
+    expect(screen.queryByLabelText("SIP trunk")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Account SID"), {
+      target: { value: ACCOUNT_SID },
+    });
+    const token = screen.getByLabelText("Auth token");
+    expect(token).toHaveAttribute("type", "password");
+    fireEvent.change(token, { target: { value: "secret-token" } });
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Add channel" }).at(-1)!,
+    );
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+        name: "Twilio",
+        enabled: true,
+        kind: "sms",
+        provider: "twilio",
+        accountSid: ACCOUNT_SID,
+        authToken: "secret-token",
+        messagingServiceSid: "",
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Auth token")).toBeNull(),
+    );
+    expect(screen.queryByText("secret-token")).toBeNull();
+  });
+
   it("shows the reason the server refuses a channel", async () => {
     api({
       "POST /api/v1/messaging/channels": () =>
@@ -205,6 +265,8 @@ describe("Messaging channels", () => {
     );
     await waitFor(() =>
       expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+        deskPhoneDelivery: false,
+        ownerExtensionId: null,
         label: "",
         enabled: true,
         optOutKeywords: ["stop", "arret"],
@@ -212,6 +274,31 @@ describe("Messaging channels", () => {
         optOutText: "",
         channelId: 1,
         address: "+3270999999",
+      }),
+    );
+  });
+
+  it("turns on desk phone delivery and names an owner extension", async () => {
+    const calls = api({
+      "PUT /api/v1/messaging/addresses/5": () =>
+        json({ ...address, deskPhoneDelivery: true, ownerExtensionId: 10 }),
+    });
+    renderApp("/messaging/channels");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit +3270123456" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("switch", { name: /Deliver to desk phones/ }),
+    );
+    await screen.findByRole("option", { name: "101 Reception" });
+    fireEvent.change(screen.getByLabelText("Owner extension"), {
+      target: { value: "10" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save number" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PUT")?.body).toMatchObject({
+        deskPhoneDelivery: true,
+        ownerExtensionId: 10,
       }),
     );
   });

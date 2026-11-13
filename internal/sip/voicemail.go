@@ -159,7 +159,13 @@ func (c *call) mailboxExt(mode int) string {
 // comes from the snapshot, so no database call precedes the 200.
 func (c *call) startVoicemail(mode int, reason string) {
 	s := c.s
-	answer, sess, err := s.answerAnchored(c.inv.Body())
+	answer, sess, err := s.answerAnchored(c.inv.Body(), c.soloPolicy())
+	if errors.Is(err, media.ErrSRTPRequired) {
+		// The caller's policy demands SRTP and the offer cannot deliver it:
+		// voicemail is never answered in the clear.
+		c.soloRefuseSRTP("SRTP is required but voicemail could not negotiate it")
+		return
+	}
 	if err != nil {
 		// No anchor: the call still completes, without recording (spec
 		// failure mode); the flow notes it in the CDR.
@@ -170,6 +176,9 @@ func (c *call) startVoicemail(mode int, reason string) {
 	c.mediaMode = "anchored"
 	c.vmSession = sess
 	c.mu.Unlock()
+	if ss, ok := sess.(media.SecureSession); ok {
+		c.setSoloSecure(ss.Secure())
+	}
 	// The answer goes out before the INVITE handler returns (sipgo
 	// terminates the transaction then); only the application runs on after
 	// it, in its own goroutine.
@@ -210,12 +219,12 @@ func (c *call) mailboxExtLocked(mode int) string {
 
 // answerAnchored binds the media anchor for this call and builds the answer
 // SDP from the caller's offer.
-func (s *Server) answerAnchored(offer []byte) ([]byte, media.Session, error) {
+func (s *Server) answerAnchored(offer []byte, pol media.SecurePolicy) ([]byte, media.Session, error) {
 	anchor := s.voicemailAnchor(offer)
 	if s.deps.Objects == nil || anchor == nil {
 		return nil, nil, errors.New("voicemail media disabled")
 	}
-	return anchor.Answer(offer)
+	return anchor.AnswerSecure(offer, pol)
 }
 
 // voicemailAnchor is the node's media anchor; without an advertised anchor
@@ -434,6 +443,7 @@ func (c *call) vmLeave(ctx context.Context, sess media.Session, box VoicemailBox
 	c.s.m.VoicemailMessages.WithLabelValues(VMStored).Inc()
 	c.addTrace(fmt.Sprintf("Voicemail message %d stored (%d ms)", box.ID, dur.Milliseconds()))
 	c.sendMWI(c.mailboxExt(vmLeave))
+	c.voicemailEvent(box.Extension, dur)
 }
 
 // customGreeting is the object of the box's own greeting for reason: the

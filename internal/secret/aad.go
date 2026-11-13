@@ -16,3 +16,39 @@ func TOTPAAD(userID int64) string { return fmt.Sprintf("user:%d:totp", userID) }
 // ChatTurnstileAAD is the additional data a chat site's Turnstile secret key
 // is sealed under, so a value copied to another site's row does not open.
 func ChatTurnstileAAD(siteID int64) string { return fmt.Sprintf("chat_site:%d:turnstile", siteID) }
+
+// DoorOpenAAD is the additional data a door station's door-open code is
+// sealed under, so a code copied to another extension's row does not open.
+func DoorOpenAAD(extensionID int64) string { return fmt.Sprintf("door-open:%d", extensionID) }
+
+// DoorCameraAAD is the additional data a door station camera's password is
+// sealed under, so a value copied to another extension's row does not open.
+func DoorCameraAAD(extensionID int64) string { return fmt.Sprintf("door-camera:%d", extensionID) }
+
+// DoorWebhookAAD is the additional data a doorbell webhook's secret is sealed
+// under, so a value copied to another webhook's row does not open.
+func DoorWebhookAAD(id int64) string { return fmt.Sprintf("door-webhook:%d", id) }
+
+// CRMSecretAAD is the additional data a CRM connector's OAuth client secret
+// is sealed under.
+func CRMSecretAAD(connectorID int64) string { return fmt.Sprintf("crm:%d:client_secret", connectorID) }
+
+// CRMTokenAAD is the additional data a CRM connection's access or refresh
+// token is sealed under (which is "access" or "refresh").
+func CRMTokenAAD(connectorID int64, which string) string {
+	return fmt.Sprintf("crm:%d:%s", connectorID, which)
+}
+
+// CRMUserTokenAAD is the additional data a per-user CRM connection's access
+// or refresh token is sealed under. It names the user, so a token copied to
+// another user's connection row does not open.
+func CRMUserTokenAAD(connectorID, userID int64, which string) string {
+	return fmt.Sprintf("crm:%d:user:%d:%s", connectorID, userID, which)
+}
+
+// MsgChannelAAD is the additional data a messaging channel's carrier
+// credentials are sealed under, so a value copied to another channel's row
+// does not open.
+func MsgChannelAAD(channelID int64) string {
+	return fmt.Sprintf("msg_channel:%d:credentials", channelID)
+}

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/provider"
 )
 
 // Errors of the messaging store; the API maps them to a status.
@@ -50,15 +51,19 @@ type MsgChannel struct {
 	Name     string `json:"name"`
 	Enabled  bool   `json:"enabled"`
 	// TrunkID and TrunkName name the SIP trunk of a sip_trunk channel.
-	TrunkID        *int64     `json:"trunkId"`
-	TrunkName      string     `json:"trunkName"`
-	HasCredentials bool       `json:"hasCredentials"`
-	Status         string     `json:"status"`
-	StatusDetail   string     `json:"statusDetail"`
-	LastEventAt    *time.Time `json:"lastEventAt"`
-	Addresses      int        `json:"addresses"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	TrunkID        *int64 `json:"trunkId"`
+	TrunkName      string `json:"trunkName"`
+	HasCredentials bool   `json:"hasCredentials"`
+	// AccountHint is the tail of a carrier account's SID, enough to tell
+	// accounts apart; never the token.
+	AccountHint      string     `json:"accountHint"`
+	MessagingService bool       `json:"messagingService"`
+	Status           string     `json:"status"`
+	StatusDetail     string     `json:"statusDetail"`
+	LastEventAt      *time.Time `json:"lastEventAt"`
+	Addresses        int        `json:"addresses"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
 }
 
 // MsgChannelInput creates or replaces a channel.
@@ -68,10 +73,13 @@ type MsgChannelInput struct {
 	Name     string
 	Enabled  bool
 	TrunkID  *int64
+	// Credentials seal a carrier account; nil keeps the stored ones. A
+	// carrier channel needs them on creation.
+	Credentials *provider.Config
 }
 
 const msgChannelCols = `c.id, c.kind, c.provider, c.name, c.enabled, c.trunk_id, coalesce(t.name, ''),
-	c.credentials_enc IS NOT NULL, c.status, c.status_detail, c.last_event_at,
+	c.credentials_enc IS NOT NULL, coalesce(c.config->>'accountHint', ''), coalesce(c.config->>'messagingService', '') = 'true', c.status, c.status_detail, c.last_event_at,
 	(SELECT count(*) FROM msg_addresses a WHERE a.channel_id = c.id), c.created_at, c.updated_at`
 
 const msgChannelFrom = ` FROM msg_channels c LEFT JOIN trunks t ON t.id = c.trunk_id`
@@ -83,7 +91,7 @@ func scanMsgChannel(r interface{ Scan(...any) error }) (MsgChannel, error) {
 		last  sql.NullTime
 	)
 	err := r.Scan(&c.ID, &c.Kind, &c.Provider, &c.Name, &c.Enabled, &trunk, &c.TrunkName,
-		&c.HasCredentials, &c.Status, &c.StatusDetail, &last, &c.Addresses, &c.CreatedAt, &c.UpdatedAt)
+		&c.HasCredentials, &c.AccountHint, &c.MessagingService, &c.Status, &c.StatusDetail, &last, &c.Addresses, &c.CreatedAt, &c.UpdatedAt)
 	if trunk.Valid {
 		c.TrunkID = &trunk.Int64
 	}
@@ -135,6 +143,9 @@ func newHookID() (string, error) {
 // checkChannelTrunk refuses a channel whose trunk does not exist.
 func checkChannelTrunk(ctx context.Context, tx *sql.Tx, in MsgChannelInput) error {
 	if in.Provider != messaging.ProviderSIPTrunk {
+		if in.TrunkID != nil {
+			return fieldError("trunkId", "a carrier channel does not use a SIP trunk")
+		}
 		return nil
 	}
 	if in.TrunkID == nil {
@@ -161,11 +172,19 @@ func (s *Store) CreateMsgChannel(ctx context.Context, actor string, in MsgChanne
 		if err := checkChannelTrunk(ctx, tx, in); err != nil {
 			return err
 		}
+		if in.Provider != messaging.ProviderSIPTrunk && in.Credentials == nil {
+			return fieldError("accountSid", "a carrier channel needs its account credentials")
+		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO msg_channels (kind, provider, name, enabled, hook_id, trunk_id)
 			VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 			in.Kind, in.Provider, in.Name, in.Enabled, hook, in.TrunkID).Scan(&id); err != nil {
 			return err
+		}
+		if in.Credentials != nil {
+			if err := s.sealChannelCredentials(ctx, tx, id, *in.Credentials); err != nil {
+				return err
+			}
 		}
 		return insertAudit(ctx, tx, actor, "create", "msg_channel", strconv.FormatInt(id, 10))
 	})
@@ -191,6 +210,11 @@ func (s *Store) UpdateMsgChannel(ctx context.Context, actor string, id int64, in
 			UPDATE msg_channels SET name = $2, enabled = $3, trunk_id = $4, updated_at = now()
 			WHERE id = $1`, id, in.Name, in.Enabled, in.TrunkID); err != nil {
 			return err
+		}
+		if in.Credentials != nil {
+			if err := s.sealChannelCredentials(ctx, tx, id, *in.Credentials); err != nil {
+				return err
+			}
 		}
 		action := "update"
 		if !in.Enabled {
@@ -229,18 +253,26 @@ func (s *Store) DeleteMsgChannel(ctx context.Context, actor string, id int64) er
 
 // MsgAddress is one number on a channel.
 type MsgAddress struct {
-	ID            int64     `json:"id"`
-	ChannelID     int64     `json:"channelId"`
-	ChannelName   string    `json:"channelName"`
-	Address       string    `json:"address"`
-	Label         string    `json:"label"`
-	RouteKind     string    `json:"routeKind"`
-	Enabled       bool      `json:"enabled"`
-	OptOutWords   []string  `json:"optOutKeywords"`
-	HelpText      string    `json:"helpText"`
-	OptOutText    string    `json:"optOutText"`
-	Conversations int       `json:"conversations"`
-	CreatedAt     time.Time `json:"createdAt"`
+	ID          int64    `json:"id"`
+	ChannelID   int64    `json:"channelId"`
+	ChannelName string   `json:"channelName"`
+	Address     string   `json:"address"`
+	Label       string   `json:"label"`
+	RouteKind   string   `json:"routeKind"`
+	Enabled     bool     `json:"enabled"`
+	OptOutWords []string `json:"optOutKeywords"`
+	HelpText    string   `json:"helpText"`
+	OptOutText  string   `json:"optOutText"`
+	// SendsPerMinute caps the carrier texts the number starts per minute.
+	SendsPerMinute int       `json:"sendsPerMinute"`
+	Conversations  int       `json:"conversations"`
+	CreatedAt      time.Time `json:"createdAt"`
+	// DeskPhoneDelivery delivers conversations assigned to a user who turned
+	// it on to the phones of their extension (spec M-26).
+	DeskPhoneDelivery bool `json:"deskPhoneDelivery"`
+	// OwnerExtensionID is the extension whose phone may reply into an
+	// existing conversation on this number; nil when none.
+	OwnerExtensionID *int64 `json:"ownerExtensionId"`
 	// Key is the lookup key inbound texts are matched by.
 	Key string `json:"-"`
 }
@@ -256,11 +288,17 @@ type MsgAddressInput struct {
 	OptOutWords []string
 	HelpText    string
 	OptOutText  string
+	// SendsPerMinute is the throughput cap (0 keeps the stored or default).
+	SendsPerMinute int
+	// DeskPhoneDelivery and OwnerExtensionID: see MsgAddress.
+	DeskPhoneDelivery bool
+	OwnerExtensionID  *int64
 }
 
 const msgAddressCols = `a.id, a.channel_id, c.name, a.address, a.address_key, a.label, a.route_kind, a.enabled,
-	to_json(a.optout_keywords)::text, a.help_text, a.optout_text,
-	(SELECT count(*) FROM conversations v WHERE v.address_id = a.id), a.created_at`
+	to_json(a.optout_keywords)::text, a.help_text, a.optout_text, a.sends_per_minute,
+	(SELECT count(*) FROM conversations v WHERE v.address_id = a.id), a.created_at,
+	a.desk_phone_delivery, a.owner_extension_id`
 
 const msgAddressFrom = ` FROM msg_addresses a JOIN msg_channels c ON c.id = a.channel_id`
 
@@ -268,10 +306,14 @@ func scanMsgAddress(r interface{ Scan(...any) error }) (MsgAddress, error) {
 	var (
 		a     MsgAddress
 		words string
+		owner sql.NullInt64
 	)
 	if err := r.Scan(&a.ID, &a.ChannelID, &a.ChannelName, &a.Address, &a.Key, &a.Label, &a.RouteKind, &a.Enabled,
-		&words, &a.HelpText, &a.OptOutText, &a.Conversations, &a.CreatedAt); err != nil {
+		&words, &a.HelpText, &a.OptOutText, &a.SendsPerMinute, &a.Conversations, &a.CreatedAt, &a.DeskPhoneDelivery, &owner); err != nil {
 		return a, err
+	}
+	if owner.Valid {
+		a.OwnerExtensionID = &owner.Int64
 	}
 	if err := json.Unmarshal([]byte(words), &a.OptOutWords); err != nil {
 		return a, err
@@ -323,10 +365,15 @@ func (s *Store) CreateMsgAddress(ctx context.Context, actor string, in MsgAddres
 		if chat {
 			return fieldError("channelId", "a chat site has one address, managed with the site")
 		}
+		if err := checkOwnerExtension(ctx, tx, in.OwnerExtensionID); err != nil {
+			return err
+		}
 		if err := tx.QueryRowContext(ctx, `
-			INSERT INTO msg_addresses (channel_id, address, address_key, address_suffix, label, enabled, optout_keywords, help_text, optout_text)
-			VALUES ($1, $2, $3, $9, $4, $5, $6::text[], $7, $8) RETURNING id`,
-			in.ChannelID, in.Address, in.Key, in.Label, in.Enabled, keywordsArg(in.OptOutWords), in.HelpText, in.OptOutText, in.Suffix).Scan(&id); err != nil {
+			INSERT INTO msg_addresses (channel_id, address, address_key, address_suffix, label, enabled, optout_keywords, help_text, optout_text, sends_per_minute,
+				desk_phone_delivery, owner_extension_id)
+			VALUES ($1, $2, $3, $9, $4, $5, $6::text[], $7, $8, coalesce(NULLIF($10::int, 0), 60), $11, $12) RETURNING id`,
+			in.ChannelID, in.Address, in.Key, in.Label, in.Enabled, keywordsArg(in.OptOutWords), in.HelpText, in.OptOutText, in.Suffix, in.SendsPerMinute,
+			in.DeskPhoneDelivery, ownerArg(in.OwnerExtensionID)).Scan(&id); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "create", "msg_address", strconv.FormatInt(id, 10))
@@ -335,6 +382,28 @@ func (s *Store) CreateMsgAddress(ctx context.Context, actor string, in MsgAddres
 		return MsgAddress{}, err
 	}
 	return s.GetMsgAddress(ctx, id)
+}
+
+// ownerArg is the owner extension column's value.
+func ownerArg(id *int64) any {
+	if id == nil {
+		return nil
+	}
+	return *id
+}
+
+// checkOwnerExtension refuses an owner that is not a user extension: a door
+// station or a missing extension cannot text.
+func checkOwnerExtension(ctx context.Context, tx *sql.Tx, id *int64) error {
+	if id == nil {
+		return nil
+	}
+	var kind string
+	err := tx.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = $1`, *id).Scan(&kind)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && kind == ExtensionDoor) {
+		return fieldError("ownerExtensionId", "no such extension that can text")
+	}
+	return err
 }
 
 // keywordsArg is the stored keyword list: lower case, or the default.
@@ -353,9 +422,15 @@ func keywordsArg(words []string) []string {
 // stay.
 func (s *Store) UpdateMsgAddress(ctx context.Context, actor string, id int64, in MsgAddressInput) (MsgAddress, error) {
 	err := s.tx(ctx, func(tx *sql.Tx) error {
+		if err := checkOwnerExtension(ctx, tx, in.OwnerExtensionID); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx, `
-			UPDATE msg_addresses SET label = $2, enabled = $3, optout_keywords = $4::text[], help_text = $5, optout_text = $6
-			WHERE id = $1`, id, in.Label, in.Enabled, keywordsArg(in.OptOutWords), in.HelpText, in.OptOutText)
+			UPDATE msg_addresses SET label = $2, enabled = $3, optout_keywords = $4::text[], help_text = $5, optout_text = $6,
+				sends_per_minute = coalesce(NULLIF($7::int, 0), sends_per_minute),
+				desk_phone_delivery = $8, owner_extension_id = $9
+			WHERE id = $1`, id, in.Label, in.Enabled, keywordsArg(in.OptOutWords), in.HelpText, in.OptOutText, in.SendsPerMinute,
+			in.DeskPhoneDelivery, ownerArg(in.OwnerExtensionID))
 		if err != nil {
 			return err
 		}
@@ -398,6 +473,12 @@ type MessagingSettings struct {
 	RetentionChatDays int  `json:"retentionChatDays"`
 	ReopenDays        int  `json:"reopenDays"`
 	EmailNotify       bool `json:"emailNotify"`
+	// FirstContact is off (default) or attested (M-17): whether an agent may
+	// start a conversation with a number that has not texted first.
+	FirstContact string `json:"firstContact"`
+	// The first-contact rate limits: per agent per hour, per number per day.
+	FirstContactPerUserHour   int `json:"firstContactPerUserHour"`
+	FirstContactPerAddressDay int `json:"firstContactPerAddressDay"`
 }
 
 // GetMessagingSettings returns the settings.
@@ -407,8 +488,10 @@ func (s *Store) GetMessagingSettings(ctx context.Context) (MessagingSettings, er
 
 func getMessagingSettings(ctx context.Context, q rowQuerier) (MessagingSettings, error) {
 	var m MessagingSettings
-	err := q.QueryRowContext(ctx, `SELECT retention_sms_days, retention_chat_days, reopen_days, email_notify
-		FROM messaging_settings`).Scan(&m.RetentionSMSDays, &m.RetentionChatDays, &m.ReopenDays, &m.EmailNotify)
+	err := q.QueryRowContext(ctx, `SELECT retention_sms_days, retention_chat_days, reopen_days, email_notify,
+		first_contact, first_contact_user_hour, first_contact_address_day
+		FROM messaging_settings`).Scan(&m.RetentionSMSDays, &m.RetentionChatDays, &m.ReopenDays, &m.EmailNotify,
+		&m.FirstContact, &m.FirstContactPerUserHour, &m.FirstContactPerAddressDay)
 	return m, err
 }
 
@@ -416,8 +499,10 @@ func getMessagingSettings(ctx context.Context, q rowQuerier) (MessagingSettings,
 func (s *Store) PutMessagingSettings(ctx context.Context, actor string, m MessagingSettings) (MessagingSettings, error) {
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE messaging_settings SET retention_sms_days = $1, retention_chat_days = $2, reopen_days = $3, email_notify = $4`,
-			m.RetentionSMSDays, m.RetentionChatDays, m.ReopenDays, m.EmailNotify); err != nil {
+			UPDATE messaging_settings SET retention_sms_days = $1, retention_chat_days = $2, reopen_days = $3, email_notify = $4,
+				first_contact = $5, first_contact_user_hour = $6, first_contact_address_day = $7`,
+			m.RetentionSMSDays, m.RetentionChatDays, m.ReopenDays, m.EmailNotify,
+			m.FirstContact, m.FirstContactPerUserHour, m.FirstContactPerAddressDay); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "update", "messaging_settings", "1")
