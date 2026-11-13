@@ -142,6 +142,17 @@ The other vendors write no SRTP key until their key is confirmed from vendor
 documentation. A phone on UDP keeps its own SRTP setting; whatever it offers,
 Hello answers with plain RTP on that leg.
 
+DTLS-SRTP and ICE (S-16, see [media.md](media.md#dtls-srtp-and-ice-lite)) add
+two Grandstream keys, from the vendor's WP8x6 config templates (wp8x6_config
+1.0.3.35 and later, wp856_config 1.0.3.16):
+
+| Key      | Models                  | Written                                              | Values                                   |
+| -------- | ----------------------- | ---------------------------------------------------- | ---------------------------------------- |
+| `P60078` | WP826, WP836, WP856     | with `P183`, for a phone on TLS                      | `0` SDES, `1` DTLS (the device's **Key exchange**) |
+| `P95002` | WP826, WP836            | for any phone of the model, Auto by default          | `1` Auto, `4` ICE (the device's **ICE** switch)    |
+
+Both are account 1, as `P183`. Other models and vendors write neither.
+
 ## Certificate renewal and alerting
 
 cert-manager renews the certificate 30 days before it expires. Kamailio reads
@@ -168,3 +179,13 @@ whether the phone in "enabled but not forced" mode offers `a=crypto` on an
 whether a phone set to forced mode accepts Hello's `RTP/SAVP` offer, that a
 hold and resume keep the key, and that an `AES_CM_128_HMAC_SHA1_32` answer is
 taken when the phone prefers it.
+
+DTLS-SRTP and ICE (S-16): whether `P60078 = 1` makes the phone offer
+`UDP/TLS/RTP/SAVP` with `a=fingerprint` and `a=setup:actpass` (and what "enabled
+but not forced" does with it); which hash it uses in `a=fingerprint` and which
+SRTP profiles it offers; that it completes the handshake as client (Hello's
+`active` answer to its `actpass`) and as server (Hello's offer); that its
+answer to Hello's DTLS offer carries `active` or `passive`; whether `P95002 =
+4` makes it send `a=ice-ufrag`, `a=ice-pwd` and candidates, accept Hello's
+`a=ice-lite` answer and send its checks to the relay address (with Trickle ICE
+`P95003` on or off); and that hold, resume and a re-INVITE keep the session.

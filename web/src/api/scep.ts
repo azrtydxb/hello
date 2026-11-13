@@ -1,4 +1,4 @@
-// SCEP and 802.1X client (migration 00052, phone-feature-parity S-25): the
+// SCEP and 802.1X client (migration 00076, phone-feature-parity S-25): the
 // Hello device CA, the certificates it issued, the reusable 802.1X profiles
 // and each phone group's SCEP switch and wired profile. No response carries
 // a key, a challenge or a password.

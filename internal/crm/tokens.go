@@ -156,35 +156,28 @@ func (m *TokenManager) refresh(ctx context.Context, row ConnectorRow, conn Conne
 	if !force && (t.ExpiresAt.IsZero() || t.ExpiresAt.After(m.now().Add(m.skew()))) {
 		return t, nil
 	}
-	if da, ok := conn.(Direct); ok {
-		// Client credentials: sign in again, there is no refresh token.
-		nt, err := da.Authenticate(ctx, cfg)
-		if err != nil {
-			var ae *APIError
-			if errors.As(err, &ae) && !ae.Retry {
-				m.needsReauth(ctx, row, cr.ID, "the CRM refused the client credentials")
-				return Tokens{}, ErrNeedsReauth
-			}
-			return Tokens{}, err
+	var nt Tokens
+	// Connect treats a connector that is both as direct; so does this.
+	switch c := conn.(type) {
+	case Direct:
+		// A client-credentials token is requested again; a static
+		// credential comes back unchanged, so a second refusal marks the
+		// connection needs_reauth in the caller.
+		nt, err = c.Authenticate(ctx, cfg)
+	case OAuth:
+		if t.Refresh == "" {
+			m.needsReauth(ctx, row, cr.ID, "no refresh token")
+			return Tokens{}, ErrNeedsReauth
 		}
-		if nt.Account == "" {
-			nt.Account = t.Account
-		}
-		if _, err := m.Repo.SaveOrgConnection(ctx, row.ID, nt); err != nil {
-			return Tokens{}, err
-		}
-		return nt, nil
-	}
-	oa, ok := conn.(OAuth)
-	if !ok || t.Refresh == "" {
+		nt, err = c.Refresh(ctx, cfg, t.Refresh)
+	default:
 		m.needsReauth(ctx, row, cr.ID, "no refresh token")
 		return Tokens{}, ErrNeedsReauth
 	}
-	nt, err := oa.Refresh(ctx, cfg, t.Refresh)
 	if err != nil {
 		var ae *APIError
 		if errors.As(err, &ae) && !ae.Retry {
-			m.needsReauth(ctx, row, cr.ID, "the CRM refused the refresh token")
+			m.needsReauth(ctx, row, cr.ID, "the CRM refused the credentials")
 			return Tokens{}, ErrNeedsReauth
 		}
 		return Tokens{}, err

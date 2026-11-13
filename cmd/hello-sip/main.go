@@ -20,9 +20,19 @@ import (
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/crm"
-	_ "github.com/azrtydxb/hello/internal/crm/dynamics"   // registers the Dynamics 365 connector
-	_ "github.com/azrtydxb/hello/internal/crm/hubspot"    // registers the HubSpot connector
-	_ "github.com/azrtydxb/hello/internal/crm/salesforce" // registers the Salesforce connector
+	_ "github.com/azrtydxb/hello/internal/crm/autotask"    // registers the autotask connector
+	_ "github.com/azrtydxb/hello/internal/crm/bitrix24"    // registers the Bitrix24 connector
+	_ "github.com/azrtydxb/hello/internal/crm/clio"        // registers the clio connector
+	_ "github.com/azrtydxb/hello/internal/crm/connectwise" // registers the connectwise connector
+	_ "github.com/azrtydxb/hello/internal/crm/dynamics"    // registers the Dynamics 365 connector
+	_ "github.com/azrtydxb/hello/internal/crm/freshdesk"   // registers the freshdesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/halopsa"     // registers the halopsa connector
+	_ "github.com/azrtydxb/hello/internal/crm/hubspot"     // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/odoo"        // registers the Odoo connector
+	_ "github.com/azrtydxb/hello/internal/crm/pipedrive"   // registers the Pipedrive connector
+	_ "github.com/azrtydxb/hello/internal/crm/salesforce"  // registers the Salesforce connector
+	_ "github.com/azrtydxb/hello/internal/crm/zendesk"     // registers the zendesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/zoho"        // registers the Zoho CRM connector
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/lifecycle"
@@ -166,7 +176,7 @@ func run(args []string) error {
 	// the SIP path bounds to a few hundred milliseconds. The CRM query runs
 	// in the background, so a slow CRM never holds a call.
 	crmRepo := &crm.PG{DB: sipDB, Box: box}
-	crmTokens := &crm.TokenManager{Repo: crmRepo, Providers: crm.DefaultProvider(safehttp.NewClient(safehttp.Options{Timeout: crm.LookupTimeout})),
+	crmTokens := &crm.TokenManager{Repo: crmRepo, Providers: crm.DefaultProvider(safehttp.NewClient(safehttp.Options{Timeout: crm.LookupTimeout, Allow: cfg.IntegrationsAllowedCIDRs})),
 		Log: log.With("component", "crm")}
 	crmLookup := &crm.Lookup{Repo: crmRepo, Tokens: crmTokens, Cache: crm.ValkeyCache{Client: func() valkey.Client { return vk }}, Log: log.With("component", "crm")}
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
@@ -183,7 +193,7 @@ func run(args []string) error {
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
 		SessionExpires: cfg.SessionExpires, SessionMinSE: cfg.SessionMinSE, SessionTimersTrunks: cfg.SessionTimersTrunks, MediaDeadAfter: cfg.MediaDeadAfter,
-		PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
+		DoorHangup: cfg.DoorHangup, PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
 		PageMulticastIface: cfg.PageMulticastIface, PageMulticastTTL: cfg.PageMulticastTTL,
 		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax, Dialing: cfg.Dial,
 		MediaForceAnchor: cfg.MediaForceAnchor, MediaRecordingNotice: cfg.MediaRecordingNotice,
@@ -214,8 +224,21 @@ func run(args []string) error {
 	// into anchored SDP answers, so LAN phones send RTP to a reachable
 	// node address instead of mirroring the offer's own c= line. Empty
 	// keeps the tests'/lab's offer-mirroring behaviour.
+	media.SetFeatures(cfg.MediaDTLS, cfg.MediaICE)
 	if cfg.MediaAnchorHost != "" {
 		srv.SetMediaAnchor(media.NewAnchor(cfg.MediaAnchorHost, log.With("component", "media")))
+	}
+	// The WebRTC side of the anchor (clients S-4): one shared UDP port for
+	// browser and app legs, off unless HELLO_MEDIA_WEBRTC_ENABLED.
+	if cfg.MediaWebRTCEnabled {
+		node, err := media.StartWebRTC(cfg.MediaWebRTCPort, cfg.MediaAnchorHost, cfg.MediaWebRTCPublicIP)
+		if err != nil {
+			return err
+		}
+		node.Register(metrics.Registry)
+		media.SetWebRTCNode(node)
+		defer func() { media.SetWebRTCNode(nil); _ = node.Close() }()
+		log.Info("webrtc media enabled", "port", node.Mux().Port(), "candidates", node.Hosts())
 	}
 	watcher.OnReload = srv.SnapshotChanged
 

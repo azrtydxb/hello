@@ -382,6 +382,9 @@ func (m *Mem) Finish(_ context.Context, id int64, r LogResult) error {
 	if r.ExternalID != "" {
 		l.ExternalID = r.ExternalID
 	}
+	if r.State != nil {
+		l.State = *r.State
+	}
 	if r.ClearLink {
 		l.LinkExpiresAt = nil
 	} else if r.LinkExpiresAt != nil {

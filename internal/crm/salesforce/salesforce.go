@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/crm"
+	"github.com/azrtydxb/hello/internal/crm/kit"
 )
 
 // Kind is the connector kind.
@@ -53,7 +54,7 @@ var (
 
 // Connector is the Salesforce connector.
 type Connector struct {
-	rest crm.REST
+	hc *http.Client
 	// BaseURL maps a Salesforce host to the URL requests go to; tests point
 	// it at an httptest server.
 	BaseURL func(host string) string
@@ -61,7 +62,7 @@ type Connector struct {
 
 // New returns the connector on hc (the SSRF-safe client).
 func New(hc *http.Client) *Connector {
-	return &Connector{rest: crm.REST{HC: hc, Classify: classify}, BaseURL: func(h string) string { return "https://" + h }}
+	return &Connector{hc: hc, BaseURL: func(h string) string { return "https://" + h }}
 }
 
 // Kind implements crm.Connector.
@@ -194,6 +195,9 @@ func (c *Connector) api(cc crm.Conn, path string) string {
 // Authenticate implements crm.Direct: the client-credentials grant of the
 // customer's connected app.
 func (c *Connector) Authenticate(ctx context.Context, cfg crm.Config) (crm.Tokens, error) {
+	if cfg.ClientID == "" {
+		return crm.Tokens{}, &crm.APIError{Status: 400, Msg: "the client id is not set"}
+	}
 	d := cfg.Extra["domain"]
 	if !domainRE.MatchString(d) {
 		return crm.Tokens{}, &crm.APIError{Status: 400, Msg: "the My Domain host is not set"}
@@ -205,7 +209,7 @@ func (c *Connector) Authenticate(ctx context.Context, cfg crm.Config) (crm.Token
 		ExpiresIn   int64  `json:"expires_in"`
 	}
 	form := url.Values{"grant_type": {"client_credentials"}, "client_id": {cfg.ClientID}, "client_secret": {cfg.ClientSecret}}
-	if err := c.rest.Do(ctx, http.MethodPost, c.BaseURL(d)+"/services/oauth2/token", "", nil, form, &tr); err != nil {
+	if err := c.send(ctx, http.MethodPost, c.BaseURL(d)+"/services/oauth2/token", "", nil, form, &tr); err != nil {
 		if errors.Is(err, crm.ErrAuth) {
 			return crm.Tokens{}, &crm.APIError{Status: 401, Msg: "the connected app refused the client credentials"}
 		}
@@ -227,7 +231,7 @@ func (c *Connector) Authenticate(ctx context.Context, cfg crm.Config) (crm.Token
 
 // Ping implements crm.Pinger.
 func (c *Connector) Ping(ctx context.Context, cc crm.Conn) error {
-	return c.rest.Do(ctx, http.MethodGet, c.api(cc, "/"), cc.AccessToken, nil, nil, nil)
+	return c.send(ctx, http.MethodGet, c.api(cc, "/"), cc.AccessToken, nil, nil, nil)
 }
 
 type record struct {
@@ -259,7 +263,7 @@ func (c *Connector) Lookup(ctx context.Context, cc crm.Conn, number string) (*cr
 	var res struct {
 		SearchRecords []record `json:"searchRecords"`
 	}
-	if err := c.rest.Do(ctx, http.MethodGet, c.api(cc, "/search/?q="+url.QueryEscape(q)), cc.AccessToken, nil, nil, &res); err != nil {
+	if err := c.send(ctx, http.MethodGet, c.api(cc, "/search/?q="+url.QueryEscape(q)), cc.AccessToken, nil, nil, &res); err != nil {
 		return nil, err
 	}
 	var pick *record
@@ -300,7 +304,7 @@ func (c *Connector) ResolveUser(ctx context.Context, cc crm.Conn, email string) 
 			Email string `json:"Email"`
 		} `json:"records"`
 	}
-	if err := c.rest.Do(ctx, http.MethodGet, c.api(cc, "/query/?q="+url.QueryEscape(q)), cc.AccessToken, nil, nil, &res); err != nil {
+	if err := c.send(ctx, http.MethodGet, c.api(cc, "/query/?q="+url.QueryEscape(q)), cc.AccessToken, nil, nil, &res); err != nil {
 		return "", err
 	}
 	id := ""
@@ -401,7 +405,7 @@ func (c *Connector) LogCall(ctx context.Context, cc crm.Conn, l crm.CallLog) (st
 		ID      string `json:"id"`
 		Success bool   `json:"success"`
 	}
-	if err := c.rest.Do(ctx, http.MethodPost, c.api(cc, "/sobjects/Task"), cc.AccessToken, nil, t, &res); err != nil {
+	if err := c.send(ctx, http.MethodPost, c.api(cc, "/sobjects/Task"), cc.AccessToken, nil, t, &res); err != nil {
 		return "", err
 	}
 	if res.ID == "" {
@@ -421,7 +425,7 @@ func (c *Connector) UpdateCallLog(ctx context.Context, cc crm.Conn, ref string, 
 		Description string `json:"Description"`
 		WhoID       string `json:"WhoId"`
 	}
-	if err := c.rest.Do(ctx, http.MethodGet, c.api(cc, path+"?fields=Description,WhoId"), cc.AccessToken, nil, nil, &cur); err != nil {
+	if err := c.send(ctx, http.MethodGet, c.api(cc, path+"?fields=Description,WhoId"), cc.AccessToken, nil, nil, &cur); err != nil {
 		return err
 	}
 	p := map[string]any{
@@ -434,5 +438,19 @@ func (c *Connector) UpdateCallLog(ctx context.Context, cc crm.Conn, ref string, 
 	if cur.WhoID == "" && l.Contact != nil && whoable(l.Contact.ID) {
 		p["WhoId"] = l.Contact.ID
 	}
-	return c.rest.Do(ctx, http.MethodPatch, c.api(cc, path), cc.AccessToken, nil, p, nil)
+	return c.send(ctx, http.MethodPatch, c.api(cc, path), cc.AccessToken, nil, p, nil)
+}
+
+// send is one request through the shared kit: token, when set, is sent as a
+// bearer token (and a 401 is then crm.ErrAuth); extra headers are added as
+// given.
+func (c *Connector) send(ctx context.Context, method, rawURL, token string, hdr map[string]string, body, out any) error {
+	h := map[string]string{}
+	if token != "" {
+		h["Authorization"] = "Bearer " + token
+	}
+	for k, v := range hdr {
+		h[k] = v
+	}
+	return kit.Do(ctx, c.hc, kit.Request{Method: method, URL: rawURL, Header: h, Body: body, Authed: token != "", Classify: classify}, out)
 }

@@ -14,9 +14,19 @@ import (
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/crm"
-	_ "github.com/azrtydxb/hello/internal/crm/dynamics"   // registers the Dynamics 365 connector
-	_ "github.com/azrtydxb/hello/internal/crm/hubspot"    // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/autotask"    // registers the autotask connector
+	_ "github.com/azrtydxb/hello/internal/crm/bitrix24"    // registers the Bitrix24 connector
+	_ "github.com/azrtydxb/hello/internal/crm/clio"        // registers the clio connector
+	_ "github.com/azrtydxb/hello/internal/crm/connectwise" // registers the connectwise connector
+	_ "github.com/azrtydxb/hello/internal/crm/dynamics"    // registers the Dynamics 365 connector
+	_ "github.com/azrtydxb/hello/internal/crm/freshdesk"   // registers the freshdesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/halopsa"     // registers the halopsa connector
+	_ "github.com/azrtydxb/hello/internal/crm/hubspot"     // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/odoo"        // registers the Odoo connector
+	"github.com/azrtydxb/hello/internal/crm/pipedrive"
 	_ "github.com/azrtydxb/hello/internal/crm/salesforce" // registers the Salesforce connector
+	_ "github.com/azrtydxb/hello/internal/crm/zendesk"    // registers the zendesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/zoho"       // registers the Zoho CRM connector
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/safehttp"
@@ -35,11 +45,14 @@ type crmWiring struct {
 }
 
 // newCRM builds the CRM services. Recording links (spec I-33, I-53) come
-// from the recording-link service of integrations phase P4; until it is
-// wired as Links, connectors never send a recording to a CRM.
-func newCRM(cfg config.Control, st *store.Store, db *sql.DB, box *secret.Box, vk *api.LazyValkey, reg prometheus.Registerer, links crm.LinkMinter, log *slog.Logger) *crmWiring {
+// from the recording-link store of integrations phase P4 (crmLinks); a connector
+// that uploads the audio itself (Pipedrive) reads it through audio.
+func newCRM(cfg config.Control, st *store.Store, db *sql.DB, box *secret.Box, vk *api.LazyValkey, reg prometheus.Registerer, links crm.LinkMinter, audio crm.AudioSource, log *slog.Logger) *crmWiring {
 	repo := &crm.PG{DB: db, Box: box}
-	hc := safehttp.NewClient(safehttp.Options{Timeout: 15 * time.Second})
+	// A self-hosted Odoo or Bitrix24 sits on a private address, so the CRM
+	// client may reach the same private ranges webhooks may.
+	hc := safehttp.NewClient(safehttp.Options{Timeout: 15 * time.Second, Allow: cfg.IntegrationsAllowedCIDRs})
+	pipedrive.MaxUploadBytes = int64(cfg.CRMUploadMaxMB) << 20
 	providers := crm.DefaultProvider(hc)
 	metrics := crm.NewMetrics(reg)
 	clog := log.With("component", "crm")
@@ -50,7 +63,7 @@ func newCRM(cfg config.Control, st *store.Store, db *sql.DB, box *secret.Box, vk
 	return &crmWiring{
 		Service: &crm.Service{Repo: repo, Tokens: tokens, Lookup: lookup, Links: links, PublicURL: cfg.AI.PublicURL, Log: clog},
 		Hook:    hook.Handle,
-		worker:  &crm.Worker{Repo: repo, Tokens: tokens, Links: links, Metrics: metrics, Log: clog},
+		worker:  &crm.Worker{Repo: repo, Tokens: tokens, Links: links, Audio: audio, Metrics: metrics, Log: clog},
 		renewer: &crm.Renewer{Repo: repo, Log: clog},
 	}
 }

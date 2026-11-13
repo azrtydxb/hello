@@ -3,189 +3,162 @@ package crm
 import (
 	"context"
 	"errors"
-	"sync/atomic"
+	"fmt"
 	"testing"
 	"time"
 )
 
-// direct is a connector that signs in with client credentials, as
-// Salesforce and Dynamics do: it has no OAuth browser flow and no refresh
-// token.
-type direct struct {
-	fake
-	server  bool
-	auths   atomic.Int32
-	authErr error
-	valid   func(string) bool
-	now     func() time.Time
+// directFake is a connector that signs in with credentials, not OAuth. It
+// embeds the Connector interface, not the fake, so no OAuth method is
+// promoted.
+type directFake struct {
+	Connector
+	auth    func(Config) (Tokens, error)
+	logErr  error
+	authned int
 }
 
-func (d *direct) Kind() string { return "direct" }
-func (d *direct) Authenticate(_ context.Context, cfg Config) (Tokens, error) {
-	n := d.auths.Add(1)
-	if d.authErr != nil {
-		return Tokens{}, d.authErr
+func (d *directFake) Authenticate(_ context.Context, cfg Config) (Tokens, error) {
+	d.authned++
+	return d.auth(cfg)
+}
+
+func (d *directFake) SecretBoundKeys() []string { return []string{"clientId", "host"} }
+
+func (d *directFake) LogCall(ctx context.Context, c Conn, l CallLog) (string, error) {
+	if d.logErr != nil {
+		return "", d.logErr
 	}
-	return Tokens{Access: "cc" + string(rune('0'+n)), ExpiresAt: d.now().Add(time.Hour), Account: "org-" + cfg.ClientID}, nil
-}
-func (d *direct) ServerSide(map[string]string) bool { return d.server }
-func (d *direct) ValidRef(r string) bool            { return d.valid == nil || d.valid(r) }
-func (d *direct) Setup(cfg Config, public string) []SetupItem {
-	return []SetupItem{{Name: "url", Label: "URL", Kind: "url", Value: public + "/x/" + cfg.Extra["clientId"]}}
+	return d.Connector.LogCall(ctx, c, l)
 }
 
-type directRig struct {
-	*rig
-	d *direct
-}
-
-func newDirectRig(t *testing.T, server bool) directRig {
+func directRig(t *testing.T) (*rig, *directFake) {
 	t.Helper()
 	r := newRig(t)
-	d := &direct{fake: *newFake(), server: server}
-	d.now = func() time.Time { return r.now }
-	prov := func(kind string) (Connector, bool) { return d, kind == "direct" }
-	r.tokens.Providers = prov
-	r.hook.Providers = prov
-	c, err := r.repo.CreateConnector(context.Background(), ConnectorInput{Kind: "direct", Name: "sf", Enabled: true,
-		Config: map[string]string{"clientId": "cid"}, LinkTTLHours: 720, LogMissed: true}, "secret")
-	if err != nil {
-		t.Fatal(err)
+	d := &directFake{Connector: r.f}
+	d.auth = func(cfg Config) (Tokens, error) {
+		if cfg.ClientSecret != "good" && cfg.ClientSecret != "secret" {
+			return Tokens{}, &APIError{Status: 401, Msg: "refused the credentials"}
+		}
+		return Tokens{Access: cfg.ClientSecret, Account: "acme"}, nil
 	}
-	r.conn = c
-	return directRig{r, d}
+	r.tokens.Providers = func(kind string) (Connector, bool) { return d, kind == "fake" }
+	r.f.owners["anna@example.com"] = "o1"
+	return r, d
 }
 
-func TestDirectAuthConnectSavesTokensWithoutABrowser(t *testing.T) {
-	r := newDirectRig(t, true)
+func TestConnectDirectStoresTheCredentialAsTheConnection(t *testing.T) {
+	r, d := directRig(t)
 	ctx := context.Background()
-	r.svc.PublicURL = "" // the browser flow would need it; client credentials do not
-	u, err := r.svc.Connect(ctx, "admin", r.conn.ID)
-	if err != nil || u != "" {
-		t.Fatalf("connect = %q, %v", u, err)
-	}
-	v, _ := r.svc.Get(ctx, r.conn.ID)
-	if v.Connection == nil || v.Connection.Status != StatusConnected || v.Connection.ExternalAccount != "org-cid" {
-		t.Fatalf("connection = %+v", v.Connection)
-	}
-	// A secret is needed.
-	r2 := newDirectRig(t, true)
-	c2, _ := r2.repo.CreateConnector(ctx, ConnectorInput{Kind: "direct", Name: "nosecret", Enabled: true, Config: map[string]string{"clientId": "cid"}, LinkTTLHours: 1}, "")
-	if _, err := r2.svc.Connect(ctx, "a", c2.ID); !errors.Is(err, ErrNoCredentials) {
-		t.Fatalf("no secret = %v", err)
-	}
-	// A refused app is reported with the CRM's reason and saves nothing.
-	r.d.authErr = &APIError{Status: 400, Msg: "invalid_client"}
-	if err := r.repo.DeleteOrgConnection(ctx, r.conn.ID); err != nil {
+	if err := r.svc.Disconnect(ctx, "a", r.conn.ID); err != nil {
 		t.Fatal(err)
 	}
+	url, err := r.svc.Connect(ctx, "admin", r.conn.ID)
+	if err != nil || url != "" {
+		t.Fatalf("connect = %q %v", url, err)
+	}
+	cr, tok, err := r.repo.OrgConnection(ctx, r.conn.ID)
+	if err != nil || cr.Status != StatusConnected || tok.Access != "secret" || tok.Account != "acme" || !tok.ExpiresAt.IsZero() {
+		t.Fatalf("connection = %+v %+v %v", cr, tok, err)
+	}
+	v, err := r.svc.Get(ctx, r.conn.ID)
+	if err != nil || v.Auth != "direct" || v.Connection == nil || v.Connection.ExternalAccount != "acme" {
+		t.Fatalf("view = %+v %v", v, err)
+	}
+	// The OAuth callback is not for a direct connector.
+	if _, err := r.svc.Callback(ctx, "x", "y"); !errors.Is(err, ErrBadState) {
+		t.Fatalf("callback = %v", err)
+	}
+	// Refused credentials: a validation error on the secret, no connection.
+	if err := r.svc.Disconnect(ctx, "a", r.conn.ID); err != nil {
+		t.Fatal(err)
+	}
+	d.auth = func(Config) (Tokens, error) { return Tokens{}, &APIError{Status: 401, Msg: "refused the credentials"} }
 	_, err = r.svc.Connect(ctx, "admin", r.conn.ID)
 	var ve *ValidationError
-	if !errors.As(err, &ve) || !contains(ve.Fields["clientSecret"], "invalid_client") {
+	if !errors.As(err, &ve) || ve.Fields["clientSecret"] == "" {
 		t.Fatalf("refused = %v", err)
 	}
-	if v, _ := r.svc.Get(ctx, r.conn.ID); v.Connection != nil {
-		t.Fatal("a refused sign-in saved a connection")
+	if _, _, err := r.repo.OrgConnection(ctx, r.conn.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatal("a refused credential left a connection")
 	}
 }
 
-func TestDirectAuthSignsInAgainWhenTheTokenExpires(t *testing.T) {
-	r := newDirectRig(t, true)
+func TestDirectUpdateAsksForTheSecretWhenTheDestinationChanges(t *testing.T) {
+	r, d := directRig(t)
 	ctx := context.Background()
-	if _, err := r.svc.Connect(ctx, "a", r.conn.ID); err != nil {
+	host := "other.example.com"
+	_, err := r.svc.Update(ctx, "a", r.conn.ID, Settings{Config: map[string]string{"host": host}})
+	var ve *ValidationError
+	if !errors.As(err, &ve) || ve.Fields["clientSecret"] == "" {
+		t.Fatalf("host change without secret = %v", err)
+	}
+	// A new secret is proved before it replaces the stored one.
+	bad := "wrong"
+	if _, err := r.svc.Update(ctx, "a", r.conn.ID, Settings{ClientSecret: &bad}); !errors.As(err, &ve) {
+		t.Fatalf("bad secret = %v", err)
+	}
+	if s, _ := r.repo.ClientSecret(ctx, r.conn.ID); s != "secret" {
+		t.Fatalf("a refused secret replaced the stored one: %q", s)
+	}
+	good := "good"
+	if _, err := r.svc.Update(ctx, "a", r.conn.ID, Settings{ClientSecret: &good, Config: map[string]string{"host": host}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, cc, err := r.tokens.Conn(ctx, r.conn); err != nil || cc.AccessToken != "cc1" {
-		t.Fatalf("conn = %+v, %v", cc, err)
+	if _, tok, _ := r.repo.OrgConnection(ctx, r.conn.ID); tok.Access != "good" {
+		t.Fatalf("connection token = %q", tok.Access)
 	}
-	if r.d.auths.Load() != 1 {
-		t.Fatalf("authorized %d times for a live token", r.d.auths.Load())
-	}
-	r.now = r.now.Add(2 * time.Hour)
-	if _, cc, err := r.tokens.Conn(ctx, r.conn); err != nil || cc.AccessToken != "cc2" {
-		t.Fatalf("after expiry = %+v, %v", cc, err)
-	}
-	// A refused token (401 from the CRM) forces a new sign-in too.
-	if cc, err := r.tokens.Refresh(ctx, r.conn); err != nil || cc.AccessToken != "cc3" {
-		t.Fatalf("forced = %+v, %v", cc, err)
-	}
-	// Credentials the CRM no longer accepts: needs_reauth once, jobs pause.
-	r.d.authErr = &APIError{Status: 400, Msg: "invalid_client"}
-	r.now = r.now.Add(2 * time.Hour)
-	if _, _, err := r.tokens.Conn(ctx, r.conn); !errors.Is(err, ErrNeedsReauth) {
-		t.Fatalf("refused credentials = %v", err)
-	}
-	if len(r.notes) != 1 {
-		t.Fatalf("notices = %v", r.notes)
-	}
-	// A CRM that is down is not a re-authorisation.
-	r2 := newDirectRig(t, true)
-	_, _ = r2.svc.Connect(ctx, "a", r2.conn.ID)
-	r2.d.authErr = &APIError{Status: 503, Retry: true, Msg: "down"}
-	r2.now = r2.now.Add(2 * time.Hour)
-	if _, _, err := r2.tokens.Conn(ctx, r2.conn); err == nil || errors.Is(err, ErrNeedsReauth) {
-		t.Fatalf("outage = %v", err)
-	}
-	if len(r2.notes) != 0 {
-		t.Fatal("an outage paged the administrators")
+	if d.authned != 2 {
+		t.Fatalf("authenticated %d times", d.authned)
 	}
 }
 
-func TestInteractiveOnlyConnectorLogsAndLooksUpNothing(t *testing.T) {
-	r := newDirectRig(t, false)
-	ctx := context.Background()
-	_, _ = r.svc.Connect(ctx, "a", r.conn.ID)
+func TestNoTargetSkipsTheCallWithoutSpendingAnAttempt(t *testing.T) {
+	r, d := directRig(t)
+	d.logErr = fmt.Errorf("%w: no contact has this number", ErrNoTarget)
 	r.feed(t, completed("c1", "inbound", "201"))
-	if rows, _ := r.repo.ListLogs(ctx, r.conn.ID, "", 10, 0); len(rows) != 0 {
-		t.Fatalf("an interactive-only connector queued %d jobs", len(rows))
+	r.worker.Process(context.Background())
+	row, _ := r.repo.Log(r.conn.ID, "c1")
+	if row.Status != LogSkipped || row.Attempts != 0 || row.LastError == "" {
+		t.Fatalf("row = %+v", row)
 	}
-	r.look.Invalidate()
-	if c := r.look.Find(ctx, "+3211223344", time.Second); c != nil || r.d.lookups.Load() != 0 {
-		t.Fatal("an interactive-only connector was asked for a contact")
+	// Retry puts it back; with a target it logs.
+	d.logErr = nil
+	if _, err := r.svc.RetryLog(context.Background(), "a", row.ID); err != nil {
+		t.Fatal(err)
 	}
-	// The softphone's handshake needs no row: there is nothing to deduplicate.
-	adopted, err := r.svc.Engagement(ctx, "u", "direct", "c1", "00T000000000001AAA", nil, false)
-	if err != nil || !adopted {
-		t.Fatalf("handshake = %v, %v", adopted, err)
-	}
-	if rows, _ := r.repo.ListLogs(ctx, r.conn.ID, "", 10, 0); len(rows) != 0 {
-		t.Fatal("the handshake stored a job for an interactive-only connector")
-	}
-}
-
-func TestServerSideConnectorAdoptsTheSoftphonesRecord(t *testing.T) {
-	r := newDirectRig(t, true)
-	ctx := context.Background()
-	_, _ = r.svc.Connect(ctx, "a", r.conn.ID)
-	r.d.owners["anna@example.com"] = "005A"
-	r.d.valid = func(s string) bool { return s != "bad id" }
-	if _, err := r.svc.Engagement(ctx, "u", "direct", "c1", "bad id", nil, false); err == nil {
-		t.Fatal("a malformed record id was accepted")
-	}
-	if adopted, err := r.svc.Engagement(ctx, "u", "direct", "c1", "00T1", nil, false); err != nil || !adopted {
-		t.Fatalf("handshake = %v, %v", adopted, err)
-	}
-	r.feed(t, completed("c1", "outbound", "201"))
-	r.worker.Process(ctx)
-	if len(r.d.logs) != 0 || len(r.d.updates) != 1 {
-		t.Fatalf("logs = %d, updates = %d: the server must patch the softphone's task", len(r.d.logs), len(r.d.updates))
+	r.worker.Process(context.Background())
+	if row, _ = r.repo.Log(r.conn.ID, "c1"); row.Status != LogLogged {
+		t.Fatalf("after retry = %+v", row)
 	}
 }
 
-func TestSetupNeedsAPublicURL(t *testing.T) {
-	r := newDirectRig(t, true)
-	ctx := context.Background()
-	items, err := r.svc.Setup(ctx, r.conn.ID)
-	if err != nil || len(items) != 1 || items[0].Value != "https://hello.example/x/cid" {
-		t.Fatalf("setup = %+v, %v", items, err)
+func TestExpiringClientCredentialTokenIsRequestedAgain(t *testing.T) {
+	r, d := directRig(t)
+	n := 0
+	d.auth = func(Config) (Tokens, error) {
+		n++
+		return Tokens{Access: fmt.Sprintf("cc-%d", n), ExpiresAt: r.now.Add(time.Hour)}, nil
 	}
-	r.svc.PublicURL = ""
-	if _, err := r.svc.Setup(ctx, r.conn.ID); !errors.Is(err, ErrNoPublicURL) {
-		t.Fatalf("no public url = %v", err)
+	if _, err := r.repo.SaveOrgConnection(context.Background(), r.conn.ID, Tokens{Access: "cc-0", ExpiresAt: r.now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
 	}
-	// A connector with nothing to set up has an empty list, not an error.
-	r3 := newRig(t)
-	if items, err := r3.svc.Setup(ctx, r3.conn.ID); err != nil || items == nil || len(items) != 0 {
-		t.Fatalf("plain connector = %v, %v", items, err)
+	r.now = r.now.Add(time.Hour - 30*time.Second)
+	r.feed(t, completed("c1", "inbound", "201"))
+	r.worker.Process(context.Background())
+	if r.f.tokens[0] != "cc-1" {
+		t.Fatalf("the call used %q, want a fresh token", r.f.tokens[0])
+	}
+}
+
+func TestRefusedStaticCredentialMarksNeedsReauth(t *testing.T) {
+	r, d := directRig(t)
+	d.auth = func(Config) (Tokens, error) { return Tokens{}, &APIError{Status: 401, Msg: "refused"} }
+	r.f.authFail = map[string]bool{"acc1": true}
+	r.feed(t, completed("c1", "inbound", "201"))
+	r.worker.Process(context.Background())
+	cr, _, _ := r.repo.OrgConnection(context.Background(), r.conn.ID)
+	if cr.Status != StatusNeedsReauth || len(r.notes) != 1 {
+		t.Fatalf("status = %s notes = %v", cr.Status, r.notes)
 	}
 }

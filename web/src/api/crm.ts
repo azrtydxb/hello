@@ -10,6 +10,10 @@ export interface CRMCapabilities {
   clickToCall: boolean;
   screenPop: boolean;
   ticket: boolean;
+  /** The CRM stores the audio file itself; Hello uploads it. */
+  recordingUpload?: boolean;
+  /** The CRM fetches a short-lived link once and keeps a copy. */
+  recordingCopy?: boolean;
 }
 
 export type CRMConnectionStatus = "connected" | "needs_reauth" | "revoked";
@@ -204,4 +208,9 @@ export function setCRMUser(
   return request("PUT", `${base}/${id}/users/${userId}`, {
     body: { externalUserId },
   });
+}
+
+/** The address of the ticket-sidebar app package of a helpdesk connector. */
+export function crmAppUrl(id: number): string {
+  return `${base}/${id}/app`;
 }

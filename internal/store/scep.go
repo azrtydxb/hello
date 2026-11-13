@@ -1,6 +1,6 @@
 package store
 
-// SCEP and 802.1X (migration 00052, spec phone-feature-parity S-25): the
+// SCEP and 802.1X (migration 00076, spec phone-feature-parity S-25): the
 // Hello device CA with its sealed key, the per-phone one-time challenge
 // passwords, the issued certificates and their revocation, the reusable
 // 802.1X profiles and each phone group's SCEP switch and wired profile.

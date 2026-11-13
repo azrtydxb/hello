@@ -1,6 +1,6 @@
 ---
 name: hello-crm
-description: Inspect the CRM connectors of a Kuvryn Hello PBX through its MCP server - HubSpot connection state, which Hello users map to which CRM users, and the logging jobs that write calls into the CRM, including dead letters and skipped calls. Use when someone asks why a call is missing from HubSpot, why a caller shows no name, whether the CRM connection still works, who owns calls in the CRM, or why a recording link is not on a CRM record.
+description: Inspect the CRM connectors of a Kuvryn Hello PBX through its MCP server - connection state of HubSpot, Pipedrive, Zoho CRM, Odoo, Bitrix24, Zendesk, Freshdesk, ConnectWise, Autotask, HaloPSA and Clio, which Hello users map to which CRM users, and the logging jobs that write calls into the CRM, including dead letters and skipped calls. Use when someone asks why a call is missing from the CRM, why a caller shows no name, whether the CRM connection still works, who owns calls in the CRM, or why a recording link is not on a CRM record.
 license: Apache-2.0
 metadata:
   hello-version: "v1"
@@ -8,10 +8,15 @@ metadata:
 
 # Hello CRM connectors
 
-Hello can write every external call into a CRM (HubSpot, Salesforce and Dynamics 365) and look up
-the caller's name there. A **connector** is the customer's own CRM app (client
-id and secret, set up in the console); its **connection** is the OAuth sign-in
-an administrator completed. Calls are written by background **logging jobs**
+Hello can write every external call into a CRM (HubSpot, Salesforce, Dynamics 365, Pipedrive, Zoho CRM, Odoo, Bitrix24, Clio), a helpdesk
+(Zendesk, Freshdesk, HaloPSA) or a PSA (ConnectWise, Autotask) and look up the
+caller's name there. A **connector** is the customer's own app or API
+credentials (set up in the console); its **connection** is the OAuth sign-in an
+administrator completed, or, for the token-based kinds (`auth` is `direct`:
+Zendesk, Freshdesk, ConnectWise, Autotask, HaloPSA, Odoo, Bitrix24, and Salesforce and Dynamics 365, which sign in with the OAuth client-credentials grant), the credentials Hello
+signed in with (also Odoo, an API key, and Bitrix24, an inbound webhook). Helpdesk kinds (`capabilities.ticket`) write each call as a
+ticket; ConnectWise writes an activity, Autotask a company note, Clio a phone
+communication. Calls are written by background **logging jobs**
 that retry on failure. You can read all of this; changing connector settings,
 signing in and retrying a job are done in the console under Integrations, CRM,
 because they handle credentials.
@@ -54,14 +59,14 @@ Dynamics channel provider values).
 2. `listCRMLogs` with the connector id, filtered by `status`, lists the jobs
    newest first (`nextBefore` pages on). Read the job:
 
-| `status`  | Meaning and what to do                                                                                                                                                               |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `pending` | Due at `nextAttemptAt`; `attempts` and `lastError` show earlier failures. Retries go 10 s, 30 s, 2 min, 10 min, 1 h, 4 h, 12 h.                                                      |
-| `logged`  | Written; `externalId` is the CRM record id.                                                                                                                                          |
-| `update`  | Written, and a patch (a recording link) is due.                                                                                                                                      |
-| `waiting` | Its recording or the HubSpot iframe reported first; the call data has not arrived yet.                                                                                               |
-| `skipped` | Deliberately not logged: `lastError` says why (no extension owns the call, the user has no CRM user). Map the user (below) or set a fallback owner in the console, then retry there. |
-| `dead`    | Out of attempts, or the CRM refused it for good (a 4xx). `lastError` is the CRM's reason. Fix the cause, then retry in the console.                                                  |
+| `status`  | Meaning and what to do                                                                                                                                                                                                                                                                                                                         |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pending` | Due at `nextAttemptAt`; `attempts` and `lastError` show earlier failures. Retries go 10 s, 30 s, 2 min, 10 min, 1 h, 4 h, 12 h.                                                                                                                                                                                                                |
+| `logged`  | Written; `externalId` is the CRM record id.                                                                                                                                                                                                                                                                                                    |
+| `update`  | Written, and a patch (a recording link) is due.                                                                                                                                                                                                                                                                                                |
+| `waiting` | Its recording or the HubSpot iframe reported first; the call data has not arrived yet.                                                                                                                                                                                                                                                         |
+| `skipped` | Deliberately not logged: `lastError` says why (no extension owns the call, the user has no CRM user, or the CRM has no contact with the caller's number: ConnectWise, Autotask, Clio and HaloPSA without a fallback client only log calls for a known contact). Map the user (below) or set a fallback owner in the console, then retry there. |
+| `dead`    | Out of attempts, or the CRM refused it for good (a 4xx). `lastError` is the CRM's reason. Fix the cause, then retry in the console.                                                                                                                                                                                                            |
 
 Internal calls are never logged. A missed call is logged as a no-answer call
 when the connector has "log missed calls" on. A call that rang several people
@@ -87,5 +92,14 @@ the connector's `fallbackOwner`, or are skipped when that is empty.
   renewed while the call is recent. A job's `linkExpiresAt` shows when. A
   `logged` job with a `recordingId` but no `linkExpiresAt` means the link
   could not be minted: check that recording links are available.
+- Pipedrive stores an audio file, not a link: a `logged` job with a
+  `recordingId` and no `linkExpiresAt` is normal there. If `lastError` says
+  "recording not sent", the file was larger than the upload limit
+  (`HELLO_CRM_UPLOAD_MAX_MB`, 50 by default) or the recording was deleted; the
+  call itself is logged.
+- Bitrix24 fetches its recording from a one-day link once and keeps a copy, so
+  it also has no `linkExpiresAt`.
+- Odoo logs a call as a note in the contact's chatter, or in the call owner's
+  own when the caller is unknown; Zoho writes a record in the Calls module.
 
 See [tools](references/tools.md) and [failures](references/failures.md).

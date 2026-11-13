@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/crm"
+	"github.com/azrtydxb/hello/internal/crm/kit"
 )
 
 // Kind is the connector kind.
@@ -51,7 +52,7 @@ var (
 
 // Connector is the Dynamics 365 connector.
 type Connector struct {
-	rest crm.REST
+	hc *http.Client
 	// LoginURL is the Entra token host; Base maps an environment URL to
 	// where requests go. Tests point both at an httptest server.
 	LoginURL string
@@ -60,7 +61,7 @@ type Connector struct {
 
 // New returns the connector on hc (the SSRF-safe client).
 func New(hc *http.Client) *Connector {
-	return &Connector{rest: crm.REST{HC: hc, Classify: classify}, LoginURL: "https://login.microsoftonline.com", Base: func(u string) string { return u }}
+	return &Connector{hc: hc, LoginURL: "https://login.microsoftonline.com", Base: func(u string) string { return u }}
 }
 
 // Kind implements crm.Connector.
@@ -139,6 +140,9 @@ func classify(_ int, raw []byte) (string, bool) {
 // Authenticate implements crm.Direct: the client-credentials grant of the
 // application user, scoped to the environment.
 func (c *Connector) Authenticate(ctx context.Context, cfg crm.Config) (crm.Tokens, error) {
+	if cfg.ClientID == "" {
+		return crm.Tokens{}, &crm.APIError{Status: 400, Msg: "the client id is not set"}
+	}
 	org, tenant := cfg.Extra["orgUrl"], cfg.Extra["tenantId"]
 	if !orgRE.MatchString(org) || !tenantRE.MatchString(tenant) {
 		return crm.Tokens{}, &crm.APIError{Status: 400, Msg: "the environment URL or tenant id is not set"}
@@ -149,7 +153,7 @@ func (c *Connector) Authenticate(ctx context.Context, cfg crm.Config) (crm.Token
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int64  `json:"expires_in"`
 	}
-	if err := c.rest.Do(ctx, http.MethodPost, c.LoginURL+"/"+url.PathEscape(tenant)+"/oauth2/v2.0/token", "", nil, form, &tr); err != nil {
+	if err := c.send(ctx, http.MethodPost, c.LoginURL+"/"+url.PathEscape(tenant)+"/oauth2/v2.0/token", "", nil, form, &tr); err != nil {
 		return crm.Tokens{}, err
 	}
 	if tr.AccessToken == "" {
@@ -176,7 +180,7 @@ func (c *Connector) do(ctx context.Context, cc crm.Conn, method, path string, hd
 	for k, v := range hdr {
 		h[k] = v
 	}
-	return c.rest.Do(ctx, method, c.url(cc, path), cc.AccessToken, h, body, out)
+	return c.send(ctx, method, c.url(cc, path), cc.AccessToken, h, body, out)
 }
 
 // Ping implements crm.Pinger.
@@ -463,4 +467,18 @@ func (c *Connector) UpdateCallLog(ctx context.Context, cc crm.Conn, ref string, 
 		return patchErr
 	}
 	return closeErr
+}
+
+// send is one request through the shared kit: token, when set, is sent as a
+// bearer token (and a 401 is then crm.ErrAuth); extra headers are added as
+// given.
+func (c *Connector) send(ctx context.Context, method, rawURL, token string, hdr map[string]string, body, out any) error {
+	h := map[string]string{}
+	if token != "" {
+		h["Authorization"] = "Bearer " + token
+	}
+	for k, v := range hdr {
+		h[k] = v
+	}
+	return kit.Do(ctx, c.hc, kit.Request{Method: method, URL: rawURL, Header: h, Body: body, Authed: token != "", Classify: classify}, out)
 }

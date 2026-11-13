@@ -1,6 +1,6 @@
 package store
 
-// Wi-Fi profiles and roaming (migration 00052, spec phone-feature-parity S-23
+// Wi-Fi profiles and roaming (migration 00074, spec phone-feature-parity S-23
 // and S-24). Profiles are sealed with the secret box and never leave the
 // store as plain text except into the provisioning render data. A change does
 // not bump the configuration revision: only provisioning reads it, so the

@@ -54,6 +54,11 @@ func TestRoutesTable(t *testing.T) {
 		switch r.Pattern {
 		case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password":
 			return true
+		case "/api/v1/calls/{id}/door-open":
+			// Open the door of the user's own answered door call (spec
+			// S-47); the handler checks that the caller's extension is the
+			// one on the call.
+			return true
 		}
 		return strings.HasPrefix(r.Pattern, "/api/v1/me/") || strings.HasPrefix(r.Pattern, "/api/v1/events") ||
 			strings.HasPrefix(r.Pattern, "/api/v1/lookup/") || r.Pattern == "/api/v1/recording-links/{id}" ||
