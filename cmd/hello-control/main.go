@@ -130,6 +130,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	go bootstrap(ctx, st, cfg.BootstrapAdminPassword, log)
 	go pruneSessions(ctx, st, log)
 	go seedFeatureCodes(ctx, st, log)
+	go adoptWifiEAP(ctx, st, log)
 
 	// The voicemail object store and the email worker are the Phase 4
 	// control-plane services (spec contract 6, S-8). minio.New does not
@@ -398,6 +399,30 @@ func seedFeatureCodes(ctx context.Context, st *store.Store, log *slog.Logger) {
 			return
 		}
 		log.Warn("seed feature codes: retrying", "error", err, "retry_in", bootstrapRetry.String())
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(bootstrapRetry):
+		}
+	}
+}
+
+// adoptWifiEAP moves the EAP settings of enterprise Wi-Fi profiles from before
+// the shared 802.1X model into 802.1X profiles (migration 00088), retrying
+// while the database is not reachable.
+func adoptWifiEAP(ctx context.Context, st *store.Store, log *slog.Logger) {
+	for {
+		n, skipped, err := st.AdoptWifiEAP(ctx)
+		if err == nil {
+			if n > 0 {
+				log.Info("wifi: enterprise profiles moved to 802.1X profiles", "count", n)
+			}
+			if len(skipped) > 0 {
+				log.Warn("wifi: enterprise profiles with an identity an 802.1X profile cannot hold; name an 802.1X profile for them", "profiles", skipped)
+			}
+			return
+		}
+		log.Warn("wifi: adopt enterprise profiles: retrying", "error", err, "retry_in", bootstrapRetry.String())
 		select {
 		case <-ctx.Done():
 			return

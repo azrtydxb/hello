@@ -41854,6 +41854,7 @@
           "caCertPem",
           "serverDomain",
           "usedByGroups",
+          "usedByWifiProfiles",
           "updatedAt"
         ],
         "properties": {
@@ -41890,6 +41891,14 @@
               "type": "integer",
               "format": "int64"
             }
+          },
+          "usedByWifiProfiles": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "The enterprise Wi-Fi profiles that authenticate with this profile."
           },
           "updatedAt": {
             "type": "string",
@@ -42928,7 +42937,14 @@
       },
       "WifiProfile": {
         "type": "object",
-        "required": ["id", "name", "ssid", "security", "pskSet", "passwordSet"],
+        "required": [
+          "id",
+          "name",
+          "ssid",
+          "security",
+          "pskSet",
+          "dot1xProfileId"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -42955,24 +42971,10 @@
             "type": "boolean",
             "description": "A pre-shared key is stored. The key itself is never returned."
           },
-          "eapMethod": {
-            "type": "string",
-            "enum": ["", "peap"]
-          },
-          "identity": {
-            "type": "string"
-          },
-          "anonymousIdentity": {
-            "type": "string"
-          },
-          "passwordSet": {
-            "type": "boolean",
-            "description": "An 802.1X password is stored. The password itself is never returned."
-          },
-          "caCert": {
-            "type": "string",
-            "enum": ["system", "tofu", "skip"],
-            "description": "How an enterprise profile verifies the RADIUS server: system certificates, trust on first use, or no verification."
+          "dot1xProfileId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The 802.1X profile (see /dot1x-profiles) an enterprise profile authenticates with: the EAP method, identity, password and the RADIUS server's CA are its. null for any other security mode."
           },
           "priority": {
             "type": "integer",
@@ -43050,31 +43052,10 @@
             "x-hello-secret": true,
             "description": "The pre-shared key, 8 to 63 printable ASCII characters. Write-only."
           },
-          "eapMethod": {
-            "type": "string",
-            "enum": ["peap"],
-            "description": "The EAP method of an enterprise profile; only peap."
-          },
-          "identity": {
-            "type": "string",
-            "maxLength": 128,
-            "description": "The 802.1X identity of an enterprise profile."
-          },
-          "anonymousIdentity": {
-            "type": "string",
-            "maxLength": 128,
-            "description": "The anonymous (outer) identity of an enterprise profile."
-          },
-          "password": {
-            "type": "string",
-            "writeOnly": true,
-            "x-hello-secret": true,
-            "description": "The 802.1X password. Write-only."
-          },
-          "caCert": {
-            "type": "string",
-            "enum": ["system", "tofu", "skip"],
-            "description": "How an enterprise profile verifies the RADIUS server: system certificates, trust on first use, or no verification."
+          "dot1xProfileId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Required for wpa2-enterprise and wpa3-enterprise, refused for any other mode: the 802.1X profile (PEAP or EAP-TLS; not EAP-MD5, a wired method) the network authenticates with. Create it with createDot1XProfile; the same profile can serve a wired port. Only the WP8x6 takes enterprise networks."
           },
           "priority": {
             "type": "integer",

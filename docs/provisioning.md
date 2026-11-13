@@ -1348,11 +1348,13 @@ hand, and a guessed key can strand a handset.
 
 ### Profiles
 
-A profile is a named network: SSID, security, a pre-shared key or an 802.1X
-identity and password, a priority, a hidden flag, a preferred account and a
+A profile is a named network: SSID, security, a pre-shared key or, for an
+enterprise network, an 802.1X profile (`dot1xProfileId`; see
+[scep.md](scep.md): the EAP method, identity, password and the RADIUS CA are
+that profile's, shared with the wired port), a priority, a hidden flag, a preferred account and a
 "verified on a test phone" mark. A group or a phone carries at most 10
-profiles. The key and the password are stored sealed with `HELLO_SECRET_KEY`
-(context `wifi-psk:<id>` and `wifi-password:<id>`), are never returned by the
+profiles. The key is stored sealed with `HELLO_SECRET_KEY` (context `wifi-psk:<id>`;
+an 802.1X password is sealed in its own profile), is never returned by the
 API or the MCP tools, and are masked as `********` in the configuration
 preview. A profile in use by a group or phone cannot be deleted.
 
@@ -1367,15 +1369,16 @@ network typed in on the handset is overwritten at the next provisioning.
 | wpa2-psk          | `4`, key in `P83003`                    | `4`, key in `P83003`                             | `P7814 = 2`, key in `P7830`     |
 | wpa3-sae          | `11`                                    | `11`                                             | not offered                     |
 | owe               | `14`                                    | not offered                                      | not offered                     |
-| wpa2/3-enterprise | `5` / `12`, PEAP, MSCHAPv2              | not offered (no 802.1X keys in the template)     | not offered                     |
+| wpa2/3-enterprise | `5` / `12`, PEAP or EAP-TLS             | not offered (no 802.1X keys in the template)     | not offered                     |
 
 The key blocks are `P83000 + 100 (n - 1)` for network n: SSID at +0, security
-+2, key +3, EAP method +4, anonymous identity +12, phase 2 +13, identity +14,
-password +15, server certificate check +16, priority +49 and preferred account
-+85 on the WP8x6; SSID +0, enabled +1, security +2, key +3, 802.11r +48 and
++2, key +3, EAP method +4 (1 TLS, 2 PEAP), uploaded CA +11, anonymous identity
++12, phase 2 +13, identity +14, password +15, server certificate check +16
+(1 system, 3 uploaded), domain validation +18 and server name +19, TLS CA +7
+and TLS identity +9, priority +49 and preferred account +85 on the WP8x6; SSID +0, enabled +1, security +2, key +3, 802.11r +48 and
 hidden +50 on the WP810/822/825. The WP856 has one network (`P7812`, `P7814`,
-`P7830`): the profile with the highest priority it can take. EAP-TLS is not
-offered: it needs a device certificate (S-25). The WP820 has a template of its
+`P7830`): the profile with the highest priority it can take. The WP856 and the
+WP810/822/825 take no enterprise network (the templates have no EAP keys). The WP820 has a template of its
 own and is not provisioned.
 
 Capacity: the WP8x6 takes 10 networks, the WP810/822/825 17 and the WP856 one.
