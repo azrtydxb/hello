@@ -13,6 +13,9 @@ import (
 // sources on one hold, or send the held party a second call.
 func TestPhonesOriginNoMusicOnHold(t *testing.T) {
 	d := renderSample(false)
+	// The sample's prov URL carries a random token, which can contain any
+	// banned word by chance ("moh"); scan a config with a fixed one.
+	d.Prov.URL = "https://prov.hello.test/p/FIXEDTOKEN/"
 	for _, tc := range []struct {
 		v    Vendor
 		file string
@@ -30,7 +33,7 @@ func TestPhonesOriginNoMusicOnHold(t *testing.T) {
 		low := bytes.ToLower(out)
 		for _, banned := range []string{"p2350", "music_server", "musiconhold", "moh"} {
 			if bytes.Contains(low, []byte(banned)) {
-				t.Errorf("%s template mentions %q: the phone must not originate its own music on hold\n%s", tc.v, banned, out)
+				t.Errorf("%s template mentions %q: the phone must not originate its own music on hold", tc.v, banned)
 			}
 		}
 	}

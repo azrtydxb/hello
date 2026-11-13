@@ -96,6 +96,11 @@ type call struct {
 	setupClosed bool // no fork may win any more
 	isCancelled bool
 	connected   bool
+	// answerWrite is held while the 200 goes to the caller: WriteResponse
+	// records the response on the dialog and blocks for the ACK, and byeA
+	// reads that record, so a BYE (drain timeout, API hangup) that lands
+	// while the answer is going out waits for it instead of racing it.
+	answerWrite sync.Mutex
 	ended       bool
 	hungUp      bool
 	// gfDepth counts ring group failovers and gfChain the groups rung, so a
@@ -150,6 +155,9 @@ type call struct {
 	// doorOpening is set while a door-open code is being sent (spec S-47),
 	// guarded by mu, so two presses never interleave their events.
 	doorOpening bool
+	// video is the door station's video through the anchor (S-49), nil for a
+	// call without one; guarded by mu.
+	video *callVideo
 
 	// Music on hold (S-33), guarded by mu: moh plays to the held party,
 	// ringMOH to a caller in place of ringback; the route and group carry
@@ -1113,6 +1121,7 @@ func (c *call) answer(w *leg) {
 				allowSignalSource(c.relay, legCallee, bres.Source())
 				calleeAns = ans
 			}
+			c.noteVideoAnswer(bres.Body(), bres.Source())
 		}
 		off, _ := media.ParseAudioSDP(c.inv.Body())
 		body = c.anchoredAnswerA(off, calleeAns)
@@ -1131,7 +1140,9 @@ func (c *call) answer(w *leg) {
 	// 64*T1).
 	c.s.m.response(sip.StatusOK)
 	c.settleReliable(true) // the 2xx follows the PRACK of a reliable 18x
+	c.answerWrite.Lock()
 	err := c.dss.WriteResponse(res)
+	c.answerWrite.Unlock()
 	if err == nil {
 		c.mu.Lock()
 		if !c.ended {
@@ -1380,7 +1391,10 @@ func (c *call) byeA() {
 	if c.dss == nil {
 		return // a call Hello placed has no caller dialog
 	}
-	if res := c.dss.InviteResponse; res == nil || !res.IsSuccess() {
+	c.answerWrite.Lock() // the 200 may still be going out (see answerWrite)
+	res := c.dss.InviteResponse
+	c.answerWrite.Unlock()
+	if res == nil || !res.IsSuccess() {
 		// The 200 went out through the raw transaction (voicemail, feature
 		// codes), so sipgo's session never recorded it: its InviteResponse
 		// is nil (Bye dereferences it and panics) or only the last

@@ -64,6 +64,49 @@ is relayed like any DTMF.
 Provisioning an "Open door" key on the phones (Yealink DSS DTMF key, Grandstream WP
 DialDTMF softkey, and so on) is not done yet: the template keys must first be confirmed
 on hardware.
+
+## Video and the camera picture
+
+Two separate things, both optional:
+
+**Video in the call.** A door station that offers H.264 video in its SDP (as the caller,
+or when a user dials its number) has the video carried to the phone that answers, if that
+phone's SDP accepts it. The anchor opens a second pair of ports for the stream and relays
+its RTP and its RTCP (the phone's keyframe requests) unchanged; both SDPs carry a video
+m-line with Hello's own address. A phone that does not take the video gets none, and the
+station's offer is answered with a refused (port 0) video line. A call with no station
+never carries video. After a takeover by another node, a transfer or a re-anchor the call
+continues with audio only. Only H.264 over plain RTP is carried (no SRTP, no VP8).
+
+**The camera picture in the console.** Give a station the address of its camera under
+**Extensions**, the station's drawer, **Camera** (administrators), or with
+`PUT /api/v1/extensions/{id}/camera`: an MJPEG stream (`multipart/x-mixed-replace`) or a
+snapshot address (a JPEG, fetched again every 2 s), http or https, with the camera's user
+name and password (HTTP basic). The password is stored sealed and never returned. Hello
+fetches the picture itself (`GET /api/v1/extensions/{id}/camera/view`, viewers and above),
+so the browser needs no route to the camera and never sees its credentials. An `rtsp://`
+address is refused: a browser cannot show it, and Hello does not transcode.
+
+The fetch uses the guarded client that every outbound request of an administrator's
+choosing uses: loopback and link-local addresses are never reachable, and a camera on a
+private network is reachable only when that network is listed in
+`HELLO_DOOR_CAMERA_ALLOW` (comma-separated CIDRs such as `192.168.10.0/24`, on
+hello-control). A camera outside it answers `502` naming the setting. One node shows at
+most eight pictures at once (`429` above), and an MJPEG stream ends after ten minutes.
+
+## Grandstream WP door systems
+
+A WP8x6 or WP810/820/822/825 lists the stations that can call its extension (a station that
+names the extension, or a ring group it is in, or any station when the extension is in a
+Door group) as door systems in its configuration: up to ten entries from `P32000` in steps
+of five (service type 0, GDS; account 1; the station's name and number). The access
+password `P32004` is never written: Hello sends the sealed door-open code itself when the
+answering user dials `*50`, so the code never reaches a phone's configuration. These
+P-values follow the official WP8x6 (1.0.3.39) and WP810/822/825 (1.0.11.83) templates;
+whether a WP then shows the station's video and an Open door key for a station with no
+access password is for a WP on the bench to confirm. The WP856 and the Yealink, Poly,
+Snom and Fanvil phones get none.
+
 ## Doorbell webhook
 
 A doorbell that cannot register as a SIP phone (a camera doorbell, a smart button, a
@@ -104,7 +147,3 @@ Sign the exact bytes sent (an empty body signs `timestamp + "."`). Answers:
 
 Triggers are audited as `webhook:<name>` without the body, and each ring or chime
 writes a CDR with kind `door`.
-
-## Not here yet
-
-The door camera preview.
