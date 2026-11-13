@@ -525,19 +525,19 @@ func TestOAuthFlowThroughTheService(t *testing.T) {
 	}
 	state := u[len("https://crm.example/auth?client=cid&state="):]
 	state = state[:len(state)-len("&redirect=https://hello.example"+CallbackPath)]
-	if _, err := r.svc.Callback(ctx, "wrong", "good"); !errors.Is(err, ErrBadState) {
+	if _, _, err := r.svc.Callback(ctx, "wrong", "good"); !errors.Is(err, ErrBadState) {
 		t.Fatalf("wrong state = %v", err)
 	}
-	if _, err := r.svc.Callback(ctx, state, "bad"); err == nil {
+	if _, _, err := r.svc.Callback(ctx, state, "bad"); err == nil {
 		t.Fatal("a bad code was accepted")
 	}
-	if _, err := r.svc.Callback(ctx, state, "good"); !errors.Is(err, ErrBadState) {
+	if _, _, err := r.svc.Callback(ctx, state, "good"); !errors.Is(err, ErrBadState) {
 		t.Fatalf("a state must be single use, got %v", err)
 	}
 	u, _ = r.svc.Connect(ctx, "admin", r.conn.ID)
 	state = u[len("https://crm.example/auth?client=cid&state="):]
 	state = state[:len(state)-len("&redirect=https://hello.example"+CallbackPath)]
-	if id, err := r.svc.Callback(ctx, state, "good"); err != nil || id != r.conn.ID {
+	if id, _, err := r.svc.Callback(ctx, state, "good"); err != nil || id != r.conn.ID {
 		t.Fatalf("callback = %d, %v", id, err)
 	}
 	v, _ := r.svc.Get(ctx, r.conn.ID)

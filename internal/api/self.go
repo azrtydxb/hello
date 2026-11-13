@@ -139,6 +139,7 @@ type selfExtensionView struct {
 	Number           string `json:"number"`
 	Name             string `json:"name"`
 	DND              bool   `json:"dnd"`
+	DNDSource        string `json:"dndSource"`
 	ForwardAlways    string `json:"forwardAlways"`
 	ForwardBusy      string `json:"forwardBusy"`
 	ForwardNoAnswer  string `json:"forwardNoAnswer"`
@@ -146,7 +147,7 @@ type selfExtensionView struct {
 }
 
 func selfView(e store.Extension) selfExtensionView {
-	return selfExtensionView{ID: e.ID, Number: e.Number, Name: e.Name, DND: e.DND, ForwardAlways: e.ForwardAlways,
+	return selfExtensionView{ID: e.ID, Number: e.Number, Name: e.Name, DND: e.DND, DNDSource: e.DNDSource, ForwardAlways: e.ForwardAlways,
 		ForwardBusy: e.ForwardBusy, ForwardNoAnswer: e.ForwardNoAnswer, VoicemailEnabled: e.VoicemailEnabled}
 }
 

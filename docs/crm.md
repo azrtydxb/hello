@@ -4,7 +4,10 @@ Hello can write every external call into a CRM, show the caller's name from
 the CRM on an incoming call, and attach a link to the recording. This page
 covers the connector framework (`internal/crm`) and the first connector,
 HubSpot (spec `.procoder/specs/integrations.md`, phase P6). Later connectors
-(Salesforce, Pipedrive, Zoho, ...) plug into the same framework.
+(Salesforce, Pipedrive, Zoho, ...) plug into the same framework. Connectors that
+every user signs in to with their own account (Outlook and Google contacts and
+calendar, phase P18) are described in
+[Outlook and Google](contacts-calendar.md).
 
 ## What it does
 

@@ -401,8 +401,8 @@ Prerequisite: `user-accounts` merged (the `user` role, user email and extension 
 - **P14 Pipedrive** private-app OAuth, call logs, recording upload, person lookup.
 - **P15 Zoho CRM** REST connector (lookup, Calls module logging with recording link) plus the note that Zoho's native PhoneBridge click-to-call is reachable only through the Zoho Telephony Marketplace, which is not planned, so Zoho dialling uses the browser extension.
 - **P16 Zendesk and Freshdesk** sidebar apps (packaged for the customer to upload) and ticket-from-call.
-- **P17 Slack notifications, n8n node, Make app.**
-- **P18 Outlook/Google contacts lookup and calendar-based DND** (I-56).
+- **P17 Slack notifications, n8n node, Make app.** Built (`internal/slack`, `integrations/n8n`, `integrations/make`, `docs/slack.md`, `docs/n8n-make.md`, migration `00108`): a `voicemail.received` event emitted by hello-sip, Slack destinations (incoming webhook or bot token, sealed) with a durable queue, retries and dead letters, the Slack console page and admin API; an n8n community node (trigger with signature verification, place call, get/list calls, find contact) and the Make app files, both reusing the generic webhook and REST surface of P2 and P7. Decisions are in `.procoder/ask/decisions.md` (Integrations P17 and P18). Not tested: real Slack, n8n and Make accounts.
+- **P18 Outlook/Google contacts lookup and calendar-based DND** (I-56). Built (`internal/crm/outlook`, `internal/crm/google`, `internal/crm/calendar.go`, `docs/contacts-calendar.md`, migration `00109`): per-user connections in the connector framework, contact lookup by the called user's own address book for inbound caller names, the calendar poller and `extensions.dnd_source`, the Connected accounts page. Not tested: real Microsoft 365 and Google accounts.
 
 **Wave 3**
 

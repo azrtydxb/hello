@@ -17,6 +17,7 @@ type Mem struct {
 	nextID     int64
 	connectors map[int64]*memConnector
 	conns      map[int64]*memConn // by connector id
+	uconns     map[[2]int64]*memConn
 	connSeq    int64
 	states     map[string]memState
 	logs       map[int64]*LogRow
@@ -51,7 +52,7 @@ var _ Repo = (*Mem)(nil)
 
 // NewMem returns an empty Mem.
 func NewMem() *Mem {
-	return &Mem{Now: time.Now, connectors: map[int64]*memConnector{}, conns: map[int64]*memConn{},
+	return &Mem{Now: time.Now, connectors: map[int64]*memConnector{}, conns: map[int64]*memConn{}, uconns: map[[2]int64]*memConn{},
 		states: map[string]memState{}, logs: map[int64]*LogRow{}, maps: map[[2]int64]Mapping{}}
 }
 
@@ -135,6 +136,11 @@ func (m *Mem) DeleteConnector(_ context.Context, id int64) error {
 	}
 	delete(m.connectors, id)
 	delete(m.conns, id)
+	for k := range m.uconns {
+		if k[0] == id {
+			delete(m.uconns, k)
+		}
+	}
 	for k, l := range m.logs {
 		if l.ConnectorID == id {
 			delete(m.logs, k)
@@ -203,6 +209,11 @@ func (m *Mem) SetConnectionStatus(_ context.Context, id int64, status, lastError
 			c.row.Status, c.row.LastError = status, lastError
 		}
 	}
+	for _, c := range m.uconns {
+		if c.row.ID == id {
+			c.row.Status, c.row.LastError = status, lastError
+		}
+	}
 	return nil
 }
 
@@ -253,7 +264,17 @@ func (m *Mem) ActiveConnectors(context.Context, *sql.Tx) ([]ConnectorRow, error)
 	defer m.mu.Unlock()
 	var out []ConnectorRow
 	for id, c := range m.connectors {
-		if cn, ok := m.conns[id]; ok && c.row.Enabled && cn.row.Status != StatusRevoked {
+		if !c.row.Enabled {
+			continue
+		}
+		active := false
+		if cn, ok := m.conns[id]; ok && cn.row.Status != StatusRevoked {
+			active = true
+		}
+		for k, cn := range m.uconns {
+			active = active || (k[0] == id && cn.row.Status != StatusRevoked)
+		}
+		if active {
 			out = append(out, c.row)
 		}
 	}
@@ -544,4 +565,97 @@ func (m *Mem) Log(connectorID int64, callID string) (LogRow, bool) {
 		return *l, true
 	}
 	return LogRow{}, false
+}
+
+func (m *Mem) UserConnection(_ context.Context, connectorID, userID int64) (ConnectionRow, Tokens, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.uconns[[2]int64{connectorID, userID}]
+	if !ok {
+		return ConnectionRow{}, Tokens{}, ErrNotFound
+	}
+	return c.row, c.tokens, nil
+}
+
+func (m *Mem) SaveUserConnection(_ context.Context, connectorID, userID int64, t Tokens) (ConnectionRow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := [2]int64{connectorID, userID}
+	c, ok := m.uconns[k]
+	if !ok {
+		m.connSeq++
+		c = &memConn{row: ConnectionRow{ID: m.connSeq, ConnectorID: connectorID, Scope: "user", UserID: userID}}
+		m.uconns[k] = c
+	}
+	if t.Refresh == "" {
+		t.Refresh = c.tokens.Refresh
+	}
+	if t.Account == "" {
+		t.Account = c.tokens.Account
+	}
+	c.tokens = t
+	c.row.ExpiresAt, c.row.ExternalAccount, c.row.GrantedScopes = t.ExpiresAt, t.Account, joinScopes(t.Scopes)
+	c.row.Status, c.row.LastError, c.row.UpdatedAt = StatusConnected, "", m.Now()
+	return c.row, nil
+}
+
+func (m *Mem) DeleteUserConnection(_ context.Context, connectorID, userID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := [2]int64{connectorID, userID}
+	if _, ok := m.uconns[k]; !ok {
+		return ErrNotFound
+	}
+	delete(m.uconns, k)
+	return nil
+}
+
+func (m *Mem) userRows(match func(k [2]int64) bool) []ConnectionRow {
+	var out []ConnectionRow
+	for k, c := range m.uconns {
+		if match(k) {
+			out = append(out, c.row)
+		}
+	}
+	slices.SortFunc(out, func(a, b ConnectionRow) int { return int(a.ID - b.ID) })
+	return out
+}
+
+func (m *Mem) UserConnections(_ context.Context, connectorID int64) ([]ConnectionRow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.userRows(func(k [2]int64) bool { return k[0] == connectorID }), nil
+}
+
+func (m *Mem) UserConnectionsOf(_ context.Context, userID int64) ([]ConnectionRow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.userRows(func(k [2]int64) bool { return k[1] == userID }), nil
+}
+
+func (m *Mem) SetCalendarSettings(_ context.Context, id int64, dnd bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, c := range m.uconns {
+		if c.row.ID == id {
+			c.row.CalendarDND = dnd
+			if !dnd {
+				c.row.CalendarActive, c.row.CalendarBusyUntil, c.row.CalendarError = false, time.Time{}, ""
+			}
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+func (m *Mem) SetCalendarState(_ context.Context, id int64, active bool, busyUntil, checkedAt time.Time, lastError string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, c := range m.uconns {
+		if c.row.ID == id {
+			c.row.CalendarActive, c.row.CalendarBusyUntil, c.row.CalendarCheckedAt, c.row.CalendarError = active, busyUntil, checkedAt, lastError
+			return nil
+		}
+	}
+	return ErrNotFound
 }

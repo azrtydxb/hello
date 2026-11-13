@@ -10,15 +10,16 @@ later phases. [Webhooks](#webhooks) push the events to your server.
 
 ## What is emitted
 
-| Event                     | When                                                                                                                                   |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `call.ringing`            | An extension starts ringing. A call that rings several extensions (a ring group) yields one event per ringing extension.               |
-| `call.answered`           | An extension answered. The calling extension of an internal or outbound call gets one too.                                             |
-| `call.ended`              | The call ended, for each extension it involved.                                                                                        |
-| `call.missed`             | The call reached an extension and nobody answered. A call answered by another member of a ring group is not missed for the others.     |
-| `call.recording.ready`    | A recording of the call was stored. It is stored after the call ends, so it follows `call.ended`. Carries `recordingId`, `durationMs`. |
-| `call.completed`          | The call detail record was stored. Carries `cdrId`; this is the point to log the call elsewhere.                                       |
-| `call.originate.progress` | A click-to-call changed state ([click-to-call](click-to-call.md)). Carries `originateId`, `state` and, for a failure, `reason`.        |
+| Event                     | When                                                                                                                                                                                                                                    |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `call.ringing`            | An extension starts ringing. A call that rings several extensions (a ring group) yields one event per ringing extension.                                                                                                                |
+| `call.answered`           | An extension answered. The calling extension of an internal or outbound call gets one too.                                                                                                                                              |
+| `call.ended`              | The call ended, for each extension it involved.                                                                                                                                                                                         |
+| `call.missed`             | The call reached an extension and nobody answered. A call answered by another member of a ring group is not missed for the others.                                                                                                      |
+| `call.recording.ready`    | A recording of the call was stored. It is stored after the call ends, so it follows `call.ended`. Carries `recordingId`, `durationMs`.                                                                                                  |
+| `call.completed`          | The call detail record was stored. Carries `cdrId`; this is the point to log the call elsewhere.                                                                                                                                        |
+| `call.originate.progress` | A click-to-call changed state ([click-to-call](click-to-call.md)). Carries `originateId`, `state` and, for a failure, `reason`.                                                                                                         |
+| `voicemail.received`      | A caller left a voicemail message in the box of an extension (one event per box for a voicemail group). Carries the caller in `from`, the box extension in `extension` and `to`, and `durationMs`. The audio is never part of an event. |
 
 Pages, intercoms and conference legs do not produce call events.
 
@@ -494,3 +495,7 @@ the event retention, dead letters after 30 days, by one replica at a time.
 
 Click-to-call (P3), recording links (P4) and the CRM connectors build on these
 events.
+
+[Slack notifications](slack.md), [n8n and Make](n8n-make.md) and
+[Outlook and Google contacts and calendar](contacts-calendar.md) use the events
+and the connector framework above.

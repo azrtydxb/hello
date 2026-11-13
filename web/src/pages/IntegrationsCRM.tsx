@@ -23,6 +23,7 @@ import {
   Alert,
   Badge,
   Button,
+  Checkbox,
   CodeBlock,
   ConfirmDialog,
   EmptyState,
@@ -42,7 +43,42 @@ import { usePolling } from "../usePolling";
 import "./platform/platform.css";
 
 /** The connector kinds the console can create. */
-const KINDS = [{ value: "hubspot", label: "HubSpot" }];
+const KINDS = [
+  { value: "hubspot", label: "HubSpot" },
+  {
+    value: "outlook",
+    label: "Outlook / Microsoft 365 (each user's own contacts and calendar)",
+  },
+  { value: "google", label: "Google (each user's own contacts and calendar)" },
+];
+
+/** Kinds every user signs in to with their own account. */
+const PERSONAL = new Set(["outlook", "google"]);
+
+const FEATURES = [
+  { id: "contacts", label: "Contacts name callers" },
+  { id: "calendar", label: "Calendar sets DND" },
+] as const;
+
+/** The scopes a personal connector asks for, by feature. */
+const PERSONAL_SCOPES: Record<string, Record<string, string>> = {
+  outlook: {
+    contacts: "Contacts.Read",
+    calendar: "Calendars.Read",
+  },
+  google: {
+    contacts: "https://www.googleapis.com/auth/contacts.readonly",
+    calendar: "https://www.googleapis.com/auth/calendar.freebusy",
+  },
+};
+
+function featuresOf(c: Record<string, string>): string[] {
+  const f = (c.features ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return f.length ? f : ["contacts"];
+}
 
 const HUBSPOT_SCOPES = [
   "crm.objects.contacts.read",
@@ -154,6 +190,8 @@ function NewConnector({
   const [clientId, setClientId] = useState("");
   const [secret, setSecret] = useState("");
   const [region, setRegion] = useState("na");
+  const [tenant, setTenant] = useState("organizations");
+  const [features, setFeatures] = useState<string[]>(["contacts"]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -166,7 +204,12 @@ function NewConnector({
         kind,
         name,
         clientSecret: secret,
-        config: { clientId, region },
+        config:
+          kind === "hubspot"
+            ? { clientId, region }
+            : kind === "outlook"
+              ? { clientId, tenant, features: features.join(",") }
+              : { clientId, features: features.join(",") },
       });
       setOpen(false);
       setSecret("");
@@ -195,7 +238,11 @@ function NewConnector({
         label="CRM"
         value={kind}
         options={KINDS}
-        onChange={(e) => setKind(e.target.value)}
+        onChange={(e) => {
+          const k = e.target.value;
+          setKind(k);
+          setName(KINDS.find((x) => x.value === k)?.label.split(" ")[0] ?? k);
+        }}
       />
       <Input
         label="Name"
@@ -219,15 +266,28 @@ function NewConnector({
         onChange={(e) => setSecret(e.target.value)}
         hint="Kept sealed; it is never shown again."
       />
-      <Select
-        label="HubSpot data centre"
-        value={region}
-        options={[
-          { value: "na", label: "United States / default" },
-          { value: "eu", label: "Europe (app-eu1)" },
-        ]}
-        onChange={(e) => setRegion(e.target.value)}
-      />
+      {kind === "hubspot" && (
+        <Select
+          label="HubSpot data centre"
+          value={region}
+          options={[
+            { value: "na", label: "United States / default" },
+            { value: "eu", label: "Europe (app-eu1)" },
+          ]}
+          onChange={(e) => setRegion(e.target.value)}
+        />
+      )}
+      {kind === "outlook" && (
+        <Input
+          label="Tenant"
+          value={tenant}
+          onChange={(e) => setTenant(e.target.value)}
+          hint="organizations (any work or school account), a tenant id or your domain."
+        />
+      )}
+      {PERSONAL.has(kind) && (
+        <FeaturePicker value={features} onChange={setFeatures} />
+      )}
       {err && (
         <Alert tone="bad" title="Could not add the connector">
           {err}
@@ -245,6 +305,41 @@ function NewConnector({
 
 type Tab = "connection" | "users" | "calls";
 
+/**
+ * What the personal connectors may do. Changing it asks users to connect
+ * again, because the sign-in asks only for what is on.
+ */
+function FeaturePicker({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (v: string[]) => void;
+}) {
+  return (
+    <fieldset>
+      <legend>What users may connect</legend>
+      {FEATURES.map((f) => (
+        <Checkbox
+          key={f.id}
+          label={f.label}
+          checked={value.includes(f.id)}
+          onChange={(e) =>
+            onChange(
+              e.target.checked
+                ? [...value, f.id]
+                : value.filter((x) => x !== f.id),
+            )
+          }
+        />
+      ))}
+      {value.length === 0 && (
+        <p role="alert">Pick at least one; contacts is used when none is.</p>
+      )}
+    </fieldset>
+  );
+}
+
 function ConnectorPanel({
   connector: c,
   reload,
@@ -255,7 +350,10 @@ function ConnectorPanel({
   say: (m: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("connection");
-  const st = statusLabel(c);
+  const personal = c.capabilities.userScope;
+  const st = personal
+    ? { text: "Per user", tone: "info" as BadgeTone }
+    : statusLabel(c);
   return (
     <article aria-label={`${c.name} connector`}>
       <h2>
@@ -270,11 +368,15 @@ function ConnectorPanel({
       )}
       <Tabs
         aria-label={`${c.name} sections`}
-        items={[
-          { id: "connection", label: "Connection" },
-          { id: "users", label: "Users" },
-          { id: "calls", label: "Calls" },
-        ]}
+        items={
+          personal
+            ? [{ id: "connection", label: "Connection" }]
+            : [
+                { id: "connection", label: "Connection" },
+                { id: "users", label: "Users" },
+                { id: "calls", label: "Calls" },
+              ]
+        }
         value={tab}
         onChange={setTab}
       />
@@ -300,6 +402,9 @@ function ConnectionTab({
   const [clientId, setClientId] = useState(c.config.clientId ?? "");
   const [secret, setSecret] = useState("");
   const [region, setRegion] = useState(c.config.region ?? "na");
+  const [tenant, setTenant] = useState(c.config.tenant ?? "organizations");
+  const [features, setFeatures] = useState<string[]>(featuresOf(c.config));
+  const personal = c.capabilities.userScope;
   const [enabled, setEnabled] = useState(c.enabled);
   const [recordings, setRecordings] = useState(c.recordings);
   const [ttlDays, setTtlDays] = useState(
@@ -324,7 +429,12 @@ function ConnectionTab({
         logMissed,
         fallbackOwner: fallback,
         linkTtlHours: Math.max(1, Math.round(Number(ttlDays) * 24)),
-        config: { clientId, region },
+        config:
+          c.kind === "hubspot"
+            ? { clientId, region }
+            : c.kind === "outlook"
+              ? { clientId, tenant, features: features.join(",") }
+              : { clientId, features: features.join(",") },
         ...(secret !== "" ? { clientSecret: secret } : {}),
       });
       setSecret("");
@@ -359,26 +469,46 @@ function ConnectionTab({
   const conn = c.connection;
   return (
     <div>
-      <PropertyList
-        items={[
-          { label: "Account", value: conn?.externalAccount || "—", mono: true },
-          {
-            label: "Granted scopes",
-            value: conn?.grantedScopes.length
-              ? conn.grantedScopes.join(", ")
-              : "—",
-          },
-          {
-            label: "Last change",
-            value: conn ? formatTime(conn.updatedAt) : "—",
-          },
-          {
-            label: "Redirect URI",
-            value: c.redirectUri ?? "needs HELLO_PUBLIC_URL",
-            mono: true,
-          },
-        ]}
-      />
+      {personal ? (
+        <PropertyList
+          items={[
+            {
+              label: "Redirect URI",
+              value: c.redirectUri ?? "needs HELLO_PUBLIC_URL",
+              mono: true,
+            },
+            {
+              label: "Connected users",
+              value: "Each user connects under My connections.",
+            },
+          ]}
+        />
+      ) : (
+        <PropertyList
+          items={[
+            {
+              label: "Account",
+              value: conn?.externalAccount || "—",
+              mono: true,
+            },
+            {
+              label: "Granted scopes",
+              value: conn?.grantedScopes.length
+                ? conn.grantedScopes.join(", ")
+                : "—",
+            },
+            {
+              label: "Last change",
+              value: conn ? formatTime(conn.updatedAt) : "—",
+            },
+            {
+              label: "Redirect URI",
+              value: c.redirectUri ?? "needs HELLO_PUBLIC_URL",
+              mono: true,
+            },
+          ]}
+        />
+      )}
       {c.kind === "hubspot" && (
         <details>
           <summary>HubSpot app settings</summary>
@@ -394,29 +524,59 @@ function ConnectionTab({
           <CodeBlock title="Scopes" code={HUBSPOT_SCOPES.join("\n")} />
         </details>
       )}
+      {personal && (
+        <details>
+          <summary>
+            {c.kind === "outlook" ? "Microsoft Entra app" : "Google Cloud app"}{" "}
+            settings
+          </summary>
+          <p>
+            {c.kind === "outlook"
+              ? "In the Microsoft Entra admin center register an application (a web platform), add this redirect URI, create a client secret and add these delegated Microsoft Graph permissions. They are read-only and need no administrator consent."
+              : "In the Google Cloud console create an OAuth client (web application), add this redirect URI, enable the People API and the Calendar API, and add these scopes to the consent screen. Keep the app in Testing for your own domain, or publish it internal."}
+          </p>
+          <CodeBlock
+            title="Redirect URI"
+            code={c.redirectUri ?? "Set HELLO_PUBLIC_URL first"}
+          />
+          <CodeBlock
+            title="Permissions"
+            code={features
+              .map((f) => PERSONAL_SCOPES[c.kind]?.[f])
+              .filter(Boolean)
+              .join("\n")}
+          />
+        </details>
+      )}
       <p>
-        <Button
-          icon="link"
-          onClick={() => void connect()}
-          disabled={!c.redirectUri || !c.hasClientSecret || !c.config.clientId}
-        >
-          {conn ? "Connect again" : "Connect"}
-        </Button>{" "}
-        <Button
-          variant="secondary"
-          icon="activity"
-          onClick={() => void test()}
-          disabled={!conn}
-        >
-          Test
-        </Button>{" "}
-        <Button
-          variant="secondary"
-          disabled={!conn}
-          onClick={() => setConfirm("disconnect")}
-        >
-          Disconnect
-        </Button>{" "}
+        {!personal && (
+          <>
+            <Button
+              icon="link"
+              onClick={() => void connect()}
+              disabled={
+                !c.redirectUri || !c.hasClientSecret || !c.config.clientId
+              }
+            >
+              {conn ? "Connect again" : "Connect"}
+            </Button>{" "}
+            <Button
+              variant="secondary"
+              icon="activity"
+              onClick={() => void test()}
+              disabled={!conn}
+            >
+              Test
+            </Button>{" "}
+            <Button
+              variant="secondary"
+              disabled={!conn}
+              onClick={() => setConfirm("disconnect")}
+            >
+              Disconnect
+            </Button>{" "}
+          </>
+        )}
         <Button
           variant="danger"
           icon="trash-2"
@@ -464,40 +624,53 @@ function ConnectionTab({
             onChange={(e) => setRegion(e.target.value)}
           />
         )}
+        {c.kind === "outlook" && (
+          <Input
+            label="Tenant"
+            value={tenant}
+            onChange={(e) => setTenant(e.target.value)}
+            hint="organizations, a tenant id or your domain."
+          />
+        )}
+        {personal && <FeaturePicker value={features} onChange={setFeatures} />}
         <Switch
           label="Enabled"
           checked={enabled}
           onChange={(e) => setEnabled(e.target.checked)}
         />
-        <Switch
-          label="Log missed calls"
-          checked={logMissed}
-          onChange={(e) => setLogMissed(e.target.checked)}
-        />
-        <Switch
-          label="Attach recording links"
-          hint="Off by default. A link to the recording is written into the CRM record; anyone with the link can play it until it expires."
-          checked={recordings}
-          onChange={(e) => setRecordings(e.target.checked)}
-        />
-        {recordings && (
-          <Input
-            label="Recording link lifetime (days)"
-            type="number"
-            min={1}
-            max={365}
-            value={ttlDays}
-            onChange={(e) => setTtlDays(e.target.value)}
-            hint="Links of recent calls are renewed before they expire."
-          />
+        {!personal && (
+          <>
+            <Switch
+              label="Log missed calls"
+              checked={logMissed}
+              onChange={(e) => setLogMissed(e.target.checked)}
+            />
+            <Switch
+              label="Attach recording links"
+              hint="Off by default. A link to the recording is written into the CRM record; anyone with the link can play it until it expires."
+              checked={recordings}
+              onChange={(e) => setRecordings(e.target.checked)}
+            />
+            {recordings && (
+              <Input
+                label="Recording link lifetime (days)"
+                type="number"
+                min={1}
+                max={365}
+                value={ttlDays}
+                onChange={(e) => setTtlDays(e.target.value)}
+                hint="Links of recent calls are renewed before they expire."
+              />
+            )}
+            <Input
+              label="Fallback owner (CRM user id)"
+              value={fallback}
+              maxLength={64}
+              onChange={(e) => setFallback(e.target.value)}
+              hint="Owns the calls of users with no CRM user. Empty skips those calls."
+            />
+          </>
         )}
-        <Input
-          label="Fallback owner (CRM user id)"
-          value={fallback}
-          maxLength={64}
-          onChange={(e) => setFallback(e.target.value)}
-          hint="Owns the calls of users with no CRM user. Empty skips those calls."
-        />
         {err && (
           <Alert tone="bad" title="Not saved">
             {err}

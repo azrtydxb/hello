@@ -20,6 +20,14 @@ var (
 	ErrBadState      = errors.New("crm: unknown or expired state")
 	ErrRateLimited   = errors.New("crm: too many tests")
 	ErrForbidden     = errors.New("crm: not allowed")
+	// ErrUserScope is an organisation-level action on a connector every user
+	// signs in to with their own account (Outlook, Google).
+	ErrUserScope = errors.New("crm: the connector signs in per user")
+	// ErrNotUserScope is a personal sign-in on an organisation connector.
+	ErrNotUserScope = errors.New("crm: the connector does not sign in per user")
+	// ErrNoCalendar is a calendar setting on a connector or connection
+	// without calendar access.
+	ErrNoCalendar = errors.New("crm: the connection has no calendar access")
 )
 
 // ValidationError lists the fields of a request that failed validation.
@@ -57,6 +65,9 @@ type Service struct {
 	Tokens *TokenManager
 	Lookup *Lookup
 	Links  LinkMinter
+	// DND switches a user's DND for the calendar (spec I-56); nil leaves
+	// the calendar setting unavailable.
+	DND DNDSetter
 	// PublicURL is HELLO_PUBLIC_URL; without it the OAuth flow is off.
 	PublicURL string
 	Log       *slog.Logger
@@ -342,6 +353,9 @@ func (s *Service) Connect(ctx context.Context, actor string, id int64) (string, 
 	if !ok || !isOA {
 		return "", ErrNotOAuth
 	}
+	if conn.Capabilities().UserScope {
+		return "", ErrUserScope
+	}
 	cfg, err := s.Tokens.Config(ctx, cur)
 	if err != nil {
 		return "", err
@@ -356,37 +370,49 @@ func (s *Service) Connect(ctx context.Context, actor string, id int64) (string, 
 	return oa.AuthURL(cfg, s.redirectURI(), state), nil
 }
 
-// Callback completes the OAuth flow: the state names the connector and the
-// administrator who started it. It returns the connector id.
-func (s *Service) Callback(ctx context.Context, state, code string) (int64, error) {
+// Callback completes the OAuth flow: the state names the connector and who
+// started it. personal is set when a user signed in to their own account
+// (Outlook, Google); the handler then returns to the user's page, not the
+// administrators'. It returns the connector id.
+func (s *Service) Callback(ctx context.Context, state, code string) (id int64, personal bool, err error) {
 	id, actor, err := s.Repo.TakeState(ctx, state)
 	if err != nil {
-		return 0, ErrBadState
+		return 0, false, ErrBadState
 	}
+	userID, actor := parseActor(actor)
+	personal = userID != 0
 	cur, err := s.Repo.GetConnector(ctx, id)
 	if err != nil {
-		return 0, ErrBadState
+		return 0, false, ErrBadState
 	}
 	conn, ok := s.Tokens.Providers(cur.Kind)
 	oa, isOA := conn.(OAuth)
 	if !ok || !isOA {
-		return id, ErrNotOAuth
+		return id, personal, ErrNotOAuth
+	}
+	if conn.Capabilities().UserScope != personal {
+		return id, personal, ErrBadState
 	}
 	cfg, err := s.Tokens.Config(ctx, cur)
 	if err != nil {
-		return id, err
+		return id, personal, err
 	}
 	t, err := oa.Exchange(ctx, cfg, s.redirectURI(), code)
 	if err != nil {
 		_ = s.Repo.Audit(ctx, actor, "connect_failed", "crm_connector", strconv.FormatInt(id, 10))
-		return id, err
+		return id, personal, err
 	}
-	if _, err := s.Repo.SaveOrgConnection(ctx, id, t); err != nil {
-		return id, err
+	if personal {
+		_, err = s.Repo.SaveUserConnection(ctx, id, userID, t)
+	} else {
+		_, err = s.Repo.SaveOrgConnection(ctx, id, t)
+	}
+	if err != nil {
+		return id, personal, err
 	}
 	_ = s.Repo.Audit(ctx, actor, "connect", "crm_connector", strconv.FormatInt(id, 10))
 	s.Lookup.Invalidate()
-	return id, nil
+	return id, personal, nil
 }
 
 // Disconnect removes the connection, revokes the token at the CRM when it

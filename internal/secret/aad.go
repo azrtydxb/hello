@@ -26,3 +26,10 @@ func CRMSecretAAD(connectorID int64) string { return fmt.Sprintf("crm:%d:client_
 func CRMTokenAAD(connectorID int64, which string) string {
 	return fmt.Sprintf("crm:%d:%s", connectorID, which)
 }
+
+// CRMUserTokenAAD is the additional data a per-user CRM connection's access
+// or refresh token is sealed under. It names the user, so a token copied to
+// another user's connection row does not open.
+func CRMUserTokenAAD(connectorID, userID int64, which string) string {
+	return fmt.Sprintf("crm:%d:user:%d:%s", connectorID, userID, which)
+}

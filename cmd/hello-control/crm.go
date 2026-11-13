@@ -14,7 +14,9 @@ import (
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/crm"
+	_ "github.com/azrtydxb/hello/internal/crm/google"  // registers the Google contacts and calendar connector
 	_ "github.com/azrtydxb/hello/internal/crm/hubspot" // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/outlook" // registers the Outlook contacts and calendar connector
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/safehttp"
@@ -30,6 +32,9 @@ type crmWiring struct {
 	Hook    events.TxHook
 	worker  *crm.Worker
 	renewer *crm.Renewer
+	// calendar polls the calendars of users who turned calendar DND on
+	// (spec I-56).
+	calendar *crm.CalendarWorker
 }
 
 // newCRM builds the CRM services. Recording links (spec I-33, I-53) come
@@ -46,16 +51,18 @@ func newCRM(cfg config.Control, st *store.Store, db *sql.DB, box *secret.Box, vk
 	lookup := &crm.Lookup{Repo: repo, Tokens: tokens, Cache: crm.ValkeyCache{Client: vk.Client}, Log: clog}
 	hook := &crm.Hook{Repo: repo, Providers: providers}
 	return &crmWiring{
-		Service: &crm.Service{Repo: repo, Tokens: tokens, Lookup: lookup, Links: links, PublicURL: cfg.AI.PublicURL, Log: clog},
-		Hook:    hook.Handle,
-		worker:  &crm.Worker{Repo: repo, Tokens: tokens, Links: links, Metrics: metrics, Log: clog},
-		renewer: &crm.Renewer{Repo: repo, Log: clog},
+		Service:  &crm.Service{Repo: repo, Tokens: tokens, Lookup: lookup, Links: links, PublicURL: cfg.AI.PublicURL, DND: st, Log: clog},
+		Hook:     hook.Handle,
+		worker:   &crm.Worker{Repo: repo, Tokens: tokens, Links: links, Metrics: metrics, Log: clog},
+		renewer:  &crm.Renewer{Repo: repo, Log: clog},
+		calendar: &crm.CalendarWorker{Repo: repo, Tokens: tokens, DND: st, Locker: st, Log: clog},
 	}
 }
 
 // Run starts the worker and the renewer; it returns when ctx ends.
 func (w *crmWiring) Run(ctx context.Context) {
 	go w.renewer.Run(ctx)
+	go w.calendar.Run(ctx)
 	w.worker.Run(ctx)
 }
 

@@ -10,6 +10,10 @@ export interface CRMCapabilities {
   clickToCall: boolean;
   screenPop: boolean;
   ticket: boolean;
+  /** Every user signs in with their own account (Outlook, Google). */
+  userScope: boolean;
+  /** The connector can read whether the user is busy. */
+  calendar: boolean;
 }
 
 export type CRMConnectionStatus = "connected" | "needs_reauth" | "revoked";
@@ -177,4 +181,57 @@ export function setCRMUser(
   return request("PUT", `${base}/${id}/users/${userId}`, {
     body: { externalUserId },
   });
+}
+
+/** A user's own connection to an Outlook or Google connector. */
+export interface MyConnection {
+  status: CRMConnectionStatus;
+  externalAccount?: string;
+  grantedScopes: string[];
+  lastError?: string;
+  updatedAt: string;
+  calendarDnd: boolean;
+  calendarActive: boolean;
+  calendarBusyUntil?: string;
+  calendarCheckedAt?: string;
+  calendarError?: string;
+}
+
+export interface MyConnector {
+  id: number;
+  kind: string;
+  name: string;
+  /** What the administrator enabled: contacts, calendar. */
+  features: string[];
+  capabilities: CRMCapabilities;
+  connection: MyConnection | null;
+}
+
+const mine = "/api/v1/me/connections";
+
+export async function listMyConnections(
+  signal?: AbortSignal,
+): Promise<MyConnector[]> {
+  const r = await request<{ items: MyConnector[] }>("GET", mine, { signal });
+  return r.items;
+}
+
+/** Starts the user's own sign-in; the browser goes to the returned address. */
+export async function connectMyConnection(id: number): Promise<string> {
+  const r = await request<{ authorizeUrl: string }>(
+    "POST",
+    `${mine}/${id}/connect`,
+  );
+  return r.authorizeUrl;
+}
+
+export function disconnectMyConnection(id: number): Promise<void> {
+  return request("DELETE", `${mine}/${id}`);
+}
+
+export function setMyCalendarDND(
+  id: number,
+  enabled: boolean,
+): Promise<MyConnection> {
+  return request("PUT", `${mine}/${id}/calendar-dnd`, { body: { enabled } });
 }

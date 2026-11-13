@@ -30,6 +30,7 @@ import (
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/prov/redirect"
 	"github.com/azrtydxb/hello/internal/secret"
+	"github.com/azrtydxb/hello/internal/slack"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/turn"
@@ -216,6 +217,12 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Log: log.With("component", "webhooks"),
 	}
 	evSvc.Hooks = append(evSvc.Hooks, hooks.Hook())
+	// Slack notifications (spec integrations P17): queued in the same
+	// ingest transaction, sent by a worker on each replica.
+	slackSvc := &slack.Service{Store: &slack.PG{DB: db}, Box: box, PublicURL: cfg.AI.PublicURL, Log: log.With("component", "slack")}
+	evSvc.Hooks = append(evSvc.Hooks, slackSvc.Hook())
+	slackWorker := &slack.Worker{Svc: slackSvc, Metrics: slack.NewMetrics(metrics.Registry), Log: log.With("component", "slack")}
+	go slackWorker.Run(ctx)
 	dispatcher := &webhook.Dispatcher{
 		Svc: hooks, Locker: st, Metrics: webhook.NewMetrics(metrics.Registry), Log: log.With("component", "webhooks"),
 		RetentionDays: cfg.EventRetentionDays,
@@ -240,6 +247,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	go sweeper.Run(ctx)
 	apiCfg := api.Config{
 		CRM:             crmSvc.Service,
+		Slack:           slackSvc,
 		Events:          evSvc,
 		Webhooks:        hooks,
 		AIAgent:         agent,

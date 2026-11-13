@@ -1,0 +1,23 @@
+{
+  "fileVersion": 1,
+  "generalCodeFiles": {
+    "base": "general/base.imljson"
+  },
+  "components": {
+    "connection": {
+      "hello": { "label": "Hello PBX", "type": "apikey", "dir": "connections/hello" }
+    },
+    "webhook": {
+      "call-event": { "label": "Hello call event", "type": "web", "dir": "webhooks/call-event" }
+    },
+    "module": {
+      "watch-calls": { "label": "Watch Call Events", "moduleType": "instant_trigger", "actionCrud": null, "dir": "modules/watch-calls" },
+      "place-call": { "label": "Place a Call", "moduleType": "action", "actionCrud": "create", "dir": "modules/place-call" },
+      "get-call": { "label": "Get a Call Record", "moduleType": "search", "actionCrud": "read", "dir": "modules/get-call" },
+      "list-calls": { "label": "List Calls", "moduleType": "search", "actionCrud": "search", "dir": "modules/list-calls" },
+      "find-contact": { "label": "Find a Contact by Number", "moduleType": "search", "actionCrud": "read", "dir": "modules/find-contact" },
+      "make-api-call": { "label": "Make an API Call", "moduleType": "universal", "actionCrud": null, "dir": "modules/make-api-call" }
+    }
+  },
+  "origins": []
+}

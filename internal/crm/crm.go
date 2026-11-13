@@ -29,6 +29,13 @@ type Capabilities struct {
 	ClickToCall bool `json:"clickToCall"`
 	ScreenPop   bool `json:"screenPop"`
 	Ticket      bool `json:"ticket"`
+	// UserScope marks a connector each user signs in to with their own
+	// account (Outlook, Google): its lookups search the callee's own
+	// contacts, not an organisation's.
+	UserScope bool `json:"userScope"`
+	// Calendar marks a connector that can say whether the user is busy
+	// (the Calendar interface).
+	Calendar bool `json:"calendar"`
 }
 
 // Contact is a CRM contact found by phone number.
@@ -116,6 +123,22 @@ type Connector interface {
 	// ResolveUser maps a Hello user's verified email to the CRM user id;
 	// empty means the CRM has no such user.
 	ResolveUser(ctx context.Context, c Conn, email string) (string, error)
+}
+
+// Busy is what a calendar says about a moment.
+type Busy struct {
+	// Busy is set while an event the user attends, or an out-of-office
+	// block, covers the moment.
+	Busy bool
+	// Until is when the busy stretch ends (the latest end of the events that
+	// overlap it); zero when not busy.
+	Until time.Time
+}
+
+// Calendar is implemented by connectors that read a user's calendar.
+type Calendar interface {
+	// Busy reports whether the user is busy at the given moment.
+	Busy(ctx context.Context, c Conn, at time.Time) (Busy, error)
 }
 
 // OAuth is implemented by connectors that authorise with OAuth 2.
