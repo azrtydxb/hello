@@ -67,7 +67,7 @@ func (c *Connector) ValidateConfig(cfg map[string]string) (map[string]string, er
 			// Freshdesk has no client id; an empty one is accepted so the
 			// console form can share its fields with the other connectors.
 			if v != "" {
-				return nil, errors.New("Freshdesk has no client id")
+				return nil, errors.New("freshdesk has no client id")
 			}
 		default:
 			return nil, fmt.Errorf("unknown setting %q", k)

@@ -30,7 +30,12 @@ func newDirectEnv(t *testing.T, publicURL string) *crmEnv {
 	conn := zendesk.New(zd.Client())
 	conn.Base = zd.URL
 	repo := crm.NewMem()
-	tm := &crm.TokenManager{Repo: repo, Providers: func(k string) (crm.Connector, bool) { return conn, k == "zendesk" }}
+	tm := &crm.TokenManager{Repo: repo, Providers: func(k string) (crm.Connector, bool) {
+		if k == "fakecrm" {
+			return &crmFake{}, true
+		}
+		return conn, k == "zendesk"
+	}}
 	svc := &crm.Service{Repo: repo, Tokens: tm, Lookup: &crm.Lookup{Repo: repo, Tokens: tm}, PublicURL: publicURL}
 	f, _, _, _ := newAcctFake(t)
 	srv := httptest.NewServer(Handler(Config{Store: evStore{f}, CRM: svc, Log: slog.New(slog.DiscardHandler), SessionTTL: time.Hour}))
@@ -81,6 +86,11 @@ func TestCRMDirectConnectorAndSidebarApp(t *testing.T) {
 	if code, _, _ := e.do(t, "alice", "GET", connPath(id)+"/app", nil); code != 403 {
 		t.Fatalf("a non-administrator got the app: %d", code)
 	}
+	// A missing connector is a 404; a connector kind with no app is a 409.
+	e.want(t, 404, "carol", "GET", connPath(int64(99999))+"/app", nil)
+	other := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{
+		"kind": "fakecrm", "name": "Plain", "clientSecret": "x", "config": map[string]string{"clientId": "c"}})
+	e.want(t, 409, "carol", "GET", connPath(other["id"])+"/app", nil)
 	// No public URL: no app.
 	e2 := newDirectEnv(t, "")
 	c2 := e2.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "zendesk", "name": "Z", "clientSecret": "x", "config": cfg})

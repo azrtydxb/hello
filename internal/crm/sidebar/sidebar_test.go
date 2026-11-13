@@ -3,6 +3,7 @@ package sidebar
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -82,7 +83,7 @@ func TestAddressIsValidatedAndEscaped(t *testing.T) {
 	if strings.Contains(js, "</script>") {
 		t.Fatalf("script break-out: %s", js[:300])
 	}
-	if _, _, err := Build("hubspot", "https://hello.example.com"); err != ErrNoApp {
+	if _, _, err := Build("hubspot", "https://hello.example.com"); !errors.Is(err, ErrNoApp) {
 		t.Fatalf("hubspot = %v", err)
 	}
 }
