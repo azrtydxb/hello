@@ -59,14 +59,6 @@ type ScheduleDay struct {
 	To   string `json:"to"`
 }
 
-func parseClock(s string) (int, bool) {
-	t, err := time.Parse("15:04", s)
-	if err != nil || len(s) != 5 {
-		return 0, false
-	}
-	return t.Hour()*60 + t.Minute(), true
-}
-
 // Validate reports why the schedule is unusable.
 func (s Schedule) Validate() error {
 	if len(s.Days) == 0 {

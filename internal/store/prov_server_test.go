@@ -44,3 +44,31 @@ func TestProvServerTransport(t *testing.T) {
 		}
 	}
 }
+
+// TestProvServerBackupAndSRV fails if the first backup is not handed to a
+// UDP phone, SRV mode reaches a vendor other than Grandstream, SRV keeps a
+// port or a backup, or a TLS phone is given a UDP backup (S-20).
+func TestProvServerBackupAndSRV(t *testing.T) {
+	p := ProvSettings{SIPServer: "192.0.2.10:5060", SIPBackupServers: []string{"192.0.2.21:5062", "192.0.2.22:5060"}}
+	s := p.server(prov.Yealink, "T54W")
+	if s.Backup == nil || s.Backup.Host != "192.0.2.21" || s.Backup.Port != 5062 || s.DNSMode != prov.DNSA || s.Host != "192.0.2.10" {
+		t.Errorf("udp = %+v %+v", s, s.Backup)
+	}
+	if s := (ProvSettings{SIPServer: "192.0.2.10:5060"}).server(prov.Yealink, "T54W"); s.Backup != nil {
+		t.Errorf("no backups configured, got %+v", s.Backup)
+	}
+
+	p.SIPSRV = "sip.hello.example.com"
+	gs := p.server(prov.Grandstream, "WP836")
+	if gs.DNSMode != prov.DNSSRV || gs.Host != "sip.hello.example.com" || gs.Port != 0 || gs.Backup != nil {
+		t.Errorf("grandstream srv = %+v", gs)
+	}
+	if yl := p.server(prov.Yealink, "T54W"); yl.DNSMode != prov.DNSA || yl.Host != "192.0.2.10" || yl.Port != 5060 || yl.Backup == nil {
+		t.Errorf("yealink under srv = %+v", yl)
+	}
+
+	p.SIPTLSServer, p.SIPTLSModels = "192.0.2.10:5061", []string{"grandstream:WP"}
+	if tls := p.server(prov.Grandstream, "WP836"); tls.Transport != "tls" || tls.Backup != nil || tls.DNSMode != prov.DNSA || tls.Port != 5061 {
+		t.Errorf("tls = %+v", tls)
+	}
+}

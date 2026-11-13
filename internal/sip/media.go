@@ -250,6 +250,7 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	relay.SetCodecs(legCallee, offered.Codecs, offered.DTMFPayloadType)
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
+	c.startVideo(offer)
 	c.mu.Lock()
 	c.anchored = true
 	c.anchorReason = reason
@@ -342,7 +343,7 @@ func (c *call) anchoredAnswerAs(app string, offer, calleeAnswer media.AudioSDP) 
 		app = "hello"
 	}
 	c.applyNegotiated(ans, "answer", app)
-	return ans.Build(c.anchorHost, r.LegPort(legCaller), "sendrecv")
+	return c.withVideo(c.cryptoAnswer(ans, offer).Build(c.anchorHost, r.LegPort(legCaller), "sendrecv"), legCaller)
 }
 
 // applyNegotiated records the codecs the call settled on: the relay's two
@@ -506,12 +507,30 @@ func legCodecs(l *leg) []string {
 // caller's order, rtpmap and fmtp lines kept). When the filter leaves
 // nothing (a G.722-only caller calling a G.711-only trunk) the offer is
 // the caller's unfiltered list: the callee decides.
-func (c *call) anchoredOfferB(offer media.AudioSDP, allow []string) []byte {
+func (c *call) anchoredOfferB(offer media.AudioSDP, allow []string, l *leg) []byte {
 	r := c.relay
 	if r == nil {
 		return nil
 	}
-	return filteredOffer(offer, allow).Build(c.anchorHost, r.LegPort(legCallee), "sendrecv")
+	return c.withVideo(c.cryptoOffer(filteredOffer(offer, allow).PlainOffer(), l).Build(c.anchorHost, r.LegPort(legCallee), "sendrecv"), legCallee)
+}
+
+// calleeCryptoOK applies a fork's 200 OK to the callee leg's SRTP state and
+// reports whether the call may go on (false only when the fork's policy
+// requires SRTP and the answer did not deliver it). A body that does not
+// parse changes nothing.
+func (c *call) calleeCryptoOK(w *leg, bres *sip.Response) bool {
+	if !c.isAnchored() {
+		return true
+	}
+	if w == nil || bres == nil || len(bres.Body()) == 0 {
+		return !c.calleeSRTP(w).required()
+	}
+	ans, err := media.ParseAudioSDP(bres.Body())
+	if err != nil {
+		return true
+	}
+	return c.learnCalleeCrypto(w, ans)
 }
 
 // filteredOffer is offer restricted to allow, or to every supported codec
@@ -537,6 +556,7 @@ func (c *call) isAnchored() bool {
 // S-5.1). The callback runs on the relay's stats ticker and at Close, never
 // on the RTP path.
 func (c *call) observeRelay(relay *media.Relay) {
+	c.watchSecure(relay)
 	m := c.s.deps.Media
 	relay.Observe(func(st media.RelayStats) {
 		if m != nil {
@@ -589,10 +609,14 @@ func (c *call) closeMedia() {
 	c.anchored = false
 	c.mu.Unlock()
 	c.confLeave()
+	c.closeVideo()
 	if rec != nil {
 		if r, by := rec.stop(); r != nil {
 			c.storeRecording(r, by)
 		}
+	}
+	if relay != nil || c.soloSecure() != nil {
+		c.srtpGaugeRelease()
 	}
 	if relay != nil {
 		if m := c.s.deps.Media; m != nil {
@@ -667,8 +691,14 @@ func (c *call) reanchorLive(reason AnchorReason) bool {
 	cur := c.negotiatedOr(off)
 	c.applyNegotiated(cur, "", "") // logged with the answer below
 	var calleeAns media.AudioSDP
-	if ansB, ok := reinvite(w, cur.Build(host, relay.LegPort(legCallee), "sendrecv")); ok {
+	wl := c.winnerLeg()
+	if ansB, ok := reinvite(w, c.cryptoOffer(cur.PlainOffer(), wl).Build(host, relay.LegPort(legCallee), "sendrecv")); ok {
 		if a, err := media.ParseAudioSDP(ansB); err == nil {
+			if !c.learnCalleeCrypto(wl, a) {
+				relay.Close()
+				c.anchorFailed("re-anchor SRTP", errors.New("the callee did not answer with the required crypto"))
+				return false
+			}
 			relay.SetTarget(legCallee, udpAddr(a.Address, a.Port))
 			calleeAns = a
 		}
@@ -679,6 +709,7 @@ func (c *call) reanchorLive(reason AnchorReason) bool {
 	}
 	if ansA, ok := reinviteA(dss, c.anchoredAnswerA(cur, calleeAns)); ok {
 		if a, err := media.ParseAudioSDP(ansA); err == nil {
+			learnCrypto(relay, legCaller, a)
 			relay.SetTarget(legCaller, udpAddr(a.Address, a.Port))
 		}
 	} else {
@@ -700,6 +731,13 @@ func (c *call) reanchorLive(reason AnchorReason) bool {
 		c.startRecordingFlow("dtmf")
 	}
 	return true
+}
+
+// winnerLeg is the winning fork (nil without one).
+func (c *call) winnerLeg() *leg {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.winner
 }
 
 // winnerSession is the winning fork's dialog session (nil without one).
@@ -897,6 +935,9 @@ func (c *call) storeRecording(rec *media.Recorder, by string) {
 // (spec S-4). Digits also flow into the call's feature-code buffer, so an
 // INFO dtmf-relay *1 and an in-band *1 behave the same.
 func (c *call) relayDTMF(leg string, digit byte) {
+	if leg == legCallee && c.fmDigit(nil, digit) {
+		return // a follow-me target is being asked to press 1
+	}
 	if leg == legCallee && c.screenDigit(digit) {
 		return // the assistant answers the screening prompt
 	}
@@ -944,14 +985,17 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	// on the codec the call is running.
 	off = c.midCallOffer(off)
 	ansDir := mirrorDirection(dir)
-	ans := off.Build(c.anchorHost, c.legPortFor(fromCaller), ansDir)
+	relay := c.anchorRelay()
+	learnCrypto(relay, legName(fromCaller), off) // a rekey on this leg
+	ans := keepSecurity(relay, legName(fromCaller), off).Build(c.anchorHost, c.legPortFor(fromCaller), ansDir)
+	ans = c.withVideo(ans, sideOf(fromCaller))
 	res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", ans)
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.HeaderClone(&s.contact))
 	s.send(tx, res)
 	// The peer gets our SDP in the same direction (a held side hears
 	// silence because the held side stopped sending).
-	peer := off.Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir)
+	peer := c.withVideo(keepSecurity(relay, legName(!fromCaller), off).Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir), sideOf(!fromCaller))
 	if fromCaller {
 		c.noteSDP(sessCaller, ans)
 		c.noteSDP(sessCallee, peer)
@@ -964,7 +1008,9 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	c.mu.Unlock()
 	if fromCaller {
 		if w != nil {
-			_, _ = reinvite(w.session(), peer)
+			if body, ok := reinvite(w.session(), peer); ok {
+				c.learnPeerAnswer(relay, legCallee, body)
+			}
 		}
 		c.haRefresh()
 		return
@@ -973,7 +1019,9 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	dss := c.dss
 	c.mu.Unlock()
 	if dss != nil {
-		_, _ = reinviteA(dss, peer)
+		if body, ok := reinviteA(dss, peer); ok {
+			c.learnPeerAnswer(relay, legCaller, body)
+		}
 	}
 	c.haRefresh()
 }
@@ -1158,6 +1206,7 @@ func (c *call) byeCallerRaw() {
 	inv, tag := c.inv, c.vmTag
 	c.mu.Unlock()
 	if inv == nil {
+		c.s.log.Warn("no BYE sent to caller: the call has no INVITE", "correlation_id", c.id)
 		return
 	}
 	target := inv.Recipient
@@ -1182,7 +1231,7 @@ func (c *call) byeCallerRaw() {
 	defer cancel()
 	res, err := c.s.do(ctx, req)
 	if err != nil {
-		c.s.log.Debug("announcement BYE failed", "error", err)
+		c.s.log.Warn("BYE to caller on the raw dialog failed", "correlation_id", c.id, "error", err)
 		return
 	}
 	c.s.m.response(res.StatusCode)
@@ -1205,6 +1254,15 @@ func allowSignalSource(relay *media.Relay, leg, source string) {
 // stranger can claim the leg, and a phone behind NAT (whose SDP names a
 // private address) still has its media accepted.
 func handOverLeg(relay *media.Relay, leg string, target *net.UDPAddr, source string) {
+	relay.ResetCrypto(leg) // the previous endpoint's keys are not the new one's
+	moveLeg(relay, leg, target, source)
+}
+
+// moveLeg is handOverLeg for the same endpoint at a new address (or an
+// endpoint whose keys were negotiated already): the leg's source policy
+// starts over from the new address and the SRTP state is left alone, so a
+// phone that roams mid-call keeps its encryption.
+func moveLeg(relay *media.Relay, leg string, target *net.UDPAddr, source string) {
 	host, _ := splitHostPort(source)
 	if ip := net.ParseIP(host); ip != nil {
 		relay.ResetSources(leg, ip)
@@ -1212,4 +1270,12 @@ func handOverLeg(relay *media.Relay, leg string, target *net.UDPAddr, source str
 		relay.ResetSources(leg)
 	}
 	relay.SetTarget(leg, target)
+}
+
+// sideOf names the relay leg of the caller's side (true) or the callee's.
+func sideOf(caller bool) string {
+	if caller {
+		return legCaller
+	}
+	return legCallee
 }

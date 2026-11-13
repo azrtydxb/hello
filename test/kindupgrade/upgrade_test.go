@@ -285,6 +285,41 @@ func TestKindRollingUpgrade(t *testing.T) {
 	a, b := e.phone(t, caller), e.phone(t, callee)
 	register(t, a)
 	register(t, b)
+	// Registering on one hello-sip node says nothing about the other: Kamailio
+	// may dispatch the INVITE to a node that has not yet loaded the snapshot
+	// holding the callee's device, which then answers from voicemail and the
+	// callee never rings. Place the call once both nodes run the current
+	// configuration revision.
+	eventually(t, 2*time.Minute, "both hello-sip nodes on the current config revision", func() error {
+		var v struct {
+			ConfigRevision *int64 `json:"configRevision"`
+			Members        []struct {
+				ID             string
+				State          string
+				ConfigRevision int64 `json:"configRevision"`
+			}
+		}
+		if err := c.do("GET", "/api/v1/cluster", nil, &v, 200); err != nil {
+			return err
+		}
+		if v.ConfigRevision == nil {
+			return fmt.Errorf("the cluster reports no config revision")
+		}
+		n := 0
+		for _, m := range v.Members {
+			if !strings.HasPrefix(m.ID, "hello-sip-") {
+				continue
+			}
+			n++
+			if m.ConfigRevision < *v.ConfigRevision {
+				return fmt.Errorf("%s is on revision %d, want %d", m.ID, m.ConfigRevision, *v.ConfigRevision)
+			}
+		}
+		if n < 2 {
+			return fmt.Errorf("%d hello-sip members, want 2", n)
+		}
+		return nil
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
@@ -303,7 +338,11 @@ func TestKindRollingUpgrade(t *testing.T) {
 	if err != nil || out.Status != 200 {
 		t.Fatalf("dial = %+v, %v", out, err)
 	}
-	in := <-got
+	var in *sipua.Incoming
+	select {
+	case in = <-got:
+	case <-time.After(30 * time.Second):
+	}
 	if in == nil {
 		t.Fatal("the callee never received the call")
 	}

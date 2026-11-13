@@ -289,7 +289,18 @@ func (c2 *call) awaitTransfer(from *call, w *leg, legs []*leg, kind, transfereeE
 				c2.connected = true
 				c2.mu.Unlock()
 				ev.leg.ack(nil, "") // confirm the target's answer first
-				c2.handOver(from, ev.leg)
+				if !c2.handOver(from, ev.leg) {
+					// The target's policy demands SRTP and it would not take
+					// it: the call ends, it is never carried in the clear.
+					from.end(sip.StatusNotAcceptableHere, cdr.SideSystem, kind+" transfer: the target would not take SRTP", ResultFailed)
+					s.m.Transfers.WithLabelValues(kind, TransferFailed).Inc()
+					if c2.transferNotify != nil {
+						c2.transferNotify("SIP/2.0 488 Not Acceptable Here", true)
+					} else {
+						c2.notifyRefer(w, "SIP/2.0 488 Not Acceptable Here", true)
+					}
+					return
+				}
 				c2.publish()
 				if c2.maxTimer == nil {
 					c2.mu.Lock()
@@ -365,9 +376,9 @@ func (c2 *call) transferFailed(from *call, w *leg, kind string, code int) {
 
 // handOver moves the caller's media from the transferee's leg to the new
 // leg: the bridge sequence of re-INVITEs, each answering the other.
-func (c2 *call) handOver(from *call, l *leg) {
-	if c2.handOverAnchored(from, l) {
-		return
+func (c2 *call) handOver(from *call, l *leg) bool {
+	if handled, ok := c2.handOverAnchored(from, l); handled {
+		return ok
 	}
 	aSDP := from.inv.Body()
 	if len(aSDP) == 0 {
@@ -376,16 +387,17 @@ func (c2 *call) handOver(from *call, l *leg) {
 	cSDP, ok := reinvite(l.session(), aSDP)
 	if !ok {
 		c2.addTrace("Transferred caller re-INVITE failed; media follows the old path")
-		return
+		return true
 	}
 	c2.noteSDP(sessCallee, aSDP) // the SDP last sent on each dialog, for a refresh
 	aAns, ok := reinviteA(from.dss, cSDP)
 	if !ok {
-		return
+		return true
 	}
 	c2.noteSDP(sessCaller, cSDP)
 	ackLate(l.session(), aAns)
 	c2.addTrace("Caller media handed to the transferred leg")
+	return true
 }
 
 // notifyRefer sends the transfer outcome to the transferee's phone as an
@@ -756,20 +768,22 @@ func byeDialog(s *Server, dss *sipgo.DialogServerSession) {
 // original call's relay. The caller already sends to the relay's caller
 // port; the target is re-INVITEd onto its callee port, and the caller is
 // refreshed with its own port in sendrecv (a transferor's hold is over).
-// false leaves the hand-over to the direct path (the call was not
-// anchored).
-func (c2 *call) handOverAnchored(from *call, l *leg) bool {
+// handled false leaves the hand-over to the direct path (the call was not
+// anchored). The target is a new endpoint: its leg is offered keys under
+// the target's own SRTP policy, and a target that demands SRTP and does not
+// deliver it ends the call (ok false), never carried in the clear.
+func (c2 *call) handOverAnchored(from *call, l *leg) (handled, ok bool) {
 	from.mu.Lock()
 	relay, host := from.relay, from.anchorHost
 	if relay == nil || !from.anchored {
 		from.mu.Unlock()
-		return false
+		return false, false
 	}
 	from.mu.Unlock()
 	off, err := media.ParseAudioSDP(from.inv.Body())
 	if err != nil {
 		if off, err = media.ParseAudioSDP(l.session().InviteResponse.Body()); err != nil {
-			return false
+			return false, false
 		}
 	}
 	c2.mu.Lock()
@@ -779,25 +793,43 @@ func (c2 *call) handOverAnchored(from *call, l *leg) bool {
 	// The target is offered the caller's codecs (filtered for a trunk) and
 	// the caller is refreshed with whatever the target picks, so the pair
 	// agrees on one codec.
-	cOffer := filteredOffer(off, legCodecs(l)).Build(host, relay.LegPort(legCallee), "sendrecv")
+	relay.ResetCrypto(legCallee) // the transfer target is a new endpoint with its own keys
+	lg := c2.calleeSRTP(l)
+	if lg.required() && !lg.tls {
+		return true, c2.refuseTransferSRTP(l, "the transfer target requires SRTP and is not on TLS")
+	}
+	cOffer := c2.cryptoOfferOn(relay, legCallee, lg, filteredOffer(off, legCodecs(l)).PlainOffer()).Build(host, relay.LegPort(legCallee), "sendrecv")
 	cAns, ok := reinvite(l.session(), cOffer)
 	if !ok {
 		c2.addTrace("Transferred leg re-INVITE onto the anchor failed; its media follows the original offer")
-		return true
+		return true, true
 	}
 	ackLate(l.session(), nil)
+	targetAns, _ := media.ParseAudioSDP(cAns)
+	if !c2.learnCalleeCrypto(l, targetAns) {
+		return true, c2.refuseTransferSRTP(l, "the transfer target did not answer with SRTP")
+	}
 	haAim(relay, legCallee, cAns)
 	c2.noteSDP(sessCallee, cOffer)
-	targetAns, _ := media.ParseAudioSDP(cAns)
 	neg := media.AnswerFor(off, targetAns)
 	c2.applyNegotiated(neg, "transfer", "")
-	aOffer := neg.Build(host, relay.LegPort(legCaller), "sendrecv")
+	aOffer := keepSecurity(relay, legCaller, neg).Build(host, relay.LegPort(legCaller), "sendrecv")
 	if aAns, ok := reinviteA(from.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
 		c2.noteSDP(sessCaller, aOffer)
 	}
 	c2.addTrace("Caller media handed to the transferred leg through the anchor")
-	return true
+	return true, true
+}
+
+// refuseTransferSRTP ends a transferred call whose target demands SRTP that
+// the call cannot give it, and reports false.
+func (c2 *call) refuseTransferSRTP(l *leg, why string) bool {
+	c2.srtpNote("refused")
+	c2.addTrace("Transfer refused: " + why)
+	l.bye()
+	c2.endBoth(why)
+	return false
 }
 
 // bridgeAnchored re-points an anchored original call's relay at the
@@ -816,18 +848,28 @@ func (other *call) bridgeAnchored(wB *leg) (*media.Relay, bool) {
 	if err != nil {
 		return nil, false
 	}
-	cOffer := filteredOffer(off, legCodecs(wB)).Build(host, relay.LegPort(legCallee), "sendrecv")
+	relay.ResetCrypto(legCallee) // the second party is a new endpoint with its own keys
+	lg := other.calleeSRTP(wB)
+	if lg.required() && !lg.tls {
+		other.refuseBridgeSRTP(wB, "the second party requires SRTP and is not on TLS")
+		return relay, false
+	}
+	cOffer := other.cryptoOfferOn(relay, legCallee, lg, filteredOffer(off, legCodecs(wB)).PlainOffer()).Build(host, relay.LegPort(legCallee), "sendrecv")
 	cAns, ok := reinvite(wB.session(), cOffer)
 	if !ok {
 		return relay, false
 	}
 	ackLate(wB.session(), nil)
+	targetAns, _ := media.ParseAudioSDP(cAns)
+	if !other.learnCalleeCrypto(wB, targetAns) {
+		other.refuseBridgeSRTP(wB, "the second party did not answer with SRTP")
+		return relay, false
+	}
 	haAim(relay, legCallee, cAns)
 	other.noteBridgeSDP(sessCallee, cOffer) // the SDP last sent on C's dialog, for a refresh
-	targetAns, _ := media.ParseAudioSDP(cAns)
 	neg := media.AnswerFor(off, targetAns)
 	other.applyNegotiated(neg, "transfer", "")
-	aOffer := neg.Build(host, relay.LegPort(legCaller), "sendrecv")
+	aOffer := keepSecurity(relay, legCaller, neg).Build(host, relay.LegPort(legCaller), "sendrecv")
 	if aAns, ok := reinviteA(other.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
 		other.noteBridgeSDP(sessCaller, aOffer)
@@ -835,20 +877,37 @@ func (other *call) bridgeAnchored(wB *leg) (*media.Relay, bool) {
 	return relay, true
 }
 
+// refuseBridgeSRTP ends an attended transfer's original call: the second
+// party demands SRTP that it cannot get, and the relay's far leg no longer
+// belongs to the old party, so the call cannot go on in the clear.
+func (other *call) refuseBridgeSRTP(wB *leg, why string) {
+	other.srtpNote("refused")
+	other.addTrace("Attended transfer refused: " + why)
+	wB.bye() // the second party was moved onto the anchor and cannot stay
+	other.endBoth(why)
+}
+
 // adoptRelay moves an anchored call's relay to c: the original call's end
 // no longer closes it (closeMedia sees no relay), its taps report to c, and
 // the media metrics keep counting one anchored session.
 func (c *call) adoptRelay(from *call, relay *media.Relay) {
 	from.mu.Lock()
+	var gauge int
+	var callerSRTP bool
 	if from.relay == relay {
 		from.relay = nil
 		from.anchored = false
+		// The node's SRTP leg gauge follows the relay to its new owner.
+		gauge, from.srtpGauge, callerSRTP = from.srtpGauge, 0, from.srtpA
 	}
 	reason, host := from.anchorReason, from.anchorHost
 	from.mu.Unlock()
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
+	c.watchSecure(relay)
 	c.mu.Lock()
+	c.srtpGauge += gauge
+	c.srtpA = c.srtpA || callerSRTP
 	c.relay, c.anchored, c.anchorReason = relay, true, reason
 	if c.anchorHost == "" {
 		c.anchorHost = host

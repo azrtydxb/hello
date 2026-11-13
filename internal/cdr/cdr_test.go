@@ -252,8 +252,8 @@ func (a *argsDB) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandT
 	return pgconn.NewCommandTag("INSERT 0 1"), nil
 }
 
-// TestCallQualityCDR fails if the three quality columns are not the last
-// insert arguments, carry anything but the record's values, or are non-NULL
+// TestCallQualityCDR fails if the three quality columns are not at their
+// positions in the insert arguments (the SRTP column rides last), carry anything but the record's values, or are non-NULL
 // for a record without quality (directly-media or unanswered call).
 func TestCallQualityCDR(t *testing.T) {
 	db := &argsDB{}
@@ -264,8 +264,11 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 35 {
-		t.Fatalf("insert takes %d arguments, want 35", len(db.args))
+	if len(db.args) != 39 {
+		t.Fatalf("insert takes %d arguments, want 39", len(db.args))
+	}
+	if db.args[33] != SRTPNone || db.args[34] != KeyExNone || db.args[35] != false {
+		t.Fatalf("srtp, key exchange, ice = %v, %v, %v, want the defaults %q, %q, false", db.args[33], db.args[34], db.args[35], SRTPNone, KeyExNone)
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
@@ -294,6 +297,36 @@ func TestCallQualityCDR(t *testing.T) {
 	gp, gl, gj := db.args[21].(*int64), db.args[22].(*int64), db.args[23].(*float64)
 	if *gp != 1000 || *gl != 12 || *gj != 37.5 {
 		t.Fatalf("quality = %d, %d, %v", *gp, *gl, *gj)
+	}
+}
+
+// TestFollowMeLegsCDR fails if the follow-me legs are not the last insert
+// argument, as a JSON array (empty for a call with none), or if the statement
+// does not write them to cdr_legs with the role follow_me.
+func TestFollowMeLegsCDR(t *testing.T) {
+	db := &argsDB{}
+	w := NewWriter(db, newCounter(), discard)
+	now := time.Now()
+	r := Record{CorrelationID: "fm", StartTime: now, EndTime: now}
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if got := db.args[38]; got != "[]" {
+		t.Fatalf("follow-me legs = %v, want [] for a call with none", got)
+	}
+	r.FollowMeLegs = []FollowMeLeg{
+		{Kind: "own", Extension: "101", Result: "no_answer"},
+		{Kind: "external", Trunk: "carrier", Result: "answered"},
+	}
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	var got []FollowMeLeg
+	if err := json.Unmarshal([]byte(db.args[38].(string)), &got); err != nil || len(got) != 2 || got[1] != r.FollowMeLegs[1] {
+		t.Fatalf("follow-me legs argument = %v (%v), want %+v", db.args[38], err, r.FollowMeLegs)
+	}
+	if !strings.Contains(insert, "INTO cdr_legs") || !strings.Contains(insert, "'follow_me'") {
+		t.Fatal("the insert does not write cdr_legs with the role follow_me")
 	}
 }
 
@@ -349,8 +382,8 @@ func TestCDRCodecColumns(t *testing.T) {
 	if err := w.write(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 35 || db.args[27] != nil || db.args[28] != nil {
-		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 35", db.args[27], db.args[28], len(db.args))
+	if len(db.args) != 39 || db.args[27] != nil || db.args[28] != nil {
+		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 39", db.args[27], db.args[28], len(db.args))
 	}
 	r.CallerCodec, r.CalleeCodec = "opus/48000", "PCMU/8000"
 	if err := w.write(context.Background(), r); err != nil {
@@ -359,7 +392,7 @@ func TestCDRCodecColumns(t *testing.T) {
 	if db.args[27] != "opus/48000" || db.args[28] != "PCMU/8000" {
 		t.Fatalf("codecs = %#v, %#v", db.args[27], db.args[28])
 	}
-	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client, peer_call_id, answered_by)") || !strings.Contains(insert, "$32, $33)") {
-		t.Fatal("the insert does not name the codec, origin, peer call id and answered_by columns with $28 to $33")
+	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client, peer_call_id, answered_by, srtp, srtp_keyex, ice)") || !strings.Contains(insert, "$35, $36)") {
+		t.Fatal("the insert does not name the codec, origin, peer call id, answered_by, srtp, key exchange and ice columns with $28 to $36")
 	}
 }

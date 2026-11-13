@@ -32,6 +32,14 @@ const (
 	Generic     Vendor = "generic"
 )
 
+// SIPMessage is the vendor's capability flag for SIP MESSAGE texting on the
+// handset (spec messaging-channels M-26). Only Grandstream is known to show
+// it, from its administration guide (P22650 in the built-in template); it is
+// unverified on hardware. Every other vendor is off until a lab check proves
+// its handset has a text UI, so the console offers desk-phone delivery only
+// to an extension with at least one phone that has it.
+func (v Vendor) SIPMessage() bool { return v == Grandstream }
+
 // Vendors lists every vendor, first-class ones first.
 var Vendors = []Vendor{Yealink, Poly, Grandstream, Snom, Fanvil, Generic}
 
@@ -51,12 +59,13 @@ const (
 	KindBoot      FileKind = "boot"      // /p/boot/<file>
 	KindUpload    FileKind = "upload"    // a discarded PUT
 	KindPhonebook FileKind = "phonebook" // /p/<token>/pb/<n>.xml and Poly's <mac>-directory.xml
+	KindSCEP      FileKind = "scep"      // /p/<token>/scep (S-25)
 	KindRingtone  FileKind = "ringtone"  // /p/<token>/ring/<name>.wav (S-43)
 	KindOther     FileKind = "other"     // anything not recognised
 )
 
 // FileKinds lists every file kind.
-var FileKinds = []FileKind{KindCommon, KindDevice, KindMaster, KindFirmware, KindCA, KindBoot, KindUpload, KindPhonebook, KindRingtone, KindOther}
+var FileKinds = []FileKind{KindCommon, KindDevice, KindMaster, KindFirmware, KindCA, KindBoot, KindUpload, KindPhonebook, KindRingtone, KindSCEP, KindOther}
 
 // Result is the outcome recorded on a fetch (spec S-14).
 type Result string
@@ -82,6 +91,11 @@ const (
 	ResultUploadDiscarded Result = "upload_discarded"
 	ResultNotFound        Result = "not_found"
 	ResultUnavailable     Result = "unavailable"
+	// ResultSCEPIssued is a SCEP PKIOperation that issued (or re-sent) a
+	// certificate; ResultSCEPRefused one answered with a failure, or a
+	// malformed SCEP request (S-25).
+	ResultSCEPIssued  Result = "scep_issued"
+	ResultSCEPRefused Result = "scep_refused"
 )
 
 // Results lists every fetch result.
@@ -89,14 +103,17 @@ var Results = []Result{
 	ResultServed, ResultNotModified, ResultUnknownToken, ResultMACMismatch, ResultNotAllowlisted,
 	ResultPlainHTTP, ResultRateLimited, ResultNoTemplate, ResultRenderError, ResultBootServed,
 	ResultBootHandoff, ResultBootReclaim, ResultBootDenied, ResultUploadDiscarded, ResultNotFound,
-	ResultUnavailable,
+	ResultUnavailable, ResultSCEPIssued, ResultSCEPRefused,
 }
 
 // RenderData is the only value a template sees (spec S-8). Nothing outside
 // it is reachable: its fields are plain data with no methods.
 type RenderData struct {
-	Phone  Phone
+	Phone Phone
+	// Line is the phone's first line. Lines holds its further lines (2 and
+	// up, in order; empty for a one-line phone), each a Line with N set.
 	Line   Line
+	Lines  []Line
 	Server Server
 	BLF    []BLFKey
 	// VMKey is the transfer-to-voicemail key (see PlaceVMKey); nil when the
@@ -128,13 +145,54 @@ type RenderData struct {
 	// Codecs is the HD voice codec plan: Opus first where the model has
 	// it, then G.722, PCMU and PCMA (see CodecInfo).
 	Codecs CodecInfo
+	// Overrides are the setting overrides of the phone's group and of the
+	// phone, resolved (see ResolveOverrides); Render applies them to the
+	// phone's own file after the template. Secret values are masked in
+	// previews.
+	Overrides []Override
+
 	// Ring is the ring map (phone-feature-parity S-44): the distinctive-ring
 	// rules that map each ring tag's Alert-Info to a tone, and the line's
 	// default tone (see RingInfo).
 	Ring RingInfo
+	// Wifi is the Wi-Fi setup of a handset (phone-feature-parity S-23, S-24);
+	// nil when the phone has no profile and no radio setting. Render fills
+	// Wifi.Keys for the phone's model.
+	Wifi *WifiInfo
+	// Sharing is the account-sharing role of a Grandstream WP8x6 in a phone
+	// group that enabled it (S-11); nil for any other phone.
+	Sharing *SharingInfo
 	// Emergency is the comma-separated emergency numbers of Hello's
 	// emergency-flagged outbound routes (digits only), empty when none.
 	Emergency string
+	// E911 is the phone's E911 and HELD provisioning (phone-feature-parity
+	// S-28); nil unless the phone's group has E911 on and the phone is a
+	// WP8x6. AlarmNumber is the number a WP8x6 dials for its alarm (*55), set
+	// only when the phone's group has an alarm destination (S-29).
+	E911        *E911Info
+	AlarmNumber string
+	// SCEP is the phone's SCEP client settings (phone-feature-parity
+	// S-25), nil when SCEP is not on for it. Dot1X is its 802.1X profiles,
+	// nil when there are none.
+	SCEP  *SCEPInfo
+	Dot1X *Dot1XInfo
+	// DoorStations are the door stations that can call the phone's
+	// extension (at most MaxDoorStations), for the Grandstream WP door
+	// system entries (spec phone-feature-parity S-49).
+	DoorStations []DoorStation
+}
+
+// E911Info is what a WP8x6 needs to ask Hello for its location (RFC 5985).
+type E911Info struct {
+	// Server is the location server address without a scheme:
+	// host[:port]/p/<token>/held. It carries the phone's token, so previews
+	// mask it like Prov.URL. The phone reaches it over HTTPS (P8566 = 1).
+	Server string
+	// IntervalMinutes is how often the phone asks again (30 to 1440).
+	IntervalMinutes int
+	// Numbers are the emergency numbers the E911 service watches for,
+	// separated by ";" as the phone takes them.
+	Numbers string
 }
 
 // SyslogInfo is a phone's syslog setting. Host is the sink's bare host and
@@ -174,6 +232,16 @@ func NewSyslogInfo(address, level string) *SyslogInfo {
 	return i
 }
 
+// MaxDoorStations is how many door system entries a WP takes (10).
+const MaxDoorStations = 10
+
+// DoorStation is a door station as a phone lists it: the number it calls
+// from and the name the phone shows.
+type DoorStation struct {
+	Number string
+	Name   string
+}
+
 // Phone is the phone itself, as templates and resolution see it.
 type Phone struct {
 	MAC           string // 12 lowercase hex digits, no separators
@@ -195,6 +263,11 @@ type Phone struct {
 	// Family is the Grandstream WP family of the model ("8x6", "856",
 	// "8xx"), empty for any other phone. Render fills it from Model.
 	Family string
+	// SCEPCapable is set for a model whose built-in template has SCEP keys
+	// (SupportsSCEP) and Wired8021X for one with wired 802.1X keys
+	// (SupportsWired8021X). Render fills both from Vendor and Model.
+	SCEPCapable bool
+	Wired8021X  bool
 	// FXO is set for the Grandstream HT813 (FXS port plus an FXO port to
 	// the PSTN): the template then writes the FXO disconnect supervision
 	// keys. Render fills it from Vendor and Model.
@@ -203,6 +276,9 @@ type Phone struct {
 
 // Line is the SIP account of the phone's bound device.
 type Line struct {
+	// N is the line number: 1 for the first line, 2 and up for Lines. Render
+	// sets it.
+	N           int
 	Username    string
 	AuthName    string
 	Password    string // the opened device secret; masked in previews
@@ -225,6 +301,10 @@ type Line struct {
 	// it, so the phone and Hello agree about a second call. False means the
 	// phone must not announce one.
 	CallWaiting bool
+	// SendAnonymous is the extension's phoneSendAnonymous flag: the
+	// Grandstream template writes the phone's "Send Anonymous" (P65, account
+	// 1) as 1 only when it is set, and writes nothing otherwise.
+	SendAnonymous bool
 	// ParkCode and ParkRetrieveCode are the call-park and park-retrieve
 	// feature codes, empty when none is configured.
 	ParkCode, ParkRetrieveCode string
@@ -249,7 +329,38 @@ type Server struct {
 	// vendor has a transport key and whose model HELLO_PROV_SIP_TLS_MODELS
 	// lists, registering with HELLO_PROV_SIP_TLS_SERVER (S-14).
 	Transport string
+	// DNSMode is DNSA (the default: the host is resolved by its A record)
+	// or DNSSRV (Grandstream only: the host is a name whose SRV records list
+	// the servers, and Port is 0). See S-20.
+	DNSMode string
+	// Backup is the backup registrar of a phone that registers over UDP
+	// with a fixed address, nil when none is configured or the phone
+	// resolves its servers by SRV (S-20).
+	Backup *Backup
+	// SRTP is the phone's media-encryption policy ("off", "optional" or
+	// "required") on a TLS phone; empty on a phone that registers over UDP,
+	// where Hello offers no crypto and the templates leave the phone's SRTP
+	// setting alone (phone-feature-parity S-15).
+	SRTP string
+	// SRTPKeyEx is "sdes" or "dtls" for a phone model that has the setting
+	// (GrandstreamDTLSKey), empty for the others and for a phone on UDP; ICE
+	// is "ice" or "auto" for a model that has the Media NAT Traversal
+	// setting (GrandstreamICEKey), empty otherwise (S-16).
+	SRTPKeyEx string
+	ICE       string
 	Expiry    int // registration expiry, seconds
+}
+
+// The DNS modes of Server.DNSMode.
+const (
+	DNSA   = "a"
+	DNSSRV = "srv"
+)
+
+// Backup is a backup registrar.
+type Backup struct {
+	Host string
+	Port int
 }
 
 // BLFKey is one busy-lamp-field key. Render places the keys of a Yealink,
@@ -475,6 +586,12 @@ func PhoneTokenAAD(phoneID int64) string { return "phone-token:" + strconv.Forma
 // PhoneAdminAAD is the context of a phone's sealed admin password.
 func PhoneAdminAAD(phoneID int64) string { return "phone-admin:" + strconv.FormatInt(phoneID, 10) }
 
+// SharingSecretAAD is the context of a phone group's sealed account sharing
+// password (P22523).
+func SharingSecretAAD(groupID int64) string {
+	return "account-sharing:" + strconv.FormatInt(groupID, 10)
+}
+
 // PhoneLDAPAAD and PhoneLDAPPrevAAD are the contexts of a phone's sealed
 // LDAP password and of the previous one kept after a rotation.
 func PhoneLDAPAAD(phoneID int64) string { return "phone-ldap:" + strconv.FormatInt(phoneID, 10) }
@@ -535,4 +652,27 @@ func AccountLabel(number, name string) string {
 		return name
 	}
 	return number + " (" + name + ")"
+}
+
+// E911SyncMinutes is how often a WP8x6 asks Hello for its location again; the
+// phone accepts 0 (never) or 30 to 1440.
+const E911SyncMinutes = 60
+
+// AlarmNumber is the number a WP8x6 dials for its alarm; Hello answers it
+// (spec S-29).
+const AlarmNumber = "*55"
+
+// NewE911 builds a phone's E911 data from its provisioning URL (the phone's
+// own URL with its token, ending in "/") and its emergency numbers (comma
+// separated, as P8385 takes them). nil when the URL is not an https one.
+func NewE911(provURL, numbers string) *E911Info {
+	rest, ok := strings.CutPrefix(provURL, "https://")
+	if !ok || rest == "" {
+		return nil
+	}
+	return &E911Info{
+		Server:          strings.TrimSuffix(rest, "/") + "/held",
+		IntervalMinutes: E911SyncMinutes,
+		Numbers:         strings.ReplaceAll(numbers, ",", ";"),
+	}
 }

@@ -92,7 +92,7 @@ type Queue struct {
 	CallbackDigit      string `json:"callbackDigit"`
 	// PromptLanguage is the queue's own prompt language; "" inherits (S-20).
 	PromptLanguage string `json:"promptLanguage"`
-	// Text settings (migration 00100, spec messaging-channels M-13): whether
+	// Text settings (migration 00095, spec messaging-channels M-13): whether
 	// the queue takes customer texts, how many open conversations each agent
 	// holds, when an unanswered one returns to the pool (0 never) and whether
 	// an agent on a call is offered none.

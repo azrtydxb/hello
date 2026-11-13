@@ -21,6 +21,11 @@ const TRUNK = {
   destinations: [{ host: "10.0.0.5", port: 5060, priority: 0, weight: 1 }],
   internalDialing: { mode: "off", patterns: [] },
   messaging: false,
+  geolocation: false,
+  faxMode: "passthrough",
+  anonymousPolicy: "honour",
+  assertedIdentity: "",
+  identityHeader: "pai",
   sessionTimers: "default",
   codecs: ["PCMU", "PCMA"],
   rejectAnonymous: false,
@@ -152,6 +157,70 @@ describe("Trunks", () => {
     });
   });
 
+  it("sets the anonymous call policy, asserted identity and identity header", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [TRUNK] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+      "PATCH /api/v1/trunks/4": () => json(TRUNK),
+    });
+    renderApp("/trunks");
+    const primary = await card(/carrier-primary/);
+    expect(within(primary).getByText("Anonymous calls")).toBeVisible();
+    fireEvent.click(
+      within(primary).getByRole("button", {
+        name: "Edit trunk carrier-primary",
+      }),
+    );
+    fireEvent.change(screen.getByLabelText("Anonymous calls"), {
+      target: { value: "always" },
+    });
+    fireEvent.change(screen.getByLabelText("Asserted identity"), {
+      target: { value: "+97142000999" },
+    });
+    fireEvent.change(screen.getByLabelText("Identity header"), {
+      target: { value: "ppi" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(
+      await screen.findByText("Trunk carrier-primary saved."),
+    ).toBeVisible();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      anonymousPolicy: "always",
+      assertedIdentity: "+97142000999",
+      identityHeader: "ppi",
+    });
+  });
+
+  it("turns the emergency location on for a trunk, off by default", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [TRUNK] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+      "PATCH /api/v1/trunks/4": () => json({ ...TRUNK, geolocation: true }),
+    });
+    renderApp("/trunks");
+    const primary = await card(/carrier-primary/);
+    expect(within(primary).getByText("Emergency location")).toBeVisible();
+    fireEvent.click(
+      within(primary).getByRole("button", {
+        name: "Edit trunk carrier-primary",
+      }),
+    );
+    const geo = screen.getByRole("switch", {
+      name: /Send the caller's location with emergency calls/,
+    });
+    expect(geo).not.toBeChecked();
+    fireEvent.click(geo);
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(
+      await screen.findByText("Trunk carrier-primary saved."),
+    ).toBeVisible();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      geolocation: true,
+    });
+  });
+
   it("sets a trunk's session timers to on, off or the default", async () => {
     const calls = mockApi({
       ...ME,
@@ -177,6 +246,33 @@ describe("Trunks", () => {
     ).toBeVisible();
     expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
       sessionTimers: "on",
+    });
+  });
+
+  it("sets the fax mode of a trunk: passthrough by default, T.38 on request", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [TRUNK] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+      "PATCH /api/v1/trunks/4": () => json({ ...TRUNK, faxMode: "t38" }),
+    });
+    renderApp("/trunks");
+    const primary = await card(/carrier-primary/);
+    expect(within(primary).getByText("Passthrough (G.711)")).toBeVisible();
+    fireEvent.click(
+      within(primary).getByRole("button", {
+        name: "Edit trunk carrier-primary",
+      }),
+    );
+    const fax = screen.getByLabelText("Fax") as HTMLSelectElement;
+    expect(fax.value).toBe("passthrough");
+    fireEvent.change(fax, { target: { value: "t38" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(
+      await screen.findByText("Trunk carrier-primary saved."),
+    ).toBeVisible();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      faxMode: "t38",
     });
   });
 
@@ -207,6 +303,84 @@ describe("Trunks", () => {
     await screen.findByText("Trunk carrier-primary created.");
     expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
       codecs: ["PCMU", "PCMA", "G722"],
+    });
+  });
+
+  it("defaults a trunk's media encryption to off and sends the policy chosen", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [] }),
+      "GET /api/v1/trunks/status": () => json({ items: [] }),
+      "POST /api/v1/trunks": () => json(TRUNK, 201),
+    });
+    renderApp("/trunks");
+
+    expect(await screen.findByText("No trunks yet")).toBeVisible();
+    fireEvent.click(screen.getAllByRole("button", { name: "New trunk" })[0]!);
+    const drawer = screen.getByRole("dialog", { name: "New trunk" });
+    const srtp = within(drawer).getByLabelText("SRTP");
+    expect(srtp).toHaveValue("off");
+    field("Name", "carrier-srtp");
+    field("Username", "acct1001");
+    field("Password (optional)", PASSWORD);
+    field("Host 1", "10.0.0.5");
+    fireEvent.change(srtp, { target: { value: "optional" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create trunk" }));
+    await screen.findByText("Trunk carrier-primary created.");
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
+      srtp: "optional",
+    });
+  });
+
+  it("does not offer Required SRTP on a trunk, since trunks are UDP", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [] }),
+      "GET /api/v1/trunks/status": () => json({ items: [] }),
+    });
+    renderApp("/trunks");
+
+    expect(await screen.findByText("No trunks yet")).toBeVisible();
+    fireEvent.click(screen.getAllByRole("button", { name: "New trunk" })[0]!);
+    const drawer = screen.getByRole("dialog", { name: "New trunk" });
+    const srtp = within(drawer).getByLabelText("SRTP");
+    const values = within(srtp)
+      .getAllByRole("option")
+      .map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(["off", "optional"]);
+    expect(drawer.textContent).toContain("Required is not available");
+  });
+
+  it("flags a trunk stored as Required and refuses to save it that way", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () =>
+        json({ items: [{ ...TRUNK, srtp: "required" }] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+      "PATCH /api/v1/trunks/4": () => json(TRUNK),
+    });
+    renderApp("/trunks");
+
+    expect(
+      await screen.findByText(/Required \(calls are refused/),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit trunk carrier-primary" }),
+    );
+    const drawer = await screen.findByRole("dialog");
+    const srtp = within(drawer).getByLabelText("SRTP");
+    expect(srtp).toHaveValue("required");
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(
+      await within(drawer).findByText(/Required needs a TLS trunk/),
+    ).toBeVisible();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+
+    fireEvent.change(srtp, { target: { value: "off" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    await screen.findByText("Trunk carrier-primary saved.");
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      srtp: "off",
     });
   });
 

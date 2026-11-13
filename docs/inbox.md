@@ -17,12 +17,16 @@ This is the first phase of the messaging channels. What works now:
   user, a ring group's users or the pool, with opening hours, and a text queue
   hands them to its agents by the queue's strategy (see
   [Routing and queues](#routing-and-queues));
-- Hello's own opt-out handling, retention and erasing a customer.
+- Hello's own opt-out handling, retention and erasing a customer;
+- sending SMS through a **Twilio** account (see "Sending through Twilio"):
+  outbound only;
+- a website chat widget for intranet pages and VPN users, served on the LAN only
+  (see "Website chat" below).
 
-Not yet: SMS through a carrier's web API (Twilio, Telnyx), WhatsApp, the chat
-widget, texts on desk phones, and AI. None of
-the providers that need an Internet-facing address is possible while Hello is
-reachable only on the LAN.
+Not yet: receiving texts from a carrier's web API (needs an Internet-facing
+address), Telnyx, WhatsApp, and AI. None of the providers that need an
+Internet-facing address is possible while Hello is reachable only on the LAN,
+and neither is a widget on a public website.
 
 ## Setting it up
 
@@ -42,6 +46,81 @@ reachable only on the LAN.
 
 A channel or a number that has conversations cannot be deleted (`409`):
 retention, or erasing the customer, removes them first.
+
+## Sending through Twilio
+
+A **Twilio** channel sends texts through your own Twilio account. Hello has no
+shared account or relay: the account, its numbers and its fees are yours.
+
+**What works, and what does not.** Hello is reachable only on the LAN, and
+Twilio delivers an inbound text by calling a public webhook. So a Twilio
+number **cannot receive** texts yet, and a customer's reply to a text from it
+does not arrive in the inbox. A conversation on a Twilio number starts with a
+**first-contact** text (below), and everything after that is Hello's outbound
+side: the agent's texts and their delivery status. Receiving needs the public
+listener, which is not built; do not plan on replies arriving.
+
+1. **Messaging > Channels > Add channel**, carrier **Twilio**: the account SID
+   (`AC` and 32 hex digits), the auth token, and optionally a Messaging Service
+   SID (`MG...`) when texts should leave through its sender pool instead of the
+   number. Hello checks the account with Twilio before it saves anything (a
+   refused token is `422`, an unreachable Twilio `502`), then seals the SID and
+   token with `HELLO_SECRET_KEY`. **The token is never shown again**, not in
+   the API, the console, a log or an audit row. To change it, enter the SID and
+   the token together; they replace the stored ones after Twilio accepts them.
+   **Test** asks Twilio whether the stored credentials work and the numbers can
+   be listed; it sends nothing. `GET /api/v1/messaging/channels/{id}/numbers`
+   lists the numbers of the account.
+2. **Add number**: the Twilio number in international format
+   (`+3270123456`). **Texts per minute** (default 60) caps how fast a number
+   sends; the rest wait queued.
+3. Before go-live, start the **A2P 10DLC** brand and campaign registration (and
+   toll-free verification if you want it) in your Twilio account. Hello only
+   sends; the registration, the carrier fees and what Twilio filters are
+   Twilio's. Unregistered US traffic is filtered or surcharged by carriers.
+
+**First contact.** Off by default. An administrator turns it on in **Messaging
+settings** ("Allowed with a consent attestation"). An operator or
+administrator then starts a conversation from the Inbox (**Text a customer**,
+or `POST /api/v1/inbox/conversations`): one customer number in international
+format, one message, the carrier number it leaves from, a confirmation that the
+customer agreed to be texted and a note saying how. The attestation and the
+note are stored on the conversation and the audit log records who sent it,
+never the number or the note. Hello refuses a number that opted out (`422`), a
+customer who already has an open conversation on that number (`409`, reply
+there), and a number that is not in international format (`400`). It is rate
+limited per agent (default 20 an hour) and per number (default 200 a day):
+`429`. There is no list, import or multi-recipient form, and there never will
+be: Hello is not a campaign tool.
+
+**How a text is sent, and what its state means.** A text is stored **queued**
+in the same transaction that checks the opt-out, then a worker claims it
+(**sending**) and calls Twilio once. It is sent **at most once**: if Twilio's
+answer is lost (a timeout, a dropped connection, a 5xx), Hello cannot know
+whether Twilio has the text, so it is never sent again; after five minutes it
+becomes **unknown** ("may have been delivered"). Otherwise it is **sent** when
+Twilio accepts it, then **delivered** or **failed** (with Twilio's error code)
+when Twilio reports it. There are no status callbacks on the LAN, so Hello
+**polls** Twilio for each text: every 5 seconds at first, backing off to every
+5 minutes, then every 30 minutes after the first hour, and it stops at the
+final state or after 48 hours. A text still queued after an hour (the channel
+is off) fails with `not_sent`. A reply can be up to 1600 characters (Twilio
+segments it); media is not sent.
+
+**Opt-out.** Twilio blocks a recipient who replied STOP and fails the send with
+error 21610. Hello records that as an opt-out on the number (source
+"carrier"), so its own list and the composer agree, and nobody can text that
+customer from that number.
+
+**When the carrier fails.** Five failed or lost sends in a row mark the channel
+**degraded** (a banner; sends continue and a good send clears it). A refused
+token (`401`) marks it **credentials invalid**: the text fails, later texts
+wait queued and are not sent, and the channel accepts no new ones until a
+working token is entered.
+
+Metrics: `hello_msg_outbound_total{provider,result}` (sent, failed, unknown).
+The send, status and settle workers run on every control replica; the store
+hands each text to one attempt, so two replicas never send the same text.
 
 ## Conversations
 
@@ -84,6 +163,58 @@ never "delivered". The composer shows how many texts a message makes (GSM-7:
 nothing more.
 
 Internal **notes** are visible to agents and supervisors and are never sent.
+
+## Contacts and names
+
+A customer's number is named for whoever reads it, at read time, from the same
+books as caller-name lookup: the extensions, **their own personal contacts**,
+the named books of their phones' groups, then the company book. A personal
+contact names the number for its owner only and is never stored on the
+conversation; a name from a shared book (extensions, company) is stored with
+its source, so everyone sees it. If no book names the number, the name the
+carrier sent is shown. **Add to contacts** in the conversation's details saves
+the number under a name: to your own contacts (a user an administrator has not
+linked to an extension has none), or, for an operator or administrator, to the
+company book.
+
+The details also show a **Call** button and the number's **recent calls**. The
+button opens the Dial page (click-to-call): Hello rings your own phone first and
+dials the customer when you answer. The list holds the latest calls to or from
+the number; a supervisor sees every such call, an agent only the calls their own
+extension took part in, as in their own call history. A chat visitor has neither.
+The numbers match by their last nine digits, so `0475 12 34 56` and
+`+32 475 12 34 56` are one customer.
+
+## Desk phones
+
+A text can follow the conversation to the desk phone. Two switches must both be
+on, both off by default: **Deliver to desk phones** on the number (Messaging
+channels) and **Show customer texts on my desk phone** in the user's profile.
+Then, when a conversation is assigned to or taken by that user, and for each
+later customer text while it is theirs, Hello queues a SIP MESSAGE to every
+registered phone of the user's extension (an unregistered phone gets it at its
+next REGISTER, within the text queue's TTL). The phone shows it from the
+customer, with the contact name resolved for that user, and a non-SMS channel
+is prefixed (`[WhatsApp] `). A text longer than 700 bytes is split into parts
+numbered `(1/3) `. Turning text messaging off ([messaging.md](messaging.md))
+stops phone delivery but never the inbox.
+
+A text typed on the phone to the customer's number replies into the
+conversation, in this order: the user's own open conversation with that
+customer; else an existing conversation with them on a number whose **owner
+extension** is the phone's extension (unassigned or the user's). It is sent as a
+reply from the web would be: the sender is the phone's authenticated extension
+(never the `From` header), an opted-out customer is refused, and it is limited
+to the text queue's per-minute rate. A refusal is answered to the phone as a
+text from the system with the reason (`403`, or `429` for the rate). A customer
+who is in another agent's open conversation is refused too, not texted around
+the inbox. A number with no conversation is not the inbox's and takes the
+ordinary external-number path unchanged: **a phone never makes first contact
+through the inbox**. Only text is accepted from a phone.
+
+Only Grandstream is known to show SIP MESSAGE on the handset (P22650 in the
+built-in template); other vendors are off until a lab check. A user whose phones
+are all of such vendors does not see the profile switch.
 
 ## Routing and queues
 
@@ -219,18 +350,125 @@ The page also:
   number**. It needs SMTP ([user-accounts.md](user-accounts.md)); the switch is
   in the settings.
 
+## Website chat
+
+A chat site is a widget an administrator embeds on **intranet pages** (or pages
+reached over a VPN). Visitors are anonymous; their chat arrives in the inbox as
+a conversation, and agents answer it there. It is **LAN only**: the public
+widget needs the public listener, which is not built.
+
+### Turning it on
+
+1. Set `HELLO_MSG_CHAT_LAN_ADDR` (for example `:8087`) on hello-control. Unset,
+   nothing listens and there is no extra port. Helm: `control.chat.lanAddr`.
+   `HELLO_MSG_CHAT_ENABLED=false` is the global kill switch (every `/chat`
+   request answers 503); `HELLO_MSG_CHAT_TRUSTED_PROXIES` lists the proxies whose
+   `X-Forwarded-For` is believed (the UI pods and the ingress controller; without
+   them every visitor shares one address and one set of limits);
+   `HELLO_MSG_CHAT_MAX_INFLIGHT` (500) and `HELLO_MSG_CHAT_MAX_STREAMS` (2000) bound
+   a pod.
+2. The listener has its own `http.Server` and serves only `/chat/*` and
+   `/healthz`; the admin API, the UI, OAuth and MCP are not routed on it. The
+   UI container proxies `/chat/` to it (`HELLO_CHAT_UPSTREAM`), so the widget is
+   on the same LAN host as the console; the Helm chart sets this when the
+   listener is on.
+3. **Messaging, Chat sites**: add a site, list the intranet origins that may
+   embed it (`scheme://host[:port]`), and copy the embed code:
+
+   ```html
+   <script
+     async
+     src="https://hello.lan/chat/v1/widget.js"
+     data-site="SITE_KEY"
+   ></script>
+   ```
+
+   The loader injects a sandboxed iframe on Hello's own origin, so the page's
+   scripts and styles can neither read nor break the chat. The frame is served
+   with `frame-ancestors` set to the site's allowed origins (`'none'` until
+   some are listed) and `default-src 'none'; script-src 'self'; style-src
+'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none';
+form-action 'none'`. A Turnstile site also allows Cloudflare's host for
+   scripts and frames, which its widget needs.
+
+### What a visitor sees
+
+A launcher bubble, an optional pre-chat form (name and email: off, optional or
+required; the retention period and a privacy policy link are shown, and
+consent is recorded), the conversation, a typing indicator and "Support"
+as the agents' name. Outside the site's opening hours, with no supervisor
+holding the inbox open, or with the live queue full, the widget offers to leave
+a message and an email address (or hides itself, per site). A visitor may end
+the chat and, when the site allows it, email themselves a transcript (three a
+day). Messages are plain text everywhere; a link in a visitor's message is
+clickable only in the inbox, with `rel="noopener noreferrer nofollow"` and one
+confirmation per host before it leaves Hello.
+
+### What an agent does
+
+The conversation is an ordinary inbox conversation (peer kind visitor) with the
+visitor's name, email, the page the chat started on and a coarse browser
+family. An agent can **block the visitor** (24 hours by default, 30 days at
+most; the day's network address too), **answer an offline chat by email** (the
+reply and no link are emailed to the address the visitor gave and kept in the
+conversation; the visitor sees it in the widget when they return; needs SMTP),
+and the visitor sees when an agent is typing and when their messages were read.
+
+### Abuse controls
+
+All of them are server-side and none trusts the `Origin` header (anyone can run
+`curl`):
+
+- **Challenge** at session creation: a stateless proof of work (default, 14 to
+  22 bits, no third party), Cloudflare Turnstile with the customer's own keys, or
+  none (the page warns). A solved nonce works once, only for the address it was
+  issued to, and expires in three minutes. The difficulty rises one level for 15
+  minutes while a site gets more than three times its usual session rate
+  (`hello_chat_challenge_raised_total`).
+- **Limits** (Valkey, with the same windows per pod in memory when Valkey does
+  not answer; never open): sessions 5 a minute and 30 an hour per address and 200
+  a minute per site; messages 20 a minute and 300 a day per visitor and 10,000 a
+  day per site; typing, history, event streams and transcripts have their own.
+  Over a limit the answer is `429` with `Retry-After` and no body.
+- **Caps**: 2000 characters a message (valid UTF-8, control and invisible
+  formatting characters removed, normalised), 16 KiB a request, one open
+  conversation per visitor, 200 messages before any agent reply, and the live
+  queue cap per site. A pod answers 503 beyond 500 requests in flight; each
+  request has a 10 second deadline; a pod holds at most 2000 event streams.
+- **Blocklist**: a blocked visitor gets a normal-looking `200` with a closed
+  state and reaches nobody. Addresses are only ever kept as an HMAC under a salt
+  that changes at 00:00 UTC.
+- **Content**: honeypot field, optional link stripping, no cookies, no
+  fingerprinting, the user agent reduced to a browser family, the page to host
+  and path.
+- **Not built**: attachments and the site logo (they need the media pipeline,
+  which is not on main).
+
+Visitors' names, emails, tokens, addresses and text never reach a log, a metric
+label or an audit row. Retention for finished chats is 90 days by default (a
+site can set its own); visitors with no chat left are removed after 30 days;
+erasing `visitor:<id>` removes the visitor's whole record.
+
+Metrics: `hello_chat_sessions_total{result}`, `hello_chat_messages_total{result}`,
+`hello_chat_rate_limited_total{rule}`, `hello_chat_challenge_raised_total`,
+`hello_chat_rejected_total{reason}` and `hello_chat_streams`.
+
 ## API
 
-| Route                                                                | Role and scope        |
-| -------------------------------------------------------------------- | --------------------- |
-| `/api/v1/messaging/channels` (+ `/{id}`, `/{id}/test`)               | admin, `admin`        |
-| `/api/v1/messaging/addresses` (+ `/{id}`, `/{id}/routing`)           | admin, `admin`        |
-| `/api/v1/messaging/settings`                                         | admin, `admin`        |
-| `/api/v1/messaging/optouts` (+ `/{id}/reconsent`)                    | admin, `admin`        |
-| `POST /api/v1/inbox/erase`                                           | admin, `admin`        |
-| `/api/v1/inbox/conversations...`, `/stats`, `/queues`                | operator, `messages`  |
-| `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream` | any agent, `messages` |
-| `/api/v1/me/inbox/agent` (GET, POST: log in, pause)                  | any agent, `messages` |
+| Route                                                                                     | Role and scope                |
+| ----------------------------------------------------------------------------------------- | ----------------------------- |
+| `/api/v1/messaging/channels` (+ `/{id}`, `/{id}/test`)                                    | admin, `admin`                |
+| `/api/v1/messaging/addresses` (+ `/{id}`, `/{id}/routing`)                                | admin, `admin`                |
+| `/api/v1/messaging/settings`                                                              | admin, `admin`                |
+| `/api/v1/messaging/optouts` (+ `/{id}/reconsent`)                                         | admin, `admin`                |
+| `POST /api/v1/inbox/erase`                                                                | admin, `admin`                |
+| `/api/v1/messaging/chat/sites` (+ `/{id}`, `/{id}/blocks`), `/chat/blocks/{id}`           | admin, `admin`                |
+| `/api/v1/inbox/conversations/{id}/block`, `/email-reply`, `/typing` (and `/me/inbox/...`) | operator or agent, `messages` |
+| `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`, `/api/v1/inbox/queues`           | operator, `messages`          |
+| `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream`                      | any agent, `messages`         |
+| `/api/v1/me/inbox/agent` (GET, POST: log in, pause)                                       | any agent, `messages`         |
+| `POST .../conversations/{id}/contact` (add to contacts)                                   | as the area it is in          |
+| `GET .../conversations/{id}/calls` (the number's recent calls)                            | as the area it is in          |
 
 Queues take `textEnabled`, `textCapacity`, `textReassignSeconds` and
 `textRequiresIdleVoice`.
@@ -242,7 +480,8 @@ Conversations list with `view` (`all`, `mine`, `unassigned`), `status`, `q`
 ## Metrics
 
 `hello_msg_inbound_total{provider,result}` (stored, duplicate, not_text,
-failed), `hello_msg_optout_total{source}`, `hello_msg_purged_total{kind}`,
+failed), `hello_msg_device_replies_total{result}` (sent, refused, failed: texts typed on
+a desk phone), `hello_msg_optout_total{source}`, `hello_msg_purged_total{kind}`,
 `hello_msg_unassigned` and `hello_msg_unassigned_oldest_seconds`, and for
 routing `hello_msg_assign_total{result}` (placed, assigned, full, lost,
 returned, after_hours_reply), `hello_msg_first_response_seconds`,
@@ -267,3 +506,10 @@ IP-authenticated trunk, and whether it accepts outbound MESSAGE for SMS, is
 unverified. With a real trunk check: receive a text; send a reply; a long reply
 (split); non-ASCII text; what the carrier does on STOP; what happens when the
 trunk refuses (the reply shows failed).
+
+With real Grandstream phones (WP822 and WP836, IM account `P22650 = 1`):
+assign a conversation to a user with both switches on and see the text on the
+phone; a long text arrives as numbered parts; reply from the phone and see it
+in the conversation and at the customer; a reply to an opted-out customer is
+refused with the reason shown on the phone; the contact name shows as the
+sender.

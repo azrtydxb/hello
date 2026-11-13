@@ -316,6 +316,10 @@ func emuYealink(m *emu) {
 	}
 	m.caFetch(c.take("static.trusted_certificates.url"))
 	m.firmware(c.opt("static.firmware.url"))
+	// TR-069 is off (S-22): no ACS can be reached behind Hello.
+	if got := c.take("static.managementserver.enable"); got != "0" {
+		m.t.Errorf("Yealink: static.managementserver.enable = %q, want 0", got)
+	}
 	// remote_phonebook.data.N.url is a full URL of one directory file.
 	slots := 0
 	for i := 1; i <= 5; i++ {

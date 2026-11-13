@@ -40,6 +40,22 @@ export interface Conversation {
   firstResponseAt: string | null;
   resolvedAt: string | null;
   createdAt: string;
+  /** What an agent sees of a website chat visitor; null for a text. */
+  chat?: ChatInfo | null;
+}
+
+/** The facts kept about a chat visitor (spec messaging-channels M-29). */
+export interface ChatInfo {
+  siteId: number;
+  /** The chat was left while nobody was available. */
+  offline: boolean;
+  /** The address the visitor gave, empty for none. */
+  email: string;
+  /** Hostname and path of the page the chat started on. */
+  page: string;
+  /** A coarse browser family, nothing more. */
+  browser: string;
+  blocked: boolean;
 }
 
 export type MessageState =
@@ -80,10 +96,22 @@ export interface InboxAgent {
   displayName: string;
 }
 
+/** A carrier number a supervisor may start a conversation from. */
+export interface InboxSender {
+  addressId: number;
+  address: string;
+  label: string;
+  channel: string;
+}
+
 export interface InboxStatus {
   enabled: boolean;
   unread: number;
   unassigned: number;
+  /** Whether email is configured, so an offline chat can be answered by email. */
+  emailReply?: boolean;
+  /** Empty for an agent and while first contact is off. */
+  senders: InboxSender[];
 }
 
 function query(params: Record<string, string | number | undefined>): string {
@@ -118,6 +146,41 @@ export interface InboxApi {
   ): Promise<Conversation>;
   setTags(id: number, tags: string[]): Promise<Conversation>;
   read(id: number): Promise<void>;
+  /** Blocks the visitor of a website chat for `hours` (24 when omitted). */
+  block(id: number, hours?: number): Promise<ChatBlock>;
+  /** Answers an offline chat by email. */
+  emailReply(
+    id: number,
+    body: string,
+    clientMsgId: string,
+  ): Promise<InboxMessage>;
+  /** Tells the visitor an agent is typing. */
+  typing(id: number): Promise<void>;
+  /** Saves the customer's number as a contact and returns the renamed conversation. */
+  addContact(id: number, contact: ContactInput): Promise<Conversation>;
+  /** The customer's most recent calls, newest first (an agent sees their own). */
+  calls(id: number, signal?: AbortSignal): Promise<{ items: InboxCall[] }>;
+}
+
+/** One call to or from the customer's number. */
+export interface InboxCall {
+  id: number;
+  startTime: string;
+  durationMs: number;
+  direction: string;
+  kind: string;
+  source: string;
+  destination: string;
+  answered: boolean;
+}
+
+/** The name an "Add to contacts" saves the customer under. */
+export interface ContactInput {
+  firstName?: string;
+  lastName?: string;
+  company?: string;
+  /** personal (the caller's own contacts, the default) or company (supervisors). */
+  book?: "personal" | "company";
 }
 
 function area(base: string): InboxApi {
@@ -138,6 +201,14 @@ function area(base: string): InboxApi {
       request("POST", at(id, "/status"), { body: { status, snoozedUntil } }),
     setTags: (id, tags) => request("POST", at(id, "/tags"), { body: { tags } }),
     read: (id) => request("POST", at(id, "/read")),
+    block: (id, hours) =>
+      request("POST", at(id, "/block"), { body: hours ? { hours } : {} }),
+    emailReply: (id, body, clientMsgId) =>
+      request("POST", at(id, "/email-reply"), { body: { body, clientMsgId } }),
+    typing: (id) => request("POST", at(id, "/typing")),
+    addContact: (id, contact) =>
+      request("POST", at(id, "/contact"), { body: contact }),
+    calls: (id, signal) => request("GET", at(id, "/calls"), { signal }),
   };
 }
 
@@ -165,6 +236,7 @@ export const INBOX_EVENTS = [
   "message.in",
   "message.sent",
   "message.status",
+  "typing",
 ] as const;
 
 // --- administration ----------------------------------------------------------
@@ -178,6 +250,9 @@ export interface MessagingChannel {
   trunkId: number | null;
   trunkName: string;
   hasCredentials: boolean;
+  /** The last four characters of a carrier account's SID; never the token. */
+  accountHint: string;
+  messagingService: boolean;
   status: "ok" | "degraded" | "credentials_invalid";
   statusDetail: string;
   lastEventAt: string | null;
@@ -188,10 +263,23 @@ export interface MessagingChannel {
 
 export interface ChannelInput {
   kind?: "sms";
-  provider?: "sip_trunk";
+  provider?: "sip_trunk" | "twilio";
   name?: string;
   enabled?: boolean;
   trunkId?: number;
+  /** A Twilio channel's account; the token is write-only. */
+  accountSid?: string;
+  authToken?: string;
+  messagingServiceSid?: string;
+}
+
+/** A number a carrier account owns. */
+export interface CarrierNumber {
+  number: string;
+  label: string;
+  sms: boolean;
+  mms: boolean;
+  voice: boolean;
 }
 
 export interface ChannelTest {
@@ -210,6 +298,11 @@ export interface MessagingAddress {
   optOutKeywords: string[];
   helpText: string;
   optOutText: string;
+  /** Customer texts also go to the desk phones of the assigned user's extension. */
+  deskPhoneDelivery: boolean;
+  /** The extension whose phone may reply into a conversation on this number. */
+  ownerExtensionId: number | null;
+  sendsPerMinute: number;
   conversations: number;
   createdAt: string;
 }
@@ -222,6 +315,9 @@ export interface AddressInput {
   optOutKeywords?: string[];
   helpText?: string;
   optOutText?: string;
+  deskPhoneDelivery?: boolean;
+  ownerExtensionId?: number | null;
+  sendsPerMinute?: number;
 }
 
 export interface MessagingSettings {
@@ -229,6 +325,18 @@ export interface MessagingSettings {
   retentionChatDays: number;
   reopenDays: number;
   emailNotify: boolean;
+  firstContact: "off" | "attested";
+  firstContactPerUserHour: number;
+  firstContactPerAddressDay: number;
+}
+
+/** A first-contact text: one customer, one message, one attestation. */
+export interface StartConversationInput {
+  addressId: number;
+  to: string;
+  body: string;
+  consentAttestation: boolean;
+  consentNote: string;
 }
 
 export interface OptOut {
@@ -267,6 +375,13 @@ export const deleteChannel = (id: Id) =>
   request<void>("DELETE", `${MESSAGING}/channels/${id}`);
 export const testChannel = (id: Id) =>
   request<ChannelTest>("POST", `${MESSAGING}/channels/${id}/test`);
+export const listChannelNumbers = (id: Id) =>
+  request<{ items: CarrierNumber[] }>(
+    "GET",
+    `${MESSAGING}/channels/${id}/numbers`,
+  );
+export const startConversation = (body: StartConversationInput) =>
+  request<Conversation>("POST", "/api/v1/inbox/conversations", { body });
 
 export const listAddresses = (signal?: AbortSignal) =>
   itemsOf(
@@ -309,3 +424,90 @@ export const reconsentOptOut = (id: Id, note: string) =>
 
 export const erasePeer = (peer: string) =>
   request<EraseReport>("POST", "/api/v1/inbox/erase", { body: { peer } });
+
+// --- website chat ------------------------------------------------------------
+
+export interface ChatHours {
+  zone: string;
+  /** 0 is Sunday. */
+  days: { day: number; from: string; to: string }[];
+}
+
+export interface ChatSite {
+  id: number;
+  channelId: number;
+  addressId: number;
+  name: string;
+  enabled: boolean;
+  siteKey: string;
+  allowedOrigins: string[];
+  greeting: string;
+  accent: string;
+  position: "left" | "right";
+  collect: "off" | "optional" | "required";
+  hours: ChatHours;
+  offlineMode: "collect" | "hidden";
+  privacyUrl: string;
+  challenge: "pow" | "turnstile" | "none";
+  powBits: number;
+  turnstileSiteKey: string;
+  hasTurnstileSecret: boolean;
+  stripLinks: boolean;
+  maxOpenUnassigned: number;
+  transcripts: boolean;
+  retentionDays: number | null;
+  conversations: number;
+  createdAt: string;
+  updatedAt: string;
+  warnings: string[];
+}
+
+/** What a create or replace sends; a field left out keeps its value. */
+export type ChatSiteInput = Partial<
+  Omit<
+    ChatSite,
+    | "id"
+    | "channelId"
+    | "addressId"
+    | "siteKey"
+    | "hasTurnstileSecret"
+    | "conversations"
+    | "createdAt"
+    | "updatedAt"
+    | "warnings"
+    | "retentionDays"
+  >
+> & {
+  /** Sealed when stored and never returned; "" removes it. */
+  turnstileSecret?: string;
+  /** 0 follows the messaging settings. */
+  retentionDays?: number;
+};
+
+export interface ChatBlock {
+  id: number;
+  siteId: number;
+  visitorId: number | null;
+  byIp: boolean;
+  until: string;
+  createdAt: string;
+}
+
+const CHAT = `${MESSAGING}/chat`;
+
+export const listChatSites = (signal?: AbortSignal) =>
+  itemsOf(request<{ items: ChatSite[] }>("GET", `${CHAT}/sites`, { signal }));
+export const createChatSite = (body: ChatSiteInput) =>
+  request<ChatSite>("POST", `${CHAT}/sites`, { body });
+export const updateChatSite = (id: Id, body: ChatSiteInput) =>
+  request<ChatSite>("PUT", `${CHAT}/sites/${id}`, { body });
+export const deleteChatSite = (id: Id) =>
+  request<void>("DELETE", `${CHAT}/sites/${id}`);
+export const listChatBlocks = (id: Id, signal?: AbortSignal) =>
+  itemsOf(
+    request<{ items: ChatBlock[] }>("GET", `${CHAT}/sites/${id}/blocks`, {
+      signal,
+    }),
+  );
+export const deleteChatBlock = (id: Id) =>
+  request<void>("DELETE", `${CHAT}/blocks/${id}`);

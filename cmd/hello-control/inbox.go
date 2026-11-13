@@ -14,6 +14,7 @@ import (
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
+	_ "github.com/azrtydxb/hello/internal/messaging/provider/twilio" // registers the Twilio adapter
 	"github.com/azrtydxb/hello/internal/messaging/router"
 	acdqueue "github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/store"
@@ -41,6 +42,15 @@ func runInboxMaintenance(ctx context.Context, st *store.Store, l lease, node str
 			} else if r.Conversations > 0 {
 				m.Purged.WithLabelValues("conversations").Add(float64(r.Conversations))
 				log.Info("inbox retention purged conversations", "count", r.Conversations)
+			}
+		}
+		if held || err != nil {
+			if unknown, failed, err := st.SettleCarrierTexts(ctx); err != nil {
+				if ctx.Err() == nil {
+					log.Warn("carrier text settle", "error", err)
+				}
+			} else if unknown+failed > 0 {
+				log.Info("carrier texts settled", "unknown", unknown, "failed", failed)
 			}
 		}
 		// Every replica reports the pool, whoever ran the maintenance.
@@ -142,6 +152,47 @@ func runMessageRouter(ctx context.Context, st *store.Store, live router.Live, m 
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		}
+	}
+}
+
+const (
+	carrierSendEvery = 2 * time.Second
+	carrierPollEvery = 5 * time.Second
+)
+
+// runCarrierWorkers sends the texts agents queued on carrier channels and
+// follows their delivery (spec M-9a). Every replica runs it: the store hands
+// each queued text to one attempt, so a text is never sent twice, and a
+// status read claimed by one replica is not read by another meanwhile. It
+// never logs a message, a number or a credential.
+func runCarrierWorkers(ctx context.Context, st *store.Store, m *messaging.Metrics, log *slog.Logger) {
+	w := &messaging.Worker{Store: st, Metrics: m, Log: log.With("component", "carrier")}
+	send := time.NewTicker(carrierSendEvery)
+	poll := time.NewTicker(carrierPollEvery)
+	defer send.Stop()
+	defer poll.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-send.C:
+			for {
+				n, err := w.SendOnce(ctx, 20)
+				if err != nil {
+					if ctx.Err() == nil {
+						log.Warn("carrier send", "error", err)
+					}
+					break
+				}
+				if n < 20 {
+					break
+				}
+			}
+		case <-poll.C:
+			if _, err := w.PollOnce(ctx, 50); err != nil && ctx.Err() == nil {
+				log.Warn("carrier status", "error", err)
+			}
 		}
 	}
 }

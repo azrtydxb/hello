@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/provider"
 )
 
 // InboxAccess says what part of the inbox a caller reaches. A supervisor
@@ -71,6 +72,9 @@ type Conversation struct {
 	CreatedAt       time.Time  `json:"createdAt"`
 	QueueID         *int64     `json:"queueId"` // the text queue it is placed in; nil in the pool or with a person
 	QueueName       string     `json:"queueName"`
+	// Chat is what an agent sees of a chat visitor; nil for any other
+	// conversation. Set when one conversation is read.
+	Chat *ChatInfo `json:"chat"`
 }
 
 // ConvMessage is one line of a conversation.
@@ -239,6 +243,9 @@ func (s *Store) ListConversations(ctx context.Context, acc InboxAccess, f ConvFi
 		out = out[:limit]
 		next = ConvCursor{At: out[limit-1].LastMessageAt, ID: out[limit-1].ID}.String()
 	}
+	if err := s.nameConversations(ctx, acc.UserID, out); err != nil {
+		return nil, "", err
+	}
 	return out, next, nil
 }
 
@@ -251,7 +258,21 @@ func (s *Store) GetConversation(ctx context.Context, acc InboxAccess, id int64) 
 		return c, mapErr(err)
 	}
 	s.auditSupervisorView(ctx, acc, c)
-	return c, nil
+	if c.ChannelKind == messaging.KindWebchat {
+		if c.Chat, err = s.chatInfo(ctx, c.ID); err != nil {
+			return c, err
+		}
+	}
+	return s.namedConversation(ctx, acc.UserID, c)
+}
+
+// namedConversation applies the reader's contact names to one conversation.
+func (s *Store) namedConversation(ctx context.Context, userID int64, c Conversation) (Conversation, error) {
+	cs := []Conversation{c}
+	if err := s.nameConversations(ctx, userID, cs); err != nil {
+		return c, err
+	}
+	return cs[0], nil
 }
 
 // auditSupervisorView records that a supervisor read a conversation that is
@@ -447,18 +468,41 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 			return ErrConversationState
 		}
 		var (
-			provider, address, kind string
-			chEnabled, adEnabled    bool
-			trunk                   sql.NullInt64
+			prov, address, kind, chStatus string
+			chEnabled, adEnabled          bool
+			trunk                         sql.NullInt64
 		)
 		if err := tx.QueryRowContext(ctx, `
-			SELECT ch.provider, ch.kind, ch.enabled, ch.trunk_id, a.address, a.enabled
+			SELECT ch.provider, ch.kind, ch.enabled, ch.trunk_id, a.address, a.enabled, ch.status
 			FROM msg_channels ch JOIN msg_addresses a ON a.channel_id = ch.id WHERE ch.id = $1 AND a.id = $2`,
-			c.ChannelID, c.AddressID).Scan(&provider, &kind, &chEnabled, &trunk, &address, &adEnabled); err != nil {
+			c.ChannelID, c.AddressID).Scan(&prov, &kind, &chEnabled, &trunk, &address, &adEnabled, &chStatus); err != nil {
 			return err
 		}
-		if !chEnabled || !adEnabled || provider != messaging.ProviderSIPTrunk || !trunk.Valid {
+		if prov == messaging.ProviderChat {
+			// A live chat has no carrier: the reply is stored and the
+			// visitor's stream carries it.
+			m, err := s.chatAgentReply(ctx, tx, c, acc, in, chEnabled && adEnabled)
+			if err != nil {
+				return err
+			}
+			msg, created = m, true
+			sinkEvent = &messaging.Event{Type: "message.sent", ConversationID: c.ID, MessageID: m.ID, ChannelKind: kind,
+				Direction: messaging.DirOut, Status: m.Status}
+			return nil
+		}
+		carrier := prov != messaging.ProviderSIPTrunk
+		switch {
+		case !chEnabled || !adEnabled:
 			return ErrChannelUnavailable
+		case carrier && (!provider.Known(prov) || chStatus == "credentials_invalid"):
+			return ErrChannelUnavailable
+		case !carrier && !trunk.Valid:
+			return ErrChannelUnavailable
+		}
+		if carrier {
+			if err := checkCarrierText(prov, c.PeerKey, in.Body); err != nil {
+				return err
+			}
 		}
 		out, err := optedOut(ctx, tx, s, c.AddressID, c.PeerKey)
 		if err != nil {
@@ -475,11 +519,17 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_user_id,
 				sender_name, body, status, client_msg_id)
-			VALUES ($1, $2, 'out', 'message', 'user', $3, $4, $5, 'sending', $6) RETURNING id`,
-			c.ID, c.ChannelID, acc.UserID, acc.Name, in.Body, clientID).Scan(&id); err != nil {
+			VALUES ($1, $2, 'out', 'message', 'user', $3, $4, $5, $7, $6) RETURNING id`,
+			c.ID, c.ChannelID, acc.UserID, acc.Name, in.Body, clientID, initialStatus(carrier)).Scan(&id); err != nil {
 			return err
 		}
-		for _, part := range messaging.SplitText(in.Body, messaging.MaxPartBytes) {
+		// A carrier text waits for the send worker; a SIP text is queued
+		// in the SIP text queue in this transaction.
+		parts := messaging.SplitText(in.Body, messaging.MaxPartBytes)
+		if carrier {
+			parts = nil
+		}
+		for _, part := range parts {
 			text, raw := splitBody(messageDefaultCType, []byte(part))
 			var sent MessageSent
 			if err := s.sendMessageTx(ctx, tx, MessageInput{
@@ -590,6 +640,9 @@ func (s *Store) ClaimConversation(ctx context.Context, acc InboxAccess, convID i
 		if _, err := addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", acc.Name+" took the conversation"); err != nil {
 			return err
 		}
+		if err := s.deliverLastToDeskPhone(ctx, tx, c.ID, acc.UserID); err != nil {
+			return err
+		}
 		// The supervisors saw it as unassigned, so they are told it moved.
 		return emitPoolEvent(ctx, tx, c.ID, "conversation.assigned", acc.UserID)
 	})
@@ -656,6 +709,11 @@ func (s *Store) AssignConversation(ctx context.Context, acc InboxAccess, convID,
 		if _, err := addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", acc.Name+" assigned the conversation to "+name); err != nil {
 			return err
 		}
+		if toUser > 0 {
+			if err := s.deliverLastToDeskPhone(ctx, tx, c.ID, toUser); err != nil {
+				return err
+			}
+		}
 		extra := []int64{acc.UserID}
 		if c.Assignee.Valid {
 			extra = append(extra, c.Assignee.Int64)
@@ -681,7 +739,10 @@ func (s *Store) AssignConversation(ctx context.Context, acc InboxAccess, convID,
 // access check beyond the change's own and no audit row.
 func (s *Store) conversationByID(ctx context.Context, userID int64, all bool, id int64) (Conversation, error) {
 	c, err := scanConversation(s.db.QueryRowContext(ctx, convSelect+` WHERE c.id = $3 AND `+visible, userID, all, id))
-	return c, mapErr(err)
+	if err != nil {
+		return c, mapErr(err)
+	}
+	return s.namedConversation(ctx, userID, c)
 }
 
 // SetConversationStatus changes a conversation's state. Snoozing needs a
@@ -722,6 +783,9 @@ func (s *Store) SetConversationStatus(ctx context.Context, acc InboxAccess, conv
 		}
 		if status == messaging.StatusResolved {
 			ev = &messaging.Event{Type: "conversation.resolved", ConversationID: c.ID, Status: status}
+			if err := chatEvent(ctx, tx, c.ID, 0, "closed"); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -766,7 +830,11 @@ func (s *Store) MarkConversationRead(ctx context.Context, acc InboxAccess, convI
 			ON CONFLICT (user_id, conversation_id) DO UPDATE
 				SET last_read_message_id = GREATEST(conversation_reads.last_read_message_id, EXCLUDED.last_read_message_id), at = now()`,
 			acc.UserID, c.ID)
-		return err
+		if err != nil {
+			return err
+		}
+		// A chat visitor is shown their messages as read.
+		return chatEvent(ctx, tx, c.ID, 0, "read")
 	})
 }
 
@@ -839,14 +907,30 @@ type InboxStatus struct {
 	// Unassigned counts the active conversations nobody has taken (a
 	// supervisor's pool); it is 0 for anyone else.
 	Unassigned int `json:"unassigned"`
+	// Senders are the carrier numbers a supervisor may start a conversation
+	// from: empty unless an administrator turned first contact on.
+	Senders []InboxSender `json:"senders"`
+}
+
+// InboxSender is a carrier number a first-contact text can leave from.
+type InboxSender struct {
+	AddressID int64  `json:"addressId"`
+	Address   string `json:"address"`
+	Label     string `json:"label"`
+	Channel   string `json:"channel"`
 }
 
 // GetInboxStatus reads the caller's inbox status.
 func (s *Store) GetInboxStatus(ctx context.Context, acc InboxAccess) (InboxStatus, error) {
-	var st InboxStatus
+	st := InboxStatus{Senders: []InboxSender{}}
 	var err error
 	if st.Enabled, err = s.HasMsgChannel(ctx); err != nil || !st.Enabled {
 		return st, err
+	}
+	if acc.All {
+		if st.Senders, err = s.firstContactSenders(ctx); err != nil {
+			return st, err
+		}
 	}
 	err = s.db.QueryRowContext(ctx, `
 		SELECT count(*) FROM conversations c LEFT JOIN conversation_reads r ON r.conversation_id = c.id AND r.user_id = $1
@@ -859,6 +943,30 @@ func (s *Store) GetInboxStatus(ctx context.Context, acc InboxAccess) (InboxStatu
 	err = s.db.QueryRowContext(ctx, `SELECT count(*) FROM conversations
 		WHERE assignee_user_id IS NULL AND status IN ('open', 'pending')`).Scan(&st.Unassigned)
 	return st, err
+}
+
+// firstContactSenders lists the enabled carrier numbers, when the
+// administrator allows first contact.
+func (s *Store) firstContactSenders(ctx context.Context) ([]InboxSender, error) {
+	out := []InboxSender{}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT a.id, a.address, a.label, ch.name
+		FROM msg_addresses a JOIN msg_channels ch ON ch.id = a.channel_id, messaging_settings ms
+		WHERE ms.first_contact = 'attested' AND ch.provider <> 'sip_trunk' AND ch.enabled AND a.enabled
+		  AND ch.status <> 'credentials_invalid'
+		ORDER BY lower(ch.name), a.address`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var x InboxSender
+		if err := rows.Scan(&x.AddressID, &x.Address, &x.Label, &x.Channel); err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
 }
 
 // InboxStats are the counts a supervisor watches; they carry no content.
@@ -1016,6 +1124,15 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *sql.Tx, in TrunkText, r
 	if in.FromName != "" {
 		peerName, peerNameSrc = in.FromName, "provider"
 	}
+	if peerName == "" {
+		// A name from a shared book (never a personal one, which only its
+		// owner sees, at read time).
+		if n, src, err := resolveContactName(ctx, tx, 0, in.FromKey); err != nil {
+			return err
+		} else if n != "" {
+			peerName, peerNameSrc = n, src
+		}
+	}
 	// The open conversation of this peer on this number, if any.
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, status, assignee_user_id FROM conversations
@@ -1085,6 +1202,11 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *sql.Tx, in TrunkText, r
 		return err
 	}
 	res.ConversationID, res.MessageID = conv, msgID
+	if convAssignee.Valid {
+		if err := s.deliverToDeskPhone(ctx, tx, conv, msgID, convAssignee.Int64); err != nil {
+			return err
+		}
+	}
 	row := convRow{ID: conv, ChannelID: channelID, AddressID: addressID, PeerKey: in.FromKey}
 
 	switch messaging.ClassifyKeyword(in.Body, words) {
@@ -1305,6 +1427,7 @@ func (s *Store) syncStuckConversationMessages(ctx context.Context) error {
 		UPDATE conversation_messages cm SET status = 'unknown'
 		WHERE cm.status IN ('queued', 'sending') AND cm.direction = 'out' AND cm.kind = 'message'
 		  AND cm.created_at < now() - interval '5 minutes'
+		  AND cm.channel_id IN (SELECT id FROM msg_channels WHERE provider = 'sip_trunk')
 		  AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_message_id = cm.id)`)
 	return err
 }

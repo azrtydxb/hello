@@ -130,7 +130,7 @@ func ParseRole(v string) (Role, error) {
 func GrantableScopes(r Role) Scopes {
 	switch r {
 	case RoleUser:
-		return Scopes{ScopeRead, ScopeWrite, ScopeMessages}
+		return Scopes{ScopeRead, ScopeWrite, ScopeCalls, ScopeEvents, ScopeRecordings, ScopeMessages}
 	case RoleViewer:
 		return Scopes{ScopeRead, ScopeEvents}
 	case RoleOperator:
@@ -195,6 +195,23 @@ func ReplayFrom(ctx context.Context) (Replay, bool) {
 type Agent struct {
 	UserID int64
 	TaskID string
+	// Preview marks the dry run of a proposed configuration batch (spec
+	// flow-canvas S-19): the agent then also holds the write and admin
+	// scopes, with the user's own role, but only for POST
+	// /api/v1/config/batch with dryRun and for the operations replayed
+	// inside that dry-run batch (the API refuses every other write). It
+	// lets the validator check a batch exactly as the applier would run
+	// it, with nothing committed.
+	Preview bool
+	// Apply marks the assistant applying its own batch for the user (flow
+	// canvas decision of 2026-11-10, the user turned on "Let AI apply
+	// changes"): like Preview it holds the write and admin scopes with the
+	// user's own role, so a viewer is still refused, but the API admits its
+	// writes only on POST /api/v1/config/batch and for the operations
+	// replayed inside that batch. A revert, a layout write or any direct
+	// object write is refused. Its changes carry the via the caller set
+	// (WithVia, "ai:<session>"). Preview wins when both are set.
+	Apply bool
 }
 
 type agentKey struct{}

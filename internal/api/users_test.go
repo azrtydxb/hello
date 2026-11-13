@@ -208,7 +208,7 @@ func TestRoleEnforcement(t *testing.T) {
 // hold).
 func TestUserRoles(t *testing.T) {
 	for role, want := range map[auth.Role]auth.Scopes{
-		auth.RoleUser:     {auth.ScopeRead, auth.ScopeWrite, auth.ScopeMessages},
+		auth.RoleUser:     {auth.ScopeRead, auth.ScopeWrite, auth.ScopeCalls, auth.ScopeEvents, auth.ScopeRecordings, auth.ScopeMessages},
 		auth.RoleViewer:   {auth.ScopeRead, auth.ScopeEvents},
 		auth.RoleOperator: {auth.ScopeRead, auth.ScopeWrite, auth.ScopeCalls, auth.ScopeEvents, auth.ScopeRecordings, auth.ScopeMessages},
 		auth.RoleAdmin:    auth.AllScopes,

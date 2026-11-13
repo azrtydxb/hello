@@ -259,9 +259,11 @@ func (s *Store) MessageRouter() router.Store { return routerStore{s} }
 type routerStore struct{ s *Store }
 
 // afterAssign runs in the transaction that gave a conversation to a user, for
-// whatever else an assignment must do. The desk-phone delivery of item 3
-// belongs here (deliverLastToDeskPhone) once that item is on main.
-func (s *Store) afterAssign(_ context.Context, _ *sql.Tx, _, _ int64) error { return nil }
+// whatever else an assignment must do: the customer's latest text follows the
+// conversation to the user's desk phone (a no-op unless both switches are on).
+func (s *Store) afterAssign(ctx context.Context, tx *sql.Tx, convID, userID int64) error {
+	return s.deliverLastToDeskPhone(ctx, tx, convID, userID)
+}
 
 // ---------------------------------------------------------------------------
 // Placing new conversations.

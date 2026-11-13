@@ -48,6 +48,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "user",
       },
       {
+        label: "Connected accounts",
+        path: "/me/connections",
+        phase: 5,
+        icon: "plug",
+        minRole: "user",
+      },
+      {
         label: "Voicemail",
         path: "/me/voicemail",
         phase: 5,
@@ -69,10 +76,24 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "user",
       },
       {
+        label: "Faxes",
+        path: "/me/faxes",
+        phase: 5,
+        icon: "printer",
+        minRole: "user",
+      },
+      {
         label: "Messages",
         path: "/me/messages",
         phase: 5,
         icon: "message-square",
+        minRole: "user",
+      },
+      {
+        label: "Web devices",
+        path: "/me/devices",
+        phase: 5,
+        icon: "monitor-smartphone",
         minRole: "user",
       },
       {
@@ -103,6 +124,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       },
       { label: "Devices", path: "/devices", phase: 1, icon: "smartphone" },
       { label: "Phones", path: "/phones", phase: 5, icon: "phone" },
+      { label: "Locations", path: "/locations", phase: 5, icon: "map-pin" },
       {
         label: "Onboarding",
         path: "/onboarding",
@@ -147,6 +169,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         phase: 5,
         icon: "bell-electric",
       },
+      { label: "Door", path: "/door", phase: 5, icon: "door-open" },
       { label: "Paging", path: "/paging", phase: 5, icon: "megaphone" },
       {
         label: "Conferences",
@@ -207,6 +230,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "gauge",
       },
       { label: "Call history", path: "/history", phase: 1, icon: "history" },
+      { label: "Faxes", path: "/faxes", phase: 5, icon: "printer" },
       {
         label: "Messages",
         path: "/messages",
@@ -240,6 +264,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         path: "/messaging/channels",
         phase: 5,
         icon: "radio-tower",
+        minRole: "admin",
+      },
+      {
+        label: "Chat sites",
+        path: "/messaging/chat",
+        phase: 5,
+        icon: "messages-square",
         minRole: "admin",
       },
       {
@@ -302,6 +333,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "admin",
       },
       {
+        label: "Directory",
+        path: "/integrations/directory",
+        phase: 5,
+        icon: "users",
+        minRole: "admin",
+      },
+      {
         label: "Webhooks",
         path: "/integrations/webhooks",
         phase: 5,
@@ -313,6 +351,20 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         path: "/integrations/events",
         phase: 5,
         icon: "radio-tower",
+      },
+      {
+        label: "CRM",
+        path: "/integrations/crm",
+        phase: 5,
+        icon: "contact",
+        minRole: "admin",
+      },
+      {
+        label: "Slack",
+        path: "/integrations/slack",
+        phase: 5,
+        icon: "message-square",
+        minRole: "admin",
       },
     ],
   },

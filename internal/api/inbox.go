@@ -13,6 +13,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -22,6 +23,8 @@ import (
 
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/provider"
+	"github.com/azrtydxb/hello/internal/messaging/provider/twilio"
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/store"
 )
@@ -60,6 +63,8 @@ type InboxStore interface {
 	ListInboxAgents(ctx context.Context) ([]store.InboxAgent, error)
 	GetInboxStatus(ctx context.Context, acc store.InboxAccess) (store.InboxStatus, error)
 	GetInboxStats(ctx context.Context) (store.InboxStats, error)
+	AddConversationContact(ctx context.Context, acc store.InboxAccess, convID int64, book string, in phonebook.EntryInput) (store.Conversation, error)
+	ConversationCalls(ctx context.Context, acc store.InboxAccess, convID int64, limit int) ([]store.CDR, error)
 	ListInboxEvents(ctx context.Context, userID, after int64, limit int) ([]store.InboxEvent, error)
 	LatestInboxEventID(ctx context.Context, userID int64) (int64, error)
 	TouchInboxPresence(ctx context.Context, userID int64) error
@@ -68,6 +73,8 @@ type InboxStore interface {
 	PutMsgRouting(ctx context.Context, actor string, addressID int64, in store.MsgRoutingInput) (store.MsgRouting, error)
 	GetTextQueueStatus(ctx context.Context) ([]store.TextQueueStatus, error)
 	UserTextAgent(ctx context.Context, userID int64) ([]store.TextAgentExt, error)
+	StartConversation(ctx context.Context, acc store.InboxAccess, in store.StartInput) (store.Conversation, error)
+	ChannelProviderConfig(ctx context.Context, channelID int64) (provider.Config, error)
 }
 
 var _ InboxStore = (*store.Store)(nil)
@@ -84,6 +91,7 @@ func (s *server) inboxStore(w http.ResponseWriter) (InboxStore, bool) {
 // first, then the usual 404, 409 and 500.
 func (s *server) inboxError(w http.ResponseWriter, what string, err error) {
 	var v *store.ValidationError
+	var exists *store.ConversationExistsError
 	switch {
 	case errors.As(err, &v):
 		writeFields(w, v.Fields)
@@ -93,8 +101,19 @@ func (s *server) inboxError(w http.ResponseWriter, what string, err error) {
 		writeError(w, http.StatusUnprocessableEntity, "not_agent", "that user cannot take conversations")
 	case errors.Is(err, store.ErrChannelUnavailable):
 		writeError(w, http.StatusConflict, "channel_unavailable", "the channel or number is disabled or cannot send")
+	case errors.Is(err, store.ErrFirstContactOff):
+		writeError(w, http.StatusConflict, "first_contact_off", "texting a number that has not texted first is turned off; an administrator can allow it in the messaging settings")
+	case errors.Is(err, store.ErrRateLimited):
+		w.Header().Set("Retry-After", "600")
+		writeError(w, http.StatusTooManyRequests, "rate_limited", "the first-contact limit is reached; try again later")
+	case errors.As(err, &exists):
+		writeError(w, http.StatusConflict, "conversation_exists", fmt.Sprintf("the customer already has an open conversation (%d) on this number; reply there", exists.ID))
 	case errors.Is(err, store.ErrConversationState):
 		writeError(w, http.StatusConflict, "conversation_state", "the conversation is not in a state that allows this")
+	case errors.Is(err, store.ErrNotChat):
+		writeError(w, http.StatusConflict, "not_chat", "the conversation is not a website chat")
+	case errors.Is(err, store.ErrChatNoEmail):
+		writeError(w, http.StatusConflict, "no_email", "the visitor left no email address, or the chat was live: there is nobody to email")
 	case errors.Is(err, store.ErrMessagesDisabled):
 		writeError(w, http.StatusConflict, "messaging_disabled", "text messaging is turned off")
 	case errors.Is(err, store.ErrNoExternalTrunk):
@@ -144,6 +163,11 @@ type msgChannelBody struct {
 	Name     *string `json:"name"`
 	Enabled  *bool   `json:"enabled"`
 	TrunkID  *int64  `json:"trunkId"`
+	// The carrier account of a carrier channel, write-only: the token is
+	// sealed and never returned.
+	AccountSID          *string `json:"accountSid"`
+	AuthToken           *string `json:"authToken"`
+	MessagingServiceSID *string `json:"messagingServiceSid"`
 }
 
 func (b msgChannelBody) input(create bool, cur store.MsgChannel) (store.MsgChannelInput, fieldErrs) {
@@ -162,8 +186,8 @@ func (b msgChannelBody) input(create bool, cur store.MsgChannel) (store.MsgChann
 		in.Kind = *b.Kind
 	}
 	if b.Provider != nil {
-		if *b.Provider != messaging.ProviderSIPTrunk {
-			f.add("provider", "only sip_trunk exists yet")
+		if *b.Provider != messaging.ProviderSIPTrunk && *b.Provider != messaging.ProviderTwilio {
+			f.add("provider", "must be sip_trunk or twilio")
 		}
 		if !create && *b.Provider != cur.Provider {
 			f.add("provider", "cannot be changed")
@@ -190,10 +214,75 @@ func (b msgChannelBody) input(create bool, cur store.MsgChannel) (store.MsgChann
 	if b.TrunkID != nil {
 		in.TrunkID = b.TrunkID
 	}
-	if in.TrunkID == nil || *in.TrunkID <= 0 {
-		f.add("trunkId", "a SIP trunk channel needs a trunk")
+	if in.Provider == messaging.ProviderTwilio {
+		if b.TrunkID != nil {
+			f.add("trunkId", "a Twilio channel does not use a SIP trunk")
+		}
+		in.TrunkID = nil
+		given := b.AccountSID != nil || b.AuthToken != nil || b.MessagingServiceSID != nil
+		if create || given {
+			cfg := provider.Config{}
+			if b.AccountSID != nil {
+				cfg.AccountSID = strings.TrimSpace(*b.AccountSID)
+			}
+			if b.AuthToken != nil {
+				cfg.AuthToken = strings.TrimSpace(*b.AuthToken)
+			}
+			if b.MessagingServiceSID != nil {
+				cfg.MessagingServiceSID = strings.TrimSpace(*b.MessagingServiceSID)
+			}
+			if !twilio.ValidAccountSID(cfg.AccountSID) {
+				f.add("accountSid", "must be the account SID: AC followed by 32 hex digits")
+			}
+			if cfg.AuthToken == "" || len(cfg.AuthToken) > 128 || !printable(cfg.AuthToken, 128, false) {
+				f.add("authToken", "is required (at most 128 characters, no spaces)")
+			}
+			if cfg.MessagingServiceSID != "" && !twilio.ValidServiceSID(cfg.MessagingServiceSID) {
+				f.add("messagingServiceSid", "must be a Messaging Service SID: MG followed by 32 hex digits, or empty")
+			}
+			in.Credentials = &cfg
+		}
+	} else {
+		if b.AccountSID != nil || b.AuthToken != nil || b.MessagingServiceSID != nil {
+			f.add("accountSid", "only a carrier channel has an account")
+		}
+		if in.TrunkID == nil || *in.TrunkID <= 0 {
+			f.add("trunkId", "a SIP trunk channel needs a trunk")
+		}
 	}
 	return in, f
+}
+
+// carrierError answers a carrier call that failed while an administrator was
+// saving or testing a channel: refused credentials and refusals are 422,
+// anything else 502. The carrier's own message is never repeated.
+func (s *server) carrierError(w http.ResponseWriter, err error) {
+	var rej *provider.Rejected
+	switch {
+	case errors.Is(err, provider.ErrAuth):
+		writeError(w, http.StatusUnprocessableEntity, "credentials_rejected", "the carrier refused these credentials")
+	case errors.As(err, &rej):
+		writeError(w, http.StatusUnprocessableEntity, "credentials_rejected", "the carrier does not accept the account ("+rej.Code+")")
+	default:
+		writeError(w, http.StatusBadGateway, "provider_unreachable", "the carrier could not be reached or did not answer as expected")
+	}
+}
+
+// checkCarrier validates credentials against the carrier before they are
+// saved. It writes the answer and returns false on failure.
+func (s *server) checkCarrier(w http.ResponseWriter, r *http.Request, kind string, cfg provider.Config) bool {
+	p, err := provider.New(kind, cfg)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "credentials_rejected", "the credentials are not usable")
+		return false
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	if err := p.Validate(ctx); err != nil {
+		s.carrierError(w, err)
+		return false
+	}
+	return true
 }
 
 func (s *server) listMessagingChannels(w http.ResponseWriter, r *http.Request) {
@@ -221,6 +310,9 @@ func (s *server) createMessagingChannel(w http.ResponseWriter, r *http.Request) 
 	in, f := b.input(true, store.MsgChannel{})
 	if len(f) > 0 {
 		writeFields(w, f)
+		return
+	}
+	if in.Credentials != nil && !s.checkCarrier(w, r, in.Provider, *in.Credentials) {
 		return
 	}
 	c, err := is.CreateMsgChannel(r.Context(), actor(r).String(), in)
@@ -271,6 +363,9 @@ func (s *server) putMessagingChannel(w http.ResponseWriter, r *http.Request) {
 		writeFields(w, f)
 		return
 	}
+	if in.Credentials != nil && !s.checkCarrier(w, r, in.Provider, *in.Credentials) {
+		return
+	}
 	c, err := is.UpdateMsgChannel(r.Context(), actor(r).String(), id, in)
 	if err != nil {
 		s.inboxError(w, "messaging channel", err)
@@ -319,7 +414,10 @@ func (s *server) testMessagingChannel(w http.ResponseWriter, r *http.Request) {
 	checks := []check{}
 	add := func(name string, ok bool, detail string) { checks = append(checks, check{name, ok, detail}) }
 	add("channel", c.Enabled, map[bool]string{true: "enabled", false: "the channel is turned off"}[c.Enabled])
-	if c.TrunkID == nil {
+	if c.Provider != messaging.ProviderSIPTrunk {
+		ok, detail := s.carrierCredentialCheck(r.Context(), is, c)
+		add("credentials", ok, detail)
+	} else if c.TrunkID == nil {
 		add("trunk", false, "the channel's trunk was deleted; pick another")
 	} else if t, err := s.Store.GetTrunk(r.Context(), *c.TrunkID); err != nil {
 		add("trunk", false, "the channel's trunk was deleted; pick another")
@@ -346,6 +444,70 @@ func (s *server) testMessagingChannel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": all, "checks": checks})
 }
 
+// carrierCredentialCheck asks the carrier whether the channel's stored
+// credentials work, and says so in words that hold no secret. It sends
+// nothing.
+func (s *server) carrierCredentialCheck(ctx context.Context, is InboxStore, c store.MsgChannel) (bool, string) {
+	cfg, err := is.ChannelProviderConfig(ctx, c.ID)
+	if err != nil {
+		return false, "the stored credentials cannot be read; enter them again"
+	}
+	p, err := provider.New(c.Provider, cfg)
+	if err != nil {
+		return false, "the stored credentials are not usable; enter them again"
+	}
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	switch err := p.Validate(cctx); {
+	case err == nil:
+		return true, "the carrier accepts the credentials and the numbers can be listed"
+	case errors.Is(err, provider.ErrAuth):
+		return false, "the carrier refused the credentials; enter them again"
+	default:
+		return false, "the carrier could not be checked just now"
+	}
+}
+
+// listMessagingChannelNumbers lists the numbers of a carrier account, so an
+// administrator can pick the ones to add.
+func (s *server) listMessagingChannelNumbers(w http.ResponseWriter, r *http.Request) {
+	is, ok := s.inboxStore(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	c, err := is.GetMsgChannel(r.Context(), id)
+	if err != nil {
+		s.storeError(w, "messaging channel", err)
+		return
+	}
+	if c.Provider == messaging.ProviderSIPTrunk {
+		writeError(w, http.StatusConflict, "not_a_carrier_channel", "a SIP trunk channel has no carrier account to list numbers from")
+		return
+	}
+	cfg, err := is.ChannelProviderConfig(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusConflict, "credentials_unreadable", "the stored credentials cannot be read; enter them again")
+		return
+	}
+	p, err := provider.New(c.Provider, cfg)
+	if err != nil {
+		writeError(w, http.StatusConflict, "credentials_unreadable", "the stored credentials are not usable; enter them again")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	ns, err := p.Numbers(ctx)
+	if err != nil {
+		s.carrierError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items(ns))
+}
+
 // addressBody is the create and replace request of a number.
 type addressBody struct {
 	ChannelID   *int64    `json:"channelId"`
@@ -355,13 +517,38 @@ type addressBody struct {
 	OptOutWords *[]string `json:"optOutKeywords"`
 	HelpText    *string   `json:"helpText"`
 	OptOutText  *string   `json:"optOutText"`
+	// DeskPhoneDelivery turns on delivery of assigned conversations to desk
+	// phones; OwnerExtensionID names the extension whose phone may reply
+	// (null clears it, absent keeps it).
+	DeskPhoneDelivery *bool           `json:"deskPhoneDelivery"`
+	OwnerExtensionID  json.RawMessage `json:"ownerExtensionId"`
+	// SendsPerMinute caps the carrier texts the number starts per minute.
+	SendsPerMinute *int `json:"sendsPerMinute"`
 }
 
 func (s *server) addressInput(b addressBody, create bool, cur store.MsgAddress) (store.MsgAddressInput, fieldErrs) {
 	var f fieldErrs
 	in := store.MsgAddressInput{
 		ChannelID: cur.ChannelID, Address: cur.Address, Key: cur.Key, Label: cur.Label, Enabled: true,
-		OptOutWords: cur.OptOutWords, HelpText: cur.HelpText, OptOutText: cur.OptOutText,
+		OptOutWords: cur.OptOutWords, HelpText: cur.HelpText, OptOutText: cur.OptOutText, SendsPerMinute: cur.SendsPerMinute,
+		DeskPhoneDelivery: cur.DeskPhoneDelivery, OwnerExtensionID: cur.OwnerExtensionID,
+	}
+	if b.DeskPhoneDelivery != nil {
+		in.DeskPhoneDelivery = *b.DeskPhoneDelivery
+	}
+	if len(b.OwnerExtensionID) > 0 {
+		var id *int64
+		if err := json.Unmarshal(b.OwnerExtensionID, &id); err != nil || (id != nil && *id <= 0) {
+			f.add("ownerExtensionId", "must be an extension id or null")
+		} else {
+			in.OwnerExtensionID = id
+		}
+	}
+	if b.SendsPerMinute != nil {
+		if *b.SendsPerMinute < 1 || *b.SendsPerMinute > 600 {
+			f.add("sendsPerMinute", "must be 1-600")
+		}
+		in.SendsPerMinute = *b.SendsPerMinute
 	}
 	if !create {
 		in.Enabled = cur.Enabled
@@ -465,6 +652,10 @@ func (s *server) createMessagingAddress(w http.ResponseWriter, r *http.Request) 
 		writeFields(w, f)
 		return
 	}
+	if ch, err := is.GetMsgChannel(r.Context(), in.ChannelID); err == nil && ch.Provider != messaging.ProviderSIPTrunk && !store.ValidE164(in.Key) {
+		writeFields(w, fieldErrs{{Path: "address", Message: "a carrier number must be in international format: + and 8 to 15 digits"}})
+		return
+	}
 	a, err := is.CreateMsgAddress(r.Context(), actor(r).String(), in)
 	if err != nil {
 		s.inboxError(w, "messaging number", err)
@@ -542,6 +733,11 @@ type messagingSettingsBody struct {
 	RetentionChatDays *int  `json:"retentionChatDays"`
 	ReopenDays        *int  `json:"reopenDays"`
 	EmailNotify       *bool `json:"emailNotify"`
+	// FirstContact is off or attested; the two limits bound the texts an
+	// agent and a number may start per hour and per day.
+	FirstContact              *string `json:"firstContact"`
+	FirstContactPerUserHour   *int    `json:"firstContactPerUserHour"`
+	FirstContactPerAddressDay *int    `json:"firstContactPerAddressDay"`
 }
 
 func (s *server) getMessagingSettings(w http.ResponseWriter, r *http.Request) {
@@ -575,7 +771,19 @@ func (s *server) putMessagingSettings(w http.ResponseWriter, r *http.Request) {
 	setIf(&cur.RetentionChatDays, b.RetentionChatDays)
 	setIf(&cur.ReopenDays, b.ReopenDays)
 	setIf(&cur.EmailNotify, b.EmailNotify)
+	setIf(&cur.FirstContact, b.FirstContact)
+	setIf(&cur.FirstContactPerUserHour, b.FirstContactPerUserHour)
+	setIf(&cur.FirstContactPerAddressDay, b.FirstContactPerAddressDay)
 	var f fieldErrs
+	if cur.FirstContact != messaging.FirstContactOff && cur.FirstContact != messaging.FirstContactAttested {
+		f.add("firstContact", "must be off or attested")
+	}
+	if cur.FirstContactPerUserHour < 1 || cur.FirstContactPerUserHour > 1000 {
+		f.add("firstContactPerUserHour", "must be 1-1000")
+	}
+	if cur.FirstContactPerAddressDay < 1 || cur.FirstContactPerAddressDay > 10000 {
+		f.add("firstContactPerAddressDay", "must be 1-10000")
+	}
 	if cur.RetentionSMSDays < 1 || cur.RetentionSMSDays > 3650 {
 		f.add("retentionSmsDays", "must be 1-3650")
 	}
@@ -716,9 +924,12 @@ func (s *server) eraseMessagingPeer(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &b) {
 		return
 	}
-	key, kok := s.peerKey(b.Peer)
+	key, kok := chatPeerKey(b.Peer)
 	if !kok {
-		writeFields(w, fieldErrs{{Path: "peer", Message: "must be a phone number"}})
+		key, kok = s.peerKey(b.Peer)
+	}
+	if !kok {
+		writeFields(w, fieldErrs{{Path: "peer", Message: "must be a phone number or a chat visitor (visitor:<id>)"}})
 		return
 	}
 	rep, err := is.ErasePeer(r.Context(), actor(r).String(), key)
@@ -903,6 +1114,56 @@ func (s *server) sendInboxMessageCommon(w http.ResponseWriter, r *http.Request, 
 	writeJSON(w, status, m)
 }
 
+// startConversationBody starts a conversation with a customer who has not
+// texted first (M-17). One recipient, one message, one attestation.
+type startConversationBody struct {
+	AddressID          int64  `json:"addressId"`
+	To                 string `json:"to"`
+	Body               string `json:"body"`
+	ConsentAttestation bool   `json:"consentAttestation"`
+	ConsentNote        string `json:"consentNote"`
+}
+
+func (s *server) startInboxConversation(w http.ResponseWriter, r *http.Request) {
+	is, acc, ok := s.inboxCaller(w, r, true, true)
+	if !ok {
+		return
+	}
+	var b startConversationBody
+	if !decode(w, r, &b) {
+		return
+	}
+	var f fieldErrs
+	if b.AddressID <= 0 {
+		f.add("addressId", "is required")
+	}
+	key, kok := s.peerKey(b.To)
+	if !kok || !store.ValidE164(key) {
+		f.add("to", "must be one phone number in international format: + and 8 to 15 digits")
+	}
+	body, bok := messaging.CleanBody(b.Body, messaging.MaxBodyBytes)
+	if !bok {
+		f.add("body", "must be 1-%d bytes of text", messaging.MaxBodyBytes)
+	}
+	if !b.ConsentAttestation {
+		f.add("consentAttestation", "must be true: confirm the customer agreed to be texted")
+	}
+	note, nok := messaging.CleanBody(b.ConsentNote, 500)
+	if !nok {
+		f.add("consentNote", "is required: say how the customer agreed (1-500 characters)")
+	}
+	if len(f) > 0 {
+		writeFields(w, f)
+		return
+	}
+	c, err := is.StartConversation(r.Context(), acc, store.StartInput{AddressID: b.AddressID, PeerKey: key, Body: body, ConsentNote: note})
+	if err != nil {
+		s.inboxError(w, "conversation", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, c)
+}
+
 type inboxNoteBody struct {
 	Body string `json:"body"`
 }
@@ -1055,6 +1316,116 @@ func (s *server) setInboxTagsCommon(w http.ResponseWriter, r *http.Request, all 
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
+}
+
+// inboxContactBody is the "add to contacts" request: a name for the
+// conversation's number. The number is the conversation's, not the caller's
+// to choose.
+type inboxContactBody struct {
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Company   string `json:"company"`
+	// Book is personal (the caller's own contacts, the default) or company
+	// (the shared book, supervisors only).
+	Book string `json:"book"`
+}
+
+func (s *server) addInboxContactCommon(w http.ResponseWriter, r *http.Request, all bool) {
+	is, acc, ok := s.inboxCaller(w, r, all, true)
+	if !ok {
+		return
+	}
+	id, ok := convID(w, r)
+	if !ok {
+		return
+	}
+	var b inboxContactBody
+	if !decode(w, r, &b) {
+		return
+	}
+	book := b.Book
+	if book == "" {
+		book = store.NameSourcePersonal
+	}
+	if book != store.NameSourcePersonal && (!all || book != store.NameSourceCompany) {
+		msg := "must be personal"
+		if all {
+			msg = "must be personal or company"
+		}
+		writeFields(w, fieldErrs{{Path: "book", Message: msg}})
+		return
+	}
+	conv, err := is.GetConversation(r.Context(), acc, id)
+	if err != nil {
+		s.inboxError(w, "conversation", err)
+		return
+	}
+	in := phonebook.EntryInput{FirstName: b.FirstName, LastName: b.LastName, Company: b.Company,
+		Numbers: []phonebook.Number{{Label: phonebook.LabelMobile, Number: conv.Peer}}}
+	if errs := in.Normalize(s.Dialing); len(errs) > 0 {
+		writePhonebookFields(w, errs)
+		return
+	}
+	c, err := is.AddConversationContact(r.Context(), acc, id, book, in)
+	if err != nil {
+		if errors.Is(err, store.ErrNoExtensionLink) {
+			s.contactError(w, "contact", err)
+			return
+		}
+		s.configError(w, "contact", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+func (s *server) addInboxContact(w http.ResponseWriter, r *http.Request) {
+	s.addInboxContactCommon(w, r, true)
+}
+func (s *server) addMyInboxContact(w http.ResponseWriter, r *http.Request) {
+	s.addInboxContactCommon(w, r, false)
+}
+
+// maxInboxCalls is the most calls the conversation panel asks for.
+const maxInboxCalls = 50
+
+// inboxConversationCallsCommon is the peer's recent calls for the panel: the
+// same slim record as the caller's own call history.
+func (s *server) inboxConversationCallsCommon(w http.ResponseWriter, r *http.Request, all bool) {
+	is, acc, ok := s.inboxCaller(w, r, all, false)
+	if !ok {
+		return
+	}
+	id, ok := convID(w, r)
+	if !ok {
+		return
+	}
+	limit := 10
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > maxInboxCalls {
+			badRequest(w, "limit must be 1-50")
+			return
+		}
+		limit = n
+	}
+	cs, err := is.ConversationCalls(r.Context(), acc, id, limit)
+	if err != nil {
+		s.inboxError(w, "conversation", err)
+		return
+	}
+	out := make([]selfCall, len(cs))
+	for i, c := range cs {
+		out[i] = selfCall{ID: c.ID, StartTime: c.StartTime.UTC().Format("2006-01-02T15:04:05Z07:00"), DurationMs: c.DurationMs,
+			Direction: c.Direction, Kind: c.Kind, Source: c.Source, Destination: c.Destination, Answered: c.AnswerTime != nil}
+	}
+	writePage(w, out, 0)
+}
+
+func (s *server) listInboxConversationCalls(w http.ResponseWriter, r *http.Request) {
+	s.inboxConversationCallsCommon(w, r, true)
+}
+func (s *server) listMyInboxConversationCalls(w http.ResponseWriter, r *http.Request) {
+	s.inboxConversationCallsCommon(w, r, false)
 }
 
 func (s *server) readInboxConversationCommon(w http.ResponseWriter, r *http.Request, all bool) {
@@ -1210,7 +1581,17 @@ func (s *server) myInboxStatus(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "inbox status", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, st)
+	_, ready, err := s.emailSettings(r.Context())
+	if err != nil {
+		s.internal(w, "inbox status: email settings", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		store.InboxStatus
+		// EmailReply is whether SMTP is configured: an offline chat can only
+		// be answered by email then.
+		EmailReply bool `json:"emailReply"`
+	}{st, ready})
 }
 
 func (s *server) listMyInboxAgents(w http.ResponseWriter, r *http.Request) {
