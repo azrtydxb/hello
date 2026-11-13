@@ -16,6 +16,8 @@ package kindha
 import (
 	"fmt"
 	"net"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -444,7 +446,19 @@ func runHA(t *testing.T, source string) {
 	t.Run("legacy node address flows", func(t *testing.T) {
 		l.flows(t, l.oldPhone, l.oldAddr, l.nodeIPs[l.nodes[0]], "node address")
 	})
-	t.Run("graceful loss of the active instance", func(t *testing.T) { l.failover(t, false) })
+	// KINDHA_GRACEFUL_REPEAT=n runs the graceful loss n times in a row (the
+	// holder of the VIP changes sides each time), to hunt a flake in it.
+	repeat := 1
+	if v, err := strconv.Atoi(os.Getenv("KINDHA_GRACEFUL_REPEAT")); err == nil && v > 1 {
+		repeat = v
+	}
+	for i := 1; i <= repeat; i++ {
+		name := "graceful loss of the active instance"
+		if repeat > 1 {
+			name += fmt.Sprintf(" %d", i)
+		}
+		t.Run(name, func(t *testing.T) { l.failover(t, false) })
+	}
 	t.Run("crash of the active instance", func(t *testing.T) { l.failover(t, true) })
 	t.Run("rolling restart", l.rolling)
 }
