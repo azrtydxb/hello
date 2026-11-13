@@ -263,3 +263,40 @@ func (l *leg) acknowledgeProvisional(dcs *sipgo.DialogClientSession, r *sip.Resp
 		}
 	}()
 }
+
+// writeAckKeepingCSeq sends the ACK of a 2xx whose dialog carried PRACKs. The
+// ACK must repeat the INVITE's CSeq number (RFC 3261 section 13.2.2.4), but
+// sipgo numbers it from the dialog's last request, which a PRACK has moved on:
+// a strict phone then drops the ACK and tears the call down after 32 s. The
+// request is built here with the dialog's routing, as sipgo does for any
+// in-dialog request, and sent directly (an ACK has no transaction). It is used
+// only for dialogs that sent a PRACK; the 2xx retransmission ACKs sipgo
+// resends for the others are not set up for these.
+func writeAckKeepingCSeq(dcs *sipgo.DialogClientSession, ack *sip.Request) error {
+	inv, res := dcs.InviteRequest, dcs.InviteResponse
+	ack.PrependHeader(
+		sip.HeaderClone(inv.From()),
+		sip.HeaderClone(res.To()),
+		sip.HeaderClone(inv.CallID()),
+		&sip.CSeqHeader{SeqNo: inv.CSeq().SeqNo, MethodName: sip.ACK},
+	)
+	maxFwd := sip.MaxForwardsHeader(70)
+	ack.AppendHeader(&maxFwd)
+	hdrs := res.GetHeaders("record-route")
+	for i := len(hdrs) - 1; i >= 0; i-- {
+		ack.AppendHeader(sip.NewHeader("Route", hdrs[i].Value()))
+	}
+	switch {
+	case len(hdrs) > 0:
+		if rh := ack.Route(); rh != nil && !rh.Address.UriParams.Has("lr") {
+			ack.Recipient = rh.Address // strict routing
+		}
+	case dcs.UA.RewriteContact:
+		ack.SetDestination(res.Source())
+	}
+	if ack.Contact() == nil {
+		ack.AppendHeader(sip.HeaderClone(&dcs.UA.ContactHDR))
+	}
+	ack.SetTransport(inv.Transport())
+	return dcs.UA.Client.WriteRequest(ack, sipgo.ClientRequestAddVia)
+}

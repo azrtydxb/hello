@@ -380,7 +380,7 @@ func (e *wpEnv) checkTransport(t *testing.T) {
 	switch e.transp {
 	case "tcp":
 		e.want(t, "P130", "1")
-		e.absent(t, "P183")    // SRTP is a TLS-only setting
+		e.absent(t, "P183") // SRTP is a TLS-only setting
 		// The backup registrar: P2312 and P2333 name it, P48 repeats the primary.
 		e.want(t, "P2312", "127.0.0.1:5082")
 		e.want(t, "P2333", "127.0.0.1:5082")
@@ -676,8 +676,6 @@ func (e *wpEnv) callWP(t *testing.T, caller labDevice, reliable bool) (*sipua.In
 // response: Hello offers 100rel, PRACKs the 180 and still connects, and the
 // INVITE carries the ring tag's Alert-Info, which the CDR records.
 func (e *wpEnv) checkRingTagAndPRACK(t *testing.T) {
-	sip.SIPDebug = true
-	defer func() { sip.SIPDebug = false }()
 	call, out, _ := e.callWP(t, e.other, true)
 	if h := call.Request.GetHeader("Supported"); h == nil || !strings.Contains(strings.ToLower(h.Value()), "100rel") {
 		t.Errorf("the INVITE to the WP carries Supported %v, want 100rel", h)

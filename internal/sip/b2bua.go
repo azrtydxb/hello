@@ -1890,7 +1890,16 @@ func (l *leg) ack(body []byte, contentType string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	if err := dcs.WriteAck(ctx, ack); err != nil {
+	l.mu.Lock()
+	prackd := l.lastRSeq != 0
+	l.mu.Unlock()
+	var err error
+	if prackd {
+		err = writeAckKeepingCSeq(dcs, ack)
+	} else {
+		err = dcs.WriteAck(ctx, ack)
+	}
+	if err != nil {
 		l.c.s.log.Debug("ACK to fork failed", "error", err)
 	}
 }
