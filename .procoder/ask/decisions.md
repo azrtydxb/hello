@@ -3900,7 +3900,6 @@ Follow-up to "Clients item 1: media foundation on pion". Choices:
   `hello_sip_webrtc_refused_total{reason="cleartext_hop"}`; the softphone call
   path (not built yet) answers 488.
 
-
 ## Integrations P13 and P19: Salesforce Open CTI and Dynamics 365 CIF (2026-11-13)
 
 Decided while building, without asking, within the spec and the brief:
