@@ -88,7 +88,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P13 | Salesforce Open CTI                            | todo        |
 | P14 | Pipedrive                                      | todo        |
 | P15 | Zoho CRM                                       | todo        |
-| P16 | Zendesk, Freshdesk                             | todo        |
+| P16 | Zendesk, Freshdesk                             | wip (#PR)   |
 | P17 | Slack, n8n, Make                               | todo        |
 | P18 | Outlook/Google contacts lookup, calendar DND   | todo        |
 | P19 | Dynamics 365 CIF                               | todo        |
@@ -112,7 +112,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P13 | Salesforce Open CTI                            | todo        |
 | P14 | Pipedrive                                      | todo        |
 | P15 | Zoho CRM                                       | todo        |
-| P16 | Zendesk, Freshdesk                             | todo        |
+| P16 | Zendesk, Freshdesk                             | wip (#PR)   |
 | P17 | Slack, n8n, Make                               | todo        |
 | P18 | Outlook/Google contacts lookup, calendar DND   | todo        |
 | P19 | Dynamics 365 CIF                               | todo        |

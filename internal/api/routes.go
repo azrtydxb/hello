@@ -222,6 +222,7 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/integrations/crm/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getCRMConnector},
 		{"PATCH", "/api/v1/integrations/crm/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updateCRMConnector},
 		{"DELETE", "/api/v1/integrations/crm/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteCRMConnector},
+		{"GET", "/api/v1/integrations/crm/{id}/app", auth.ScopeAdmin, auth.RoleAdmin, false, s.downloadCRMApp},
 		{"POST", "/api/v1/integrations/crm/{id}/connect", auth.ScopeAdmin, auth.RoleAdmin, false, s.connectCRMConnector},
 		{"DELETE", "/api/v1/integrations/crm/{id}/connection", auth.ScopeAdmin, auth.RoleAdmin, false, s.disconnectCRMConnector},
 		{"POST", "/api/v1/integrations/crm/{id}/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testCRMConnector},

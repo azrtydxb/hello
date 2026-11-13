@@ -1268,9 +1268,7 @@
         "operationId": "getMyFollowMe",
         "summary": "Get my extension's follow-me profile",
         "description": "Returns the follow-me profile of one of the signed-in user's own extensions. An extension that is not the user's answers 404, exactly like one that does not exist.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1311,9 +1309,7 @@
         "operationId": "putMyFollowMe",
         "summary": "Change my extension's follow-me profile",
         "description": "Changes the follow-me profile of one of the signed-in user's own extensions, with the same fields and rules as the operator route. An extension that is not the user's answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4749,9 +4745,7 @@
         "operationId": "getFollowMe",
         "summary": "Get an extension's follow-me profile",
         "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Returns the profile; an extension that has none reads as the defaults, off with no targets.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4789,9 +4783,7 @@
         "operationId": "putFollowMe",
         "summary": "Change an extension's follow-me profile",
         "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Fields left out keep their stored value; targets, when sent, replace the whole list (at most 5, in ring order). A profile can be turned on only with at least one target. A target cannot be the extension itself, an external target is 2 to 32 digits with an optional leading +, and an extension or ring group target must exist.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -23194,11 +23186,61 @@
         }
       }
     },
+    "/api/v1/integrations/crm/{id}/app": {
+      "get": {
+        "operationId": "downloadCRMApp",
+        "summary": "Download the ticket-sidebar app",
+        "description": "Builds the ticket-sidebar app of a helpdesk connector (Zendesk or Freshdesk) as a zip the customer uploads to their own account. The app shows the requester's phone numbers with a Call button that opens Hello's dialer, and the requester's latest tickets. It holds no Hello credential. Needs HELLO_PUBLIC_URL (https).",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The app package",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "A binary package for the customer's helpdesk account; downloaded from the console.",
+          "category": "credentials"
+        }
+      }
+    },
     "/api/v1/integrations/crm/{id}/connect": {
       "post": {
         "operationId": "connectCRMConnector",
         "summary": "Start the CRM sign-in",
-        "description": "Starts the OAuth authorization of the connector and returns the CRM address to send the browser to. The CRM returns to /api/v1/integrations/crm/oauth/callback, which finishes the connection and redirects to the console. Needs HELLO_PUBLIC_URL and the client id and secret.",
+        "description": "Starts the OAuth authorization of the connector and returns the CRM address to send the browser to. The CRM returns to /api/v1/integrations/crm/oauth/callback, which finishes the connection and redirects to the console. Needs HELLO_PUBLIC_URL and the client id and secret. A connector with auth \"direct\" (Zendesk, Freshdesk, ConnectWise, Autotask, HaloPSA) has no browser step: Connect signs in with the stored credentials, stores the connection and returns an empty authorizeUrl; refused credentials are a 400 field error on clientSecret.",
         "tags": ["integrations"],
         "parameters": [
           {
@@ -23215,6 +23257,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -33202,21 +33247,11 @@
                 "description": "For a call that rang a follow-me profile, what each leg did, in the order they rang: own (the extension's own devices), extension, ring_group or external, and how it ended (answered, declined: an external target did not press 1, busy, no_answer, failed, skipped, cancelled)",
                 "items": {
                   "type": "object",
-                  "required": [
-                    "kind",
-                    "extension",
-                    "trunk",
-                    "result"
-                  ],
+                  "required": ["kind", "extension", "trunk", "result"],
                   "properties": {
                     "kind": {
                       "type": "string",
-                      "enum": [
-                        "own",
-                        "extension",
-                        "ring_group",
-                        "external"
-                      ]
+                      "enum": ["own", "extension", "ring_group", "external"]
                     },
                     "extension": {
                       "type": "string",
@@ -36397,10 +36432,7 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "simultaneous",
-              "sequential"
-            ]
+            "enum": ["simultaneous", "sequential"]
           },
           "ringOwnDevices": {
             "type": "boolean",
@@ -36432,19 +36464,11 @@
       "FollowMeTarget": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "target",
-          "delaySeconds"
-        ],
+        "required": ["kind", "target", "delaySeconds"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "external",
-              "extension",
-              "ring_group"
-            ],
+            "enum": ["external", "extension", "ring_group"],
             "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
           },
           "target": {
@@ -36462,18 +36486,11 @@
       "FollowMeTargetInput": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "target"
-        ],
+        "required": ["kind", "target"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "external",
-              "extension",
-              "ring_group"
-            ],
+            "enum": ["external", "extension", "ring_group"],
             "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
           },
           "target": {
@@ -36499,10 +36516,7 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "simultaneous",
-              "sequential"
-            ],
+            "enum": ["simultaneous", "sequential"],
             "description": "simultaneous rings everything at once; sequential starts the targets one after another."
           },
           "ringOwnDevices": {
@@ -41612,6 +41626,7 @@
       "CRMConnector": {
         "type": "object",
         "required": [
+          "auth",
           "id",
           "kind",
           "name",
@@ -41633,7 +41648,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "The connector kind, for example hubspot."
+            "description": "The connector kind: hubspot, zendesk, freshdesk, connectwise, autotask, halopsa or clio."
           },
           "name": {
             "type": "string"
@@ -41647,11 +41662,16 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "The connector's settings: clientId and, for HubSpot, region (na or eu)."
+            "description": "The connector's settings. clientId is the OAuth client id or, for direct connectors, the identity the secret belongs to (Zendesk agent email, ConnectWise integrator clientId, Autotask API user, Halo client id). hubspot: region (na or eu). zendesk: subdomain, createContacts (true or false), answeredStatus (open, pending, hold, solved). freshdesk: subdomain, answeredStatus (open, pending, resolved). connectwise: host, companyId, publicKey, codebase, activityType. autotask: integrationCode, host (zone, found when empty), actionType. halopsa: host, tenant, ticketTypeId, fallbackClientId. clio: region (us, eu, ca, au)."
+          },
+          "auth": {
+            "type": "string",
+            "enum": ["oauth", "direct"],
+            "description": "How the connector signs in: oauth sends the administrator to the CRM to approve the app; direct signs in with the credentials the administrator typed (no browser step)."
           },
           "hasClientSecret": {
             "type": "boolean",
-            "description": "Whether the OAuth client secret is set. The secret itself is never returned."
+            "description": "Whether the client secret, API token or key is set. The secret itself is never returned."
           },
           "recordings": {
             "type": "boolean",
@@ -41712,7 +41732,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "description": "The connector kind (hubspot); required on create, immutable afterwards."
+            "description": "The connector kind (hubspot, zendesk, freshdesk, connectwise, autotask, halopsa, clio); required on create, immutable afterwards."
           },
           "name": {
             "type": "string",
@@ -41729,12 +41749,12 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "clientId and, for HubSpot, region (na or eu, default na); keys you leave out are kept."
+            "description": "The connector's own settings (see CRMConnector.config); keys you leave out are kept. Changing the clientId or a setting that decides where the secret is sent (host, subdomain, company, region) needs the clientSecret again."
           },
           "clientSecret": {
             "type": "string",
             "x-hello-secret": true,
-            "description": "The OAuth client secret of the customer's CRM app. Write-only; an empty string clears it."
+            "description": "The OAuth client secret of the customer's CRM app, or for a direct connector the API token, API key or private key. Write-only; an empty string clears it. A direct connector that is connected signs in with a new secret before storing it."
           },
           "recordings": {
             "type": "boolean",

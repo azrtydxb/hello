@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/azrtydxb/hello/internal/crm/sidebar"
 )
 
 // Errors the API maps to statuses.
@@ -20,6 +22,7 @@ var (
 	ErrBadState      = errors.New("crm: unknown or expired state")
 	ErrRateLimited   = errors.New("crm: too many tests")
 	ErrForbidden     = errors.New("crm: not allowed")
+	ErrNoApp         = sidebar.ErrNoApp
 )
 
 // ValidationError lists the fields of a request that failed validation.
@@ -97,6 +100,10 @@ type ConnectorView struct {
 	Capabilities Capabilities `json:"capabilities"`
 	Connection   *Connection  `json:"connection"`
 	RedirectURI  string       `json:"redirectUri,omitempty"`
+	// Auth is how the connector signs in: "oauth" sends the administrator to
+	// the CRM to approve the app, "direct" signs in with the credentials the
+	// administrator typed.
+	Auth string `json:"auth"`
 }
 
 func (s *Service) redirectURI() string {
@@ -110,6 +117,7 @@ func (s *Service) view(ctx context.Context, r ConnectorRow) (ConnectorView, erro
 	v := ConnectorView{ConnectorRow: r, RedirectURI: s.redirectURI()}
 	if c, ok := s.Tokens.Providers(r.Kind); ok {
 		v.Capabilities = c.Capabilities()
+		v.Auth = authKind(c)
 	}
 	cr, _, err := s.Repo.OrgConnection(ctx, r.ID)
 	switch {
@@ -124,6 +132,21 @@ func (s *Service) view(ctx context.Context, r ConnectorRow) (ConnectorView, erro
 		}
 	}
 	return v, nil
+}
+
+func authKind(c Connector) string {
+	if _, ok := c.(Direct); ok {
+		return "direct"
+	}
+	return "oauth"
+}
+
+// secretBound lists the settings whose change asks for the secret again.
+func secretBound(c Connector) []string {
+	if sb, ok := c.(SecretBound); ok {
+		return sb.SecretBoundKeys()
+	}
+	return []string{"clientId"}
 }
 
 // List returns every connector.
@@ -266,12 +289,34 @@ func (s *Service) Update(ctx context.Context, actor string, id int64, in Setting
 	if verr != nil {
 		return ConnectorView{}, verr
 	}
-	if ci.Config["clientId"] != cur.Config["clientId"] && in.ClientSecret == nil {
-		return ConnectorView{}, &ValidationError{map[string]string{"clientSecret": "required when the client id changes"}}
+	conn, _ := s.Tokens.Providers(cur.Kind)
+	if in.ClientSecret == nil {
+		for _, k := range secretBound(conn) {
+			if ci.Config[k] != cur.Config[k] {
+				return ConnectorView{}, &ValidationError{map[string]string{"clientSecret": "required when the " + k + " changes"}}
+			}
+		}
+	}
+	// A direct connector signs in again with the new credentials before they
+	// are stored, so a typo never replaces a working connection.
+	var fresh *Tokens
+	if d, ok := conn.(Direct); ok && in.ClientSecret != nil {
+		if _, _, cerr := s.Repo.OrgConnection(ctx, id); cerr == nil {
+			t, aerr := d.Authenticate(ctx, Config{Kind: ci.Kind, ClientID: ci.Config["clientId"], ClientSecret: *in.ClientSecret, Extra: ci.Config})
+			if aerr != nil {
+				return ConnectorView{}, &ValidationError{map[string]string{"clientSecret": scrub(aerr.Error())}}
+			}
+			fresh = &t
+		}
 	}
 	r, err := s.Repo.UpdateConnector(ctx, id, ci, in.ClientSecret)
 	if err != nil {
 		return ConnectorView{}, err
+	}
+	if fresh != nil {
+		if _, err := s.Repo.SaveOrgConnection(ctx, id, *fresh); err != nil {
+			return ConnectorView{}, err
+		}
 	}
 	if (cur.Enabled && !r.Enabled) || (cur.Recordings && !r.Recordings) {
 		s.revokeLinks(ctx, id)
@@ -328,18 +373,26 @@ func (s *Service) revokeToken(ctx context.Context, cur ConnectorRow) {
 	}
 }
 
-// Connect starts the OAuth flow and returns where to send the browser.
+// Connect starts the OAuth flow and returns where to send the browser. A
+// direct connector has no browser step: Connect signs in with the stored
+// credentials, stores the connection and returns an empty address.
 func (s *Service) Connect(ctx context.Context, actor string, id int64) (string, error) {
 	cur, err := s.Repo.GetConnector(ctx, id)
 	if err != nil {
 		return "", err
 	}
+	conn, ok := s.Tokens.Providers(cur.Kind)
+	if !ok {
+		return "", ErrNotOAuth
+	}
+	if d, isDirect := conn.(Direct); isDirect {
+		return "", s.connectDirect(ctx, actor, cur, d)
+	}
 	if s.PublicURL == "" {
 		return "", ErrNoPublicURL
 	}
-	conn, ok := s.Tokens.Providers(cur.Kind)
 	oa, isOA := conn.(OAuth)
-	if !ok || !isOA {
+	if !isOA {
 		return "", ErrNotOAuth
 	}
 	cfg, err := s.Tokens.Config(ctx, cur)
@@ -354,6 +407,32 @@ func (s *Service) Connect(ctx context.Context, actor string, id int64) (string, 
 		return "", err
 	}
 	return oa.AuthURL(cfg, s.redirectURI(), state), nil
+}
+
+// connectDirect signs a direct connector in and stores the connection. A
+// refused credential is a validation error naming the secret, never the
+// CRM's raw answer.
+func (s *Service) connectDirect(ctx context.Context, actor string, cur ConnectorRow, d Direct) error {
+	cfg, err := s.Tokens.Config(ctx, cur)
+	if err != nil {
+		return err
+	}
+	if !cur.HasSecret {
+		return ErrNoCredentials
+	}
+	actx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	t, err := d.Authenticate(actx, cfg)
+	if err != nil {
+		_ = s.Repo.Audit(ctx, actor, "connect_failed", "crm_connector", strconv.FormatInt(cur.ID, 10))
+		return &ValidationError{map[string]string{"clientSecret": scrub(err.Error())}}
+	}
+	if _, err := s.Repo.SaveOrgConnection(ctx, cur.ID, t); err != nil {
+		return err
+	}
+	_ = s.Repo.Audit(ctx, actor, "connect", "crm_connector", strconv.FormatInt(cur.ID, 10))
+	s.Lookup.Invalidate()
+	return nil
 }
 
 // Callback completes the OAuth flow: the state names the connector and the
@@ -593,4 +672,26 @@ func (s *Service) Engagement(ctx context.Context, actor, kind, callID, ref strin
 	}
 	_ = s.Repo.Audit(ctx, actor, "engagement", "crm_connector", strconv.FormatInt(conn.ID, 10))
 	return adopted, nil
+}
+
+// SidebarApp builds the ticket-sidebar app of a helpdesk connector (Zendesk,
+// Freshdesk) for the customer to upload to their own account. It needs
+// HELLO_PUBLIC_URL: the app's Call button opens Hello's dialer there.
+func (s *Service) SidebarApp(ctx context.Context, actor string, id int64) (name string, data []byte, err error) {
+	cur, err := s.Repo.GetConnector(ctx, id)
+	if err != nil {
+		return "", nil, err
+	}
+	if !sidebar.Supported(cur.Kind) {
+		return "", nil, ErrNoApp
+	}
+	if s.PublicURL == "" {
+		return "", nil, ErrNoPublicURL
+	}
+	name, data, err = sidebar.Build(cur.Kind, s.PublicURL)
+	if err != nil {
+		return "", nil, err
+	}
+	_ = s.Repo.Audit(ctx, actor, "download_app", "crm_connector", strconv.FormatInt(id, 10))
+	return name, data, nil
 }

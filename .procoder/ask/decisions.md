@@ -3333,3 +3333,47 @@ Decided while building, without asking, within the spec and the brief:
 - Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
+
+## Integrations P16 and P20: helpdesks, PSA tools and Clio (2026-11-13)
+
+Decided while building, without asking, within the spec and the brief:
+
+- **Direct sign-in is a framework concept.** Zendesk, Freshdesk, ConnectWise, Autotask and
+  HaloPSA have no browser consent (spec: customer API token / org-level API member). A
+  connector implements `crm.Direct` (`Authenticate`) instead of `crm.OAuth`; the existing
+  `Connect` call signs in with the stored credentials, proves them with a harmless read and
+  stores the result as the org connection. A static credential has no expiry; HaloPSA's
+  client-credentials token has one and is requested again by the TokenManager. The API
+  `auth` field says `oauth` or `direct`. No migration: the secret is the connector's sealed
+  client secret and the other settings are `config`.
+- **Secret-bound settings.** A setting that decides where the secret is sent (subdomain,
+  host, company, region, identity) asks for the secret again when it changes
+  (`crm.SecretBound`; default `clientId` only). A new secret on a connected direct
+  connector is proved before it replaces the stored one.
+- **`crm.ErrNoTarget` means skipped, not dead.** ConnectWise, Autotask and Clio need a
+  contact (and Halo a client) to put a call on; a call from an unknown number is `skipped`
+  with the reason and can be retried. Zendesk creates an end user for an unknown caller
+  (setting `createContacts`, default on, international numbers only); Freshdesk lets
+  Freshdesk create the contact from the phone.
+- **One ticket per call for helpdesks** (Zendesk Talk's behaviour), the first Zendesk comment
+  private so the customer is never e-mailed. The recording link is a second private
+  comment/note, added only if the ticket does not already carry it (a read first), so a
+  retry or a renewal never repeats it. PSA/Clio records are rewritten whole (idempotent).
+- **Record choice for the "verify each" cells of the spec:** ConnectWise = Sales activity of
+  type Call; Autotask = company note with the contact; Clio = PhoneCommunication; HaloPSA =
+  ticket. Phone search is by the last four digits (or the exact E.164 for Zendesk and
+  Freshdesk) followed by a digit comparison in Hello, because each system stores numbers as
+  typed. Contact ids that need two values are compound (`contact:company`, `Person:id`,
+  `user:client`).
+- **Sidebar apps do not hold a Hello credential.** The Call button opens `/dial?n=` in a new
+  tab (the agent is signed in there). So the "pop from the SSE stream" inside the helpdesk is
+  not shipped; the pop stays in `/dial` and the events stream. The Zendesk app is a ZAF 2
+  zip; the Freshdesk app is an FDK 2.3 source package (`fdk pack` then upload). Both are
+  built per request by `GET /integrations/crm/{id}/app` with Hello's https address embedded
+  as an escaped JSON string; Zendesk Talk Partner Edition stays out of scope, as in the spec.
+- **Recording links are now wired** (`cmd/hello-control/crmlinks.go`): the P6 follow-up that
+  P6 left as "one line". Links carry `recording_links.connector_id` (reserved by P4), so
+  revoking a connector's links is one UPDATE. No migration, so no placeholder number is
+  used and the migrate counts are unchanged.
+- **Clio revoke on disconnect is not done:** Clio's deauthorize takes the access token, the
+  framework's `Revoker` passes the refresh token; the administrator revokes in Clio.
