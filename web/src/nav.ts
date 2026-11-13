@@ -48,6 +48,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "user",
       },
       {
+        label: "Connected accounts",
+        path: "/me/connections",
+        phase: 5,
+        icon: "plug",
+        minRole: "user",
+      },
+      {
         label: "Voicemail",
         path: "/me/voicemail",
         phase: 5,
@@ -329,6 +336,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         path: "/integrations/crm",
         phase: 5,
         icon: "contact",
+        minRole: "admin",
+      },
+      {
+        label: "Slack",
+        path: "/integrations/slack",
+        phase: 5,
+        icon: "message-square",
         minRole: "admin",
       },
     ],

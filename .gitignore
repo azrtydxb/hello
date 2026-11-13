@@ -4,3 +4,8 @@
 .procoder/state/
 .procoder/index/
 .lycheecache
+
+# Editor and merge leftovers
+*.bak
+*.orig
+*.rej

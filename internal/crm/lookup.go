@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -151,9 +153,27 @@ func (l *Lookup) timeout() time.Duration {
 	return LookupTimeout
 }
 
-// connectors returns the active connectors that can look contacts up,
-// re-read every listTTL.
+// scoped is whether a connector signs in per user.
+func (l *Lookup) scoped(r ConnectorRow) bool {
+	c, ok := l.Tokens.Providers(r.Kind)
+	return ok && c.Capabilities().UserScope
+}
+
+// connectors returns the active organisation-level connectors that can look
+// contacts up (the per-user ones are asked by FindForUser).
 func (l *Lookup) connectors(ctx context.Context) []ConnectorRow {
+	var out []ConnectorRow
+	for _, r := range l.lookupConnectors(ctx) {
+		if !l.scoped(r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// lookupConnectors returns the active connectors that can look contacts up,
+// re-read every listTTL.
+func (l *Lookup) lookupConnectors(ctx context.Context) []ConnectorRow {
 	l.mu.Lock()
 	if l.list != nil && l.now().Sub(l.listAt) < listTTL {
 		out := l.list
@@ -170,7 +190,7 @@ func (l *Lookup) connectors(ctx context.Context) []ConnectorRow {
 	}
 	out := []ConnectorRow{}
 	for _, r := range rows {
-		if c, ok := l.Tokens.Providers(r.Kind); ok && c.Capabilities().Lookup {
+		if c, ok := l.Tokens.Providers(r.Kind); ok && c.Capabilities().Lookup && serverSide(c, r.Config) {
 			out = append(out, r)
 		}
 	}
@@ -214,7 +234,7 @@ func (l *Lookup) Find(ctx context.Context, number string, budget time.Duration) 
 	if budget <= 0 {
 		budget = l.timeout()
 	}
-	f := l.start(key, n)
+	f := l.start(key, func(ctx context.Context) (*Contact, bool) { return l.query(ctx, n) })
 	t := time.NewTimer(budget)
 	defer t.Stop()
 	select {
@@ -228,7 +248,7 @@ func (l *Lookup) Find(ctx context.Context, number string, budget time.Duration) 
 }
 
 // start runs (or joins) the query for key.
-func (l *Lookup) start(key, number string) *flight {
+func (l *Lookup) start(key string, run func(ctx context.Context) (*Contact, bool)) *flight {
 	l.mu.Lock()
 	if f, ok := l.inflight[key]; ok {
 		l.mu.Unlock()
@@ -243,7 +263,7 @@ func (l *Lookup) start(key, number string) *flight {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), l.timeout())
 		defer cancel()
-		c, definitive := l.query(ctx, number)
+		c, definitive := run(ctx)
 		f.c = c
 		if definitive && l.Cache != nil {
 			raw, _ := json.Marshal(c)
@@ -315,6 +335,131 @@ func (l *Lookup) query(ctx context.Context, number string) (*Contact, bool) {
 		}
 	}
 	return nil, definitive
+}
+
+// userKey is the breaker key of one user's connection to a connector.
+func userKey(connectorID, userID int64) int64 { return -(connectorID<<32 | userID&0xffffffff) }
+
+// FindForUser looks number up in the contacts of one user: the Outlook and
+// Google connectors the user signed in to. The budget works as in Find.
+func (l *Lookup) FindForUser(ctx context.Context, userID int64, number string, budget time.Duration) *Contact {
+	n, ok := NormalizeNumber(number)
+	if !ok || l.Tokens == nil || userID == 0 {
+		return nil
+	}
+	key := cachePrefix + "u" + strconv.FormatInt(userID, 10) + ":" + digitsOf(n)
+	if l.Cache != nil {
+		if raw, hit := l.Cache.Get(ctx, key); hit {
+			var c *Contact
+			if json.Unmarshal(raw, &c) == nil {
+				return c
+			}
+		}
+	}
+	var scoped []ConnectorRow
+	for _, r := range l.lookupConnectors(ctx) {
+		if l.scoped(r) {
+			scoped = append(scoped, r)
+		}
+	}
+	if len(scoped) == 0 {
+		return nil
+	}
+	if budget <= 0 {
+		budget = l.timeout()
+	}
+	f := l.start(key, func(ctx context.Context) (*Contact, bool) { return l.queryUser(ctx, scoped, userID, n) })
+	t := time.NewTimer(budget)
+	defer t.Stop()
+	select {
+	case <-f.done:
+		return f.c
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return nil
+	}
+}
+
+// queryUser asks the connectors the user is signed in to.
+func (l *Lookup) queryUser(ctx context.Context, rows []ConnectorRow, userID int64, number string) (*Contact, bool) {
+	conns, err := l.Repo.UserConnectionsOf(ctx, userID)
+	if err != nil {
+		return nil, false
+	}
+	definitive := true
+	for _, row := range rows {
+		i := slices.IndexFunc(conns, func(c ConnectionRow) bool { return c.ConnectorID == row.ID && c.Status == StatusConnected })
+		if i < 0 {
+			continue
+		}
+		bk := userKey(row.ID, userID)
+		if l.open(bk) {
+			definitive = false
+			continue
+		}
+		conn, cc, err := l.Tokens.ConnFor(ctx, row, userID)
+		if err != nil {
+			l.record(bk, false)
+			definitive = false
+			continue
+		}
+		c, err := conn.Lookup(ctx, cc, number)
+		if err != nil {
+			l.log().Warn("crm: contact lookup failed", "connector", row.ID, "kind", row.Kind, "error", err)
+			l.record(bk, false)
+			definitive = false
+			continue
+		}
+		l.record(bk, true)
+		if c != nil {
+			return c, true
+		}
+	}
+	return nil, definitive
+}
+
+// NameFor returns the caller-ID name for number from the contacts of the
+// user who owns extension ext (the callee), within budget. The extension to
+// user answer is cached for a minute so a call costs no query.
+func (l *Lookup) NameFor(ctx context.Context, ext, number string, budget time.Duration) (string, bool) {
+	if ext == "" || l.Tokens == nil {
+		return "", false
+	}
+	uid := l.userOf(ctx, ext)
+	c := l.FindForUser(ctx, uid, number, budget)
+	if c == nil {
+		return "", false
+	}
+	name := c.Name
+	if name == "" {
+		name = c.Company
+	}
+	if name = DisplayName(name); name == "" {
+		return "", false
+	}
+	return name, true
+}
+
+func (l *Lookup) userOf(ctx context.Context, ext string) int64 {
+	key := cachePrefix + "ext:" + ext
+	if l.Cache != nil {
+		if raw, hit := l.Cache.Get(ctx, key); hit {
+			id, _ := strconv.ParseInt(string(raw), 10, 64)
+			return id
+		}
+	}
+	u, ok, err := l.Repo.UserForExtension(ctx, ext)
+	if err != nil {
+		return 0
+	}
+	if !ok {
+		u.ID = 0
+	}
+	if l.Cache != nil {
+		l.Cache.Set(ctx, key, []byte(strconv.FormatInt(u.ID, 10)), time.Minute)
+	}
+	return u.ID
 }
 
 // Name returns the caller-ID name for number within budget: the contact's

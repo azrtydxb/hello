@@ -157,7 +157,11 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 	}
 	if d.Wifi != nil {
 		w := *d.Wifi
-		w.Keys = WifiKeys(WifiFamily(d.Phone.Vendor, d.Phone.Model), w)
+		var profiles []Dot1XProfile
+		if d.Dot1X != nil {
+			profiles = d.Dot1X.Profiles
+		}
+		w.Keys = WifiKeys(WifiFamily(d.Phone.Vendor, d.Phone.Model), w, profiles)
 		d.Wifi = &w
 	}
 	d.Prov.CACertBase64 = pemBase64(d.Prov.CACertPEM)

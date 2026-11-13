@@ -38,3 +38,29 @@ func TestIntegrationsAllowedCIDRs(t *testing.T) {
 		}
 	}
 }
+
+// TestCRMUploadAndSIPAllowList fails if the CRM upload limit is not 50 MB by
+// default, accepts a bad value, or if hello-sip does not read the same
+// private-range allow-list as hello-control (a self-hosted Odoo or Bitrix24
+// must be reachable for the caller-name lookup too).
+func TestCRMUploadAndSIPAllowList(t *testing.T) {
+	c, err := LoadControl(env(nil))
+	if err != nil || c.CRMUploadMaxMB != 50 {
+		t.Fatalf("default = %d, %v", c.CRMUploadMaxMB, err)
+	}
+	if c, err = LoadControl(env(map[string]string{"HELLO_CRM_UPLOAD_MAX_MB": "20"})); err != nil || c.CRMUploadMaxMB != 20 {
+		t.Fatalf("set = %d, %v", c.CRMUploadMaxMB, err)
+	}
+	for _, bad := range []string{"0", "-1", "lots"} {
+		if _, err := LoadControl(env(map[string]string{"HELLO_CRM_UPLOAD_MAX_MB": bad})); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	s, err := LoadSIP(env(nil))
+	if err != nil || len(s.IntegrationsAllowedCIDRs) != 3 {
+		t.Fatalf("sip default = %v, %v", s.IntegrationsAllowedCIDRs, err)
+	}
+	if s, err = LoadSIP(env(map[string]string{"HELLO_INTEGRATIONS_ALLOWED_CIDRS": "none"})); err != nil || len(s.IntegrationsAllowedCIDRs) != 0 {
+		t.Fatalf("sip none = %v, %v", s.IntegrationsAllowedCIDRs, err)
+	}
+}

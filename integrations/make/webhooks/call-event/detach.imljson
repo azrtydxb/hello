@@ -1,0 +1,7 @@
+{
+  "url": "/webhooks/{{webhook.data.id}}",
+  "method": "DELETE",
+  "response": {
+    "valid": "{{statusCode = 204 or statusCode = 404}}"
+  }
+}

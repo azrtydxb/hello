@@ -38,6 +38,8 @@ import {
 } from "./pages/Integrations";
 import { IntegrationEvents } from "./pages/IntegrationEvents";
 import { IntegrationsCRM } from "./pages/IntegrationsCRM";
+import { IntegrationsSlack } from "./pages/IntegrationsSlack";
+import { MyConnections } from "./pages/MyConnections";
 import { Webhooks } from "./pages/Webhooks";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
@@ -49,6 +51,8 @@ import { Cluster } from "./pages/Cluster";
 import { Door } from "./pages/Door";
 import { Calls } from "./pages/Calls";
 import { Consent } from "./pages/Consent";
+import { HubspotCallback } from "./pages/HubspotCallback";
+import { HubspotIframe } from "./pages/HubspotIframe";
 import { Dashboard } from "./pages/Dashboard";
 import { Devices } from "./pages/Devices";
 import { Diagnostics } from "./pages/Diagnostics";
@@ -184,6 +188,8 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/integrations/api-access": IntegrationsApiAccess,
   "/integrations/events": IntegrationEvents,
   "/integrations/crm": IntegrationsCRM,
+  "/integrations/slack": IntegrationsSlack,
+  "/me/connections": MyConnections,
   "/integrations/webhooks": Webhooks,
 };
 
@@ -345,6 +351,17 @@ export function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          {/* The HubSpot calling iframe and its sign-in popup: full pages with
+              no console session (HubSpot frames the first; nginx lets only
+              HubSpot do so). */}
+          <Route
+            path="/integrations/hubspot/iframe"
+            element={<HubspotIframe />}
+          />
+          <Route
+            path="/integrations/hubspot/callback"
+            element={<HubspotCallback />}
+          />
           {/* OAuth consent: full page, outside the shell, after sign-in. */}
           <Route
             path="/oauth/consent"

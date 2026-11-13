@@ -1297,6 +1297,11 @@ func TestSMTPSettings(t *testing.T) {
 	}
 }
 
+// TestDoorCallRoutes covers the door-open routes (spec S-47); the details are
+// in doorCallRoutes. It sits before TestAccountRoutesDocumentedStatuses so the
+// statuses it produces count there.
+func TestDoorCallRoutes(t *testing.T) { doorCallRoutes(t) }
+
 // TestFollowMeRoutes fails if a user can read or change the follow-me profile
 // of an extension that is not theirs, if the operator routes accept what the
 // profile rules refuse (a target that is the extension itself, an unusable
@@ -1446,7 +1451,7 @@ func TestAccountRoutesDocumentedStatuses(t *testing.T) {
 			match = match || strings.HasPrefix(op.Path, p)
 		}
 		if !match || strings.Contains(op.Path, "/me/contacts") || strings.Contains(op.Path, "/me/messages") ||
-			strings.Contains(op.Path, "/me/inbox") {
+			strings.Contains(op.Path, "/me/inbox") || strings.Contains(op.Path, "/me/connections") {
 			continue
 		}
 		for status := range conf.spec.Responses(op.ID) {

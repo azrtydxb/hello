@@ -105,6 +105,11 @@ type Record struct {
 	// SRTP says which legs of the call carried SRTP (migration 00081):
 	// none (the default), caller, callee or both.
 	SRTP string
+	// SRTPKeyEx is how the encrypted legs agreed their keys (migration
+	// 00079): none (the default), sdes, dtls or mixed; ICE says a leg ran
+	// ICE-lite.
+	SRTPKeyEx string
+	ICE       bool
 	// PeerCallID is the Call-ID of the answering callee leg (migration
 	// 00066), so an RTCP-XR report from the callee's phone finds the record;
 	// empty when no leg answered.
@@ -112,7 +117,7 @@ type Record struct {
 	// PageLegs is a page's outcome per member (migration 00014), one row
 	// each; empty for any other call.
 	PageLegs []PageLeg
-	// FollowMeLegs is what each follow-me target did (migration 00080), one
+	// FollowMeLegs is what each follow-me target did (migration 00079), one
 	// row each in cdr_legs with the role follow_me; empty for a call that
 	// ran no follow-me.
 	FollowMeLegs []FollowMeLeg
@@ -131,6 +136,14 @@ const (
 	SRTPCaller = "caller"
 	SRTPCallee = "callee"
 	SRTPBoth   = "both"
+)
+
+// The SRTPKeyEx column's values.
+const (
+	KeyExNone  = "none"
+	KeyExSDES  = "sdes"
+	KeyExDTLS  = "dtls"
+	KeyExMixed = "mixed"
 )
 
 // Queue leg events.
@@ -252,20 +265,20 @@ const insert = `WITH c AS (INSERT INTO cdrs (correlation_id, sip_call_id, source
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason,
     direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
-    rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client, peer_call_id, answered_by, srtp)
+    rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule, caller_codec, callee_codec, origin, origin_client, peer_call_id, answered_by, srtp, srtp_keyex, ice)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)
 ON CONFLICT (correlation_id) DO NOTHING RETURNING id),
 p AS (INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
 SELECT c.id, l.ord, l.leg->>'extension', l.leg->>'device', l.leg->>'result'
-FROM c, jsonb_array_elements($35::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1),
+FROM c, jsonb_array_elements($37::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1),
 f AS (INSERT INTO cdr_legs (cdr_id, position, role, extension, trunk, result, target_kind)
 SELECT c.id, l.ord, 'follow_me', l.leg->>'extension', l.leg->>'trunk', l.leg->>'result', l.leg->>'kind'
-FROM c, jsonb_array_elements($37::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1)
+FROM c, jsonb_array_elements($39::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1)
 INSERT INTO cdr_queue_legs (cdr_id, position, event, queue, extension, wait_ms, result, at)
 SELECT c.id, l.ord, l.leg->>'event', l.leg->>'queue', l.leg->>'extension', (l.leg->>'waitMs')::bigint,
        l.leg->>'result', (l.leg->>'at')::timestamptz
-FROM c, jsonb_array_elements($36::jsonb) WITH ORDINALITY AS l(leg, ord)`
+FROM c, jsonb_array_elements($38::jsonb) WITH ORDINALITY AS l(leg, ord)`
 
 // Run writes queued records until ctx is cancelled, retrying each with
 // exponential backoff. After cancellation it tries to flush what is left for
@@ -342,6 +355,10 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	if srtp == "" {
 		srtp = SRTPNone
 	}
+	keyex := r.SRTPKeyEx
+	if keyex == "" {
+		keyex = KeyExNone
+	}
 	trace := r.Trace
 	if trace == nil {
 		trace = routing.Trace{}
@@ -379,7 +396,7 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
 		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, r.RingTag, r.RingRule,
-		nullString(r.CallerCodec), nullString(r.CalleeCodec), origin, r.OriginClient, r.PeerCallID, r.AnsweredBy, srtp, string(lj), string(qj), string(fj))
+		nullString(r.CallerCodec), nullString(r.CalleeCodec), origin, r.OriginClient, r.PeerCallID, r.AnsweredBy, srtp, keyex, r.ICE, string(lj), string(qj), string(fj))
 	if err != nil {
 		return err
 	}
