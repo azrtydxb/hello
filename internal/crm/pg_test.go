@@ -253,6 +253,25 @@ func TestPGCallLogLifecycle(t *testing.T) {
 	if err := p.AttachRecording(ctx, nil, c.ID, "call-1", 43); err != nil {
 		t.Fatal(err)
 	}
+	// A failed attempt saves the connector's state; a later settle that sets
+	// none keeps it, and one that clears it empties it.
+	st := `{"id":"x1"}`
+	if err := p.Finish(ctx, row.ID, LogResult{Status: LogPending, Attempts: 1, NextAttemptAt: time.Now(), State: &st, RecordingSeen: 43}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Finish(ctx, row.ID, LogResult{Status: LogPending, Attempts: 1, NextAttemptAt: time.Now(), RecordingSeen: 43}); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := p.GetLog(ctx, row.ID); g.State != st {
+		t.Fatalf("state = %q, want it kept", g.State)
+	}
+	empty := ""
+	if err := p.Finish(ctx, row.ID, LogResult{Status: LogPending, Attempts: 1, NextAttemptAt: time.Now(), State: &empty, RecordingSeen: 43}); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := p.GetLog(ctx, row.ID); g.State != "" {
+		t.Fatalf("state = %q, want it cleared", g.State)
+	}
 	exp := time.Now().Add(30 * 24 * time.Hour)
 	if err := p.Finish(ctx, row.ID, LogResult{Status: LogLogged, ExternalID: "ext-1", NextAttemptAt: time.Now(), LinkExpiresAt: &exp, RecordingSeen: 42}); err != nil {
 		t.Fatal(err)

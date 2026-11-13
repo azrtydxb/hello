@@ -108,7 +108,7 @@ type Relay struct {
 type relayLeg struct {
 	name string
 	r    *Relay
-	conn *net.UDPConn
+	conn LegConn
 	port int
 
 	remoteMu sync.Mutex
@@ -277,6 +277,33 @@ func (r *Relay) addLegAt(name string, port int) (int, error) {
 	r.legs = append(r.legs, l)
 	r.used[port] = true
 	return port, nil
+}
+
+// AddMuxLeg adds the next leg on a shared WebRTC port instead of a socket of
+// its own (S-4): the leg reads and writes through ep, an endpoint of mux, and
+// the SDP names the mux's port. The caller names the leg's ICE ufrag with
+// ep.SetUfrag once the leg's ICE-lite credentials exist. Closing the relay
+// closes the endpoint, not the shared socket.
+func (r *Relay) AddMuxLeg(name string, mux *Mux) (port int, ep *MuxEndpoint, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || len(r.legs) >= 2 {
+		return 0, nil, errors.New("media: relay takes exactly two legs")
+	}
+	ep, err = mux.NewEndpoint()
+	if err != nil {
+		return 0, nil, fmt.Errorf("media: leg %q on the WebRTC port: %w", name, err)
+	}
+	l := &relayLeg{
+		name: name, r: r, conn: ep, port: mux.Port(),
+		q: make(chan relayMsg, relayQueue),
+	}
+	l.secure.Bind(ep.LocalAddr(), func(b []byte, to *net.UDPAddr) { _, _ = ep.WriteToUDP(b, to) },
+		func(from *net.UDPAddr, nominated bool) { l.iceVerified(from, nominated) })
+	l.secure.OnFail(func(reason string) { r.secureFailed(l.name, reason) })
+	l.secure.OnReady(func() { r.secureUpCall(l.name) })
+	r.legs = append(r.legs, l)
+	return mux.Port(), ep, nil
 }
 
 // SetTarget aims leg at addr: the address from the remote SDP until the
@@ -945,7 +972,7 @@ func (o *rewriteState) reset() error {
 		return fmt.Errorf("media: generate rewrite state: %w", err)
 	}
 	o.ssrc = binary.BigEndian.Uint32(b[0:4])
-	o.seq = binary.BigEndian.Uint16(b[4:6])
+	o.seq = startSeq(b[4:6])
 	o.ts = binary.BigEndian.Uint32(b[6:10])
 	o.started = true
 	o.haveIn = false
@@ -1104,7 +1131,7 @@ func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate 
 	if _, err := rand.Read(b[:]); err != nil {
 		return fmt.Errorf("media: announcement stream: %w", err)
 	}
-	seq := binary.BigEndian.Uint16(b[0:2])
+	seq := startSeq(b[0:2])
 	ts := binary.BigEndian.Uint32(b[2:6])
 	ssrc := binary.BigEndian.Uint32(b[6:10])
 	frame := 2 * codec.PlaybackFrameSamples()
@@ -1193,7 +1220,7 @@ func (r *Relay) SendDTMF(ctx context.Context, legName, digits string) error {
 	if _, err := rand.Read(b[:]); err != nil {
 		return fmt.Errorf("media: dtmf stream: %w", err)
 	}
-	seq := binary.BigEndian.Uint16(b[0:2])
+	seq := startSeq(b[0:2])
 	ts := binary.BigEndian.Uint32(b[2:6])
 	ssrc := binary.BigEndian.Uint32(b[6:10])
 	frameTicks := uint16(dtmfClockRate * frameDur / time.Second)

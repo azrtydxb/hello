@@ -3586,3 +3586,148 @@ Decided while building, without asking, within the spec and the brief:
   kamailio.cfg, the kw ConfigMap and test/deploy tests need re-syncing against
   #326 and #338 at merge (NEED_TLS defined in both, the hello-socket checks, the
   TLS opt-in test).
+
+## Integrations P14, P15, P21: Pipedrive, Zoho CRM, Odoo, Bitrix24 (2026-11-13)
+
+Decided while building, without asking, within the spec and the brief:
+
+- **One migration, 00087.** `crm_call_logs.state TEXT NOT NULL DEFAULT ''`
+  (additive). The connector settings live in the existing `config` JSON and `kind` has no CHECK.
+  The migrate counts in `test/integration/migrate_{prov,ai,ai_agent}_test.go` are main's plus one.
+- **Sign-in follows #328's names.** Odoo (API key) and Bitrix24 (inbound webhook) are `crm.Direct`
+  connectors (`auth` is `direct`; Connect verifies the stored secret and returns an empty
+  `authorizeUrl`; a refused one is a field error on `clientSecret`) and use `crm.SecretBound`
+  (Zoho: `region`; Odoo: `url`, `db`; Bitrix24: none, its webhook address is the secret), the
+  shared `internal/crm/kit` helper and `crm.ErrNoTarget` (Odoo, a call with neither a contact
+  nor an owner). Odoo's access token is the API key, Bitrix24's the webhook address.
+- **Multi-step writes survive a restart.** A connector returns `crm.PartialError{State, Err}`
+  from `LogCall` when it fails after a step that cannot be repeated; the worker saves State on
+  the job and hands it back as `CallLog.State` on the retry, clearing it on success. Bitrix24
+  uses it for register then finish then attachRecord, so a retry (also after a `hello-control`
+  restart) never registers the call twice. This replaces an in-memory record.
+- **Pipedrive: one org-level connection, not one per user.** The spec's table says tokens are
+  per user "for attribution"; the call log's `user_id` gives the same attribution from one
+  administrator's connection, so per-user sign-in (and its console flow) is not built. The
+  user is matched by email (`users/find`), manual mapping as for every connector. Pipedrive's
+  `api_domain` is kept as the connection account and used as the REST base only when it is an
+  https `*.pipedrive.com` host.
+- **Pipedrive recording is an upload.** `Capabilities.RecordingUpload`: the worker keeps the
+  call log's reference first (status `update`), then opens the audio from MinIO through
+  `crm.AudioSource` (wired in `cmd/hello-control/crmaudio.go`) and the connector uploads it
+  once. A failed upload is retried as an update, never as a second create. Over
+  `HELLO_CRM_UPLOAD_MAX_MB` (default 50) or a deleted recording: the call stays logged and the
+  job's `lastError` says why. No link is minted, so nothing is renewed.
+- **Bitrix24 copies its recording.** `Capabilities.RecordingCopy`: a link of at most one day
+  (`CopyLinkTTL`) is minted, Bitrix24 fetches it once, and `link_expires_at` stays empty so
+  the renewal job never re-attaches a duplicate file.
+- **Zoho** sends the recording link in the call's description, as the spec says; a renewal
+  rewrites the description. Leads are looked up after contacts and attached as `Who_Id`.
+  Zoho's refused-code answer is HTTP 200 with an `error` member and is treated as permanent.
+  PhoneBridge click-to-call is not built (marketplace only, decision 1).
+- **Odoo logs a note in the chatter** (spec: "chatter/log, verify"): no call model is shared
+  by all editions. Unknown caller: the note goes to the call owner's own partner so the call
+  is not lost. It speaks `/jsonrpc` (Odoo 14 to 19); `/json/2` is on the lab list, since
+  `/jsonrpc` is deprecated for removal in Odoo 20. `author_id` is not set (the note is the API
+  user's), so the later body update is always allowed; the owner's name is in the body.
+- **Bitrix24 register is not idempotent** on the Bitrix side; see the state above. No lead is
+  created for an unknown number (`CRM_CREATE = 0`), `SHOW = 0` (no screen-pop in the portal).
+- **Private-network CRMs.** The CRM HTTP client now allows `HELLO_INTEGRATIONS_ALLOWED_CIDRS`
+  (RFC 1918 by default) in `hello-control` and, via a new config field, `hello-sip`, so a
+  self-hosted Odoo or Bitrix24 is reachable. Loopback, link-local and metadata stay blocked.
+- **Recording links** come from #328's `cmd/hello-control/crmlinks.go` minter (no second
+  wiring here); `newCRM` gains only the audio source for Pipedrive's upload.
+- **MCP:** unchanged. The four read tools list the new kinds; the `hello-crm` skill and its
+  failures table were taught the new kinds.
+
+## Integrations P16 and P20: helpdesks, PSA tools and Clio (2026-11-13)
+
+Decided while building, without asking, within the spec and the brief:
+
+- **Direct sign-in is a framework concept.** Zendesk, Freshdesk, ConnectWise, Autotask and
+  HaloPSA have no browser consent (spec: customer API token / org-level API member). A
+  connector implements `crm.Direct` (`Authenticate`) instead of `crm.OAuth`; the existing
+  `Connect` call signs in with the stored credentials, proves them with a harmless read and
+  stores the result as the org connection. A static credential has no expiry; HaloPSA's
+  client-credentials token has one and is requested again by the TokenManager. The API
+  `auth` field says `oauth` or `direct`. No migration: the secret is the connector's sealed
+  client secret and the other settings are `config`.
+- **Secret-bound settings.** A setting that decides where the secret is sent (subdomain,
+  host, company, region, identity) asks for the secret again when it changes
+  (`crm.SecretBound`; default `clientId` only). A new secret on a connected direct
+  connector is proved before it replaces the stored one.
+- **`crm.ErrNoTarget` means skipped, not dead.** ConnectWise, Autotask and Clio need a
+  contact (and Halo a client) to put a call on; a call from an unknown number is `skipped`
+  with the reason and can be retried. Zendesk creates an end user for an unknown caller
+  (setting `createContacts`, default on, international numbers only); Freshdesk lets
+  Freshdesk create the contact from the phone.
+- **One ticket per call for helpdesks** (Zendesk Talk's behaviour), the first Zendesk comment
+  private so the customer is never e-mailed. The recording link is a second private
+  comment/note, added only if the ticket does not already carry it (a read first), so a
+  retry or a renewal never repeats it. PSA/Clio records are rewritten whole (idempotent).
+- **Record choice for the "verify each" cells of the spec:** ConnectWise = Sales activity of
+  type Call; Autotask = company note with the contact; Clio = PhoneCommunication; HaloPSA =
+  ticket. Phone search is by the last four digits (or the exact E.164 for Zendesk and
+  Freshdesk) followed by a digit comparison in Hello, because each system stores numbers as
+  typed. Contact ids that need two values are compound (`contact:company`, `Person:id`,
+  `user:client`).
+- **Sidebar apps do not hold a Hello credential.** The Call button opens `/dial?n=` in a new
+  tab (the agent is signed in there). So the "pop from the SSE stream" inside the helpdesk is
+  not shipped; the pop stays in `/dial` and the events stream. The Zendesk app is a ZAF 2
+  zip; the Freshdesk app is an FDK 2.3 source package (`fdk pack` then upload). Both are
+  built per request by `GET /integrations/crm/{id}/app` with Hello's https address embedded
+  as an escaped JSON string; Zendesk Talk Partner Edition stays out of scope, as in the spec.
+- **Recording links are now wired** (`cmd/hello-control/crmlinks.go`): the P6 follow-up that
+  P6 left as "one line". Links carry `recording_links.connector_id` (reserved by P4), so
+  revoking a connector's links is one UPDATE. No migration, so no placeholder number is
+  used and the migrate counts are unchanged.
+- **Clio revoke on disconnect is not done:** Clio's deauthorize takes the access token, the
+  framework's `Revoker` passes the refresh token; the administrator revokes in Clio.
+
+## Clients item 1: media foundation on pion (2026-11-13)
+
+Spec: `clients-webrtc-mobile-video.md` S-2 to S-6. Built on main without
+waiting for #276 (DTLS-SRTP, ICE-lite per leg). Choices:
+
+- **The SDP model wraps pion/sdp and keeps every attribute in order.** A parse
+  then build is a no-op, tested over a corpus of vendor and browser SDPs
+  (`testdata/sdp`). `ParseAudioSDP` is not re-implemented on it: the spec says
+  "where trivial", it is not, and #276 changes that code. `AudioSection`
+  bridges a section to it instead.
+- **The shared port is a mux that routes by ufrag, then by source address.** It
+  does not authenticate: the leg's ICE-lite agent does. Addresses per leg are
+  capped at 8 so a forged check cannot grow the table. This replaces pion/ice's
+  UDP mux, which assumes a full agent per connection.
+- **Relay legs read a `LegConn`** (a UDP socket or a mux endpoint) so the relay,
+  recorder and announcements are untouched.
+- **The thin seam to #276** is three calls after it merges: bind the leg's
+  `Secure` to the endpoint (`Bind(ep.LocalAddr(), ep.WriteToUDP, ...)`), call
+  `ep.SetUfrag` with the ufrag its `iceLocal` made, and pass `Fingerprint()` and
+  the answered setup into `WebRTCNode.Local`. The mux and SDP code use no #276
+  names (`muxIsSTUN`, `fingerprintUsable`), so the two merge without clashes.
+  `TestWebRTCToPhoneAudio`, `TestDTLSFingerprintMismatch` and the plaintext
+  check need #276's handshake and follow with that glue.
+- Video is rejected in the answer; accepting it is item 6.
+
+## Clients item 1 glue: WebRTC legs keyed by DTLS-SRTP (2026-11-13)
+
+Follow-up to "Clients item 1: media foundation on pion". Choices:
+
+- **`Relay.AnswerWebRTC` is the one join.** It validates the offer on the model,
+  routes the leg's ICE-lite ufrag to its mux endpoint before the answer exists,
+  lets the leg's `Secure` accept the DTLS offer (the handshake, fingerprint
+  pinning and keys are #276's code, unchanged) and writes the answer on the
+  model with the fingerprint and role Secure chose. A leg that cannot be keyed is
+  refused, never answered in the clear (`SecurePolicy{Require: true}`).
+- **`AddMuxLeg` binds the leg's `Secure` exactly as `AddLeg` does**, so the
+  relay, recorder and announcements see no difference between a socket and the
+  shared port.
+- **`ParseAudioSDP` is not unified on the SDP model.** The model (pion/sdp) needs
+  v=, o=, s= and t= lines; phones and trunks send SDPs without them and call
+  setup must answer them, so the strict reader cannot replace the tolerant one.
+  `TestParseAudioSDPStaysTolerant` pins the difference. `AudioSection` remains the
+  bridge.
+- **Tests:** `TestWebRTCToPhoneAudio` (PCMU and Opus; Opus is off in `-race`
+  builds, as everywhere), `TestDTLSFingerprintMismatch`, with a pion DTLS-SRTP
+  client as the browser. They check that nothing but STUN and DTLS crosses the
+  browser leg before the keys are in, that nothing on it is in the clear after,
+  and that a cleartext packet from the browser is not relayed.

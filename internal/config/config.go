@@ -82,6 +82,10 @@ type Control struct {
 	// RFC 1918 ranges by default, "none" for no private target at all).
 	// Loopback, link-local and metadata addresses are never allowed.
 	IntegrationsAllowedCIDRs []netip.Prefix
+	// CRMUploadMaxMB (HELLO_CRM_UPLOAD_MAX_MB, default 50) is the largest
+	// recording uploaded to a CRM that stores the file itself (Pipedrive);
+	// a larger one is not sent.
+	CRMUploadMaxMB int
 	// MinIO (voicemail audio) and SMTP (voicemail email). SMTP is optional:
 	// an empty SmtpHost disables the mailer.
 	MinioEndpoint      string
@@ -426,6 +430,10 @@ type SIP struct {
 	// PushRate (HELLO_PROV_PUSH_RATE, default 20) is how many check-sync
 	// pushes the cluster sends per minute.
 	PushRate int
+	// IntegrationsAllowedCIDRs are the private ranges the CRM caller-name
+	// lookup may reach (a self-hosted Odoo or Bitrix24); the same setting
+	// as hello-control's.
+	IntegrationsAllowedCIDRs []netip.Prefix
 	// VoicePromptLanguage (HELLO_VOICEMAIL_LANGUAGE, default en) is the
 	// language of the spoken voicemail prompts. Timezone (HELLO_TIMEZONE,
 	// else HELLO_PROV_TIMEZONE, else UTC) is the zone message times are
@@ -521,6 +529,20 @@ type SIP struct {
 	// keeps the old behaviour of mirroring the offer's own c= address,
 	// which only carries audio when the peer can reach the pod directly.
 	MediaAnchorHost string
+	// MediaWebRTCEnabled (HELLO_MEDIA_WEBRTC_ENABLED, default false) lets
+	// the anchor accept webrtc-profile legs (clients S-3, S-4): ICE-lite
+	// and DTLS-SRTP from browsers and apps on one shared UDP port.
+	MediaWebRTCEnabled bool
+	// MediaWebRTCPort (HELLO_MEDIA_WEBRTC_PORT, default 21100) is that
+	// port; it lies outside the RTP range.
+	MediaWebRTCPort int
+	// MediaWebRTCPublicIP (HELLO_MEDIA_WEBRTC_PUBLIC_IP, default empty) is
+	// an extra candidate address for clients outside the LAN.
+	MediaWebRTCPublicIP string
+	// MediaWebRTCAllowCleartextHop (HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP,
+	// default false) permits WebRTC calls while the Kamailio to hello-sip
+	// hop is not TLS: the fingerprint then travels in the clear on that hop.
+	MediaWebRTCAllowCleartextHop bool
 	// MediaDTLS (HELLO_MEDIA_DTLS, default true) lets the anchor terminate
 	// DTLS-SRTP (phone-feature-parity S-16); off, an offer that carries only
 	// DTLS is refused with 488 and no device is offered it. MediaICE
@@ -585,6 +607,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
 	}
 	c.IntegrationsAllowedCIDRs = r.allowedCIDRs("HELLO_INTEGRATIONS_ALLOWED_CIDRS")
+	c.CRMUploadMaxMB = r.positiveInt("HELLO_CRM_UPLOAD_MAX_MB", 50)
 	c.Database = r.database(c.DatabaseURL)
 	c.DoorCameraAllow = r.cameraAllow()
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
@@ -692,8 +715,9 @@ func (r *reader) clients() Clients {
 	if c.AuthKeyPrevious != "" && c.AuthKey == "" {
 		r.fail("HELLO_CLIENT_AUTH_KEY_PREVIOUS", errors.New("needs HELLO_CLIENT_AUTH_KEY"))
 	}
-	if c.WSSURL != "" && !strings.HasPrefix(c.WSSURL, "wss://") && !strings.HasPrefix(c.WSSURL, "ws://") {
-		r.fail("HELLO_WSS_URL", errors.New("must be a wss:// (or ws://) URL"))
+	// A plain ws scheme is accepted on purpose, for a lab without TLS.
+	if u, err := url.Parse(c.WSSURL); c.WSSURL != "" && (err != nil || (u.Scheme != "wss" && u.Scheme != "ws")) {
+		r.fail("HELLO_WSS_URL", errors.New("must be a wss (or ws) URL"))
 	}
 	if len(c.TURNURLs) > 0 && len(c.TURNSecret) < 16 {
 		r.fail("HELLO_TURN_SECRET", errors.New("is required with HELLO_TURN_URLS and must be at least 16 bytes"))
@@ -1096,6 +1120,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 		MaxCallDuration:    r.duration("HELLO_SIP_MAX_CALL_DURATION", 4*time.Hour),
 		PushRate:           r.positiveInt("HELLO_PROV_PUSH_RATE", 20),
 	}
+	c.IntegrationsAllowedCIDRs = r.allowedCIDRs("HELLO_INTEGRATIONS_ALLOWED_CIDRS")
 	c.VoicePromptLanguage = r.optional("HELLO_VOICEMAIL_LANGUAGE", "en")
 	c.Timezone = r.optional("HELLO_TIMEZONE", r.optional("HELLO_PROV_TIMEZONE", "UTC"))
 	if _, err := time.LoadLocation(c.Timezone); err != nil {
@@ -1128,6 +1153,23 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	if c.MediaAnchorHost != "" {
 		if ip := net.ParseIP(c.MediaAnchorHost); ip == nil || ip.To4() == nil {
 			r.fail("HELLO_MEDIA_ANCHOR_HOST", fmt.Errorf("%q is not an IPv4 address", c.MediaAnchorHost))
+		}
+	}
+	c.MediaWebRTCEnabled = r.boolean("HELLO_MEDIA_WEBRTC_ENABLED")
+	c.MediaWebRTCPort = r.port("HELLO_MEDIA_WEBRTC_PORT", 21100)
+	c.MediaWebRTCPublicIP = r.optional("HELLO_MEDIA_WEBRTC_PUBLIC_IP", "")
+	c.MediaWebRTCAllowCleartextHop = r.boolean("HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP")
+	if c.MediaWebRTCPublicIP != "" {
+		if ip := net.ParseIP(c.MediaWebRTCPublicIP); ip == nil || ip.To4() == nil {
+			r.fail("HELLO_MEDIA_WEBRTC_PUBLIC_IP", fmt.Errorf("%q is not an IPv4 address", c.MediaWebRTCPublicIP))
+		}
+	}
+	if c.MediaWebRTCEnabled {
+		if c.MediaAnchorHost == "" {
+			r.fail("HELLO_MEDIA_WEBRTC_ENABLED", errors.New("needs HELLO_MEDIA_ANCHOR_HOST, the address clients send media to"))
+		}
+		if c.MediaWebRTCPort >= c.RTPPortMin && c.MediaWebRTCPort <= c.RTPPortMax {
+			r.fail("HELLO_MEDIA_WEBRTC_PORT", errors.New("must lie outside HELLO_RTP_PORT_MIN to HELLO_RTP_PORT_MAX"))
 		}
 	}
 	if c.MaxCallDuration == 0 {
