@@ -39,6 +39,10 @@ type Device struct {
 	// SRTP is the device's media-encryption policy (secmedia): "off",
 	// "optional" or "required"; empty (a test fixture) is optional.
 	SRTP string
+	// SRTPKeyEx is how the device's SRTP keys are agreed when Hello offers
+	// ("sdes" or "dtls", S-16) and MediaICE whether Hello offers it ICE-lite.
+	SRTPKeyEx string
+	MediaICE  bool
 	// Kind is desk (or empty), web or mobile. A client device has an owner
 	// (UserID) and derived credentials (AuthMode "derived"): it has no stored
 	// HA1, and its Username is the stable base w<id> that the expiring name
@@ -584,7 +588,7 @@ type Querier interface {
 // ride along in the same row, so one query keeps devices and features on one
 // revision.
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
-       d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, coalesce(d.srtp, 'optional'), e.number, e.name,
+       d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, coalesce(d.srtp, 'optional'), coalesce(d.srtp_keyex, 'sdes'), coalesce(d.media_ice, false), e.number, e.name,
        d.kind, d.auth_mode, d.user_id,
        (d.kind = 'web' AND NOT u.ring_web) OR (d.kind = 'mobile' AND NOT u.ring_mobile),
        e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id,
@@ -617,7 +621,8 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 			d                              Device
 			id                             *int64
 			user, realm, ha1MD5, ha1SHA256 *string
-			srtpPolicy                     string
+			srtpPolicy, srtpKeyEx          string
+			mediaICE                       bool
 			kind, authMode                 *string
 			userID                         *int64
 			ringOff                        *bool
@@ -625,7 +630,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 			boxID                          *int64
 			callWaiting                    bool
 		)
-		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &srtpPolicy, &d.Extension, &d.ExtensionName,
+		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &srtpPolicy, &srtpKeyEx, &mediaICE, &d.Extension, &d.ExtensionName,
 			&kind, &authMode, &userID, &ringOff,
 			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID,
 			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden, &e.AnonymousOutbound, &e.Door); err != nil {
@@ -662,7 +667,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 				d.UserID = *userID
 			}
 			d.RingOff = ringOff != nil && *ringOff
-			d.SRTP = srtpPolicy
+			d.SRTP, d.SRTPKeyEx, d.MediaICE = srtpPolicy, srtpKeyEx, mediaICE
 			devices = append(devices, d)
 		}
 		if !seen[e.Number] {

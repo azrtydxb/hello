@@ -51,6 +51,10 @@ type call struct {
 	// srtpClosed is set once the call's media ended: the gauge is released.
 	srtpClosed bool
 	srtpNoted  map[string]bool
+	// kexA and kexB are how each leg's keys were agreed ("sdes" or "dtls"),
+	// iceLegs the legs that ran ICE-lite (the CDR's srtp_keyex and ice).
+	kexA, kexB string
+	iceLegs    map[string]bool
 	srtpSnap   *snapshot.Snapshot
 	// soloSec is the SRTP state of the media a call Hello answers itself
 	// uses (voicemail, a conference room, a page's caller leg).
@@ -1561,6 +1565,7 @@ func (c *call) record(status int, side, reason, result string) {
 		r.MediaMode = media
 	}
 	r.SRTP = c.srtpCDR()
+	r.SRTPKeyEx, r.ICE = c.srtpKeyExCDR(), c.iceCDR()
 	if r.MediaMode == "anchored" && !answer.IsZero() {
 		if p, l, j, ok := c.qualityStats(); ok {
 			r.RTPPackets, r.RTPLost, r.RTPJitterMs = &p, &l, &j

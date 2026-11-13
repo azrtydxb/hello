@@ -507,6 +507,13 @@ type SIP struct {
 	// keeps the old behaviour of mirroring the offer's own c= address,
 	// which only carries audio when the peer can reach the pod directly.
 	MediaAnchorHost string
+	// MediaDTLS (HELLO_MEDIA_DTLS, default true) lets the anchor terminate
+	// DTLS-SRTP (phone-feature-parity S-16); off, an offer that carries only
+	// DTLS is refused with 488 and no device is offered it. MediaICE
+	// (HELLO_MEDIA_ICE, default true) lets the anchor answer ICE offers as
+	// ICE-lite; off, ICE attributes are ignored.
+	MediaDTLS bool
+	MediaICE  bool
 	// HATakeoverEnabled (HELLO_HA_TAKEOVER_ENABLED, default true) lets the
 	// node poll for orphaned dialogs and take calls over; disabling it
 	// leaves the node replication-only.
@@ -1083,6 +1090,8 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.DSCPRTP = r.dscp("HELLO_DSCP_RTP", DefaultDSCPRTP)
 	c.MediaForceAnchor = r.getenv("HELLO_MEDIA_FORCE_ANCHOR") == "true"
 	c.MediaRecordingNotice = r.getenv("HELLO_MEDIA_RECORDING_NOTICE") != "false"
+	c.MediaDTLS = r.getenv("HELLO_MEDIA_DTLS") != "false"
+	c.MediaICE = r.getenv("HELLO_MEDIA_ICE") != "false"
 	c.MediaAnchorHost = r.optional("HELLO_MEDIA_ANCHOR_HOST", "")
 	if c.MediaAnchorHost != "" {
 		if ip := net.ParseIP(c.MediaAnchorHost); ip == nil || ip.To4() == nil {
