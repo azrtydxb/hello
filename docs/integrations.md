@@ -494,3 +494,13 @@ the event retention, dead letters after 30 days, by one replica at a time.
 
 Click-to-call (P3), recording links (P4) and the CRM connectors build on these
 events.
+
+## Microsoft Teams
+
+Teams Direct Routing needs a Microsoft-certified SBC, and Hello is not one.
+The supported way to connect Hello and Teams is an SBC (or a
+Direct-Routing-as-a-Service provider) in front of Hello, with Hello seeing it
+as a trunk of the **SBC peer** profile. There is no Teams code in Hello and no
+Microsoft account is configured in it. See [teams.md](teams.md) for the call
+flow, the Hello trunk, the number plan, the Teams-side steps, emergency calls
+and the support boundary.

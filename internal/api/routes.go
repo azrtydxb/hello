@@ -284,6 +284,7 @@ func (s *server) routes() []route {
 
 		{"GET", "/api/v1/trunks", auth.ScopeRead, auth.RoleViewer, false, s.listTrunks},
 		{"POST", "/api/v1/trunks", auth.ScopeWrite, auth.RoleOperator, false, s.createTrunk},
+		{"GET", "/api/v1/trunk-profiles", auth.ScopeRead, auth.RoleViewer, false, s.listTrunkProfiles},
 		{"GET", "/api/v1/trunks/status", auth.ScopeRead, auth.RoleViewer, false, s.trunkStatus},
 		{"GET", "/api/v1/trunks/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getTrunk},
 		{"PATCH", "/api/v1/trunks/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.updateTrunk},

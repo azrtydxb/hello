@@ -7,6 +7,7 @@ require (
 	github.com/emiago/sipgo v1.7.2
 	github.com/go-asn1-ber/asn1-ber v1.5.8
 	github.com/go-ldap/ldap/v3 v3.4.15
+	github.com/gobwas/ws v1.3.2
 	github.com/google/jsonschema-go v0.4.3
 	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/icholy/digest v1.2.0
@@ -36,7 +37,6 @@ require (
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
-	github.com/gobwas/ws v1.3.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect

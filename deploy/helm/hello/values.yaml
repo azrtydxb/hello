@@ -271,6 +271,30 @@ kamailio:
     publicPort: 5061
     nodePort: null
     secretName: ""
+  # SIP over WSS for browsers (docs/webrtc.md; clients-webrtc-mobile-video
+  # S-8 to S-12). Kamailio ends TLS and the WebSocket on its pod address and
+  # speaks UDP to the hello-sip nodes. Needs a kamailio image with the
+  # websocket and tls modules (docker/kamailio) and a certificate Secret.
+  wss:
+    enabled: false
+    # The port Kamailio binds on its pod address (with hostNetwork, the node
+    # port). Only the ingress controller should reach it (docs/webrtc.md).
+    port: 8088
+    # A kubernetes.io/tls Secret issued by the Hello CA; default
+    # kamailio.tls.secretName. The ingress does not verify it.
+    secretName: ""
+    # Browser origins allowed to open a WebSocket, exact. Default: the origin
+    # of global.publicUrl.
+    origins: []
+    # A regular expression the ingress controller's pod address must match
+    # for its X-Forwarded-For to be believed (the browser's own address for
+    # Hello's throttles). Empty: the ingress's address stands for every
+    # browser.
+    trustedProxies: ""
+    # Publish wss://<ui.ingress.host>/sip through ui.ingress (needs
+    # ui.ingress.enabled).
+    ingress: true
+    ingressAnnotations: {}
   # Phones' Service when hostNetwork is off.
   service:
     type: LoadBalancer

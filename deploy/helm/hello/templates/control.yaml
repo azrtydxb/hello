@@ -107,7 +107,11 @@ spec:
             {{- include "hello.clientKeyEnv" . | nindent 12 }}
             - name: HELLO_CLIENT_MAX_DEVICES
               value: {{ .Values.clients.maxDevices | quote }}
-            {{- with .Values.clients.wssUrl }}
+            {{- $wssUrl := .Values.clients.wssUrl }}
+            {{- if and (not $wssUrl) .Values.kamailio.wss.enabled .Values.kamailio.wss.ingress .Values.ui.ingress.enabled }}
+            {{- $wssUrl = printf "wss://%s/sip" .Values.ui.ingress.host }}
+            {{- end }}
+            {{- with $wssUrl }}
             - name: HELLO_WSS_URL
               value: {{ . | quote }}
             {{- end }}

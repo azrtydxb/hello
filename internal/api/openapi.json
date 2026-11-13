@@ -3141,6 +3141,62 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/trunk-profiles": {
+      "get": {
+        "operationId": "listTrunkProfiles",
+        "summary": "The trunk profiles and the defaults and limits each one applies",
+        "description": "Lists the profiles a trunk can have: generic and sbc-peer (the SBC in front of Microsoft Teams Direct Routing, see docs/teams.md). For each, the defaults a new trunk takes for the fields it leaves unset, and the limits the profile enforces.",
+        "tags": ["trunks"],
+        "responses": {
+          "200": {
+            "description": "Profiles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["name", "description", "defaults", "limits"],
+                        "properties": {
+                          "name": { "type": "string", "enum": ["generic", "sbc-peer"] },
+                          "description": { "type": "string" },
+                          "defaults": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "Trunk fields (as in createTrunk) a new trunk of this profile takes when it leaves them unset."
+                          },
+                          "limits": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "What the profile requires of the trunk, one sentence each."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/trunks/status": {
       "get": {
         "operationId": "listTrunkStatus",
@@ -31721,6 +31777,7 @@
           "unknownCallerAction",
           "rejectCode",
           "faxMode",
+          "profile",
           "geolocation"
         ],
         "properties": {
@@ -31869,6 +31926,12 @@
             "enum": [603, 486],
             "default": 603,
             "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
+          },
+          "profile": {
+            "type": "string",
+            "enum": ["generic", "sbc-peer"],
+            "default": "generic",
+            "description": "The trunk's profile. generic is every trunk. sbc-peer is a trunk to a session border controller Hello peers with, such as the certified SBC in front of Microsoft Teams Direct Routing (docs/teams.md): on create the unset fields take the profile's defaults (GET /api/v1/trunk-profiles), and the trunk must be IP-authenticated with source CIDRs and a destination, offer only G.711 and G.722, and never use SRTP required. 400 lists what is wrong."
           },
           "faxMode": {
             "type": "string",
@@ -32032,6 +32095,12 @@
             "default": 603,
             "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
           },
+          "profile": {
+            "type": "string",
+            "enum": ["generic", "sbc-peer"],
+            "default": "generic",
+            "description": "The trunk's profile. generic is every trunk. sbc-peer is a trunk to a session border controller Hello peers with, such as the certified SBC in front of Microsoft Teams Direct Routing (docs/teams.md): on create the unset fields take the profile's defaults (GET /api/v1/trunk-profiles), and the trunk must be IP-authenticated with source CIDRs and a destination, offer only G.711 and G.722, and never use SRTP required. 400 lists what is wrong."
+          },
           "faxMode": {
             "type": "string",
             "enum": ["passthrough", "t38", "off"],
@@ -32192,6 +32261,12 @@
             "enum": [603, 486],
             "default": 603,
             "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
+          },
+          "profile": {
+            "type": "string",
+            "enum": ["generic", "sbc-peer"],
+            "default": "generic",
+            "description": "The trunk's profile. generic is every trunk. sbc-peer is a trunk to a session border controller Hello peers with, such as the certified SBC in front of Microsoft Teams Direct Routing (docs/teams.md): on create the unset fields take the profile's defaults (GET /api/v1/trunk-profiles), and the trunk must be IP-authenticated with source CIDRs and a destination, offer only G.711 and G.722, and never use SRTP required. 400 lists what is wrong."
           },
           "faxMode": {
             "type": "string",

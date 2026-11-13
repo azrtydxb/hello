@@ -1009,7 +1009,7 @@ func (s *Server) recountRegistrations(ctx context.Context) {
 		return
 	}
 	n := 0
-	byTransport := map[string]int{"udp": 0, "tcp": 0, "tls": 0}
+	byTransport := map[string]int{"udp": 0, "tcp": 0, "tls": 0, "ws": 0, "wss": 0}
 	for _, b := range bs {
 		if b.ReceivedNode == s.cfg.NodeID {
 			n++

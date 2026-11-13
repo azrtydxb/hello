@@ -3333,3 +3333,38 @@ Decided while building, without asking, within the spec and the brief:
 - Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
+
+## WSS on Kamailio and the SBC-peer trunk profile (2026-11-13)
+
+- WSS (clients item 2) is opt-in by `KAMAILIO_WSS_PORT`, off in the chart
+  (`kamailio.wss.enabled`). Kamailio ends TLS and the WebSocket on a `wss`
+  listener on its own address; the Ingress (`/sip`, `backend-protocol: HTTPS`)
+  is a separate chart object. Origins are an exact allow-list
+  (`KAMAILIO_WS_ORIGINS`, default the console origin); a handshake without an
+  `Origin` is let in because a browser always sends one and the client still
+  needs digest. Unset list means no origin.
+- The browser's real address comes from `X-Forwarded-For` only when the TCP
+  peer matches `KAMAILIO_WSS_TRUSTED_PROXIES`, kept per connection id in an
+  htable and sent as `X-Hello-Client`. pike is skipped for WebSocket clients
+  because the ingress address is shared.
+- hello-sip records `ws` and `wss` as transports. A `sips:` call may ring `wss`
+  (encrypted to the edge) but not `ws`; SDES SRTP is still decided by TLS
+  only, since a browser negotiates DTLS-SRTP.
+- With the VIP, WebSocket clients use a separate `hello_ws` socket on the
+  instance's own address (UDP 5072), so Path and Record-Route name the
+  instance that holds the connection. HA activation is not changed.
+- The Kamailio to hello-sip TLS hop (S-12) is not built: it needs the DTLS-SRTP
+  work (#276) that this change does not depend on. It is a precondition for
+  accepting WebRTC calls in production, not for registering over WSS.
+- Teams (items 13 and P22): a trunk `profile` column (`generic`, `sbc-peer`,
+  migration 00110), defaults on create, limits on create and PATCH, a profile
+  list endpoint and MCP tool, a UI select, and docs/teams.md. No Teams code in
+  internal/sip. Hello has no TLS or SRTP transport towards trunks, so the
+  profile cannot ask for them and refuses `srtp: required`; the SBC encrypts
+  towards Microsoft and the Hello to SBC leg is UDP on the LAN or DMZ. A TLS
+  trunk transport and Diversion/History-Info are separate features that are
+  not built.
+- deploy/kuvryn-sync/kw/ is untouched by instruction, so its copy of
+  kamailio.cfg lags: TestKwKamailioConfigMatchesSource fails until the
+  manifests step copies deploy/kamailio/kamailio.cfg into the ConfigMap and
+  updates the checksum annotation.

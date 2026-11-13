@@ -74,7 +74,11 @@ type Trunk struct {
 	// Hello's own), "on" or "off".
 	SessionTimers string `json:"sessionTimers"`
 	// FaxMode is passthrough (default), t38 or off (migration 00072).
-	FaxMode   string    `json:"faxMode"`
+	FaxMode string `json:"faxMode"`
+	// Profile is the trunk's profile: "generic" or "sbc-peer" (migration
+	// 00110; docs/teams.md). A profile is a set of defaults and limits the
+	// API enforces, never read by hello-sip.
+	Profile   string    `json:"profile"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -107,6 +111,8 @@ type TrunkInput struct {
 	Geolocation      bool
 	SessionTimers    string
 	FaxMode          string
+	// Profile is "generic" (or empty) or "sbc-peer".
+	Profile string
 }
 
 // anonymousDefaults fills the defaults of the anonymous-call fields.
@@ -135,6 +141,7 @@ func (t Trunk) Input() TrunkInput {
 		SRTP:          t.SRTP,
 		SessionTimers: t.SessionTimers,
 		FaxMode:       t.FaxMode,
+		Profile:       t.Profile,
 	}
 }
 
@@ -164,14 +171,14 @@ type PasswordChange struct {
 
 const trunkCols = `id, name, mode, username, password_enc IS NOT NULL, realm, from_domain, register_expires,
 	options_interval, to_json(source_cidrs::text[]), max_calls, default_caller_id, enabled, to_json(internal_dialing),
-	to_json(codecs), messaging, geolocation, anonymous_policy, asserted_identity, identity_header, reject_anonymous, to_json(allowed_country_codes), unknown_caller_action, reject_code, srtp, session_timers, fax_mode, created_at, updated_at`
+	to_json(codecs), messaging, geolocation, anonymous_policy, asserted_identity, identity_header, reject_anonymous, to_json(allowed_country_codes), unknown_caller_action, reject_code, srtp, session_timers, fax_mode, profile, created_at, updated_at`
 
 func scanTrunk(r interface{ Scan(...any) error }) (Trunk, error) {
 	var t Trunk
 	var cidrs, dialing, codecs, countries []byte
 	if err := r.Scan(&t.ID, &t.Name, &t.Mode, &t.Username, &t.HasPassword, &t.Realm, &t.FromDomain, &t.RegisterExpires,
 		&t.OptionsInterval, &cidrs, &t.MaxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging, &t.Geolocation, &t.AnonymousPolicy, &t.AssertedIdentity, &t.IdentityHeader,
-		&t.RejectAnonymous, &countries, &t.UnknownCallerAction, &t.RejectCode, &t.SRTP, &t.SessionTimers, &t.FaxMode, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&t.RejectAnonymous, &countries, &t.UnknownCallerAction, &t.RejectCode, &t.SRTP, &t.SessionTimers, &t.FaxMode, &t.Profile, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return t, err
 	}
 	t.AllowedCountryCodes = []string{}
@@ -323,13 +330,13 @@ func (s *Store) CreateTrunk(ctx context.Context, actor string, in TrunkInput, pa
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO trunks (name, mode, username, realm, from_domain, register_expires,
 				options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging, geolocation,
-				anonymous_policy, asserted_identity, identity_header, reject_anonymous, allowed_country_codes, unknown_caller_action, reject_code, srtp, session_timers, fax_mode)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11, $12::jsonb, $13::jsonb, $14, $15, $16, $17, $18, $19, $20::text[], $21, $22, $23, $24, $25) RETURNING id`,
+				anonymous_policy, asserted_identity, identity_header, reject_anonymous, allowed_country_codes, unknown_caller_action, reject_code, srtp, session_timers, fax_mode, profile)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11, $12::jsonb, $13::jsonb, $14, $15, $16, $17, $18, $19, $20::text[], $21, $22, $23, $24, $25, $26) RETURNING id`,
 			in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires, in.OptionsInterval,
 			nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled, dialingArg(in.InternalDialing),
 			codecsArg(in.Codecs), in.Messaging, in.Geolocation,
 			in.AnonymousPolicy, in.AssertedIdentity, in.IdentityHeader, in.CallerPolicy.RejectAnonymous, nonNil(in.CallerPolicy.AllowedCountryCodes),
-			policyAction(in.CallerPolicy), policyCode(in.CallerPolicy), string(secmedia.Normalize(in.SRTP, secmedia.Off)), sessionTimersArg(in.SessionTimers), faxModeArg(in.FaxMode)).Scan(&id); err != nil {
+			policyAction(in.CallerPolicy), policyCode(in.CallerPolicy), string(secmedia.Normalize(in.SRTP, secmedia.Off)), sessionTimersArg(in.SessionTimers), faxModeArg(in.FaxMode), profileArg(in.Profile)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := s.setPassword(ctx, tx, id, password); err != nil {
@@ -371,12 +378,12 @@ func (s *Store) UpdateTrunk(ctx context.Context, actor string, id int64, pw Pass
 				max_calls = $10, default_caller_id = $11, enabled = $12, internal_dialing = $13::jsonb,
 				codecs = $14::jsonb, messaging = $15, geolocation = $16, anonymous_policy = $17,
 				asserted_identity = $18, identity_header = $19, reject_anonymous = $20, allowed_country_codes = $21::text[],
-				unknown_caller_action = $22, reject_code = $23, srtp = $24, session_timers = $25, fax_mode = $26, updated_at = now()
+				unknown_caller_action = $22, reject_code = $23, srtp = $24, session_timers = $25, fax_mode = $26, profile = $27, updated_at = now()
 			WHERE id = $1`, id, in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires,
 			in.OptionsInterval, nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled,
 			dialingArg(in.InternalDialing), codecsArg(in.Codecs), in.Messaging, in.Geolocation,
 			in.AnonymousPolicy, in.AssertedIdentity, in.IdentityHeader, in.CallerPolicy.RejectAnonymous,
-			nonNil(in.CallerPolicy.AllowedCountryCodes), policyAction(in.CallerPolicy), policyCode(in.CallerPolicy), string(secmedia.Normalize(in.SRTP, secmedia.Off)), sessionTimersArg(in.SessionTimers), faxModeArg(in.FaxMode)); err != nil {
+			nonNil(in.CallerPolicy.AllowedCountryCodes), policyAction(in.CallerPolicy), policyCode(in.CallerPolicy), string(secmedia.Normalize(in.SRTP, secmedia.Off)), sessionTimersArg(in.SessionTimers), faxModeArg(in.FaxMode), profileArg(in.Profile)); err != nil {
 			return id, err
 		}
 		if pw.Set {
@@ -1195,4 +1202,12 @@ func faxModeArg(m string) string {
 		return "passthrough"
 	}
 	return m
+}
+
+// profileArg is a trunk profile as stored: empty is "generic".
+func profileArg(p string) string {
+	if p == "" {
+		return routing.ProfileGeneric
+	}
+	return p
 }

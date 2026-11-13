@@ -10,7 +10,10 @@ FROM debian:trixie-slim
 # kamailio-tls-modules carries tls.so, which terminates SIP over TLS for
 # phones (phone-feature-parity S-14); it is only loaded when the pod sets
 # KAMAILIO_TLS_PORT (deploy/kamailio/kamailio.cfg).
-RUN apt-get update && apt-get install -y --no-install-recommends kamailio kamailio-tls-modules wget \
+# kamailio-websocket-modules carries websocket.so, which terminates SIP over
+# WebSocket for browsers (RFC 7118, clients-webrtc-mobile-video S-8); it is
+# only loaded when the pod sets KAMAILIO_WSS_PORT, which also needs tls.so.
+RUN apt-get update && apt-get install -y --no-install-recommends kamailio kamailio-tls-modules kamailio-websocket-modules wget \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # The kw manifest pins runAsUser/runAsGroup 102 (the official image's
@@ -21,7 +24,8 @@ RUN groupmod -g 102 kamailio 2>/dev/null || groupadd -g 102 kamailio \
     ; chown -R 102:102 /etc/kamailio
 
 # Build-time config check: load every module deploy/kamailio/kamailio.cfg
-# needs (all ship in the base kamailio package on trixie) so a missing
+# needs (all but tls and websocket ship in the base kamailio package on
+# trixie; the two are checked below) so a missing
 # module fails the image build, not a phone call.
 RUN printf '%s\n' \
       'loadmodule "jsonrpcs.so"' \
@@ -48,17 +52,20 @@ RUN printf '%s\n' \
       'loadmodule "xhttp.so"' \
       'loadmodule "xhttp_prom.so"' \
       'loadmodule "rtimer.so"' \
+      'loadmodule "htable.so"' \
+      'loadmodule "websocket.so"' \
       'request_route { drop; }' \
       > /tmp/check.cfg \
     && kamailio -c -f /tmp/check.cfg > /dev/null \
     && rm /tmp/check.cfg \
-    && find /usr/lib -name tls.so | grep -q .
+    && find /usr/lib -name tls.so | grep -q . \
+    && find /usr/lib -name websocket.so | grep -q .
 
 # The k8s pod mounts an emptyDir at /run/kamailio (fsGroup 102) and the
 # ConfigMap at /etc/kamailio; the container itself needs nothing writable
 # beyond /run/kamailio.
 USER 102:102
-EXPOSE 5060/udp 5061/tcp 5070/udp 9090
+EXPOSE 5060/udp 5061/tcp 5070/udp 5072/udp 9090
 ENTRYPOINT ["kamailio"]
 # -DD: stay in the foreground without forking into daemon mode, but still
 # fork the UDP/TCP listener children (plain -D would run no-fork and bind
