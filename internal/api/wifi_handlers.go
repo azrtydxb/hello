@@ -7,7 +7,7 @@ import (
 	"github.com/azrtydxb/hello/internal/store"
 )
 
-// Wi-Fi profiles and roaming (migration 00052, spec phone-feature-parity S-23
+// Wi-Fi profiles and roaming (migration 00074, spec phone-feature-parity S-23
 // and S-24). A profile's pre-shared key and 802.1X password are write-only:
 // the API shows pskSet and passwordSet, never the secret. Reads are open to a
 // viewer; changes need the admin scope, as the phone groups they apply to do.

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -29,6 +30,7 @@ import (
 	"github.com/azrtydxb/hello/internal/originate"
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/prov/redirect"
+	"github.com/azrtydxb/hello/internal/safehttp"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/telemetry"
@@ -201,7 +203,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// appends to, store it, and fan it out to the SSE clients of this pod.
 	// CRM connectors (spec integrations I-47): their hook queues calls in
 	// the ingest transaction, so it is registered before the service runs.
-	crmSvc := newCRM(cfg, st, db, box, vk, metrics.Registry, nil, log)
+	crmSvc := newCRM(cfg, st, db, box, vk, metrics.Registry, &crmLinks{Store: st, PublicURL: cfg.AI.PublicURL}, crmAudio{st: st, objs: objs}, log)
 	evSvc := &events.Service{
 		Hooks: []events.TxHook{crmSvc.Hook},
 		DB:    db, Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
@@ -239,21 +241,26 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	sweeper := &originate.Sweeper{Store: st, Live: vk, Lock: st, Log: log.With("component", "originate")}
 	go sweeper.Run(ctx)
 	apiCfg := api.Config{
-		CRM:             crmSvc.Service,
-		Events:          evSvc,
-		Webhooks:        hooks,
-		AIAgent:         agent,
-		Store:           st,
-		Live:            vk,
-		Queues:          vk,
-		Callbacks:       st.QueueCallbacks(),
-		Fax:             faxCfg,
-		Trunks:          vk,
-		Cluster:         vk,
-		Valkey:          vk,
-		PageTests:       vk,
-		Parked:          vk,
-		DoorTriggers:    vk,
+		CRM:          crmSvc.Service,
+		Events:       evSvc,
+		Webhooks:     hooks,
+		AIAgent:      agent,
+		Store:        st,
+		Live:         vk,
+		Queues:       vk,
+		Callbacks:    st.QueueCallbacks(),
+		Fax:          faxCfg,
+		Trunks:       vk,
+		Cluster:      vk,
+		Valkey:       vk,
+		PageTests:    vk,
+		Parked:       vk,
+		DoorCalls:    vk,
+		DoorTriggers: vk,
+		CameraHTTP: &http.Client{
+			Transport:     safehttp.NewTransport(safehttp.Options{Allow: cfg.DoorCameraAllow}),
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
 		Objects:         objs,
 		Backups:         backups,
 		Maintenance:     backups.Maintenance,

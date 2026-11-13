@@ -1268,9 +1268,7 @@
         "operationId": "getMyFollowMe",
         "summary": "Get my extension's follow-me profile",
         "description": "Returns the follow-me profile of one of the signed-in user's own extensions. An extension that is not the user's answers 404, exactly like one that does not exist.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1311,9 +1309,7 @@
         "operationId": "putMyFollowMe",
         "summary": "Change my extension's follow-me profile",
         "description": "Changes the follow-me profile of one of the signed-in user's own extensions, with the same fields and rules as the operator route. An extension that is not the user's answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4749,9 +4745,7 @@
         "operationId": "getFollowMe",
         "summary": "Get an extension's follow-me profile",
         "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Returns the profile; an extension that has none reads as the defaults, off with no targets.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4789,9 +4783,7 @@
         "operationId": "putFollowMe",
         "summary": "Change an extension's follow-me profile",
         "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Fields left out keep their stored value; targets, when sent, replace the whole list (at most 5, in ring order). A profile can be turned on only with at least one target. A target cannot be the extension itself, an external target is 2 to 32 digits with an optional leading +, and an extension or ring group target must exist.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -17903,6 +17895,212 @@
         }
       }
     },
+    "/api/v1/extensions/{id}/door-open": {
+      "get": {
+        "operationId": "getDoorOpen",
+        "summary": "Show a door station's door-open settings",
+        "description": "Says whether a door-open code is set on a door station and whether the call hangs up after the door was opened. The code itself is never returned. An ordinary user extension answers 409.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Door-open settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorOpen"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "updateDoorOpen",
+        "summary": "Set or clear a door station's door-open code",
+        "description": "Sets the door-open code (1 to 8 characters of 0-9, * and #) or clears it with an empty string, and the hang-up-after-open flag. When the user who answered a door call dials *50, or presses Open door in the console, Hello sends the code to the door as RFC 2833 events. The code is stored sealed and is never returned or logged. An ordinary user extension answers 409.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DoorOpenUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Door-open settings after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorOpen"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "the door-open code is set only in the console",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/me/door-calls": {
+      "get": {
+        "operationId": "listMyDoorCalls",
+        "summary": "List the door calls you answered and that are still up",
+        "description": "Lists the live calls with a door station that the signed-in user's extension answered (or, for a call the user placed to a station, started). The console offers Open door on them.",
+        "tags": ["me"],
+        "responses": {
+          "200": {
+            "description": "Your live door calls",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorCallList"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
+        }
+      }
+    },
+    "/api/v1/calls/{id}/door-open": {
+      "post": {
+        "operationId": "openDoorForCall",
+        "summary": "Open the door of your live door call",
+        "description": "Asks the hello-sip node holding the call to send the door station's door-open code to the door, as `*50` does. Only the user whose extension answered the call (or placed it to the station) may; anyone else gets 403. The path id is the call's correlation id from GET /api/v1/calls. 409 when the call is not an answered door call or the station has no code or the media does not allow it; 502 when the node could not send; 504 when no node answered in time.",
+        "tags": ["live"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Correlation id of the live call",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The code is being sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorOpenSent"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "504": {
+            "description": "No hello-sip node answered in time",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "physical access: only the user who answered the door call opens it, from the console",
+          "category": "human-in-the-loop"
+        }
+      }
+    },
     "/api/v1/door/webhooks": {
       "get": {
         "operationId": "listDoorWebhooks",
@@ -23004,7 +23202,7 @@
       "post": {
         "operationId": "createCRMConnector",
         "summary": "Create a CRM connector",
-        "description": "Adds a connector of a registered kind (hubspot). The customer creates the CRM app in their own account; this stores its client id (config.clientId) and, write-only, its client secret. A new connector is not connected until an administrator signs in with connect. Validation failures list each failing field in error.fields.",
+        "description": "Adds a connector of a registered kind (hubspot, pipedrive, zoho, odoo, bitrix24). The customer creates the CRM app (or the Odoo API key, or the Bitrix24 inbound webhook) in their own account; this stores its client id (config.clientId; the login for Odoo, none for Bitrix24) and, write-only, its client secret (the API key for Odoo, the webhook address for Bitrix24). Settings per kind: hubspot region na or eu; zoho region us, eu, in, au, jp, ca, sa or cn; odoo url and db. A new connector is not connected until an administrator signs in with connect. Validation failures list each failing field in error.fields.",
         "tags": ["integrations"],
         "requestBody": {
           "required": true,
@@ -23194,11 +23392,61 @@
         }
       }
     },
+    "/api/v1/integrations/crm/{id}/app": {
+      "get": {
+        "operationId": "downloadCRMApp",
+        "summary": "Download the ticket-sidebar app",
+        "description": "Builds the ticket-sidebar app of a helpdesk connector (Zendesk or Freshdesk) as a zip the customer uploads to their own account. The app shows the requester's phone numbers with a Call button that opens Hello's dialer, and the requester's latest tickets. It holds no Hello credential. Needs HELLO_PUBLIC_URL (https).",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The app package",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "A binary package for the customer's helpdesk account; downloaded from the console.",
+          "category": "credentials"
+        }
+      }
+    },
     "/api/v1/integrations/crm/{id}/connect": {
       "post": {
         "operationId": "connectCRMConnector",
         "summary": "Start the CRM sign-in",
-        "description": "Starts the OAuth authorization of the connector and returns the CRM address to send the browser to. The CRM returns to /api/v1/integrations/crm/oauth/callback, which finishes the connection and redirects to the console. Needs HELLO_PUBLIC_URL and the client id and secret.",
+        "description": "Starts the OAuth authorization of the connector and returns the CRM address to send the browser to. The CRM returns to /api/v1/integrations/crm/oauth/callback, which finishes the connection and redirects to the console. Needs HELLO_PUBLIC_URL and the client id and secret. A connector with auth \"direct\" (Zendesk, Freshdesk, ConnectWise, Autotask, HaloPSA, Odoo, Bitrix24) has no browser step: Connect signs in with the stored credentials, stores the connection and returns an empty authorizeUrl; refused credentials are a 400 field error on clientSecret.",
         "tags": ["integrations"],
         "parameters": [
           {
@@ -23215,6 +23463,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -25258,6 +25509,222 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": true
+      }
+    },
+    "/api/v1/extensions/{id}/camera": {
+      "get": {
+        "operationId": "getDoorCamera",
+        "summary": "Show a door station's camera",
+        "description": "Shows where a door station's camera picture comes from. The password is never returned. An ordinary user extension answers 409.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Camera settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorCamera"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "credentials"
+        }
+      },
+      "put": {
+        "operationId": "updateDoorCamera",
+        "summary": "Set a door station's camera",
+        "description": "Sets the address of a door station's camera, an MJPEG stream or a snapshot, with its credentials. hello-control fetches the picture itself, and only from addresses it may reach (public ones and the networks in HELLO_DOOR_CAMERA_ALLOW). An ordinary user extension answers 409.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DoorCameraUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Camera settings after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorCamera"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteDoorCamera",
+        "summary": "Remove a door station's camera",
+        "description": "Removes the camera and its stored password.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/extensions/{id}/camera/view": {
+      "get": {
+        "operationId": "viewDoorCamera",
+        "summary": "Show a door station's camera picture",
+        "description": "Fetches the door station's picture from its camera and passes it on: image/jpeg for a snapshot camera, multipart/x-mixed-replace for an MJPEG stream (ended after ten minutes; at most eight pictures at a time per node). 404 when the station has no camera, 502 when the camera cannot be reached or does not answer with a picture (its address may be outside HELLO_DOOR_CAMERA_ALLOW), 429 when too many pictures are shown.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The picture",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "multipart/x-mixed-replace": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "description": "Too many pictures are being shown; see Retry-After",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "binary-download"
+        }
       }
     }
   },
@@ -29336,7 +29803,8 @@
                   "caller_id_not_allowed",
                   "route_denied",
                   "device_limit",
-                  "derived_device"
+                  "derived_device",
+                  "not_your_call"
                 ]
               },
               "message": {
@@ -31083,6 +31551,15 @@
             "enum": ["off", "optional", "required"],
             "description": "Media-encryption policy of the device: off (plain RTP), optional (SDES SRTP is offered on a TLS leg and used when the phone answers with it) or required (SRTP only; a call that cannot be encrypted is refused with 488). Crypto is never offered on a leg that is not TLS."
           },
+          "srtpKeyExchange": {
+            "type": "string",
+            "enum": ["sdes", "dtls"],
+            "description": "How Hello agrees SRTP keys with the device when it makes the offer: sdes (a=crypto lines in the SDP, the default) or dtls (DTLS-SRTP, UDP/TLS/RTP/SAVP with a fingerprint). An offer from the phone is answered in kind. Either is only used on a leg whose signalling is TLS."
+          },
+          "mediaIce": {
+            "type": "boolean",
+            "description": "Whether Hello offers the device ICE-lite and provisions its ICE setting (Grandstream WP826 and WP836, P95002). An ICE offer from a phone is answered as ICE-lite whatever this says."
+          },
           "id": {
             "type": "integer",
             "format": "int64"
@@ -31158,6 +31635,15 @@
             "type": "string",
             "enum": ["off", "optional", "required"],
             "description": "Media-encryption policy of the device: off (plain RTP), optional (SDES SRTP is offered on a TLS leg and used when the phone answers with it) or required (SRTP only; a call that cannot be encrypted is refused with 488). Crypto is never offered on a leg that is not TLS."
+          },
+          "srtpKeyExchange": {
+            "type": "string",
+            "enum": ["sdes", "dtls"],
+            "description": "How Hello agrees SRTP keys with the device when it makes the offer: sdes (a=crypto lines in the SDP, the default) or dtls (DTLS-SRTP, UDP/TLS/RTP/SAVP with a fingerprint). An offer from the phone is answered in kind. Either is only used on a leg whose signalling is TLS."
+          },
+          "mediaIce": {
+            "type": "boolean",
+            "description": "Whether Hello offers the device ICE-lite and provisions its ICE setting (Grandstream WP826 and WP836, P95002). An ICE offer from a phone is answered as ICE-lite whatever this says."
           },
           "id": {
             "type": "integer",
@@ -31259,6 +31745,15 @@
             "type": "string",
             "enum": ["off", "optional", "required"],
             "description": "Media-encryption policy of the device: off (plain RTP), optional (SDES SRTP is offered on a TLS leg and used when the phone answers with it) or required (SRTP only; a call that cannot be encrypted is refused with 488). Crypto is never offered on a leg that is not TLS."
+          },
+          "srtpKeyExchange": {
+            "type": "string",
+            "enum": ["sdes", "dtls"],
+            "description": "How Hello agrees SRTP keys with the device when it makes the offer: sdes (a=crypto lines in the SDP, the default) or dtls (DTLS-SRTP, UDP/TLS/RTP/SAVP with a fingerprint). An offer from the phone is answered in kind. Either is only used on a leg whose signalling is TLS."
+          },
+          "mediaIce": {
+            "type": "boolean",
+            "description": "Whether Hello offers the device ICE-lite and provisions its ICE setting (Grandstream WP826 and WP836, P95002). An ICE offer from a phone is answered as ICE-lite whatever this says."
           },
           "enabled": {
             "type": "boolean",
@@ -31373,6 +31868,10 @@
             "enum": ["internal", "inbound", "outbound"],
             "description": "Call direction as its CDR will record it; absent on records from older nodes"
           },
+          "door": {
+            "type": "string",
+            "description": "Extension number of the door station on the call (spec S-45); absent when no station takes part"
+          },
           "ha": {
             "type": "string",
             "enum": ["owned", "taken-over"],
@@ -31417,6 +31916,15 @@
             "type": "string",
             "enum": ["none", "caller", "callee", "both"],
             "description": "Which legs of the call carried SRTP: none, caller, callee or both. Direct-media calls are none."
+          },
+          "srtpKeyEx": {
+            "type": "string",
+            "enum": ["none", "sdes", "dtls", "mixed"],
+            "description": "How the call's encrypted legs agreed their keys: none, sdes, dtls, or mixed (one leg each)."
+          },
+          "ice": {
+            "type": "boolean",
+            "description": "Whether a leg of the call ran ICE-lite."
           },
           "id": {
             "type": "integer",
@@ -33202,21 +33710,11 @@
                 "description": "For a call that rang a follow-me profile, what each leg did, in the order they rang: own (the extension's own devices), extension, ring_group or external, and how it ended (answered, declined: an external target did not press 1, busy, no_answer, failed, skipped, cancelled)",
                 "items": {
                   "type": "object",
-                  "required": [
-                    "kind",
-                    "extension",
-                    "trunk",
-                    "result"
-                  ],
+                  "required": ["kind", "extension", "trunk", "result"],
                   "properties": {
                     "kind": {
                       "type": "string",
-                      "enum": [
-                        "own",
-                        "extension",
-                        "ring_group",
-                        "external"
-                      ]
+                      "enum": ["own", "extension", "ring_group", "external"]
                     },
                     "extension": {
                       "type": "string",
@@ -36397,10 +36895,7 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "simultaneous",
-              "sequential"
-            ]
+            "enum": ["simultaneous", "sequential"]
           },
           "ringOwnDevices": {
             "type": "boolean",
@@ -36432,19 +36927,11 @@
       "FollowMeTarget": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "target",
-          "delaySeconds"
-        ],
+        "required": ["kind", "target", "delaySeconds"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "external",
-              "extension",
-              "ring_group"
-            ],
+            "enum": ["external", "extension", "ring_group"],
             "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
           },
           "target": {
@@ -36462,18 +36949,11 @@
       "FollowMeTargetInput": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "target"
-        ],
+        "required": ["kind", "target"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "external",
-              "extension",
-              "ring_group"
-            ],
+            "enum": ["external", "extension", "ring_group"],
             "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
           },
           "target": {
@@ -36499,10 +36979,7 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "simultaneous",
-              "sequential"
-            ],
+            "enum": ["simultaneous", "sequential"],
             "description": "simultaneous rings everything at once; sequential starts the targets one after another."
           },
           "ringOwnDevices": {
@@ -39073,6 +39550,76 @@
           }
         }
       },
+      "DoorOpen": {
+        "type": "object",
+        "required": ["codeSet", "hangupAfterOpen"],
+        "properties": {
+          "codeSet": {
+            "type": "boolean",
+            "description": "Whether a door-open code is stored. The code itself is never returned."
+          },
+          "hangupAfterOpen": {
+            "type": "boolean",
+            "description": "Whether the call ends HELLO_DOOR_HANGUP_SECONDS after the code was sent."
+          }
+        }
+      },
+      "DoorOpenUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "At least one field is required.",
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 8,
+            "pattern": "^[0-9*#]*$",
+            "description": "The door-open code: 1 to 8 characters of 0-9, * and #; an empty string clears it. Stored sealed, write-only."
+          },
+          "hangupAfterOpen": {
+            "type": "boolean",
+            "description": "End the call after the code was sent."
+          }
+        }
+      },
+      "DoorCall": {
+        "type": "object",
+        "required": ["id", "door", "startedAt"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Correlation id of the call"
+          },
+          "door": {
+            "type": "string",
+            "description": "The door station's extension number"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DoorCallList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DoorCall"
+            }
+          }
+        }
+      },
+      "DoorOpenSent": {
+        "type": "object",
+        "required": ["sent"],
+        "properties": {
+          "sent": {
+            "type": "boolean"
+          }
+        }
+      },
       "DoorWebhook": {
         "type": "object",
         "required": [
@@ -41570,6 +42117,14 @@
           "ticket": {
             "type": "boolean",
             "description": "The connector can open a ticket from a call."
+          },
+          "recordingUpload": {
+            "type": "boolean",
+            "description": "The CRM stores the audio file itself (Pipedrive): Hello uploads the recording once instead of writing a link."
+          },
+          "recordingCopy": {
+            "type": "boolean",
+            "description": "The CRM fetches a short-lived link once and keeps a copy (Bitrix24); the link is not renewed."
           }
         }
       },
@@ -41612,6 +42167,7 @@
       "CRMConnector": {
         "type": "object",
         "required": [
+          "auth",
           "id",
           "kind",
           "name",
@@ -41633,7 +42189,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "The connector kind, for example hubspot."
+            "description": "The connector kind: hubspot, pipedrive, zoho, odoo, bitrix24, zendesk, freshdesk, connectwise, autotask, halopsa or clio."
           },
           "name": {
             "type": "string"
@@ -41647,11 +42203,16 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "The connector's settings: clientId and, for HubSpot, region (na or eu)."
+            "description": "The connector's settings. clientId is the OAuth client id or, for direct connectors, the identity the secret belongs to (Zendesk agent email, ConnectWise integrator clientId, Autotask API user, Halo client id). hubspot: region (na or eu). zendesk: subdomain, createContacts (true or false), answeredStatus (open, pending, hold, solved). freshdesk: subdomain, answeredStatus (open, pending, resolved). connectwise: host, companyId, publicKey, codebase, activityType. autotask: integrationCode, host (zone, found when empty), actionType. halopsa: host, tenant, ticketTypeId, fallbackClientId. clio: region (us, eu, ca, au). zoho: region (us, eu, in, au, jp, ca, sa or cn). odoo: url and db, clientId is the login. bitrix24: no settings; the secret is the inbound webhook address."
+          },
+          "auth": {
+            "type": "string",
+            "enum": ["oauth", "direct"],
+            "description": "How the connector signs in: oauth sends the administrator to the CRM to approve the app; direct signs in with the credentials the administrator typed (no browser step)."
           },
           "hasClientSecret": {
             "type": "boolean",
-            "description": "Whether the OAuth client secret is set. The secret itself is never returned."
+            "description": "Whether the client secret, API token or key is set. The secret itself is never returned."
           },
           "recordings": {
             "type": "boolean",
@@ -41691,7 +42252,7 @@
           },
           "redirectUri": {
             "type": "string",
-            "description": "The redirect URI to register in the CRM app; absent without HELLO_PUBLIC_URL."
+            "description": "The redirect URI to register in the CRM app; absent without HELLO_PUBLIC_URL and for a direct connector."
           }
         }
       },
@@ -41712,7 +42273,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "description": "The connector kind (hubspot); required on create, immutable afterwards."
+            "description": "The connector kind (hubspot, pipedrive, zoho, odoo, bitrix24, zendesk, freshdesk, connectwise, autotask, halopsa, clio); required on create, immutable afterwards."
           },
           "name": {
             "type": "string",
@@ -41729,12 +42290,12 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "clientId and, for HubSpot, region (na or eu, default na); keys you leave out are kept."
+            "description": "The connector's own settings (see CRMConnector.config); keys you leave out are kept. Changing the clientId or a setting that decides where the secret is sent (host, subdomain, company, region) needs the clientSecret again."
           },
           "clientSecret": {
             "type": "string",
             "x-hello-secret": true,
-            "description": "The OAuth client secret of the customer's CRM app. Write-only; an empty string clears it."
+            "description": "The OAuth client secret of the customer's CRM app, or for a direct connector the API token, API key or private key. Write-only; an empty string clears it. A direct connector that is connected signs in with a new secret before storing it."
           },
           "recordings": {
             "type": "boolean",
@@ -41763,7 +42324,7 @@
         "properties": {
           "authorizeUrl": {
             "type": "string",
-            "description": "The CRM address that asks the administrator to approve the app."
+            "description": "The CRM address that asks the administrator to approve the app. Empty for a direct connector, which has no browser step."
           }
         }
       },
@@ -42822,6 +43383,60 @@
             "type": "string",
             "pattern": "^[0-9A-Za-z._-]{0,64}$",
             "description": "The ring group told of every emergency call; empty for none."
+          }
+        }
+      },
+      "DoorCamera": {
+        "type": "object",
+        "required": ["configured", "kind", "url", "username", "passwordSet"],
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "Whether the station has a camera"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["mjpeg", "snapshot", ""],
+            "description": "mjpeg: a multipart/x-mixed-replace stream; snapshot: one JPEG per request"
+          },
+          "url": {
+            "type": "string",
+            "description": "The camera address, without credentials"
+          },
+          "username": {
+            "type": "string"
+          },
+          "passwordSet": {
+            "type": "boolean",
+            "description": "Whether a password is stored. The password itself is never returned."
+          }
+        }
+      },
+      "DoorCameraUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "url"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["mjpeg", "snapshot"],
+            "description": "mjpeg: a multipart/x-mixed-replace stream; snapshot: one JPEG per request"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "An absolute http:// or https:// address without credentials. rtsp:// cannot be shown in a browser."
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The camera's user name for HTTP basic authentication"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 256,
+            "x-hello-secret": true,
+            "description": "The camera's password, stored sealed and never returned. Absent keeps the stored one, an empty string clears it."
           }
         }
       }

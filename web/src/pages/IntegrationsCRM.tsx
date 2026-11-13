@@ -4,6 +4,7 @@ import { errorMessage } from "../api";
 import {
   connectCRMConnector,
   createCRMConnector,
+  crmAppUrl,
   CRM_LOG_STATUSES,
   deleteCRMConnector,
   disconnectCRMConnector,
@@ -38,17 +39,15 @@ import {
   type BadgeTone,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
+import {
+  buildConfig,
+  initialValues,
+  KINDS,
+  kindSpec,
+  type KindField,
+} from "./crmKinds";
 import { usePolling } from "../usePolling";
 import "./platform/platform.css";
-
-/** The connector kinds the console can create. */
-const KINDS = [{ value: "hubspot", label: "HubSpot" }];
-
-const HUBSPOT_SCOPES = [
-  "crm.objects.contacts.read",
-  "crm.objects.contacts.write",
-  "crm.objects.owners.read",
-];
 
 const CONNECTION_TONE: Record<string, BadgeTone> = {
   connected: "good",
@@ -124,7 +123,7 @@ export function IntegrationsCRM() {
       <PageHeader
         eyebrow="Integrations"
         title="CRM"
-        description="Write every external call into your CRM, show the caller's name from the CRM on incoming calls, and attach recordings if you want to. You create the CRM app in your own account; Hello keeps its client secret and tokens sealed."
+        description="Write every external call into your CRM, helpdesk or practice system, show the caller's name on incoming calls, and attach recordings if you want to. You create the app or API credentials in your own account; Hello keeps the secrets and tokens sealed."
       />
       <div className="cf-stack">
         {connected && (
@@ -147,7 +146,7 @@ export function IntegrationsCRM() {
           <EmptyState
             icon="plug"
             title="No CRM connected"
-            description="Add the HubSpot app you created in your own HubSpot developer account."
+            description="Add HubSpot, Zendesk, Freshdesk, ConnectWise, Autotask, HaloPSA or Clio with the credentials you created in your own account."
           />
         )}
         {items?.map((c) => (
@@ -165,6 +164,36 @@ export function IntegrationsCRM() {
   );
 }
 
+/** One kind-specific field of the connector form: a select or a text input. */
+function KindFieldInput({
+  field,
+  value,
+  onChange,
+}: {
+  field: KindField;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  if (field.options)
+    return (
+      <Select
+        label={field.label}
+        value={value}
+        options={field.options}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  return (
+    <Input
+      label={field.label}
+      value={value}
+      required={field.required}
+      hint={field.hint}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
+
 function NewConnector({
   reload,
   say,
@@ -174,28 +203,48 @@ function NewConnector({
 }) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState(KINDS[0]!.value);
-  const [name, setName] = useState("HubSpot");
+  const spec = kindSpec(kind);
+  const [name, setName] = useState(spec.label);
   const [clientId, setClientId] = useState("");
   const [secret, setSecret] = useState("");
-  const [region, setRegion] = useState("na");
+  const [values, setValues] = useState(() => initialValues(spec));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  function pick(next: string) {
+    const sp = kindSpec(next);
+    setKind(next);
+    setName(sp.label);
+    setClientId("");
+    setValues(initialValues(sp));
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setErr(null);
     try {
-      await createCRMConnector({
+      const created = await createCRMConnector({
         kind,
         name,
         clientSecret: secret,
-        config: { clientId, region },
+        config: buildConfig(spec, clientId, values),
       });
       setOpen(false);
       setSecret("");
       reload();
-      say("Connector added. Connect it next.");
+      if (spec.auth === "direct") {
+        // No browser step: sign in with the typed credentials now.
+        try {
+          await connectCRMConnector(created.id);
+          reload();
+          say("Connector added and connected.");
+        } catch (x: unknown) {
+          say(`Connector added, but the sign-in failed: ${errorMessage(x)}`);
+        }
+      } else {
+        say("Connector added. Connect it next.");
+      }
     } catch (x: unknown) {
       setErr(errorMessage(x));
     } finally {
@@ -218,8 +267,8 @@ function NewConnector({
       <Select
         label="CRM"
         value={kind}
-        options={KINDS}
-        onChange={(e) => setKind(e.target.value)}
+        options={KINDS.map((k) => ({ value: k.value, label: k.label }))}
+        onChange={(e) => pick(e.target.value)}
       />
       <Input
         label="Name"
@@ -228,30 +277,32 @@ function NewConnector({
         required
         onChange={(e) => setName(e.target.value)}
       />
+      {spec.idLabel && (
+        <Input
+          label={spec.idLabel}
+          value={clientId}
+          required
+          hint={spec.idHint}
+          onChange={(e) => setClientId(e.target.value)}
+        />
+      )}
       <Input
-        label="Client ID"
-        value={clientId}
-        required
-        onChange={(e) => setClientId(e.target.value)}
-      />
-      <Input
-        label="Client secret"
+        label={spec.secretLabel}
         type="password"
         autoComplete="off"
         value={secret}
         required
         onChange={(e) => setSecret(e.target.value)}
-        hint="Kept sealed; it is never shown again."
+        hint={spec.secretHint}
       />
-      <Select
-        label="HubSpot data centre"
-        value={region}
-        options={[
-          { value: "na", label: "United States / default" },
-          { value: "eu", label: "Europe (app-eu1)" },
-        ]}
-        onChange={(e) => setRegion(e.target.value)}
-      />
+      {spec.fields.map((f) => (
+        <KindFieldInput
+          key={f.key}
+          field={f}
+          value={values[f.key] ?? ""}
+          onChange={(v) => setValues((m) => ({ ...m, [f.key]: v }))}
+        />
+      ))}
       {err && (
         <Alert tone="bad" title="Could not add the connector">
           {err}
@@ -320,10 +371,15 @@ function ConnectionTab({
   reload: () => void;
   say: (m: string) => void;
 }) {
+  const spec = kindSpec(c.kind);
   const [name, setName] = useState(c.name);
   const [clientId, setClientId] = useState(c.config.clientId ?? "");
   const [secret, setSecret] = useState("");
-  const [region, setRegion] = useState(c.config.region ?? "na");
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      spec.fields.map((f) => [f.key, c.config[f.key] ?? f.initial ?? ""]),
+    ),
+  );
   const [enabled, setEnabled] = useState(c.enabled);
   const [recordings, setRecordings] = useState(c.recordings);
   const [ttlDays, setTtlDays] = useState(
@@ -334,7 +390,10 @@ function ConnectionTab({
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<"disconnect" | "delete" | null>(null);
-  const idChanged = clientId !== (c.config.clientId ?? "");
+  // Changing the identity or where the secret goes asks for the secret again.
+  const idChanged =
+    (spec.idLabel !== undefined && clientId !== (c.config.clientId ?? "")) ||
+    spec.bound.some((k) => (values[k] ?? "") !== (c.config[k] ?? ""));
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -348,7 +407,7 @@ function ConnectionTab({
         logMissed,
         fallbackOwner: fallback,
         linkTtlHours: Math.max(1, Math.round(Number(ttlDays) * 24)),
-        config: { clientId, region },
+        config: buildConfig(spec, clientId, values),
         ...(secret !== "" ? { clientSecret: secret } : {}),
       });
       setSecret("");
@@ -364,7 +423,13 @@ function ConnectionTab({
   async function connect() {
     setErr(null);
     try {
-      window.location.assign(await connectCRMConnector(c.id));
+      const url = await connectCRMConnector(c.id);
+      if (url) {
+        window.location.assign(url);
+      } else {
+        reload();
+        say("Connected.");
+      }
     } catch (x: unknown) {
       setErr(errorMessage(x));
     }
@@ -396,44 +461,70 @@ function ConnectionTab({
             label: "Last change",
             value: conn ? formatTime(conn.updatedAt) : "—",
           },
-          {
-            label: "Redirect URI",
-            value: c.redirectUri ?? "needs HELLO_PUBLIC_URL",
-            mono: true,
-          },
+          ...(c.auth === "oauth"
+            ? [
+                {
+                  label: "Redirect URI",
+                  value: c.redirectUri ?? "needs HELLO_PUBLIC_URL",
+                  mono: true,
+                },
+              ]
+            : []),
         ]}
       />
-      {c.kind === "hubspot" && (
-        <details>
-          <summary>HubSpot app settings</summary>
-          <p>
-            In your HubSpot developer account, create a private (unlisted) app
-            and set these under Auth. HubSpot rejects a sign-in whose redirect
-            URI differs by a character.
-          </p>
+      <details>
+        <summary>{spec.guide.summary}</summary>
+        <p>{spec.guide.text}</p>
+        {spec.guide.steps && (
+          <ol>
+            {spec.guide.steps.map((st) => (
+              <li key={st}>{st}</li>
+            ))}
+          </ol>
+        )}
+        {c.auth === "oauth" && (
           <CodeBlock
             title="Redirect URL"
             code={c.redirectUri ?? "Set HELLO_PUBLIC_URL first"}
           />
-          <CodeBlock title="Scopes" code={HUBSPOT_SCOPES.join("\n")} />
+        )}
+        {spec.guide.scopes && (
+          <CodeBlock title="Scopes" code={spec.guide.scopes.join("\n")} />
+        )}
+        {c.kind === "hubspot" && (
+          <>
+            <p>
+              <strong>Calling from HubSpot.</strong> For HubSpot&apos;s phone
+              icon to place a call with the user&apos;s Hello phone, add a
+              calling extension to the same app (Calling, in the app&apos;s
+              settings) with these values. Each user opens the phone widget
+              once and signs in to Hello in the window that appears.
+            </p>
+            <CodeBlock
+              title="Calling settings"
+              code={callingSettings(c.redirectUri)}
+            />
+          </>
+        )}
+        {spec.sidebarApp && (
           <p>
-            <strong>Calling from HubSpot.</strong> For HubSpot&apos;s phone icon
-            to place a call with the user&apos;s Hello phone, add a calling
-            extension to the same app (Calling, in the app&apos;s settings) with
-            these values. Each user opens the phone widget once and signs in to
-            Hello in the window that appears.
+            <a href={crmAppUrl(c.id)} download>
+              Download the {spec.label} sidebar app
+            </a>{" "}
+            (shows the requester&apos;s numbers with a Call button and their
+            latest tickets).
           </p>
-          <CodeBlock
-            title="Calling settings"
-            code={callingSettings(c.redirectUri)}
-          />
-        </details>
-      )}
+        )}
+      </details>
       <p>
         <Button
           icon="link"
           onClick={() => void connect()}
-          disabled={!c.redirectUri || !c.hasClientSecret || !c.config.clientId}
+          disabled={
+            c.auth === "oauth"
+              ? !c.redirectUri || !c.hasClientSecret || !c.config.clientId
+              : !c.hasClientSecret
+          }
         >
           {conn ? "Connect again" : "Connect"}
         </Button>{" "}
@@ -468,14 +559,17 @@ function ConnectionTab({
           required
           onChange={(e) => setName(e.target.value)}
         />
+        {spec.idLabel && (
+          <Input
+            label={spec.idLabel}
+            value={clientId}
+            required
+            hint={spec.idHint}
+            onChange={(e) => setClientId(e.target.value)}
+          />
+        )}
         <Input
-          label="Client ID"
-          value={clientId}
-          required
-          onChange={(e) => setClientId(e.target.value)}
-        />
-        <Input
-          label="Client secret"
+          label={spec.secretLabel}
           type="password"
           autoComplete="off"
           value={secret}
@@ -484,21 +578,18 @@ function ConnectionTab({
           onChange={(e) => setSecret(e.target.value)}
           hint={
             idChanged
-              ? "A new client ID needs its secret again."
+              ? "A changed identity or address needs the secret again."
               : "Write-only."
           }
         />
-        {c.kind === "hubspot" && (
-          <Select
-            label="HubSpot data centre"
-            value={region}
-            options={[
-              { value: "na", label: "United States / default" },
-              { value: "eu", label: "Europe (app-eu1)" },
-            ]}
-            onChange={(e) => setRegion(e.target.value)}
+        {spec.fields.map((f) => (
+          <KindFieldInput
+            key={f.key}
+            field={f}
+            value={values[f.key] ?? ""}
+            onChange={(v) => setValues((m) => ({ ...m, [f.key]: v }))}
           />
-        )}
+        ))}
         <Switch
           label="Enabled"
           checked={enabled}
@@ -510,24 +601,36 @@ function ConnectionTab({
           onChange={(e) => setLogMissed(e.target.checked)}
         />
         <Switch
-          label="Attach recording links"
-          hint="Off by default. A link to the recording is written into the CRM record; anyone with the link can play it until it expires."
+          label={
+            c.capabilities.recordingUpload
+              ? "Attach recordings"
+              : "Attach recording links"
+          }
+          hint={
+            c.capabilities.recordingUpload
+              ? "Off by default. The CRM stores an audio file, not a link: the recording is uploaded to the call log."
+              : c.capabilities.recordingCopy
+                ? "Off by default. The CRM fetches the recording once from a one-day link and keeps its own copy."
+                : "Off by default. A link to the recording is written into the CRM record; anyone with the link can play it until it expires."
+          }
           checked={recordings}
           onChange={(e) => setRecordings(e.target.checked)}
         />
-        {recordings && (
-          <Input
-            label="Recording link lifetime (days)"
-            type="number"
-            min={1}
-            max={365}
-            value={ttlDays}
-            onChange={(e) => setTtlDays(e.target.value)}
-            hint="Links of recent calls are renewed before they expire."
-          />
-        )}
+        {recordings &&
+          !c.capabilities.recordingUpload &&
+          !c.capabilities.recordingCopy && (
+            <Input
+              label="Recording link lifetime (days)"
+              type="number"
+              min={1}
+              max={365}
+              value={ttlDays}
+              onChange={(e) => setTtlDays(e.target.value)}
+              hint="Links of recent calls are renewed before they expire."
+            />
+          )}
         <Input
-          label="Fallback owner (CRM user id)"
+          label={spec.ownerLabel}
           value={fallback}
           maxLength={64}
           onChange={(e) => setFallback(e.target.value)}

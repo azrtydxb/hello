@@ -2,9 +2,17 @@
 
 Hello can write every external call into a CRM, show the caller's name from
 the CRM on an incoming call, and attach a link to the recording. This page
-covers the connector framework (`internal/crm`) and the first connector,
-HubSpot (spec `.procoder/specs/integrations.md`, phase P6). Later connectors
-(Salesforce, Pipedrive, Zoho, ...) plug into the same framework.
+covers the connector framework (`internal/crm`) and its connectors: HubSpot
+(spec `.procoder/specs/integrations.md`, phase P6), Pipedrive (P14), Zoho CRM
+(P15), Odoo and Bitrix24 (P21), the helpdesks Zendesk and Freshdesk (P16) and the PSA and legal tools ConnectWise, Autotask, HaloPSA and Clio (P20). Later connectors plug into the same framework.
+
+| Connector | Sign-in                                  | Lookup by phone                        | A call is written as                         | Recording                                     |
+| --------- | ---------------------------------------- | -------------------------------------- | -------------------------------------------- | --------------------------------------------- |
+| HubSpot   | OAuth, the customer's app                | Contacts search                        | Call engagement                              | Link in `hs_call_recording_url`               |
+| Pipedrive | OAuth, the customer's private app        | Persons search                         | Call log                                     | The audio file, uploaded to the call log      |
+| Zoho CRM  | OAuth, the customer's API console client | Contacts, then Leads                   | Record in the Calls module                   | Link in the call's description                |
+| Odoo      | API key of a user (no browser step)      | Partners (`phone_mobile_search`)       | Note in the partner's chatter                | Link in the note                              |
+| Bitrix24  | Inbound webhook (no browser step)        | Contacts, companies and leads by phone | `telephony.externalcall` register and finish | Bitrix24 fetches a one-day link, keeps a copy |
 
 ## What it does
 
@@ -45,6 +53,212 @@ sign-in returns to it).
 The secret is write-only: it is never returned by the API, shown in the
 console, logged or sent over MCP. Changing the client ID asks for the secret
 again, so a secret is never sent to another app.
+
+## Set up Pipedrive
+
+1. In the Pipedrive developer hub create a **private app**. Set the
+   **Callback URL** to `<HELLO_PUBLIC_URL>/api/v1/integrations/crm/oauth/callback`
+   and grant the scopes Contacts (read), Calls (activities, full access) and
+   Users (read). Pipedrive takes the scopes from the app, not from the sign-in
+   address.
+2. In Hello open **Integrations, CRM, Add a CRM**, pick Pipedrive, paste the
+   client ID and secret and press **Connect**. The connector shows the company
+   address (`api_domain`) as its account; Hello only ever sends the token to a
+   `*.pipedrive.com` address.
+3. **Users**: a Hello user is matched to the Pipedrive user with the same email
+   (`/users/find` by email, compared exactly). One administrator's connection
+   serves everyone: each call is logged with the `user_id` of its owner, so it
+   appears under that person. Per-user sign-in is not needed.
+
+Pipedrive specifics:
+
+- A call is a **call log** (`POST /api/v1/callLogs`) with `outcome` (`connected`,
+  `no_answer`, `busy`), `duration` in seconds, `from_phone_number`,
+  `to_phone_number`, `start_time` and `end_time` in UTC, `user_id`, and the
+  `person_id` and `org_id` found by phone. A missed call is `no_answer`.
+- The person is found with `GET /api/v1/persons/search` on the phone field, by the full number's
+  digits and then its last nine; a hit is accepted only when one of the
+  person's own numbers ends in the same digits.
+- Pipedrive cannot edit a call log and takes an audio **file**, not a link
+  (`POST /api/v1/callLogs/{id}/recordings`). With **Attach recordings** on,
+  Hello keeps the call log first, then uploads the audio from storage once.
+  A recording larger than `HELLO_CRM_UPLOAD_MAX_MB` (default 50) is not sent;
+  the call stays logged and the job shows why. No link is minted, so there is
+  nothing to renew.
+
+## Set up Zoho CRM
+
+1. In the Zoho API console (the data centre of your account) add a
+   **Server-based Application**; set the **Authorized Redirect URI** to
+   `<HELLO_PUBLIC_URL>/api/v1/integrations/crm/oauth/callback`.
+2. In Hello add a CRM, pick Zoho CRM, choose the **data centre** (United States,
+   Europe, India, Australia, Japan, Canada, Saudi Arabia or China), paste the
+   client ID and secret and press **Connect**. Hello asks for
+   `ZohoCRM.modules.calls.CREATE`, `ZohoCRM.modules.calls.UPDATE`,
+   `ZohoCRM.modules.contacts.READ`, `ZohoCRM.modules.leads.READ` and
+   `ZohoCRM.users.READ`. The connector shows the email of the user who approved.
+3. Users are matched by email (`/users/search`).
+
+Zoho specifics:
+
+- A call is a record in the **Calls** module (`POST /crm/v6/Calls`): `Subject`,
+  `Call_Type` (`Inbound`, `Outbound`, `Missed`), `Call_Start_Time`,
+  `Call_Duration` (`mm:ss`), `Description`, `Owner` and `Who_Id`.
+- The caller is found with `GET /crm/v6/Contacts/search?phone=` and then
+  `Leads`, as E.164 and as bare digits; each hit is checked against its own
+  phone and mobile fields. A lead is attached as `Who_Id` like a contact.
+- The **recording link** is a line in the call's description. Renewing the link
+  rewrites the description (`PUT /crm/v6/Calls/{id}`), so text a person added
+  there is replaced; keep notes in a note, not the description.
+- Zoho answers a refused code or refresh token with status 200 and an `error`
+  member; Hello treats that as a permanent refusal (the connection becomes
+  `needs_reauth`), except its "Access Denied" rate limit, which is retried.
+- Zoho's native **PhoneBridge** click-to-call is only reachable through the Zoho
+  Telephony Marketplace, which Hello does not use (private apps only). Dial
+  from Zoho with the browser extension.
+- The data centre decides which host receives the client secret, so changing it
+  asks for the secret again.
+
+## Set up Odoo
+
+Odoo 14 or later, through its external JSON-RPC API (`/jsonrpc`, `execute_kw`).
+
+1. In Odoo open the user's preferences, **Account Security**, **New API Key**.
+   The user needs read access to Contacts and the right to post notes.
+2. In Hello add a CRM, pick Odoo and enter the **Odoo address**
+   (`https://odoo.example.com`), the **database**, the **login** of the key's
+   user and the **API key**. Press **Connect**: Hello authenticates with the key
+   and shows the user id as the account. There is no browser step and
+   `HELLO_PUBLIC_URL` is not needed.
+3. Users are matched to the Odoo user whose login or email equals the Hello
+   user's email.
+
+Odoo specifics:
+
+- Odoo has no call model every edition shares (`crm.phonecall` is gone since 17;
+  the VoIP call model is Enterprise only), so a call is a **note in the chatter**
+  (`message_post`, subtype Note) of the contact the caller number belongs to. A
+  caller Odoo does not know gets the note on the **call owner's own partner**,
+  so no call is lost. The note names the owner, direction, numbers, start,
+  duration and result.
+- The partner is found with the `phone_mobile_search` field (it ignores number
+  formatting). An Odoo without that field falls back to a search on the last
+  three digits, filtered here by the full number.
+- The recording link is a line in the note; renewing it rewrites the note's body
+  (`mail.message.write`).
+- The API key is the credential and is sent only to the Odoo address, for that
+  database and login. Changing the address, database or login asks for the key
+  again. A self-hosted Odoo on a private address needs it inside
+  `HELLO_INTEGRATIONS_ALLOWED_CIDRS` (RFC 1918 by default).
+- The JSON-RPC endpoint is deprecated in Odoo 19 for removal in Odoo 20 (its
+  replacement is `/json/2`); see the lab checklist.
+
+## Set up Bitrix24
+
+1. In Bitrix24 open **Developer resources, Other, Inbound webhook**; give it the
+   permissions **CRM**, **Telephony** and **Users**.
+2. In Hello add a CRM, pick Bitrix24 and paste the **webhook address**
+   (`https://portal.bitrix24.com/rest/1/xxxxxxxx/`) as the secret. Press
+   **Connect**: Hello calls `profile` and shows the portal as the account.
+   The address contains the secret: it is sealed, never shown again and never
+   written to a log or an error.
+3. Users are matched by email (`user.get` filtered on `EMAIL`).
+
+Bitrix24 specifics:
+
+- The caller is found with `crm.duplicate.findbycomm` (contacts first, then
+  companies, then leads), and read for its name. The call is **registered**
+  (`telephony.externalcall.register`, bound to that entity, `SHOW = 0`, no
+  lead is created for an unknown number) and **finished**
+  (`telephony.externalcall.finish`: duration, `STATUS_CODE` 200 answered, 304
+  missed, 486 busy, 503 failed).
+- Bitrix24 has no idempotency key on register. Hello saves how far a call got
+  on the job (`crm_call_logs.state`: the registered call id and whether it was
+  finished), so when the finish or the recording attach fails, the retry
+  continues with that step instead of registering the call again, also after a
+  restart of `hello-control`.
+- The recording is attached with `telephony.externalCall.attachRecord` from a
+  link Hello mints for **one day**. Bitrix24 fetches it once and keeps its own
+  copy, so the link is not renewed.
+- Bitrix24's own telephony REST screen-pop (`telephony.externalcall.show`) and
+  its click-to-call are not part of this release.
+
+## Helpdesks, PSA tools and Clio
+
+| Connector              | Sign-in                                          | A call becomes                                                         | Caller found by                                                   |
+| ---------------------- | ------------------------------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **Zendesk**            | Agent email and API token (direct)               | An internal ticket (first comment private), tags `hello`, `call_<dir>` | `type:user phone:+E164` search                                    |
+| **Freshdesk**          | API key (direct)                                 | A phone-source ticket, recording as a private note                     | Contact `phone` / `mobile` filter                                 |
+| **HaloPSA**            | API application, client credentials (direct)     | A ticket for the caller's client; recording as a hidden action         | User search on the last four digits, then compared digit by digit |
+| **ConnectWise Manage** | API member keys and integrator clientId (direct) | A Call activity of the contact's company, assigned to the member       | Contact communication items containing the last four digits       |
+| **Autotask PSA**       | API user, secret and integration code (direct)   | A company note on the contact's company, assigned to the resource      | Contact phone fields containing the last four digits              |
+| **Clio Manage**        | OAuth 2 with your own Clio application           | A phone communication between the contact and the Clio user            | Contact query on the last four digits                             |
+
+### Direct sign-in
+
+Zendesk, Freshdesk, HaloPSA, ConnectWise and Autotask have no browser consent:
+the administrator types the credentials and Hello signs in with them.
+**Connect** (the console presses it after **Add connector**) proves the
+credentials against the system and stores the connection; a refused credential
+is shown on the secret field and nothing is stored. Saving a new secret on a
+connected connector signs in with it first, so a typo never replaces a working
+credential. HaloPSA's client-credentials token expires and is requested again
+before that; the others are static, and a refusal after a working period makes
+the connection `needs_reauth` once, like a revoked OAuth app. The secret (API
+token, key, private key) is sealed like an OAuth client secret and never
+returned. Changing a setting that decides where the secret is sent (a
+subdomain, host, company, region or the identity) asks for the secret again.
+
+### Where a call goes
+
+- **Zendesk, Freshdesk, HaloPSA** (capability `ticket`): one ticket per call.
+  A missed call is a new or open ticket; the status of an answered call is a
+  setting (`answeredStatus`). Zendesk's first comment is private, so the
+  customer is never e-mailed about their own call. A caller Zendesk does not
+  know becomes a new end user with the number when `createContacts` is on
+  (international numbers only); Freshdesk creates the contact itself from the
+  phone number; Halo needs a client, so an unknown caller is logged only when
+  the connector has a `fallbackClientId`.
+- **ConnectWise, Autotask, Clio**: the record needs a contact, so a call from
+  a number that is no contact is **skipped** with the reason in the console
+  (**Calls**, status `skipped`) and can be retried once the contact exists.
+  The owner (assigned member, resource or Clio user) is found by email like
+  HubSpot's owner; without one the fallback owner is used, else the call is
+  skipped.
+- The recording link is added when the recording arrives: as a second private
+  comment or note on tickets (never twice: Hello reads the ticket first), or by
+  rewriting the activity notes, note text or communication body.
+- Phone matching: every system stores numbers as typed, so Hello asks for the
+  last four digits (or the exact E.164 form for Zendesk and Freshdesk) and then
+  compares digits itself (last nine digits, never fewer than seven).
+
+### Setup values
+
+| Connector   | Settings (`config`)                                                                                                      |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Zendesk     | `clientId` (agent email), `subdomain`, `createContacts`, `answeredStatus`                                                |
+| Freshdesk   | `subdomain`, `answeredStatus`                                                                                            |
+| HaloPSA     | `clientId`, `host`, `tenant` (hosted instances), `ticketTypeId`, `fallbackClientId`                                      |
+| ConnectWise | `clientId` (integrator client id), `host`, `companyId`, `publicKey`, `codebase` (v4_6_release), `activityType` (Call)    |
+| Autotask    | `clientId` (API user), `integrationCode`, `host` (zone, found from the user when empty), `actionType` (found when empty) |
+| Clio        | `clientId` (application key), `region` (us, eu, ca, au); redirect URI as shown in the console                            |
+
+The API creates and reads them with `kind` and `config` as for HubSpot; the
+console form lists the fields of each kind.
+
+### Sidebar apps (Zendesk, Freshdesk)
+
+`GET /api/v1/integrations/crm/{id}/app` (administrator) downloads a zip of a
+ticket-sidebar app for the customer to upload to their own account (no
+marketplace listing). It shows the requester's phone numbers with a **Call**
+button and their latest tickets. It holds no Hello credential: Call opens
+Hello's dialer (`/dial?n=`) in a new tab, where the agent is signed in and
+click-to-call applies. The Zendesk app is a ZAF 2 app (upload the zip as a
+private app); the Freshdesk app is an FDK 2.3 app (unzip, `fdk pack`, upload;
+it asks for the subdomain and an API key to list tickets, kept as a secure
+installation parameter). Needs `HELLO_PUBLIC_URL` (https). A live pop on an
+incoming call needs a Hello token inside the helpdesk, which is not shipped:
+the incoming-call pop stays in `/dial` and the events stream.
 
 ## The logging pipeline
 
@@ -163,9 +377,10 @@ switching recordings off revokes all its links. HubSpot only accepts `https`
 links ending in `.mp3` or `.wav`; anything else is left out of the record.
 Recording notices and consent stay governed by the media settings.
 
-> The recording-link service itself ships with integrations phase P4.
-> Until it is wired into `hello-control`, a connector with recording links
-> switched on logs calls without a link.
+Links are minted by the recording-link store of integrations phase P4 and
+carry the connector that minted them (`recording_links.connector_id`), so the
+revocation above is one statement. Zendesk, Freshdesk, HaloPSA, ConnectWise,
+Autotask and Clio accept any `https` link in a note or comment.
 
 ## API and MCP
 
@@ -186,6 +401,13 @@ cookie): the single-use, ten-minute state minted for the administrator who
 pressed Connect is its only credential, and it always redirects to
 `/integrations/crm`.
 
+## Settings
+
+| Setting                            | Default  | Meaning                                                                                                                                                 |
+| ---------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HELLO_CRM_UPLOAD_MAX_MB`          | 50       | The largest recording uploaded to a CRM that stores the audio itself (Pipedrive). A larger one is not sent.                                             |
+| `HELLO_INTEGRATIONS_ALLOWED_CIDRS` | RFC 1918 | Private ranges the CRM connectors may reach, read by `hello-control` and `hello-sip` (a self-hosted Odoo or Bitrix24). `none` allows only public hosts. |
+
 ## Metrics
 
 | Metric                                          | Meaning                                                               |
@@ -198,8 +420,13 @@ pressed Connect is its only credential, and it always redirects to
 ## Adding a connector
 
 Implement `crm.Connector` (`Lookup`, `LogCall`, `UpdateCallLog`,
-`ResolveUser`, `Capabilities`), optionally `crm.OAuth`, `crm.ConfigValidator`,
-`crm.Pinger` and `crm.Revoker`, register it with `crm.Register(kind, factory)`
+`ResolveUser`, `Capabilities`), optionally `crm.OAuth` (browser consent) or
+`crm.Direct` (`Authenticate` with the typed credentials: a static token or a
+client-credentials grant), `crm.SecretBound` (settings that choose where the
+secret goes), `crm.ConfigValidator`, `crm.Pinger` and `crm.Revoker`. A
+connector with no place for a call returns `crm.ErrNoTarget` and the job is
+skipped, not dead (Odoo does this for a call with no contact and no owner). `Capabilities.RecordingUpload` asks the worker for the audio (`CallLog.Recording`) instead of a link; `RecordingCopy` gives a one-day link that is never renewed. A connector that writes a call in several steps returns `crm.PartialError` with the state to keep; it is saved on the job (`crm_call_logs.state`) and handed back as `CallLog.State` on the retry, also after a restart. `internal/crm/kit` has the shared request helper, the phone
+comparison and the call text, and `kit/kittest` the fake server for tests, register it with `crm.Register(kind, factory)`
 and import its package from `cmd/hello-control` and `cmd/hello-sip`. The
 framework supplies the sealed token storage and refresh, the cache and
 timeouts, the retry schedule and dead letters, the owner mapping, recording
@@ -245,3 +472,96 @@ test account is enough) and are not blocking the merge:
       (`frame-ancestors`); the sign-in popup opens from inside HubSpot's frame
       and its token survives a reload; the engagement handshake adopts the
       iframe's engagement; and the recording link appears in that engagement.
+
+## Lab checklists for Pipedrive, Zoho, Odoo and Bitrix24
+
+The tests mock each CRM's API. These need real accounts and are not blocking
+the merge (they are on the tracker's accounts list):
+
+Pipedrive (a free developer sandbox is enough)
+
+- [ ] The private app accepts the callback URL; **Connect** completes and the
+      connector shows the company address.
+- [ ] `persons/search` on the `phone` field finds a person stored as
+      `+32 11 22 33 44` from the full digits or from the last nine, and does
+      not match another number.
+- [ ] `callLogs` accepts `user_id` (the call shows under that user), `person_id`
+      and `org_id`; an answered, a missed and a busy call show the right
+      outcome.
+- [ ] The recording upload is accepted, plays in Pipedrive, and the real size
+      limit is at least the 50 MB default (the spec marks it **verify**).
+- [ ] Revoking the app makes the connection `needs_reauth` once.
+
+Zoho CRM (a developer sandbox on the account's data centre)
+
+- [ ] The five scopes are enough; **Connect** completes on a non-US data centre.
+- [ ] `Contacts/search?phone=` finds a contact in the E.164 or the digits form
+      and `Leads/search` finds a lead; the Calls record with `Who_Id` of a lead
+      is accepted (Zoho may want the module named).
+- [ ] `Call_Duration` as `mm:ss`, `Call_Type` `Missed` and the offset in
+      `Call_Start_Time` are accepted; the call shows on the contact's timeline.
+- [ ] A user with the same email is found by `users/search`.
+- [ ] A revoked refresh token (200 with `error`) makes the connection
+      `needs_reauth`.
+
+Odoo (14 to 19)
+
+- [ ] `common.authenticate` accepts the API key as the password on each
+      version tested; a wrong key is refused.
+- [ ] `phone_mobile_search` exists on `res.partner`; where it does not, the
+      fallback finds the partner.
+- [ ] `message_post` with subtype `mail.mt_note` creates a note for the API
+      user, and `mail.message.write` of its body is allowed to that user.
+- [ ] Whether `/json/2` (Odoo 19) should replace `/jsonrpc` before Odoo 20.
+- [ ] A self-hosted Odoo on a private address works with the default
+      `HELLO_INTEGRATIONS_ALLOWED_CIDRS`.
+
+Bitrix24
+
+- [ ] A webhook with CRM, Telephony and Users permissions passes **Connect**.
+- [ ] `crm.duplicate.findbycomm` finds a contact in the E.164 and the bare-digit
+      form; the call registered with `SHOW = 0` and `CRM_CREATE = 0` appears in
+      the entity's timeline after `finish`, with the right duration and status.
+- [ ] `user.get` filtered on `EMAIL` finds the user.
+- [ ] `attachRecord` with `RECORD_URL` fetches the recording from a Hello link
+      and the player works after the link has expired.
+- [ ] Bitrix24's rate limit (`QUERY_LIMIT_EXCEEDED`) slows the jobs without
+      losing one.
+
+## Lab checklist for the helpdesk, PSA and Clio connectors
+
+The tests mock every API. Each item needs a real account or sandbox and none
+blocks the merge. Request shapes follow each vendor's published reference and
+the **verify** items are the ones most likely to need a correction.
+
+- [ ] **Zendesk**: the API token signs in; `type:user phone:+E164` finds a user
+      whose phone is stored in E.164; a ticket is created with a private first
+      comment, the requester, the assignee agent and the tags; an unknown
+      caller becomes an end user; the recording comment appears once.
+- [ ] **Freshdesk**: `GET /contacts?phone=` and `?mobile=` match the formats
+      your contacts use (E.164, bare digits or `00`); a phone ticket without a
+      contact creates one (it needs the name Hello sends); status mapping
+      (open 2, pending 3, resolved 4); the private note appears once.
+- [ ] **HaloPSA**: the client-credentials token request with `scope=all` (and
+      `?tenant=` for a hosted instance); the `users?search=` term finds the
+      user by the last four digits and the phone fields are returned; the ticket
+      needs `client_id`, `user_id`, `agent_id` and `tickettype_id` as sent; the
+      hidden action with `note_html` is accepted.
+- [ ] **ConnectWise**: the `clientId` header plus `company+public:private`
+      Basic auth; the `childConditions` wildcard (`like "*1234*"`) on
+      `communicationItems/value`; the `Call` activity type is found by name; an
+      activity with `type`, `company`, `contact`, `assignTo`, `dateStart`,
+      `dateEnd` is accepted; the JSON Patch of `/notes` works.
+- [ ] **Autotask**: zone discovery from the API user; the `contains` filter on
+      `phone`, `mobilePhone` and `alternatePhone`; the `CompanyNotes` create and
+      PATCH shape (fields and the action type pick list); `Resources/query` by
+      email.
+- [ ] **Clio**: the authorize and token hosts per region; `contacts.json?query=`
+      finds a contact by the last four digits of a formatted number;
+      `communications.json` accepts a `PhoneCommunication` with `senders` and
+      `receivers` and the fields Hello sends; the PATCH of `body` works.
+- [ ] **Sidebar apps**: the Zendesk zip uploads as a private app and shows the
+      requester; the Freshdesk package builds with `fdk pack`; Call opens
+      `/dial` for the number.
+- [ ] A recording link written into a ticket or note plays, expires and is
+      revoked when the connector is disabled.

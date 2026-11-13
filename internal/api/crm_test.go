@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -50,6 +51,17 @@ func (f *crmFake) Refresh(context.Context, crm.Config, string) (crm.Tokens, erro
 }
 func (f *crmFake) Ping(context.Context, crm.Conn) error { return f.pingErr }
 
+// crmStatic is a credential connector (Odoo, Bitrix24 style): the client
+// secret is the credential and Connect verifies it.
+type crmStatic struct{ *crmFake }
+
+func (crmStatic) Authenticate(_ context.Context, c crm.Config) (crm.Tokens, error) {
+	if c.ClientSecret != "good-key" {
+		return crm.Tokens{}, errors.New("the key was refused")
+	}
+	return crm.Tokens{Access: "credential", Account: "uid-7"}, nil
+}
+
 type crmEnv struct {
 	repo *crm.Mem
 	svc  *crm.Service
@@ -62,7 +74,12 @@ func newCRMEnv(t *testing.T, publicURL string) *crmEnv {
 	repo := crm.NewMem()
 	repo.UsersList = []crm.UserRef{{ID: uAlice, Username: "alice", Email: "alice@example.com", Extension: "101"}}
 	fake := &crmFake{}
-	tm := &crm.TokenManager{Repo: repo, Providers: func(k string) (crm.Connector, bool) { return fake, k == "fakecrm" }}
+	tm := &crm.TokenManager{Repo: repo, Providers: func(k string) (crm.Connector, bool) {
+		if k == "staticcrm" {
+			return crmStatic{fake}, true
+		}
+		return fake, k == "fakecrm"
+	}}
 	svc := &crm.Service{Repo: repo, Tokens: tm, Lookup: &crm.Lookup{Repo: repo, Tokens: tm}, PublicURL: publicURL}
 	f, _, _, _ := newAcctFake(t)
 	h := Handler(Config{Store: evStore{f}, CRM: svc, Log: slog.New(slog.DiscardHandler), SessionTTL: time.Hour})
@@ -394,5 +411,39 @@ func TestCRMRoutesAnswer503WithoutService(t *testing.T) {
 		if code, b, _ := e.do(t, who, rt.m, rt.p, map[string]any{}); code != 503 {
 			t.Errorf("%s %s = %d %s, want 503", rt.m, rt.p, code, b)
 		}
+	}
+}
+
+// TestCRMCredentialConnectorConnectsOnTheSpot fails if a credential
+// connector needs a public URL or a redirect, if a refused key connects, or
+// if the key or a redirect URI appears in the connector's view.
+func TestCRMCredentialConnectorConnectsOnTheSpot(t *testing.T) {
+	e := newCRMEnv(t, "") // no HELLO_PUBLIC_URL
+	c := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "staticcrm", "name": "S", "clientSecret": "bad-key"})
+	if c["auth"] != "direct" || c["redirectUri"] != nil {
+		t.Fatalf("view = %v", c)
+	}
+	code, b, _ := e.do(t, "carol", "POST", connPath(c["id"])+"/connect", nil)
+	if code != 400 && code != 422 || strings.Contains(string(b), "bad-key") {
+		t.Fatalf("refused key = %d %s", code, b)
+	}
+	e.want(t, 200, "carol", "PATCH", connPath(c["id"]), map[string]any{"clientSecret": "good-key"})
+	got := e.want(t, 200, "carol", "POST", connPath(c["id"])+"/connect", nil)
+	if got["authorizeUrl"] != "" {
+		t.Fatalf("connect = %v", got)
+	}
+	v := e.want(t, 200, "carol", "GET", connPath(c["id"]), nil)
+	cn, _ := v["connection"].(map[string]any)
+	if cn["status"] != "connected" || cn["externalAccount"] != "uid-7" {
+		t.Fatalf("connection = %v", v["connection"])
+	}
+	raw, _ := json.Marshal(v)
+	if strings.Contains(string(raw), "good-key") {
+		t.Fatalf("the key leaks: %s", raw)
+	}
+	// OAuth connectors report oauth.
+	o := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "fakecrm", "name": "O"})
+	if o["auth"] != "oauth" {
+		t.Fatalf("auth = %v", o["auth"])
 	}
 }

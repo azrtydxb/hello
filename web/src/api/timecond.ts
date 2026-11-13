@@ -1,4 +1,4 @@
-// Time and date routing client (migration 00020): schedules, holiday
+// Time and date routing client (migration 00038): schedules, holiday
 // calendars and time conditions, with the day/night override and the
 // "what would happen" evaluation.
 

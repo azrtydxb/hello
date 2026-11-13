@@ -1,4 +1,4 @@
-// Wi-Fi profiles and roaming client (migration 00052): the networks Wi-Fi
+// Wi-Fi profiles and roaming client (migration 00074): the networks Wi-Fi
 // handsets join, assigned to phone groups and phones. A pre-shared key and an
 // 802.1X password are write-only: the API reports only that one is stored.
 
