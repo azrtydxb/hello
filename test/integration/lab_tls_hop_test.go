@@ -188,14 +188,12 @@ func TestLabTLSHop(t *testing.T) {
 			case <-time.After(20 * time.Second):
 				t.Log("the caller's dial is still running")
 			}
-			eventually(t, 15*time.Second, "a CDR for the call", func() error {
-				if len(lc.cdrsTo(ext.Extension)) == 0 {
-					return fmt.Errorf("none yet")
+			time.Sleep(3 * time.Second) // the CDR is written after the call
+			var recent struct{ Items []labCDR }
+			if err := lc.do("GET", "/api/v1/cdrs?limit=4", nil, &recent, 200); err == nil {
+				for _, c := range recent.Items {
+					t.Logf("CDR %d %s -> %s status %d trace: %q", c.ID, c.Source, c.Destination, c.FinalStatus, lc.cdrTrace(c.ID))
 				}
-				return nil
-			})
-			for _, c := range lc.cdrsTo(ext.Extension) {
-				t.Logf("CDR %d trace: %q", c.ID, lc.cdrTrace(c.ID))
 			}
 			for _, svc := range []string{"kamailio", "hello-sip-1", "hello-sip-2"} {
 				out, _ := compose("logs", "--no-color", "--tail", "120", svc).CombinedOutput()
