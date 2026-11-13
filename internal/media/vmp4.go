@@ -28,7 +28,7 @@ func box(typ string, parts ...[]byte) []byte {
 }
 
 func fullBox(typ string, version byte, flags uint32, parts ...[]byte) []byte {
-	hdr := []byte{version, byte(flags >> 16), byte(flags >> 8), byte(flags)}
+	hdr := []byte{version, byte(flags >> 16), byte(flags >> 8), byte(flags)} //nolint:gosec // the low byte of each is the point
 	return box(typ, append([][]byte{hdr}, parts...)...)
 }
 

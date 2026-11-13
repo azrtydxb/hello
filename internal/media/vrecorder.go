@@ -142,25 +142,24 @@ func (v *VideoRecorder) Packet(leg, codec string, pkt *RTPPacket) {
 		}
 		s = v.newStream(leg, codec, d, newReorder())
 	}
-	for {
-		rs := s.packet(pkt)
-		if rs == nil {
-			return
-		}
-		// The stream ended on a keyframe that changed the picture or its
-		// configuration: the next stream, a new part, starts on that frame.
-		s = v.newStream(leg, codec, s.depay, s.reorder)
-		s.frame(rs.frame, v.cfg.Now())
-		if len(rs.rest) == 0 {
-			return
-		}
-		if rs2 := s.process(rs.rest, false, v.cfg.Now()); rs2 != nil {
-			// A second change inside one batch of packets: treat the rest as
-			// lost (a keyframe will come again).
-			s = v.newStream(leg, codec, s.depay, s.reorder)
-			s.frame(rs2.frame, v.cfg.Now())
-		}
+	// A stream can end on a keyframe that changes the picture size or its
+	// configuration: the next stream, a new part, starts on that frame and takes
+	// the packets that followed it.
+	rs := s.packet(pkt)
+	if rs == nil {
 		return
+	}
+	now := v.cfg.Now()
+	s = v.newStream(leg, codec, s.depay, s.reorder)
+	s.frame(rs.frame, now)
+	if len(rs.rest) == 0 {
+		return
+	}
+	if rs2 := s.process(rs.rest, false, now); rs2 != nil {
+		// A second change inside one batch of packets: the rest is taken as
+		// lost (a keyframe will come again).
+		s = v.newStream(leg, codec, s.depay, s.reorder)
+		s.frame(rs2.frame, now)
 	}
 }
 
@@ -594,13 +593,14 @@ func (s *vstream) fail(reason string) {
 // without stop is replaced by a successor; its uploads finish in the
 // background.
 func (s *vstream) finish(stop bool) {
-	if s.state == vsRunning {
+	switch s.state {
+	case vsRunning:
 		if s.prev != nil {
 			s.push(*s.prev, 0)
 			s.prev = nil
 		}
 		s.cut()
-	} else if s.state == vsWaitKey {
+	case vsWaitKey:
 		s.prev = nil
 		s.cut()
 	}

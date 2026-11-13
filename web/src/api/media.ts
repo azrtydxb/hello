@@ -191,6 +191,8 @@ export function greetingLabel(box: VoicemailBoxDetail): string {
 
 /** A recording with the parties of its call's CDR. */
 export interface CallRecording extends Recording {
+  /** The call's video was recorded too: GET .../manifest lists the streams. */
+  video?: boolean;
   /** The call's CDR; absent until the CDR is written. */
   cdrId?: Id;
   /** "" until the CDR is written. */
@@ -235,6 +237,68 @@ export async function listCallRecordings(
  */
 export const recordingDownloadPath = (recordingId: Id) =>
   `${recordingAudioPath(recordingId)}?download=1`;
+
+// --- video recordings (S-42) -----------------------------------------------------
+
+/** One recorded video stream: a sending leg's camera for one part. */
+export interface RecordingVideoStream {
+  id: Id;
+  part: number;
+  /** Whose camera: the leg that sent the video. */
+  leg: "caller" | "callee";
+  codec: "h264" | "vp8";
+  container: "mp4" | "webm";
+  width: number;
+  height: number;
+  /** When the first picture came, in ms after the audio recording started. */
+  offsetMs: number;
+  durationMs: number;
+  bytes: number;
+  state: "recording" | "ended" | "finalized" | "failed" | "purged";
+  failure?: string;
+  finalized: boolean;
+  mediaType: "video/mp4" | "video/webm";
+}
+
+/** GET /api/v1/recordings/{id}/manifest. */
+export interface RecordingVideoManifest {
+  recordingId: Id;
+  correlationId: string;
+  /** The audio's duration: the player's master clock. */
+  durationMs: number;
+  streams: RecordingVideoStream[];
+}
+
+export const getRecordingManifest = (recordingId: Id, signal?: AbortSignal) =>
+  request<RecordingVideoManifest>(
+    "GET",
+    `/api/v1/recordings/${seg(recordingId)}/manifest`,
+    { signal },
+  );
+
+/** GET /api/v1/recordings/{id}/video/{stream}, optionally as an attachment. */
+export const recordingVideoPath = (
+  recordingId: Id,
+  streamId: Id,
+  download = false,
+) =>
+  `/api/v1/recordings/${seg(recordingId)}/video/${seg(streamId)}${
+    download ? "?download=1" : ""
+  }`;
+
+/** GET and PUT /api/v1/recordings/settings (admin). */
+export interface RecordingSettings {
+  videoRetentionDays: number;
+  updatedAt: string;
+}
+
+export const getRecordingSettings = (signal?: AbortSignal) =>
+  request<RecordingSettings>("GET", "/api/v1/recordings/settings", { signal });
+
+export const putRecordingSettings = (videoRetentionDays: number) =>
+  request<RecordingSettings>("PUT", "/api/v1/recordings/settings", {
+    body: { videoRetentionDays },
+  });
 
 // --- announcements ------------------------------------------------------------
 

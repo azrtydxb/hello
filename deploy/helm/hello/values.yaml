@@ -173,6 +173,12 @@ sip:
   # defaults (enabled, 1500 kbit/s each way, 20 calls per node); set any of
   # enabled, maxKbps and maxSessions to change them.
   video: {}
+  # Recording the video of recorded calls (clients S-42, docs/media.md). Empty
+  # keeps the code's defaults (on, fragments of 10 s or 4 MiB, a 200 GB quota);
+  # set any of enabled, segment, segmentBytes and quotaGB (0 for no quota) to
+  # change them. The quota is also given to hello-control, which alerts at 80
+  # percent. Video is large: check the MinIO capacity first.
+  recordingVideo: {}
   # Kamailio's addresses: only these may set Path/X-Hello-Client. Narrow it
   # to your pod CIDR (and node CIDR when Kamailio is on the host network).
   trustedProxies: "10.0.0.0/8"

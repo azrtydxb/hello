@@ -426,13 +426,6 @@ func sharedFeedback(a, b []string) []string {
 	return out
 }
 
-// webLegBody is the SDP body for a leg of a call, which already carries the
-// video section when the leg is a browser's (the relay writes it in Build).
-func (c *call) isWebLeg(leg string) bool {
-	r := c.anchorRelay()
-	return r != nil && r.IsWebLeg(leg)
-}
-
 // ---- in-dialog changes (hold, resume, video up and down) -------------------
 
 // webInDialog applies a browser's re-INVITE to the relay before the answer and
@@ -464,7 +457,7 @@ func (c *call) webInDialog(fromCaller bool, body []byte, dir string) {
 		}
 		vo, offered = media.ParseVideoOffer(body)
 	} else {
-		first, has := media.PlainVideoFirstPT(body)
+		first, has := media.PlainVideoLine(body)
 		r.NotePlainVideoOffer(leg, has, first)
 		if !has && !r.HasPlainVideo(leg) {
 			return

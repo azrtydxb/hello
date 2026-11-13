@@ -802,6 +802,9 @@ func (c *call) startRecordingFlow(by string) {
 	}
 	c.addTrace("Recording started")
 	withVideo := c.startVideoRecording()
+	if !withVideo {
+		c.signalRecording(true, false)
+	}
 	c.noteHAState(haPhaseRecording, "")
 	// The notice announcement plays before the capture becomes a kept
 	// recording, matching the voicemail beep discipline.
@@ -826,6 +829,7 @@ func (c *call) toggleRecording() {
 		c.addTrace("Recording stopped")
 		c.noteHAState("", "")
 		go c.stopVideoRecording()
+		c.signalRecording(false, false)
 		go c.storeRecording(r, by)
 		return
 	}

@@ -17,6 +17,7 @@ const ROOM = {
   entryAnnouncement: "",
   exitAnnouncement: "",
   record: false,
+  video: true,
   enabled: true,
   createdAt: CREATED,
   updatedAt: CREATED,
@@ -109,8 +110,40 @@ describe("Conferences", () => {
         exitAnnouncement: "",
         record: false,
         enabled: true,
+        video: true,
       },
     });
+  });
+
+  it("turns the room's video off, on unless the server says otherwise", async () => {
+    const calls = setup({
+      "POST /api/v1/conferences": () => json({ ...ROOM, video: false }, 201),
+    });
+    renderApp("/conferences");
+    const [create] = await screen.findAllByRole("button", {
+      name: "New conference room",
+    });
+    await waitFor(() => expect(create).toBeEnabled());
+    fireEvent.click(create!);
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Weekly" },
+    });
+    fireEvent.change(screen.getByLabelText("Room number"), {
+      target: { value: "800" },
+    });
+    const sw = screen.getByRole("switch", { name: /Video/ });
+    expect(sw).toBeChecked();
+    fireEvent.click(sw);
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual(
+        expect.objectContaining({
+          method: "POST",
+          url: "/api/v1/conferences",
+          body: expect.objectContaining({ video: false }) as unknown,
+        }),
+      ),
+    );
   });
 
   it("shows validation errors at their fields and sends nothing", async () => {

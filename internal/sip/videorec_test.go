@@ -313,3 +313,40 @@ func TestVideoRecordingPolicy(t *testing.T) {
 		}
 	})
 }
+
+// TestRecordingSignalToBrowsers fails if the browsers of a recorded video call
+// are not told what the recording is: an INFO of type
+// application/x-hello-recording naming recording and video, to a browser on
+// either side, so the softphone can show its badge; and one more when the
+// recording stops. A desk phone is told nothing.
+func TestRecordingSignalToBrowsers(t *testing.T) {
+	objs, rows := &fakeObjects{}, &fakeVideoRows{}
+	feats := func(s *snapshot.Snapshot) {
+		s.WithExtensionData([]snapshot.Extension{{Number: "200", RecordDefault: true}})
+	}
+	pbx := startWebPBX(t, webDevices(), true, withFeatures(feats), withVoicemail(newVMStore(), objs),
+		func(c *Config, d *Deps) {
+			d.Recordings = &fakeRecordings{}
+			d.VideoRecordings = rows
+			c.RecordingVideo, c.RecordingVideoSegment, c.RecordingVideoSegmentBytes = true, time.Second, 2<<10
+		})
+	a, w, r, _, _, _ := webVideoPair(t, pbx)
+	want := func(p *phone, who, body string) {
+		t.Helper()
+		deadline := time.After(5 * time.Second)
+		for {
+			select {
+			case req := <-p.infos:
+				if ct := req.ContentType(); ct != nil && ct.Value() == recordingInfoType && strings.Contains(string(req.Body()), body) {
+					return
+				}
+			case <-deadline:
+				t.Fatalf("%s was not told %q", who, body)
+			}
+		}
+	}
+	want(a.phone, "the caller", "video: yes")
+	want(w.phone, "the callee", "video: yes")
+	hangup(t, r.dcs)
+	pbx.nextCDR(t)
+}

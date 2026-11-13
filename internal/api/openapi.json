@@ -28622,6 +28622,7 @@
           "exitAnnouncement",
           "record",
           "enabled",
+          "video",
           "createdAt",
           "updatedAt",
           "live"
@@ -28680,6 +28681,10 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "video": {
+            "type": "boolean",
+            "description": "Video. On: the room forwards the active speaker's picture (H.264 Constrained Baseline or VP8, never mixed or transcoded) to the participants that bring video; every participant sees the speaker, the speaker sees the one before. Off: every video line is answered with port 0 and the room is audio only."
           },
           "createdAt": {
             "type": "string",
@@ -28772,6 +28777,11 @@
             "type": "boolean",
             "default": true,
             "description": "A disabled room refuses callers."
+          },
+          "video": {
+            "type": "boolean",
+            "default": true,
+            "description": "Forward the active speaker's video to participants that bring video; off makes the room audio only."
           }
         }
       },

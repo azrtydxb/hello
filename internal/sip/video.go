@@ -77,7 +77,7 @@ func (c *call) videoLegAllowed(leg string) bool {
 		return c.inTrunk == nil
 	}
 	w := c.winnerLeg()
-	return w == nil || (w.trunk == nil && w.uri == nil)
+	return w == nil || (w.trunk == nil && (w.uri == nil || c.confFwdActive()))
 }
 
 // noteVideoOffer reads the video of the caller's first offer: a browser's
@@ -89,7 +89,7 @@ func (c *call) noteVideoOffer(r *media.Relay, offer []byte) {
 		c.noteWebVideoOffer(offer)
 		return
 	}
-	first, has := media.PlainVideoFirstPT(offer)
+	first, has := media.PlainVideoLine(offer)
 	r.NotePlainVideoOffer(legCaller, has, first)
 	if !has {
 		return
@@ -141,7 +141,9 @@ func (c *call) offerPlainVideo(l *leg) {
 	if len(cands) == 0 {
 		return
 	}
-	if l.trunk != nil || l.uri != nil {
+	if l.trunk != nil || (l.uri != nil && !c.confFwdActive()) {
+		// A room on another node is the one URI destination that takes video:
+		// the call is relayed to the node that mixes the room.
 		c.addTrace("Video not carried: trunks carry audio only")
 		return
 	}

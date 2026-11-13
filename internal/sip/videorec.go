@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/emiago/sipgo/sip"
 )
 
 // Video recording (clients-webrtc-mobile-video S-42). When a call is recorded
@@ -128,6 +129,7 @@ func (c *call) startVideoRecording() bool {
 	r.RequestKeyframe(legCaller)
 	r.RequestKeyframe(legCallee)
 	c.addTrace("Video is recorded next to the audio")
+	c.signalRecording(true, true)
 	return true
 }
 
@@ -273,5 +275,43 @@ func (w *streamWriter) flush() {
 			}
 			w.mu.Unlock()
 		}
+	}
+}
+
+// recordingInfoType is the content type of the INFO a web client gets when its
+// call's recording changes: the badge of the softphone (S-42, S-43). Body lines
+// are "recording: on|off" and "video: yes|no".
+const recordingInfoType = "application/x-hello-recording"
+
+// signalRecording tells the Hello clients on the call (browsers, which show a
+// recording badge with a camera mark when video is in it) what the recording is
+// now. Phones get nothing: they hear the notice. It runs off the call's path.
+func (c *call) signalRecording(on, video bool) {
+	r := c.anchorRelay()
+	if r == nil {
+		return
+	}
+	body := "recording: off\r\nvideo: no\r\n"
+	if on {
+		body = "recording: on\r\nvideo: no\r\n"
+		if video {
+			body = "recording: on\r\nvideo: yes\r\n"
+		}
+	}
+	send := func(do func(context.Context, *sip.Request) (*sip.Response, error), target sip.Uri) {
+		out := sip.NewRequest(sip.INFO, target)
+		out.AppendHeader(sip.NewHeader("Content-Type", recordingInfoType))
+		out.SetBody([]byte(body))
+		ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
+		defer cancel()
+		if _, err := requireResponse(do(ctx, out)); err != nil {
+			c.s.log.Debug("recording INFO to a client failed", "correlation_id", c.id, "error", err)
+		}
+	}
+	if r.IsWebLeg(legCaller) && c.dss != nil {
+		go send(c.dss.Do, c.target())
+	}
+	if w := c.winnerLeg(); w != nil && r.IsWebLeg(legCallee) && w.session() != nil {
+		go send(w.session().Do, w.target())
 	}
 }

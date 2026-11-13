@@ -34,6 +34,9 @@ type Conference struct {
 	ExitAnnouncement  string
 	Record            bool
 	Enabled           bool
+	// Video forwards the active speaker's picture to participants that bring
+	// video (migration 00122, S-45).
+	Video bool
 	// Misconfigured is set when a sealed PIN did not open (a changed
 	// HELLO_SECRET_KEY): the room refuses callers rather than run unguarded.
 	Misconfigured bool
@@ -71,7 +74,7 @@ func loadConferences(ctx context.Context, db Querier, box *secret.Box, log *slog
 		log = slog.Default()
 	}
 	rows, err := db.Query(ctx, `SELECT id, name, number, user_pin_enc, leader_pin_enc, max_participants, wait_for_leader,
-		mute_on_entry, entry_exit, entry_announcement, exit_announcement, record, enabled FROM conference_rooms ORDER BY id`)
+		mute_on_entry, entry_exit, entry_announcement, exit_announcement, record, enabled, video FROM conference_rooms ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("snapshot: conference rooms: %w", err)
 	}
@@ -83,7 +86,7 @@ func loadConferences(ctx context.Context, db Querier, box *secret.Box, log *slog
 			userEnc, leaderEnc []byte
 		)
 		if err := rows.Scan(&c.ID, &c.Name, &c.Number, &userEnc, &leaderEnc, &c.MaxParticipants, &c.WaitForLeader,
-			&c.MuteOnEntry, &c.EntryExit, &c.EntryAnnouncement, &c.ExitAnnouncement, &c.Record, &c.Enabled); err != nil {
+			&c.MuteOnEntry, &c.EntryExit, &c.EntryAnnouncement, &c.ExitAnnouncement, &c.Record, &c.Enabled, &c.Video); err != nil {
 			return nil, fmt.Errorf("snapshot: scan conference room: %w", err)
 		}
 		for _, p := range []struct {

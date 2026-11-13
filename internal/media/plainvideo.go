@@ -160,8 +160,8 @@ type plainVideo struct {
 	mu   sync.Mutex
 	sock *videoSock
 	// offered: the remote's offer had a video section, so every answer has one
-	// (port 0 when the video is not carried). firstPT is that section's first
-	// format, kept for the rejected line.
+	// (port 0 when the video is not carried). firstPT is that section's transport
+	// and first format ("RTP/AVP 96"), kept for the refused line.
 	offered bool
 	firstPT string
 	// vOffer is what Hello offers (offerer legs), vSel the negotiated section;
@@ -185,7 +185,7 @@ func (l *relayLeg) pvState(create bool) *plainVideo {
 }
 
 // NotePlainVideoOffer records whether the remote's latest offer on leg had a
-// video section (and its first format), so every SDP Hello writes for the leg
+// video section (its transport and first format, see PlainVideoLine), so every SDP Hello writes for the leg
 // has a video section too, refused unless the video is carried. An offer
 // without one clears it: the m= lines of the dialog follow the offer's.
 func (r *Relay) NotePlainVideoOffer(leg string, has bool, firstPT string) {
@@ -378,12 +378,12 @@ func (pv *plainVideo) section(ip string) string {
 		if !pv.offered && !pv.sentVideo {
 			return ""
 		}
-		first := pv.firstPT
-		if first == "" {
-			first = "96"
+		line := pv.firstPT
+		if line == "" {
+			line = "RTP/AVP 96"
 		}
 		pv.sentVideo = true
-		return "m=video 0 RTP/AVP " + first + "\r\n"
+		return "m=video 0 " + line + "\r\n"
 	}
 	pv.sentVideo = true
 	var b strings.Builder
@@ -444,15 +444,16 @@ func PlainVideoOffer(body []byte) (VideoOffer, *net.UDPAddr, *net.UDPAddr, bool)
 	return out, v.RTPAddr(), v.RTCPAddr(), true
 }
 
-// PlainVideoFirstPT is the first format of the first video section of an SDP
-// whether it is accepted or not (the rejected line repeats it).
-func PlainVideoFirstPT(body []byte) (string, bool) {
-	for _, line := range strings.Split(string(body), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "m=video ") {
-			f := strings.Fields(line)
+// PlainVideoLine is the transport and first format of the first video section
+// of an SDP ("RTP/SAVP 96"), whether the section is accepted or not: the refused
+// line repeats it (RFC 3264). ok is false when the SDP has no video section.
+func PlainVideoLine(body []byte) (line string, ok bool) {
+	for _, l := range strings.Split(string(body), "\n") {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "m=video ") {
+			f := strings.Fields(l)
 			if len(f) >= 4 {
-				return f[3], true
+				return f[2] + " " + f[3], true
 			}
 			return "", true
 		}

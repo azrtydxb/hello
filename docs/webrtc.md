@@ -285,11 +285,13 @@ decodes, repacketizes or transcodes it.
   caller's payload numbering, answers with one, and the caller is answered with
   that one (its fmtp as the callee sent it). No common codec means `m=video 0`
   and the call goes on as audio.
-- **Never to a desk phone or a trunk.** Only a web client on both legs gets video.
-  A call to a desk phone, a trunk or anything else answers the caller's video
-  line with port 0; the trace says why and
-  `hello_video_negotiation_failures_total{reason}` counts it. (Video phones and
-  door stations are a later piece built on the same relay.)
+- **Desk phones and door stations take video too, trunks never do.** A SIP video
+  phone or a door station that offers H.264 on a video line of its own (RTP/AVP,
+  its own RTP and RTCP ports) is a plain-RTP video leg on the same relay: see
+  [Video phones and door stations](#video-phones-and-door-stations). A trunk, a
+  URI destination and an application Hello answers itself (voicemail, an
+  announcement, an IVR, paging) answer the caller's video line with port 0; the
+  trace says why and `hello_video_negotiation_failures_total{reason}` counts it.
 - **Policy.** `extensions.video_allowed` (Extensions page, "Video allowed", on by
   default) for either extension of the call, `HELLO_VIDEO_ENABLED` (default
   true), and the node's session limit `HELLO_VIDEO_MAX_SESSIONS` (default 20): a
@@ -318,12 +320,54 @@ decodes, repacketizes or transcodes it.
   with the self-view picture-in-picture, the received resolution, frame rate and
   codec, camera selection, and the end-of-call report. The call's detail page says
   the call carried video.
-- **Not yet.** Recording of video calls (they record audio only and the trace
-  says so), video in conference rooms, and video phones and door stations are
-  later pieces; the relay's two-leg pairing and the per-leg video configuration
-  (`Relay.SetVideo`, `VideoLeg`) are the seams they plug into. A browser's
-  per-codec behaviour (Safari, Firefox, hardware encoders), the REMB fallback's
-  quality in each browser, and real-world capacity are lab items.
+- **Recorded and in rooms.** A recorded call keeps its video
+  ([Recording video](media.md#recording-video)), and a conference room forwards
+  the active speaker's picture ([conference.md](conference.md#video)). A
+  browser's per-codec behaviour (Safari, Firefox, hardware encoders), the REMB
+  fallback's quality in each browser, and real-world capacity are lab items.
+
+### Video phones and door stations
+
+A phone or a door station that offers `m=video` with H.264 over plain RTP/AVP
+gets the browser's treatment, because a plain video leg is one more
+`VideoLeg` configuration on the same relay (`internal/media/plainvideo.go`):
+
+- **A socket pair of its own.** The leg binds an even RTP port and the next one
+  for RTCP from the RTP range, next to its audio port; the SDP says `a=rtcp:`
+  explicitly and `rtcp-mux` is never answered. Video RTP and RTCP from a source
+  that is not the leg's peer (the SDP's address, the signalling source or the
+  first packet) are dropped, like audio.
+- **The same translator.** Constant sequence and timestamp offsets, one SSRC and
+  one payload type per leg, RTCP terminated per leg, PLI, FIR, NACK and REMB
+  carried across, the `HELLO_VIDEO_MAX_KBPS` ceiling. A payload type that differs
+  between the two ends (a door station's 99 and a phone's 96) is rewritten. A
+  phone that lists no `rtcp-fb` is still sent picture loss indications (every
+  H.264 video encoder answers one); NACK and REMB need the phone to list them.
+- **Pairings.** Phone to phone, door station to phone, phone to browser and
+  browser to phone all work. Between two plain ends any H.264 with the same
+  packetization mode and `profile_idc` is carried (the answer's fmtp goes back to
+  the offerer as sent); as soon as a browser is on one end both ends must be
+  Constrained Baseline in mode 1, which is what a browser decodes. A phone offered
+  only VP8 or H.265 gets audio. VP8 is never offered to a plain leg.
+- **Policy.** The same as for browsers: `HELLO_VIDEO_ENABLED`,
+  `extensions.video_allowed` for either extension, `HELLO_VIDEO_MAX_SESSIONS`.
+  A call whose audio is SRTP (SDES or DTLS) carries no plain video beside it:
+  the video line is refused with the reason in the trace rather than sent in the
+  clear. Door stations are no longer special: their video is a call like any
+  other, and `video_allowed` governs it.
+- **Mid-call.** A phone adds video by re-INVITE like a browser does (the peer is
+  offered the one codec the phone listed first, a refusal ends the video again),
+  hold stops audio and video together, resume asks both senders for a keyframe,
+  and a re-INVITE without the video line ends it.
+- **Not carried.** A takeover by another node, a transfer or a re-anchor carries
+  audio only (the video relay is the node's own, as the browser's ICE state is).
+  Vendor preview keys on the phones (`phone-feature-parity` S-49) and a real
+  video phone or door station on the LAN are on the hardware list.
+
+Tests: `TestPhoneVideoCall`, `TestPhoneVideoRefusals`, `TestPhoneVideoWithBrowser`
+and `TestDoorVideoPassthrough` (internal/sip) place calls with plain-RTP video
+phones, a door station and a browser; `TestPlainVideoLegs` and
+`TestPlainVideoClosesWithRelay` (internal/media) test the leg.
 
 ### Settings and series
 
@@ -332,6 +376,9 @@ decodes, repacketizes or transcodes it.
 | `HELLO_VIDEO_ENABLED`      | true    | Calls between web clients may carry video |
 | `HELLO_VIDEO_MAX_KBPS`     | 1500    | Per-direction ceiling of a call's video   |
 | `HELLO_VIDEO_MAX_SESSIONS` | 20      | Calls one node carries video for          |
+
+Video recording has its own settings (`HELLO_RECORDING_VIDEO*`,
+[media.md](media.md#recording-video)).
 
 `hello_video_sessions`, `hello_video_keyframe_requests_total`,
 `hello_video_dropped_packets_total{reason}` and

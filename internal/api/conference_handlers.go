@@ -61,13 +61,14 @@ type conferenceBody struct {
 	ExitAnnouncement  *string `json:"exitAnnouncement"`
 	Record            *bool   `json:"record"`
 	Enabled           *bool   `json:"enabled"`
+	Video             *bool   `json:"video"`
 }
 
 // toInput applies the body over the defaults: ten seats, tones, no waiting,
-// no recording, enabled.
+// no recording, enabled, video on.
 func (b conferenceBody) toInput() store.ConferenceInput {
 	in := store.ConferenceInput{
-		MaxParticipants: store.DefaultConferenceCap, EntryExit: store.ConferenceSoundTone, Enabled: true,
+		MaxParticipants: store.DefaultConferenceCap, EntryExit: store.ConferenceSoundTone, Enabled: true, Video: true,
 	}
 	if b.Name != nil {
 		in.Name = *b.Name
@@ -98,6 +99,9 @@ func (b conferenceBody) toInput() store.ConferenceInput {
 	}
 	if b.Enabled != nil {
 		in.Enabled = *b.Enabled
+	}
+	if b.Video != nil {
+		in.Video = *b.Video
 	}
 	return in
 }

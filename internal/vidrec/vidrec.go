@@ -73,7 +73,6 @@ func (w *Worker) Usage() (used, quota int64) { return w.usage.Load(), w.QuotaByt
 type Metrics struct {
 	Finalized *prometheus.CounterVec
 	Purged    prometheus.Counter
-	usage     func() float64
 }
 
 // NewMetrics registers the series: hello_recording_video_bytes (what the video

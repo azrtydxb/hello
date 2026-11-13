@@ -31,6 +31,8 @@ import {
 } from "../design/azrty/components";
 import { formatDuration, formatTime } from "../format";
 import { NowPlaying, usePlayback } from "./media/MediaParts";
+import { RecordingPlayer } from "./media/RecordingPlayer";
+import { RetentionCard } from "./media/RetentionCard";
 import { Can } from "../role";
 
 export const PAGE_SIZE = 50;
@@ -182,9 +184,16 @@ export function Recordings() {
       key: "origin",
       label: "Started by",
       render: (r) => (
-        <Badge tone="outline">
-          {ORIGIN_LABEL[r.initiatedBy] ?? r.initiatedBy}
-        </Badge>
+        <span className="media-actions">
+          <Badge tone="outline">
+            {ORIGIN_LABEL[r.initiatedBy] ?? r.initiatedBy}
+          </Badge>
+          {r.video && (
+            <Badge tone="outline">
+              <Icon name="video" size={12} /> video
+            </Badge>
+          )}
+        </span>
       ),
     },
     {
@@ -263,7 +272,15 @@ export function Recordings() {
           </Alert>
         )}
         {playback.error && <Alert tone="bad">{playback.error}</Alert>}
-        {playingRec && (
+        {playingRec && playingRec.video && (
+          <RecordingPlayer
+            key={String(playingRec.id)}
+            recording={playingRec}
+            title={callLabel(playingRec)}
+            onStop={playback.stop}
+          />
+        )}
+        {playingRec && !playingRec.video && (
           <NowPlaying
             key={String(playingRec.id)}
             src={recordingAudioPath(playingRec.id)}
@@ -273,6 +290,9 @@ export function Recordings() {
             onStop={playback.stop}
           />
         )}
+        <Can min="admin">
+          <RetentionCard />
+        </Can>
         {state.status === "loading" && <Spinner label="Loading recordings…" />}
         {state.status === "error" && (
           <Alert tone="bad" title="Could not load recordings">

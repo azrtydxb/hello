@@ -167,6 +167,22 @@ spec:
             - name: HELLO_VIDEO_MAX_SESSIONS
               value: {{ $sip.video.maxSessions | quote }}
             {{- end }}
+            {{- if hasKey $sip.recordingVideo "enabled" }}
+            - name: HELLO_RECORDING_VIDEO
+              value: {{ $sip.recordingVideo.enabled | quote }}
+            {{- end }}
+            {{- if hasKey $sip.recordingVideo "segment" }}
+            - name: HELLO_RECORDING_VIDEO_SEGMENT
+              value: {{ $sip.recordingVideo.segment | quote }}
+            {{- end }}
+            {{- if hasKey $sip.recordingVideo "segmentBytes" }}
+            - name: HELLO_RECORDING_VIDEO_SEGMENT_BYTES
+              value: {{ $sip.recordingVideo.segmentBytes | quote }}
+            {{- end }}
+            {{- if hasKey $sip.recordingVideo "quotaGB" }}
+            - name: HELLO_RECORDING_VIDEO_QUOTA_GB
+              value: {{ $sip.recordingVideo.quotaGB | quote }}
+            {{- end }}
             - name: HELLO_MEDIA_RECORDING_NOTICE
               value: {{ $sip.recordingNotice | quote }}
             - name: HELLO_VOICEMAIL_LANGUAGE

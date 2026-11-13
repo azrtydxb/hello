@@ -107,7 +107,9 @@ func (s *memStore) ReleaseVideoStream(_ context.Context, id int64) error {
 	return nil
 }
 
-func (s *memStore) SweepVideoStreams(context.Context, time.Duration) (int64, error) { return s.swept, nil }
+func (s *memStore) SweepVideoStreams(context.Context, time.Duration) (int64, error) {
+	return s.swept, nil
+}
 
 func (s *memStore) ExpiredVideoStreams(_ context.Context, days, n int) ([]store.VideoStream, error) {
 	s.mu.Lock()
@@ -140,7 +142,9 @@ func (s *memStore) Audit(_ context.Context, actor, action, resource, id string) 
 	return nil
 }
 
-func (s *memStore) TryLock(context.Context, string) (func(), bool, error) { return func() {}, true, nil }
+func (s *memStore) TryLock(context.Context, string) (func(), bool, error) {
+	return func() {}, true, nil
+}
 
 var sps = []byte{0x67, 0x42, 0xc0, 0x1e, 0xd9, 0x00, 0xa0, 0x47, 0xfe, 0x88}
 

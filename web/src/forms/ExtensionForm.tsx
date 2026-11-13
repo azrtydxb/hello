@@ -257,6 +257,7 @@ export function ExtensionDrawer({
   const [intercom, setIntercom] = useState(ext.allowIntercom !== false);
   const [callWaiting, setCallWaiting] = useState(ext.callWaiting !== false);
   const [videoAllowed, setVideoAllowed] = useState(ext.videoAllowed !== false);
+  const [recordVideo, setRecordVideo] = useState(ext.recordVideo !== false);
   const [anonymous, setAnonymous] = useState(ext.anonymousOutbound === true);
   const [phoneAnon, setPhoneAnon] = useState(ext.phoneSendAnonymous === true);
   const [mohClass, setMohClass] = useState<Id | null>(ext.mohClassId ?? null);
@@ -313,6 +314,9 @@ export function ExtensionDrawer({
     }
     if (videoAllowed !== (ext.videoAllowed !== false)) {
       patch.videoAllowed = videoAllowed;
+    }
+    if (recordVideo !== (ext.recordVideo !== false)) {
+      patch.recordVideo = recordVideo;
     }
     if (callWaiting !== (ext.callWaiting !== false)) {
       patch.callWaiting = callWaiting;
@@ -497,10 +501,17 @@ export function ExtensionDrawer({
             />
             <Switch
               label="Video allowed"
-              hint="On: calls of this extension may carry video between web softphones (H.264 or VP8, relayed and never transcoded). Off: every video line is answered with port 0 and the call goes on as audio. Trunk and desk-phone legs never carry video"
+              hint="On: calls of this extension may carry video: between web softphones (H.264 or VP8) and with video desk phones and door stations (H.264), relayed and never transcoded. Off: every video line is answered with port 0 and the call goes on as audio. Trunk legs never carry video"
               labelPosition="end"
               checked={videoAllowed}
               onChange={(e) => setVideoAllowed(e.target.checked)}
+            />
+            <Switch
+              label="Record video"
+              hint="On: when a call of this extension is recorded and carries video, the video is recorded next to the audio (storage grows fast: see Recordings). Off: the recording is audio only"
+              labelPosition="end"
+              checked={recordVideo}
+              onChange={(e) => setRecordVideo(e.target.checked)}
             />
             <Switch
               label="Anonymous outbound"

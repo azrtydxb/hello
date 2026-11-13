@@ -40,6 +40,8 @@ function setup(extra: Parameters<typeof mockApi>[0] = {}) {
     "GET /api/v1/extensions": () => json({ items: [EXT] }),
     "GET /api/v1/recordings?limit=50": () =>
       json({ items: [REC, OTHER], next: "" }),
+    "GET /api/v1/recordings/settings": () =>
+      json({ videoRetentionDays: 30, updatedAt: CREATED }),
     ...extra,
   });
 }
@@ -185,5 +187,71 @@ describe("Recordings", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could not load recordings",
     );
+  });
+
+  it("marks a recording that has video and plays it with the video player", async () => {
+    setup({
+      "GET /api/v1/recordings?limit=50": () =>
+        json({ items: [{ ...REC, video: true }, OTHER], next: "" }),
+      "GET /api/v1/recordings/31/audio": () =>
+        new Response("R", {
+          status: 206,
+          headers: { "Content-Type": "audio/wav" },
+        }),
+      "GET /api/v1/recordings/31/manifest": () =>
+        json({
+          recordingId: 31,
+          correlationId: "corr-31",
+          durationMs: 21000,
+          streams: [],
+        }),
+    });
+    renderApp("/recordings");
+    const row = await screen.findByRole("row", { name: /corr-31/ });
+    expect(within(row).getByText("video")).toBeVisible();
+    expect(
+      within(screen.getByRole("row", { name: /corr-32/ })).queryByText("video"),
+    ).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Play the recording corr-31" }),
+    );
+    expect(await screen.findByText("No video was stored")).toBeVisible();
+  });
+
+  it("lets an admin read and change the video retention", async () => {
+    const calls = setup({
+      "PUT /api/v1/recordings/settings": () =>
+        json({ videoRetentionDays: 7, updatedAt: CREATED }),
+    });
+    renderApp("/recordings");
+    const input = await screen.findByLabelText(
+      "Keep video recordings for (days)",
+    );
+    await vi.waitFor(() => expect(input).toHaveValue(30));
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    fireEvent.change(input, { target: { value: "0" } });
+    expect(await screen.findByText("Whole days, 1 to 3650.")).toBeVisible();
+    expect(save).toBeDisabled();
+    fireEvent.change(input, { target: { value: "7" } });
+    fireEvent.click(save);
+    await vi.waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "PUT",
+        url: "/api/v1/recordings/settings",
+        body: { videoRetentionDays: 7 },
+      }),
+    );
+  });
+
+  it("hides the retention from a viewer", async () => {
+    setup({
+      "GET /api/v1/auth/me": () => json({ username: "v", role: "viewer" }),
+    });
+    renderApp("/recordings");
+    await screen.findByRole("row", { name: /corr-31/ });
+    expect(
+      screen.queryByLabelText("Keep video recordings for (days)"),
+    ).toBeNull();
   });
 });

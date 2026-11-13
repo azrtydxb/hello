@@ -120,6 +120,10 @@ spec:
               value: {{ include "hello.turnUrls" . | quote }}
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_TURN_SECRET" "key" "turnSecret") | nindent 12 }}
             {{- end }}
+            {{- if hasKey .Values.sip.recordingVideo "quotaGB" }}
+            - name: HELLO_RECORDING_VIDEO_QUOTA_GB
+              value: {{ .Values.sip.recordingVideo.quotaGB | quote }}
+            {{- end }}
             - name: HELLO_BACKUP_TMP
               value: /var/lib/hello-backup
             - name: HELLO_VOICEMAIL_LANGUAGE

@@ -294,26 +294,6 @@ func (r *Relay) AddLeg(name string) (int, error) {
 	return port, nil
 }
 
-// addLegAt is AddLeg on one given port.
-func (r *Relay) addLegAt(name string, port int) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed || len(r.legs) >= 2 {
-		return 0, errors.New("media: relay takes exactly two legs")
-	}
-	if r.used[port] {
-		return 0, fmt.Errorf("media: port %d is in use", port)
-	}
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: port})
-	if err != nil {
-		return 0, fmt.Errorf("media: bind leg %q RTP socket: %w", name, err)
-	}
-	l := newRelayLeg(r, name, conn, port)
-	r.legs = append(r.legs, l)
-	r.used[port] = true
-	return port, nil
-}
-
 // AddMuxLeg adds the next leg on a shared WebRTC port instead of a socket of
 // its own (S-4): the leg reads and writes through ep, an endpoint of mux, and
 // the SDP names the mux's port. The caller names the leg's ICE ufrag with

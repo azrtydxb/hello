@@ -118,6 +118,8 @@ export interface Extension {
   callWaiting?: boolean;
   /** Video between web clients is allowed; true by default. */
   videoAllowed?: boolean;
+  /** The video of a recorded call is kept next to the audio; true by default. */
+  recordVideo?: boolean;
   /**
    * Anonymous outbound; false by default. On: every trunk call from the
    * extension carries Privacy: id, an anonymous From and the trunk's asserted
@@ -947,6 +949,7 @@ export const updateExtension = (
     allowIntercom?: boolean;
     callWaiting?: boolean;
     videoAllowed?: boolean;
+    recordVideo?: boolean;
     anonymousOutbound?: boolean;
     phoneSendAnonymous?: boolean;
 
@@ -1548,6 +1551,8 @@ export interface Conference {
   exitAnnouncement: string;
   record: boolean;
   enabled: boolean;
+  /** The room forwards the active speaker's video; true by default. */
+  video: boolean;
   createdAt: string;
   updatedAt: string;
   live: ConferenceLive | null;
@@ -1567,6 +1572,7 @@ export interface ConferenceFields {
   exitAnnouncement: string;
   record: boolean;
   enabled: boolean;
+  video: boolean;
 }
 
 export type ConferenceAction =

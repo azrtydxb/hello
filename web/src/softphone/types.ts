@@ -65,6 +65,12 @@ export interface CallInfo {
   heldRemote: boolean;
   muted: boolean;
   video: VideoState;
+  /**
+   * What the PBX says about this call's recording (an INFO of type
+   * application/x-hello-recording): off, on with audio only, or on with video.
+   * Absent until the PBX says anything.
+   */
+  recording?: "off" | "audio" | "video";
   /** A transfer is in progress (REFER sent, waiting for the outcome). */
   transferring: boolean;
   /** Epoch ms when the call was answered; 0 before. */

@@ -190,6 +190,27 @@ function ActiveCall({ c, sp }: { c: CallInfo; sp: Softphone }) {
             {c.transferring && " · transferring…"}
           </div>
         </div>
+        {answered && c.recording && c.recording !== "off" && (
+          <span
+            className="sp-rec"
+            title={
+              c.recording === "video"
+                ? "This call is being recorded, video included"
+                : "This call is being recorded"
+            }
+          >
+            <Icon
+              name={c.recording === "video" ? "video" : "circle"}
+              size={12}
+            />
+            <span className="visually-hidden">
+              {c.recording === "video"
+                ? "Recording, including video"
+                : "Recording"}
+            </span>
+            <span aria-hidden="true">REC</span>
+          </span>
+        )}
         {answered && (
           <span
             className={`sp-quality sp-quality--${grade}`}

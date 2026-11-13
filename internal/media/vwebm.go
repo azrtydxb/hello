@@ -13,11 +13,11 @@ import (
 func ebmlID(id uint32) []byte {
 	switch {
 	case id > 0xffffff:
-		return []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}
+		return []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)} //nolint:gosec // the low byte of each is the point
 	case id > 0xffff:
-		return []byte{byte(id >> 16), byte(id >> 8), byte(id)}
+		return []byte{byte(id >> 16), byte(id >> 8), byte(id)} //nolint:gosec // the low byte of each is the point
 	case id > 0xff:
-		return []byte{byte(id >> 8), byte(id)}
+		return []byte{byte(id >> 8), byte(id)} //nolint:gosec // the low byte of each is the point
 	}
 	return []byte{byte(id)}
 }
@@ -158,7 +158,7 @@ func WebMCluster(startMs uint64, frames []WebMFrame) []byte {
 		if f.Key {
 			flags = 0x80
 		}
-		blk := []byte{0x81, byte(uint16(f.At) >> 8), byte(f.At), flags} // track 1, relative timecode, flags
+		blk := []byte{0x81, byte(uint16(f.At) >> 8), byte(f.At), flags} //nolint:gosec // track 1, the timecode's two bytes, flags
 		parts = append(parts, el(idSimpleBlock, blk, f.Data))
 	}
 	return el(idCluster, parts...)
@@ -186,7 +186,7 @@ func WebMHeader(width, height int, durationMs float64, frags []FragInfo) []byte 
 	// depend on them and can be measured before they are known.
 	seekHead := func(infoPos, tracksPos, cuesPos uint64) []byte {
 		pad := func(id uint32, pos uint64) []byte {
-			return el(idSeek, el(idSeekID, ebmlID(id)), el(idSeekPos, []byte{byte(pos >> 24), byte(pos >> 16), byte(pos >> 8), byte(pos)}))
+			return el(idSeek, el(idSeekID, ebmlID(id)), el(idSeekPos, []byte{byte(pos >> 24), byte(pos >> 16), byte(pos >> 8), byte(pos)})) //nolint:gosec // four bytes of a position under 4 GiB
 		}
 		return el(idSeekHead, pad(idInfo, infoPos), pad(idTracks, tracksPos), pad(idCues, cuesPos))
 	}

@@ -114,6 +114,14 @@ type Party struct {
 	closeOnce sync.Once
 	done      chan struct{}
 
+	// vid is the participant's video (roomvideo.go), nil without; the room the
+	// participant is in is set by Room.Add.
+	vid    *partyVideo
+	vwg    sync.WaitGroup
+	roomMu sync.Mutex
+	room   *Room
+	roomID string
+
 	// Counters, for the room's metrics.
 	rx, tx, dropped atomic.Uint64
 	lastRx          atomic.Int64 // unix nanos of the last inbound audio packet
@@ -134,6 +142,15 @@ func NewParty(host string, minPort, maxPort int, offer []byte) ([]byte, *Party, 
 // participant; a policy that requires SRTP and an offer that cannot deliver
 // it fails with ErrSRTPRequired and binds nothing.
 func NewPartySecure(host string, minPort, maxPort int, offer []byte, pol SecurePolicy) ([]byte, *Party, error) {
+	return NewPartySecureVideo(host, minPort, maxPort, offer, pol, nil)
+}
+
+// NewPartySecureVideo is NewPartySecure for a participant that may bring video
+// (a phone or a door station with H.264 on RTP/AVP): with vj the answer carries
+// a video section when the offer holds H.264 Constrained Baseline in the room's
+// codec, on a socket pair of the participant's own, and refuses it in place
+// (port 0) otherwise. The video goes through the room's forwarder.
+func NewPartySecureVideo(host string, minPort, maxPort int, offer []byte, pol SecurePolicy, vj *VideoJoin) ([]byte, *Party, error) {
 	ip := net.ParseIP(host)
 	if ip == nil || ip.To4() == nil {
 		return nil, nil, fmt.Errorf("media: advertised host %q is not an IPv4 address", host)
@@ -191,9 +208,55 @@ func NewPartySecure(host string, minPort, maxPort int, offer []byte, pol SecureP
 		marker: true, sec: sec,
 		dtmf: make(chan byte, partyDTMFQueue), done: make(chan struct{}),
 	}
-	go p.recv()
 	port := conn.LocalAddr().(*net.UDPAddr).Port //nolint:forcetypeassert // always a UDPAddr
-	return ansSDP.Build(host, port, "sendrecv"), p, nil
+	answer := ansSDP.Build(host, port, "sendrecv")
+	if vj != nil {
+		if pv, c, sock := plainPartyVideo(sec, offer, minPort, maxPort, vj); pv != nil {
+			answer = append(answer[:len(answer):len(answer)], pv.section(host)...)
+			if sock != nil {
+				p.vid = newPartyVideo(p, *c)
+				p.vid.pv = pv
+			}
+		}
+	} else if first, has := PlainVideoLine(offer); has {
+		// A video line in the offer is answered, refused in place (RFC 3264).
+		answer = append(answer[:len(answer):len(answer)], (&plainVideo{offered: true, firstPT: first}).section(host)...)
+	}
+	go p.recv()
+	if p.vid != nil {
+		p.vid.start()
+	}
+	return answer, p, nil
+}
+
+// plainPartyVideo decides the video of a plain RTP participant: its SDP state,
+// the codec taken and the sockets, the last two nil when the video is refused. A
+// participant whose audio is SRTP gets no plain video beside it.
+func plainPartyVideo(sec *Secure, offer []byte, minPort, maxPort int, vj *VideoJoin) (*plainVideo, *SDPCodec, *videoSock) {
+	first, has := PlainVideoLine(offer)
+	if !has {
+		return nil, nil, nil
+	}
+	pv := &plainVideo{offered: true, firstPT: first}
+	vo, rtp, rtcp, ok := PlainVideoOffer(offer)
+	if !ok {
+		return pv, nil, nil
+	}
+	if _, enc := sec.Profile(); enc {
+		return pv, nil, nil
+	}
+	c, ok := chooseRoomCodec(vo.Codecs, vj.Codec)
+	if !ok || !equalFold(c.Name, "H264") {
+		return pv, nil, nil
+	}
+	sock, err := bindVideoSock(minPort, maxPort, nil)
+	if err != nil {
+		return pv, nil, nil
+	}
+	sock.setTarget(rtp, rtcp)
+	pv.sock = sock
+	pv.setSection(&c, "sendrecv", vj.Kbps)
+	return pv, &c, sock
 }
 
 // bindPartySocket takes the first free port of the range; with no range it
@@ -258,6 +321,9 @@ func (p *Party) Done() <-chan struct{} { return p.done }
 func (p *Party) Close() {
 	p.closeOnce.Do(func() {
 		close(p.done)
+		if p.vid != nil {
+			p.vid.close()
+		}
 		p.sec.Close()
 		_ = p.conn.Close() // teardown: nothing depends on the close error
 		// The receive goroutine owns the decoder and frees it on its way out.
@@ -291,8 +357,13 @@ func (p *Party) recv() {
 		}
 		// An encrypted participant's packets are authenticated first; one
 		// that fails is dropped before it is latched, decoded or mixed.
-		data, ok, _ := p.sec.UnprotectFrom(buf[:n], from)
+		data, isRTCP, ok, _ := p.sec.UnprotectAny(buf[:n], from)
 		if !ok {
+			continue
+		}
+		if isRTCP {
+			p.latch(from)
+			p.onVideoRTCP(data)
 			continue
 		}
 		pkt, ok := ParseRTP(data)
@@ -300,6 +371,9 @@ func (p *Party) recv() {
 			continue
 		}
 		switch {
+		case p.vid != nil && p.vid.vid.carries(pkt.PayloadType):
+			p.latch(from)
+			p.onVideoRTP(pkt, data)
 		case pkt.PayloadType == p.codec.codec.PT:
 			p.latch(from)
 			p.rx.Add(1)
@@ -419,6 +493,15 @@ func (p *Party) send(frame []int16) error {
 // participant's audio: a video or data line in the offer is answered with port 0
 // in place (the conference mixes audio; room video comes later).
 func NewPartyWebRTC(node *WebRTCNode, offer []byte) ([]byte, *Party, error) {
+	return NewPartyWebRTCVideo(node, offer, nil)
+}
+
+// NewPartyWebRTCVideo is NewPartyWebRTC for a browser that may bring video: with
+// vj the answer carries the video section (H.264 Constrained Baseline or VP8,
+// the room's codec once it has one) on the same transport as the audio, and the
+// video goes through the room's forwarder; without a codec the room can use the
+// section is answered with port 0.
+func NewPartyWebRTCVideo(node *WebRTCNode, offer []byte, vj *VideoJoin) ([]byte, *Party, error) {
 	if node == nil {
 		return nil, nil, errors.New("media: WebRTC is not enabled on this node")
 	}
@@ -482,6 +565,15 @@ func NewPartyWebRTC(node *WebRTCNode, offer []byte) ([]byte, *Party, error) {
 			w.audioMid = m.Mid()
 		}
 	}
+	var vsel *SDPCodec
+	if vj != nil {
+		if vo, ok := videoOfferOf(sess); ok {
+			if c, ok := chooseRoomCodec(vo.Codecs, vj.Codec); ok {
+				vsel = &c
+				w.vSel, w.vDir, w.kbps, w.videoMid = &c, "sendrecv", vj.Kbps, vo.Mid
+			}
+		}
+	}
 	ans = ans.withWeb(w.audioMid, node.Hosts())
 	ans.localWeb.finish = func(sdp []byte) []byte {
 		out, _, _, err := renderSections(w, false, sdp)
@@ -500,6 +592,12 @@ func NewPartyWebRTC(node *WebRTCNode, offer []byte) ([]byte, *Party, error) {
 		marker: true, sec: sec,
 		dtmf: make(chan byte, partyDTMFQueue), done: make(chan struct{}),
 	}
+	if vsel != nil {
+		p.vid = newPartyVideo(p, *vsel)
+	}
 	go p.recv()
+	if p.vid != nil {
+		p.vid.start()
+	}
 	return ans.Build(node.Hosts()[0], node.Mux().Port(), "sendrecv"), p, nil
 }

@@ -35,21 +35,24 @@ const (
 // Conference is a room as the API shows it. The PINs are write-only: only
 // whether each is set is exposed.
 type Conference struct {
-	ID                int64     `json:"id"`
-	Name              string    `json:"name"`
-	Number            string    `json:"number"`
-	HasUserPIN        bool      `json:"hasUserPin"`
-	HasLeaderPIN      bool      `json:"hasLeaderPin"`
-	MaxParticipants   int       `json:"maxParticipants"`
-	WaitForLeader     bool      `json:"waitForLeader"`
-	MuteOnEntry       bool      `json:"muteOnEntry"`
-	EntryExit         string    `json:"entryExit"`
-	EntryAnnouncement string    `json:"entryAnnouncement"`
-	ExitAnnouncement  string    `json:"exitAnnouncement"`
-	Record            bool      `json:"record"`
-	Enabled           bool      `json:"enabled"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ID                int64  `json:"id"`
+	Name              string `json:"name"`
+	Number            string `json:"number"`
+	HasUserPIN        bool   `json:"hasUserPin"`
+	HasLeaderPIN      bool   `json:"hasLeaderPin"`
+	MaxParticipants   int    `json:"maxParticipants"`
+	WaitForLeader     bool   `json:"waitForLeader"`
+	MuteOnEntry       bool   `json:"muteOnEntry"`
+	EntryExit         string `json:"entryExit"`
+	EntryAnnouncement string `json:"entryAnnouncement"`
+	ExitAnnouncement  string `json:"exitAnnouncement"`
+	Record            bool   `json:"record"`
+	Enabled           bool   `json:"enabled"`
+	// Video forwards the active speaker's picture to the participants that
+	// bring video (migration 00122, S-45); off, the room is audio only.
+	Video     bool      `json:"video"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // ConferenceInput is the writable shape of a room.
@@ -64,6 +67,7 @@ type ConferenceInput struct {
 	ExitAnnouncement  string
 	Record            bool
 	Enabled           bool
+	Video             bool
 }
 
 // PINChange says what to do with one PIN: leave it (the zero value), set it
@@ -74,12 +78,12 @@ type PINChange struct {
 }
 
 const conferenceCols = `id, name, number, user_pin_enc IS NOT NULL, leader_pin_enc IS NOT NULL, max_participants,
-	wait_for_leader, mute_on_entry, entry_exit, entry_announcement, exit_announcement, record, enabled, created_at, updated_at`
+	wait_for_leader, mute_on_entry, entry_exit, entry_announcement, exit_announcement, record, enabled, video, created_at, updated_at`
 
 func scanConference(row interface{ Scan(...any) error }) (Conference, error) {
 	var c Conference
 	err := row.Scan(&c.ID, &c.Name, &c.Number, &c.HasUserPIN, &c.HasLeaderPIN, &c.MaxParticipants, &c.WaitForLeader,
-		&c.MuteOnEntry, &c.EntryExit, &c.EntryAnnouncement, &c.ExitAnnouncement, &c.Record, &c.Enabled, &c.CreatedAt, &c.UpdatedAt)
+		&c.MuteOnEntry, &c.EntryExit, &c.EntryAnnouncement, &c.ExitAnnouncement, &c.Record, &c.Enabled, &c.Video, &c.CreatedAt, &c.UpdatedAt)
 	return c, err
 }
 
@@ -193,10 +197,10 @@ func (s *Store) CreateConference(ctx context.Context, actor string, in Conferenc
 		}
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO conference_rooms (name, number, max_participants, wait_for_leader,
-				mute_on_entry, entry_exit, entry_announcement, exit_announcement, record, enabled)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+				mute_on_entry, entry_exit, entry_announcement, exit_announcement, record, enabled, video)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
 			in.Name, in.Number, in.MaxParticipants, in.WaitForLeader, in.MuteOnEntry, in.EntryExit,
-			in.EntryAnnouncement, in.ExitAnnouncement, in.Record, in.Enabled).Scan(&id); err != nil {
+			in.EntryAnnouncement, in.ExitAnnouncement, in.Record, in.Enabled, in.Video).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := s.setConferencePIN(ctx, tx, id, "user", userPIN); err != nil {
@@ -239,9 +243,9 @@ func (s *Store) UpdateConference(ctx context.Context, actor string, id int64, in
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE conference_rooms SET name = $2, number = $3, max_participants = $4,
 				wait_for_leader = $5, mute_on_entry = $6, entry_exit = $7, entry_announcement = $8, exit_announcement = $9,
-				record = $10, enabled = $11, updated_at = now() WHERE id = $1`,
+				record = $10, enabled = $11, video = $12, updated_at = now() WHERE id = $1`,
 			id, in.Name, in.Number, in.MaxParticipants, in.WaitForLeader, in.MuteOnEntry, in.EntryExit,
-			in.EntryAnnouncement, in.ExitAnnouncement, in.Record, in.Enabled); err != nil {
+			in.EntryAnnouncement, in.ExitAnnouncement, in.Record, in.Enabled, in.Video); err != nil {
 			return id, err
 		}
 		if err := s.setConferencePIN(ctx, tx, id, "user", userPIN); err != nil {

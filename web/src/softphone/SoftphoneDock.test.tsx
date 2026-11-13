@@ -287,6 +287,32 @@ describe("softphone dock", () => {
     );
   });
 
+  it("shows a recording badge with a camera mark when the PBX says the call is recorded with video", async () => {
+    mockApi(routes);
+    const { engine } = setup();
+    await turnOn(engine);
+    const active = {
+      ...incoming,
+      phase: "active" as const,
+      answeredAt: Date.now(),
+    };
+    engine.emit({ type: "call", call: active });
+    await screen.findByRole("button", { name: "Hold" });
+    expect(screen.queryByText("REC")).toBeNull();
+    engine.emit({ type: "call", call: { ...active, recording: "audio" } });
+    expect(await screen.findByText("Recording")).toBeInTheDocument();
+    expect(screen.getByTitle("This call is being recorded")).toBeVisible();
+    engine.emit({ type: "call", call: { ...active, recording: "video" } });
+    expect(
+      await screen.findByText("Recording, including video"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTitle("This call is being recorded, video included"),
+    ).toBeVisible();
+    engine.emit({ type: "call", call: { ...active, recording: "off" } });
+    await vi.waitFor(() => expect(screen.queryByText("REC")).toBeNull());
+  });
+
   it("places a call from the dialer, with and without video", async () => {
     mockApi(routes);
     const { engine } = setup();

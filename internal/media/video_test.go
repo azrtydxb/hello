@@ -90,7 +90,7 @@ func TestPlainVideoLegs(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Start()
-	r.NotePlainVideoOffer("a", true, "96")
+	r.NotePlainVideoOffer("a", true, "RTP/AVP 96")
 	pa, err := r.BindPlainVideo("a")
 	if err != nil {
 		t.Fatal(err)
@@ -185,8 +185,11 @@ func TestPlainVideoClosesWithRelay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.AddLeg("a")
-	r.AddLeg("b")
+	for _, leg := range []string{"a", "b"} {
+		if _, err := r.AddLeg(leg); err != nil {
+			t.Fatal(err)
+		}
+	}
 	r.Start()
 	p, err := r.BindPlainVideo("a")
 	if err != nil {

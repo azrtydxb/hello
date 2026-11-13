@@ -66,9 +66,8 @@ participant to the mixing rate (a streaming half-band filter takes G.722 and
 Opus down from 16 kHz) and encodes that participant's mix back in its codec, so
 a G.711 phone and a G.722 phone share a room. Mixing at 8 kHz means wideband
 participants hear narrowband quality; Opus is unavailable in `-race` builds.
-Room state is kept per participant and its media sits behind that codec step,
-so a video track can be added beside the audio later without redesigning the
-room.
+Room state is kept per participant and its media sits behind that codec step;
+video is carried beside the audio ([Video](#video)).
 
 Callers waiting for a leader hear music on hold: the global default MOH class
 (Media, Music on hold), or the built-in tune when no class is set or none of
@@ -79,6 +78,64 @@ source through the `ConferenceHold` dependency of the SIP server
 Recording is held in memory per ten-minute segment and stored as a WAV in the
 recordings bucket, one row per segment (initiated by `default`, correlation id
 `conf-<room>-<start>-<n>`), so a node that dies loses at most one segment.
+
+## Video
+
+A room forwards **the active speaker's picture** to every participant that brings
+video: each participant sees the speaker, and the speaker sees the one before.
+Nothing is decoded, composed or mixed (clients-webrtc-mobile-video S-45,
+`internal/media/roomvideo.go`). The **Video** switch on the room (Conferences page,
+`video` in the API, default on) turns it off; off, every video line a participant
+offers is answered with port 0 and the room is audio only.
+
+- **Why forwarding, not composing or an SFU.** A composed picture (a gallery in
+  one stream) needs every stream decoded and a new one encoded for every room, a
+  CPU cost that grows with the room and that pure Go (no cgo codecs) does not
+  pay. An SFU (LiveKit, Janus) is the right tool for a gallery of many pictures
+  with simulcast, but it is a second media engine beside the one that anchors,
+  records and detects DTMF, and rooms here are meetings of a few to a dozen people
+  where one picture is what a speaker view needs. Forwarding costs what a relay
+  costs: a packet in and one out per viewer.
+- **Who speaks.** The room already measures each participant's audio every 20 ms;
+  the loudest participant with video becomes the speaker when their smoothed level
+  is above a gate and at least 1.5 times the speaker's, and 1.5 seconds have
+  passed since the last move. Until anyone speaks, the first participant with video
+  has the picture. A muted participant (muted on entry or by a leader) or one who
+  waits for a leader is never the speaker. When the speaker leaves, the picture
+  goes back to the one before.
+- **Switching.** Each viewer has its own outbound stream (own SSRC and payload
+  type, a sequence number and timestamp that carry on across a switch, so a
+  viewer's decoder sees one stream). A viewer whose source changes (a switch, or
+  a join) is held until a keyframe of the new source arrives, which the source is
+  asked for with a PLI every 250 ms; after two seconds the pictures pass anyway
+  for a sender that ignores PLI. A viewer's PLI and FIR are carried to its
+  source, NACKs are mapped by the stream's offset, REMB is the lowest estimate of
+  a source's viewers held at `HELLO_VIDEO_MAX_KBPS`, and each participant gets its
+  own sender and reception reports.
+- **One codec per room.** The first participant with video fixes it (H.264
+  Constrained Baseline, else VP8); a later participant joins the video only if its
+  offer holds that codec, and otherwise gets the audio with the video line refused
+  and the reason in the trace. Phones and door stations offer H.264 only, so a room
+  that began with VP8 browsers is audio for them. The room forgets its codec when
+  the last participant with video leaves.
+- **Who can join with video.** Browsers (on the shared WebRTC port, one bundle,
+  encrypted), video desk phones and door stations (plain RTP/AVP on a socket pair
+  of their own), and a participant forwarded to the node that mixes the room (the
+  call is relayed between the two nodes as an ordinary video call). The same policy
+  as any call applies (`HELLO_VIDEO_ENABLED`, `extensions.video_allowed`, the node's
+  `HELLO_VIDEO_MAX_SESSIONS`; each participant with video takes a slot); a trunk
+  and a participant whose audio is SRTP carry no video.
+- **Recording and HA.** The room's recording is the audio mix, as before; video in
+  a room is not recorded. A participant re-homed by a takeover rejoins with audio
+  only. A browser participant is not replicated, as with any browser call.
+- **Series.** `hello_video_sessions`, `hello_video_keyframe_requests_total` and
+  `hello_video_dropped_packets_total` count the room's video with every other
+  call's.
+
+Tests: `TestRoomVideoSpeakerForwarding` and `TestRoomVideoSignalLevels`
+(internal/media) run a room of video phones; `TestConferenceVideoPhones`,
+`TestConferenceVideoRefused` and `TestConferenceVideoBrowser` (internal/sip) join
+a room by SIP with phones and a browser.
 
 ## High availability
 

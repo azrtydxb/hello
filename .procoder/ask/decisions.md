@@ -3753,3 +3753,102 @@ Builds on #324, #276, #341 and the devices and ICE servers of #282. Choices:
   kamailio.cfg lags: TestKwKamailioConfigMatchesSource fails until the
   manifests step copies deploy/kamailio/kamailio.cfg into the ConfigMap and
   updates the checksum annotation.
+
+## Clients items 6b, 10 and 11: video recording, video phones and door stations, conference-room video (2026-11-13)
+
+Stacked on #343 (items 5 and 6); merges after it. Choices:
+
+- **A plain RTP video leg is the browser's leg with its own sockets.** A phone or
+  a door station that offers `m=video` on RTP/AVP gets an even RTP port and the
+  next one for RTCP from the RTP range, read by two goroutines per leg that feed
+  the relay's existing `forwardVideo` and `handleRTCP`. So it has the same
+  translator (offsets, one SSRC and payload type per leg, per-leg RTCP, PLI, FIR,
+  NACK, REMB, the ceiling) and every pairing works: phone to phone, door station to
+  phone, phone to browser, browser to phone. The old door-only "relay the port pair
+  unchanged" (`VideoRelay`) is gone: it could not carry a door's video to a
+  browser, could not enforce a slot or `video_allowed`, and could not be recorded.
+  Its test now asserts the translated stream and the regenerated PLI.
+- **The SDP section is written by the leg**, appended in `AudioSDP.Build` through a
+  `localVideo` hook (every SDP of the dialog carries it, so transfer, park, hold
+  and pickup cannot drop an `m=` line) and again by `withVideo` on the paths that
+  skip the relay's SDP functions. An offer that had a video line is always answered
+  with one, `m=video 0` unless carried; an offer without one clears it.
+- **Plain video never rides beside encrypted audio and never reaches a trunk.** A
+  plain video line has no SRTP here (`ParseVideoSDP` accepts RTP/AVP and AVPF only);
+  sending clear video next to SRTP audio would defeat the policy, so the line is
+  refused with the reason in the trace. Trunks and URI destinations stay audio only,
+  with one exception below.
+- **Codec match.** Between two plain ends any H.264 with the same packetization mode
+  and `profile_idc` goes (the answerer's fmtp is passed back as sent, the relay does
+  not look inside); with a browser on either end both must be Constrained Baseline
+  mode 1, the one thing browsers decode. VP8 is never offered to a plain leg.
+- **A phone that lists no `rtcp-fb` is still sent PLI and FIR** (the relay marks
+  both on for a plain leg with none listed). Door stations and video phones answer
+  a picture loss indication whether or not their SDP lists it, and a viewer who joins
+  a door camera needs a keyframe now, not at the next GOP; NACK and REMB stay as
+  negotiated.
+- **Video recording (6b) is fragments in the bucket, a row per stream, a finalizer
+  in hello-control.** The recorder reads the relay's `OnVideo` tap, depacketizes
+  (H.264 per RFC 6184, VP8 per RFC 7741) and writes fMP4 or WebM with in-tree writers
+  (a few boxes and elements; no dependency, `CGO_ENABLED=0` kept). It cuts a fragment
+  at a keyframe after 10 s or 4 MiB (hard cut at 1.5 times either) and stores it at
+  once; at most three wait for the object store. A keyframe that changes the picture
+  size or the SPS or PPS starts a new part.
+- **Fragments live under `<stem>.parts/`, the finalized file is `<stem>.<ext>`.** The
+  spec put both under one name (`x` finalized, `x/init` and `x/<seq>` fragments);
+  MinIO does not let an object and a prefix share a name. The file name is the
+  spec's.
+- **The finalizer streams.** It writes the header (`sidx` or Cues, from the manifest:
+  fragment sizes, durations, keyframe flags, offsets) and then copies each fragment
+  through a pipe to a put of known size, so a one-hour video is never in memory. A
+  fragment that is missing or the wrong size ends the file at the one before.
+- **Crash recovery is the row, not replication.** hello-sip writes a stream's row
+  when it opens and after every stored fragment; a node that dies leaves it in
+  `recording`, and hello-control's sweeper ends the rows nobody wrote for ten
+  minutes (`failure = interrupted`) and finalizes what they list. A takeover carries
+  audio only (the video relay is the node's own), so the spec's replicated video
+  recording state and "part 2 after a takeover" are not built: the part the dead node
+  held is kept, the taker records audio. This matches how the door video and the
+  browser legs already behave on takeover.
+- **Retention, quota and the notice.** `recording_settings.video_retention_days`
+  (default 30; the table is new, audio has no retention job) and
+  `HELLO_RECORDING_VIDEO_QUOTA_GB` (default 200, 0 for none). The quota is read by
+  hello-sip (no new video recording above it) and hello-control (a warning at 80
+  percent and a gauge). The notice plays `recording-notice-video` when the
+  recording includes video and the operator uploaded it, else the plain
+  `recording-notice`.
+- **Web clients are told what is recorded by an INFO** of type
+  `application/x-hello-recording` (`recording: on|off`, `video: yes|no`), sent on the
+  dialog of each browser leg when the recording starts, gains video or stops. The
+  softphone shows a REC badge, with a camera mark when video is in it. Desk phones
+  hear the notice. The spec's "both sides that are Hello clients" is this.
+- **The player slaves the video to the audio** (`RecordingPlayer`): the WAV is the
+  clock, each `<video>` muted and set to the audio's time minus the stream's offset
+  on play and seek and by a two-second check against a 100 ms drift, parts one after
+  another with a "recording gap" marker, a download when the browser cannot play the
+  codec. The manifest never names an object.
+- **Conference-room video (11) forwards the active speaker; it does not compose
+  and it is not an SFU.** The reasons are in docs/conference.md (composing needs
+  decoding and encoding, an SFU is a second media engine beside the one that anchors
+  and records). The room already measures each participant's audio every 20 ms, so
+  the speaker is the loudest participant with video above a gate and 1.5 times the
+  speaker's level, after a 1.5 s dwell; each viewer has its own outbound stream
+  (SSRC, payload type, offsets that continue across a switch) and waits for a
+  keyframe of a new source, asked for with a PLI every 250 ms and given up on after
+  two seconds. The speaker sees the one before. All the decisions about who is shown
+  whom, the wait and the queueing happen under the room's lock together, so a late
+  packet of the old speaker cannot land among the new one's.
+- **One codec per room**, fixed by the first participant with video (H.264
+  Constrained Baseline, else VP8); a later one joins the video only with that codec.
+  Phones and door stations are H.264 only.
+- **A per-room Video switch** (`conference_rooms.video`, migration 00122, default
+  on): bandwidth is the operator's to spend per room. Off answers every video line
+  with port 0.
+- **A forwarded participant carries video too**: the leg to the node that mixes the
+  room is the one URI destination that takes video, so a room that lives on another
+  node still shows video; each end of that leg takes a video slot.
+- **Not built for rooms:** recording of room video (the room's recording is its audio
+  mix, stored in segments as before) and re-homing video on a takeover.
+- **Tests use headless pion and plain SIP/RTP clients** (a DTLS-SRTP browser stand-in,
+  UDP video phones, a door station phone); real phones, door stations and browsers
+  are on the hardware list.

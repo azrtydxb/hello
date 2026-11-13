@@ -128,7 +128,7 @@ func TestPhoneVideoCall(t *testing.T) {
 // other does not share. Each answers the phone's video line with port 0 (never
 // drops the m= line), holds no slot and leaves the reason in the trace.
 func TestPhoneVideoRefusals(t *testing.T) {
-	run := func(t *testing.T, opts []pbxOpt, calleeVideo bool, calleeFmtp, why string) {
+	run := func(t *testing.T, opts []pbxOpt, calleeVideo bool, calleeFmtp, why string, callerMutate ...func(*phone)) {
 		t.Helper()
 		pbx := startPBX(t, doorDevices(), append([]pbxOpt{withMedia(false), doorFeatures(), withVideoOn()}, opts...)...)
 		a := newPhone(t, pbx, "a1", "pa")
@@ -136,6 +136,9 @@ func TestPhoneVideoRefusals(t *testing.T) {
 		b := newPhone(t, pbx, "b1", "pb1")
 		b.register(t)
 		videoPhone(t, a, "sendrecv")
+		for _, m := range callerMutate {
+			m(a)
+		}
 		if calleeVideo {
 			videoPhone(t, b, "sendrecv")
 			if calleeFmtp != "" {
@@ -153,6 +156,9 @@ func TestPhoneVideoRefusals(t *testing.T) {
 		body := string(r.dcs.InviteResponse.Body())
 		if _, ok := media.ParseVideoSDP([]byte(body)); ok || !strings.Contains(body, "m=video 0 ") {
 			t.Errorf("the phone's video line is not refused in place:\n%s", body)
+		}
+		if strings.Contains(string(a.sdp), "RTP/SAVP 96") && !strings.Contains(body, "m=video 0 RTP/SAVP 96") {
+			t.Errorf("the refused line does not repeat the offered transport:\n%s", body)
 		}
 		if media.VideoSessions() != 0 {
 			t.Errorf("a video slot is held: %d", media.VideoSessions())
@@ -177,6 +183,12 @@ func TestPhoneVideoRefusals(t *testing.T) {
 		run(t, []pbxOpt{func(c *Config, _ *Deps) { c.VideoEnabled = false }}, true, "", "switched off")
 	})
 	t.Run("audio only callee", func(t *testing.T) { run(t, nil, false, "", "callee cannot do video") })
+	t.Run("video over SRTP", func(t *testing.T) {
+		// The refused line repeats the offered transport (RFC 3264).
+		run(t, nil, true, "", "no H.264 over plain RTP", func(p *phone) {
+			p.rewriteSDP(func(s string) string { return strings.Replace(s, "RTP/AVP 96", "RTP/SAVP 96", 1) })
+		})
+	})
 	t.Run("another H.264 profile", func(t *testing.T) {
 		run(t, nil, true, "profile-level-id=640028;packetization-mode=1", "no common video codec")
 	})
