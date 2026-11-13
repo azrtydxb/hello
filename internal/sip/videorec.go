@@ -309,7 +309,28 @@ func (c *call) signalRecording(on, video bool) {
 		}
 	}
 	if r.IsWebLeg(legCaller) && c.dss != nil {
-		go send(c.dss.Do, c.target())
+		go func() {
+			// The caller's dialog is confirmed once its 200 has gone out and been
+			// acknowledged. WriteResponse records the response on the session
+			// under answerWrite, so the INFO waits for a 2xx to be there (a call
+			// that records from its answer reaches this before the 200 is sent).
+			for range 100 {
+				c.answerWrite.Lock()
+				res := c.dss.InviteResponse
+				c.answerWrite.Unlock()
+				if res != nil && res.IsSuccess() {
+					send(c.dss.Do, c.target())
+					return
+				}
+				c.mu.Lock()
+				over := c.ended
+				c.mu.Unlock()
+				if over {
+					return
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}()
 	}
 	if w := c.winnerLeg(); w != nil && r.IsWebLeg(legCallee) && w.session() != nil {
 		go send(w.session().Do, w.target())
