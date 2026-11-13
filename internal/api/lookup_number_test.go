@@ -114,7 +114,7 @@ type fakeContacts struct {
 
 func (f *fakeContacts) FindContact(_ context.Context, userID int64, number string) *crm.Contact {
 	f.gotUser = userID
-	if number != "+41795550100" {
+	if strings.ReplaceAll(number, " ", "") != "+41795550100" {
 		return nil
 	}
 	return &crm.Contact{ID: "c9", Name: "Grace Hopper", Company: "Navy", URL: "https://crm.example/c9"}
