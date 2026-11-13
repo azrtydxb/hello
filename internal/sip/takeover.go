@@ -53,7 +53,7 @@ type haLeg struct {
 	source       string   // where the endpoint's requests come from
 	sdp          string   // the last SDP on this leg (Hello's side)
 	remoteSDP    string   // the endpoint's own last SDP
-	srtp         string   // "", "savp" or "avp": the leg was encrypted
+	srtp         string   // "", "savp", "avp" or "dtls": the leg was encrypted
 	uas          bool     // we are the dialog's UAS side (the caller leg)
 	failed       bool     // the takeover re-INVITE got no answer
 
@@ -341,6 +341,8 @@ func (s *Server) takeoverPass(ctx context.Context) {
 	if st, _ := s.state(); st != cluster.Ready {
 		return
 	}
+	s.takeoverMu.Lock()
+	defer s.takeoverMu.Unlock()
 	cctx, cancel := context.WithTimeout(ctx, s.cfg.StateTimeout)
 	members, err := s.deps.Membership.Members(cctx)
 	cancel()
@@ -660,7 +662,7 @@ func haAimSecure(relay *media.Relay, leg string, body []byte, srtp string) bool 
 	if err != nil {
 		return srtp == ""
 	}
-	secure := relay.LearnCrypto(leg, a.Crypto, srtp == "savp")
+	secure := relay.LearnAnswer(leg, a, srtp == "savp")
 	relay.SetTarget(leg, udpAddr(a.Address, a.Port))
 	return srtp == "" || secure
 }
@@ -1071,7 +1073,7 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 	if soloSec != nil && a.srtp != "" {
 		// The caller was encrypted: it is offered the taker's own keys, in
 		// the profile it had, and must answer with crypto.
-		keyed, err := soloSec.ReSDP(body, a.srtp == "savp")
+		keyed, err := soloSec.ReSDPMode(body, a.srtp)
 		if err != nil {
 			if sess != nil {
 				_ = sess.Close()
@@ -1112,7 +1114,7 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		if ans, err := media.ParseAudioSDP(res.Body()); err == nil {
 			soloSec.LearnSDP(ans)
 		}
-		if _, on := soloSec.Suite(); !on {
+		if _, on := soloSec.Profile(); !on {
 			// No silent downgrade to clear media.
 			if sess != nil {
 				_ = sess.Close()

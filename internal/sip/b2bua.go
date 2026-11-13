@@ -51,6 +51,10 @@ type call struct {
 	// srtpClosed is set once the call's media ended: the gauge is released.
 	srtpClosed bool
 	srtpNoted  map[string]bool
+	// kexA and kexB are how each leg's keys were agreed ("sdes" or "dtls"),
+	// iceLegs the legs that ran ICE-lite (the CDR's srtp_keyex and ice).
+	kexA, kexB string
+	iceLegs    map[string]bool
 	srtpSnap   *snapshot.Snapshot
 	// soloSec is the SRTP state of the media a call Hello answers itself
 	// uses (voicemail, a conference room, a page's caller leg).
@@ -148,6 +152,12 @@ type call struct {
 	// the one dialled after the code).
 	vmTarget string
 	held     bool
+	// doorOpening is set while a door-open code is being sent (spec S-47),
+	// guarded by mu, so two presses never interleave their events.
+	doorOpening bool
+	// video is the door station's video through the anchor (S-49), nil for a
+	// call without one; guarded by mu.
+	video *callVideo
 
 	// Music on hold (S-33), guarded by mu: moh plays to the held party,
 	// ringMOH to a caller in place of ringback; the route and group carry
@@ -1111,6 +1121,7 @@ func (c *call) answer(w *leg) {
 				allowSignalSource(c.relay, legCallee, bres.Source())
 				calleeAns = ans
 			}
+			c.noteVideoAnswer(bres.Body(), bres.Source())
 		}
 		off, _ := media.ParseAudioSDP(c.inv.Body())
 		body = c.anchoredAnswerA(off, calleeAns)
@@ -1571,6 +1582,7 @@ func (c *call) record(status int, side, reason, result string) {
 		r.MediaMode = media
 	}
 	r.SRTP = c.srtpCDR()
+	r.SRTPKeyEx, r.ICE = c.srtpKeyExCDR(), c.iceCDR()
 	if r.MediaMode == "anchored" && !answer.IsZero() {
 		if p, l, j, ok := c.qualityStats(); ok {
 			r.RTPPackets, r.RTPLost, r.RTPJitterMs = &p, &l, &j
@@ -1590,6 +1602,7 @@ func (c *call) record(status int, side, reason, result string) {
 }
 
 func (c *call) live() livestate.Call {
+	door, _, _ := c.doorStation(c.s.deps.Snapshots.Current()) // takes c.mu itself
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	state := "ringing"
@@ -1606,7 +1619,7 @@ func (c *call) live() livestate.Call {
 		callee = c.winner.binding.Extension
 	}
 	return livestate.Call{
-		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, Callee: callee, State: state,
+		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, Callee: callee, Door: door, State: state,
 		Node: c.s.cfg.NodeID, Media: "direct", StartedAt: c.start, AnsweredAt: answered, HA: ha, Direction: c.direction,
 	}
 }
