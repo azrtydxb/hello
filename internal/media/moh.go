@@ -149,7 +149,7 @@ func (r *Relay) PlayStream(ctx context.Context, legName string, next func() Trac
 	if _, err := rand.Read(b[:]); err != nil {
 		return fmt.Errorf("media: music stream: %w", err)
 	}
-	seq := binary.BigEndian.Uint16(b[0:2])
+	seq := startSeq(b[0:2])
 	ts := binary.BigEndian.Uint32(b[2:6])
 	ssrc := binary.BigEndian.Uint32(b[6:10])
 	ticker := time.NewTicker(frameDur)
