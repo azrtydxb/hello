@@ -138,7 +138,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | #   | Item                                        | Status                       |
 | --- | ------------------------------------------- | ---------------------------- |
-| 1   | Media foundation (pion)                     | blocked (parity 23-25)       |
+| 1   | Media foundation (pion)                     | wip (#PR)                    |
 | 2   | WSS on Kamailio                             | blocked (parity 23)          |
 | 3   | Web devices and credentials                 | wip (#282)                   |
 | 4   | coturn, ICE servers                         | wip (#282)                   |

@@ -398,6 +398,36 @@ func TestLoadMediaAnchorHost(t *testing.T) {
 	}
 }
 
+// TestLoadMediaWebRTC fails if WebRTC is on by default, the port default moves,
+// or WebRTC is accepted without a node address, with a port inside the RTP
+// range, or with a public address that is not IPv4.
+func TestLoadMediaWebRTC(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MediaWebRTCEnabled || c.MediaWebRTCPort != 21100 || c.MediaWebRTCPublicIP != "" || c.MediaWebRTCAllowCleartextHop {
+		t.Fatalf("defaults: %+v", c)
+	}
+	on := map[string]string{"HELLO_MEDIA_WEBRTC_ENABLED": "true", "HELLO_MEDIA_ANCHOR_HOST": "192.0.2.10", "HELLO_MEDIA_WEBRTC_PUBLIC_IP": "203.0.113.9"}
+	c, err = LoadSIP(env(on))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.MediaWebRTCEnabled || c.MediaWebRTCPublicIP != "203.0.113.9" {
+		t.Fatalf("enabled: %+v", c)
+	}
+	for key, bad := range map[string]map[string]string{
+		"HELLO_MEDIA_WEBRTC_ENABLED":   {"HELLO_MEDIA_WEBRTC_ENABLED": "true"},
+		"HELLO_MEDIA_WEBRTC_PORT":      {"HELLO_MEDIA_WEBRTC_ENABLED": "true", "HELLO_MEDIA_ANCHOR_HOST": "192.0.2.10", "HELLO_MEDIA_WEBRTC_PORT": "20500"},
+		"HELLO_MEDIA_WEBRTC_PUBLIC_IP": {"HELLO_MEDIA_WEBRTC_PUBLIC_IP": "pbx.example"},
+	} {
+		if _, err := LoadSIP(env(bad)); err == nil || !strings.Contains(err.Error(), key) {
+			t.Fatalf("%s: %v", key, err)
+		}
+	}
+}
+
 // TestLoadAIDefaults fails if OAuth and MCP are on without HELLO_PUBLIC_URL
 // or a default lifetime or switch differs from the spec's.
 func TestLoadAIDefaults(t *testing.T) {

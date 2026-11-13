@@ -3333,3 +3333,28 @@ Decided while building, without asking, within the spec and the brief:
 - Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
+
+## Clients item 1: media foundation on pion (2026-11-13)
+
+Spec: `clients-webrtc-mobile-video.md` S-2 to S-6. Built on main without
+waiting for #276 (DTLS-SRTP, ICE-lite per leg). Choices:
+
+- **The SDP model wraps pion/sdp and keeps every attribute in order.** A parse
+  then build is a no-op, tested over a corpus of vendor and browser SDPs
+  (`testdata/sdp`). `ParseAudioSDP` is not re-implemented on it: the spec says
+  "where trivial", it is not, and #276 changes that code. `AudioSection`
+  bridges a section to it instead.
+- **The shared port is a mux that routes by ufrag, then by source address.** It
+  does not authenticate: the leg's ICE-lite agent does. Addresses per leg are
+  capped at 8 so a forged check cannot grow the table. This replaces pion/ice's
+  UDP mux, which assumes a full agent per connection.
+- **Relay legs read a `LegConn`** (a UDP socket or a mux endpoint) so the relay,
+  recorder and announcements are untouched.
+- **The thin seam to #276** is three calls after it merges: bind the leg's
+  `Secure` to the endpoint (`Bind(ep.LocalAddr(), ep.WriteToUDP, ...)`), call
+  `ep.SetUfrag` with the ufrag its `iceLocal` made, and pass `Fingerprint()` and
+  the answered setup into `WebRTCNode.Local`. The mux and SDP code use no #276
+  names (`muxIsSTUN`, `fingerprintUsable`), so the two merge without clashes.
+  `TestWebRTCToPhoneAudio`, `TestDTLSFingerprintMismatch` and the plaintext
+  check need #276's handshake and follow with that glue.
+- Video is rejected in the answer; accepting it is item 6.

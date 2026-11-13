@@ -507,6 +507,20 @@ type SIP struct {
 	// keeps the old behaviour of mirroring the offer's own c= address,
 	// which only carries audio when the peer can reach the pod directly.
 	MediaAnchorHost string
+	// MediaWebRTCEnabled (HELLO_MEDIA_WEBRTC_ENABLED, default false) lets
+	// the anchor accept webrtc-profile legs (clients S-3, S-4): ICE-lite
+	// and DTLS-SRTP from browsers and apps on one shared UDP port.
+	MediaWebRTCEnabled bool
+	// MediaWebRTCPort (HELLO_MEDIA_WEBRTC_PORT, default 21100) is that
+	// port; it lies outside the RTP range.
+	MediaWebRTCPort int
+	// MediaWebRTCPublicIP (HELLO_MEDIA_WEBRTC_PUBLIC_IP, default empty) is
+	// an extra candidate address for clients outside the LAN.
+	MediaWebRTCPublicIP string
+	// MediaWebRTCAllowCleartextHop (HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP,
+	// default false) permits WebRTC calls while the Kamailio to hello-sip
+	// hop is not TLS: the fingerprint then travels in the clear on that hop.
+	MediaWebRTCAllowCleartextHop bool
 	// HATakeoverEnabled (HELLO_HA_TAKEOVER_ENABLED, default true) lets the
 	// node poll for orphaned dialogs and take calls over; disabling it
 	// leaves the node replication-only.
@@ -1087,6 +1101,23 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	if c.MediaAnchorHost != "" {
 		if ip := net.ParseIP(c.MediaAnchorHost); ip == nil || ip.To4() == nil {
 			r.fail("HELLO_MEDIA_ANCHOR_HOST", fmt.Errorf("%q is not an IPv4 address", c.MediaAnchorHost))
+		}
+	}
+	c.MediaWebRTCEnabled = r.boolean("HELLO_MEDIA_WEBRTC_ENABLED")
+	c.MediaWebRTCPort = r.port("HELLO_MEDIA_WEBRTC_PORT", 21100)
+	c.MediaWebRTCPublicIP = r.optional("HELLO_MEDIA_WEBRTC_PUBLIC_IP", "")
+	c.MediaWebRTCAllowCleartextHop = r.boolean("HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP")
+	if c.MediaWebRTCPublicIP != "" {
+		if ip := net.ParseIP(c.MediaWebRTCPublicIP); ip == nil || ip.To4() == nil {
+			r.fail("HELLO_MEDIA_WEBRTC_PUBLIC_IP", fmt.Errorf("%q is not an IPv4 address", c.MediaWebRTCPublicIP))
+		}
+	}
+	if c.MediaWebRTCEnabled {
+		if c.MediaAnchorHost == "" {
+			r.fail("HELLO_MEDIA_WEBRTC_ENABLED", errors.New("needs HELLO_MEDIA_ANCHOR_HOST, the address clients send media to"))
+		}
+		if c.MediaWebRTCPort >= c.RTPPortMin && c.MediaWebRTCPort <= c.RTPPortMax {
+			r.fail("HELLO_MEDIA_WEBRTC_PORT", errors.New("must lie outside HELLO_RTP_PORT_MIN to HELLO_RTP_PORT_MAX"))
 		}
 	}
 	if c.MaxCallDuration == 0 {
