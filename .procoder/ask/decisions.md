@@ -3579,3 +3579,27 @@ waiting for #276 (DTLS-SRTP, ICE-lite per leg). Choices:
   `TestWebRTCToPhoneAudio`, `TestDTLSFingerprintMismatch` and the plaintext
   check need #276's handshake and follow with that glue.
 - Video is rejected in the answer; accepting it is item 6.
+
+## Clients item 1 glue: WebRTC legs keyed by DTLS-SRTP (2026-11-13)
+
+Follow-up to "Clients item 1: media foundation on pion". Choices:
+
+- **`Relay.AnswerWebRTC` is the one join.** It validates the offer on the model,
+  routes the leg's ICE-lite ufrag to its mux endpoint before the answer exists,
+  lets the leg's `Secure` accept the DTLS offer (the handshake, fingerprint
+  pinning and keys are #276's code, unchanged) and writes the answer on the
+  model with the fingerprint and role Secure chose. A leg that cannot be keyed is
+  refused, never answered in the clear (`SecurePolicy{Require: true}`).
+- **`AddMuxLeg` binds the leg's `Secure` exactly as `AddLeg` does**, so the
+  relay, recorder and announcements see no difference between a socket and the
+  shared port.
+- **`ParseAudioSDP` is not unified on the SDP model.** The model (pion/sdp) needs
+  v=, o=, s= and t= lines; phones and trunks send SDPs without them and call
+  setup must answer them, so the strict reader cannot replace the tolerant one.
+  `TestParseAudioSDPStaysTolerant` pins the difference. `AudioSection` remains the
+  bridge.
+- **Tests:** `TestWebRTCToPhoneAudio` (PCMU and Opus; Opus is off in `-race`
+  builds, as everywhere), `TestDTLSFingerprintMismatch`, with a pion DTLS-SRTP
+  client as the browser. They check that nothing but STUN and DTLS crosses the
+  browser leg before the keys are in, that nothing on it is in the clear after,
+  and that a cleartext packet from the browser is not relayed.

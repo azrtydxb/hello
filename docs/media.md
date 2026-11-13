@@ -401,6 +401,12 @@ devices and the softphone build on it.
   ufrag, and media from an unbound address, are dropped and counted. The relay
   reaches it through `Relay.AddMuxLeg`; a leg reads and writes a `LegConn`, which
   a UDP socket and a mux endpoint both are.
+- **Answering.** `Relay.AnswerWebRTC` answers a browser offer on a mux leg: it
+  routes the leg's ICE ufrag to its endpoint, starts the DTLS-SRTP handshake
+  (Hello is the DTLS client to an `actpass` offer) and writes the answer with
+  Hello's fingerprint. The leg carries only STUN and DTLS until the keys are in,
+  and a certificate that does not match the offered fingerprint ends the call
+  (`reason: fingerprint`).
 - **Settings.** `HELLO_MEDIA_WEBRTC_ENABLED` (default false; needs
   `HELLO_MEDIA_ANCHOR_HOST`), `HELLO_MEDIA_WEBRTC_PORT`,
   `HELLO_MEDIA_WEBRTC_PUBLIC_IP`, `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP`

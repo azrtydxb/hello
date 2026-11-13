@@ -294,10 +294,15 @@ func (r *Relay) AddMuxLeg(name string, mux *Mux) (port int, ep *MuxEndpoint, err
 	if err != nil {
 		return 0, nil, fmt.Errorf("media: leg %q on the WebRTC port: %w", name, err)
 	}
-	r.legs = append(r.legs, &relayLeg{
+	l := &relayLeg{
 		name: name, r: r, conn: ep, port: mux.Port(),
 		q: make(chan relayMsg, relayQueue),
-	})
+	}
+	l.secure.Bind(ep.LocalAddr(), func(b []byte, to *net.UDPAddr) { _, _ = ep.WriteToUDP(b, to) },
+		func(from *net.UDPAddr, nominated bool) { l.iceVerified(from, nominated) })
+	l.secure.OnFail(func(reason string) { r.secureFailed(l.name, reason) })
+	l.secure.OnReady(func() { r.secureUpCall(l.name) })
+	r.legs = append(r.legs, l)
 	return mux.Port(), ep, nil
 }
 
