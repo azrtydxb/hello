@@ -8,7 +8,7 @@ metadata:
 
 # Hello CRM connectors
 
-Hello can write every external call into a CRM (today HubSpot) and look up
+Hello can write every external call into a CRM (HubSpot, Salesforce and Dynamics 365) and look up
 the caller's name there. A **connector** is the customer's own CRM app (client
 id and secret, set up in the console); its **connection** is the OAuth sign-in
 an administrator completed. Calls are written by background **logging jobs**
@@ -19,7 +19,7 @@ because they handle credentials.
 ## Connecting
 
 - MCP server: `https://<hello host>/mcp` (on kw: `https://hello.kw.watteel.lab/mcp`).
-- `listCRMConnectors`, `getCRMConnector` and `listCRMUsers` need scope `admin`
+- `listCRMConnectors`, `getCRMConnector`, `getCRMSetup` and `listCRMUsers` need scope `admin`
   and the `admin` role; `listCRMLogs` needs scope `write` and the `operator`
   role. Client secrets and tokens are never in any result.
 
@@ -37,6 +37,16 @@ and its `connection`:
 `connection.lastError` says why. `connection.grantedScopes` should include the
 contact and owner scopes of the app; a missing scope shows up as dead jobs
 with a 403 in `lastError`.
+
+Salesforce and Dynamics 365 sign in with client credentials, so their
+connection has no refresh token: `needs_reauth` there means the customer's app
+refused the client id and secret (usually a rotated or expired secret), and an
+administrator presses Connect again after fixing it. A Salesforce connector
+with `config.serverLogging` `false` is only the Open CTI softphone: it has no
+connection, logs nothing from the server and looks nothing up, by design; the
+softphone writes the Tasks. `getCRMSetup` returns what the customer configures
+in the CRM (the Salesforce call center definition and CTI adapter URL, the
+Dynamics channel provider values).
 
 ## A call is missing in the CRM
 

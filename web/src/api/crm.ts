@@ -37,6 +37,8 @@ export interface CRMConnector {
   createdAt: string;
   capabilities: CRMCapabilities;
   connection: CRMConnection | null;
+  /** oauth: the administrator approves the app at the CRM; direct: Hello signs in with the typed credentials. */
+  auth: "oauth" | "direct";
   /** The redirect URI to register in the CRM app; absent without HELLO_PUBLIC_URL. */
   redirectUri?: string;
 }
@@ -125,13 +127,38 @@ export function deleteCRMConnector(id: number): Promise<void> {
   return request("DELETE", `${base}/${id}`);
 }
 
-/** Starts the sign-in; the browser goes to the returned address. */
-export async function connectCRMConnector(id: number): Promise<string> {
-  const r = await request<{ authorizeUrl: string }>(
-    "POST",
-    `${base}/${id}/connect`,
+/**
+ * Starts the sign-in. An OAuth connector answers the address the browser
+ * goes to; one that signs in with client credentials is connected by the
+ * call itself (`connected`, empty address).
+ */
+export function connectCRMConnector(
+  id: number,
+): Promise<{ authorizeUrl: string; connected: boolean }> {
+  return request("POST", `${base}/${id}/connect`);
+}
+
+/** One thing to configure in the CRM (a value to paste or a file to import). */
+export interface CRMSetupItem {
+  name: string;
+  label: string;
+  kind: "text" | "url" | "file";
+  value: string;
+  filename?: string;
+  hint?: string;
+}
+
+/** GET .../{id}/setup: what the customer configures in the CRM. */
+export async function getCRMSetup(
+  id: number,
+  signal?: AbortSignal,
+): Promise<CRMSetupItem[]> {
+  const r = await request<{ items: CRMSetupItem[] }>(
+    "GET",
+    `${base}/${id}/setup`,
+    { signal },
   );
-  return r.authorizeUrl;
+  return r.items;
 }
 
 export function disconnectCRMConnector(id: number): Promise<void> {

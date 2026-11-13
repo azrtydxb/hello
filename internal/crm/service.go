@@ -42,7 +42,75 @@ type (
 	Revoker interface {
 		RevokeToken(ctx context.Context, c Config, refresh string) error
 	}
+	// ServerSide tells whether a connector's settings let the server itself
+	// write to the CRM. A connector that is only the CRM's embedded softphone
+	// (Salesforce without a connected app) has nothing to log or look up.
+	ServerSide interface {
+		ServerSide(cfg map[string]string) bool
+	}
+	// RefValidator checks the CRM record id a softphone reports for a call.
+	RefValidator interface {
+		ValidRef(ref string) bool
+	}
+	// SetupProvider describes what the customer configures in the CRM: the
+	// values to paste and the files to import.
+	SetupProvider interface {
+		Setup(cfg Config, publicURL string) []SetupItem
+	}
 )
+
+// Direct is implemented by connectors that need no browser consent: the
+// administrator gives Hello a token or a client secret and Hello signs in
+// with it. Salesforce and Dynamics 365 use the OAuth client-credentials
+// grant: Connect signs in at once, and the token manager signs in again when
+// the token expires, so there is no refresh token. A refused credential is
+// an APIError that is not retryable.
+type Direct interface {
+	Authenticate(ctx context.Context, cfg Config) (Tokens, error)
+}
+
+// SecretBound is implemented by connectors whose settings choose where the
+// secret is sent (a host, a tenant). Changing one of these settings asks for
+// the secret again, so a stored secret is never sent to another place.
+// Without it only clientId is bound.
+type SecretBound interface {
+	SecretBoundKeys() []string
+}
+
+func secretBound(c Connector) []string {
+	if sb, ok := c.(SecretBound); ok {
+		return sb.SecretBoundKeys()
+	}
+	return []string{"clientId"}
+}
+
+func authKind(c Connector) string {
+	if _, ok := c.(Direct); ok {
+		return "direct"
+	}
+	return "oauth"
+}
+
+// SetupItem is one thing the customer configures in the CRM.
+type SetupItem struct {
+	// Name is a stable key; Label is what the console shows.
+	Name  string `json:"name"`
+	Label string `json:"label"`
+	// Kind is text, url or file; a file carries Filename and is offered as a
+	// download.
+	Kind     string `json:"kind"`
+	Value    string `json:"value"`
+	Filename string `json:"filename,omitempty"`
+	Hint     string `json:"hint,omitempty"`
+}
+
+// serverSide reports whether the connector of row writes to the CRM itself.
+func serverSide(c Connector, cfg map[string]string) bool {
+	if ss, ok := c.(ServerSide); ok {
+		return ss.ServerSide(cfg)
+	}
+	return true
+}
 
 // CallbackPath is the OAuth redirect URI path shared by every connector.
 const CallbackPath = "/api/v1/integrations/crm/oauth/callback"
@@ -97,6 +165,10 @@ type ConnectorView struct {
 	Capabilities Capabilities `json:"capabilities"`
 	Connection   *Connection  `json:"connection"`
 	RedirectURI  string       `json:"redirectUri,omitempty"`
+	// Auth is how the connector signs in: "oauth" sends the administrator to
+	// the CRM to approve the app, "direct" signs in with the credentials the
+	// administrator typed.
+	Auth string `json:"auth"`
 }
 
 func (s *Service) redirectURI() string {
@@ -110,6 +182,7 @@ func (s *Service) view(ctx context.Context, r ConnectorRow) (ConnectorView, erro
 	v := ConnectorView{ConnectorRow: r, RedirectURI: s.redirectURI()}
 	if c, ok := s.Tokens.Providers(r.Kind); ok {
 		v.Capabilities = c.Capabilities()
+		v.Auth = authKind(c)
 	}
 	cr, _, err := s.Repo.OrgConnection(ctx, r.ID)
 	switch {
@@ -266,8 +339,13 @@ func (s *Service) Update(ctx context.Context, actor string, id int64, in Setting
 	if verr != nil {
 		return ConnectorView{}, verr
 	}
-	if ci.Config["clientId"] != cur.Config["clientId"] && in.ClientSecret == nil {
-		return ConnectorView{}, &ValidationError{map[string]string{"clientSecret": "required when the client id changes"}}
+	conn, _ := s.Tokens.Providers(cur.Kind)
+	if in.ClientSecret == nil && (cur.HasSecret || ci.Config["clientId"] != cur.Config["clientId"]) {
+		for _, k := range secretBound(conn) {
+			if ci.Config[k] != cur.Config[k] {
+				return ConnectorView{}, &ValidationError{map[string]string{"clientSecret": "required when the " + k + " changes"}}
+			}
+		}
 	}
 	r, err := s.Repo.UpdateConnector(ctx, id, ci, in.ClientSecret)
 	if err != nil {
@@ -334,10 +412,13 @@ func (s *Service) Connect(ctx context.Context, actor string, id int64) (string, 
 	if err != nil {
 		return "", err
 	}
+	conn, ok := s.Tokens.Providers(cur.Kind)
+	if da, isDA := conn.(Direct); ok && isDA {
+		return "", s.connectDirect(ctx, actor, cur, da)
+	}
 	if s.PublicURL == "" {
 		return "", ErrNoPublicURL
 	}
-	conn, ok := s.Tokens.Providers(cur.Kind)
 	oa, isOA := conn.(OAuth)
 	if !ok || !isOA {
 		return "", ErrNotOAuth
@@ -354,6 +435,54 @@ func (s *Service) Connect(ctx context.Context, actor string, id int64) (string, 
 		return "", err
 	}
 	return oa.AuthURL(cfg, s.redirectURI(), state), nil
+}
+
+// connectDirect signs in with the connector's client credentials.
+func (s *Service) connectDirect(ctx context.Context, actor string, cur ConnectorRow, da Direct) error {
+	cfg, err := s.Tokens.Config(ctx, cur)
+	if err != nil {
+		return err
+	}
+	if !cur.HasSecret || cfg.ClientID == "" {
+		return ErrNoCredentials
+	}
+	id := strconv.FormatInt(cur.ID, 10)
+	actx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	t, err := da.Authenticate(actx, cfg)
+	if err != nil {
+		_ = s.Repo.Audit(ctx, actor, "connect_failed", "crm_connector", id)
+		// A refused credential is a validation error naming the secret, never
+		// the CRM's raw answer.
+		return &ValidationError{map[string]string{"clientSecret": scrub(err.Error())}}
+	}
+	if _, err := s.Repo.SaveOrgConnection(ctx, cur.ID, t); err != nil {
+		return err
+	}
+	_ = s.Repo.Audit(ctx, actor, "connect", "crm_connector", id)
+	s.Lookup.Invalidate()
+	return nil
+}
+
+// Setup returns what the customer configures in the CRM for a connector.
+func (s *Service) Setup(ctx context.Context, id int64) ([]SetupItem, error) {
+	cur, err := s.Repo.GetConnector(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	conn, ok := s.Tokens.Providers(cur.Kind)
+	sp, isSP := conn.(SetupProvider)
+	if !ok || !isSP {
+		return []SetupItem{}, nil
+	}
+	if s.PublicURL == "" {
+		return nil, ErrNoPublicURL
+	}
+	cfg, err := s.Tokens.Config(ctx, cur)
+	if err != nil {
+		return nil, err
+	}
+	return sp.Setup(cfg, strings.TrimRight(s.PublicURL, "/")), nil
 }
 
 // Callback completes the OAuth flow: the state names the connector and the
@@ -577,6 +706,15 @@ func (s *Service) Engagement(ctx context.Context, actor, kind, callID, ref strin
 	}
 	if conn == nil {
 		return false, ErrNotFound
+	}
+	prov, known := s.Tokens.Providers(conn.Kind)
+	if rv, ok := prov.(RefValidator); known && ok && !rv.ValidRef(ref) {
+		return false, &ValidationError{map[string]string{"recordId": "is not a " + conn.Kind + " record id"}}
+	}
+	if known && !serverSide(prov, conn.Config) {
+		// Nothing on the server writes this call to the CRM, so there is no
+		// duplicate to avoid; the softphone's own record is the log.
+		return true, nil
 	}
 	if restricted {
 		ok, err := s.Repo.CallInvolves(ctx, callID, exts)

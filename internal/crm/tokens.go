@@ -156,6 +156,25 @@ func (m *TokenManager) refresh(ctx context.Context, row ConnectorRow, conn Conne
 	if !force && (t.ExpiresAt.IsZero() || t.ExpiresAt.After(m.now().Add(m.skew()))) {
 		return t, nil
 	}
+	if da, ok := conn.(Direct); ok {
+		// Client credentials: sign in again, there is no refresh token.
+		nt, err := da.Authenticate(ctx, cfg)
+		if err != nil {
+			var ae *APIError
+			if errors.As(err, &ae) && !ae.Retry {
+				m.needsReauth(ctx, row, cr.ID, "the CRM refused the client credentials")
+				return Tokens{}, ErrNeedsReauth
+			}
+			return Tokens{}, err
+		}
+		if nt.Account == "" {
+			nt.Account = t.Account
+		}
+		if _, err := m.Repo.SaveOrgConnection(ctx, row.ID, nt); err != nil {
+			return Tokens{}, err
+		}
+		return nt, nil
+	}
 	oa, ok := conn.(OAuth)
 	if !ok || t.Refresh == "" {
 		m.needsReauth(ctx, row, cr.ID, "no refresh token")

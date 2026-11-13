@@ -7,6 +7,7 @@ import {
   CRM_LOG_STATUSES,
   deleteCRMConnector,
   disconnectCRMConnector,
+  getCRMSetup,
   listCRMConnectors,
   listCRMLogs,
   listCRMUsers,
@@ -17,6 +18,7 @@ import {
   type CRMConnector,
   type CRMLog,
   type CRMLogStatus,
+  type CRMSetupItem,
   type CRMUserMapping,
 } from "../api/crm";
 import {
@@ -41,8 +43,222 @@ import { formatTime } from "../format";
 import { usePolling } from "../usePolling";
 import "./platform/platform.css";
 
+/** One of a connector kind's own settings. */
+interface KindField {
+  key: string;
+  label: string;
+  type: "text" | "select" | "switch";
+  options?: { value: string; label: string }[];
+  hint?: string;
+  placeholder?: string;
+  required?: boolean;
+}
+
+interface KindDef {
+  value: string;
+  label: string;
+  /** What the connector needs from the customer, shown when it is added. */
+  intro: string;
+  fields: KindField[];
+  defaults: Record<string, string>;
+  /** Whether the client id and secret are needed for these settings. */
+  needsCredentials: (cfg: Record<string, string>) => boolean;
+  /** Whether Connect (a sign-in) does anything for these settings. */
+  canConnect: (cfg: Record<string, string>) => boolean;
+}
+
 /** The connector kinds the console can create. */
-const KINDS = [{ value: "hubspot", label: "HubSpot" }];
+const KIND_DEFS: KindDef[] = [
+  {
+    value: "hubspot",
+    label: "HubSpot",
+    intro:
+      "Add the HubSpot app you created in your own HubSpot developer account.",
+    fields: [
+      {
+        key: "region",
+        label: "HubSpot data centre",
+        type: "select",
+        options: [
+          { value: "na", label: "United States / default" },
+          { value: "eu", label: "Europe (app-eu1)" },
+        ],
+      },
+    ],
+    defaults: { region: "na" },
+    needsCredentials: () => true,
+    canConnect: () => true,
+  },
+  {
+    value: "salesforce",
+    label: "Salesforce",
+    intro:
+      "The Open CTI softphone needs no sign-in: import the call center from the Connection tab. Add a connected app only to let Hello also log calls nobody had a browser open for.",
+    fields: [
+      {
+        key: "serverLogging",
+        label: "Also log calls from the server",
+        type: "switch",
+        hint: "Needs a connected app with the client credentials flow and an integration user. Logs missed calls and calls made on a desk phone, looks callers up by phone and adds recording links.",
+      },
+      {
+        key: "domain",
+        label: "My Domain",
+        type: "text",
+        placeholder: "acme.my.salesforce.com",
+        hint: "The host of your org, without https://. Needed for server-side logging.",
+      },
+      {
+        key: "apiVersion",
+        label: "API version",
+        type: "text",
+        placeholder: "62.0",
+      },
+    ],
+    defaults: { serverLogging: "false", apiVersion: "62.0", domain: "" },
+    needsCredentials: (c) => c.serverLogging === "true",
+    canConnect: (c) => c.serverLogging === "true",
+  },
+  {
+    value: "dynamics",
+    label: "Dynamics 365",
+    intro:
+      "Register an app in Microsoft Entra, add it to your environment as an application user, and enter its tenant, environment address and credentials.",
+    fields: [
+      {
+        key: "orgUrl",
+        label: "Environment URL",
+        type: "text",
+        placeholder: "https://contoso.crm4.dynamics.com",
+        required: true,
+      },
+      {
+        key: "tenantId",
+        label: "Directory (tenant) ID",
+        type: "text",
+        required: true,
+        hint: "A GUID, from the app registration.",
+      },
+    ],
+    defaults: { orgUrl: "", tenantId: "" },
+    needsCredentials: () => true,
+    canConnect: () => true,
+  },
+];
+
+const KINDS = KIND_DEFS.map((k) => ({ value: k.value, label: k.label }));
+
+function kindDef(kind: string): KindDef {
+  return KIND_DEFS.find((k) => k.value === kind) ?? KIND_DEFS[0]!;
+}
+
+/** The kind's own settings as the form edits them. */
+function KindFields({
+  def,
+  cfg,
+  setCfg,
+}: {
+  def: KindDef;
+  cfg: Record<string, string>;
+  setCfg: (c: Record<string, string>) => void;
+}) {
+  const set = (key: string, v: string) => setCfg({ ...cfg, [key]: v });
+  return (
+    <>
+      {def.fields.map((f) => {
+        const v = cfg[f.key] ?? "";
+        if (f.type === "select")
+          return (
+            <Select
+              key={f.key}
+              label={f.label}
+              value={v}
+              options={f.options ?? []}
+              onChange={(e) => set(f.key, e.target.value)}
+            />
+          );
+        if (f.type === "switch")
+          return (
+            <Switch
+              key={f.key}
+              label={f.label}
+              hint={f.hint}
+              checked={v === "true"}
+              onChange={(e) => set(f.key, e.target.checked ? "true" : "false")}
+            />
+          );
+        return (
+          <Input
+            key={f.key}
+            label={f.label}
+            value={v}
+            placeholder={f.placeholder}
+            hint={f.hint}
+            required={f.required}
+            onChange={(e) => set(f.key, e.target.value)}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+/** What the customer sets up in the CRM: values to copy, files to import. */
+function SetupPanel({ connector: c }: { connector: CRMConnector }) {
+  const load = useCallback(
+    (sig: AbortSignal) => getCRMSetup(c.id, sig),
+    [c.id],
+  );
+  const setup = usePolling(load, 60_000);
+  if (setup.status === "loading") return <Spinner label="Loading setup…" />;
+  if (setup.status === "error")
+    return (
+      <Alert tone="warn" title="Setup values are not available">
+        {setup.message}
+      </Alert>
+    );
+  if (setup.data.length === 0) return null;
+  return (
+    <details open>
+      <summary>Set up {kindDef(c.kind).label}</summary>
+      {setup.data.map((it) => (
+        <SetupRow key={it.name} item={it} />
+      ))}
+    </details>
+  );
+}
+
+function SetupRow({ item }: { item: CRMSetupItem }) {
+  if (item.kind === "file") {
+    const download = () => {
+      const url = URL.createObjectURL(
+        new Blob([item.value], { type: "application/xml" }),
+      );
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = item.filename ?? "hello.xml";
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+    return (
+      <div>
+        <p>
+          <Button icon="download" variant="secondary" onClick={download}>
+            Download {item.label}
+          </Button>{" "}
+          {item.hint}
+        </p>
+        <CodeBlock title={item.filename ?? item.label} code={item.value} />
+      </div>
+    );
+  }
+  return (
+    <div>
+      <CodeBlock title={item.label} code={item.value} />
+      {item.hint && <p>{item.hint}</p>}
+    </div>
+  );
+}
 
 const HUBSPOT_SCOPES = [
   "crm.objects.contacts.read",
@@ -123,7 +339,7 @@ export function IntegrationsCRM() {
           <EmptyState
             icon="plug"
             title="No CRM connected"
-            description="Add the HubSpot app you created in your own HubSpot developer account."
+            description="Add HubSpot, Salesforce or Dynamics 365. You create the app in your own account."
           />
         )}
         {items?.map((c) => (
@@ -153,8 +369,12 @@ function NewConnector({
   const [name, setName] = useState("HubSpot");
   const [clientId, setClientId] = useState("");
   const [secret, setSecret] = useState("");
-  const [region, setRegion] = useState("na");
+  const [cfg, setCfg] = useState<Record<string, string>>(
+    kindDef(KINDS[0]!.value).defaults,
+  );
   const [busy, setBusy] = useState(false);
+  const def = kindDef(kind);
+  const creds = def.needsCredentials(cfg);
   const [err, setErr] = useState<string | null>(null);
 
   async function submit(e: FormEvent) {
@@ -165,8 +385,8 @@ function NewConnector({
       await createCRMConnector({
         kind,
         name,
-        clientSecret: secret,
-        config: { clientId, region },
+        ...(secret !== "" ? { clientSecret: secret } : {}),
+        config: { ...cfg, clientId },
       });
       setOpen(false);
       setSecret("");
@@ -195,8 +415,14 @@ function NewConnector({
         label="CRM"
         value={kind}
         options={KINDS}
-        onChange={(e) => setKind(e.target.value)}
+        onChange={(e) => {
+          const k = e.target.value;
+          setKind(k);
+          setName(kindDef(k).label);
+          setCfg(kindDef(k).defaults);
+        }}
       />
+      <p>{def.intro}</p>
       <Input
         label="Name"
         value={name}
@@ -204,10 +430,11 @@ function NewConnector({
         required
         onChange={(e) => setName(e.target.value)}
       />
+      <KindFields def={def} cfg={cfg} setCfg={setCfg} />
       <Input
         label="Client ID"
         value={clientId}
-        required
+        required={creds}
         onChange={(e) => setClientId(e.target.value)}
       />
       <Input
@@ -215,18 +442,9 @@ function NewConnector({
         type="password"
         autoComplete="off"
         value={secret}
-        required
+        required={creds}
         onChange={(e) => setSecret(e.target.value)}
         hint="Kept sealed; it is never shown again."
-      />
-      <Select
-        label="HubSpot data centre"
-        value={region}
-        options={[
-          { value: "na", label: "United States / default" },
-          { value: "eu", label: "Europe (app-eu1)" },
-        ]}
-        onChange={(e) => setRegion(e.target.value)}
       />
       {err && (
         <Alert tone="bad" title="Could not add the connector">
@@ -299,7 +517,11 @@ function ConnectionTab({
   const [name, setName] = useState(c.name);
   const [clientId, setClientId] = useState(c.config.clientId ?? "");
   const [secret, setSecret] = useState("");
-  const [region, setRegion] = useState(c.config.region ?? "na");
+  const def = kindDef(c.kind);
+  const [cfg, setCfg] = useState<Record<string, string>>({
+    ...def.defaults,
+    ...c.config,
+  });
   const [enabled, setEnabled] = useState(c.enabled);
   const [recordings, setRecordings] = useState(c.recordings);
   const [ttlDays, setTtlDays] = useState(
@@ -311,6 +533,8 @@ function ConnectionTab({
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<"disconnect" | "delete" | null>(null);
   const idChanged = clientId !== (c.config.clientId ?? "");
+  const creds = def.needsCredentials(cfg);
+  const canConnect = def.canConnect(c.config);
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -324,7 +548,7 @@ function ConnectionTab({
         logMissed,
         fallbackOwner: fallback,
         linkTtlHours: Math.max(1, Math.round(Number(ttlDays) * 24)),
-        config: { clientId, region },
+        config: { ...cfg, clientId },
         ...(secret !== "" ? { clientSecret: secret } : {}),
       });
       setSecret("");
@@ -340,7 +564,13 @@ function ConnectionTab({
   async function connect() {
     setErr(null);
     try {
-      window.location.assign(await connectCRMConnector(c.id));
+      const r = await connectCRMConnector(c.id);
+      if (r.connected) {
+        reload();
+        say("Connected.");
+      } else {
+        window.location.assign(r.authorizeUrl);
+      }
     } catch (x: unknown) {
       setErr(errorMessage(x));
     }
@@ -372,11 +602,15 @@ function ConnectionTab({
             label: "Last change",
             value: conn ? formatTime(conn.updatedAt) : "—",
           },
-          {
-            label: "Redirect URI",
-            value: c.redirectUri ?? "needs HELLO_PUBLIC_URL",
-            mono: true,
-          },
+          ...(c.kind === "hubspot"
+            ? [
+                {
+                  label: "Redirect URI",
+                  value: c.redirectUri ?? "needs HELLO_PUBLIC_URL",
+                  mono: true,
+                },
+              ]
+            : []),
         ]}
       />
       {c.kind === "hubspot" && (
@@ -394,14 +628,25 @@ function ConnectionTab({
           <CodeBlock title="Scopes" code={HUBSPOT_SCOPES.join("\n")} />
         </details>
       )}
+      {c.kind !== "hubspot" && (
+        <SetupPanel key={JSON.stringify(c.config)} connector={c} />
+      )}
       <p>
-        <Button
-          icon="link"
-          onClick={() => void connect()}
-          disabled={!c.redirectUri || !c.hasClientSecret || !c.config.clientId}
-        >
-          {conn ? "Connect again" : "Connect"}
-        </Button>{" "}
+        {canConnect && (
+          <>
+            <Button
+              icon="link"
+              onClick={() => void connect()}
+              disabled={
+                (c.kind === "hubspot" && !c.redirectUri) ||
+                !c.hasClientSecret ||
+                !c.config.clientId
+              }
+            >
+              {conn ? "Connect again" : "Connect"}
+            </Button>{" "}
+          </>
+        )}
         <Button
           variant="secondary"
           icon="activity"
@@ -433,10 +678,11 @@ function ConnectionTab({
           required
           onChange={(e) => setName(e.target.value)}
         />
+        <KindFields def={def} cfg={cfg} setCfg={setCfg} />
         <Input
           label="Client ID"
           value={clientId}
-          required
+          required={creds}
           onChange={(e) => setClientId(e.target.value)}
         />
         <Input
@@ -445,7 +691,7 @@ function ConnectionTab({
           autoComplete="off"
           value={secret}
           placeholder={c.hasClientSecret ? "set; leave empty to keep it" : ""}
-          required={idChanged}
+          required={idChanged && clientId !== ""}
           onChange={(e) => setSecret(e.target.value)}
           hint={
             idChanged
@@ -453,17 +699,6 @@ function ConnectionTab({
               : "Write-only."
           }
         />
-        {c.kind === "hubspot" && (
-          <Select
-            label="HubSpot data centre"
-            value={region}
-            options={[
-              { value: "na", label: "United States / default" },
-              { value: "eu", label: "Europe (app-eu1)" },
-            ]}
-            onChange={(e) => setRegion(e.target.value)}
-          />
-        )}
         <Switch
           label="Enabled"
           checked={enabled}

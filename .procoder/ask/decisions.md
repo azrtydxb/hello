@@ -3333,3 +3333,63 @@ Decided while building, without asking, within the spec and the brief:
 - Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
+
+## Integrations P13 and P19: Salesforce Open CTI and Dynamics 365 CIF (2026-11-13)
+
+Decided while building, without asking, within the spec and the brief:
+
+- **Two halves per CRM.** The interactive half is a static page Hello serves
+  (`web/public/integrations/{salesforce,dynamics}`), served by the UI's nginx with a
+  per-page Content-Security-Policy (`frame-ancestors` only the CRM's hosts, no inline
+  script, `connect-src 'self'`); the server half is a `internal/crm` connector. The
+  pages need no CRM token: Open CTI and CIF run in the user's own CRM session.
+- **No Hello cookie in the frame.** A third-party frame does not get Hello's session
+  cookie, so the pages sign in through a popup (authorization code with PKCE) against two
+  new pre-registered public clients, `hello-salesforce` and `hello-dynamics` (spec I-32),
+  with scopes `calls events`; the callback pages postMessage the code to their own opener
+  (origin and state checked) and the token stays in the frame's session storage.
+- **Client credentials as a framework feature.** `crm.DirectAuth` (Authorize with the
+  customer's client id and secret) lets a connector sign in without a browser. `Connect`
+  connects at once (`connected: true`, empty `authorizeUrl`), and the token manager signs in
+  again at expiry or on a 401 instead of refreshing. Refused credentials are the same
+  `needs_reauth` once as a refused refresh token; an outage is not. Salesforce and Dynamics
+  both use it (spec: connected app / org service principal). JWT bearer for Salesforce is
+  not built: client credentials is the simpler flow Salesforce offers for an integration
+  user and needs no certificate handling.
+- **Salesforce interactive-only mode.** `config.serverLogging` (default `false`): with it
+  off the connector is only the softphone's settings. It needs no credentials, the hook
+  queues no job, the lookup skips it and the engagement handshake is a no-op
+  (`adopted: true`), so nothing waits for a connection that will never exist. `crm.ServerSide`
+  is the framework switch for it. The softphone then also logs missed calls for its user
+  (`?missed=1` in the adapter URL the call center definition carries).
+- **No duplicate Tasks.** The softphone saves the Task at answer (`saveLog`), then tells the
+  server (`POST /api/v1/integrations/salesforce/engagements`, `callId` and `recordId`);
+  the server patches that Task with the duration, outcome and recording link. A server
+  Task that exists first wins (`adopted: false`). This is the HubSpot handshake
+  generalised: `Service.Engagement` validates the record id through the optional
+  `crm.RefValidator` of the connector.
+- **Dynamics logs only on the server.** The CIF widget does click-to-act and the screen pop;
+  it does not write activities, so there is no Dynamics handshake route.
+- **Dynamics channel provider is entered, not imported.** The spec says "customer-imported
+  solution". A CIF v2 channel provider is a data record (Customer Service admin center,
+  Channel Providers), not a solution component, so Hello shows the exact values to enter
+  (`GET /api/v1/integrations/crm/{id}/setup`, also an MCP read `getCRMSetup`) instead of
+  generating a solution zip nobody could verify here. The channel URL carries
+  `?org=<environment URL>` so the page knows where to load the CIF library from; it loads
+  that library only from `https://*.dynamics.com`. The same endpoint gives Salesforce its
+  Call Center definition XML and adapter URL.
+- **Dynamics phone call states.** Created open, then closed (Made for outbound, Received for
+  inbound; a missed call is Received with "Missed call from" and "No answer", Dynamics has
+  no missed reason). A closed activity is read-only, so an update reopens, patches and
+  closes. A failed close after a successful create is retried once and never repeats the
+  create. Sovereign clouds (`.us`, `.cn`) are not supported: only `*.dynamics.com`.
+- **Phone matching.** Salesforce: SOSL `IN PHONE FIELDS` on the last nine digits. Dynamics:
+  `contains` on the last nine digits of `telephone1`, `mobilephone`, `telephone2`; numbers
+  stored with separators are not found (documented, on the lab list).
+- **Shared HTTP client** `crm.REST` (bearer, form or JSON, retry classification) and
+  `crm.RecordingLine` (replace-not-repeat of the `Recording:` description line, never
+  touching what a person wrote). HubSpot keeps its own client; it is not touched.
+- **Frames' lint.** `web/public/integrations` are classic scripts without a build and are
+  excluded from eslint; `web/src/integrations/embedded.test.ts` runs them against fakes.
+- **No migration.** The connector kind column has no CHECK; the placeholder 00102 is
+  unused.

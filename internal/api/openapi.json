@@ -1268,9 +1268,7 @@
         "operationId": "getMyFollowMe",
         "summary": "Get my extension's follow-me profile",
         "description": "Returns the follow-me profile of one of the signed-in user's own extensions. An extension that is not the user's answers 404, exactly like one that does not exist.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1311,9 +1309,7 @@
         "operationId": "putMyFollowMe",
         "summary": "Change my extension's follow-me profile",
         "description": "Changes the follow-me profile of one of the signed-in user's own extensions, with the same fields and rules as the operator route. An extension that is not the user's answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4749,9 +4745,7 @@
         "operationId": "getFollowMe",
         "summary": "Get an extension's follow-me profile",
         "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Returns the profile; an extension that has none reads as the defaults, off with no targets.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4789,9 +4783,7 @@
         "operationId": "putFollowMe",
         "summary": "Change an extension's follow-me profile",
         "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Fields left out keep their stored value; targets, when sent, replace the whole list (at most 5, in ring order). A profile can be turned on only with at least one target. A target cannot be the extension itself, an external target is 2 to 32 digits with an optional leading +, and an extension or ring group target must exist.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -23198,7 +23190,7 @@
       "post": {
         "operationId": "connectCRMConnector",
         "summary": "Start the CRM sign-in",
-        "description": "Starts the OAuth authorization of the connector and returns the CRM address to send the browser to. The CRM returns to /api/v1/integrations/crm/oauth/callback, which finishes the connection and redirects to the console. Needs HELLO_PUBLIC_URL and the client id and secret.",
+        "description": "Starts the sign-in of the connector. For an OAuth connector (HubSpot) it returns the CRM address to send the browser to; the CRM returns to /api/v1/integrations/crm/oauth/callback, which finishes the connection and redirects to the console, and HELLO_PUBLIC_URL is needed. A connector that signs in with client credentials (Salesforce, Dynamics 365) is connected by this call: connected is true and authorizeUrl is empty. Needs the client id and secret. A refused client id or secret is a 400 on clientSecret.",
         "tags": ["integrations"],
         "parameters": [
           {
@@ -23215,6 +23207,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -25258,6 +25253,103 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": true
+      }
+    },
+    "/api/v1/integrations/crm/{id}/setup": {
+      "get": {
+        "operationId": "getCRMSetup",
+        "summary": "What to configure in the CRM",
+        "description": "Lists what the customer configures in the CRM for the connector: for Salesforce the Call Center definition file to import and the CTI adapter URL, for Dynamics 365 the values of the Channel Integration Framework channel provider. Needs HELLO_PUBLIC_URL. None of it is secret. A connector with nothing to configure has an empty list.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The setup items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMSetupList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/integrations/salesforce/engagements": {
+      "post": {
+        "operationId": "recordSalesforceTask",
+        "summary": "Record the Salesforce Task of a call",
+        "description": "The Open CTI softphone tells the server which Task its saveLog created for a call, so the server patches that Task (duration, outcome, recording link) instead of creating a second one. If the server already logged the call, its Task is kept and adopted is false. When the connector does not log server side there is nothing to deduplicate and adopted is true. A user may only record calls of their own extensions.",
+        "tags": ["integrations"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CRMRecordInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Whether the engagement was adopted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMEngagementResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "calls",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "called by the Salesforce softphone, not by an agent",
+          "category": "credentials"
+        }
       }
     }
   },
@@ -33202,21 +33294,11 @@
                 "description": "For a call that rang a follow-me profile, what each leg did, in the order they rang: own (the extension's own devices), extension, ring_group or external, and how it ended (answered, declined: an external target did not press 1, busy, no_answer, failed, skipped, cancelled)",
                 "items": {
                   "type": "object",
-                  "required": [
-                    "kind",
-                    "extension",
-                    "trunk",
-                    "result"
-                  ],
+                  "required": ["kind", "extension", "trunk", "result"],
                   "properties": {
                     "kind": {
                       "type": "string",
-                      "enum": [
-                        "own",
-                        "extension",
-                        "ring_group",
-                        "external"
-                      ]
+                      "enum": ["own", "extension", "ring_group", "external"]
                     },
                     "extension": {
                       "type": "string",
@@ -36397,10 +36479,7 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "simultaneous",
-              "sequential"
-            ]
+            "enum": ["simultaneous", "sequential"]
           },
           "ringOwnDevices": {
             "type": "boolean",
@@ -36432,19 +36511,11 @@
       "FollowMeTarget": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "target",
-          "delaySeconds"
-        ],
+        "required": ["kind", "target", "delaySeconds"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "external",
-              "extension",
-              "ring_group"
-            ],
+            "enum": ["external", "extension", "ring_group"],
             "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
           },
           "target": {
@@ -36462,18 +36533,11 @@
       "FollowMeTargetInput": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "target"
-        ],
+        "required": ["kind", "target"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "external",
-              "extension",
-              "ring_group"
-            ],
+            "enum": ["external", "extension", "ring_group"],
             "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
           },
           "target": {
@@ -36499,10 +36563,7 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "simultaneous",
-              "sequential"
-            ],
+            "enum": ["simultaneous", "sequential"],
             "description": "simultaneous rings everything at once; sequential starts the targets one after another."
           },
           "ringOwnDevices": {
@@ -41624,7 +41685,8 @@
           "fallbackOwner",
           "createdAt",
           "capabilities",
-          "connection"
+          "connection",
+          "auth"
         ],
         "properties": {
           "id": {
@@ -41647,7 +41709,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "The connector's settings: clientId and, for HubSpot, region (na or eu)."
+            "description": "The connector's settings (see the create request)."
           },
           "hasClientSecret": {
             "type": "boolean",
@@ -41692,6 +41754,11 @@
           "redirectUri": {
             "type": "string",
             "description": "The redirect URI to register in the CRM app; absent without HELLO_PUBLIC_URL."
+          },
+          "auth": {
+            "type": "string",
+            "enum": ["oauth", "direct"],
+            "description": "oauth: the administrator approves the app at the CRM. direct: Hello signs in with the credentials the administrator typed (client credentials)."
           }
         }
       },
@@ -41712,7 +41779,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "description": "The connector kind (hubspot); required on create, immutable afterwards."
+            "description": "The connector kind (hubspot, salesforce, dynamics); required on create, immutable afterwards."
           },
           "name": {
             "type": "string",
@@ -41729,7 +41796,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "clientId and, for HubSpot, region (na or eu, default na); keys you leave out are kept."
+            "description": "The connector's settings; keys you leave out are kept. HubSpot: clientId, region (na or eu). Salesforce: clientId, domain (My Domain host), apiVersion, serverLogging (true or false). Dynamics 365: clientId, tenantId, orgUrl."
           },
           "clientSecret": {
             "type": "string",
@@ -41759,11 +41826,15 @@
       },
       "CRMAuthorize": {
         "type": "object",
-        "required": ["authorizeUrl"],
+        "required": ["authorizeUrl", "connected"],
         "properties": {
           "authorizeUrl": {
             "type": "string",
-            "description": "The CRM address that asks the administrator to approve the app."
+            "description": "The CRM address that asks the administrator to approve the app; empty when the connector is already connected."
+          },
+          "connected": {
+            "type": "boolean",
+            "description": "True when the sign-in finished without a browser (client credentials)."
           }
         }
       },
@@ -42822,6 +42893,60 @@
             "type": "string",
             "pattern": "^[0-9A-Za-z._-]{0,64}$",
             "description": "The ring group told of every emergency call; empty for none."
+          }
+        }
+      },
+      "CRMSetupItem": {
+        "type": "object",
+        "required": ["name", "label", "kind", "value"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["text", "url", "file"]
+          },
+          "value": {
+            "type": "string",
+            "description": "The value to paste, or the content of the file."
+          },
+          "filename": {
+            "type": "string",
+            "description": "The name to save a file as."
+          },
+          "hint": {
+            "type": "string"
+          }
+        }
+      },
+      "CRMSetupList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CRMSetupItem"
+            }
+          }
+        }
+      },
+      "CRMRecordInput": {
+        "type": "object",
+        "required": ["callId", "recordId"],
+        "properties": {
+          "callId": {
+            "type": "string",
+            "description": "The call's correlation id from the call events."
+          },
+          "recordId": {
+            "type": "string",
+            "maxLength": 18,
+            "description": "The id of the Salesforce Task the softphone created."
           }
         }
       }

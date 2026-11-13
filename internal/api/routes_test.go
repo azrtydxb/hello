@@ -58,6 +58,7 @@ func TestRoutesTable(t *testing.T) {
 		return strings.HasPrefix(r.Pattern, "/api/v1/me/") || strings.HasPrefix(r.Pattern, "/api/v1/events") ||
 			strings.HasPrefix(r.Pattern, "/api/v1/lookup/") || r.Pattern == "/api/v1/recording-links/{id}" ||
 			r.Pattern == "/api/v1/recordings/{id}/links" || r.Pattern == "/api/v1/integrations/hubspot/engagements" ||
+			r.Pattern == "/api/v1/integrations/salesforce/engagements" ||
 			strings.HasPrefix(r.Pattern, "/api/v1/calls/originate")
 	}
 	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true, "POST /api/v1/auth/login/2fa": true,

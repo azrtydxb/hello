@@ -14,7 +14,9 @@ import (
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/crm"
-	_ "github.com/azrtydxb/hello/internal/crm/hubspot" // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/dynamics"   // registers the Dynamics 365 connector
+	_ "github.com/azrtydxb/hello/internal/crm/hubspot"    // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/salesforce" // registers the Salesforce connector
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/safehttp"

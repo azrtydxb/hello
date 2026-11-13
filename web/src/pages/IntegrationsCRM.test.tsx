@@ -19,6 +19,7 @@ function connector(extra: Partial<CRMConnector> = {}): CRMConnector {
     linkTtlHours: 720,
     logMissed: true,
     fallbackOwner: "",
+    auth: "oauth",
     createdAt: "2026-11-01T10:00:00Z",
     capabilities: {
       lookup: true,
@@ -376,6 +377,135 @@ describe("CRM connectors (spec integrations P6)", () => {
     );
     await waitFor(() =>
       expect(calls.some((c) => c.method === "DELETE")).toBe(true),
+    );
+  });
+
+  it("adds a Salesforce connector without credentials and shows its call center", async () => {
+    let created = false;
+    const calls = mockApi({
+      ...me("admin"),
+      "GET /api/v1/integrations/crm": () =>
+        json({
+          items: created
+            ? [
+                connector({
+                  id: 2,
+                  kind: "salesforce",
+                  auth: "direct",
+                  name: "Salesforce",
+                  hasClientSecret: false,
+                  connection: null,
+                  config: {
+                    serverLogging: "false",
+                    apiVersion: "62.0",
+                    domain: "",
+                  },
+                }),
+              ]
+            : [],
+        }),
+      "POST /api/v1/integrations/crm": () => {
+        created = true;
+        return json({}, 201);
+      },
+      "GET /api/v1/integrations/crm/2/setup": () =>
+        json({
+          items: [
+            {
+              name: "callCenterXml",
+              label: "Call Center definition",
+              kind: "file",
+              value: "<callCenter/>",
+              filename: "HelloSoftphone.xml",
+              hint: "Setup, Call Centers, Import.",
+            },
+            {
+              name: "trustedSite",
+              label: "CSP Trusted Site",
+              kind: "url",
+              value: "https://hello.example",
+            },
+          ],
+        }),
+    });
+    renderApp("/integrations/crm");
+    fireEvent.click(await screen.findByRole("button", { name: "Add a CRM" }));
+    const form = await screen.findByRole("form", { name: "New CRM connector" });
+    fireEvent.change(within(form).getByLabelText("CRM"), {
+      target: { value: "salesforce" },
+    });
+    expect(within(form).getByLabelText("Name")).toHaveValue("Salesforce");
+    // Without server-side logging nothing needs a credential.
+    expect(within(form).getByLabelText("Client ID")).not.toBeRequired();
+    expect(within(form).getByLabelText("Client secret")).not.toBeRequired();
+    fireEvent.click(
+      within(form).getByRole("switch", { name: /Also log calls/ }),
+    );
+    expect(within(form).getByLabelText("Client ID")).toBeRequired();
+    fireEvent.click(
+      within(form).getByRole("switch", { name: /Also log calls/ }),
+    );
+    fireEvent.click(
+      within(form).getByRole("button", { name: "Add connector" }),
+    );
+    await waitFor(() => expect(created).toBe(true));
+    expect(calls.find((c) => c.method === "POST")!.body).toEqual({
+      kind: "salesforce",
+      name: "Salesforce",
+      config: {
+        serverLogging: "false",
+        apiVersion: "62.0",
+        domain: "",
+        clientId: "",
+      },
+    });
+    expect(await screen.findByText("Set up Salesforce")).toBeVisible();
+    expect(screen.getByText("https://hello.example")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /Download Call Center definition/ }),
+    ).toBeVisible();
+    // No sign-in to start for the softphone alone.
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+  });
+
+  it("connects a client-credentials connector without leaving the page", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    let connectCalls = 0;
+    mockApi({
+      ...me("admin"),
+      "GET /api/v1/integrations/crm": () =>
+        json({
+          items: [
+            connector({
+              id: 3,
+              kind: "dynamics",
+              auth: "direct",
+              name: "Dynamics 365",
+              connection: null,
+              config: {
+                clientId: "app",
+                orgUrl: "https://contoso.crm4.dynamics.com",
+                tenantId: "11111111-2222-3333-4444-555555555555",
+              },
+            }),
+          ],
+        }),
+      "GET /api/v1/integrations/crm/3/setup": () => json({ items: [] }),
+      "POST /api/v1/integrations/crm/3/connect": () => {
+        connectCalls++;
+        return json({ authorizeUrl: "", connected: true });
+      },
+    });
+    renderApp("/integrations/crm");
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+    await waitFor(() => expect(connectCalls).toBe(1));
+    expect(assign).not.toHaveBeenCalled();
+    const form = await screen.findByRole("form", {
+      name: "Dynamics 365 settings",
+    });
+    expect(within(form).getByLabelText("Environment URL")).toHaveValue(
+      "https://contoso.crm4.dynamics.com",
     );
   });
 });
