@@ -222,6 +222,7 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/integrations/crm/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getCRMConnector},
 		{"PATCH", "/api/v1/integrations/crm/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updateCRMConnector},
 		{"DELETE", "/api/v1/integrations/crm/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteCRMConnector},
+		{"GET", "/api/v1/integrations/crm/{id}/app", auth.ScopeAdmin, auth.RoleAdmin, false, s.downloadCRMApp},
 		{"POST", "/api/v1/integrations/crm/{id}/connect", auth.ScopeAdmin, auth.RoleAdmin, false, s.connectCRMConnector},
 		{"DELETE", "/api/v1/integrations/crm/{id}/connection", auth.ScopeAdmin, auth.RoleAdmin, false, s.disconnectCRMConnector},
 		{"POST", "/api/v1/integrations/crm/{id}/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testCRMConnector},
@@ -229,6 +230,8 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/integrations/crm/logs/{id}/retry", auth.ScopeWrite, auth.RoleOperator, false, s.retryCRMLog},
 		{"GET", "/api/v1/integrations/crm/{id}/users", auth.ScopeAdmin, auth.RoleAdmin, false, s.listCRMUsers},
 		{"PUT", "/api/v1/integrations/crm/{id}/users/{userId}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putCRMUser},
+		{"GET", "/api/v1/integrations/crm/{id}/setup", auth.ScopeAdmin, auth.RoleAdmin, false, s.getCRMSetup},
+		{"POST", "/api/v1/integrations/salesforce/engagements", auth.ScopeCalls, auth.RoleUser, false, s.salesforceEngagement},
 		{"POST", "/api/v1/integrations/hubspot/engagements", auth.ScopeCalls, auth.RoleUser, false, s.hubspotEngagement},
 
 		{"GET", "/api/v1/conferences", auth.ScopeRead, auth.RoleViewer, false, s.listConferences},
@@ -272,10 +275,19 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/door/webhooks/{id}/rotate-secret", auth.ScopeAdmin, auth.RoleAdmin, false, s.rotateDoorWebhookSecret},
 		{"POST", "/api/v1/door/webhooks/{id}/trigger", "", "", true, s.triggerDoorWebhook},
 
+		{"GET", "/api/v1/extensions/{id}/camera", auth.ScopeRead, auth.RoleViewer, false, s.getDoorCamera},
+		{"PUT", "/api/v1/extensions/{id}/camera", auth.ScopeAdmin, auth.RoleAdmin, false, s.putDoorCamera},
+		{"DELETE", "/api/v1/extensions/{id}/camera", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteDoorCamera},
+		{"GET", "/api/v1/extensions/{id}/camera/view", auth.ScopeRead, auth.RoleViewer, false, s.viewDoorCamera},
+
 		{"GET", "/api/v1/presence", auth.ScopeRead, auth.RoleViewer, false, s.presence},
 
 		{"GET", "/api/v1/registrations", auth.ScopeRead, auth.RoleViewer, false, s.registrations},
 		{"GET", "/api/v1/calls", auth.ScopeRead, auth.RoleViewer, false, s.calls},
+		{"POST", "/api/v1/calls/{id}/door-open", auth.ScopeWrite, auth.RoleUser, false, s.doorOpenCall},
+		{"GET", "/api/v1/me/door-calls", auth.ScopeRead, auth.RoleUser, false, s.listMyDoorCalls},
+		{"GET", "/api/v1/extensions/{id}/door-open", auth.ScopeRead, auth.RoleViewer, false, s.getDoorOpen},
+		{"PUT", "/api/v1/extensions/{id}/door-open", auth.ScopeAdmin, auth.RoleAdmin, false, s.putDoorOpen},
 		{"GET", "/api/v1/cdrs", auth.ScopeRead, auth.RoleViewer, false, s.cdrs},
 		{"GET", "/api/v1/cdrs/counts", auth.ScopeRead, auth.RoleViewer, false, s.cdrCounts},
 		{"GET", "/api/v1/cdrs/concurrency", auth.ScopeRead, auth.RoleViewer, false, s.cdrConcurrency},
@@ -360,6 +372,7 @@ func (s *server) routes() []route {
 
 		{"GET", "/api/v1/phonebooks", auth.ScopeRead, auth.RoleViewer, false, s.listPhonebooks},
 		{"GET", "/api/v1/phonebooks/lookup", auth.ScopeAdmin, auth.RoleAdmin, false, s.lookupPhonebook},
+		{"GET", "/api/v1/lookup/number", auth.ScopeRead, auth.RoleUser, false, s.lookupNumber},
 		{"POST", "/api/v1/phonebooks", auth.ScopeAdmin, auth.RoleAdmin, false, s.createPhonebook},
 		{"GET", "/api/v1/phonebooks/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getPhonebook},
 		{"PUT", "/api/v1/phonebooks/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updatePhonebook},

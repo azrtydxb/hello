@@ -1,7 +1,7 @@
 // Wi-Fi profiles and roaming client (migration 00074): the networks Wi-Fi
 // handsets join, assigned to phone groups and phones. A pre-shared key is
 // write-only: the API reports only that one is stored. An enterprise network
-// names an 802.1X profile (api/scep.ts, migration 00112) for its EAP method
+// names an 802.1X profile (api/scep.ts, migration 00088) for its EAP method
 // and credentials, the same profiles the wired ports use.
 
 import { list, request, type Id } from "../api";

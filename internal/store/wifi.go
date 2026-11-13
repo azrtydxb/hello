@@ -25,7 +25,7 @@ type WifiProfile struct {
 	SSID     string `json:"ssid"`
 	Security string `json:"security"`
 	PSKSet   bool   `json:"pskSet"`
-	// Dot1XID is the 802.1X profile (S-25, migration 00112) an enterprise
+	// Dot1XID is the 802.1X profile (S-25, migration 00088) an enterprise
 	// profile authenticates with; nil for any other. The EAP method, identity,
 	// password and CA are that profile's.
 	Dot1XID       *int64    `json:"dot1xProfileId"`
@@ -496,7 +496,7 @@ type legacyWifiEAP struct {
 }
 
 // AdoptWifiEAP moves the EAP settings of every enterprise Wi-Fi profile that
-// predates the shared 802.1X model (migration 00112) into an 802.1X profile
+// predates the shared 802.1X model (migration 00088) into an 802.1X profile
 // named "Wi-Fi <name>" and points the profile at it, re-sealing the password
 // under the 802.1X profile's context. It is idempotent and runs at start-up.
 // The legacy columns stay (a later release drops them), unread. A profile

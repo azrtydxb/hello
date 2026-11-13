@@ -79,7 +79,13 @@ type Store interface {
 	CreateExtensionKind(ctx context.Context, actor, number, name, externalNumber, kind string, targets store.DoorTargets, check store.Check) (store.Extension, error)
 	UpdateExtension(ctx context.Context, actor string, id int64, c store.ExtensionChange, check store.Check) (store.Extension, error)
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
+	GetDoorOpen(ctx context.Context, id int64) (store.DoorOpen, error)
+	SetDoorOpen(ctx context.Context, actor string, id int64, c store.DoorOpenChange, check store.Check) (store.DoorOpen, error)
 
+	GetDoorCamera(ctx context.Context, id int64) (store.DoorCamera, error)
+	SetDoorCamera(ctx context.Context, actor string, id int64, in store.DoorCameraInput) (store.DoorCamera, error)
+	DeleteDoorCamera(ctx context.Context, actor string, id int64) error
+	DoorCameraForView(ctx context.Context, id int64) (store.DoorCameraAccess, bool, error)
 	ListDoorWebhooks(ctx context.Context) ([]store.DoorWebhook, error)
 	GetDoorWebhook(ctx context.Context, id int64) (store.DoorWebhook, error)
 	CreateDoorWebhook(ctx context.Context, actor string, in store.DoorWebhookInput) (store.DoorWebhook, string, error)
@@ -215,7 +221,7 @@ type Store interface {
 	ListDevices(ctx context.Context, kind string) ([]store.Device, error)
 	GetDevice(ctx context.Context, id int64) (store.Device, error)
 	CreateDevice(ctx context.Context, actor string, in store.NewDevice) (store.Device, error)
-	UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, srtp *string) (store.Device, error)
+	UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, m store.DeviceMedia) (store.Device, error)
 	RotateDeviceSecret(ctx context.Context, actor string, id int64, realm, secret string) (store.Device, error)
 	DeleteDevice(ctx context.Context, actor string, id int64) error
 
@@ -357,6 +363,13 @@ type Config struct {
 	OriginateMetrics *OriginateMetrics
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
+	// DoorCalls carries door-open requests to the hello-sip node holding a
+	// call; nil answers 503. DoorOpenWait bounds the wait (0 means 5 s).
+	DoorCalls    DoorControl
+	DoorOpenWait time.Duration
+	// CameraHTTP fetches door station camera pictures; it should be built on
+	// the SSRF-guarded safehttp transport. nil answers 503.
+	CameraHTTP *http.Client
 	// DoorTriggers carries doorbell webhook triggers to hello-sip and keeps
 	// their rate and duplicate windows; nil answers 503.
 	DoorTriggers DoorTriggers

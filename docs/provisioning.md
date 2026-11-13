@@ -1650,7 +1650,12 @@ BLF, ring tags and call waiting, because each is a device of its own extension.
   password, name, voicemail number, expiry, MWI subscription, transport (and the
   `sips` scheme on TLS), the four-codec choice, the Broadsoft special feature
   with feature key sync, accept-SIP-from-the-proxy-only (S-32) and call waiting
-  (not on the WP820, whose template has only the phone-wide switch). The WP8x6
+  (not on the WP820, whose template has only the phone-wide switch). Each line
+  also gets its own SRTP mode and key exchange (on TLS), presence keys (WP8x6 and
+  WP8xx: both off), RTCP-XR collector keys (when `HELLO_PROV_RTCPXR` is on) and
+  backup server keys (`P2412` and on, `P403` and on, `P2433` and on), at the
+  account offsets of the same templates. The WP820's Secondary SIP Server is
+  `P50602` (`P51102` for line 2), not `P2312`. The WP8x6
   template labels account 3 "GRP2602/2603/2604 only"; the spec and the
   template's account choices give the WP8x6 three accounts, so check the third on
   a handset.
@@ -1749,11 +1754,11 @@ Wi-Fi handset), so leave both off until it has.
 registrars, at most two; the first is written to the phones that take one. List
 the other HA nodes here.
 
-| Vendor      | Keys written                                                                                                                                                                                                                                  |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.1.sip_server.2.address`, `.port`, `.transport_type = 0`, `.expires`                                                                                                                                                                  |
-| Poly        | `reg.1.server.2.address`, `.port`, `.transport = "UDPOnly"`, `.expires`                                                                                                                                                                       |
-| Grandstream | `P48` Outbound Proxy (the primary, `host:port`), `P2333` Backup Outbound Proxy (the backup) and, on the WP8x6, WP810/822/825 and WP856, `P2312` Secondary SIP Server (the backup); the phone uses the backup when the primary does not answer |
+| Vendor      | Keys written                                                                                                                                                                                                                 |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.1.sip_server.2.address`, `.port`, `.transport_type = 0`, `.expires`                                                                                                                                                 |
+| Poly        | `reg.1.server.2.address`, `.port`, `.transport = "UDPOnly"`, `.expires`                                                                                                                                                      |
+| Grandstream | `P48` Outbound Proxy (the primary, `host:port`), `P2333` Backup Outbound Proxy (the backup) and `P2312` Secondary SIP Server (the backup; `P50602` on the WP820); the phone uses the backup when the primary does not answer |
 
 Snom and Fanvil get none: no key for a second registrar is in a vendor
 document Hello was checked against. A phone that registers over TLS gets none

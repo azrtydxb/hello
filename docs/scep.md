@@ -98,7 +98,7 @@ What Hello leaves alone:
 ## Wi-Fi (enterprise networks)
 
 A Wi-Fi profile for a WPA2/WPA3-Enterprise network has no EAP settings of its
-own: it names an 802.1X profile (`dot1xProfileId`, migration 00112) and the
+own: it names an 802.1X profile (`dot1xProfileId`, migration 00088) and the
 profile is not copied, so a network and a wired port share one model. Every profile is
 in the render data as `.Dot1X.Profiles`, with the identity filled in for the
 phone, the password opened, and the WP8x6 values already worked out:

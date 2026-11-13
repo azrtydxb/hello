@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"sync"
@@ -29,6 +30,12 @@ type Capabilities struct {
 	ClickToCall bool `json:"clickToCall"`
 	ScreenPop   bool `json:"screenPop"`
 	Ticket      bool `json:"ticket"`
+	// RecordingUpload means the connector stores the audio file itself
+	// (Pipedrive): Hello hands it the bytes instead of a link, once.
+	RecordingUpload bool `json:"recordingUpload,omitempty"`
+	// RecordingCopy means the CRM fetches a link once and keeps its own
+	// copy (Bitrix24): the link is short-lived and never renewed.
+	RecordingCopy bool `json:"recordingCopy,omitempty"`
 }
 
 // Contact is a CRM contact found by phone number.
@@ -37,6 +44,9 @@ type Contact struct {
 	Name    string `json:"name"`
 	Company string `json:"company,omitempty"`
 	URL     string `json:"url,omitempty"`
+	// CompanyID is the CRM's id of the company or organisation, when the
+	// connector links calls to it.
+	CompanyID string `json:"companyId,omitempty"`
 }
 
 // Outcome is how a call ended, in the CRM-neutral terms connectors map onto
@@ -74,7 +84,52 @@ type CallLog struct {
 	Contact *Contact
 	// RecordingURL is a recording link, empty while there is none.
 	RecordingURL string
+	// Recording is the audio of the call for a connector with
+	// Capabilities.RecordingUpload; the worker opens and closes it around
+	// UpdateCallLog.
+	Recording *RecordingFile
+	// State is what an earlier, failed LogCall of this call saved (see
+	// PartialError); empty on the first attempt.
+	State string
 }
+
+// PartialError is returned by LogCall when it failed after a step that
+// cannot be repeated (a call already registered in the CRM). State is kept on
+// the job and handed back as CallLog.State, so the retry continues with the
+// failed step, also after a restart. Err is the failure; it decides retry or
+// dead as usual.
+type PartialError struct {
+	State string
+	Err   error
+}
+
+func (e *PartialError) Error() string { return e.Err.Error() }
+func (e *PartialError) Unwrap() error { return e.Err }
+
+// RecordingFile is a recording's audio.
+type RecordingFile struct {
+	Body        io.ReadCloser
+	Size        int64
+	Name        string
+	ContentType string
+}
+
+// AudioSource opens a recording's audio for a connector that uploads it.
+type AudioSource interface {
+	// Open returns the audio; ErrAudioGone means the recording no longer
+	// exists.
+	Open(ctx context.Context, recordingID int64) (RecordingFile, error)
+}
+
+// ErrAudioGone is a recording that was deleted before it could be sent.
+var ErrAudioGone = errors.New("crm: the recording no longer exists")
+
+// SkipError is returned by UpdateCallLog when a recording is deliberately
+// not sent (too large for the CRM): the call stays logged and the reason is
+// shown on the job.
+type SkipError struct{ Reason string }
+
+func (e *SkipError) Error() string { return "crm: recording not sent: " + e.Reason }
 
 // Conn is what a connector needs to call its CRM: the connector's settings
 // and a valid access token.
@@ -126,6 +181,27 @@ type OAuth interface {
 	Exchange(ctx context.Context, cfg Config, redirectURI, code string) (Tokens, error)
 	// Refresh trades a refresh token for new tokens.
 	Refresh(ctx context.Context, cfg Config, refresh string) (Tokens, error)
+}
+
+// Direct is implemented by connectors that need no browser consent: the
+// administrator gives Hello an API token or a client secret and Hello signs
+// in with it (Zendesk, Freshdesk, ConnectWise, Autotask, HaloPSA). Connect
+// calls Authenticate and stores what it returns as the org connection.
+type Direct interface {
+	// Authenticate proves the credentials against the CRM and returns the
+	// tokens to store. A static credential comes back as Access with no
+	// expiry; a client-credentials grant comes back with its real expiry and
+	// is requested again when it runs out. A refused credential is an
+	// APIError that is not retryable.
+	Authenticate(ctx context.Context, cfg Config) (Tokens, error)
+}
+
+// SecretBound is implemented by connectors whose settings choose where the
+// secret is sent (a host, a tenant). Changing one of these settings asks for
+// the secret again, so a stored secret is never sent to another place.
+// Without it only clientId is bound.
+type SecretBound interface {
+	SecretBoundKeys() []string
 }
 
 // Factory builds a connector. hc is the SSRF-safe HTTP client.
@@ -191,6 +267,12 @@ func (e *APIError) Error() string {
 // ErrAuth means the CRM refused the access token (401): the framework
 // refreshes once, then marks the connection needs_reauth.
 var ErrAuth = errors.New("crm: access token refused")
+
+// ErrNoTarget is returned by LogCall (wrapped with the reason) when the CRM
+// has nowhere to put the call: a legal or PSA system that only takes a call
+// for a known contact. The worker marks the job skipped, not dead, so it
+// shows in the console with its reason and can be retried.
+var ErrNoTarget = errors.New("crm: no record to log the call on")
 
 // ErrNeedsReauth means the connection cannot be refreshed any more.
 var ErrNeedsReauth = errors.New("crm: connection needs re-authorisation")
