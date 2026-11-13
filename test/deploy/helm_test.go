@@ -358,6 +358,7 @@ var kwOnlyEnv = map[string]string{
 	"HELLO_AI_BACKGROUND_BUDGET_PERCENT": "kw tuning; set through control.extraEnv",
 	"HELLO_AI_MAX_CONCURRENCY":           "kw tuning; set through control.extraEnv",
 	"HELLO_AI_TIMEOUT":                   "kw tuning; set through control.extraEnv",
+	"HELLO_DOOR_CAMERA_ALLOW":            "the private network of kw's door cameras; set through control.extraEnv",
 }
 
 // TestChartEnvParityWithKw fails if a hello-sip, hello-control or Kamailio
@@ -379,6 +380,14 @@ func TestChartEnvParityWithKw(t *testing.T) {
 		// kw serves the node address beside the VIP while phones move.
 		"--set", "kamailio.vip.legacy=true",
 		"--set", "kamailio.vip.apiServerAddress=127.0.0.1",
+		// The fax engine and coturn are on in kw (kw/fax.yaml, kw/coturn.yaml).
+		"--set", "fax.enabled=true",
+		"--set", "fax.tokenSecret=hello-fax",
+		"--set", "coturn.enabled=true",
+		"--set", "coturn.servers[0].name=1", "--set", "coturn.servers[0].externalIP=192.168.10.101",
+		"--set", "coturn.servers[1].name=2", "--set", "coturn.servers[1].externalIP=192.168.10.102",
+		"--set", "coturn.allowedPeers[0]=192.168.10.101-192.168.10.108",
+		"--set", "coturn.tls.enabled=true", "--set", "coturn.tls.secretName=hello-coturn-tls",
 	)
 	// The chart option renders the VIP form, so it is compared with kw as it
 	// is after the VIP go-live patch.

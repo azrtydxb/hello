@@ -1,0 +1,112 @@
+# The fax engine (docs/fax.md, pbx-gaps B5 and B6): a separate Deployment with
+# spandsp and poppler, reachable only inside the cluster. hello-sip and
+# hello-control reach it at hello-fax:8083 with the bearer token of the
+# hello-fax Secret (faxToken). Media goes straight to the pod: hello-sip is
+# host-networked and sends a fax session's RTP to the pod IP, which the engine
+# stamps into its answers (HELLO_FAX_MEDIA_HOST). No Ingress.
+#
+# HOLD (see the PR): the image tag is the commit this file was written at; pin
+# it to the tag ci.yaml published when the deploys resume.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-fax
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: fax
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: fax
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/component: fax
+    spec:
+      containers:
+        - name: hello-fax
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-fax:sha-2e6afd26e970e8f76d1f44f574e2d16322e5130b
+          imagePullPolicy: Always
+          args:
+            - serve
+          env:
+            - name: HELLO_FAX_LISTEN
+              value: ":8083"
+            - name: HELLO_FAX_RTP_PORT_MIN
+              # The UDP range a fax session's media port is drawn from, on the pod.
+              value: "40000"
+            - name: HELLO_FAX_RTP_PORT_MAX
+              value: "40999"
+            - name: HELLO_FAX_MEDIA_HOST
+              # hello-sip sends media straight to the pod, not through the
+              # Service: replies from a pod only reach a relay that expects
+              # the pod's own address.
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: HELLO_FAX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hello-fax
+                  key: faxToken
+          ports:
+            - name: http
+              containerPort: 8083
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-fax
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: fax
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  # Cluster-internal control API; media goes to pod addresses (UDP
+  # 40000-40999), which are never exposed outside the cluster.
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: fax
+  ports:
+    - name: http
+      port: 8083
+      targetPort: http
