@@ -569,7 +569,17 @@ func (l *lab) failover(t *testing.T, crash bool) {
 			}
 		})
 	}
+	// Record the loss: the nodes' Kamailio and kube-vip logs and the SIP on the
+	// wire, and (below) the phone's and Hello's own trace of the window.
+	l.watchEdge(t)
 	t0 := time.Now()
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("SIP trace of the loss at %s, from the endpoints' side:", t0.Format("15:04:05.000"))
+			l.hello.dumpSince(t, t0.Add(-time.Second))
+			p.dumpSince(t, t0.Add(-time.Second))
+		}
+	})
 	if crash {
 		// A power-off: the node container is killed, its network namespace goes
 		// with it (a paused one would still answer ARP for the VIP).
