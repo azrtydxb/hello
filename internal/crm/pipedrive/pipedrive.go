@@ -102,9 +102,7 @@ type tokenResponse struct {
 }
 
 func basic(cfg crm.Config) map[string]string {
-	r, _ := http.NewRequest(http.MethodGet, "http://x", nil)
-	r.SetBasicAuth(cfg.ClientID, cfg.ClientSecret)
-	return map[string]string{"Authorization": r.Header.Get("Authorization")}
+	return map[string]string{"Authorization": kit.Basic(cfg.ClientID, cfg.ClientSecret)}
 }
 
 func (c *Connector) token(ctx context.Context, cfg crm.Config, form url.Values) (crm.Tokens, error) {

@@ -155,14 +155,14 @@ func (c *Connector) Authenticate(ctx context.Context, cfg crm.Config) (crm.Token
 	var uid any
 	err := c.rpc(ctx, cfg, "common", "authenticate", []any{cfg.Extra["db"], cfg.ClientID, cfg.ClientSecret, map[string]any{}}, &uid)
 	if errors.Is(err, crm.ErrAuth) {
-		return crm.Tokens{}, errors.New("Odoo refused the login or API key")
+		return crm.Tokens{}, errors.New("the login or API key was refused by Odoo")
 	}
 	if err != nil {
 		return crm.Tokens{}, err
 	}
 	f, ok := uid.(float64)
 	if !ok || f < 1 {
-		return crm.Tokens{}, errors.New("Odoo refused the login or API key")
+		return crm.Tokens{}, errors.New("the login or API key was refused by Odoo")
 	}
 	return crm.Tokens{Access: cfg.ClientSecret, Account: strconv.FormatInt(int64(f), 10)}, nil
 }
