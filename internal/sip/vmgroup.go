@@ -169,6 +169,7 @@ func (c *call) vmGroupLeave(ctx context.Context, sess media.Session, g snapshot.
 	for _, m := range g.Members {
 		if got[m.BoxID] {
 			c.sendMWI(m.Extension)
+			c.voicemailEvent(m.Extension, dur)
 		}
 	}
 	if skipped := len(boxes) - len(delivered); skipped > 0 {

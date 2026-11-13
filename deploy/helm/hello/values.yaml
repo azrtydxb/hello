@@ -34,7 +34,10 @@ secrets:
   #   minioAccessKey / minioSecretKey
   # and, when postgresql.enabled: postgresUser, postgresPassword.
   # Optional keys (control reads them with optional: true): provider,
-  # base-url, model, api-key (the AI agent).
+  # base-url, model, api-key (the AI agent); clientAuthKey and
+  # clientAuthKeyPrevious (web device credentials, at least 32 bytes, on
+  # control and sip); turnSecret (coturn's static-auth-secret, at least 16
+  # bytes; required when coturn.enabled).
   existingSecret: ""
   # Vendor redirect-service credentials for phone provisioning, a Secret
   # with the keys documented in docs/provisioning.md. Empty: unconfigured.
@@ -55,12 +58,28 @@ control:
     publicUrl: ""
     # Where provisioned phones register; default <kamailio.publicHost>:<kamailio.publicPort>.
     sipServer: ""
+    # Backup registrars (comma separated host:port, at most 2; the first is
+    # used) written to the phones that take one: Yealink and Poly (second
+    # server), Grandstream (backup outbound proxy). The HA node list when
+    # SRV records are not published. Empty: none (S-20).
+    sipBackupServers: ""
+    # A DNS name whose _sip._udp SRV records list the SIP servers (see
+    # docs/provisioning.md, "SRV records and backup servers"). Set, Grandstream
+    # phones use DNS SRV mode with it. Empty keeps A-record mode, the default
+    # until the failover lab test passes.
+    sipSrv: ""
     # With kamailio.tls.enabled, the SIP-over-TLS address (default
     # <kamailio.publicHost>:<kamailio.tls.publicPort>) and the models that
     # register over it: comma separated vendors or vendor:model-prefix
     # (default grandstream:WP; "none" keeps every phone on UDP).
     sipTlsServer: ""
     sipTlsModels: ""
+    # Provision Grandstream WP810/WP822/WP825 to publish RTCP-XR voice-quality
+    # reports to the SIP server (HELLO_PROV_RTCPXR, docs/provisioning.md).
+    rtcpxr: false
+    # Models that register over TCP (same format as sipTlsModels, default
+    # none: UDP). A model also in sipTlsModels uses TLS while TLS is on.
+    sipTcpModels: ""
     # Proxies whose X-Forwarded-* is believed (the ingress controller's pods).
     trustedProxies: ""
     # Secret holding ca.crt (cert-manager writes it next to the certificate);
@@ -163,6 +182,8 @@ sip:
   # refresh plus a probe interval. Lower it only with a cluster DNS TTL to match.
   minReadySeconds: 45
   recordingNotice: true
+  # Bindings one AOR may hold (HELLO_SIP_MAX_CONTACTS).
+  maxContacts: 10
   # required | preferred | none. required: one node per Kubernetes node,
   # which hostNetwork needs (the ports would collide).
   antiAffinity: required
@@ -267,6 +288,67 @@ kamailio:
   affinity: {}
   podAnnotations: {}
 
+# Browser softphone (docs/webrtc.md). The credentials are derived from keys in
+# the credentials Secret (clientAuthKey, optionally clientAuthKeyPrevious while
+# a key is being replaced); without clientAuthKey web devices are off.
+clients:
+  # Web devices one user may have (HELLO_CLIENT_MAX_DEVICES).
+  maxDevices: 5
+  # Where the softphone registers (HELLO_WSS_URL): the edge's WSS address.
+  wssUrl: ""
+
+# coturn: STUN and TURN for WebRTC media (docs/webrtc.md). One Deployment per
+# server address; the shared secret (turnSecret in the credentials Secret) is
+# the TURN REST API static-auth-secret, and hello-control derives the
+# short-lived credentials the softphone gets from it.
+coturn:
+  enabled: false
+  image:
+    name: coturn
+    tag: ""
+  # hostNetwork binds the TURN and relay ports on the node address, so
+  # relayed media leaves from the address clients are told (externalIP of the
+  # server, which must be that node's address). Pin each server to its node
+  # with servers[].nodeSelector. Without it each server gets a Service that
+  # owns externalIP and lists every relay port.
+  hostNetwork: true
+  # The realm (default global.sipDomain).
+  realm: ""
+  port: 3478
+  tlsPort: 5349
+  # Relay ports; 800 allocations by default. Without hostNetwork at most 200
+  # ports (a Service lists each one).
+  relayPortMin: 49152
+  relayPortMax: 49999
+  # One entry per address clients reach TURN at (REQUIRED):
+  #   - name: 1                   a DNS label; the Deployment is <release>-coturn-<name>
+  #     externalIP: 192.168.10.x  the server's IPv4 address
+  #     nodeSelector: {}          pins it to its node (hostNetwork)
+  servers: []
+  # The hello-sip media addresses clients may relay to (REQUIRED): single
+  # IPv4 addresses or a-b ranges. Every private, loopback and link-local range
+  # is denied except these.
+  allowedPeers: []
+  userQuota: 12
+  totalQuota: 1200
+  # TURN over TLS: a kubernetes.io/tls Secret (cert-manager) whose names
+  # include the server addresses.
+  tls:
+    enabled: false
+    secretName: ""
+  # The Prometheus exporter (port 9641); needs a coturn built with it.
+  metrics:
+    enabled: false
+  service:
+    type: LoadBalancer
+    annotations: {}
+  resources:
+    requests: { cpu: 50m, memory: 32Mi }
+    limits: { memory: 256Mi }
+  nodeSelector: {}
+  tolerations: []
+  podAnnotations: {}
+
 ui:
   replicas: 1
   image:
@@ -289,6 +371,28 @@ ui:
       nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
       nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
       nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+  nodeSelector: {}
+  tolerations: []
+
+# The fax engine (docs/fax.md): a separate deployment with spandsp and
+# poppler, reachable only inside the cluster. Off by default; on, hello-sip and
+# hello-control are told where it is (HELLO_FAX_ENABLED, HELLO_FAX_ADDR).
+fax:
+  enabled: false
+  replicas: 1
+  image:
+    name: hello-fax
+    tag: ""
+  # The UDP range a fax session's media port is drawn from, on the pod.
+  rtpPortMin: 40000
+  rtpPortMax: 40999
+  # A Secret holding the key faxToken: the bearer token between hello-sip,
+  # hello-control and hello-fax. Empty: no token (rely on a network policy).
+  tokenSecret: ""
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  extraEnv: []
   nodeSelector: {}
   tolerations: []
 

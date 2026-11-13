@@ -6,9 +6,13 @@ import {
   listDevices,
   listExtensions,
   SIP_USERNAME_PATTERN,
+  SRTP_KEY_EXCHANGES,
+  SRTP_POLICIES,
   updateDevice,
   type Device,
   type Extension,
+  type SrtpKeyExchange,
+  type SrtpPolicy,
 } from "../api";
 import {
   bindingsOf,
@@ -58,9 +62,28 @@ type Pending = { kind: "rotate" | "delete"; device: Device } | null;
 
 /** Drop the secret from a create/rotate response before keeping the device. */
 function withoutSecret(issued: IssuedDevice): Device {
-  const { id, extensionId, sipUsername, enabled, createdAt, updatedAt } =
-    issued;
-  return { id, extensionId, sipUsername, enabled, createdAt, updatedAt };
+  const {
+    id,
+    extensionId,
+    sipUsername,
+    enabled,
+    srtp,
+    srtpKeyExchange,
+    mediaIce,
+    createdAt,
+    updatedAt,
+  } = issued;
+  return {
+    id,
+    extensionId,
+    sipUsername,
+    enabled,
+    srtp,
+    srtpKeyExchange,
+    mediaIce,
+    createdAt,
+    updatedAt,
+  };
 }
 
 const plural = (n: number, one: string, many: string) =>
@@ -112,6 +135,44 @@ export function Devices() {
   const extensionOf = (d: Device) =>
     extensions.find((e) => String(e.id) === String(d.extensionId));
 
+  async function onKeyExchange(device: Device, kex: SrtpKeyExchange) {
+    setActionError(null);
+    try {
+      replaceDevice(await updateDevice(device.id, { srtpKeyExchange: kex }));
+      toast.show(
+        `${device.sipUsername}: key exchange ${kex === "dtls" ? "DTLS-SRTP" : "SDES"}.`,
+      );
+    } catch (err) {
+      setActionError(
+        `Could not update ${device.sipUsername}: ${errorMessage(err)}`,
+      );
+    }
+  }
+
+  async function onIce(device: Device, mediaIce: boolean) {
+    setActionError(null);
+    try {
+      replaceDevice(await updateDevice(device.id, { mediaIce }));
+      toast.show(`${device.sipUsername}: ICE ${mediaIce ? "on" : "off"}.`);
+    } catch (err) {
+      setActionError(
+        `Could not update ${device.sipUsername}: ${errorMessage(err)}`,
+      );
+    }
+  }
+
+  async function onSrtp(device: Device, srtp: SrtpPolicy) {
+    setActionError(null);
+    try {
+      replaceDevice(await updateDevice(device.id, { srtp }));
+      toast.show(`${device.sipUsername}: media encryption ${srtp}.`);
+    } catch (err) {
+      setActionError(
+        `Could not update ${device.sipUsername}: ${errorMessage(err)}`,
+      );
+    }
+  }
+
   async function onToggle(device: Device, enabled: boolean) {
     setActionError(null);
     try {
@@ -146,7 +207,23 @@ export function Devices() {
   }
 
   const columns: TableColumn<Device>[] = [
-    { key: "sipUsername", label: "SIP username", mono: true },
+    {
+      key: "sipUsername",
+      label: "SIP username",
+      mono: true,
+      render: (d) =>
+        d.kind === "web" || d.kind === "mobile" ? (
+          <>
+            {d.sipUsername}
+            <small>
+              {d.kind === "web" ? "Web" : "Mobile"} device
+              {d.label ? `: ${d.label}` : ""}
+            </small>
+          </>
+        ) : (
+          d.sipUsername
+        ),
+    },
     {
       key: "extension",
       label: "Extension",
@@ -191,6 +268,59 @@ export function Devices() {
       ),
     },
     {
+      key: "srtp",
+      label: "Media encryption",
+      render: (d) => {
+        const policy = d.srtp ?? "optional";
+        const label =
+          SRTP_POLICIES.find((p) => p.value === policy)?.label ?? policy;
+        return (
+          <Can fallback={label}>
+            <Select
+              aria-label={`Media encryption: ${d.sipUsername}`}
+              value={policy}
+              options={SRTP_POLICIES}
+              onChange={(e) => void onSrtp(d, e.target.value as SrtpPolicy)}
+            />
+          </Can>
+        );
+      },
+    },
+    {
+      key: "srtpKeyExchange",
+      label: "Key exchange",
+      render: (d) => {
+        const kex = d.srtpKeyExchange ?? "sdes";
+        const label =
+          SRTP_KEY_EXCHANGES.find((k) => k.value === kex)?.label ?? kex;
+        return (
+          <Can fallback={label}>
+            <Select
+              aria-label={`Key exchange: ${d.sipUsername}`}
+              value={kex}
+              options={SRTP_KEY_EXCHANGES}
+              onChange={(e) =>
+                void onKeyExchange(d, e.target.value as SrtpKeyExchange)
+              }
+            />
+          </Can>
+        );
+      },
+    },
+    {
+      key: "mediaIce",
+      label: "ICE",
+      render: (d) => (
+        <Can fallback={d.mediaIce ? "On" : "Off"}>
+          <Switch
+            aria-label={`ICE: ${d.sipUsername}`}
+            checked={d.mediaIce ?? false}
+            onChange={(e) => void onIce(d, e.target.checked)}
+          />
+        </Can>
+      ),
+    },
+    {
       key: "enabled",
       label: "Enabled",
       render: (d) => (
@@ -210,15 +340,17 @@ export function Devices() {
       render: (d) => (
         <div className="dir-actions">
           <Can min="admin">
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="key-round"
-              aria-label={`Rotate secret for ${d.sipUsername}`}
-              onClick={() => setPending({ kind: "rotate", device: d })}
-            >
-              Rotate secret
-            </Button>
+            {(d.kind === undefined || d.kind === "desk") && (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="key-round"
+                aria-label={`Rotate secret for ${d.sipUsername}`}
+                onClick={() => setPending({ kind: "rotate", device: d })}
+              >
+                Rotate secret
+              </Button>
+            )}
           </Can>
           <Can>
             <IconButton

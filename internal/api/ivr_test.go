@@ -40,7 +40,7 @@ func TestValidateIVRMenu(t *testing.T) {
 			in.Options = append(in.Options, store.IVROption{Digit: "1", Kind: "hangup"})
 		},
 		"bad digit":          func(in *store.IVRMenuInput) { in.Options[0].Digit = "12" },
-		"bad kind":           func(in *store.IVRMenuInput) { in.Options[0].Kind = "fax" },
+		"bad kind":           func(in *store.IVRMenuInput) { in.Options[0].Kind = "teleport" },
 		"hangup with target": func(in *store.IVRMenuInput) { in.Options[0] = store.IVROption{Digit: "1", Kind: "hangup", Target: "1"} },
 		"extension shape":    func(in *store.IVRMenuInput) { in.Options[0].Target = "x" },
 		"page code shape":    func(in *store.IVRMenuInput) { in.Options[1].Target = "60" },

@@ -1,0 +1,97 @@
+{{- if .Values.fax.enabled -}}
+{{- $full := include "hello.fullname" . -}}
+{{- $ctx := dict "root" . "component" "fax" -}}
+{{- $fax := .Values.fax -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}-fax
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $fax.replicas }}
+  selector:
+    matchLabels:
+      {{- include "hello.selectorLabels" $ctx | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "hello.selectorLabels" $ctx | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $full }}
+      automountServiceAccountToken: false
+      {{- include "hello.pullSecrets" . | nindent 6 }}
+      {{- with $fax.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $fax.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: hello-fax
+          image: {{ include "hello.image" (dict "root" . "name" $fax.image.name "tag" $fax.image.tag) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: ["serve"]
+          env:
+            - name: HELLO_FAX_LISTEN
+              value: ":8083"
+            - name: HELLO_FAX_RTP_PORT_MIN
+              value: {{ $fax.rtpPortMin | quote }}
+            - name: HELLO_FAX_RTP_PORT_MAX
+              value: {{ $fax.rtpPortMax | quote }}
+            - name: HELLO_FAX_MEDIA_HOST
+              # hello-sip sends media straight to the pod, not through the
+              # Service: replies from a pod only reach a relay that expects
+              # the pod's own address.
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            {{- if $fax.tokenSecret }}
+            {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_FAX_TOKEN" "key" "faxToken" "secret" $fax.tokenSecret) | nindent 12 }}
+            {{- end }}
+            {{- with $fax.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8083
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            {{- toYaml $fax.resources | nindent 12 }}
+          securityContext:
+            {{- include "hello.containerSecurity" . | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-fax
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  # Cluster-internal control API; media goes to pod addresses (UDP
+  # {{ $fax.rtpPortMin }}-{{ $fax.rtpPortMax }}), which are never exposed outside the cluster.
+  type: ClusterIP
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 8083
+      targetPort: http
+{{- end }}

@@ -67,8 +67,8 @@ func (s *Snapshot) WithRouting(r *RoutingState) *Snapshot {
 // silently, and never logged itself (only its ID and reason are).
 func loadTrunks(ctx context.Context, db Querier, box *secret.Box, log *slog.Logger, cfg *routing.Config, bad map[int64]string) error {
 	rows, err := db.Query(ctx, `SELECT id, name, mode, username, password_enc, realm, from_domain, register_expires,
-		options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging,
-		reject_anonymous, allowed_country_codes, unknown_caller_action, reject_code, session_timers FROM trunks ORDER BY id`)
+		options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging, geolocation,
+		anonymous_policy, asserted_identity, identity_header, reject_anonymous, allowed_country_codes, unknown_caller_action, reject_code, srtp, session_timers, fax_mode FROM trunks ORDER BY id`)
 	if err != nil {
 		return fmt.Errorf("snapshot: trunks: %w", err)
 	}
@@ -84,9 +84,9 @@ func loadTrunks(ctx context.Context, db Querier, box *secret.Box, log *slog.Logg
 			rejectCode int32
 		)
 		if err := rows.Scan(&t.ID, &t.Name, &t.Mode, &t.Username, &sealed, &t.Realm, &t.FromDomain, &reg,
-			&opts, &t.SourceCIDRs, &maxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging,
-			&t.CallerPolicy.RejectAnonymous, &t.CallerPolicy.AllowedCountryCodes, &t.CallerPolicy.UnknownCallerAction,
-			&rejectCode, &t.SessionTimers); err != nil {
+			&opts, &t.SourceCIDRs, &maxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging, &t.Geolocation,
+			&t.AnonymousPolicy, &t.AssertedIdentity, &t.IdentityHeader, &t.CallerPolicy.RejectAnonymous, &t.CallerPolicy.AllowedCountryCodes, &t.CallerPolicy.UnknownCallerAction,
+			&rejectCode, &t.SRTP, &t.SessionTimers, &t.FaxMode); err != nil {
 			return fmt.Errorf("snapshot: scan trunk: %w", err)
 		}
 		t.RegisterExpires = time.Duration(reg) * time.Second
@@ -249,7 +249,8 @@ func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Log
 		UNION ALL SELECT 'announcement', name FROM announcements
 		UNION ALL SELECT 'paging', code FROM paging_groups
 		UNION ALL SELECT 'voicemail', e.number FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id
-		UNION ALL SELECT 'voicemail_group', number FROM voicemail_groups`)
+		UNION ALL SELECT 'voicemail_group', number FROM voicemail_groups
+		UNION ALL SELECT 'fax', name FROM fax_destinations`)
 	if err != nil {
 		return cfg, nil, fmt.Errorf("snapshot: named destinations: %w", err)
 	}

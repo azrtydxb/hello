@@ -55,6 +55,15 @@ func (s *server) getFlowGraph(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, `include must be "devices"`)
 		return
 	}
+	var summary bool
+	switch f := q.Get("fields"); f {
+	case "", "all":
+	case "summary":
+		summary = true
+	default:
+		badRequest(w, `fields must be "all" or "summary"`)
+		return
+	}
 	for range flowReadAttempts {
 		before, err := s.Store.ConfigRevision(r.Context())
 		if err != nil {
@@ -88,6 +97,9 @@ func (s *server) getFlowGraph(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusRequestEntityTooLarge, "graph_too_large",
 				"the configuration has too many nodes for one graph; use scope=closure:<nodeId>")
 			return
+		}
+		if summary {
+			g = summarize(g)
 		}
 		writeJSON(w, http.StatusOK, g)
 		return
@@ -159,7 +171,7 @@ func (s *server) flowInput(ctx context.Context, devices bool) (flow.Input, error
 		return in, err
 	}
 	if devices {
-		if in.Devices, err = st.ListDevices(ctx); err != nil {
+		if in.Devices, err = st.ListDevices(ctx, ""); err != nil {
 			return in, err
 		}
 		if s.ProvStore != nil {
@@ -169,4 +181,23 @@ func (s *server) flowInput(ctx context.Context, devices bool) (flow.Input, error
 		}
 	}
 	return in, nil
+}
+
+// summarize is the graph with fields=summary (spec flow-canvas S-17): each
+// node's summary emptied and each edge's details dropped, so that an AI tool
+// result of a whole small PBX stays under its 16 KiB limit. Ids, kinds,
+// labels, versions, ports and owners stay.
+func summarize(g flow.Graph) flow.Graph {
+	nodes := make([]flow.Node, len(g.Nodes))
+	for i, n := range g.Nodes {
+		n.Summary = map[string]any{}
+		nodes[i] = n
+	}
+	edges := make([]flow.Edge, len(g.Edges))
+	for i, e := range g.Edges {
+		e.Data = nil
+		edges[i] = e
+	}
+	g.Nodes, g.Edges = nodes, edges
+	return g
 }

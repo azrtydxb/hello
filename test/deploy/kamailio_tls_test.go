@@ -164,3 +164,39 @@ func TestChartProvisioningTLSServer(t *testing.T) {
 		t.Errorf("HELLO_PROV_SIP_TLS_SERVER = %q, want 192.0.2.9:5061", got)
 	}
 }
+
+// TestChartProvisioningBackupAndSRV fails if the backup registrars or the SRV
+// name of the provisioning values do not reach hello-control, or are set
+// without being asked for (phone-feature-parity S-20).
+func TestChartProvisioningBackupAndSRV(t *testing.T) {
+	env := func(objs []object) map[string]string {
+		out := map[string]string{}
+		for _, d := range objs {
+			if str(d["kind"]) != "Deployment" || !strings.Contains(str(dig(d, "metadata", "name")), "control") {
+				continue
+			}
+			for _, c := range list(dig(podSpec(d), "containers")) {
+				for _, e := range list(dig(c, "env")) {
+					out[str(dig(e, "name"))] = str(dig(e, "value"))
+				}
+			}
+		}
+		return out
+	}
+	base := []string{"-f", valuesFile(t, "values-eval.yaml"), "--set", "control.provisioning.publicUrl=https://p.example.com"}
+	off := env(render(t, base...))
+	for _, k := range []string{"HELLO_PROV_SIP_BACKUP_SERVERS", "HELLO_PROV_SIP_SRV"} {
+		if _, ok := off[k]; ok {
+			t.Errorf("%s is set by default", k)
+		}
+	}
+	on := env(render(t, append(base,
+		"--set", "control.provisioning.sipBackupServers=192.0.2.21:5060\\,192.0.2.22:5060",
+		"--set", "control.provisioning.sipSrv=sip.hello.example.com")...))
+	if got := on["HELLO_PROV_SIP_BACKUP_SERVERS"]; got != "192.0.2.21:5060,192.0.2.22:5060" {
+		t.Errorf("HELLO_PROV_SIP_BACKUP_SERVERS = %q", got)
+	}
+	if got := on["HELLO_PROV_SIP_SRV"]; got != "sip.hello.example.com" {
+		t.Errorf("HELLO_PROV_SIP_SRV = %q", got)
+	}
+}

@@ -4,36 +4,70 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 ## phone-feature-parity
 
-| #   | Item                                                                          | Status                 |
-| --- | ----------------------------------------------------------------------------- | ---------------------- |
-| 9   | Session timers, CRLF keep-alive, dead-media teardown, roaming relearn (S-9)   | done (#203)            |
-| 9b  | Session timers on parked/picked-up/transferred dialogs and trunk legs         | done (#228)            |
-| 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                          | done (#204)            |
-| 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | done (#226)            |
-| 12  | Tone library (S-43)                                                           | done (#238)            |
-| 13  | Door station extension kind, Door group (S-45, S-46)                          | done (#225)            |
-| 14  | Door-open DTMF `*50` (S-47)                                                   | todo (after 13)        |
-| 15  | Setting overrides and WP extras (S-12)                                        | todo                   |
-| 16  | Doorbell webhook (S-48)                                                       | todo (after 13)        |
-| 17  | Door video preview (S-49)                                                     | todo (code), hw (test) |
-| 18  | vCard phonebook slot (S-31), partial                                          | todo                   |
-| 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)    | done (#232)            |
-| 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                      | todo                   |
-| 21  | Multiple lines and account sharing (S-10, S-11)                               | todo                   |
-| 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial      | todo                   |
-| 23  | SIP over TLS and sips (S-14)                                                  | done (#202)            |
-| 24  | SRTP SDES (S-15)                                                              | todo (after 23)        |
-| 25  | DTLS-SRTP and ICE-lite (S-16)                                                 | todo (after 24)        |
-| 26  | PRACK/100rel, anonymous outbound (Privacy), partial                           | todo                   |
-| 27  | Provisioning hardening (S-22, S-32), TR-069 off etc. (explicitly in spec)     | todo                   |
-| 28  | DSCP marking (S-21)                                                           | done (#231)            |
-| 29  | Phone backup/secondary servers (S-20), partial                                | todo                   |
-| 30  | HELD, Geolocation, locations, callback tag, alarm `*55` (S-28, S-29), partial | todo                   |
-| 31  | Wi-Fi profiles and roaming (S-23, S-24)                                       | todo                   |
-| 34  | Presence: reg event, PUBLISH, eventlist (S-35)                                | todo                   |
-| 35  | RTCP-XR collector (S-36)                                                      | todo                   |
-| 36  | Syslog sink (S-27)                                                            | done (#235)            |
-| 37  | SCEP and 802.1X (S-25)                                                        | todo                   |
+| #   | Item                                                                          | Status              |
+| --- | ----------------------------------------------------------------------------- | ------------------- |
+| 9   | Session timers, CRLF keep-alive, dead-media teardown, roaming relearn (S-9)   | done (#203)         |
+| 9b  | Session timers on parked/picked-up/transferred dialogs and trunk legs         | done (#228)         |
+| 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                          | done (#204)         |
+| 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | done (#226)         |
+| 12  | Tone library (S-43)                                                           | done (#238)         |
+| 13  | Door station extension kind, Door group (S-45, S-46)                          | done (#225)         |
+| 14  | Door-open DTMF `*50` (S-47)                                                   | wip (#283)          |
+| 15  | Setting overrides and WP extras (S-12)                                        | todo                |
+| 16  | Doorbell webhook (S-48)                                                       | wip (#284)          |
+| 17  | Door video preview (S-49)                                                     | wip (#285)          |
+| 18  | vCard phonebook slot (S-31), partial                                          | todo                |
+| 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)    | done (#232)         |
+| 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                      | todo                |
+| 21  | Multiple lines and account sharing (S-10, S-11)                               | wip (#270)          |
+| 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial      | todo                |
+| 23  | SIP over TLS and sips (S-14)                                                  | done (#202)         |
+| 24  | SRTP SDES (S-15)                                                              | wip (#266)          |
+| 25  | DTLS-SRTP and ICE-lite (S-16)                                                 | wip (#276)          |
+| 26  | PRACK/100rel, anonymous outbound (Privacy), partial                           | todo                |
+| 27  | Provisioning hardening (S-22, S-32), TR-069 off etc. (explicitly in spec)     | todo                |
+| 28  | DSCP marking (S-21)                                                           | done (#231)         |
+| 29  | Phone backup/secondary servers (S-20), partial                                | todo                |
+| 30  | HELD, Geolocation, locations, callback tag, alarm `*55` (S-28, S-29), partial | wip (#275)          |
+| 31  | Wi-Fi profiles and roaming (S-23, S-24)                                       | wip (#278)          |
+| 34  | Presence: reg event, PUBLISH, eventlist (S-35)                                | todo                |
+| 35  | RTCP-XR collector (S-36)                                                      | todo                |
+| 36  | Syslog sink (S-27)                                                            | wip (parity-syslog) |
+| 37  | SCEP and 802.1X (S-25)                                                        | wip (#279)          |
+
+| #   | Item                                                                        | Status                 |
+| --- | --------------------------------------------------------------------------- | ---------------------- |
+| 9   | Session timers, CRLF keep-alive, dead-media teardown, roaming relearn (S-9) | done (#203)            |
+| 9b  | Session timers on parked/picked-up/transferred dialogs and trunk legs       | done (#228)            |
+| 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                        | done (#204)            |
+| 11  | Ring map provisioning, Ringing page (S-42, S-44)                            | done (#226)            |
+| 12  | Tone library (S-43)                                                         | done (#238)            |
+| 13  | Door station extension kind, Door group (S-45, S-46)                        | done (#225)            |
+| 14  | Door-open DTMF `*50` (S-47)                                                 | todo (after 13)        |
+| 15  | Setting overrides and WP extras (S-12)                                      | wip (#259)             |
+| 16  | Doorbell webhook (S-48)                                                     | todo (after 13)        |
+| 17  | Door video preview (S-49)                                                   | todo (code), hw (test) |
+| 18  | vCard phonebook slot (S-31), partial                                        | wip (#261)             |
+| 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)  | done (#232)            |
+| 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                    | todo                   |
+| 21  | Multiple lines and account sharing (S-10, S-11)                             | todo                   |
+| 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial    | wip (#258)             |
+| 23  | SIP over TLS and sips (S-14)                                                | done (#202)            |
+| 24  | SRTP SDES (S-15)                                                            | todo (after 23)        |
+| 25  | DTLS-SRTP and ICE-lite (S-16)                                               | todo (after 24)        |
+| 26  | PRACK/100rel, anonymous outbound (Privacy), partial                         | todo                   |
+| 27  | Provisioning hardening (S-22, S-32), TR-069 off etc. (explicitly in spec)   | wip (#263)             |
+
+| 26 | PRACK/100rel, anonymous outbound (Privacy), partial | wip (#265) |
+| 27 | Provisioning hardening (S-22, S-32), TR-069 off etc. (explicitly in spec) | todo |
+| 28 | DSCP marking (S-21) | done (#231) |
+| 29 | Phone backup/secondary servers (S-20), partial | wip (#262) |
+| 30 | HELD, Geolocation, locations, callback tag, alarm `*55` (S-28, S-29), partial | todo |
+| 31 | Wi-Fi profiles and roaming (S-23, S-24) | todo |
+| 34 | Presence: reg event, PUBLISH, eventlist (S-35) | wip (#268) |
+| 35 | RTCP-XR collector (S-36) | todo |
+| 36 | Syslog sink (S-27) | done (#235) |
+| 37 | SCEP and 802.1X (S-25) | todo |
 
 ## integrations
 
@@ -51,39 +85,39 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P10 | SCIM 2.0                                       | todo        |
 | P11 | OIDC SSO, LDAP bind login                      | todo        |
 | P12 | Auto-provisioning extensions from a range      | todo        |
-| P13 | Salesforce Open CTI                            | todo        |
-| P14 | Pipedrive                                      | todo        |
-| P15 | Zoho CRM                                       | todo        |
-| P16 | Zendesk, Freshdesk                             | todo        |
-| P17 | Slack, n8n, Make                               | todo        |
-| P18 | Outlook/Google contacts lookup, calendar DND   | todo        |
-| P19 | Dynamics 365 CIF                               | todo        |
-| P20 | ConnectWise, Autotask, HaloPSA, Clio           | todo        |
-| P21 | Odoo, Bitrix24                                 | todo        |
+| P13 | Salesforce Open CTI                            | wip (#331)  |
+| P14 | Pipedrive                                      | wip (#329)  |
+| P15 | Zoho CRM                                       | wip (#329)  |
+| P16 | Zendesk, Freshdesk                             | wip (#328)  |
+| P17 | Slack, n8n, Make                               | wip (#335)  |
+| P18 | Outlook/Google contacts lookup, calendar DND   | wip (#335)  |
+| P19 | Dynamics 365 CIF                               | wip (#331)  |
+| P20 | ConnectWise, Autotask, HaloPSA, Clio           | wip (#328)  |
+| P21 | Odoo, Bitrix24                                 | wip (#329)  |
 | P22 | Teams Direct Routing guide (shared with WR 13) | todo        |
 | #   | Item                                           | Status      |
 | --- | ---------------------------------------------- | ----------- |
 | P1  | Call events: stream, integration_events, SSE   | done (#205) |
 | P2  | Webhooks: signing, retries, DLQ                | wip (#222)  |
 | P3  | Click-to-call: originate API, /dial, tel:      | wip (#234)  |
-| P4  | Recording links and lookup API                 | todo        |
+| P4  | Recording links and lookup API                 | wip (#281)  |
 | P5  | Browser extension (MV3), fixed signing key     | todo        |
-| P6  | HubSpot and internal/crm framework             | todo        |
+| P6  | HubSpot and internal/crm framework             | wip (#289)  |
 | P7  | Zapier                                         | todo        |
 | P8  | Directory engine, AD/LDAP                      | todo        |
 | P9  | Google Workspace and Entra connectors          | todo        |
 | P10 | SCIM 2.0                                       | todo        |
 | P11 | OIDC SSO, LDAP bind login                      | todo        |
 | P12 | Auto-provisioning extensions from a range      | todo        |
-| P13 | Salesforce Open CTI                            | todo        |
-| P14 | Pipedrive                                      | todo        |
-| P15 | Zoho CRM                                       | todo        |
-| P16 | Zendesk, Freshdesk                             | todo        |
-| P17 | Slack, n8n, Make                               | todo        |
-| P18 | Outlook/Google contacts lookup, calendar DND   | todo        |
-| P19 | Dynamics 365 CIF                               | todo        |
-| P20 | ConnectWise, Autotask, HaloPSA, Clio           | todo        |
-| P21 | Odoo, Bitrix24                                 | todo        |
+| P13 | Salesforce Open CTI                            | wip (#331)  |
+| P14 | Pipedrive                                      | wip (#329)  |
+| P15 | Zoho CRM                                       | wip (#329)  |
+| P16 | Zendesk, Freshdesk                             | wip (#328)  |
+| P17 | Slack, n8n, Make                               | wip (#335)  |
+| P18 | Outlook/Google contacts lookup, calendar DND   | wip (#335)  |
+| P19 | Dynamics 365 CIF                               | wip (#331)  |
+| P20 | ConnectWise, Autotask, HaloPSA, Clio           | wip (#328)  |
+| P21 | Odoo, Bitrix24                                 | wip (#329)  |
 | P22 | Teams Direct Routing guide (shared with WR 13) | todo        |
 
 ## messaging-channels
@@ -104,10 +138,10 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | #   | Item                                        | Status                       |
 | --- | ------------------------------------------- | ---------------------------- |
-| 1   | Media foundation (pion)                     | blocked (parity 23-25)       |
+| 1   | Media foundation (pion)                     | wip (#324)                   |
 | 2   | WSS on Kamailio                             | blocked (parity 23)          |
-| 3   | Web devices and credentials                 | todo                         |
-| 4   | coturn, ICE servers                         | todo                         |
+| 3   | Web devices and credentials                 | wip (#282)                   |
+| 4   | coturn, ICE servers                         | wip (#282)                   |
 | 5   | Web softphone, audio                        | blocked (1-4)                |
 | 6   | Web video                                   | blocked (5)                  |
 | 6b  | Video recording                             | blocked (6)                  |
@@ -125,8 +159,8 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P3  | Batch backend                                             | done (#214)             |
 | P4  | Editing UI                                                | done (#227)             |
 | P5  | traceFlow, trace mode                                     | done (#224)             |
-| P6  | AI on the canvas                                          | todo (after P4)         |
-| P7  | New node types: batch ops, trace, override badge          | todo (after P5)         |
+| P6  | AI on the canvas                                          | wip (#280)              |
+| P7  | New node types: batch ops, trace, override badge          | wip (#277)              |
 | D3  | Every call output accepts every target kind               | done (#196)             |
 | -   | Routes form `conference` destination chooser              | wip (routes-conference) |
 | -   | Canvas usability: Add everything, Arrange, open on create | wip (#233)              |
@@ -140,20 +174,20 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 ## Competitor gaps (spec pbx-gaps, #199)
 
-| Item                                          | Status                |
-| --------------------------------------------- | --------------------- |
-| Backup and restore                            | wip (#219, A2)        |
-| Follow-me                                     | todo (spec done #199) |
-| Blocklist, anonymous reject, country limits   | done (#210, A1)       |
-| Queue callback                                | done (#237)           |
-| 2FA                                           | done (#209)           |
-| Dial-by-name                                  | done (#229, B3)       |
-| Voicemail groups                              | done (#220, A6)       |
-| Fax                                           | todo (spec done #199) |
-| Boss/secretary                                | done (#236, B2)       |
-| Multi-language prompts (Dutch option per box) | done (#208, A5)       |
-| Codec in call history                         | done (#206)           |
-| Phone LDAP directory                          | wip (#223, A7)        |
+| Item                                          | Status          |
+| --------------------------------------------- | --------------- |
+| Backup and restore                            | wip (#219, A2)  |
+| Follow-me                                     | wip (#272)      |
+| Blocklist, anonymous reject, country limits   | done (#210, A1) |
+| Queue callback                                | done (#237)     |
+| 2FA                                           | done (#209)     |
+| Dial-by-name                                  | done (#229, B3) |
+| Voicemail groups                              | done (#220, A6) |
+| Fax                                           | wip (#273)      |
+| Boss/secretary                                | done (#236, B2) |
+| Multi-language prompts (Dutch option per box) | done (#208, A5) |
+| Codec in call history                         | done (#206)     |
+| Phone LDAP directory                          | wip (#223, A7)  |
 
 ## Other
 
@@ -163,7 +197,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
 | Transfer-to-voicemail phone key                                                                           | done (#200)           |
-| Vendor template keys left out (Poly caps/pickup, record keys, Fanvil CA, Snom/Yealink EXP, pickup values) | todo                  |
+| Vendor template keys left out (Poly caps/pickup, record keys, Fanvil CA, Snom/Yealink EXP, pickup values) | wip (#264)            |
 | Competitor report into the repo (docs)                                                                    | done (#199)           |
 | Voicemail box after an extension forward stage uses the forwarded target                                  | done (#213)           |
 | Ring groups form: `announcement` failure kind chooser                                                     | done (#213)           |
@@ -188,3 +222,5 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - Parity lab items 1-7 and 14
 - Hello MCP "Connected apps" end-to-end (after #189)
 - Real-account lab lists for integrations, messaging, clients (after those phases)
+- Salesforce (Developer Edition) and Dynamics 365 (trial) live checks: docs/crm.md, "Lab checklist: Salesforce" and "Lab checklist: Dynamics 365"
+- CRM connector live checks on real accounts: Pipedrive, Zoho CRM, Odoo, Bitrix24 (docs/crm.md lab checklists)

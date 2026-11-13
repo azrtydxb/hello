@@ -1,0 +1,97 @@
+/* AI on the canvas (spec flow-canvas S-19): the panel and the proposal
+   overlay. Created and changed nodes reuse the draft styles; these add the
+   AI outline and the struck-out look of what the proposal deletes. */
+
+.flow-ai {
+  display: flex;
+  flex-direction: column;
+  gap: var(--az-space-3, 12px);
+}
+
+.flow-ai__quick,
+.flow-ai__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--az-space-2, 8px);
+  align-items: center;
+}
+
+.flow-ai__composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--az-space-2, 8px);
+}
+
+.flow-ai__composer textarea {
+  min-height: 5rem;
+  resize: vertical;
+  font: inherit;
+  padding: var(--az-space-2, 8px);
+  border: 1px solid var(--az-border, #ccc);
+  border-radius: var(--az-radius-sm, 6px);
+  background: var(--az-surface, transparent);
+  color: inherit;
+}
+
+.flow-ai__log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--az-space-3, 12px);
+}
+
+.flow-ai__q {
+  font-weight: 600;
+}
+
+.flow-ai__step {
+  color: var(--az-text-muted, #666);
+  font-style: italic;
+}
+
+.flow-ai__ops,
+.flow-ai__proposals {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.flow-ai__proposals {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--az-space-2, 8px);
+}
+
+.flow-ai__proposals li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--az-space-2, 8px);
+  align-items: center;
+}
+
+.flow-stage .flow-node--ai-added .flow-node,
+.flow-stage .flow-node--ai-changed .flow-node {
+  outline: 2px dashed var(--az-accent, #6d5bd0);
+  outline-offset: 3px;
+}
+
+.flow-stage .flow-node--ai-removed .flow-node {
+  opacity: 0.45;
+  outline: 2px dashed var(--az-bad, #c62828);
+  outline-offset: 3px;
+  text-decoration: line-through;
+}
+
+.flow-stage .flow-edge--ai-added path {
+  stroke: var(--az-good, #2e7d32);
+  stroke-width: 2.5;
+}
+
+.flow-stage .flow-edge--ai-removed path {
+  stroke: var(--az-bad, #c62828);
+  stroke-dasharray: 6 4;
+  opacity: 0.6;
+}

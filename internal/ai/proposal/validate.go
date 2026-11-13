@@ -79,6 +79,11 @@ func (v *SchemaValidator) Validate(ctx context.Context, ident Identity, d *Draft
 	if len(d.Actions) == 0 || len(d.Actions) > MaxActions {
 		return fmt.Errorf("a proposal has 1 to %d actions, got %d", MaxActions, len(d.Actions))
 	}
+	for _, a := range d.Actions {
+		if a.OperationID == BatchOp && len(d.Actions) > 1 {
+			return errors.New("a proposal with a configuration batch has that one action: put every change into the batch's ops")
+		}
+	}
 	for i := range d.Actions {
 		if err := v.action(ctx, ident, &d.Actions[i]); err != nil {
 			return fmt.Errorf("action %d (%s): %w", i, d.Actions[i].OperationID, err)
@@ -95,6 +100,9 @@ func (v *SchemaValidator) action(ctx context.Context, ident Identity, a *Action)
 	if !ok {
 		return errors.New("the operation is not in the API document")
 	}
+	if op.ID == BatchOp {
+		return v.batch(ctx, ident, a)
+	}
 	if err := checkParams(op, a.PathParams); err != nil {
 		return err
 	}
@@ -105,7 +113,7 @@ func (v *SchemaValidator) action(ctx context.Context, ident Identity, a *Action)
 	if hasCredential(body) {
 		return errors.New("the body sets a credential property; a proposal never carries passwords, PINs or secrets")
 	}
-	a.Before, a.After, a.Destructive, a.References = nil, nil, IsDelete(op.ID), nil
+	a.Before, a.After, a.Destructive, a.References, a.Preview = nil, nil, IsDelete(op.ID), nil, nil
 	if op.Method != http.MethodPost {
 		get, ok := v.gets[op.Path]
 		if !ok {

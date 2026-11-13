@@ -66,3 +66,11 @@ type Session interface {
 	// is safe to call more than once.
 	Close() error
 }
+
+// SecureSession is a Session that can carry SRTP: the SDP exchanges of the
+// call read and drive its key state through Secure. Every session Anchor
+// returns is one.
+type SecureSession interface {
+	Session
+	Secure() *Secure
+}

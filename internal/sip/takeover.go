@@ -53,6 +53,7 @@ type haLeg struct {
 	source       string   // where the endpoint's requests come from
 	sdp          string   // the last SDP on this leg (Hello's side)
 	remoteSDP    string   // the endpoint's own last SDP
+	srtp         string   // "", "savp", "avp" or "dtls": the leg was encrypted
 	uas          bool     // we are the dialog's UAS side (the caller leg)
 	failed       bool     // the takeover re-INVITE got no answer
 
@@ -70,7 +71,7 @@ func haLegFrom(d livestate.DialogLeg, uas bool) *haLeg {
 		localCSeq: d.LocalCSeq, remoteCSeq: d.RemoteCSeq,
 		routes: d.RouteSet, localID: d.LocalIdentity, remoteID: d.RemoteIdentity,
 		remoteTarget: d.RemoteTarget, endpoint: d.Endpoint, source: d.Source,
-		sdp: d.SDP, remoteSDP: d.RemoteSDP, uas: uas,
+		sdp: d.SDP, remoteSDP: d.RemoteSDP, uas: uas, srtp: d.SRTP,
 	}
 }
 
@@ -340,6 +341,8 @@ func (s *Server) takeoverPass(ctx context.Context) {
 	if st, _ := s.state(); st != cluster.Ready {
 		return
 	}
+	s.takeoverMu.Lock()
+	defer s.takeoverMu.Unlock()
 	cctx, cancel := context.WithTimeout(ctx, s.cfg.StateTimeout)
 	members, err := s.deps.Membership.Members(cctx)
 	cancel()
@@ -647,9 +650,21 @@ func haOffer(a, b *haLeg) (media.AudioSDP, bool) {
 
 // haAim points a relay leg at an endpoint's re-INVITE answer.
 func haAim(relay *media.Relay, leg string, body []byte) {
-	if a, err := media.ParseAudioSDP(body); err == nil {
-		relay.SetTarget(leg, udpAddr(a.Address, a.Port))
+	haAimSecure(relay, leg, body, "")
+}
+
+// haAimSecure is haAim for a leg that may be encrypted (srtp is its
+// replicated mode): the answer's crypto goes in before the target, so no
+// packet is sent in the clear, and it reports false when the leg was
+// encrypted and the answer does not carry it on (never a silent downgrade).
+func haAimSecure(relay *media.Relay, leg string, body []byte, srtp string) bool {
+	a, err := media.ParseAudioSDP(body)
+	if err != nil {
+		return srtp == ""
 	}
+	secure := relay.LearnAnswer(leg, a, srtp == "savp")
+	relay.SetTarget(leg, udpAddr(a.Address, a.Port))
+	return srtp == "" || secure
 }
 
 // resStatus is a response's status for a log line ("" on a transport error).
@@ -730,21 +745,17 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	// Re-INVITE both endpoints to the new relay (spec S-4): the offer is
 	// this node's relay port for that leg, in the dialog's replicated
 	// direction (a held call stays held); the answer re-aims it.
-	bodyA := []byte(relaySDPDir(host, relay, legCaller, off, media.SDPDirection([]byte(a.sdp))))
+	bodyA := []byte(haLegSDP(host, relay, legCaller, off, media.SDPDirection([]byte(a.sdp)), a.srtp))
 	s.log.Info("takeover re-INVITE", "call_id", st.CallID, "leg", legCaller, "to", a.destination(s))
 	res, okA := s.haReinvite(a, bodyA)
-	if okA {
-		haAim(relay, legCaller, res.Body())
-	} else {
+	if !okA || !haAimSecure(relay, legCaller, res.Body(), a.srtp) {
 		a.failed = true
 		s.log.Warn("takeover leg failed", "call_id", st.CallID, "leg", legCaller, "res", resStatus(res))
 	}
-	bodyB := []byte(relaySDPDir(host, relay, legCallee, off, media.SDPDirection([]byte(b.sdp))))
+	bodyB := []byte(haLegSDP(host, relay, legCallee, off, media.SDPDirection([]byte(b.sdp)), b.srtp))
 	s.log.Info("takeover re-INVITE", "call_id", st.CallID, "leg", legCallee, "to", b.destination(s))
 	res, okB := s.haReinvite(b, bodyB)
-	if okB {
-		haAim(relay, legCallee, res.Body())
-	} else {
+	if !okB || !haAimSecure(relay, legCallee, res.Body(), b.srtp) {
 		b.failed = true
 		s.log.Warn("takeover leg failed", "call_id", st.CallID, "leg", legCallee, "res", resStatus(res))
 	}
@@ -767,6 +778,7 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 // and replication heartbeats, release the claim, restart recording or the
 // announcement if the call was mid-way through one.
 func (s *Server) haHome(c *call, st livestate.DialogState, from string, restored time.Time) {
+	c.syncSRTP()
 	hom := c.homed()
 	took := restored.Sub(hom.takenAt)
 	gap, since := haGap(st, hom.takenAt, restored)
@@ -921,8 +933,10 @@ func (c *call) haInDialog(hom *homedCall, req *sip.Request, tx sip.ServerTransac
 			c.setHAPeerDir(fromCaller, peerDir)
 		}
 		off = c.midCallOffer(off)
-		ans = off.Build(c.anchorHost, c.legPortFor(fromCaller), mirrorDirection(dir))
-		peer = off.Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir)
+		relay := c.anchorRelay()
+		learnCrypto(relay, legName(fromCaller), off)
+		ans = keepSecurity(relay, legName(fromCaller), off).Build(c.anchorHost, c.legPortFor(fromCaller), mirrorDirection(dir))
+		peer = keepSecurity(relay, legName(!fromCaller), off).Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir)
 		c.holdMOH(fromCaller, held)
 	}
 	res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", ans)
@@ -997,6 +1011,7 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		body      []byte
 		sess      media.Session
 		confMedia *media.Party
+		soloSec   *media.Secure // the SRTP state of the taker's own media object
 	)
 	switch st.State {
 	case haPhaseConference:
@@ -1005,7 +1020,7 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 			s.haAbandon(st, from, "conference media: "+err.Error())
 			return
 		}
-		body, confMedia = ans, party
+		body, confMedia, soloSec = ans, party, party.Secure()
 	case haPhaseVoicemail:
 		anchor := s.voicemailAnchor([]byte(a.remoteSDP))
 		if anchor == nil {
@@ -1018,6 +1033,9 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 			return
 		}
 		body, sess = ans, vs
+		if ss, ok := vs.(media.SecureSession); ok {
+			soloSec = ss.Secure()
+		}
 		c.vmSession = vs
 	default: // an announcement destination
 		off, err := media.ParseAudioSDP([]byte(a.remoteSDP))
@@ -1050,7 +1068,23 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		if m := s.deps.Media; m != nil {
 			m.NoteStart()
 		}
-		body = ansSDP.Build(c.anchorHost, relay.LegPort(legCaller), "sendrecv")
+		body = []byte(haLegSDP(c.anchorHost, relay, legCaller, ansSDP, "sendrecv", a.srtp))
+	}
+	if soloSec != nil && a.srtp != "" {
+		// The caller was encrypted: it is offered the taker's own keys, in
+		// the profile it had, and must answer with crypto.
+		keyed, err := soloSec.ReSDPMode(body, a.srtp)
+		if err != nil {
+			if sess != nil {
+				_ = sess.Close()
+			}
+			if confMedia != nil {
+				confMedia.Close()
+			}
+			s.haAbandon(st, from, "SRTP keys: "+err.Error())
+			return
+		}
+		body = keyed
 	}
 	s.log.Info("takeover re-INVITE", "call_id", st.CallID, "leg", legCaller, "to", a.destination(s), "app", st.State)
 	res, ok := s.haReinvite(a, body)
@@ -1067,11 +1101,39 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		s.m.ZombieCalls.Inc()
 		return
 	}
-	if relay := c.anchorRelay(); relay != nil {
-		haAim(relay, legCaller, res.Body())
+	if relay := c.anchorRelay(); relay != nil && !haAimSecure(relay, legCaller, res.Body(), a.srtp) {
+		// The caller was encrypted and did not answer with crypto: no
+		// silent downgrade to clear media.
+		s.log.Warn("takeover leg failed", "call_id", st.CallID, "leg", legCaller, "reason", "srtp not renegotiated")
+		c.addTrace(fmt.Sprintf("Takeover from %s failed: the caller did not renegotiate SRTP", from))
+		c.end(sip.StatusServiceUnavailable, cdr.SideSystem, "takeover failed: the caller did not renegotiate SRTP", ResultFailed)
+		s.m.ZombieCalls.Inc()
+		return
+	}
+	if soloSec != nil && a.srtp != "" {
+		if ans, err := media.ParseAudioSDP(res.Body()); err == nil {
+			soloSec.LearnSDP(ans)
+		}
+		if _, on := soloSec.Profile(); !on {
+			// No silent downgrade to clear media.
+			if sess != nil {
+				_ = sess.Close()
+			}
+			if confMedia != nil {
+				confMedia.Close()
+			}
+			s.log.Warn("takeover leg failed", "call_id", st.CallID, "leg", legCaller, "reason", "srtp not renegotiated")
+			c.addTrace(fmt.Sprintf("Takeover from %s failed: the caller did not renegotiate SRTP", from))
+			c.end(sip.StatusServiceUnavailable, cdr.SideSystem, "takeover failed: the caller did not renegotiate SRTP", ResultFailed)
+			s.m.ZombieCalls.Inc()
+			return
+		}
+	}
+	if soloSec != nil {
+		c.setSoloSecure(soloSec)
 	}
 	a.mu.Lock()
-	a.sdp = string(body)
+	a.sdp = media.StripCrypto(string(body)) // Hello's own key is never replicated
 	a.mu.Unlock()
 	now := time.Now()
 	took := now.Sub(start)

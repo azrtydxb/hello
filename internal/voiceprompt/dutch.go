@@ -97,4 +97,7 @@ var dutch = map[Key]string{
 	DirectoryMore:        "Dat levert te veel namen op. Toets meer letters in.",
 	DirectoryNone:        "Sorry, er is geen naam gevonden bij deze letters.",
 	DirectoryTooLong:     "Dat zijn te veel letters. Toets minder letters in.",
+	AlarmAnnounce:        "Paniekalarm van {who}.",
+	EmergencyAnnounce:    "Noodoproep van {who}, toestel {ext}.",
+	FollowMeAccept:       "U heeft een doorgeschakeld gesprek. Druk op 1 om het aan te nemen.",
 }
