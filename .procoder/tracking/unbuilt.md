@@ -4,36 +4,36 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 ## phone-feature-parity
 
-| #   | Item                                                                          | Status                 |
-| --- | ----------------------------------------------------------------------------- | ---------------------- |
-| 9   | Session timers, CRLF keep-alive, dead-media teardown, roaming relearn (S-9)   | done (#203)            |
-| 9b  | Session timers on parked/picked-up/transferred dialogs and trunk legs         | done (#228)            |
-| 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                          | done (#204)            |
-| 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | done (#226)            |
-| 12  | Tone library (S-43)                                                           | done (#238)            |
-| 13  | Door station extension kind, Door group (S-45, S-46)                          | done (#225)            |
-| 14  | Door-open DTMF `*50` (S-47)                                                   | todo (after 13)        |
-| 15  | Setting overrides and WP extras (S-12)                                        | todo                   |
-| 16  | Doorbell webhook (S-48)                                                       | wip (#284)             |
-| 17  | Door video preview (S-49)                                                     | todo (code), hw (test) |
-| 18  | vCard phonebook slot (S-31), partial                                          | todo                   |
-| 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)    | done (#232)            |
-| 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                      | todo                   |
-| 21  | Multiple lines and account sharing (S-10, S-11)                               | wip (#270)             |
-| 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial      | todo                   |
-| 23  | SIP over TLS and sips (S-14)                                                  | done (#202)            |
-| 24  | SRTP SDES (S-15)                                                              | wip (#266)             |
-| 25  | DTLS-SRTP and ICE-lite (S-16)                                                 | todo (after 24)        |
-| 26  | PRACK/100rel, anonymous outbound (Privacy), partial                           | todo                   |
-| 27  | Provisioning hardening (S-22, S-32), TR-069 off etc. (explicitly in spec)     | todo                   |
-| 28  | DSCP marking (S-21)                                                           | done (#231)            |
-| 29  | Phone backup/secondary servers (S-20), partial                                | todo                   |
-| 30  | HELD, Geolocation, locations, callback tag, alarm `*55` (S-28, S-29), partial | wip (#275)             |
-| 31  | Wi-Fi profiles and roaming (S-23, S-24)                                       | wip (#278)             |
-| 34  | Presence: reg event, PUBLISH, eventlist (S-35)                                | todo                   |
-| 35  | RTCP-XR collector (S-36)                                                      | todo                   |
-| 36  | Syslog sink (S-27)                                                            | wip (parity-syslog)    |
-| 37  | SCEP and 802.1X (S-25)                                                        | wip (#279)             |
+| #   | Item                                                                          | Status              |
+| --- | ----------------------------------------------------------------------------- | ------------------- |
+| 9   | Session timers, CRLF keep-alive, dead-media teardown, roaming relearn (S-9)   | done (#203)         |
+| 9b  | Session timers on parked/picked-up/transferred dialogs and trunk legs         | done (#228)         |
+| 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                          | done (#204)         |
+| 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | done (#226)         |
+| 12  | Tone library (S-43)                                                           | done (#238)         |
+| 13  | Door station extension kind, Door group (S-45, S-46)                          | done (#225)         |
+| 14  | Door-open DTMF `*50` (S-47)                                                   | wip (#283)          |
+| 15  | Setting overrides and WP extras (S-12)                                        | todo                |
+| 16  | Doorbell webhook (S-48)                                                       | wip (#284)          |
+| 17  | Door video preview (S-49)                                                     | wip (#285)          |
+| 18  | vCard phonebook slot (S-31), partial                                          | todo                |
+| 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)    | done (#232)         |
+| 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                      | todo                |
+| 21  | Multiple lines and account sharing (S-10, S-11)                               | wip (#270)          |
+| 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial      | todo                |
+| 23  | SIP over TLS and sips (S-14)                                                  | done (#202)         |
+| 24  | SRTP SDES (S-15)                                                              | wip (#266)          |
+| 25  | DTLS-SRTP and ICE-lite (S-16)                                                 | wip (#276)          |
+| 26  | PRACK/100rel, anonymous outbound (Privacy), partial                           | todo                |
+| 27  | Provisioning hardening (S-22, S-32), TR-069 off etc. (explicitly in spec)     | todo                |
+| 28  | DSCP marking (S-21)                                                           | done (#231)         |
+| 29  | Phone backup/secondary servers (S-20), partial                                | todo                |
+| 30  | HELD, Geolocation, locations, callback tag, alarm `*55` (S-28, S-29), partial | wip (#275)          |
+| 31  | Wi-Fi profiles and roaming (S-23, S-24)                                       | wip (#278)          |
+| 34  | Presence: reg event, PUBLISH, eventlist (S-35)                                | todo                |
+| 35  | RTCP-XR collector (S-36)                                                      | todo                |
+| 36  | Syslog sink (S-27)                                                            | wip (parity-syslog) |
+| 37  | SCEP and 802.1X (S-25)                                                        | wip (#279)          |
 
 | #   | Item                                                                        | Status                 |
 | --- | --------------------------------------------------------------------------- | ---------------------- |

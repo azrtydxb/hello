@@ -187,7 +187,7 @@ func run(args []string) error {
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
 		SessionExpires: cfg.SessionExpires, SessionMinSE: cfg.SessionMinSE, SessionTimersTrunks: cfg.SessionTimersTrunks, MediaDeadAfter: cfg.MediaDeadAfter,
-		PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
+		DoorHangup: cfg.DoorHangup, PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
 		PageMulticastIface: cfg.PageMulticastIface, PageMulticastTTL: cfg.PageMulticastTTL,
 		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax, Dialing: cfg.Dial,
 		MediaForceAnchor: cfg.MediaForceAnchor, MediaRecordingNotice: cfg.MediaRecordingNotice,
@@ -218,6 +218,7 @@ func run(args []string) error {
 	// into anchored SDP answers, so LAN phones send RTP to a reachable
 	// node address instead of mirroring the offer's own c= line. Empty
 	// keeps the tests'/lab's offer-mirroring behaviour.
+	media.SetFeatures(cfg.MediaDTLS, cfg.MediaICE)
 	if cfg.MediaAnchorHost != "" {
 		srv.SetMediaAnchor(media.NewAnchor(cfg.MediaAnchorHost, log.With("component", "media")))
 	}
