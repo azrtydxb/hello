@@ -703,9 +703,10 @@ type wpCDR struct {
 	Kind    string `json:"kind"`
 	RingTag string `json:"ringTag"`
 	RTCPXR  []struct {
-		Device string   `json:"device"`
-		Final  bool     `json:"final"`
-		MOSLQ  *float64 `json:"mosLq"`
+		Device    string   `json:"device"`
+		Extension string   `json:"extension"`
+		Final     bool     `json:"final"`
+		MOSLQ     *float64 `json:"mosLq"`
 	} `json:"rtcpxr"`
 }
 
@@ -871,7 +872,7 @@ func (e *wpEnv) checkRTCPXR(t *testing.T) {
 				return nil
 			}
 		}
-		return fmt.Errorf("CDR %d carries %d reports, none from %s with MOS-LQ 4.1", e.lastCDR, len(c.RTCPXR), e.wp.User)
+		return fmt.Errorf("CDR %d carries reports %+v, none from %s with MOS-LQ 4.1", e.lastCDR, c.RTCPXR, e.wp.User)
 	})
 	wpProve("rtcpxr")
 }
