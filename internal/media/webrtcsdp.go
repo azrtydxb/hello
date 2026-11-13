@@ -115,7 +115,7 @@ func AnswerWebRTC(offer *SDPSession, audio AudioSDP, local WebRTCLocal) (*SDPSes
 	if len(audio.Codecs) == 0 {
 		return nil, errors.New("media: no codec to answer the WebRTC offer with")
 	}
-	ans := NewSDPSession(local.Hosts[0], uint64(local.Port))
+	ans := NewSDPSession(local.Hosts[0], uint64(local.Port)) //nolint:gosec // validate() made the port positive
 	ans.SetSessionAttr("ice-lite", "")
 	done := false
 	var bundle []string
