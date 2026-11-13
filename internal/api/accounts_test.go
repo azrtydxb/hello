@@ -44,9 +44,12 @@ type acctFake struct {
 	msgs    map[int64]store.VoicemailMessage
 	calls   []store.CDR
 	smtp    store.SMTPSendSettings
-	touched []string // mutations that reached the store, "op id"
+	fm      map[int64]store.FollowMe // follow-me profiles by extension id
+	touched []string                 // mutations that reached the store, "op id"
 	audit   []string
 	nextID  int64
+	// clients are the web devices (accounts_clients_test.go).
+	clients []clientRow
 }
 
 func (f *acctFake) SessionActor(_ context.Context, h []byte) (auth.Actor, error) {
@@ -159,6 +162,12 @@ func (f *acctFake) UpdateProfile(_ context.Context, _ string, id int64, c store.
 	}
 	if c.DeskphoneDelivery != nil {
 		u.DeskphoneDelivery = *c.DeskphoneDelivery
+	}
+	if c.RingWeb != nil {
+		u.RingWeb = *c.RingWeb
+	}
+	if c.RingMobile != nil {
+		u.RingMobile = *c.RingMobile
 	}
 	f.mu.Unlock()
 	return f.GetUser(context.Background(), id)
@@ -276,6 +285,40 @@ func (f *acctFake) UserExtension(_ context.Context, uid, id int64) (store.Extens
 		return store.Extension{}, store.ErrNotFound
 	}
 	return *f.exts[id], nil
+}
+
+func (f *acctFake) GetFollowMe(_ context.Context, id int64) (store.FollowMe, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e, ok := f.exts[id]
+	if !ok {
+		return store.FollowMe{}, store.ErrNotFound
+	}
+	if p, ok := f.fm[id]; ok {
+		return p, nil
+	}
+	p := store.DefaultFollowMe()
+	p.ExtensionID, p.Number = id, e.Number
+	return p, nil
+}
+
+func (f *acctFake) PutFollowMe(_ context.Context, _ string, id int64, in store.FollowMeInput) (store.FollowMe, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e, ok := f.exts[id]
+	if !ok {
+		return store.FollowMe{}, store.ErrNotFound
+	}
+	f.touched = append(f.touched, "follow-me "+strconv.FormatInt(id, 10))
+	if f.fm == nil {
+		f.fm = map[int64]store.FollowMe{}
+	}
+	p := store.FollowMe{
+		ExtensionID: id, Number: e.Number, Enabled: in.Enabled, Strategy: in.Strategy, RingOwnDevices: in.RingOwnDevices,
+		TimeoutSeconds: in.TimeoutSeconds, ConfirmExternal: in.ConfirmExternal, DNDBlocks: in.DNDBlocks, Targets: in.Targets,
+	}
+	f.fm[id] = p
+	return p, nil
 }
 
 func (f *acctFake) UserVoicemailMessage(_ context.Context, uid, id int64) (store.VoicemailMessage, error) {
@@ -495,7 +538,7 @@ func newAcctFake(t *testing.T) (*acctFake, http.Handler, *audioFake, *bytes.Buff
 		{ID: 2, Source: "102", Destination: "+3298", Direction: "outbound", Kind: "call", Trunk: "secret-trunk", StartTime: time.Now()},
 	}
 	add := func(id int64, name string, role auth.Role, exts ...int64) {
-		f.users[id] = &store.User{ID: id, Username: name, AuthMethod: "local", Role: role, Enabled: true,
+		f.users[id] = &store.User{ID: id, Username: name, AuthMethod: "local", Role: role, Enabled: true, RingWeb: true, RingMobile: true,
 			VoicemailEmail: store.VoicemailEmailPrefs{Notify: true, Attach: true, After: "none"}}
 		f.hashes[id] = hash
 		f.links[id] = exts
@@ -517,7 +560,8 @@ func newAcctFake(t *testing.T) (*acctFake, http.Handler, *audioFake, *bytes.Buff
 	f.actors[hex.EncodeToString(auth.HashToken("svc"+cookieSuffix))] = auth.Actor{UserID: 0, Username: "", Role: auth.RoleUser}
 	objs := &audioFake{}
 	logs := &bytes.Buffer{}
-	h := Handler(Config{Store: f, Objects: objs, Log: slog.New(slog.NewTextHandler(logs, nil)), SessionTTL: time.Hour,
+	h := Handler(Config{Store: f, Objects: objs, Fax: acctFax(f), Log: slog.New(slog.NewTextHandler(logs, nil)), SessionTTL: time.Hour,
+		SIPDomain: testDomain, Clients: f, ClientAuth: testClientAuth(),
 		SMTPDeliver: func(context.Context, mailer.Settings, string, []byte) error { return nil }})
 	return f, h, objs, logs
 }
@@ -1275,6 +1319,143 @@ func TestSMTPSettings(t *testing.T) {
 	}
 }
 
+// TestDoorCallRoutes covers the door-open routes (spec S-47); the details are
+// in doorCallRoutes. It sits before TestAccountRoutesDocumentedStatuses so the
+// statuses it produces count there.
+func TestDoorCallRoutes(t *testing.T) { doorCallRoutes(t) }
+
+// TestFollowMeRoutes fails if a user can read or change the follow-me profile
+// of an extension that is not theirs, if the operator routes accept what the
+// profile rules refuse (a target that is the extension itself, an unusable
+// number, a sixth target, a profile turned on without a target), or if a
+// change does not merge into the stored profile.
+func TestFollowMeRoutes(t *testing.T) {
+	f, h, _, _ := newAcctFake(t)
+	own := fmt.Sprintf("/api/v1/me/extensions/%d/follow-me", extAlice)
+
+	t.Run("a user reads and changes the profile of their own extension", func(t *testing.T) {
+		got := wantJSON(t, acctCall(h, "alice", "GET", own, nil), 200, "default")
+		if got["enabled"] != false || got["strategy"] != "simultaneous" || got["ringOwnDevices"] != true ||
+			got["timeoutSeconds"] != float64(30) || got["confirmExternal"] != true || got["dndBlocks"] != true {
+			t.Fatalf("default profile = %v", got)
+		}
+		if len(got["targets"].([]any)) != 0 {
+			t.Fatalf("default targets = %v", got["targets"])
+		}
+		got = wantJSON(t, acctCall(h, "alice", "PUT", own, map[string]any{
+			"enabled": true, "strategy": "sequential", "timeoutSeconds": 45,
+			"targets": []map[string]any{
+				{"kind": "external", "target": "+32475123456", "delaySeconds": 15},
+				{"kind": "extension", "target": "102"},
+			},
+		}), 200, "put")
+		if got["enabled"] != true || got["strategy"] != "sequential" || got["timeoutSeconds"] != float64(45) {
+			t.Fatalf("saved = %v", got)
+		}
+		// A change that names one field keeps the others, targets included.
+		got = wantJSON(t, acctCall(h, "alice", "PUT", own, map[string]any{"confirmExternal": false}), 200, "merge")
+		if got["confirmExternal"] != false || got["strategy"] != "sequential" || len(got["targets"].([]any)) != 2 {
+			t.Fatalf("merged = %v", got)
+		}
+		if again := wantJSON(t, acctCall(h, "alice", "GET", own, nil), 200, "read back"); again["confirmExternal"] != false {
+			t.Fatalf("read back = %v", again)
+		}
+	})
+
+	t.Run("the profile rules are enforced", func(t *testing.T) {
+		six := make([]map[string]any, 6)
+		for i := range six {
+			six[i] = map[string]any{"kind": "extension", "target": fmt.Sprint(200 + i)}
+		}
+		for name, body := range map[string]map[string]any{
+			"empty body":          {},
+			"unknown field":       {"colour": "red"},
+			"bad strategy":        {"strategy": "random"},
+			"timeout too short":   {"timeoutSeconds": 4},
+			"timeout too long":    {"timeoutSeconds": 121},
+			"six targets":         {"targets": six},
+			"self target":         {"targets": []map[string]any{{"kind": "extension", "target": "101"}}},
+			"self as external":    {"targets": []map[string]any{{"kind": "external", "target": "101"}}},
+			"bad external":        {"targets": []map[string]any{{"kind": "external", "target": "0475 12 34 56"}}},
+			"star in external":    {"targets": []map[string]any{{"kind": "external", "target": "*72"}}},
+			"bad kind":            {"targets": []map[string]any{{"kind": "sip_uri", "target": "102"}}},
+			"delay too long":      {"targets": []map[string]any{{"kind": "extension", "target": "102", "delaySeconds": 61}}},
+			"empty group name":    {"targets": []map[string]any{{"kind": "ring_group", "target": ""}}},
+			"on without a target": {"enabled": true, "targets": []map[string]any{}},
+		} {
+			if rec := acctCall(h, "alice", "PUT", own, body); rec.Code != http.StatusBadRequest {
+				t.Errorf("%s: status %d %s, want 400", name, rec.Code, rec.Body)
+			}
+		}
+		// The ring group named like the extension is allowed: it is a group.
+		wantJSON(t, acctCall(h, "alice", "PUT", own, map[string]any{"targets": []map[string]any{{"kind": "ring_group", "target": "101"}}}), 200, "group named like the extension")
+	})
+
+	t.Run("another user's extension is 404 and nothing reaches the store", func(t *testing.T) {
+		f.touched = nil
+		for _, ext := range []int{extBob, extFree, 99999, 0, -1} {
+			path := fmt.Sprintf("/api/v1/me/extensions/%d/follow-me", ext)
+			if rec := acctCall(h, "alice", "GET", path, nil); rec.Code != http.StatusNotFound {
+				t.Errorf("GET %s = %d, want 404", path, rec.Code)
+			}
+			body := map[string]any{"targets": []map[string]any{{"kind": "external", "target": "+3247599999"}}}
+			if rec := acctCall(h, "alice", "PUT", path, body); rec.Code != http.StatusNotFound {
+				t.Errorf("PUT %s = %d, want 404", path, rec.Code)
+			}
+		}
+		if len(f.touched) != 0 {
+			t.Fatalf("a refused request reached the store: %v", f.touched)
+		}
+		if _, ok := f.fm[extBob]; ok {
+			t.Fatal("bob's profile was written")
+		}
+	})
+
+	t.Run("a credential that is not a user is refused", func(t *testing.T) {
+		if rec := acctCall(h, "svc", "GET", own, nil); rec.Code != http.StatusForbidden {
+			t.Errorf("GET = %d", rec.Code)
+		}
+		if rec := acctCall(h, "svc", "PUT", own, map[string]any{"enabled": false}); rec.Code != http.StatusForbidden {
+			t.Errorf("PUT = %d", rec.Code)
+		}
+	})
+
+	t.Run("operators reach any extension, a user and a viewer do not write", func(t *testing.T) {
+		op := fmt.Sprintf("/api/v1/extensions/%d/follow-me", extBob)
+		got := wantJSON(t, acctCall(h, "carol", "GET", op, nil), 200, "operator get")
+		if got["number"] != "102" {
+			t.Fatalf("number = %v", got["number"])
+		}
+		got = wantJSON(t, acctCall(h, "carol", "PUT", op, map[string]any{
+			"enabled": true, "targets": []map[string]any{{"kind": "ring_group", "target": "sales"}},
+		}), 200, "operator put")
+		if got["enabled"] != true {
+			t.Fatalf("operator put = %v", got)
+		}
+		if rec := acctCall(h, "carol", "GET", "/api/v1/extensions/99999/follow-me", nil); rec.Code != http.StatusNotFound {
+			t.Errorf("unknown extension GET = %d", rec.Code)
+		}
+		if rec := acctCall(h, "carol", "PUT", "/api/v1/extensions/99999/follow-me", map[string]any{"enabled": false}); rec.Code != http.StatusNotFound {
+			t.Errorf("unknown extension PUT = %d", rec.Code)
+		}
+		if rec := acctCall(h, "carol", "PUT", op, map[string]any{"targets": []map[string]any{{"kind": "extension", "target": "102"}}}); rec.Code != http.StatusBadRequest {
+			t.Errorf("self target = %d", rec.Code)
+		}
+		if rec := acctCall(h, "dave", "PUT", op, map[string]any{"enabled": false}); rec.Code != http.StatusForbidden {
+			t.Errorf("viewer PUT = %d, want 403", rec.Code)
+		}
+		if rec := acctCall(h, "dave", "GET", op, nil); rec.Code != http.StatusOK {
+			t.Errorf("viewer GET = %d, want 200", rec.Code)
+		}
+		if rec := acctCall(h, "alice", "GET", op, nil); rec.Code != http.StatusForbidden {
+			t.Errorf("user GET of the operator route = %d, want 403", rec.Code)
+		}
+		if rec := acctCall(h, "alice", "PUT", op, map[string]any{"enabled": false}); rec.Code != http.StatusForbidden {
+			t.Errorf("user PUT of the operator route = %d, want 403", rec.Code)
+		}
+	})
+}
+
 // TestAccountRoutesDocumentedStatuses runs last among the account tests and
 // fails if a documented status of an account route was never produced by
 // them (the package conformance check does this over the whole suite when
@@ -1292,7 +1473,7 @@ func TestAccountRoutesDocumentedStatuses(t *testing.T) {
 			match = match || strings.HasPrefix(op.Path, p)
 		}
 		if !match || strings.Contains(op.Path, "/me/contacts") || strings.Contains(op.Path, "/me/messages") ||
-			strings.Contains(op.Path, "/me/inbox") {
+			strings.Contains(op.Path, "/me/inbox") || strings.Contains(op.Path, "/me/connections") {
 			continue
 		}
 		for status := range conf.spec.Responses(op.ID) {

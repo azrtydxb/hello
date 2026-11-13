@@ -302,6 +302,20 @@ func selfSigned(t *testing.T) (certPEM, keyPEM []byte) {
 		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: kd})
 }
 
+// TestLoadProvSIPTCP fails if TCP provisioning is on by default, the model
+// list is not read, or a malformed entry is accepted.
+func TestLoadProvSIPTCP(t *testing.T) {
+	c, err := LoadControl(provOn(nil))
+	if err != nil || len(c.Prov.SIPTCPModels) != 0 {
+		t.Fatalf("default = %q, %v", c.Prov.SIPTCPModels, err)
+	}
+	c, err = LoadControl(provOn(map[string]string{"HELLO_PROV_SIP_TCP_MODELS": "grandstream:WP8, yealink"}))
+	if err != nil || len(c.Prov.SIPTCPModels) != 2 || c.Prov.SIPTCPModels[1] != "yealink" {
+		t.Fatalf("tcp = %q, %v", c.Prov.SIPTCPModels, err)
+	}
+	wantProvErr(t, provOn(map[string]string{"HELLO_PROV_SIP_TCP_MODELS": "Grandstream"}), "HELLO_PROV_SIP_TCP_MODELS", "Grandstream")
+}
+
 // TestLoadProvSIPTLS fails if SIP over TLS is on without being asked for,
 // the model list does not default to Grandstream WP phones, "none" does not
 // empty it, or a malformed TLS registrar or model entry is accepted.
@@ -325,5 +339,41 @@ func TestLoadProvSIPTLS(t *testing.T) {
 	}
 	for _, bad := range []string{"Grandstream", "grand/stream", "yealink:"} {
 		wantProvErr(t, provOn(map[string]string{"HELLO_PROV_SIP_TLS_MODELS": bad}), "HELLO_PROV_SIP_TLS_MODELS", bad)
+	}
+}
+
+// TestLoadSCEP fails if the SCEP server is off without being turned off,
+// HELLO_SCEP=false does not turn it off, or a value other than true or
+// false is accepted.
+func TestLoadSCEP(t *testing.T) {
+	c, err := LoadControl(provOn(nil))
+	if err != nil || !c.Prov.SCEP {
+		t.Fatalf("default SCEP = %v, %v", c.Prov.SCEP, err)
+	}
+	c, err = LoadControl(provOn(map[string]string{"HELLO_SCEP": "false"}))
+	if err != nil || c.Prov.SCEP {
+		t.Fatalf("HELLO_SCEP=false = %v, %v", c.Prov.SCEP, err)
+	}
+	wantProvErr(t, provOn(map[string]string{"HELLO_SCEP": "yes"}), "HELLO_SCEP", "yes")
+}
+
+// TestLoadProvBackupAndSRV fails if the backup registrars or the SRV name are
+// on by default, are not read, or a malformed one is accepted (S-20).
+func TestLoadProvBackupAndSRV(t *testing.T) {
+	c, err := LoadControl(provOn(nil))
+	if err != nil || len(c.Prov.SIPBackupServers) != 0 || c.Prov.SIPSRV != "" {
+		t.Fatalf("defaults = %q %q, %v", c.Prov.SIPBackupServers, c.Prov.SIPSRV, err)
+	}
+	c, err = LoadControl(provOn(map[string]string{
+		"HELLO_PROV_SIP_BACKUP_SERVERS": "192.0.2.21:5060, sip2.hello.test:5060", "HELLO_PROV_SIP_SRV": "sip.hello.test",
+	}))
+	if err != nil || len(c.Prov.SIPBackupServers) != 2 || c.Prov.SIPBackupServers[1] != "sip2.hello.test:5060" || c.Prov.SIPSRV != "sip.hello.test" {
+		t.Fatalf("set = %q %q, %v", c.Prov.SIPBackupServers, c.Prov.SIPSRV, err)
+	}
+	for _, bad := range []string{"sip2.hello.test", "0.0.0.0:5060", "h:0", "h:70000", "a:5060,b:5060,c:5060"} {
+		wantProvErr(t, provOn(map[string]string{"HELLO_PROV_SIP_BACKUP_SERVERS": bad}), "HELLO_PROV_SIP_BACKUP_SERVERS", bad)
+	}
+	for _, bad := range []string{"sip.hello.test:5060", "192.0.2.1", "a b", "https://x"} {
+		wantProvErr(t, provOn(map[string]string{"HELLO_PROV_SIP_SRV": bad}), "HELLO_PROV_SIP_SRV", bad)
 	}
 }

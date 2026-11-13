@@ -11,6 +11,9 @@ type Metrics struct {
 	// DeviceReplies counts texts typed on a desk phone that the gateway took
 	// by result: sent, refused (told to the phone) or failed.
 	DeviceReplies *prometheus.CounterVec // result
+	// Outbound counts carrier texts by provider and outcome: sent, failed
+	// or unknown.
+	Outbound *prometheus.CounterVec // provider, result
 	// OptOut counts opt-outs and opt-ins Hello recorded, by source.
 	OptOut *prometheus.CounterVec // source
 	// Purged counts what retention deleted.
@@ -31,6 +34,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		DeviceReplies: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "hello_msg_device_replies_total", Help: "Texts typed on a desk phone and offered to the inbox, by result.",
 		}, []string{"result"}),
+		Outbound: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "hello_msg_outbound_total", Help: "Texts sent through a carrier by provider and outcome.",
+		}, []string{"provider", "result"}),
 		OptOut: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "hello_msg_optout_total", Help: "Opt-outs and opt-ins recorded, by source.",
 		}, []string{"source"}),
@@ -44,6 +50,6 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "hello_msg_unassigned", Help: "Active conversations nobody has taken.",
 		}),
 	}
-	reg.MustRegister(m.Inbound, m.DeviceReplies, m.OptOut, m.Purged, m.UnassignedOldest, m.Unassigned)
+	reg.MustRegister(m.Inbound, m.DeviceReplies, m.Outbound, m.OptOut, m.Purged, m.UnassignedOldest, m.Unassigned)
 	return m
 }

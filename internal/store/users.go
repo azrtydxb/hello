@@ -53,11 +53,16 @@ type User struct {
 	// the user to the phones of their extension (spec messaging-channels
 	// M-26); it also needs the number's own switch.
 	DeskphoneDelivery bool `json:"-"`
+	// RingWeb and RingMobile are whether the user's web and mobile clients
+	// ring for calls to their extension. They are the user's own profile
+	// settings (/me), not part of the account an admin manages.
+	RingWeb    bool `json:"-"`
+	RingMobile bool `json:"-"`
 }
 
 const userCols = `id, username, display_name, email, auth_method, role, enabled, must_change_password, extension_id,
 	coalesce((SELECT json_agg(extension_id ORDER BY position, extension_id) FROM user_extensions WHERE user_id = users.id), '[]'::json)::text,
-	vm_email_notify, vm_email_attach, vm_email_after, totp_enabled_at IS NOT NULL, totp_required, created_at, deskphone_delivery`
+	vm_email_notify, vm_email_attach, vm_email_after, totp_enabled_at IS NOT NULL, totp_required, created_at, ring_web, ring_mobile, deskphone_delivery`
 
 func scanUser(r interface{ Scan(...any) error }) (User, error) {
 	var (
@@ -65,7 +70,7 @@ func scanUser(r interface{ Scan(...any) error }) (User, error) {
 		exts string
 	)
 	err := r.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.AuthMethod, &u.Role, &u.Enabled, &u.MustChangePassword,
-		&u.ExtensionID, &exts, &u.VoicemailEmail.Notify, &u.VoicemailEmail.Attach, &u.VoicemailEmail.After, &u.TOTPEnabled, &u.TOTPRequired, &u.CreatedAt, &u.DeskphoneDelivery)
+		&u.ExtensionID, &exts, &u.VoicemailEmail.Notify, &u.VoicemailEmail.Attach, &u.VoicemailEmail.After, &u.TOTPEnabled, &u.TOTPRequired, &u.CreatedAt, &u.RingWeb, &u.RingMobile, &u.DeskphoneDelivery)
 	if err != nil {
 		return u, err
 	}
@@ -234,6 +239,11 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 				return err
 			}
 		}
+		// A client device is the user's way into their extensions: it ends
+		// with the account, and with the link to its extension.
+		if err := revokeClientDevices(ctx, tx, id, enabled); err != nil {
+			return err
+		}
 		if !enabled || c.PasswordHash != nil {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = $1`, id); err != nil {
 				return err
@@ -278,6 +288,25 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 	return u, err
 }
 
+// revokeClientDevices disables the web and mobile devices of user id that it
+// no longer may have: all of them when keepLinked is false (the account is
+// disabled or going), otherwise the ones on an extension the user is no
+// longer linked to. The configuration revision moves when any changed, so
+// hello-sip drops their registrations.
+func revokeClientDevices(ctx context.Context, tx *sql.Tx, id int64, keepLinked bool) error {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE devices SET enabled = FALSE, updated_at = now()
+		WHERE user_id = $1 AND kind <> 'desk' AND enabled
+		  AND (NOT $2 OR extension_id NOT IN (SELECT extension_id FROM user_extensions WHERE user_id = $1))`, id, keepLinked)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return err
+	}
+	return bumpConfigRevision(ctx, tx)
+}
+
 func prefNotify(p *VoicemailEmailPrefs) *bool {
 	if p == nil {
 		return nil
@@ -314,6 +343,11 @@ func (s *Store) DeleteUser(ctx context.Context, actor string, id int64) error {
 		}
 		if role == auth.RoleAdmin && enabled && admins <= 1 {
 			return ErrLastAdmin
+		}
+		// The devices cascade with the user; revoking first moves the
+		// revision, so hello-sip drops their registrations now.
+		if err := revokeClientDevices(ctx, tx, id, false); err != nil {
+			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id); err != nil {
 			return err
@@ -458,6 +492,10 @@ type ProfileChange struct {
 	// DeskphoneDelivery turns desk-phone delivery of the user's conversations
 	// on or off.
 	DeskphoneDelivery *bool
+	// RingWeb and RingMobile choose whether the user's web and mobile
+	// clients ring for calls to their extension.
+	RingWeb    *bool
+	RingMobile *bool
 }
 
 // UpdateProfile changes the caller's own profile.
@@ -471,13 +509,22 @@ func (s *Store) UpdateProfile(ctx context.Context, actor string, id int64, c Pro
 				vm_email_notify = COALESCE($4, vm_email_notify),
 				vm_email_attach = COALESCE($5, vm_email_attach),
 				vm_email_after = COALESCE($6, vm_email_after),
-				deskphone_delivery = COALESCE($7, deskphone_delivery)
-			WHERE id = $1`, id, c.DisplayName, c.Email, prefNotify(c.Voicemail), prefAttach(c.Voicemail), prefAfter(c.Voicemail), c.DeskphoneDelivery)
+				ring_web = COALESCE($7, ring_web),
+				ring_mobile = COALESCE($8, ring_mobile),
+				deskphone_delivery = COALESCE($9, deskphone_delivery)
+			WHERE id = $1`, id, c.DisplayName, c.Email, prefNotify(c.Voicemail), prefAttach(c.Voicemail), prefAfter(c.Voicemail),
+			c.RingWeb, c.RingMobile, c.DeskphoneDelivery)
 		if err != nil {
 			return err
 		}
 		if err := requireRow(res); err != nil {
 			return err
+		}
+		if c.RingWeb != nil || c.RingMobile != nil {
+			// hello-sip reads the preference from its snapshot.
+			if err := bumpConfigRevision(ctx, tx); err != nil {
+				return err
+			}
 		}
 		if err := insertAudit(ctx, tx, actor, "update-profile", "user", strconv.FormatInt(id, 10)); err != nil {
 			return err

@@ -10,15 +10,16 @@ later phases. [Webhooks](#webhooks) push the events to your server.
 
 ## What is emitted
 
-| Event                     | When                                                                                                                                   |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `call.ringing`            | An extension starts ringing. A call that rings several extensions (a ring group) yields one event per ringing extension.               |
-| `call.answered`           | An extension answered. The calling extension of an internal or outbound call gets one too.                                             |
-| `call.ended`              | The call ended, for each extension it involved.                                                                                        |
-| `call.missed`             | The call reached an extension and nobody answered. A call answered by another member of a ring group is not missed for the others.     |
-| `call.recording.ready`    | A recording of the call was stored. It is stored after the call ends, so it follows `call.ended`. Carries `recordingId`, `durationMs`. |
-| `call.completed`          | The call detail record was stored. Carries `cdrId`; this is the point to log the call elsewhere.                                       |
-| `call.originate.progress` | A click-to-call changed state ([click-to-call](click-to-call.md)). Carries `originateId`, `state` and, for a failure, `reason`.        |
+| Event                     | When                                                                                                                                                                                                                                    |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `call.ringing`            | An extension starts ringing. A call that rings several extensions (a ring group) yields one event per ringing extension.                                                                                                                |
+| `call.answered`           | An extension answered. The calling extension of an internal or outbound call gets one too.                                                                                                                                              |
+| `call.ended`              | The call ended, for each extension it involved.                                                                                                                                                                                         |
+| `call.missed`             | The call reached an extension and nobody answered. A call answered by another member of a ring group is not missed for the others.                                                                                                      |
+| `call.recording.ready`    | A recording of the call was stored. It is stored after the call ends, so it follows `call.ended`. Carries `recordingId`, `durationMs`.                                                                                                  |
+| `call.completed`          | The call detail record was stored. Carries `cdrId`; this is the point to log the call elsewhere.                                                                                                                                        |
+| `call.originate.progress` | A click-to-call changed state ([click-to-call](click-to-call.md)). Carries `originateId`, `state` and, for a failure, `reason`.                                                                                                         |
+| `voicemail.received`      | A caller left a voicemail message in the box of an extension (one event per box for a voicemail group). Carries the caller in `from`, the box extension in `extension` and `to`, and `durationMs`. The audio is never part of an event. |
 
 Pages, intercoms and conference legs do not produce call events.
 
@@ -222,6 +223,81 @@ responses is the usual cause.
 An alert on a rising `hello_events_dropped_total` or a growing ingest lag
 catches a stalled pipeline.
 
+## Recording links
+
+A recording link lets someone without a Hello session, such as a CRM user,
+play one call recording. Hello serves the audio itself (the object store is
+cluster-internal, so a presigned URL could not be followed from outside).
+
+```sh
+curl -X POST https://hello.example/api/v1/recordings/42/links \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"ttlHours": 720, "maxUses": 0}'
+# {"id":7,"recordingId":42,"url":"https://hello.example/r/<token>.wav","expiresAt":"...","maxUses":0}
+```
+
+- Scope `recordings`. A user, or a token or service account with an
+  `extensionScope`, may only link recordings of calls involving its own
+  extensions (`403` otherwise); a viewer is limited to the extensions linked to
+  them, and operators, administrators and unrestricted service accounts may
+  link any recording. The body is optional: `ttlHours` is 1 to 8760 (default
+  720, 30 days) and `maxUses` is 0 for unlimited.
+- The URL is shown once. The token is 256 random bits; only its SHA-256 is
+  stored. Anyone holding the URL can play the recording until it expires, so
+  treat it as a secret. The `.wav` suffix is there for CRMs that play only
+  files with an audio extension and need HTTPS.
+- `GET /r/<token>.wav` needs no credential, supports `Range`, and answers
+  `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer` and
+  `X-Robots-Tag: noindex`. An unknown, expired, revoked or used-up link is the
+  same `404`. Each token may be requested 30 times a minute from one address
+  (`429` with `Retry-After`, per replica). `maxUses` counts requests, so a
+  player's `Range` requests each count.
+- `DELETE /api/v1/recording-links/{id}` revokes a link (the creator, or anyone
+  allowed to link that recording). Deleting the recording deletes its links.
+- Creating and revoking a link are audited (`create`/`revoke`
+  `recording_link`, with the credential as the actor). The token is never
+  logged or audited.
+- The console's nginx proxies `/r/` to hello-control; an ingress in front must
+  send `/r/` there too. Recording notice and consent stay governed by
+  `HELLO_MEDIA_RECORDING_NOTICE`: a link means a recording leaves Hello's
+  storage in the sense that whoever has the link can play it.
+
+Metrics: `hello_recording_link_hits_total{result}` (`ok`, `unknown`, `revoked`,
+`expired`, `used_up`, `rate_limited`, `storage_error`) and
+`hello_recording_links_active`.
+
+## Finding calls and recordings
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  'https://hello.example/api/v1/lookup/calls?number=%2B3211111222&from=2026-11-01T00:00:00Z&recorded=true'
+```
+
+- `GET /api/v1/lookup/calls` (scope `calls`) and
+  `GET /api/v1/lookup/recordings` (scope `recordings`) take the same filters:
+  `number`, `extension`, `from`, `to` (RFC 3339, on the call's start),
+  `callId` (the id call events carry, or the SIP Call-ID), `before` and
+  `limit` (1 to 200); calls also take `recorded=true`. Results are newest
+  first, `next` is the cursor for the following page.
+- `number` ignores spaces, dashes and brackets and compares digits only; a
+  number of eight or more digits also matches by its last eight digits, so
+  `+32 11 111 222` finds a call recorded as `011 111 222`. It matches the source,
+  the destination and the dialled number of the call.
+- Each call carries `recordingId` when it was recorded, ready for
+  `POST /recordings/{id}/links`. A recording appears once its audio is stored.
+- The restriction is applied in the query, not after it: a user, or a
+  credential with an `extensionScope`, only ever sees calls involving its own
+  extensions, and asking for another extension is `403`. The viewer, operator
+  and admin roles and unrestricted service accounts see all calls.
+- Both lookups are MCP tools (`lookupCalls`, `lookupRecordings`); creating a
+  link is not.
+
+## What comes next
+
+Outbound webhooks with signed, retried delivery (P2), click-to-call (P3)
+and the CRM connectors build on these events: the ingest
+transaction already has a hook point where webhook deliveries are queued.
+
 ## Webhooks
 
 A **webhook endpoint** receives the events it subscribes to as signed HTTP
@@ -418,4 +494,8 @@ the event retention, dead letters after 30 days, by one replica at a time.
 ## What comes next
 
 Click-to-call (P3), recording links (P4) and the CRM connectors build on these
-events.
+events. [Zapier and other automation tools](zapier.md) use the webhooks above.
+
+[Slack notifications](slack.md), [n8n and Make](n8n-make.md) and
+[Outlook and Google contacts and calendar](contacts-calendar.md) use the events
+and the connector framework above.

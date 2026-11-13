@@ -118,6 +118,7 @@ const TARGET_LABEL: Partial<Record<IvrDestinationKind, string>> = {
   time_condition: "Time condition",
   external: "Number",
   queue: "Call queue",
+  fax: "Fax destination (name)",
 };
 
 /**

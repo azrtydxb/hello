@@ -19,13 +19,31 @@ import (
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/config"
+	"github.com/azrtydxb/hello/internal/crm"
+	_ "github.com/azrtydxb/hello/internal/crm/autotask"    // registers the autotask connector
+	_ "github.com/azrtydxb/hello/internal/crm/bitrix24"    // registers the Bitrix24 connector
+	_ "github.com/azrtydxb/hello/internal/crm/clio"        // registers the clio connector
+	_ "github.com/azrtydxb/hello/internal/crm/connectwise" // registers the connectwise connector
+	_ "github.com/azrtydxb/hello/internal/crm/dynamics"    // registers the Dynamics 365 connector
+	_ "github.com/azrtydxb/hello/internal/crm/freshdesk"   // registers the freshdesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/google"      // registers the Google contacts connector
+	_ "github.com/azrtydxb/hello/internal/crm/halopsa"     // registers the halopsa connector
+	_ "github.com/azrtydxb/hello/internal/crm/hubspot"     // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/odoo"        // registers the Odoo connector
+	_ "github.com/azrtydxb/hello/internal/crm/outlook"     // registers the Outlook contacts connector
+	_ "github.com/azrtydxb/hello/internal/crm/pipedrive"   // registers the Pipedrive connector
+	_ "github.com/azrtydxb/hello/internal/crm/salesforce"  // registers the Salesforce connector
+	_ "github.com/azrtydxb/hello/internal/crm/zendesk"     // registers the zendesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/zoho"        // registers the Zoho CRM connector
 	"github.com/azrtydxb/hello/internal/events"
+	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/lifecycle"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/ops"
 	"github.com/azrtydxb/hello/internal/queue"
+	"github.com/azrtydxb/hello/internal/safehttp"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/sip"
 	"github.com/azrtydxb/hello/internal/snapshot"
@@ -156,6 +174,13 @@ func run(args []string) error {
 	controlStore.WithSecretBox(box)
 	live := livestate.New(vk)
 	members := cluster.New(vk)
+	// CRM caller names (spec integrations I-47): a cache-first lookup that
+	// the SIP path bounds to a few hundred milliseconds. The CRM query runs
+	// in the background, so a slow CRM never holds a call.
+	crmRepo := &crm.PG{DB: sipDB, Box: box}
+	crmTokens := &crm.TokenManager{Repo: crmRepo, Providers: crm.DefaultProvider(safehttp.NewClient(safehttp.Options{Timeout: crm.LookupTimeout, Allow: cfg.IntegrationsAllowedCIDRs})),
+		Log: log.With("component", "crm")}
+	crmLookup := &crm.Lookup{Repo: crmRepo, Tokens: crmTokens, Cache: crm.ValkeyCache{Client: func() valkey.Client { return vk }}, Log: log.With("component", "crm")}
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
 		ReloadFailures: reloadFailures, Box: box, ConfigInvalid: routingInvalid, InvalidRevision: routingInvalidRev, Revision: configRevision,
 		DNSFailures: dnsFailures}
@@ -165,11 +190,12 @@ func run(args []string) error {
 	incarnation := cluster.NewIncarnation()
 	srv, err := sip.New(sip.Config{
 		NodeID: cfg.NodeID, Incarnation: incarnation, Domain: cfg.SIPDomain, AdvertisedAddr: cfg.SIPAdvertisedAddr,
-		NonceSecret: []byte(cfg.NonceSecret), MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
+		NonceSecret: []byte(cfg.NonceSecret), ClientAuthKey: cfg.ClientAuthKey, ClientAuthKeyPrevious: cfg.ClientAuthKeyPrevious,
+		MaxContacts: cfg.MaxContacts, MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
 		SessionExpires: cfg.SessionExpires, SessionMinSE: cfg.SessionMinSE, SessionTimersTrunks: cfg.SessionTimersTrunks, MediaDeadAfter: cfg.MediaDeadAfter,
-		PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
+		DoorHangup: cfg.DoorHangup, PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
 		PageMulticastIface: cfg.PageMulticastIface, PageMulticastTTL: cfg.PageMulticastTTL,
 		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax, Dialing: cfg.Dial,
 		MediaForceAnchor: cfg.MediaForceAnchor, MediaRecordingNotice: cfg.MediaRecordingNotice,
@@ -180,16 +206,18 @@ func run(args []string) error {
 		Snapshots: watcher, State: live, Trunks: live,
 		Throttle: sip.ValkeyThrottle{Client: vk, Window: cfg.AuthFailWindow},
 		CDRs:     cdrs, Events: emitter, Metrics: sipMetrics, Log: log.With("component", "sip"),
-		Presence:      sip.ValkeyPresence{Client: vk},
-		MailboxEvents: mailboxEvents{cfg: cfg.Database, log: log.With("component", "mailbox")},
-		Pushes:        pushQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "checksync")},
-		Messages:      messageQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "messages")},
-		Conversations: conversations{st: controlStore, dial: cfg.Dial, log: log.With("component", "inbox"), metrics: messaging.NewMetrics(metrics.Registry)},
-		Voicemails:    voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings, TimeConditions: timeConditions{st: controlStore},
+		Presence:       sip.ValkeyPresence{Client: vk},
+		MailboxEvents:  mailboxEvents{cfg: cfg.Database, log: log.With("component", "mailbox")},
+		Pushes:         pushQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "checksync")},
+		QualityReports: controlStore,
+		Messages:       messageQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "messages")},
+		Conversations:  conversations{st: controlStore, dial: cfg.Dial, log: log.With("component", "inbox"), metrics: messaging.NewMetrics(metrics.Registry)},
+		Voicemails:     voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings, TimeConditions: timeConditions{st: controlStore},
 		Speech:     newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
-		HAState: live, Membership: members, PageTests: live, Originates: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Park: live, Published: live,
+		HAState: live, Membership: members, PageTests: live, DoorTriggers: live, Originates: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Fax: faxDeps(cfg, controlStore), Park: live, Published: live, Emergency: live,
 		Conferences: live, ConferenceAudit: controlStore,
+		CallerNames: crmLookup,
 	})
 	if err != nil {
 		return err
@@ -198,8 +226,21 @@ func run(args []string) error {
 	// into anchored SDP answers, so LAN phones send RTP to a reachable
 	// node address instead of mirroring the offer's own c= line. Empty
 	// keeps the tests'/lab's offer-mirroring behaviour.
+	media.SetFeatures(cfg.MediaDTLS, cfg.MediaICE)
 	if cfg.MediaAnchorHost != "" {
 		srv.SetMediaAnchor(media.NewAnchor(cfg.MediaAnchorHost, log.With("component", "media")))
+	}
+	// The WebRTC side of the anchor (clients S-4): one shared UDP port for
+	// browser and app legs, off unless HELLO_MEDIA_WEBRTC_ENABLED.
+	if cfg.MediaWebRTCEnabled {
+		node, err := media.StartWebRTC(cfg.MediaWebRTCPort, cfg.MediaAnchorHost, cfg.MediaWebRTCPublicIP)
+		if err != nil {
+			return err
+		}
+		node.Register(metrics.Registry)
+		media.SetWebRTCNode(node)
+		defer func() { media.SetWebRTCNode(nil); _ = node.Close() }()
+		log.Info("webrtc media enabled", "port", node.Mux().Port(), "candidates", node.Hosts())
 	}
 	watcher.OnReload = srv.SnapshotChanged
 
@@ -340,4 +381,18 @@ func primaryOf(vk valkey.Client) string {
 		return addr
 	}
 	return ""
+}
+
+// faxDeps wires the fax feature (pbx-gaps S-15): nil, so fax calls are
+// answered 488 and nothing is sent, unless HELLO_FAX_ENABLED is true and the
+// PDF store can be built.
+func faxDeps(cfg config.SIP, st *store.Store) *sip.FaxDeps {
+	if !cfg.Fax.Enabled {
+		return nil
+	}
+	objs, err := fax.NewObjects(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioSecure)
+	if err != nil {
+		return nil
+	}
+	return &sip.FaxDeps{Enabled: true, Client: &fax.Client{Addr: cfg.Fax.Addr, Token: cfg.Fax.Token}, Store: st.Faxes(), Objects: objs}
 }

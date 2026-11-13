@@ -62,6 +62,9 @@ type Action struct {
 	// what disappears with it. Both are filled by Validate.
 	Destructive bool        `json:"destructive,omitempty"`
 	References  []Reference `json:"references,omitempty"`
+	// Preview is, for a batch (BatchOp), the dry run's answer when the
+	// proposal was made: results, warnings and the change to the graph.
+	Preview *Preview `json:"preview,omitempty"`
 }
 
 // Reference is one resource connected to the target of a delete.
@@ -107,6 +110,11 @@ type Proposal struct {
 	AppliedAt, DismissedAt                    *time.Time
 	DismissReason, DismissText                *string
 	Failure                                   *Failure
+	// AppliedVia is how an applied proposal was applied: "ai:<session>"
+	// when the assistant applied it for AppliedBy (ViaAI), nil when
+	// AppliedBy did. BatchID is the configuration batch an applied batch
+	// proposal ran as, the one a revert undoes.
+	AppliedVia, BatchID *string
 }
 
 // Identity is who a validation reads as: the user the assistant works for

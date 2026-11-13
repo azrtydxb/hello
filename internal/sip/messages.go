@@ -773,6 +773,11 @@ func (s *Server) sendToExtension(ctx context.Context, snap *snapshot.Snapshot, j
 	}
 	var targets []target
 	for _, d := range snap.DevicesForExtension(j.Recipient) {
+		// A web client has no stored HA1 to answer a MESSAGE challenge with,
+		// and the softphone does not take SIP MESSAGE yet.
+		if d.AuthMode == snapshot.AuthDerived {
+			continue
+		}
 		sctx, cancel := s.stateCtx()
 		bs, err := s.deps.State.Bindings(sctx, s.aor(d.Username))
 		cancel()

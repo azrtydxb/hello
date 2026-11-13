@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { ApiError, errorMessage, fieldErrors } from "../../api";
+import { getMyFollowMe, putMyFollowMe } from "../../api/followme";
 import { updateMyExtension, type SelfExtension } from "../../api/self";
 import {
   Alert,
@@ -10,6 +11,7 @@ import {
   useToast,
 } from "../../design/azrty/components";
 import { mapFieldErrors } from "../../forms";
+import { FollowMeEditor } from "../followme/FollowMeEditor";
 import { WithExtension } from "./useMyExtensions";
 
 /** Forwarding, do-not-disturb and the display label of the user's extension. */
@@ -22,7 +24,17 @@ export function MyForwarding() {
         description="Do not disturb, forwarding and the name your extension shows."
       />
       <WithExtension>
-        {(ext, replace) => <ForwardingForm ext={ext} onSaved={replace} />}
+        {(ext, replace) => (
+          <>
+            <ForwardingForm ext={ext} onSaved={replace} />
+            <FollowMeEditor
+              id={ext.id}
+              ownNumber={ext.number}
+              load={getMyFollowMe}
+              save={putMyFollowMe}
+            />
+          </>
+        )}
       </WithExtension>
     </section>
   );

@@ -1,0 +1,8 @@
+[
+  { "name": "id", "type": "number", "label": "ID" },
+  { "name": "source", "type": "text", "label": "Source" },
+  { "name": "destination", "type": "text", "label": "Destination" },
+  { "name": "direction", "type": "text", "label": "Direction" },
+  { "name": "disposition", "type": "text", "label": "Disposition" },
+  { "name": "startTime", "type": "date", "label": "Start" }
+]

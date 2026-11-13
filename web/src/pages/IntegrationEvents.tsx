@@ -38,6 +38,7 @@ const TONES: Record<string, BadgeTone> = {
   "call.recording.ready": "outline",
   "call.completed": "outline",
   "call.originate.progress": "info",
+  "voicemail.received": "warn",
 };
 
 function party(p: { number?: string; name?: string; extension?: string }) {

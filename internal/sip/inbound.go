@@ -86,7 +86,12 @@ func (s *Server) inboundCall(req *sip.Request, tx sip.ServerTransaction, snap *s
 	c := s.newCall(req)
 	from := req.From()
 	c.direction, c.trunkName = cdr.DirectionInbound, t.Name
+	c.faxMode = t.FaxMode
 	c.inTrunk = t
+	c.trunkSRTP = t.SRTP
+	if !c.srtpGate(tx, snap) {
+		return
+	}
 	if isPageOrIntercomCode(snap, req.Recipient.User) {
 		// Auto-answer turns a phone into a listening device: only an
 		// authenticated internal caller may use it (spec P-16).
@@ -126,6 +131,10 @@ func (s *Server) inboundCall(req *sip.Request, tx sip.ServerTransaction, snap *s
 	dec.Trace = nil
 	if dec.CallerID != "" {
 		c.callerNum = dec.CallerID // the route's normalised caller ID
+	}
+	if name := s.crmCallerName(c.callerNum, c.callerName, dec.Extension); name != c.callerName {
+		c.callerName = name
+		c.trace.Add("Caller name from the CRM")
 	}
 	s.dispatch(c, req, tx, snap, dec)
 }

@@ -513,7 +513,7 @@ These items are checked on hardware (two WP836 on 1.0.1.44 and 1.0.1.80, upgrade
   - a PSK appears unsealed in the database or the API;
   - more than 10 profiles are accepted for WP8x6 (or more than 20 for WP822);
   - a radio setting does not render its P-value.
-- [ ] [S-25] `TestSCEPServer` in `internal/prov` passes. It fails if a certificate is issued without the phone's one-time challenge, the challenge can be reused, or SCEP answers when off for the group.
+- [x] [S-25] `TestSCEPServer` in `internal/prov` passes. It fails if a certificate is issued without the phone's one-time challenge, the challenge can be reused, or SCEP answers when off for the group.
 - [ ] [S-26] `TestFirmwareMinimum` in `internal/api` and `internal/prov` passes, together with `ProvFirmware.test.tsx`. They fail if a pin below the model minimum is accepted or rendered, or if the drift badge is missing when firmware_seen differs from the pin.
 - [ ] [S-27] `TestSyslogSink` passes. It fails if lines from a provisioned phone are not stored and shown, lines from an unknown IP are kept, the per-phone rate cap is not applied, or a redacted secret survives.
 - [ ] [S-28] `TestEmergencyCalling` in `internal/sip` and `TestHELDServer` in `internal/prov` pass. They fail if:
