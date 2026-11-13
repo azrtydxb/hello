@@ -341,6 +341,8 @@ func (s *Server) takeoverPass(ctx context.Context) {
 	if st, _ := s.state(); st != cluster.Ready {
 		return
 	}
+	s.takeoverMu.Lock()
+	defer s.takeoverMu.Unlock()
 	cctx, cancel := context.WithTimeout(ctx, s.cfg.StateTimeout)
 	members, err := s.deps.Membership.Members(cctx)
 	cancel()
