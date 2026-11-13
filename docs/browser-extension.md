@@ -123,5 +123,5 @@ person may do: own extensions only, the click-to-call limits and refusals in
 - Sites with a strict Content-Security-Policy are fine: the page script runs in
   an isolated world and its box lives in a closed shadow root.
 - The incoming-call notification names the caller through `GET /api/v1/lookup/number`
-  (see below). Hello must be reachable for the lookup; without it the
+  (see Incoming calls above). Hello must be reachable for the lookup; without it the
   notification shows the name in the event.
