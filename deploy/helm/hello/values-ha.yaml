@@ -47,7 +47,6 @@ kamailio:
 
 ui:
   replicas: 2
-  dnsResolver: 10.96.0.10
   ingress:
     enabled: true
     className: nginx
