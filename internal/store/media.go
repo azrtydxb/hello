@@ -29,6 +29,9 @@ type Recording struct {
 	CDRID       *int64 `json:"cdrId,omitempty"`
 	Source      string `json:"source"`
 	Destination string `json:"destination"`
+	// Video is true when the call's video was recorded too (migration 00121);
+	// the list fills it in.
+	Video bool `json:"video"`
 	// Object is the MinIO key; it stays internal (clients play audio through
 	// the audio route).
 	Object string `json:"-"`

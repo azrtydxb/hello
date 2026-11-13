@@ -1,138 +1,193 @@
 package sip
 
 import (
+	"bytes"
+	"net"
+	"strings"
+
 	"github.com/azrtydxb/hello/internal/media"
 )
 
-// Door station video (spec phone-feature-parity S-49). When a door station
-// offers H.264 video (as the caller, or as the callee a user dialled), the
-// anchor relays the video's RTP and RTCP port pairs unchanged next to the
-// audio relay, and the SDP on each side carries a video m-line with Hello's
-// own ports. The callee's answer decides: a callee that accepts the video
-// gets it, one that does not gets none and the door's offer is answered with
-// a refused (port 0) video line. A call with no door station never carries
-// video, whatever its SDP offers, and nothing here is added to an audio-only
-// offer. A takeover, transfer or re-anchor carries audio only.
+// Video on plain RTP legs (clients-webrtc-mobile-video S-44, phone-feature-
+// parity S-49). A desk phone or a door station that offers H.264 on a video
+// m-line gets the same treatment as a browser: its video runs through the
+// relay's translator (constant offsets, one SSRC per leg, RTCP ended per leg,
+// PLI, FIR, NACK and REMB carried across, the rate ceiling) on a port pair of
+// the leg of its own, so a phone and a browser, two phones and a door station
+// and a phone are each one pairing of VideoLeg configurations. The decision is
+// the one webrtc.go makes for browsers: policy, a node slot, a common codec; a
+// callee that cannot answers m=video 0 and the call goes on as audio. A call
+// whose audio leg is SRTP never carries plain video beside it, and a trunk
+// never carries video at all. A takeover, a transfer or a re-anchor carries
+// audio only.
 
-// callVideo is a call's video state (guarded by call.mu).
-type callVideo struct {
-	// relay carries the RTP and RTCP; nil when no video port could be bound
-	// (the offer is then refused).
-	relay *media.VideoRelay
-	// offer is what the caller offered, H.264 only; answer is what the callee
-	// accepted, nil until it answers or when it refused.
-	offer  media.VideoSDP
-	answer *media.VideoSDP
-}
-
-// involvesDoor reports whether a door station is a party of the call: it
-// called, or a user dialled its number.
-func (c *call) involvesDoor() bool {
-	c.mu.Lock()
-	caller := c.doorCaller
-	c.mu.Unlock()
-	if caller {
-		return true
+// h264Only keeps the H.264 payload types of a candidate list.
+func h264Only(in []media.SDPCodec) []media.SDPCodec {
+	var out []media.SDPCodec
+	for _, c := range in {
+		if strings.EqualFold(c.Name, "H264") {
+			out = append(out, c)
+		}
 	}
-	snap := c.s.deps.Snapshots.Current()
-	return snap != nil && snap.IsDoor(c.dialled)
+	return out
 }
 
-// startVideo sets up the video relay for a door call whose caller offered
-// H.264 video. It runs when the audio anchor is created.
-func (c *call) startVideo(offerBody []byte) {
-	if !c.involvesDoor() || c.webCaller() {
+// sameH264Plain is the codec match between two plain endpoints: H.264 with the
+// same packetization mode and, when both name one, the same profile_idc. The
+// relay does not look inside, so what matters is that the two decoders agree.
+func sameH264Plain(a, b media.SDPCodec) bool {
+	if !strings.EqualFold(a.Name, "H264") || !strings.EqualFold(b.Name, "H264") {
+		return false
+	}
+	return fmtpParam(a.Fmtp, "packetization-mode", "0") == fmtpParam(b.Fmtp, "packetization-mode", "0") &&
+		profileIDC(a.Fmtp) == profileIDC(b.Fmtp)
+}
+
+func fmtpParam(fmtp, key, def string) string {
+	for _, kv := range strings.Split(fmtp, ";") {
+		k, v, _ := strings.Cut(strings.TrimSpace(kv), "=")
+		if strings.EqualFold(k, key) {
+			return v
+		}
+	}
+	return def
+}
+
+func profileIDC(fmtp string) string {
+	v := fmtpParam(fmtp, "profile-level-id", "")
+	if len(v) >= 2 {
+		return strings.ToLower(v[:2])
+	}
+	return ""
+}
+
+// sameVideo decides whether two descriptions are one codec for the relay.
+func sameVideo(a, b media.SDPCodec, anyWeb bool) bool {
+	if anyWeb {
+		return media.SameVideoCodec(a, b)
+	}
+	return sameH264Plain(a, b)
+}
+
+// videoLegAllowed reports whether leg of the call may carry video at all: not a
+// trunk or a URI destination, and its audio is not encrypted when it is a plain
+// leg.
+func (c *call) videoLegAllowed(leg string) bool {
+	if leg == legCaller {
+		return c.inTrunk == nil
+	}
+	w := c.winnerLeg()
+	return w == nil || (w.trunk == nil && w.uri == nil)
+}
+
+// noteVideoOffer reads the video of the caller's first offer: a browser's
+// section through the browser's negotiation, a phone's or door station's H.264
+// section on plain RTP. Whatever is decided, an offer that had a video section
+// is answered with one (port 0 unless the video is carried).
+func (c *call) noteVideoOffer(r *media.Relay, offer []byte) {
+	if c.webCaller() {
+		c.noteWebVideoOffer(offer)
 		return
 	}
-	v, ok := media.ParseVideoSDP(offerBody)
+	first, has := media.PlainVideoFirstPT(offer)
+	r.NotePlainVideoOffer(legCaller, has, first)
+	if !has {
+		return
+	}
+	if !c.videoLegAllowed(legCaller) {
+		c.addTrace("Video not carried: trunks carry audio only")
+		return
+	}
+	vo, rtp, rtcp, ok := media.PlainVideoOffer(offer)
 	if !ok {
+		if media.IsWebRTCOffer(offer) {
+			return
+		}
+		media.NoteVideoRefused(media.VideoNoCodec)
+		c.addTrace("Video not carried: no H.264 over plain RTP in the video offer")
 		return
 	}
-	cv := &callVideo{offer: v}
-	relay, err := media.NewVideoRelay(c.s.cfg.RTPPortMin, c.s.cfg.RTPPortMax)
-	if err != nil {
+	if ok, why := c.videoPolicy(); !ok {
+		media.NoteVideoRefused(why)
+		c.addTrace("Video not carried: " + videoWhy(why))
+		return
+	}
+	if r.LegEncrypted(legCaller) {
+		media.NoteVideoRefused(media.VideoNoCodec)
+		c.addTrace("Video not carried: the audio is encrypted and plain RTP video would not be")
+		return
+	}
+	w := c.webState()
+	c.mu.Lock()
+	w.video, w.videoOffer = vo.Codecs, vo
+	w.plainRTP, w.plainRTCP = rtp, rtcp
+	c.mu.Unlock()
+}
+
+// offerPlainVideo adds the video the caller offered to the offer for a plain
+// callee (a phone or a door station): the H.264 types it listed, in its own
+// numbering and with its direction. Every fork shares the callee leg's video
+// ports, as it shares its audio port.
+func (c *call) offerPlainVideo(l *leg) {
+	r := c.anchorRelay()
+	if r == nil || l == nil {
+		return
+	}
+	w := c.webState()
+	c.mu.Lock()
+	cands := h264Only(w.video)
+	dir := w.videoOffer.Dir
+	c.mu.Unlock()
+	if len(cands) == 0 {
+		return
+	}
+	if l.trunk != nil || l.uri != nil {
+		c.addTrace("Video not carried: trunks carry audio only")
+		return
+	}
+	if !c.takeVideoSlot() {
+		return
+	}
+	if _, err := r.BindPlainVideo(legCallee); err != nil {
+		c.releaseVideoSlot()
 		c.addTrace("Video not carried: no media port pair")
-	} else {
-		relay.SetTarget(legCaller, v.RTPAddr())
-		relay.SetRTCPTarget(legCaller, v.RTCPAddr())
-		allowSignalSource(relay.Relay, legCaller, c.inv.Source())
-		relay.Start()
-		cv.relay = relay
-		c.addTrace("Video offered by the caller (H.264), relayed through the anchor")
-	}
-	c.mu.Lock()
-	c.video = cv
-	c.mu.Unlock()
-}
-
-// noteVideoAnswer reads the callee's answer for video: an accepted H.264
-// section aims the callee leg of the video relay at it.
-func (c *call) noteVideoAnswer(calleeBody []byte, source string) {
-	c.mu.Lock()
-	cv := c.video
-	c.mu.Unlock()
-	if cv == nil || cv.relay == nil {
 		return
 	}
-	v, ok := media.ParseVideoSDP(calleeBody)
-	if !ok {
-		c.addTrace("Video refused by the callee")
-		return
-	}
-	cv.relay.SetTarget(legCallee, v.RTPAddr())
-	cv.relay.SetRTCPTarget(legCallee, v.RTCPAddr())
-	allowSignalSource(cv.relay.Relay, legCallee, source)
-	c.mu.Lock()
-	cv.answer = &v
-	c.mu.Unlock()
-	c.addTrace("Video accepted by the callee (H.264)")
+	r.SetVideoOffer(legCallee, cands, orDirection(dir), c.webVideoKbps())
 }
 
-// videoFacing is the video section of an SDP that faces side: the callee
-// gets the caller's offer on the callee leg's ports, the caller gets the
-// callee's answer on the caller leg's ports, or a refused line when the
-// callee did not take the video. Empty when the call carries no video.
-func (c *call) videoFacing(side string) string {
-	c.mu.Lock()
-	cv, host := c.video, c.anchorHost
-	c.mu.Unlock()
-	if cv == nil {
-		return ""
+func orDirection(d string) string {
+	switch d {
+	case "sendonly", "recvonly", "inactive":
+		return d
 	}
-	switch {
-	case side == legCallee && cv.relay != nil:
-		return cv.offer.Section(host, cv.relay.LegPort(legCallee), "")
-	case side == legCallee:
-		return ""
-	}
-	c.mu.Lock()
-	ans := cv.answer
-	c.mu.Unlock()
-	if ans != nil && cv.relay != nil {
-		return ans.Section(host, cv.relay.LegPort(legCaller), "")
-	}
-	return media.RejectedVideoSection(cv.offer)
+	return "sendrecv"
 }
 
-// withVideo appends the video section facing side to an audio SDP.
+// withVideo appends the video section of a plain leg to an audio SDP built for
+// side when the build did not already write one.
 func (c *call) withVideo(sdp []byte, side string) []byte {
-	if sdp == nil || c.isWebLeg(side) {
-		// A browser leg's video section is written by the relay with the
-		// rest of its SDP (webrtc.go).
+	r := c.anchorRelay()
+	if sdp == nil || r == nil || r.IsWebLeg(side) || bytes.Contains(sdp, []byte("\nm=video")) {
 		return sdp
 	}
-	if s := c.videoFacing(side); s != "" {
+	if s := r.PlainVideoSection(side, c.anchorHost); s != "" {
 		return append(sdp[:len(sdp):len(sdp)], s...)
 	}
 	return sdp
 }
 
-// closeVideo stops the video relay with the call.
-func (c *call) closeVideo() {
-	c.mu.Lock()
-	cv := c.video
-	c.mu.Unlock()
-	if cv != nil && cv.relay != nil {
-		cv.relay.Close()
+// ensurePlainVideo gives a plain leg its video sockets and aims them at the
+// addresses its SDP names.
+func (c *call) ensurePlainVideo(r *media.Relay, leg string, rtp, rtcp *net.UDPAddr) bool {
+	if r.IsWebLeg(leg) {
+		return true
 	}
+	if _, err := r.BindPlainVideo(leg); err != nil {
+		return false
+	}
+	if rtp != nil {
+		r.SetPlainVideoTarget(leg, rtp, rtcp)
+	}
+	return true
 }

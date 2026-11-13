@@ -54,8 +54,11 @@ type Control struct {
 	// and loopback and link-local ones are never reachable.
 	DoorCameraAllow []netip.Prefix
 	// Fax is the fax feature (HELLO_FAX_*); disabled unless HELLO_FAX_ENABLED.
-	Fax         Fax
-	DatabaseURL string
+	Fax Fax
+	// RecordingVideoQuotaGB is hello-sip's HELLO_RECORDING_VIDEO_QUOTA_GB, read
+	// so the alert at 80 percent and the gauge know the same limit (0 for none).
+	RecordingVideoQuotaGB int
+	DatabaseURL           string
 	// Database is DatabaseURL parsed, so a malformed DSN fails at startup.
 	Database *pgx.ConnConfig
 	// ValkeyAddr is read for the live registrations/calls API.
@@ -544,6 +547,16 @@ type SIP struct {
 	VideoEnabled     bool
 	VideoMaxKbps     int
 	VideoMaxSessions int
+	// RecordingVideo (HELLO_RECORDING_VIDEO, default true) keeps the video of
+	// a recorded call (S-42); RecordingVideoSegment (HELLO_RECORDING_VIDEO_SEGMENT,
+	// default 10s) and RecordingVideoSegmentBytes (HELLO_RECORDING_VIDEO_SEGMENT_BYTES,
+	// default 4 MiB) cut its fragments; RecordingVideoQuotaGB
+	// (HELLO_RECORDING_VIDEO_QUOTA_GB, default 200, 0 for none) stops new video
+	// recordings when the video stored reaches it.
+	RecordingVideo             bool
+	RecordingVideoSegment      time.Duration
+	RecordingVideoSegmentBytes int
+	RecordingVideoQuotaGB      int
 	// MediaDTLS (HELLO_MEDIA_DTLS, default true) lets the anchor terminate
 	// DTLS-SRTP (phone-feature-parity S-16); off, an offer that carries only
 	// DTLS is refused with 488 and no device is offered it. MediaICE
@@ -603,6 +616,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		SessionTTL:             r.duration("HELLO_SESSION_TTL", 12*time.Hour),
 	}
 	c.Fax = r.fax()
+	c.RecordingVideoQuotaGB = r.quotaGB()
 	c.EventRetentionDays = r.positiveInt("HELLO_EVENT_RETENTION_DAYS", 7)
 	if c.EventRetentionDays > 30 {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
@@ -1160,6 +1174,13 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.VideoEnabled = r.booleanDefault("HELLO_VIDEO_ENABLED", true)
 	c.VideoMaxKbps = r.positiveInt("HELLO_VIDEO_MAX_KBPS", 1500)
 	c.VideoMaxSessions = r.positiveInt("HELLO_VIDEO_MAX_SESSIONS", 20)
+	c.RecordingVideo = r.booleanDefault("HELLO_RECORDING_VIDEO", true)
+	c.RecordingVideoSegment = r.duration("HELLO_RECORDING_VIDEO_SEGMENT", 10*time.Second)
+	if c.RecordingVideoSegment < time.Second || c.RecordingVideoSegment > time.Minute {
+		r.fail("HELLO_RECORDING_VIDEO_SEGMENT", errors.New("must be between 1s and 1m"))
+	}
+	c.RecordingVideoSegmentBytes = r.positiveInt("HELLO_RECORDING_VIDEO_SEGMENT_BYTES", 4<<20)
+	c.RecordingVideoQuotaGB = r.quotaGB()
 	if c.MediaWebRTCPublicIP != "" {
 		if ip := net.ParseIP(c.MediaWebRTCPublicIP); ip == nil || ip.To4() == nil {
 			r.fail("HELLO_MEDIA_WEBRTC_PUBLIC_IP", fmt.Errorf("%q is not an IPv4 address", c.MediaWebRTCPublicIP))
@@ -1515,6 +1536,19 @@ func (r *reader) positiveInt(key string, def int) int {
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
 		r.fail(key, errors.New("must be a positive integer"))
+	}
+	return n
+}
+
+// quotaGB reads HELLO_RECORDING_VIDEO_QUOTA_GB: whole gigabytes, 0 for no limit.
+func (r *reader) quotaGB() int {
+	v := r.getenv("HELLO_RECORDING_VIDEO_QUOTA_GB")
+	if v == "" {
+		return 200
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		r.fail("HELLO_RECORDING_VIDEO_QUOTA_GB", errors.New("must be a whole number of gigabytes, 0 for no limit"))
 	}
 	return n
 }

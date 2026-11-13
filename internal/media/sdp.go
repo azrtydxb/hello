@@ -73,6 +73,9 @@ type AudioSDP struct {
 	// (clients-webrtc-mobile-video S-3): a=mid, the BUNDLE group, a candidate
 	// for every node address and end-of-candidates. nil for every other leg.
 	localWeb *webSDP
+	// localVideo writes the video section of a plain leg's SDP for the given
+	// connection address (plainvideo.go); nil for a leg with no video state.
+	localVideo func(ip string) string
 }
 
 // webSDP is what makes a leg's SDP a browser's: the section id and the host
@@ -619,6 +622,11 @@ func (a AudioSDP) Build(ip string, port int, dir string) []byte {
 		dtls: a.localDTLS, ice: a.localICE, mux: a.localMux, web: a.localWeb})
 	if a.localWeb != nil && a.localWeb.finish != nil {
 		return a.localWeb.finish(out)
+	}
+	if a.localVideo != nil {
+		if sec := a.localVideo(ip); sec != "" {
+			out = append(out[:len(out):len(out)], sec...)
+		}
 	}
 	return out
 }

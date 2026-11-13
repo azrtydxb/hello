@@ -12,6 +12,7 @@ package sip
 import (
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/azrtydxb/hello/internal/cdr"
@@ -32,6 +33,8 @@ type callWeb struct {
 	// the caller offered none or video is not allowed for the call.
 	video      []media.SDPCodec
 	videoOffer media.VideoOffer
+	// plainRTP and plainRTCP are where a plain caller's video RTP and RTCP go.
+	plainRTP, plainRTCP *net.UDPAddr
 	// slot: the call holds one of the node's video session slots.
 	slot bool
 	// used: video was negotiated at some point (the CDR's video column).
@@ -281,10 +284,10 @@ func (c *call) webOfferB(offer media.AudioSDP, allow []string, l *leg) []byte {
 	w := c.webState()
 	c.mu.Lock()
 	w.altLeg = true
-	cands := append([]media.SDPCodec(nil), w.video...)
+	cands := media.SupportedVideo(w.video)
 	c.mu.Unlock()
 	l.web = true
-	if len(cands) > 0 && c.webCaller() && c.takeVideoSlot() {
+	if len(cands) > 0 && c.takeVideoSlot() {
 		r.SetVideoOffer(media.AltLeg, cands, "sendrecv", c.webVideoKbps())
 	}
 	return a.Build(c.anchorHost, r.LegPort(media.AltLeg), "sendrecv")
@@ -311,48 +314,62 @@ func (c *call) webFork(w *leg) bool {
 	return false
 }
 
-// webVideoAnswered negotiates the video of a call that was just answered: the
-// callee's video section (a browser's answer to the offer of webOfferB, with
-// one codec chosen from the offered ones) and the caller's answer follow it. A
-// callee that is not a browser, or answered without video, leaves the caller's
-// video section rejected.
-func (c *call) webVideoAnswered(calleeBody []byte, calleeWeb bool) {
+// videoAnswered negotiates the video of a call that was just answered: the
+// callee's video section (a browser's answer to the offer of webOfferB, or a
+// phone's or door station's on plain RTP) is matched with the codecs the caller
+// offered, and both legs are configured to relay it. A callee that answered
+// without video, or with a codec the caller cannot use, leaves the caller's
+// video section refused and the call as audio.
+func (c *call) videoAnswered(calleeBody []byte, calleeWeb bool) {
 	r := c.anchorRelay()
-	if r == nil || !c.webCaller() {
+	if r == nil {
 		return
 	}
 	w := c.webState()
 	c.mu.Lock()
 	cands := append([]media.SDPCodec(nil), w.video...)
+	callerRTP, callerRTCP := w.plainRTP, w.plainRTCP
 	c.mu.Unlock()
-	reject := func(why int) {
+	callerWeb := c.webCaller()
+	reject := func(why int, say bool) {
 		r.SetVideoSection(legCaller, nil, "", 0)
-		if r.IsWebLeg(legCallee) {
-			r.SetVideoSection(legCallee, nil, "", 0)
-		}
-		if len(cands) > 0 {
+		r.SetVideoSection(legCallee, nil, "", 0)
+		if len(cands) > 0 && say {
 			media.NoteVideoRefused(why)
 			c.addTrace("Video not carried: " + videoWhy(why))
 		}
 		c.releaseVideoSlot()
 	}
 	if len(cands) == 0 {
-		reject(media.VideoNoCodec)
+		reject(media.VideoNoCodec, false)
 		return
 	}
-	if !calleeWeb {
-		reject(media.VideoNoPeer)
-		return
+	var vb media.VideoOffer
+	var calleeRTP, calleeRTCP *net.UDPAddr
+	var ok bool
+	if calleeWeb {
+		vb, ok = media.ParseVideoOffer(calleeBody)
+	} else {
+		if !r.HasPlainVideo(legCallee) {
+			reject(media.VideoNoPeer, true)
+			return
+		}
+		vb, calleeRTP, calleeRTCP, ok = media.PlainVideoOffer(calleeBody)
 	}
-	vb, ok := media.ParseVideoOffer(calleeBody)
 	if !ok || len(vb.Codecs) == 0 {
-		reject(media.VideoNoPeer)
+		reject(media.VideoNoPeer, true)
+		return
+	}
+	if !calleeWeb && r.LegEncrypted(legCallee) {
+		media.NoteVideoRefused(media.VideoNoCodec)
+		c.addTrace("Video not carried: the callee's audio is encrypted and plain RTP video would not be")
+		reject(media.VideoNoCodec, false)
 		return
 	}
 	var callerCodec *media.SDPCodec
 	var calleeCodec media.SDPCodec
 	for _, oc := range cands {
-		if media.SameVideoCodec(oc, vb.Codecs[0]) {
+		if sameVideo(oc, vb.Codecs[0], callerWeb || calleeWeb) {
 			cc := oc
 			cc.Fmtp = vb.Codecs[0].Fmtp
 			cc.Feedback = sharedFeedback(oc.Feedback, vb.Codecs[0].Feedback)
@@ -363,18 +380,35 @@ func (c *call) webVideoAnswered(calleeBody []byte, calleeWeb bool) {
 		}
 	}
 	if callerCodec == nil {
-		reject(media.VideoNoCodec)
+		reject(media.VideoNoCodec, true)
 		return
+	}
+	if !callerWeb && !c.ensurePlainVideo(r, legCaller, callerRTP, callerRTCP) {
+		reject(media.VideoNoPeer, true)
+		c.addTrace("Video not carried: no media port pair")
+		return
+	}
+	if !calleeWeb {
+		c.ensurePlainVideo(r, legCallee, calleeRTP, calleeRTCP)
+	}
+	// Two browsers see sendrecv; with a plain end the directions are the
+	// callee's answer toward the caller and the caller's offer toward the callee.
+	callerDir, calleeDir := "sendrecv", "sendrecv"
+	if !callerWeb || !calleeWeb {
+		callerDir = orDirection(vb.Dir)
+		c.mu.Lock()
+		calleeDir = orDirection(w.videoOffer.Dir)
+		c.mu.Unlock()
 	}
 	kbps := c.webVideoKbps()
 	r.SetVideoCap(kbps)
-	r.SetVideoSection(legCaller, callerCodec, "sendrecv", kbps)
-	r.SetVideoSection(legCallee, &calleeCodec, "sendrecv", kbps)
+	r.SetVideoSection(legCaller, callerCodec, callerDir, kbps)
+	r.SetVideoSection(legCallee, &calleeCodec, calleeDir, kbps)
 	c.mu.Lock()
 	w.used = true
 	c.mu.Unlock()
 	c.addTrace(fmt.Sprintf("Video relayed (%s), at most %d kbit/s each way, not transcoded", strings.ToUpper(calleeCodec.Name), kbps))
-	c.noteVideoUnrecorded()
+	c.videoStarted()
 }
 
 // sharedFeedback is the RTCP feedback both ends listed: only what both can use
@@ -415,28 +449,41 @@ func (c *call) isWebLeg(leg string) bool {
 //     resume asks both senders for a keyframe.
 func (c *call) webInDialog(fromCaller bool, body []byte, dir string) {
 	r := c.anchorRelay()
-	if r == nil || !r.IsWebLeg(legName(fromCaller)) {
+	if r == nil {
 		return
 	}
 	leg, peer := legName(fromCaller), legName(!fromCaller)
-	node := media.CurrentWebRTC()
-	if err := r.PrepareWebRTC(leg, node, body); err != nil {
-		c.addTrace("Browser re-INVITE not usable for media: " + err.Error())
-		return
+	var vo media.VideoOffer
+	var offered bool
+	var rtp, rtcp *net.UDPAddr
+	if r.IsWebLeg(leg) {
+		node := media.CurrentWebRTC()
+		if err := r.PrepareWebRTC(leg, node, body); err != nil {
+			c.addTrace("Browser re-INVITE not usable for media: " + err.Error())
+			return
+		}
+		vo, offered = media.ParseVideoOffer(body)
+	} else {
+		first, has := media.PlainVideoFirstPT(body)
+		r.NotePlainVideoOffer(leg, has, first)
+		if !has && !r.HasPlainVideo(leg) {
+			return
+		}
+		vo, rtp, rtcp, offered = media.PlainVideoOffer(body)
+		if offered && r.HasPlainVideo(leg) {
+			r.SetPlainVideoTarget(leg, rtp, rtcp)
+		}
 	}
 	kbps := c.webVideoKbps()
-	vo, offered := media.ParseVideoOffer(body)
 	cur, have := r.VideoSection(leg)
 	if !offered || strings.EqualFold(vo.Dir, "inactive") && !have {
 		if have {
-			c.webVideoOff(leg, peer, "the browser stopped its video")
+			c.webVideoOff(leg, peer, "the sender stopped its video")
 		}
 		return
 	}
 	if !have {
-		if !c.webUpgrade(r, leg, peer, vo, dir, kbps) {
-			return
-		}
+		c.webUpgrade(r, leg, peer, vo, rtp, rtcp, dir, kbps)
 		return
 	}
 	// Video goes on: its direction follows the offer's.
@@ -451,8 +498,17 @@ func (c *call) webInDialog(fromCaller bool, body []byte, dir string) {
 	}
 }
 
+// videoPeerOK reports whether the other end of a mid-call video offer can be
+// offered video: a browser, or a plain leg that is not a trunk and not SRTP.
+func (c *call) videoPeerOK(r *media.Relay, peer string) bool {
+	if r.IsWebLeg(peer) {
+		return true
+	}
+	return c.videoLegAllowed(peer) && !r.LegEncrypted(peer)
+}
+
 // webUpgrade adds video to a running call. It reports whether video was taken.
-func (c *call) webUpgrade(r *media.Relay, leg, peer string, vo media.VideoOffer, dir string, kbps int) bool {
+func (c *call) webUpgrade(r *media.Relay, leg, peer string, vo media.VideoOffer, rtp, rtcp *net.UDPAddr, dir string, kbps int) bool {
 	if strings.EqualFold(vo.Dir, "inactive") {
 		return false
 	}
@@ -461,12 +517,19 @@ func (c *call) webUpgrade(r *media.Relay, leg, peer string, vo media.VideoOffer,
 		c.addTrace("Video not added: " + videoWhy(why))
 		return false
 	}
-	if !r.IsWebLeg(peer) {
+	if !c.videoLegAllowed(leg) || (!r.IsWebLeg(leg) && r.LegEncrypted(leg)) || !c.videoPeerOK(r, peer) {
 		media.NoteVideoRefused(media.VideoNoPeer)
 		c.addTrace("Video not added: " + videoWhy(media.VideoNoPeer))
 		return false
 	}
-	cands := media.SupportedVideo(vo.Codecs)
+	anyWeb := r.IsWebLeg(leg) || r.IsWebLeg(peer)
+	cands := vo.Codecs
+	if anyWeb {
+		cands = media.SupportedVideo(vo.Codecs)
+	}
+	if !r.IsWebLeg(peer) || !r.IsWebLeg(leg) {
+		cands = h264Only(cands)
+	}
 	if len(cands) == 0 {
 		media.NoteVideoRefused(media.VideoNoCodec)
 		c.addTrace("Video not added: " + videoWhy(media.VideoNoCodec))
@@ -475,10 +538,15 @@ func (c *call) webUpgrade(r *media.Relay, leg, peer string, vo media.VideoOffer,
 	if !c.takeVideoSlot() {
 		return false
 	}
+	if !c.ensurePlainVideo(r, leg, rtp, rtcp) || !c.ensurePlainVideo(r, peer, nil, nil) {
+		c.releaseVideoSlot()
+		c.addTrace("Video not added: no media port pair")
+		return false
+	}
 	chosen := cands[0]
 	r.SetVideoCap(kbps)
 	r.SetVideoSection(leg, &chosen, mirrorDirection(vo.Dir), kbps)
-	// The peer is offered the one codec, in the browser's numbering; its answer
+	// The peer is offered the one codec, in the sender's numbering; its answer
 	// fixes the numbering it actually uses.
 	r.SetVideoSection(peer, &chosen, vo.Dir, kbps)
 	w := c.webState()
@@ -486,7 +554,7 @@ func (c *call) webUpgrade(r *media.Relay, leg, peer string, vo media.VideoOffer,
 	w.used = true
 	c.mu.Unlock()
 	c.addTrace(fmt.Sprintf("Video added mid-call (%s)", strings.ToUpper(chosen.Name)))
-	c.noteVideoUnrecorded()
+	c.videoStarted()
 	return true
 }
 
@@ -507,7 +575,7 @@ func (c *call) webVideoOff(leg, peer, why string) {
 // its answer, video it refused is taken off both legs.
 func (c *call) webVideoPeerAnswer(leg string, body []byte) {
 	r := c.anchorRelay()
-	if r == nil || !r.IsWebLeg(leg) {
+	if r == nil {
 		return
 	}
 	other := legName(leg != legCaller)
@@ -515,16 +583,25 @@ func (c *call) webVideoPeerAnswer(leg string, body []byte) {
 	if !have {
 		return
 	}
-	vb, ok := media.ParseVideoOffer(body)
-	if !ok || len(vb.Codecs) == 0 || !media.SameVideoCodec(cur, vb.Codecs[0]) {
+	var vb media.VideoOffer
+	var ok bool
+	if r.IsWebLeg(leg) {
+		vb, ok = media.ParseVideoOffer(body)
+	} else {
+		var rtp, rtcp *net.UDPAddr
+		vb, rtp, rtcp, ok = media.PlainVideoOffer(body)
+		if ok {
+			r.SetPlainVideoTarget(leg, rtp, rtcp)
+		}
+	}
+	if !ok || len(vb.Codecs) == 0 || !sameVideo(cur, vb.Codecs[0], r.IsWebLeg(leg) || r.IsWebLeg(other)) {
 		media.NoteVideoRefused(media.VideoNoPeer)
 		c.webVideoOff(leg, other, "the other side did not accept it")
 		return
 	}
 	got := vb.Codecs[0]
 	got.Feedback = sharedFeedback(cur.Feedback, got.Feedback)
-	dir := vb.Dir
-	r.SetVideoSection(leg, &got, mirrorDirection(dir), c.webVideoKbps())
+	r.SetVideoSection(leg, &got, mirrorDirection(vb.Dir), c.webVideoKbps())
 }
 
 // webVideoCarried reports whether the call carries video now.
@@ -533,13 +610,15 @@ func (c *call) webVideoCarried() bool {
 	return r != nil && r.VideoOn()
 }
 
-// noteVideoUnrecorded says in the trace that a recording that is running keeps
-// the audio only.
-func (c *call) noteVideoUnrecorded() {
-	c.mu.Lock()
-	rec := c.rec
-	c.mu.Unlock()
-	if rec != nil && rec.isActive() {
-		c.addTrace("Video not recorded: the recording is audio only")
+// videoStarted is called when a call begins to carry video: a running
+// recording starts its video files (videorec.go).
+func (c *call) videoStarted() {
+	if c.videoRecordingActive() {
+		return
+	}
+	if c.startVideoRecording() && c.s.cfg.MediaRecordingNotice {
+		// The recording began as audio only; both sides are told it now
+		// includes video.
+		go c.playRecordingNotice(true)
 	}
 }

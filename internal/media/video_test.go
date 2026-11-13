@@ -69,95 +69,176 @@ func TestVideoSDP(t *testing.T) {
 	}
 }
 
-// TestVideoRelay fails if RTP does not cross a video relay byte for byte in
-// payload (marker and payload type kept), or RTCP does not cross in both
-// directions unchanged on the ports next to the RTP ports.
-func TestVideoRelay(t *testing.T) {
-	v, err := NewVideoRelay(testRelayMin+500, testRelayMax)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer v.Close()
-	pa, pb := v.LegPort("a"), v.LegPort("b")
-	if pa%2 != 0 || pb%2 != 0 || v.RTCPPort("a") != pa+1 || v.RTCPPort("b") != pb+1 {
-		t.Fatalf("ports a %d/%d b %d/%d, want even RTP ports with RTCP above", pa, v.RTCPPort("a"), pb, v.RTCPPort("b"))
-	}
-	listen := func() *net.UDPConn {
-		c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = c.Close() })
-		_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
-		return c
-	}
-	doorRTP, doorRTCP, phoneRTP, phoneRTCP := listen(), listen(), listen(), listen()
-	addr := func(c *net.UDPConn) *net.UDPAddr { return c.LocalAddr().(*net.UDPAddr) }
-	v.SetTarget("a", addr(doorRTP))
-	v.SetTarget("b", addr(phoneRTP))
-	v.SetRTCPTarget("a", addr(doorRTCP))
-	v.SetRTCPTarget("b", addr(phoneRTCP))
-	v.Start()
-	dst := func(port int) *net.UDPAddr { return &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port} }
-
-	// RTP from the door reaches the phone with its payload type, marker and
-	// payload intact.
-	payload := []byte{0x65, 1, 2, 3, 4}
-	pkt := BuildRTP(96, 7, 9000, 55, true, payload)
-	if _, err := doorRTP.WriteToUDP(pkt, dst(pa)); err != nil {
-		t.Fatal(err)
-	}
-	buf := make([]byte, 1500)
-	n, _, err := phoneRTP.ReadFromUDP(buf)
-	if err != nil {
-		t.Fatalf("no RTP at the phone: %v", err)
-	}
-	got, ok := ParseRTP(buf[:n])
-	if !ok || got.PayloadType != 96 || !got.Marker || string(got.Payload) != string(payload) {
-		t.Errorf("relayed RTP = %+v, %v", got, ok)
-	}
-
-	// RTCP: a picture loss indication from the phone reaches the door, a
-	// sender report from the door reaches the phone.
-	pli := []byte{0x81, 206, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2}
-	if _, err := phoneRTCP.WriteToUDP(pli, dst(v.RTCPPort("b"))); err != nil {
-		t.Fatal(err)
-	}
-	n, _, err = doorRTCP.ReadFromUDP(buf)
-	if err != nil || string(buf[:n]) != string(pli) {
-		t.Errorf("RTCP phone to door: %v %x", err, buf[:n])
-	}
-	sr := []byte{0x80, 200, 0, 6, 0, 0, 0, 5}
-	if _, err := doorRTCP.WriteToUDP(sr, dst(v.RTCPPort("a"))); err != nil {
-		t.Fatal(err)
-	}
-	n, _, err = phoneRTCP.ReadFromUDP(buf)
-	if err != nil || string(buf[:n]) != string(sr) {
-		t.Errorf("RTCP door to phone: %v %x", err, buf[:n])
-	}
-}
-
-// TestVideoRelayBindsIPv4 fails if a video leg binds dual-stack. Every other RTP socket (anchor, relay legs, fan-out, conference
-// parties) is udp4; on BSD kernels a dual-stack bind succeeds on a port an
-// IPv4 socket already holds and IPv4 datagrams then go to the IPv4 socket, so
-// a video leg could share a port with an audio leg of another call and its
-// packets would arrive there. With udp4 the bind is refused on every kernel.
-func TestVideoRelayBindsIPv4(t *testing.T) {
-	hold := func() (*net.UDPConn, int) {
-		c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = c.Close() })
-		return c, c.LocalAddr().(*net.UDPAddr).Port
-	}
-	_, port := hold()
+// TestPlainVideoLegs fails if two plain RTP legs (a phone and a door station)
+// do not carry video through the translator: each leg gets a video port pair of
+// its own next to its audio port, the SDP a leg writes names that port and the
+// negotiated codec, a refused or unanswered section is port 0 in place, packets
+// arrive with the payload untouched on a stream of the relay's own (new SSRC, the
+// leg's payload type), RTCP is regenerated per leg (a picture loss indication
+// from one side reaches the sender as the relay's own), and a source that is not
+// the leg's peer is dropped (S-44).
+func TestPlainVideoLegs(t *testing.T) {
 	r, err := NewRelay(30000, 31000)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(r.Close)
-	if _, err := r.addLegAt("a", port); err == nil {
-		t.Errorf("a video leg bound port %d that an IPv4 socket already holds", port)
+	defer r.Close()
+	if _, err := r.AddLeg("a"); err != nil {
+		t.Fatal(err)
 	}
+	if _, err := r.AddLeg("b"); err != nil {
+		t.Fatal(err)
+	}
+	r.Start()
+	r.NotePlainVideoOffer("a", true, "96")
+	pa, err := r.BindPlainVideo("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pb, err := r.BindPlainVideo("b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := r.BindPlainVideo("a"); again != pa || pa == pb || pa%2 != 0 || pb%2 != 0 {
+		t.Fatalf("ports a=%d again=%d b=%d", pa, again, pb)
+	}
+	if !r.VideoLegOK("a") || !r.HasPlainVideo("b") || r.IsWebLeg("a") {
+		t.Error("the legs do not report their video")
+	}
+	// Before negotiation the caller's offered section is answered refused.
+	if sec := r.PlainVideoSection("a", "192.0.2.1"); !strings.HasPrefix(sec, "m=video 0 RTP/AVP 96") {
+		t.Errorf("unanswered section = %q", sec)
+	}
+	if sec := r.PlainVideoSection("b", "192.0.2.1"); sec != "" {
+		t.Errorf("a leg that was never asked says %q", sec)
+	}
+	codec := SDPCodec{PT: 96, Name: "H264", Rate: 90000, Fmtp: "profile-level-id=42e01f;packetization-mode=1", Feedback: []string{"nack", "nack pli"}}
+	r.SetVideoOffer("b", []SDPCodec{codec}, "sendonly", 1500)
+	off := r.PlainVideoSection("b", "192.0.2.1")
+	for _, want := range []string{"m=video ", " RTP/AVP 96", "c=IN IP4 192.0.2.1", "b=AS:1500", "a=rtpmap:96 H264/90000", "a=fmtp:96 profile-level-id=42e01f;packetization-mode=1",
+		"a=rtcp-fb:96 nack pli", "a=sendonly"} {
+		if !strings.Contains(off, want) {
+			t.Errorf("offer lacks %q:\n%s", want, off)
+		}
+	}
+	if !strings.Contains(off, "a=rtcp:") {
+		t.Errorf("offer names no RTCP port:\n%s", off)
+	}
+	phoneA, phoneB := udpLoopback(t), udpLoopback(t)
+	rtcpA, rtcpB := udpLoopback(t), udpLoopback(t)
+	r.SetPlainVideoTarget("a", udpAddrOf(phoneA), udpAddrOf(rtcpA))
+	r.SetPlainVideoTarget("b", udpAddrOf(phoneB), udpAddrOf(rtcpB))
+	r.SetVideoCap(1500)
+	codecB := codec
+	codecB.PT = 100 // the leg's own numbering
+	r.SetVideoSection("a", &codec, "sendrecv", 1500)
+	r.SetVideoSection("b", &codecB, "sendrecv", 1500)
+	if !r.VideoOn() {
+		t.Fatal("video is not on")
+	}
+	if sec := r.PlainVideoSection("b", "192.0.2.1"); !strings.Contains(sec, "RTP/AVP 100") || strings.Contains(sec, "RTP/AVP 100 96") {
+		t.Errorf("negotiated section = %q", sec)
+	}
+	payload := append([]byte{0x65}, make([]byte, 99)...)
+	for i := range 10 {
+		_, _ = phoneA.WriteToUDP(BuildRTP(96, uint16(10+i), 5000+uint32(i)*3000, 77, true, payload), loopbackAt(pa))
+	}
+	got := readRTP(t, phoneB)
+	if got.PayloadType != 100 || got.SSRC == 77 || len(got.Payload) != 100 || got.Payload[0] != 0x65 {
+		t.Errorf("B got %+v", got)
+	}
+	// A packet of another payload type, and one from a stranger, go nowhere.
+	_, _ = phoneA.WriteToUDP(BuildRTP(111, 99, 1, 77, true, payload), loopbackAt(pa))
+	stranger := udpLoopback(t)
+	_, _ = stranger.WriteToUDP(BuildRTP(96, 1, 1, 5, true, payload), loopbackAt(pa))
+	// B asks for a picture; A's sender hears it from the relay.
+	pli := []byte{0x81, 206, 0, 2, 0, 0, 0, 9, 0, 0, 0, 1}
+	_, _ = rtcpB.WriteToUDP(pli, loopbackAt(pb+1))
+	_, _ = phoneB.WriteToUDP(BuildRTP(100, 1, 1000, 88, true, payload), loopbackAt(pb))
+	rtcpRaw := readVideoRaw(t, rtcpA)
+	if len(rtcpRaw) < 12 || rtcpRaw[1] != 206 {
+		t.Errorf("A got RTCP %x, want a picture loss indication", rtcpRaw)
+	}
+	if s := r.VideoStats(); s.Packets < 10 {
+		t.Errorf("stats = %+v", s)
+	}
+	// Taking the section off makes both legs refuse again.
+	r.SetVideoSection("a", nil, "", 0)
+	r.SetVideoSection("b", nil, "", 0)
+	if r.VideoOn() {
+		t.Error("video still on")
+	}
+	if sec := r.PlainVideoSection("a", "192.0.2.1"); !strings.HasPrefix(sec, "m=video 0 ") {
+		t.Errorf("after the video ended, a says %q", sec)
+	}
+	// An offer without video clears the answer's section.
+	r.NotePlainVideoOffer("a", false, "")
+	if sec := r.PlainVideoSection("a", "192.0.2.1"); sec != "" {
+		t.Errorf("after an offer without video: %q", sec)
+	}
+}
+
+// TestPlainVideoClosesWithRelay fails if a plain leg's video sockets outlive the
+// relay (the ports must be free for the next call).
+func TestPlainVideoClosesWithRelay(t *testing.T) {
+	r, err := NewRelay(30000, 31000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.AddLeg("a")
+	r.AddLeg("b")
+	r.Start()
+	p, err := r.BindPlainVideo("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: p})
+	if err != nil {
+		t.Fatalf("video port %d still held after Close: %v", p, err)
+	}
+	_ = c.Close()
+	if _, err := r.BindPlainVideo("b"); err == nil {
+		t.Error("a closed relay bound a video socket")
+	}
+}
+
+func udpLoopback(t *testing.T) *net.UDPConn {
+	t.Helper()
+	c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	return c
+}
+
+func udpAddrOf(c *net.UDPConn) *net.UDPAddr { return c.LocalAddr().(*net.UDPAddr) }
+
+func loopbackAt(port int) *net.UDPAddr { return &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port} }
+
+func readVideoRaw(t *testing.T, c *net.UDPConn) []byte {
+	t.Helper()
+	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 2048)
+	n, _, err := c.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("nothing arrived: %v", err)
+	}
+	return buf[:n]
+}
+
+func readRTP(t *testing.T, c *net.UDPConn) *RTPPacket {
+	t.Helper()
+	for range 20 {
+		raw := readVideoRaw(t, c)
+		if len(raw) > 1 && raw[1] >= 192 && raw[1] <= 223 {
+			continue
+		}
+		if p, ok := ParseRTP(raw); ok {
+			return p
+		}
+	}
+	t.Fatal("no RTP arrived")
+	return nil
 }

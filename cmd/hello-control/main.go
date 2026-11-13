@@ -156,6 +156,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		_ = ln.Close()
 		return fmt.Errorf("MINIO_ENDPOINT: %w", err)
 	}
+	startVideoRecording(ctx, cfg.RecordingVideoQuotaGB, st, objs, metrics.Registry, log)
 	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, messaging.NewMetrics(metrics.Registry), log)
 	go runInboxNotifier(ctx, envSMTP(cfg), st, log)
 

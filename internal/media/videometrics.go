@@ -103,3 +103,42 @@ func registerVideoMetrics(reg prometheus.Registerer) {
 		}, func() float64 { return float64(videoGauge.negotiationFailures[i].Load()) }))
 	}
 }
+
+// Video recording series (S-42).
+var videoRecGauge struct {
+	failures [3]atomic.Uint64
+}
+
+var videoRecReasons = [...]string{"object_store", "quota", "unsupported"}
+
+func noteVideoRecFailure(reason string) {
+	for i, r := range videoRecReasons {
+		if r == reason {
+			videoRecGauge.failures[i].Add(1)
+			return
+		}
+	}
+}
+
+// NoteVideoRecFailure counts a video recording that did not start or stopped,
+// by reason (object_store, quota, unsupported).
+func NoteVideoRecFailure(reason string) { noteVideoRecFailure(reason) }
+
+func registerVideoRecMetrics(reg prometheus.Registerer) {
+	for i, why := range videoRecReasons {
+		reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+			Name: "hello_recording_video_failures_total", Help: "Video recordings that did not start or stopped early, by reason.", ConstLabels: prometheus.Labels{"reason": why},
+		}, func() float64 { return float64(videoRecGauge.failures[i].Load()) }))
+	}
+}
+
+// VideoRecFailures is how many video recordings failed for reason so far (tests
+// and the status view).
+func VideoRecFailures(reason string) uint64 {
+	for i, r := range videoRecReasons {
+		if r == reason {
+			return videoRecGauge.failures[i].Load()
+		}
+	}
+	return 0
+}

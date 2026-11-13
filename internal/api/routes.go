@@ -102,6 +102,10 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/lookup/calls", auth.ScopeCalls, auth.RoleUser, false, s.lookupCalls},
 		{"GET", "/api/v1/lookup/recordings", auth.ScopeRecordings, auth.RoleUser, false, s.lookupRecordings},
 		{"GET", "/api/v1/recordings/{id}/audio", auth.ScopeRead, auth.RoleViewer, false, s.recordingAudio},
+		{"GET", "/api/v1/recordings/{id}/manifest", auth.ScopeRead, auth.RoleViewer, false, s.recordingManifest},
+		{"GET", "/api/v1/recordings/{id}/video/{stream}", auth.ScopeRead, auth.RoleViewer, false, s.recordingVideo},
+		{"GET", "/api/v1/recordings/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.getRecordingSettings},
+		{"PUT", "/api/v1/recordings/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.putRecordingSettings},
 
 		{"GET", "/api/v1/announcements", auth.ScopeRead, auth.RoleViewer, false, s.listAnnouncements},
 		{"POST", "/api/v1/announcements", auth.ScopeWrite, auth.RoleOperator, false, s.createAnnouncement},

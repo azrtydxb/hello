@@ -155,9 +155,8 @@ type call struct {
 	// doorOpening is set while a door-open code is being sent (spec S-47),
 	// guarded by mu, so two presses never interleave their events.
 	doorOpening bool
-	// video is the door station's video through the anchor (S-49), nil for a
-	// call without one; guarded by mu.
-	video *callVideo
+	// vrec is the call's video recording (videorec.go); nil when none runs.
+	vrec *callVideoRec
 	// web is the call's browser state (webrtc.go); nil for a call with none.
 	web *callWeb
 
@@ -1127,8 +1126,7 @@ func (c *call) answer(w *leg) {
 				allowSignalSource(c.relay, legCallee, bres.Source())
 				calleeAns = ans
 			}
-			c.noteVideoAnswer(bres.Body(), bres.Source())
-			c.webVideoAnswered(bres.Body(), calleeWeb)
+			c.videoAnswered(bres.Body(), calleeWeb)
 		}
 		off, _ := media.ParseAudioSDP(c.inv.Body())
 		body = c.anchoredAnswerA(off, calleeAns)

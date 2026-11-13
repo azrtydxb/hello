@@ -178,6 +178,9 @@ type relayLeg struct {
 	web *legWeb
 	vid videoLeg
 	vq  chan relayMsg
+	// pv is a plain leg's video transport and SDP state (plainvideo.go).
+	pvMu sync.Mutex
+	pv   *plainVideo
 }
 
 // legStats is one leg's inbound counters; the direction label comes from
@@ -635,6 +638,12 @@ func (r *Relay) Start() {
 	for _, l := range r.legs {
 		go r.runLeg(l)
 	}
+	legs := append([]*relayLeg(nil), r.legs...)
+	go func() {
+		for _, l := range legs {
+			r.startPlainVideo(l)
+		}
+	}()
 	r.wg.Add(1)
 	go r.observeLoop()
 }
@@ -1057,6 +1066,9 @@ func (r *Relay) Close() {
 	for _, l := range legs {
 		l.secure.Close() // a DTLS handshake still running ends with the call
 		_ = l.conn.Close()
+		if pv := l.pvState(false); pv != nil {
+			pv.close()
+		}
 	}
 	r.wg.Wait()
 	r.mu.Lock()

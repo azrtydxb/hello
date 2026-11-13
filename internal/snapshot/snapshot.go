@@ -90,6 +90,9 @@ type Extension struct {
 	// 00120, clients-webrtc-mobile-video S-36); inverted like NoCallWaiting so
 	// every extension built without the flag allows it.
 	VideoDenied bool
+	// NoRecordVideo is true when the extension's recorded calls keep the
+	// audio only (migration 00121, S-42); inverted like VideoDenied.
+	NoRecordVideo bool
 	// AnonymousOutbound makes the extension's trunk calls anonymous
 	// (migration 00067, spec S-19).
 	AnonymousOutbound bool
@@ -599,7 +602,7 @@ const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
        d.kind, d.auth_mode, d.user_id,
        (d.kind = 'web' AND NOT u.ring_web) OR (d.kind = 'mobile' AND NOT u.ring_mobile),
        e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id,
-       e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, e.directory_hidden, e.anonymous_outbound, (e.kind = 'door'), e.video_allowed
+       e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, e.directory_hidden, e.anonymous_outbound, (e.kind = 'door'), e.video_allowed, e.record_video
 FROM extensions e
 LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled
 LEFT JOIN users u ON u.id = d.user_id
@@ -636,18 +639,19 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 			e                              Extension
 			boxID                          *int64
 			callWaiting                    bool
-			videoAllowed                   bool
+			videoAllowed, recordVideo      bool
 		)
 		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &srtpPolicy, &srtpKeyEx, &mediaICE, &d.Extension, &d.ExtensionName,
 			&kind, &authMode, &userID, &ringOff,
 			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID,
-			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden, &e.AnonymousOutbound, &e.Door, &videoAllowed); err != nil {
+			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden, &e.AnonymousOutbound, &e.Door, &videoAllowed, &recordVideo); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan: %w", err)
 		}
 		e.Number, e.Name = d.Extension, d.ExtensionName
 		e.NoCallWaiting = !callWaiting
 		e.VideoDenied = !videoAllowed
+		e.NoRecordVideo = !recordVideo
 		if boxID != nil {
 			e.VoicemailBoxID = *boxID
 		} else {

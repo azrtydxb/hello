@@ -60,9 +60,26 @@ type VideoStats struct {
 
 // relayVideo is the session-level video state of a Relay.
 type relayVideo struct {
+	// tap receives every inbound video packet of either leg (video
+	// recording); it must not block and copies what it keeps.
+	tap                                                        atomic.Pointer[VideoTap]
 	maxKbps                                                    atomic.Int32
 	packets, octets, droppedCap, droppedNoPeer, keyReqs, nacks atomic.Uint64
 	started                                                    bool
+}
+
+// VideoTap is the hook of OnVideo: leg is the sending leg and codec the leg's
+// negotiated codec name (H264 or VP8).
+type VideoTap func(leg, codec string, pkt *RTPPacket)
+
+// OnVideo taps every video packet a leg sends the relay, before the cap and
+// the peer decide anything: what a recorder reads. nil removes it.
+func (r *Relay) OnVideo(h VideoTap) {
+	if h == nil {
+		r.video.tap.Store(nil)
+		return
+	}
+	r.video.tap.Store(&h)
 }
 
 // SetVideoCap sets the per-direction ceiling in kbit/s (0 for none): REMB
@@ -184,6 +201,12 @@ func (v *videoLeg) set(c *VideoLeg) {
 	_, _ = rand.Read(b[:])
 	v.outSSRC = binary.BigEndian.Uint32(b[:]) | 1 // never 0
 	v.pt.Store(int32(c.PT) + 1)
+}
+
+func (v *videoLeg) codecName() string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.cfg.Codec
 }
 
 func (v *videoLeg) on() bool { return v.pt.Load() != 0 }
@@ -336,6 +359,9 @@ func (r *Relay) forwardVideo(l *relayLeg, pkt *RTPPacket, data []byte) {
 		// A new stream: ask its sender for a picture to start from.
 		r.requestKeyframe(l)
 	}
+	if t := r.video.tap.Load(); t != nil {
+		(*t)(l.name, l.vid.codecName(), pkt)
+	}
 	peer := r.peerOf(l)
 	if peer == nil || !peer.vid.on() || l.muted.Load() {
 		r.video.droppedNoPeer.Add(1)
@@ -373,6 +399,20 @@ func enqueueDropOldest(q chan relayMsg, msg relayMsg, dropped *atomic.Uint64) {
 
 // sendVideoMsg writes one queued video or RTCP message into leg l.
 func (r *Relay) sendVideoMsg(l *relayLeg, m relayMsg) {
+	if pv := l.pvState(false); pv != nil {
+		pv.mu.Lock()
+		sock := pv.sock
+		pv.mu.Unlock()
+		if sock != nil {
+			// A plain leg's video has sockets of its own and no SRTP.
+			if m.rtcp {
+				sock.writeRTCP(m.data)
+			} else if out, ok := l.vid.rewriteOut(m.data, time.Now()); ok {
+				sock.writeRTP(out)
+			}
+			return
+		}
+	}
 	l.remoteMu.Lock()
 	dst := l.remote
 	l.remoteMu.Unlock()

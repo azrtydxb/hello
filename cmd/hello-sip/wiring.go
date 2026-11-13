@@ -274,3 +274,30 @@ func (l *lazyObjects) GetAnnouncement(ctx context.Context, key string) ([]byte, 
 	}
 	return o.GetAnnouncement(ctx, key)
 }
+
+// videoRows adapts the store's video stream rows (migration 00121) to the SIP
+// node's VideoRecordingStore.
+type videoRows struct{ st *store.Store }
+
+var _ sip.VideoRecordingStore = videoRows{}
+
+func videoWrite(in media.VideoStreamInfo) store.VideoStreamWrite {
+	w := store.VideoStreamWrite{Part: in.Part, Leg: in.Leg, Codec: in.Codec, Container: in.Container, Prefix: in.Prefix,
+		Width: in.Width, Height: in.Height, OffsetMs: in.OffsetMs, Bytes: in.Bytes, Started: in.Started, Ended: in.Ended, Failed: in.Failed}
+	for _, s := range in.Segments {
+		w.Segments = append(w.Segments, store.VideoSegment{Seq: s.Seq, Object: s.Object, Bytes: s.Bytes, Ticks: s.Ticks, Base: s.Base, StartMs: s.StartMs, Key: s.Key})
+	}
+	return w
+}
+
+func (v videoRows) OpenVideoStream(ctx context.Context, correlationID string, in media.VideoStreamInfo) (int64, error) {
+	return v.st.OpenVideoStream(ctx, correlationID, "", videoWrite(in))
+}
+
+func (v videoRows) UpdateVideoStream(ctx context.Context, id int64, in media.VideoStreamInfo) error {
+	return v.st.UpdateVideoStream(ctx, id, videoWrite(in))
+}
+
+func (v videoRows) VideoUsageBytes(ctx context.Context) (int64, error) {
+	return v.st.VideoUsageBytes(ctx)
+}

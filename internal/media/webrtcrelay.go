@@ -309,6 +309,12 @@ func (r *Relay) PrepareWebRTCOffer(leg string, node *WebRTCNode) error {
 // the other leg's numbering, a direction and the b=AS ceiling in kbit/s. An
 // empty list offers no video.
 func (r *Relay) SetVideoOffer(leg string, codecs []SDPCodec, dir string, kbps int) {
+	if l := r.findLeg(leg); l != nil && l.web == nil {
+		if pv := l.pvState(true); pv != nil {
+			pv.setOffer(codecs, dir, kbps)
+		}
+		return
+	}
 	l := r.webLeg(leg)
 	if l == nil {
 		return
@@ -324,6 +330,27 @@ func (r *Relay) SetVideoOffer(leg string, codecs []SDPCodec, dir string, kbps in
 // it), and configures the leg's relay to match. dir is the section direction
 // as Hello writes it.
 func (r *Relay) SetVideoSection(leg string, c *SDPCodec, dir string, kbps int) {
+	if l := r.findLeg(leg); l != nil && l.web == nil {
+		pv := l.pvState(c != nil)
+		if pv == nil {
+			return
+		}
+		pv.setSection(c, dir, kbps)
+		if c == nil {
+			l.vid.set(nil)
+			return
+		}
+		v := LegFor(*c)
+		if !v.FB.PLI && !v.FB.FIR {
+			// A phone or a door station that lists no feedback still answers a
+			// picture loss indication with a keyframe (every H.264 encoder
+			// built for video calls does); asking costs nothing if it does
+			// not. NACK and REMB stay as negotiated.
+			v.FB.PLI, v.FB.FIR = true, true
+		}
+		l.vid.set(&v)
+		return
+	}
 	l := r.webLeg(leg)
 	if l == nil {
 		return
@@ -348,6 +375,18 @@ func (r *Relay) SetVideoSection(leg string, c *SDPCodec, dir string, kbps int) {
 
 // VideoSection returns the negotiated video codec of leg, ok false when none.
 func (r *Relay) VideoSection(leg string) (SDPCodec, bool) {
+	if l := r.findLeg(leg); l != nil && l.web == nil {
+		pv := l.pvState(false)
+		if pv == nil {
+			return SDPCodec{}, false
+		}
+		pv.mu.Lock()
+		defer pv.mu.Unlock()
+		if pv.vSel == nil {
+			return SDPCodec{}, false
+		}
+		return *pv.vSel, true
+	}
 	l := r.webLeg(leg)
 	if l == nil {
 		return SDPCodec{}, false
@@ -365,6 +404,9 @@ func (r *Relay) VideoSection(leg string) (SDPCodec, bool) {
 // webAudio adds a webrtc leg's extras to an audio SDP about to be built.
 func (l *relayLeg) webAudio(a AudioSDP) AudioSDP {
 	if l.web == nil {
+		if pv := l.pvState(false); pv != nil {
+			a.localVideo = pv.section
+		}
 		return a
 	}
 	l.web.mu.Lock()
@@ -675,6 +717,9 @@ func (r *Relay) PromoteAlt() bool {
 	close(old.retired)
 	old.secure.Close()
 	_ = old.conn.Close()
+	if pv := old.pvState(false); pv != nil {
+		pv.close()
+	}
 	return true
 }
 

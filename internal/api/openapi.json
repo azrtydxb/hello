@@ -5430,6 +5430,217 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/recordings/{id}/manifest": {
+      "get": {
+        "operationId": "getRecordingManifest",
+        "summary": "List a recording's video streams",
+        "description": "The video streams recorded next to a call recording's audio: one per sending leg and part, with the offset of each against the audio's start so a player can slave the video to the audio clock. A recording without video has no streams. The same role and scope as the audio.",
+        "tags": ["media"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The manifest, Cache-Control: private, no-store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingVideoManifest"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/recordings/{id}/video/{stream}": {
+      "get": {
+        "operationId": "getRecordingVideo",
+        "summary": "Play or download a recording's video stream",
+        "description": "Streams one video stream of a recording (MP4 for H.264, WebM for VP8; video only, the audio is the recording's WAV). Range is supported and answers 206. A stream that hello-control has not finalized yet is its init segment and fragments joined, a valid progressive file without fast seeking. Cache-Control: private, no-store; a viewing is audited (recording.video.download).",
+        "tags": ["media"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "stream",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "A stream id from the manifest."
+          },
+          {
+            "name": "download",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false", "1", "0"]
+            },
+            "description": "true or 1 sends the stream as an attachment (recording-<id>-video-<stream>.mp4 or .webm)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The video file",
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/webm": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested byte range (Range request)",
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/webm": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "binary video response",
+          "category": "binary-download"
+        }
+      }
+    },
+    "/api/v1/recordings/settings": {
+      "get": {
+        "operationId": "getRecordingSettings",
+        "summary": "Read the recording settings",
+        "description": "The video retention in days. Admin only.",
+        "tags": ["media"],
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putRecordingSettings",
+        "summary": "Set the recording settings",
+        "description": "Sets how many days video recordings are kept (1 to 3650); hello-control's retention job purges what is older, objects first, then rows, and audits the count only. Admin only, audited.",
+        "tags": ["media"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordingSettingsUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/recordings/{id}/audio": {
       "get": {
         "operationId": "getRecordingAudio",
@@ -31152,6 +31363,7 @@
           "anonymousOutbound",
           "phoneSendAnonymous",
           "videoAllowed",
+          "recordVideo",
           "noAnswerRings",
           "directoryHidden",
           "kind",
@@ -31238,6 +31450,10 @@
           "videoAllowed": {
             "type": "boolean",
             "description": "Video allowed. On (the default): the extension's calls may carry video between web clients (H.264 Constrained Baseline or VP8, relayed, never transcoded). Off: every video section is answered with port 0 and the call goes on as audio. Trunk legs never carry video either way."
+          },
+          "recordVideo": {
+            "type": "boolean",
+            "description": "Record video. On (the default): when a call of this extension is recorded and carries video, the video is recorded next to the audio (fragmented MP4 for H.264, WebM for VP8). Off: the recording is audio only."
           },
           "mohClassId": {
             "oneOf": [
@@ -31395,6 +31611,10 @@
             "type": "boolean",
             "description": "Video allowed. On (the default): the extension's calls may carry video between web clients (H.264 Constrained Baseline or VP8, relayed, never transcoded). Off: every video section is answered with port 0 and the call goes on as audio. Trunk legs never carry video either way."
           },
+          "recordVideo": {
+            "type": "boolean",
+            "description": "Record video. On (the default): when a call of this extension is recorded and carries video, the video is recorded next to the audio (fragmented MP4 for H.264, WebM for VP8). Off: the recording is audio only."
+          },
           "mohClassId": {
             "oneOf": [
               {
@@ -31464,6 +31684,141 @@
           "destination": {
             "type": "string",
             "description": "The CDR's destination; empty until the CDR is written."
+          },
+          "video": {
+            "type": "boolean",
+            "description": "The call's video was recorded too: GET /recordings/{id}/manifest lists the streams."
+          }
+        }
+      },
+      "RecordingVideoStream": {
+        "type": "object",
+        "required": ["id", "part", "leg", "direction", "codec", "container", "segments", "bytes", "width", "height", "offsetMs", "durationMs", "startedAt", "state", "finalized", "mediaType"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The stream's id, the {stream} of GET /recordings/{id}/video/{stream}."
+          },
+          "part": {
+            "type": "integer",
+            "description": "Starts at 1 and counts up when the stream restarts (another picture size or codec)."
+          },
+          "leg": {
+            "type": "string",
+            "enum": ["caller", "callee"],
+            "description": "Whose camera: the leg that sent the video."
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["in"]
+          },
+          "codec": {
+            "type": "string",
+            "enum": ["h264", "vp8"]
+          },
+          "container": {
+            "type": "string",
+            "enum": ["mp4", "webm"]
+          },
+          "segments": {
+            "type": "integer",
+            "description": "Fragments stored so far."
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "offsetMs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the stream's first picture came, in milliseconds after the audio recording started. A player starts the video at the audio's time minus this."
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["recording", "ended", "finalized", "failed", "purged"],
+            "description": "recording: the call is running; ended: waits for hello-control to join the fragments; finalized: one file with a seek index; failed: stopped early (see failure), what was stored is kept."
+          },
+          "failure": {
+            "type": "string",
+            "description": "Why a stream stopped early: object_store, unsupported or interrupted (its node stopped writing it)."
+          },
+          "finalized": {
+            "type": "boolean"
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": ["video/mp4", "video/webm"]
+          }
+        }
+      },
+      "RecordingVideoManifest": {
+        "type": "object",
+        "required": ["recordingId", "correlationId", "durationMs", "streams"],
+        "properties": {
+          "recordingId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The audio recording's duration: the player's master clock."
+          },
+          "streams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecordingVideoStream"
+            }
+          }
+        }
+      },
+      "RecordingSettings": {
+        "type": "object",
+        "required": ["videoRetentionDays", "updatedAt"],
+        "properties": {
+          "videoRetentionDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650,
+            "description": "How long video recordings are kept after the call (default 30). The audio keeps no retention job."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RecordingSettingsUpdate": {
+        "type": "object",
+        "required": ["videoRetentionDays"],
+        "properties": {
+          "videoRetentionDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650,
+            "description": "Days video recordings are kept after the call, 1 to 3650."
           }
         }
       },

@@ -151,6 +151,15 @@ type Config struct {
 	VideoEnabled     bool
 	VideoMaxKbps     int
 	VideoMaxSessions int
+	// RecordingVideo (HELLO_RECORDING_VIDEO, S-42) keeps the video of a
+	// recorded call next to its audio; RecordingVideoSegment and
+	// RecordingVideoSegmentBytes cut its fragments; RecordingVideoQuotaBytes
+	// (HELLO_RECORDING_VIDEO_QUOTA_GB) stops new video recordings when the video
+	// already stored reaches it (0 for no limit).
+	RecordingVideo             bool
+	RecordingVideoSegment      time.Duration
+	RecordingVideoSegmentBytes int
+	RecordingVideoQuotaBytes   int64
 
 	// In-call HA (Phase 7). HADialogHeartbeat is the replication cadence
 	// (5s; the record's TTL is 30s). HATakeoverEnabled gates the orphan
@@ -223,6 +232,9 @@ type Deps struct {
 	// disables recording. Its methods run only in a media goroutine, never
 	// on the SIP transaction path.
 	Recordings RecordingStore
+	// VideoRecordings is the store of video stream rows (S-42); nil records
+	// no video.
+	VideoRecordings VideoRecordingStore
 	// HAState is the dialog-replication store (Phase 7); nil disables
 	// in-call HA (no replication, no takeover).
 	HAState HAState

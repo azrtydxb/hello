@@ -233,6 +233,11 @@ type Store interface {
 	ListRecordings(ctx context.Context, extension string, before int64, limit int) ([]store.Recording, string, error)
 	GetRecording(ctx context.Context, id int64) (store.Recording, error)
 	DeleteRecording(ctx context.Context, actor string, id int64) (string, error)
+	VideoStreamsOf(ctx context.Context, correlation string) ([]store.VideoStream, error)
+	RecordingsWithVideo(ctx context.Context, correlations []string) (map[string]bool, error)
+	DeleteVideoStreamsOf(ctx context.Context, correlation string) ([]store.VideoStream, error)
+	GetRecordingSettings(ctx context.Context) (store.RecordingSettings, error)
+	SetVideoRetention(ctx context.Context, actor string, days int) (store.RecordingSettings, error)
 	CreateRecordingLink(ctx context.Context, actor string, recordingID int64, hash []byte, expires time.Time, maxUses int) (store.RecordingLink, error)
 	GetRecordingLink(ctx context.Context, id int64) (store.RecordingLink, error)
 	RevokeRecordingLink(ctx context.Context, actor string, id int64) error

@@ -259,10 +259,7 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	relay.SetCodecs(legCallee, offered.Codecs, offered.DTMFPayloadType)
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
-	c.startVideo(offer)
-	if c.webCaller() {
-		c.noteWebVideoOffer(offer)
-	}
+	c.noteVideoOffer(relay, offer)
 	c.mu.Lock()
 	c.anchored = true
 	c.anchorReason = reason
@@ -527,6 +524,7 @@ func (c *call) anchoredOfferB(offer media.AudioSDP, allow []string, l *leg) []by
 	if c.legIsWeb(l) {
 		return c.webOfferB(offer, allow, l)
 	}
+	c.offerPlainVideo(l)
 	return c.withVideo(c.cryptoOffer(filteredOffer(offer, allow).PlainOffer(), l).Build(c.anchorHost, r.LegPort(legCallee), "sendrecv"), legCallee)
 }
 
@@ -624,8 +622,19 @@ func (c *call) closeMedia() {
 	c.anchored = false
 	c.mu.Unlock()
 	c.confLeave()
-	c.closeVideo()
 	c.releaseVideoSlot()
+	// The video recording is closed before the relay: its open fragments are
+	// stored, but a slow object store never holds the teardown for long.
+	vdone := make(chan struct{})
+	go func() {
+		defer close(vdone)
+		c.stopVideoRecording()
+	}()
+	select {
+	case <-vdone:
+	case <-time.After(5 * time.Second):
+		c.addTrace("Video recording still storing when the call ended")
+	}
 	if rec != nil {
 		if r, by := rec.stop(); r != nil {
 			c.storeRecording(r, by)
@@ -792,16 +801,12 @@ func (c *call) startRecordingFlow(by string) {
 		return // already recording (spec: one recording per call)
 	}
 	c.addTrace("Recording started")
-	if c.webVideoCarried() {
-		// Video recording is a later piece (clients 6b); the relay forwards
-		// the video, it does not keep it.
-		c.addTrace("Video not recorded: the recording is audio only")
-	}
+	withVideo := c.startVideoRecording()
 	c.noteHAState(haPhaseRecording, "")
 	// The notice announcement plays before the capture becomes a kept
 	// recording, matching the voicemail beep discipline.
 	if c.s.cfg.MediaRecordingNotice {
-		go c.playRecordingNotice()
+		go c.playRecordingNotice(withVideo)
 	}
 }
 
@@ -820,6 +825,7 @@ func (c *call) toggleRecording() {
 	if r, by := rec.stop(); r != nil {
 		c.addTrace("Recording stopped")
 		c.noteHAState("", "")
+		go c.stopVideoRecording()
 		go c.storeRecording(r, by)
 		return
 	}
@@ -843,13 +849,21 @@ func (c *call) setRecording(on bool) {
 // playRecordingNotice plays the recording-notice announcement to both
 // parties when the announcement set has it (contract 5). A missing WAV is
 // skipped (spec failure mode).
-func (c *call) playRecordingNotice() {
+func (c *call) playRecordingNotice(withVideo bool) {
 	defer contain(c.s.log, "recording notice")
 	snap := c.s.deps.Snapshots.Current()
 	if snap == nil {
 		return
 	}
-	obj, ok := snap.Announcement(recordingNotice)
+	// A recording that includes video says so when the operator uploaded the
+	// announcement for it; otherwise the plain notice plays.
+	obj, ok := "", false
+	if withVideo {
+		obj, ok = snap.Announcement(recordingNoticeVideo)
+	}
+	if !ok {
+		obj, ok = snap.Announcement(recordingNotice)
+	}
 	if !ok {
 		return
 	}

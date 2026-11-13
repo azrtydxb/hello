@@ -620,3 +620,30 @@ func TestLoadSessionTimersTrunks(t *testing.T) {
 		t.Fatalf("junk accepted: %v", err)
 	}
 }
+
+// TestLoadRecordingVideo fails if video recording is not on by default with
+// 10 s or 4 MiB fragments and a 200 GB quota, if the settings are not read, or
+// if a malformed one is accepted; hello-control reads the same quota.
+func TestLoadRecordingVideo(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.RecordingVideo || c.RecordingVideoSegment != 10*time.Second || c.RecordingVideoSegmentBytes != 4<<20 || c.RecordingVideoQuotaGB != 200 {
+		t.Fatalf("defaults: %v %v %d %d", c.RecordingVideo, c.RecordingVideoSegment, c.RecordingVideoSegmentBytes, c.RecordingVideoQuotaGB)
+	}
+	v, err := LoadSIP(env(map[string]string{"HELLO_RECORDING_VIDEO": "false", "HELLO_RECORDING_VIDEO_SEGMENT": "5s",
+		"HELLO_RECORDING_VIDEO_SEGMENT_BYTES": "1048576", "HELLO_RECORDING_VIDEO_QUOTA_GB": "0"}))
+	if err != nil || v.RecordingVideo || v.RecordingVideoSegment != 5*time.Second || v.RecordingVideoSegmentBytes != 1<<20 || v.RecordingVideoQuotaGB != 0 {
+		t.Fatalf("settings: %+v %v", v, err)
+	}
+	for k, bad := range map[string]string{"HELLO_RECORDING_VIDEO_SEGMENT": "100ms", "HELLO_RECORDING_VIDEO_QUOTA_GB": "-1", "HELLO_RECORDING_VIDEO_SEGMENT_BYTES": "0"} {
+		if _, err := LoadSIP(env(map[string]string{k: bad})); err == nil {
+			t.Errorf("%s=%s accepted", k, bad)
+		}
+	}
+	ctl, err := LoadControl(env(map[string]string{"HELLO_RECORDING_VIDEO_QUOTA_GB": "50"}))
+	if err != nil || ctl.RecordingVideoQuotaGB != 50 {
+		t.Errorf("control quota = %d, %v", ctl.RecordingVideoQuotaGB, err)
+	}
+}
