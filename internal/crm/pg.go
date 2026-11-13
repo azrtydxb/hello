@@ -519,13 +519,13 @@ func (p *PG) AttachEngagement(ctx context.Context, connectorID int64, callID, re
 }
 
 const logCols = `id, connector_id, call_id, direction, status, external_id, attempts, next_attempt_at, last_error,
-	COALESCE(payload, 'null'::jsonb), event_type, owner_extension, COALESCE(recording_id, 0), link_expires_at, created_at, updated_at`
+	COALESCE(payload, 'null'::jsonb), event_type, owner_extension, COALESCE(recording_id, 0), link_expires_at, created_at, updated_at, state`
 
 func scanLog(r scanner) (LogRow, error) {
 	var l LogRow
 	var payload []byte
 	err := r.Scan(&l.ID, &l.ConnectorID, &l.CallID, &l.Direction, &l.Status, &l.ExternalID, &l.Attempts, &l.NextAttemptAt, &l.LastError,
-		&payload, &l.EventType, &l.OwnerExtension, &l.RecordingID, &l.LinkExpiresAt, &l.CreatedAt, &l.UpdatedAt)
+		&payload, &l.EventType, &l.OwnerExtension, &l.RecordingID, &l.LinkExpiresAt, &l.CreatedAt, &l.UpdatedAt, &l.State)
 	l.Payload = payload
 	return l, err
 }
@@ -567,9 +567,10 @@ func (p *PG) Finish(ctx context.Context, id int64, r LogResult) error {
 			next_attempt_at = CASE WHEN $2::text = 'logged' AND COALESCE(recording_id, 0) <> $9::bigint THEN now() ELSE $5::timestamptz END,
 			last_error = $6::text,
 			link_expires_at = CASE WHEN $8::boolean THEN NULL WHEN $7::timestamptz IS NULL THEN link_expires_at ELSE $7::timestamptz END,
+			state = COALESCE($10::text, state),
 			updated_at = now()
 		WHERE id = $1`,
-		id, r.Status, r.ExternalID, r.Attempts, r.NextAttemptAt, r.LastError, r.LinkExpiresAt, r.ClearLink, r.RecordingSeen)
+		id, r.Status, r.ExternalID, r.Attempts, r.NextAttemptAt, r.LastError, r.LinkExpiresAt, r.ClearLink, r.RecordingSeen, r.State)
 	return err
 }
 

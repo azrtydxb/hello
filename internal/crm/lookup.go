@@ -190,7 +190,7 @@ func (l *Lookup) lookupConnectors(ctx context.Context) []ConnectorRow {
 	}
 	out := []ConnectorRow{}
 	for _, r := range rows {
-		if c, ok := l.Tokens.Providers(r.Kind); ok && c.Capabilities().Lookup {
+		if c, ok := l.Tokens.Providers(r.Kind); ok && c.Capabilities().Lookup && serverSide(c, r.Config) {
 			out = append(out, r)
 		}
 	}

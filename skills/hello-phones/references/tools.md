@@ -57,6 +57,7 @@
 | `updatePhonebook`                   | admin | Rename a book.                                                     |
 | `deletePhonebook`                   | admin | Delete a named book.                                               |
 | `lookupPhonebook`                   | admin | Which entry names a caller.                                        |
+| `lookupNumber`                      | read  | The best contact name for a number (integrations).                 |
 | `listPhonebookEntries`              | read  | Entries of a book.                                                 |
 | `createPhonebookEntry`              | write | Add an entry.                                                      |
 | `updatePhonebookEntry`              | write | Replace an entry.                                                  |
@@ -73,27 +74,27 @@
 | `getRingMap`                        | read  | The ring map: ringer lists, defaults, choices, overrides.          |
 | `putRingMap`                        | write | Replace the global ring map choices.                               |
 | `putRingMapGroup`                   | write | Replace one phone group's ring map overrides.                      |
-| `getSCEP`                       | read  | The SCEP server, the device CA and its CRL URL.           |
-| `setSCEPCA`                     | admin | Generate or import the device CA.                         |
-| `listSCEPCertificates`          | read  | Issued device certificates.                               |
-| `revokeSCEPCertificate`         | admin | Revoke a certificate (CRL).                               |
-| `rotatePhoneSCEPChallenge`      | admin | Discard a phone's one-time SCEP challenge.                |
-| `getPhoneGroupSecurity`         | read  | A group's SCEP switch and wired 802.1X profile.           |
-| `setPhoneGroupSecurity`         | admin | Set them.                                                 |
-| `listDot1XProfiles`             | read  | 802.1X profiles.                                          |
-| `getDot1XProfile`               | read  | One 802.1X profile.                                       |
-| `createDot1XProfile`            | admin | Add an 802.1X profile.                                    |
-| `updateDot1XProfile`            | admin | Replace an 802.1X profile.                                |
-| `deleteDot1XProfile`            | admin | Delete an unused 802.1X profile.                          |
-| `listWifiProfiles`              | read  | Wi-Fi profiles, secrets never shown.                      |
-| `createWifiProfile`             | admin | Create a Wi-Fi profile.                                   |
-| `getWifiProfile`                | read  | One Wi-Fi profile.                                        |
-| `updateWifiProfile`             | admin | Change a Wi-Fi profile.                                   |
-| `deleteWifiProfile`             | admin | Delete an unused Wi-Fi profile.                           |
-| `getPhoneGroupWifi`             | read  | A group's Wi-Fi profiles and roaming.                     |
-| `putPhoneGroupWifi`             | admin | Set a group's Wi-Fi profiles and roaming.                 |
-| `getPhoneWifi`                  | read  | A phone's own and inherited profiles.                     |
-| `putPhoneWifi`                  | admin | Set a phone's Wi-Fi profiles.                             |
+| `getSCEP`                           | read  | The SCEP server, the device CA and its CRL URL.                    |
+| `setSCEPCA`                         | admin | Generate or import the device CA.                                  |
+| `listSCEPCertificates`              | read  | Issued device certificates.                                        |
+| `revokeSCEPCertificate`             | admin | Revoke a certificate (CRL).                                        |
+| `rotatePhoneSCEPChallenge`          | admin | Discard a phone's one-time SCEP challenge.                         |
+| `getPhoneGroupSecurity`             | read  | A group's SCEP switch and wired 802.1X profile.                    |
+| `setPhoneGroupSecurity`             | admin | Set them.                                                          |
+| `listDot1XProfiles`                 | read  | 802.1X profiles.                                                   |
+| `getDot1XProfile`                   | read  | One 802.1X profile.                                                |
+| `createDot1XProfile`                | admin | Add an 802.1X profile.                                             |
+| `updateDot1XProfile`                | admin | Replace an 802.1X profile.                                         |
+| `deleteDot1XProfile`                | admin | Delete an unused 802.1X profile.                                   |
+| `listWifiProfiles`                  | read  | Wi-Fi profiles, secrets never shown.                               |
+| `createWifiProfile`                 | admin | Create a Wi-Fi profile.                                            |
+| `getWifiProfile`                    | read  | One Wi-Fi profile.                                                 |
+| `updateWifiProfile`                 | admin | Change a Wi-Fi profile.                                            |
+| `deleteWifiProfile`                 | admin | Delete an unused Wi-Fi profile.                                    |
+| `getPhoneGroupWifi`                 | read  | A group's Wi-Fi profiles and roaming.                              |
+| `putPhoneGroupWifi`                 | admin | Set a group's Wi-Fi profiles and roaming.                          |
+| `getPhoneWifi`                      | read  | A phone's own and inherited profiles.                              |
+| `putPhoneWifi`                      | admin | Set a phone's Wi-Fi profiles.                                      |
 | Tool                                | Scope | What it does                                                       |
 | -------------------------------     | ----- | --------------------------------------------------------           |
 | `listPhones`                        | read  | Provisioned phones by MAC.                                         |

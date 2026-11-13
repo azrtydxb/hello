@@ -368,6 +368,20 @@ jobs:
       - uses: azrtydxb/ant-setup-action@v1
       - run: node --test integrations/n8n/test/ integrations/make/test/
 
+  zapier:
+    # The Zapier private integration (integrations/zapier, spec integrations
+    # I-52): unit tests against a fake Zapier runtime. No dependencies are
+    # installed; the tests read internal/api/openapi.json to check that every
+    # route the app calls exists.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    container:
+      image: node:26-bookworm-slim
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azrtydxb/ant-setup-action@v1
+      - run: node --test integrations/zapier/test/
+
   bench:
     # TestDetectorLatency (spec ai-agent S-19): every AIOps detector under
     # 2 s over 1 000 000 CDRs and 10 000 devices. It needs PostgreSQL and

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/crm"
+	"github.com/azrtydxb/hello/internal/crm/kit"
 )
 
 // Kind is the connector kind.
@@ -33,7 +34,7 @@ const (
 
 // Connector is the Google connector.
 type Connector struct {
-	j crm.JSONClient
+	j kit.Bearer
 	// Hosts are replaced by tests.
 	AuthBase, TokenURL, RevokeURL, UserInfoURL, PeopleBase, CalendarBase string
 	index                                                                crm.IndexCache
@@ -42,7 +43,7 @@ type Connector struct {
 // New returns the connector on hc.
 func New(hc *http.Client) *Connector {
 	//nolint:gosec // G101: public OAuth endpoint addresses, not credentials
-	return &Connector{j: crm.JSONClient{HC: hc},
+	return &Connector{j: kit.Bearer{HC: hc},
 		AuthBase: "https://accounts.google.com/o/oauth2/v2/auth", TokenURL: "https://oauth2.googleapis.com/token",
 		RevokeURL: "https://oauth2.googleapis.com/revoke", UserInfoURL: "https://openidconnect.googleapis.com/v1/userinfo",
 		PeopleBase: "https://people.googleapis.com/v1", CalendarBase: "https://www.googleapis.com/calendar/v3"}

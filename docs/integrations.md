@@ -494,7 +494,7 @@ the event retention, dead letters after 30 days, by one replica at a time.
 ## What comes next
 
 Click-to-call (P3), recording links (P4) and the CRM connectors build on these
-events.
+events. [Zapier and other automation tools](zapier.md) use the webhooks above.
 
 [Slack notifications](slack.md), [n8n and Make](n8n-make.md) and
 [Outlook and Google contacts and calendar](contacts-calendar.md) use the events

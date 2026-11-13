@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -77,6 +78,17 @@ func (d *dndFake) SetCalendarDND(_ context.Context, uid int64, on bool) (int, er
 	return 1, nil
 }
 
+// crmStatic is a credential connector (Odoo, Bitrix24 style): the client
+// secret is the credential and Connect verifies it.
+type crmStatic struct{ *crmFake }
+
+func (crmStatic) Authenticate(_ context.Context, c crm.Config) (crm.Tokens, error) {
+	if c.ClientSecret != "good-key" {
+		return crm.Tokens{}, errors.New("the key was refused")
+	}
+	return crm.Tokens{Access: "credential", Account: "uid-7"}, nil
+}
+
 type crmEnv struct {
 	repo *crm.Mem
 	svc  *crm.Service
@@ -92,7 +104,10 @@ func newCRMEnv(t *testing.T, publicURL string) *crmEnv {
 	fake := &crmFake{}
 	ufake := &crmUserFake{}
 	tm := &crm.TokenManager{Repo: repo, Providers: func(k string) (crm.Connector, bool) {
-		if k == "fakeuser" {
+		switch k {
+		case "staticcrm":
+			return crmStatic{fake}, true
+		case "fakeuser":
 			return ufake, true
 		}
 		return fake, k == "fakecrm"
@@ -418,6 +433,7 @@ func TestCRMRoutesAnswer503WithoutService(t *testing.T) {
 		{"GET", "/api/v1/integrations/crm/1/logs"}, {"POST", "/api/v1/integrations/crm/logs/1/retry"},
 		{"GET", "/api/v1/integrations/crm/1/users"}, {"PUT", "/api/v1/integrations/crm/1/users/1"},
 		{"POST", "/api/v1/integrations/hubspot/engagements"}, {"GET", "/api/v1/integrations/crm/oauth/callback"},
+		{"POST", "/api/v1/integrations/salesforce/engagements"}, {"GET", "/api/v1/integrations/crm/1/setup"},
 	} {
 		who := "carol"
 		if strings.HasSuffix(rt.p, "engagements") {
@@ -522,4 +538,115 @@ func TestPersonalConnections(t *testing.T) {
 	e.want(t, 204, "alice", "DELETE", "/api/v1/me/connections/"+toS(id), nil)
 	e.want(t, 404, "alice", "DELETE", "/api/v1/me/connections/"+toS(id), nil)
 	e.want(t, 409, "alice", "DELETE", "/api/v1/me/connections/"+toS(org["id"]), nil)
+}
+
+// sfFake is a connector that signs in with client credentials, describes its
+// own setup and checks record ids, as the Salesforce connector does.
+type sfFake struct {
+	crmFake
+	authErr error
+}
+
+func (f *sfFake) Kind() string { return "salesforce" }
+func (f *sfFake) Authenticate(context.Context, crm.Config) (crm.Tokens, error) {
+	if f.authErr != nil {
+		return crm.Tokens{}, f.authErr
+	}
+	return crm.Tokens{Access: "ACCESS-SECRET", ExpiresAt: time.Now().Add(time.Hour), Account: "acme.my.salesforce.com"}, nil
+}
+func (f *sfFake) ServerSide(cfg map[string]string) bool { return cfg["serverLogging"] == "true" }
+func (f *sfFake) ValidRef(r string) bool                { return strings.HasPrefix(r, "00T") }
+func (f *sfFake) Setup(_ crm.Config, public string) []crm.SetupItem {
+	return []crm.SetupItem{{Name: "adapterUrl", Label: "CTI adapter URL", Kind: "url", Value: public + "/integrations/salesforce/softphone"}}
+}
+
+// TestSalesforceClientCredentialsAndSetup: a client-credentials connector is
+// connected by the Connect call itself, a refusal is a 400 on the secret, the setup values need the admin, and the softphone's record
+// handshake checks the record id and the caller's ownership. It fails if
+// Connect answers an authorize URL for it, a secret or token leaks, a
+// non-admin reads the setup, or a malformed record id is stored.
+func TestSalesforceClientCredentialsAndSetup(t *testing.T) {
+	e := newCRMEnv(t, "https://hello.example")
+	sf := &sfFake{}
+	e.svc.Tokens.Providers = func(k string) (crm.Connector, bool) { return sf, k == "salesforce" }
+	e.want(t, 404, "alice", "POST", "/api/v1/integrations/salesforce/engagements", map[string]any{"callId": "c1", "recordId": "00T000000000001"}) // no connector yet
+	c := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "salesforce", "name": "Salesforce",
+		"clientSecret": "CLIENT-SECRET", "config": map[string]string{"clientId": "cid", "serverLogging": "true"}})
+	p := connPath(c["id"])
+
+	setup := e.want(t, 200, "carol", "GET", p+"/setup", nil)
+	it := setup["items"].([]any)[0].(map[string]any)
+	if it["name"] != "adapterUrl" || it["value"] != "https://hello.example/integrations/salesforce/softphone" {
+		t.Fatalf("setup = %v", setup)
+	}
+	e.want(t, 403, "alice", "GET", p+"/setup", nil)
+	e.want(t, 404, "carol", "GET", connPath(int64(99))+"/setup", nil)
+
+	sf.authErr = &crm.APIError{Status: 400, Msg: "invalid_client: invalid client credentials"}
+	code, body, _ := e.do(t, "carol", "POST", p+"/connect", nil)
+	if code != 400 || !strings.Contains(string(body), "invalid_client") {
+		t.Fatalf("refused connect = %d %s", code, body)
+	}
+	sf.authErr = nil
+	r := e.want(t, 200, "carol", "POST", p+"/connect", nil)
+	if r["connected"] != true || r["authorizeUrl"] != "" {
+		t.Fatalf("connect = %v", r)
+	}
+	got := e.want(t, 200, "carol", "GET", p, nil)
+	if conn, _ := got["connection"].(map[string]any); conn["status"] != "connected" || conn["externalAccount"] != "acme.my.salesforce.com" {
+		t.Fatalf("connection = %v", got["connection"])
+	}
+	raw, _ := json.Marshal(got)
+	for _, secret := range []string{"ACCESS-SECRET", "CLIENT-SECRET"} {
+		if strings.Contains(string(raw), secret) {
+			t.Fatalf("the connector leaks %q", secret)
+		}
+	}
+
+	hs := "/api/v1/integrations/salesforce/engagements"
+	e.repo.Events = [][2]string{{"c1", "101"}, {"c2", "102"}}
+	e.want(t, 400, "alice", "POST", hs, map[string]any{"callId": "c1"})
+	e.want(t, 400, "alice", "POST", hs, map[string]any{"callId": "c1", "recordId": strings.Repeat("0", 19)})
+	e.want(t, 400, "alice", "POST", hs, map[string]any{"callId": "c1", "recordId": "003AAAAAAAAAAAA"})
+	e.want(t, 403, "alice", "POST", hs, map[string]any{"callId": "c2", "recordId": "00T000000000001"})
+	if r := e.want(t, 200, "alice", "POST", hs, map[string]any{"callId": "c1", "recordId": "00T000000000001"}); r["adopted"] != true {
+		t.Fatalf("own call = %v", r)
+	}
+	if row, ok := e.repo.Log(int64(c["id"].(float64)), "c1"); !ok || row.ExternalID != "00T000000000001" {
+		t.Fatalf("row = %+v", row)
+	}
+}
+
+// TestCRMCredentialConnectorConnectsOnTheSpot fails if a credential
+// connector needs a public URL or a redirect, if a refused key connects, or
+// if the key or a redirect URI appears in the connector's view.
+func TestCRMCredentialConnectorConnectsOnTheSpot(t *testing.T) {
+	e := newCRMEnv(t, "") // no HELLO_PUBLIC_URL
+	c := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "staticcrm", "name": "S", "clientSecret": "bad-key"})
+	if c["auth"] != "direct" || c["redirectUri"] != nil {
+		t.Fatalf("view = %v", c)
+	}
+	code, b, _ := e.do(t, "carol", "POST", connPath(c["id"])+"/connect", nil)
+	if code != 400 && code != 422 || strings.Contains(string(b), "bad-key") {
+		t.Fatalf("refused key = %d %s", code, b)
+	}
+	e.want(t, 200, "carol", "PATCH", connPath(c["id"]), map[string]any{"clientSecret": "good-key"})
+	got := e.want(t, 200, "carol", "POST", connPath(c["id"])+"/connect", nil)
+	if got["authorizeUrl"] != "" {
+		t.Fatalf("connect = %v", got)
+	}
+	v := e.want(t, 200, "carol", "GET", connPath(c["id"]), nil)
+	cn, _ := v["connection"].(map[string]any)
+	if cn["status"] != "connected" || cn["externalAccount"] != "uid-7" {
+		t.Fatalf("connection = %v", v["connection"])
+	}
+	raw, _ := json.Marshal(v)
+	if strings.Contains(string(raw), "good-key") {
+		t.Fatalf("the key leaks: %s", raw)
+	}
+	// OAuth connectors report oauth.
+	o := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "fakecrm", "name": "O"})
+	if o["auth"] != "oauth" {
+		t.Fatalf("auth = %v", o["auth"])
+	}
 }

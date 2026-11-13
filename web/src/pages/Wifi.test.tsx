@@ -8,11 +8,7 @@ const PROFILE = {
   ssid: "corp-wifi",
   security: "wpa2-psk",
   pskSet: true,
-  eapMethod: "",
-  identity: "",
-  anonymousIdentity: "",
-  passwordSet: false,
-  caCert: "system",
+  dot1xProfileId: null,
   priority: 5,
   hidden: false,
   preferAccount: 0,
@@ -209,5 +205,45 @@ describe("Wi-Fi profiles", () => {
         .disabled,
     ).toBe(true);
     void noContent;
+  });
+
+  it("names an 802.1X profile for an enterprise network and offers no wired-only one", async () => {
+    const calls = setup("admin", {
+      "GET /api/v1/dot1x-profiles": () =>
+        json({
+          items: [
+            { id: 11, name: "Radius", method: "peap" },
+            { id: 12, name: "Wired", method: "eap-md5" },
+            { id: 13, name: "Certs", method: "eap-tls" },
+          ],
+        }),
+      "POST /api/v1/wifi-profiles": () => json({ ...PROFILE, id: 5 }, 201),
+    });
+    renderApp("/phones/wifi");
+    fireEvent.click(await screen.findByRole("button", { name: "Add profile" }));
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "Corp" },
+    });
+    fireEvent.change(screen.getByLabelText("SSID"), {
+      target: { value: "corp-dot1x" },
+    });
+    fireEvent.change(screen.getByLabelText("Security"), {
+      target: { value: "wpa2-enterprise" },
+    });
+    const select = (await screen.findByLabelText(
+      "802.1X profile",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBe(3));
+    expect(screen.queryByText(/Wired \(/)).toBeNull();
+    expect(screen.queryByLabelText("Identity")).toBeNull();
+    fireEvent.change(select, { target: { value: "11" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "POST")).toBe(true),
+    );
+    const post = calls.find((c) => c.method === "POST")?.body as {
+      dot1xProfileId?: number;
+    };
+    expect(post.dot1xProfileId).toBe(11);
   });
 });

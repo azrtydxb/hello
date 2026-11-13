@@ -559,7 +559,7 @@ type RingGroup struct {
 	FailureTarget string `json:"failureTarget"`
 	// MOHClassID is the music on hold class of calls to this group (nil
 	// uses the global default); MOHRingback plays it to the caller instead
-	// of ringback while the group rings (migration 00021).
+	// of ringback while the group rings (migration 00029).
 	MOHClassID  *int64 `json:"mohClassId"`
 	MOHRingback bool   `json:"mohRingback"`
 	// RingTag overrides the ringgroup ring tag for calls through the group

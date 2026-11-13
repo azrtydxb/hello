@@ -4,6 +4,7 @@
 | --------------------- | ----- | -------- | -------------------------------------------------------------------------------------------- |
 | `listCRMConnectors`   | admin | admin    | Connectors with capabilities and connection state (no secrets).                              |
 | `getCRMConnector`     | admin | admin    | One connector, with the redirect URI to register in the CRM app.                             |
+| `getCRMSetup`         | admin | admin    | What the customer configures in the CRM: call center definition, channel provider.           |
 | `listCRMUsers`        | admin | admin    | Hello users and the CRM user each one's calls are logged for.                                |
 | `listCRMLogs`         | write | operator | Logging jobs of a connector, newest first, filterable by `status`, paged by `before`.        |
 | `getSlackDestination` | admin | admin    | A Slack destination with its health and the count of pending and dead posts (no credential). |

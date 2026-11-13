@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/crm"
+	"github.com/azrtydxb/hello/internal/crm/kit"
 )
 
 // Kind is the connector kind.
@@ -28,7 +29,7 @@ func init() { crm.Register(Kind, func(hc *http.Client) crm.Connector { return Ne
 
 // Connector is the Outlook connector.
 type Connector struct {
-	j crm.JSONClient
+	j kit.Bearer
 	// LoginBase and GraphBase are replaced by tests.
 	LoginBase, GraphBase string
 	index                crm.IndexCache
@@ -36,7 +37,7 @@ type Connector struct {
 
 // New returns the connector on hc.
 func New(hc *http.Client) *Connector {
-	return &Connector{j: crm.JSONClient{HC: hc}, LoginBase: "https://login.microsoftonline.com", GraphBase: "https://graph.microsoft.com/v1.0"}
+	return &Connector{j: kit.Bearer{HC: hc}, LoginBase: "https://login.microsoftonline.com", GraphBase: "https://graph.microsoft.com/v1.0"}
 }
 
 // Kind implements crm.Connector.
