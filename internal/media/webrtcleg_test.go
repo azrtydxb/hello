@@ -264,7 +264,9 @@ func TestDTLSFingerprintMismatch(t *testing.T) {
 	case <-time.After(8 * time.Second):
 		t.Fatal("a certificate that does not match the SDP fingerprint was accepted")
 	}
-	_ = <-done // the browser side ends in an error too
+	if err := <-done; err == nil {
+		t.Error("the browser side finished a handshake the anchor refused")
+	}
 	if c.r.SecureLegs() != 0 {
 		t.Error("the leg counts as encrypted after a failed handshake")
 	}
