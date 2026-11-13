@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/azrtydxb/hello/internal/ai/proposal"
 	"github.com/azrtydxb/hello/internal/apispec"
+	"github.com/azrtydxb/hello/internal/jsondiff"
 	"github.com/azrtydxb/hello/internal/replay"
 	"github.com/azrtydxb/hello/internal/store"
 )
@@ -26,7 +26,7 @@ type Result struct {
 	Node        string             `json:"node,omitempty"`
 	Before      json.RawMessage    `json:"before"`
 	After       json.RawMessage    `json:"after"`
-	Diff        []proposal.Change  `json:"diff"`
+	Diff        []jsondiff.Change  `json:"diff"`
 	Layout      []store.NodeLayout `json:"layout,omitempty"`
 }
 

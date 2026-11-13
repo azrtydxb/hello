@@ -3,7 +3,7 @@
   "info": {
     "title": "Hello management API",
     "version": "v1",
-    "description": "hello-control REST API. Every route except version, openapi.json and auth/login requires the hello_session cookie or an `Authorization: Bearer <token>` header. Secrets (device SIP secrets, API tokens, trunk passwords) appear only in the response that creates them; trunk passwords never appear in any response. While a backup restore runs, every request that is not a read (GET, HEAD, OPTIONS) is refused with 503 and the error code `maintenance`, whatever its operation documents; retry after the Retry-After seconds."
+    "description": "hello-control REST API. Every route except version, openapi.json and auth/login requires the hello_session cookie or an `Authorization: Bearer <token>` header. Secrets (device SIP secrets, API tokens, trunk passwords) appear only in the response that creates them; trunk passwords never appear in any response."
   },
   "security": [
     {
@@ -1263,6 +1263,107 @@
         }
       }
     },
+    "/api/v1/me/extensions/{id}/follow-me": {
+      "get": {
+        "operationId": "getMyFollowMe",
+        "summary": "Get my extension's follow-me profile",
+        "description": "Returns the follow-me profile of one of the signed-in user's own extensions. An extension that is not the user's answers 404, exactly like one that does not exist.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The follow-me profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowMe"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
+        }
+      },
+      "put": {
+        "operationId": "putMyFollowMe",
+        "summary": "Change my extension's follow-me profile",
+        "description": "Changes the follow-me profile of one of the signed-in user's own extensions, with the same fields and rules as the operator route. An extension that is not the user's answers 404.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FollowMeUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The follow-me profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowMe"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
+        }
+      }
+    },
     "/api/v1/me/extensions/{id}/voicemail": {
       "get": {
         "operationId": "getMyVoicemail",
@@ -1748,6 +1849,292 @@
         "x-hello-mcp": {
           "exclude": "system email settings stay in the console",
           "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/backups/settings": {
+      "get": {
+        "operationId": "getBackupSettings",
+        "summary": "Backup schedule and destination",
+        "description": "Admin only. Returns the backup schedule (a five-field cron expression, server time), whether scheduled backups are enabled, the destination (the bundled MinIO bucket hello-backups, or an external S3 service), how many archives are kept and the address a failure email goes to. The S3 credentials are never returned; s3KeysSet says whether they are stored.",
+        "tags": ["backups"],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupSettings"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
+        }
+      },
+      "put": {
+        "operationId": "putBackupSettings",
+        "summary": "Save the backup schedule and destination",
+        "description": "Admin only, audited. Saves the schedule and destination. The S3 access key and secret key are sealed in the database; omit both to keep the stored ones, send both to replace them, or send both empty to remove them. Changes apply from the next scheduler pass.",
+        "tags": ["backups"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupSettingsUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
+        }
+      }
+    },
+    "/api/v1/backups": {
+      "get": {
+        "operationId": "listBackups",
+        "summary": "Backup runs",
+        "description": "Admin only. Lists the newest 200 backup runs, scheduled and manual, with status, sizes and the stored archive key.",
+        "tags": ["backups"],
+        "responses": {
+          "200": {
+            "description": "Runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BackupRun"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
+        }
+      },
+      "post": {
+        "operationId": "createBackup",
+        "summary": "Run a backup now",
+        "description": "Admin only, audited. Starts a manual backup in the background and answers 202 with the run (status running). 409 backup_busy while another backup or a restore is running. Poll the list for the outcome.",
+        "tags": ["backups"],
+        "responses": {
+          "202": {
+            "description": "The run that was started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupRun"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
+        }
+      }
+    },
+    "/api/v1/backups/{id}": {
+      "delete": {
+        "operationId": "deleteBackup",
+        "summary": "Delete a backup",
+        "description": "Admin only, audited. Removes the archive from the destination and the run row. Stored objects no remaining archive references are removed by the next run. 409 backup_busy for a run still in progress.",
+        "tags": ["backups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
+        }
+      }
+    },
+    "/api/v1/backups/{id}/restore": {
+      "post": {
+        "operationId": "restoreBackup",
+        "summary": "Restore a backup",
+        "description": "Admin only, audited. With dry_run=true it verifies the manifest and every part hash and returns counts only, and writes nothing. Otherwise the body must carry confirm: \"RESTORE <id>\". A restore puts the API in maintenance (every write answers 503 maintenance) while it replaces the database in one transaction and restores missing or changed objects, never deleting one. It is refused with 409 schema_newer for an archive from a newer schema, 409 key_mismatch for another HELLO_SECRET_KEY and 409 backup_invalid when verification fails. SIP keeps running on its current snapshot, then rebuilds it.",
+        "tags": ["backups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Verify the archive and report counts without restoring."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupRestore"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The restore report (counts only)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupRestoreReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console",
+          "category": "human-in-the-loop"
         }
       }
     },
@@ -2564,7 +2951,7 @@
       "get": {
         "operationId": "exportCDRs",
         "summary": "Call detail records as CSV, newest first",
-        "description": "Exports the filtered call records as a CSV download. The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe. The caller_codec and callee_codec columns are empty when no codec was negotiated.",
+        "description": "Exports the filtered call records as a CSV download. The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe.",
         "tags": ["history"],
         "parameters": [
           {
@@ -3516,6 +3903,16 @@
               "type": "string",
               "enum": ["devices"]
             }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "description": "`all` (default) or `summary`: every node's `summary` is empty and edges carry no `data`, a compact read that keeps an AI tool result of a small PBX under 16 KiB.",
+            "schema": {
+              "type": "string",
+              "enum": ["all", "summary"]
+            }
           }
         ],
         "responses": {
@@ -4344,6 +4741,101 @@
         },
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/extensions/{id}/follow-me": {
+      "get": {
+        "operationId": "getFollowMe",
+        "summary": "Get an extension's follow-me profile",
+        "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Returns the profile; an extension that has none reads as the defaults, off with no targets.",
+        "tags": [
+          "extensions"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The follow-me profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowMe"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putFollowMe",
+        "summary": "Change an extension's follow-me profile",
+        "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Fields left out keep their stored value; targets, when sent, replace the whole list (at most 5, in ring order). A profile can be turned on only with at least one target. A target cannot be the extension itself, an external target is 2 to 32 digits with an optional leading +, and an extension or ring group target must exist.",
+        "tags": [
+          "extensions"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FollowMeUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The follow-me profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowMe"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
         "x-hello-mcp": true
       }
     },
@@ -7688,7 +8180,7 @@
       "put": {
         "operationId": "putFeatureCodes",
         "summary": "Replace the DTMF feature codes",
-        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, ivr, queue_login, queue_logout, queue_pause, queue_unpause (the argument of queue_pause is the pause reason), voicemail_broadcast (*63 plus a voicemail group number: a member records a message for every member's box), call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed, time_condition (the argument is the time condition's name), directory (the dial-by-name directory, no argument), tc_override (the argument is toggle, open, closed or auto), boss_divert (toggles the divert of the boss link of the extension that dialled it). Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
+        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, ivr, queue_login, queue_logout, queue_pause, queue_unpause (the argument of queue_pause is the pause reason), voicemail_broadcast (*63 plus a voicemail group number: a member records a message for every member's box), call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed, time_condition (the argument is the time condition's name), directory (the dial-by-name directory, no argument), follow_me_on and follow_me_off (turn the caller's own follow-me profile on or off; they change nothing for an extension that has no profile with a target), tc_override (the argument is toggle, open, closed or auto), boss_divert (toggles the divert of the boss link of the extension that dialled it). Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
         "tags": ["feature-codes"],
         "requestBody": {
           "required": true,
@@ -8431,6 +8923,98 @@
         "x-hello-role": "admin",
         "x-hello-mcp": {
           "exclude": "secrets-scoped",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/phones/{id}/ldap": {
+      "get": {
+        "operationId": "getPhoneLDAP",
+        "summary": "Get a phone's LDAP directory state",
+        "description": "Returns the phone's LDAP bind DN, whether a password is set, when it was last rotated, whether the previous password still binds and when the phone last bound. Never the password. Viewer.",
+        "tags": ["phones"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneLDAP"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phones/{id}/ldap/password": {
+      "post": {
+        "operationId": "rotatePhoneLDAPPassword",
+        "summary": "Rotate a phone's LDAP password",
+        "description": "Generates a new 32-character LDAP password for the phone and returns it once, with the bind DN. The phone is queued a check-sync so it takes the new password with its configuration; the old password keeps working until it has fetched it. Admin, secrets scope.",
+        "tags": ["phones"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The new password, shown once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneLDAPPassword"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "secrets-scoped: the password is shown only in the console",
           "category": "credentials"
         }
       }
@@ -9443,6 +10027,108 @@
           "exclude": "too large for a tool call: a firmware image is tens of megabytes, far over the 1 MiB limit of an MCP request even as JSON; it is added in the console",
           "category": "payload-too-large"
         }
+      }
+    },
+    "/api/v1/prov/firmware/minimums": {
+      "get": {
+        "operationId": "listFirmwareMinimums",
+        "summary": "Firmware minimum and recommended versions",
+        "description": "Lists the minimum firmware version per vendor and model glob. A pin below it is refused and never rendered. The recommended version is the documented lab build.",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "The rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirmwareMinimum"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putFirmwareMinimums",
+        "summary": "Replace every firmware minimum version rule",
+        "description": "Replaces every firmware minimum version rule.",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "The rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirmwareMinimum"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FirmwareMinimum"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/prov/firmware/pins": {
@@ -13871,26 +14557,56 @@
         "x-hello-mcp": true
       }
     },
-    "/api/v1/phones/{id}/lines/{line}": {
-      "put": {
-        "operationId": "setPhoneLine",
-        "summary": "Bind a further line of a phone to an extension",
-        "description": "Binds line 2 or up of a phone (the model's line count: Grandstream WP8x6 three, WP822 two, up to six on the other vendors) to a device of the extension. Without deviceId a device is created for the extension; with one, that device is bound and its secret rotated. A line is a device, so the phone registers one SIP account per line, and each line has its own MWI, BLF, ring tags and check-sync. A device is one line of one phone, and a phone has at most one line on an extension; several phones may each have a line on the same extension (a shared line appearance: a call to the extension rings every one of them). The phone must have line 1 bound first. Yealink, Poly, Snom and Fanvil templates write the line; the Grandstream templates do not write lines 2 and up until their account keys are confirmed on hardware, and the line shows provisioned false.",
-        "tags": ["phones"],
+    "/api/v1/phone-groups/{id}/ldap": {
+      "get": {
+        "operationId": "getPhoneGroupLDAP",
+        "summary": "Get a phone group's LDAP directory setting",
+        "description": "Returns whether the group's phones are given the LDAP directory, whether this server serves LDAP at all, and where phones reach it. Viewer.",
+        "tags": ["phone-groups"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The setting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroupLDAP"
+                }
+              }
+            }
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "setPhoneGroupLDAP",
+        "summary": "Turn a phone group's LDAP directory on or off",
+        "description": "Turns the read-only LDAP directory on or off for the group's phones. On, each phone of the group is given its LDAP bind DN and a generated password in its rendered configuration (LDAPS, the same delivered address books as the XML directory). Needs HELLO_LDAP_ENABLED on the server; turning it on without answers 409. Phones pick the change up at their next fetch. Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
           {
-            "name": "line",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 2,
-              "maximum": 6
-            },
-            "description": "The line of the phone, 2 and up. Line 1 is the phone's own binding (extensionId and deviceId of the phone)."
+            "$ref": "#/components/parameters/id"
           }
         ],
         "requestBody": {
@@ -13898,18 +14614,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PhoneLineInput"
+                "$ref": "#/components/schemas/PhoneGroupLDAPInput"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "The phone with its lines",
+            "description": "The setting",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Phone"
+                  "$ref": "#/components/schemas/PhoneGroupLDAP"
                 }
               }
             }
@@ -13928,167 +14644,6 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "x-hello-scope": "write",
-        "x-hello-role": "operator",
-        "x-hello-mcp": true
-      },
-      "delete": {
-        "operationId": "clearPhoneLine",
-        "summary": "Unbind a further line of a phone",
-        "description": "Unbinds line 2 or up of a phone. The device keeps its credentials but the phone no longer receives them, so the line stops registering at the phone's next sync. Line 1 is unbound with updatePhone (deviceId null).",
-        "tags": ["phones"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          },
-          {
-            "name": "line",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 2,
-              "maximum": 6
-            },
-            "description": "The line of the phone, 2 and up. Line 1 is the phone's own binding (extensionId and deviceId of the phone)."
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The phone with its remaining lines",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Phone"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "x-hello-scope": "write",
-        "x-hello-role": "operator",
-        "x-hello-mcp": true
-      }
-    },
-    "/api/v1/phone-groups/{id}/account-sharing": {
-      "put": {
-        "operationId": "setPhoneGroupAccountSharing",
-        "summary": "Switch account sharing on or off for a phone group",
-        "description": "Account sharing lets several Grandstream WP8x6 handsets share one line: P22521 (Enable Account Sharing) is written 1 to the group's WP8x6 phones and P22522 (Role in Account Sharing) 0 for the host or 1 for a guest by their sharingRole (PATCH /phones/{id}, host by default). A WP8x6 in a group without it is written P22521 = 0; other models get neither key. Hello generates a password for each group (P22523, Group Password), stored sealed and never shown; regeneratePhoneGroupSharingSecret replaces it. It is the alternative to binding several devices to one extension (several phones each with a line on the extension, a shared line appearance). Admin only.",
-        "tags": ["phone-groups"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["enabled"],
-                "properties": {
-                  "enabled": {
-                    "type": "boolean",
-                    "description": "Whether the group's WP8x6 phones share a line."
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The group",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PhoneGroup"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "x-hello-scope": "admin",
-        "x-hello-role": "admin",
-        "x-hello-mcp": true
-      }
-    },
-    "/api/v1/phone-groups/{id}/account-sharing/regenerate": {
-      "post": {
-        "operationId": "regeneratePhoneGroupSharingSecret",
-        "summary": "Regenerate a phone group's account sharing password",
-        "description": "Hello generates a secret for each phone group when it is created and writes it as the account sharing Group Password (P22523) of the group's WP8x6 phones, so handsets of different groups on one network do not join each other's shared line. This replaces it with a new one. The phones take it at their next fetch or resync (resync the group); until every handset has it, handsets with the new and the old password do not see each other's shared line. The secret is stored sealed and is never returned. Admin only.",
-        "tags": ["phone-groups"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The group (the secret is not part of it)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PhoneGroup"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -15218,7 +15773,7 @@
       "put": {
         "operationId": "putRingMap",
         "summary": "Replace the global ring map",
-        "description": "Replaces the global choices as a whole. A change reaches the affected phones through the automatic resync (check-sync). The tone must be in the vendor's ringer list (silent only where the vendor has it), or custom:<name> of a tone in the library on a vendor whose customTones is true.",
+        "description": "Replaces the global choices as a whole. A change reaches the affected phones through the automatic resync (check-sync). The tone must be in the vendor's ringer list (silent only where the vendor has it).",
         "tags": ["ring-tags"],
         "requestBody": {
           "required": true,
@@ -15309,6 +15864,158 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ringtones": {
+      "get": {
+        "operationId": "listRingtones",
+        "summary": "List the tone library",
+        "description": "Lists the uploaded custom tones the ring map can choose, with how many ring map choices use each.",
+        "tags": ["ring-tags"],
+        "responses": {
+          "200": {
+            "description": "Tones ordered by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingtoneList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createRingtone",
+        "summary": "Upload a custom tone",
+        "description": "Adds a WAV file to the tone library (bucket hello-ringtones). A phone downloads it under its token at /p/<token>/ring/<name>.wav. The bytes are checked: PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB, otherwise 400. A name the library has is 409. Hello provisions a custom tone to Yealink and Snom phones; the other vendors keep their built-in ringer.",
+        "tags": ["ring-tags"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "audioBase64"],
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+                    "description": "The tone's unique name; the ring map names it as custom:<name>."
+                  },
+                  "audioBase64": {
+                    "type": "string",
+                    "contentEncoding": "base64",
+                    "description": "Base64 of a WAV file with the same rules as the multipart file (PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB). The JSON request is at most 1 MiB."
+                  }
+                }
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "file"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+                    "description": "The tone's unique name; the ring map names it as custom:<name>."
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "WAV bytes: PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ringtone"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ringtones/{id}": {
+      "delete": {
+        "operationId": "deleteRingtone",
+        "summary": "Delete a custom tone",
+        "description": "Removes a tone and its audio. A tone a ring map choice uses is 409 and names the choice; change the choice first.",
+        "tags": ["ring-tags"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -16151,955 +16858,6 @@
         "x-hello-mcp": true
       }
     },
-    "/api/v1/events": {
-      "get": {
-        "operationId": "listEvents",
-        "summary": "Call event history",
-        "description": "Lists stored call events (kept for HELLO_EVENT_RETENTION_DAYS, 7 by default) in cursor order. A user, or a service account with an extensionScope, sees only events about its own extensions; the viewer, operator and admin roles see all. Page with nextCursor.",
-        "tags": ["events"],
-        "parameters": [
-          {
-            "name": "types",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Comma-separated event types; a pattern ending in .* (call.*) matches a prefix."
-          },
-          {
-            "name": "extension",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "pattern": "^[0-9]{2,10}$"
-            },
-            "description": "Only events about this extension."
-          },
-          {
-            "name": "order",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": ["asc", "desc"]
-            },
-            "description": "asc (default) returns events after the cursor, oldest first; desc returns events before it, newest first."
-          },
-          {
-            "name": "after",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Return events after this cursor (order asc)."
-          },
-          {
-            "name": "before",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Return events before this cursor (order desc)."
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000
-            },
-            "description": "Page size, 1 to 1000 (default 100)."
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "A page of events",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventPage"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "events",
-        "x-hello-role": "user",
-        "x-hello-mcp": true
-      }
-    },
-    "/api/v1/events/stream": {
-      "get": {
-        "operationId": "streamEvents",
-        "summary": "Live call events (server-sent events)",
-        "description": "Opens a text/event-stream of call events. Each event has id: (its cursor), event: (its type) and data: (the Event as JSON); a comment keeps the connection alive every 15 seconds. Reconnect with the Last-Event-ID header to receive what was missed (events are replayed from the stored history); a client that falls behind is disconnected and resumes the same way. Authenticate with a bearer token, the session cookie, or ?ticket= from POST /events/tickets. At most 5 streams per credential and 200 per pod. A user, or a service account with an extensionScope, receives only events about its own extensions.",
-        "tags": ["events"],
-        "parameters": [
-          {
-            "name": "types",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Comma-separated event types; a pattern ending in .* (call.*) matches a prefix."
-          },
-          {
-            "name": "extension",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "pattern": "^[0-9]{2,10}$"
-            },
-            "description": "Only events about this extension."
-          },
-          {
-            "name": "Last-Event-ID",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Resume after this cursor."
-          },
-          {
-            "name": "lastEventId",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "description": "Resume after this cursor, for clients that cannot set the header."
-          },
-          {
-            "name": "ticket",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "description": "A single-use ticket from POST /events/tickets, for clients that cannot send an Authorization header."
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The event stream",
-            "content": {
-              "text/event-stream": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyStreams"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "events",
-        "x-hello-role": "user",
-        "x-hello-mcp": {
-          "exclude": "a long-lived stream does not fit a tool call; the history operation lists events",
-          "category": "stream"
-        }
-      }
-    },
-    "/api/v1/events/tickets": {
-      "post": {
-        "operationId": "createEventTicket",
-        "summary": "Mint an event stream ticket",
-        "description": "Returns a single-use ticket, valid for 30 seconds, that authenticates one GET /events/stream as the caller with ?ticket=. For browsers' EventSource of another origin and other clients that cannot send an Authorization header.",
-        "tags": ["events"],
-        "responses": {
-          "201": {
-            "description": "The ticket",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventTicket"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "events",
-        "x-hello-role": "user",
-        "x-hello-mcp": {
-          "exclude": "mints a credential-like ticket for a stream; not for an AI agent",
-          "category": "credentials"
-        }
-      }
-    },
-    "/api/v1/backups/settings": {
-      "get": {
-        "operationId": "getBackupSettings",
-        "summary": "Backup schedule and destination",
-        "description": "Admin only. Returns the backup schedule (a five-field cron expression, server time), whether scheduled backups are enabled, the destination (the bundled MinIO bucket hello-backups, or an external S3 service), how many archives are kept and the address a failure email goes to. The S3 credentials are never returned; s3KeysSet says whether they are stored.",
-        "tags": ["backups"],
-        "responses": {
-          "200": {
-            "description": "The settings",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BackupSettings"
-                }
-              }
-            }
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "admin",
-        "x-hello-role": "admin",
-        "x-hello-mcp": {
-          "exclude": "backup and restore stay in the console",
-          "category": "human-in-the-loop"
-        }
-      },
-      "put": {
-        "operationId": "putBackupSettings",
-        "summary": "Save the backup schedule and destination",
-        "description": "Admin only, audited. Saves the schedule and destination. The S3 access key and secret key are sealed in the database; omit both to keep the stored ones, send both to replace them, or send both empty to remove them. Changes apply from the next scheduler pass.",
-        "tags": ["backups"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BackupSettingsUpdate"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The saved settings",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BackupSettings"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "admin",
-        "x-hello-role": "admin",
-        "x-hello-mcp": {
-          "exclude": "backup and restore stay in the console",
-          "category": "human-in-the-loop"
-        }
-      }
-    },
-    "/api/v1/backups": {
-      "get": {
-        "operationId": "listBackups",
-        "summary": "Backup runs",
-        "description": "Admin only. Lists the newest 200 backup runs, scheduled and manual, with status, sizes and the stored archive key.",
-        "tags": ["backups"],
-        "responses": {
-          "200": {
-            "description": "Runs",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["items"],
-                  "properties": {
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/BackupRun"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "admin",
-        "x-hello-role": "admin",
-        "x-hello-mcp": {
-          "exclude": "backup and restore stay in the console",
-          "category": "human-in-the-loop"
-        }
-      },
-      "post": {
-        "operationId": "createBackup",
-        "summary": "Run a backup now",
-        "description": "Admin only, audited. Starts a manual backup in the background and answers 202 with the run (status running). 409 backup_busy while another backup or a restore is running. Poll the list for the outcome.",
-        "tags": ["backups"],
-        "responses": {
-          "202": {
-            "description": "The run that was started",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BackupRun"
-                }
-              }
-            }
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "admin",
-        "x-hello-role": "admin",
-        "x-hello-mcp": {
-          "exclude": "backup and restore stay in the console",
-          "category": "human-in-the-loop"
-        }
-      }
-    },
-    "/api/v1/backups/{id}": {
-      "delete": {
-        "operationId": "deleteBackup",
-        "summary": "Delete a backup",
-        "description": "Admin only, audited. Removes the archive from the destination and the run row. Stored objects no remaining archive references are removed by the next run. 409 backup_busy for a run still in progress.",
-        "tags": ["backups"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Deleted"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "admin",
-        "x-hello-role": "admin",
-        "x-hello-mcp": {
-          "exclude": "backup and restore stay in the console",
-          "category": "human-in-the-loop"
-        }
-      }
-    },
-    "/api/v1/backups/{id}/restore": {
-      "post": {
-        "operationId": "restoreBackup",
-        "summary": "Restore a backup",
-        "description": "Admin only, audited. With dry_run=true it verifies the manifest and every part hash and returns counts only, and writes nothing. Otherwise the body must carry confirm: \"RESTORE <id>\". A restore puts the API in maintenance (every write answers 503 maintenance) while it replaces the database in one transaction and restores missing or changed objects, never deleting one. It is refused with 409 schema_newer for an archive from a newer schema, 409 key_mismatch for another HELLO_SECRET_KEY and 409 backup_invalid when verification fails. SIP keeps running on its current snapshot, then rebuilds it.",
-        "tags": ["backups"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          },
-          {
-            "name": "dry_run",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean"
-            },
-            "description": "Verify the archive and report counts without restoring."
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BackupRestore"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The restore report (counts only)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BackupRestoreReport"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "admin",
-        "x-hello-role": "admin",
-        "x-hello-mcp": {
-          "exclude": "backup and restore stay in the console",
-          "category": "human-in-the-loop"
-        }
-      }
-    },
-    "/api/v1/phones/{id}/ldap": {
-      "get": {
-        "operationId": "getPhoneLDAP",
-        "summary": "Get a phone's LDAP directory state",
-        "description": "Returns the phone's LDAP bind DN, whether a password is set, when it was last rotated, whether the previous password still binds and when the phone last bound. Never the password. Viewer.",
-        "tags": ["phones"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PhoneLDAP"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "x-hello-scope": "read",
-        "x-hello-role": "viewer",
-        "x-hello-mcp": true
-      }
-    },
-    "/api/v1/phones/{id}/ldap/password": {
-      "post": {
-        "operationId": "rotatePhoneLDAPPassword",
-        "summary": "Rotate a phone's LDAP password",
-        "description": "Generates a new 32-character LDAP password for the phone and returns it once, with the bind DN. The phone is queued a check-sync so it takes the new password with its configuration; the old password keeps working until it has fetched it. Admin, secrets scope.",
-        "tags": ["phones"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The new password, shown once",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PhoneLDAPPassword"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "x-hello-scope": "secrets",
-        "x-hello-role": "admin",
-        "x-hello-mcp": {
-          "exclude": "secrets-scoped: the password is shown only in the console",
-          "category": "credentials"
-        }
-      }
-    },
-    "/api/v1/prov/firmware/minimums": {
-      "get": {
-        "operationId": "listFirmwareMinimums",
-        "summary": "Firmware minimum and recommended versions",
-        "description": "Lists the minimum firmware version per vendor and model glob. A pin below it is refused and never rendered. The recommended version is the documented lab build.",
-        "tags": ["provisioning"],
-        "responses": {
-          "200": {
-            "description": "The rules",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["items"],
-                  "properties": {
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/FirmwareMinimum"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "x-hello-scope": "read",
-        "x-hello-role": "viewer",
-        "x-hello-mcp": true
-      },
-      "put": {
-        "operationId": "putFirmwareMinimums",
-        "summary": "Replace every firmware minimum version rule",
-        "description": "Replaces every firmware minimum version rule.",
-        "tags": ["provisioning"],
-        "responses": {
-          "200": {
-            "description": "The rules",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["items"],
-                  "properties": {
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/FirmwareMinimum"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/FirmwareMinimum"
-                }
-              }
-            }
-          }
-        },
-        "x-hello-scope": "write",
-        "x-hello-role": "operator",
-        "x-hello-mcp": true
-      }
-    },
-    "/api/v1/phone-groups/{id}/ldap": {
-      "get": {
-        "operationId": "getPhoneGroupLDAP",
-        "summary": "Get a phone group's LDAP directory setting",
-        "description": "Returns whether the group's phones are given the LDAP directory, whether this server serves LDAP at all, and where phones reach it. Viewer.",
-        "tags": ["phone-groups"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The setting",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PhoneGroupLDAP"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "x-hello-scope": "read",
-        "x-hello-role": "viewer",
-        "x-hello-mcp": true
-      },
-      "put": {
-        "operationId": "setPhoneGroupLDAP",
-        "summary": "Turn a phone group's LDAP directory on or off",
-        "description": "Turns the read-only LDAP directory on or off for the group's phones. On, each phone of the group is given its LDAP bind DN and a generated password in its rendered configuration (LDAPS, the same delivered address books as the XML directory). Needs HELLO_LDAP_ENABLED on the server; turning it on without answers 409. Phones pick the change up at their next fetch. Admin only.",
-        "tags": ["phone-groups"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PhoneGroupLDAPInput"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The setting",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PhoneGroupLDAP"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "x-hello-scope": "admin",
-        "x-hello-role": "admin",
-        "x-hello-mcp": true
-      }
-    },
-    "/api/v1/ringtones": {
-      "get": {
-        "operationId": "listRingtones",
-        "summary": "List the tone library",
-        "description": "Lists the uploaded custom tones the ring map can choose, with how many ring map choices use each.",
-        "tags": ["ring-tags"],
-        "responses": {
-          "200": {
-            "description": "Tones ordered by name",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RingtoneList"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "read",
-        "x-hello-role": "viewer",
-        "x-hello-mcp": true
-      },
-      "post": {
-        "operationId": "createRingtone",
-        "summary": "Upload a custom tone",
-        "description": "Adds a WAV file to the tone library (bucket hello-ringtones). A phone downloads it under its token at /p/<token>/ring/<name>.wav. The bytes are checked: PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB, otherwise 400. A name the library has is 409. Hello provisions a custom tone to Yealink and Snom phones; the other vendors keep their built-in ringer.",
-        "tags": ["ring-tags"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["name", "audioBase64"],
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
-                    "description": "The tone's unique name; the ring map names it as custom:<name>."
-                  },
-                  "audioBase64": {
-                    "type": "string",
-                    "contentEncoding": "base64",
-                    "description": "Base64 of a WAV file with the same rules as the multipart file (PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB). The JSON request is at most 1 MiB."
-                  }
-                }
-              }
-            },
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "required": ["name", "file"],
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
-                    "description": "The tone's unique name; the ring map names it as custom:<name>."
-                  },
-                  "file": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "WAV bytes: PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB."
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Ringtone"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "502": {
-            "$ref": "#/components/responses/Upstream"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "x-hello-scope": "write",
-        "x-hello-role": "operator",
-        "x-hello-mcp": true
-      }
-    },
-    "/api/v1/ringtones/{id}": {
-      "delete": {
-        "operationId": "deleteRingtone",
-        "summary": "Delete a custom tone",
-        "description": "Removes a tone and its audio. A tone a ring map choice uses is 409 and names the choice; change the choice first.",
-        "tags": ["ring-tags"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Deleted"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "write",
-        "x-hello-role": "operator",
-        "x-hello-mcp": true
-      }
-    },
     "/api/v1/calls/originate": {
       "post": {
         "operationId": "originateCall",
@@ -17360,6 +17118,223 @@
         "x-hello-mcp": {
           "exclude": "toll-fraud controls of click-to-call are set in the console only",
           "category": "human-in-the-loop"
+        }
+      }
+    },
+    "/api/v1/events": {
+      "get": {
+        "operationId": "listEvents",
+        "summary": "Call event history",
+        "description": "Lists stored call events (kept for HELLO_EVENT_RETENTION_DAYS, 7 by default) in cursor order. A user, or a service account with an extensionScope, sees only events about its own extensions; the viewer, operator and admin roles see all. Page with nextCursor.",
+        "tags": ["events"],
+        "parameters": [
+          {
+            "name": "types",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated event types; a pattern ending in .* (call.*) matches a prefix."
+          },
+          {
+            "name": "extension",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only events about this extension."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            },
+            "description": "asc (default) returns events after the cursor, oldest first; desc returns events before it, newest first."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Return events after this cursor (order asc)."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Return events before this cursor (order desc)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "description": "Page size, 1 to 1000 (default 100)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "events",
+        "x-hello-role": "user",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/events/stream": {
+      "get": {
+        "operationId": "streamEvents",
+        "summary": "Live call events (server-sent events)",
+        "description": "Opens a text/event-stream of call events. Each event has id: (its cursor), event: (its type) and data: (the Event as JSON); a comment keeps the connection alive every 15 seconds. Reconnect with the Last-Event-ID header to receive what was missed (events are replayed from the stored history); a client that falls behind is disconnected and resumes the same way. Authenticate with a bearer token, the session cookie, or ?ticket= from POST /events/tickets. At most 5 streams per credential and 200 per pod. A user, or a service account with an extensionScope, receives only events about its own extensions.",
+        "tags": ["events"],
+        "parameters": [
+          {
+            "name": "types",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated event types; a pattern ending in .* (call.*) matches a prefix."
+          },
+          {
+            "name": "extension",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only events about this extension."
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Resume after this cursor."
+          },
+          {
+            "name": "lastEventId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Resume after this cursor, for clients that cannot set the header."
+          },
+          {
+            "name": "ticket",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "A single-use ticket from POST /events/tickets, for clients that cannot send an Authorization header."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The event stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyStreams"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "events",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "a long-lived stream does not fit a tool call; the history operation lists events",
+          "category": "stream"
+        }
+      }
+    },
+    "/api/v1/events/tickets": {
+      "post": {
+        "operationId": "createEventTicket",
+        "summary": "Mint an event stream ticket",
+        "description": "Returns a single-use ticket, valid for 30 seconds, that authenticates one GET /events/stream as the caller with ?ticket=. For browsers' EventSource of another origin and other clients that cannot send an Authorization header.",
+        "tags": ["events"],
+        "responses": {
+          "201": {
+            "description": "The ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventTicket"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "events",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "mints a credential-like ticket for a stream; not for an AI agent",
+          "category": "credentials"
         }
       }
     },
@@ -17926,6 +17901,577 @@
           "exclude": "Webhook management stays in the console: an agent does not subscribe receivers to call data or see their signing secrets.",
           "category": "credentials"
         }
+      }
+    },
+    "/api/v1/door/webhooks": {
+      "get": {
+        "operationId": "listDoorWebhooks",
+        "summary": "List doorbell webhooks",
+        "description": "Lists the doorbell webhooks. Secrets are never listed.",
+        "tags": ["door"],
+        "responses": {
+          "200": {
+            "description": "Webhooks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorWebhookList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "door webhooks carry signing secrets; managed in the console",
+          "category": "credentials"
+        }
+      },
+      "post": {
+        "operationId": "createDoorWebhook",
+        "summary": "Create a doorbell webhook; the secret is returned only in this response",
+        "description": "Creates a webhook for a non-SIP doorbell. The signing secret is returned only in this response. A ring_door webhook rings the Door group with the doorbell tone, a chime_page webhook plays the chime to a paging group.",
+        "tags": ["door"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DoorWebhookWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created webhook with its secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorWebhookCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door webhooks carry signing secrets; managed in the console",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/door/webhooks/{id}": {
+      "get": {
+        "operationId": "getDoorWebhook",
+        "summary": "One doorbell webhook",
+        "description": "Returns one webhook; never its secret.",
+        "tags": ["door"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorWebhook"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "door webhooks carry signing secrets; managed in the console",
+          "category": "credentials"
+        }
+      },
+      "put": {
+        "operationId": "updateDoorWebhook",
+        "summary": "Replace a doorbell webhook",
+        "description": "Replaces the webhook's settings; its secret stays.",
+        "tags": ["door"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DoorWebhookWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated webhook",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorWebhook"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door webhooks carry signing secrets; managed in the console",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteDoorWebhook",
+        "summary": "Delete a doorbell webhook",
+        "description": "Deletes the webhook; its URL stops working at once.",
+        "tags": ["door"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door webhooks carry signing secrets; managed in the console",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/door/webhooks/{id}/rotate-secret": {
+      "post": {
+        "operationId": "rotateDoorWebhookSecret",
+        "summary": "Replace a webhook's secret; the new secret is returned only in this response",
+        "description": "Replaces the signing secret. The old secret stops working at once and the doorbell must be reconfigured with the new one.",
+        "tags": ["door"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook with its new secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorWebhookCreated"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door webhooks carry signing secrets; managed in the console",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/door/webhooks/{id}/trigger": {
+      "post": {
+        "operationId": "triggerDoorWebhook",
+        "summary": "Trigger a doorbell webhook (signed, no session)",
+        "description": "Called by a non-SIP doorbell. Needs X-Hello-Timestamp (Unix seconds, within 300 s of now) and X-Hello-Signature, the hex HMAC-SHA256 of the timestamp, a dot and the raw body under the webhook's secret. The optional JSON body is at most 1 KiB. A missing, stale or wrong signature, an unknown id and a disabled webhook all answer the same 401. Above the webhook's rate limit the answer is 429 with Retry-After. A second trigger within 10 seconds is folded into the ring in progress. The ring_door action rings the Door group with the doorbell tag and plays the chime to whoever answers; chime_page plays it to the paging group.",
+        "tags": ["door"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DoorTriggerBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Queued, or folded into a ring already in progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorTriggerResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "413": {
+            "description": "The body is over 1 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Over the webhook's rate limit; see Retry-After",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "security": [],
+        "x-hello-mcp": {
+          "exclude": "called by the doorbell itself, signed with the webhook secret",
+          "category": "disruptive-device"
+        }
+      }
+    },
+    "/api/v1/phones/{id}/lines/{line}": {
+      "put": {
+        "operationId": "setPhoneLine",
+        "summary": "Bind a further line of a phone to an extension",
+        "description": "Binds line 2 or up of a phone (the model's line count: Grandstream WP8x6 three, WP822 two, up to six on the other vendors) to a device of the extension. Without deviceId a device is created for the extension; with one, that device is bound and its secret rotated. A line is a device, so the phone registers one SIP account per line, and each line has its own MWI, BLF, ring tags and check-sync. A device is one line of one phone, and a phone has at most one line on an extension; several phones may each have a line on the same extension (a shared line appearance: a call to the extension rings every one of them). The phone must have line 1 bound first. Yealink, Poly, Snom and Fanvil templates write the line; the Grandstream templates do not write lines 2 and up until their account keys are confirmed on hardware, and the line shows provisioned false.",
+        "tags": ["phones"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "line",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 6
+            },
+            "description": "The line of the phone, 2 and up. Line 1 is the phone's own binding (extensionId and deviceId of the phone)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneLineInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The phone with its lines",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Phone"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "clearPhoneLine",
+        "summary": "Unbind a further line of a phone",
+        "description": "Unbinds line 2 or up of a phone. The device keeps its credentials but the phone no longer receives them, so the line stops registering at the phone's next sync. Line 1 is unbound with updatePhone (deviceId null).",
+        "tags": ["phones"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "line",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 6
+            },
+            "description": "The line of the phone, 2 and up. Line 1 is the phone's own binding (extensionId and deviceId of the phone)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The phone with its remaining lines",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Phone"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/account-sharing": {
+      "put": {
+        "operationId": "setPhoneGroupAccountSharing",
+        "summary": "Switch account sharing on or off for a phone group",
+        "description": "Account sharing lets several Grandstream WP8x6 handsets share one line: P22521 (Enable Account Sharing) is written 1 to the group's WP8x6 phones and P22522 (Role in Account Sharing) 0 for the host or 1 for a guest by their sharingRole (PATCH /phones/{id}, host by default). A WP8x6 in a group without it is written P22521 = 0; other models get neither key. Hello generates a password for each group (P22523, Group Password), stored sealed and never shown; regeneratePhoneGroupSharingSecret replaces it. It is the alternative to binding several devices to one extension (several phones each with a line on the extension, a shared line appearance). Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["enabled"],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "Whether the group's WP8x6 phones share a line."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/account-sharing/regenerate": {
+      "post": {
+        "operationId": "regeneratePhoneGroupSharingSecret",
+        "summary": "Regenerate a phone group's account sharing password",
+        "description": "Hello generates a secret for each phone group when it is created and writes it as the account sharing Group Password (P22523) of the group's WP8x6 phones, so handsets of different groups on one network do not join each other's shared line. This replaces it with a new one. The phones take it at their next fetch or resync (resync the group); until every handset has it, handsets with the new and the old password do not see each other's shared line. The secret is stored sealed and is never returned. Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The group (the secret is not part of it)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroup"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/voicemail-groups": {
@@ -24212,6 +24758,507 @@
         "x-hello-role": "admin",
         "x-hello-mcp": true
       }
+    },
+    "/api/v1/locations": {
+      "get": {
+        "operationId": "listLocations",
+        "summary": "List locations",
+        "description": "Returns every location: sites, the floors of a site and the rooms of a floor. A site carries the civic address and an optional geo point; a floor or room only names a place inside its site and may carry a more exact geo point.",
+        "tags": ["locations"],
+        "responses": {
+          "200": {
+            "description": "The locations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createLocation",
+        "summary": "Create a location",
+        "description": "Creates a site (civic address and/or a geo point), a floor (parent: a site) or a room (parent: a floor or a site). A location is assigned to phone groups, extensions and phones with the location assignments; the HELD server and the Geolocation header of an emergency call read it.",
+        "tags": ["locations"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Location"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/locations/{id}": {
+      "get": {
+        "operationId": "getLocation",
+        "summary": "One location",
+        "description": "Returns one location by id.",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The location",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Location"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putLocation",
+        "summary": "Replace a location",
+        "description": "Replaces every field of a location, so fields left out are cleared. The kind cannot change. The change reaches the phones that ask the HELD server and the emergency calls placed afterwards.",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Location"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteLocation",
+        "summary": "Delete a location",
+        "description": "Deletes a location. A location with floors or rooms inside it, or that a phone group, extension or phone is assigned to, cannot be deleted (409); the message names what is in the way.",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/location-assignments": {
+      "get": {
+        "operationId": "listLocationAssignments",
+        "summary": "List what is assigned to a location",
+        "description": "Returns every phone group, extension and phone with the location it is assigned to (null for none). A phone's own location wins over its extension's, which wins over its phone group's.",
+        "tags": ["locations"],
+        "responses": {
+          "200": {
+            "description": "The assignments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationAssignmentList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/location-assignments/{kind}/{id}": {
+      "put": {
+        "operationId": "putLocationAssignment",
+        "summary": "Assign a location",
+        "description": "Assigns a phone group, an extension or a phone to a location, or to none with a null locationId. The id is that of the phone group, extension or phone.",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "description": "What is assigned: group, extension or phone.",
+            "schema": {
+              "type": "string",
+              "enum": ["group", "extension", "phone"]
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The id of the phone group, extension or phone.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocationAssignmentInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Assigned"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phones/{id}/location": {
+      "get": {
+        "operationId": "getPhoneLocation",
+        "summary": "The location of a phone",
+        "description": "Returns the location a phone resolves to (its own, else its extension's, else its phone group's) with the civic address and geo point the HELD server would answer it with, and where it came from. Source is empty and place null when none is assigned.",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The location",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneLocation"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/emergency": {
+      "get": {
+        "operationId": "getPhoneGroupEmergency",
+        "summary": "A phone group's E911 switch and alarm destination",
+        "description": "Returns whether the WP8x6 phones of the group are provisioned for E911 and HELD, and the extension or ring group the *55 alarm call rings (empty for none).",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroupEmergency"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putPhoneGroupEmergency",
+        "summary": "Set a phone group's E911 switch and alarm destination",
+        "description": "Sets both. With e911Enabled the WP8x6 phones of the group are provisioned to ask Hello's HELD server for their location. With an alarmTarget (an extension or ring group number) the phones are provisioned to dial *55 for their alarm and *55 from them rings the destination through DND with the ring tag alarm; without one *55 is answered 404 and the alarm keys are not written.",
+        "tags": ["locations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneGroupEmergency"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroupEmergency"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/emergency": {
+      "get": {
+        "operationId": "getEmergencySettings",
+        "summary": "The emergency settings",
+        "description": "Returns the settings of emergency calls that belong to no phone group: the ring group told of every emergency call.",
+        "tags": ["locations"],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmergencySettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putEmergencySettings",
+        "summary": "Set the emergency settings",
+        "description": "Sets the notify group, a ring group whose phones are paged one way with a spoken notice naming the extension on every emergency call (empty for none).",
+        "tags": ["locations"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmergencySettings"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmergencySettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
     }
   },
   "components": {
@@ -24853,62 +25900,6 @@
           }
         }
       },
-      "PhoneLine": {
-        "type": "object",
-        "required": [
-          "line",
-          "deviceId",
-          "extensionId",
-          "extensionNumber",
-          "extensionName",
-          "sipUsername",
-          "provisioned"
-        ],
-        "properties": {
-          "line": {
-            "type": "integer",
-            "description": "1 for the phone's first line, 2 and up for the others."
-          },
-          "deviceId": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "extensionId": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "extensionNumber": {
-            "type": "string"
-          },
-          "extensionName": {
-            "type": "string"
-          },
-          "sipUsername": {
-            "type": "string",
-            "description": "The SIP username of the line's device."
-          },
-          "provisioned": {
-            "type": "boolean",
-            "description": "Whether the phone's template writes the line; false for lines 2 and up of a Grandstream phone until their account keys are confirmed."
-          }
-        }
-      },
-      "PhoneLineInput": {
-        "type": "object",
-        "required": ["extensionId"],
-        "properties": {
-          "extensionId": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Id of the extension the line registers to."
-          },
-          "deviceId": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Id of an existing device of the extension to bind (its secret is rotated); omit to create one."
-          }
-        }
-      },
       "OnboardingCandidate": {
         "type": "object",
         "description": "An unadopted phone that asked for its configuration.",
@@ -25517,6 +26508,24 @@
           }
         }
       },
+      "FirmwareMinimum": {
+        "type": "object",
+        "required": ["vendor", "modelGlob"],
+        "properties": {
+          "vendor": {
+            "type": "string"
+          },
+          "modelGlob": {
+            "type": "string"
+          },
+          "minVersion": {
+            "type": "string"
+          },
+          "recommended": {
+            "type": "string"
+          }
+        }
+      },
       "RedirectAccount": {
         "type": "object",
         "properties": {
@@ -25913,9 +26922,9 @@
           "failureKind",
           "failureTarget",
           "members",
-          "isDoor",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
+          "isDoor"
         ],
         "properties": {
           "id": {
@@ -25987,10 +26996,6 @@
             "type": "string",
             "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
           },
-          "isDoor": {
-            "type": "boolean",
-            "description": "Marks the Door group: a door station may call it, its calls have kind door and ring with the doorbell tag. A new Door group with no ringTag gets doorbell."
-          },
           "failureTarget": {
             "type": "string"
           },
@@ -26007,6 +27012,10 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "isDoor": {
+            "type": "boolean",
+            "description": "Marks the Door group: a door station may call it, its calls have kind door and ring with the doorbell tag. A new Door group with no ringTag gets doorbell."
           }
         }
       },
@@ -27868,6 +28877,57 @@
               "type": "string"
             },
             "description": "What a revert could not put back."
+          },
+          "flowDiff": {
+            "$ref": "#/components/schemas/FlowGraphDiff"
+          }
+        }
+      },
+      "FlowGraphDiff": {
+        "type": "object",
+        "description": "Only on a dry run: what the batch would do to the drawn flow graph, so a client can show it as an overlay before it applies.",
+        "required": [
+          "added",
+          "changed",
+          "removed",
+          "edgesAdded",
+          "edgesRemoved"
+        ],
+        "properties": {
+          "added": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowNode"
+            },
+            "description": "Nodes the batch creates, as they would be drawn."
+          },
+          "changed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowNode"
+            },
+            "description": "Nodes whose object the batch changes, as they would be after it."
+          },
+          "removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the nodes the batch deletes."
+          },
+          "edgesAdded": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowEdge"
+            },
+            "description": "Connections the batch makes; an edge whose details change is listed here and in edgesRemoved."
+          },
+          "edgesRemoved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the connections the batch drops."
           }
         }
       },
@@ -27933,7 +28993,7 @@
           },
           "via": {
             "type": "string",
-            "description": "The origin: an OAuth client id, ai-proposal:<id> or ai-assistant; empty for the console and API tokens."
+            "description": "The origin: an OAuth client id, ai-proposal:<id> (a person applied an AI proposal), ai:<session> (the assistant applied its own batch for the actor) or ai-assistant; empty for the console and API tokens."
           },
           "baseRevision": {
             "type": "integer",
@@ -28072,7 +29132,9 @@
               "queue_pause",
               "queue_unpause",
               "voicemail_broadcast",
-              "boss_divert"
+              "boss_divert",
+              "follow_me_on",
+              "follow_me_off"
             ]
           },
           "argument": {
@@ -28139,7 +29201,9 @@
                     "queue_pause",
                     "queue_unpause",
                     "voicemail_broadcast",
-                    "boss_divert"
+                    "boss_divert",
+                    "follow_me_on",
+                    "follow_me_off"
                   ]
                 },
                 "argument": {
@@ -29096,6 +30160,246 @@
           }
         }
       },
+      "BackupSettings": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "cron",
+          "kind",
+          "bucket",
+          "s3Endpoint",
+          "s3Bucket",
+          "s3Region",
+          "s3PathStyle",
+          "s3KeysSet",
+          "keepCount",
+          "notifyEmail",
+          "updatedAt"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "cron": {
+            "type": "string",
+            "description": "Five-field cron expression in server time; the default 0 2 * * * is daily at 02:00."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["minio", "s3"]
+          },
+          "bucket": {
+            "type": "string",
+            "description": "The bucket archives go to for the minio destination."
+          },
+          "s3Endpoint": {
+            "type": "string"
+          },
+          "s3Bucket": {
+            "type": "string"
+          },
+          "s3Region": {
+            "type": "string"
+          },
+          "s3PathStyle": {
+            "type": "boolean"
+          },
+          "s3KeysSet": {
+            "type": "boolean",
+            "description": "Whether S3 credentials are stored. They are never returned."
+          },
+          "keepCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365
+          },
+          "notifyEmail": {
+            "type": "string",
+            "description": "Where the email goes when a scheduled backup fails twice; empty for none."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BackupSettingsUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["enabled", "cron", "kind", "keepCount"],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether scheduled backups run; manual backups are always possible."
+          },
+          "cron": {
+            "type": "string",
+            "description": "Five-field cron expression in server time, such as 0 2 * * * for daily at 02:00."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["minio", "s3"],
+            "description": "minio is the bundled bucket hello-backups; s3 is an external S3-compatible service."
+          },
+          "s3Endpoint": {
+            "type": "string",
+            "description": "https://host[:port] of the S3 service (kind s3)."
+          },
+          "s3Bucket": {
+            "type": "string",
+            "description": "The bucket archives go to (kind s3)."
+          },
+          "s3Region": {
+            "type": "string",
+            "description": "The S3 region; empty when the service has none."
+          },
+          "s3PathStyle": {
+            "type": "boolean",
+            "description": "Use path-style bucket addressing instead of virtual-hosted style."
+          },
+          "s3AccessKey": {
+            "type": "string",
+            "description": "Send with s3SecretKey to replace the stored credentials; both empty remove them; omit both to keep them."
+          },
+          "s3SecretKey": {
+            "type": "string",
+            "description": "The S3 secret key; write-only, sealed in the database and never returned."
+          },
+          "keepCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "description": "How many of the newest archives to keep."
+          },
+          "notifyEmail": {
+            "type": "string",
+            "description": "The address told when a scheduled backup fails twice; empty for none."
+          }
+        }
+      },
+      "BackupRun": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "attempt",
+          "startedAt",
+          "finishedAt",
+          "dbBytes",
+          "objectCount",
+          "objectBytes",
+          "archiveBytes",
+          "objectKey",
+          "errorClass"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["scheduled", "manual"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["running", "succeeded", "failed"]
+          },
+          "attempt": {
+            "type": "integer"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "dbBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "objectCount": {
+            "type": "integer"
+          },
+          "objectBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "archiveBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "objectKey": {
+            "type": "string"
+          },
+          "errorClass": {
+            "type": "string",
+            "description": "A short class (db_dump, storage, verify, source, settings, interrupted, ...) for a failed run; never a message with names or secrets."
+          }
+        }
+      },
+      "BackupRestore": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "type": "string",
+            "description": "RESTORE <id>; required unless dry_run=true."
+          }
+        }
+      },
+      "BackupRestoreReport": {
+        "type": "object",
+        "required": [
+          "dryRun",
+          "helloVersion",
+          "schemaVersion",
+          "createdAt",
+          "dbBytes",
+          "objects",
+          "objectBytes",
+          "objectsToRestore",
+          "objectsMissingInBackup"
+        ],
+        "properties": {
+          "dryRun": {
+            "type": "boolean"
+          },
+          "helloVersion": {
+            "type": "string"
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dbBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "objects": {
+            "type": "integer"
+          },
+          "objectBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "objectsToRestore": {
+            "type": "integer",
+            "description": "Live objects that are missing or differ from the backup."
+          },
+          "objectsMissingInBackup": {
+            "type": "integer",
+            "description": "Objects the archive lists that the backup store no longer holds; a restore refuses while this is not zero."
+          }
+        }
+      },
       "SmtpTest": {
         "type": "object",
         "additionalProperties": false,
@@ -29386,6 +30690,29 @@
           "directoryHidden": {
             "type": "boolean",
             "description": "Kept out of the automatic extensions address book."
+          }
+        }
+      },
+      "DoorTargets": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "The extra destinations a door station may call besides every Door ring group: extension ids and ring group ids. A door station cannot list itself or another door station.",
+        "properties": {
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "maxItems": 50
+          },
+          "ringGroups": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "maxItems": 50
           }
         }
       },
@@ -30233,9 +31560,10 @@
               "conference",
               "door",
               "callback",
-              "fax"
+              "fax",
+              "alarm"
             ],
-            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or door for a door station or a Door group, or callback for a call Hello placed to a queue caller who asked to be called back, or fax for a fax call (the fax is in the faxes list, by correlation id)."
+            "description": "call, or alarm for a *55 alarm call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or door for a door station or a Door group, or callback for a call Hello placed to a queue caller who asked to be called back, or fax for a fax call (the fax is in the faxes list, by correlation id)."
           },
           "ringTag": {
             "type": "string",
@@ -30428,7 +31756,8 @@
           "allowedCountryCodes",
           "unknownCallerAction",
           "rejectCode",
-          "faxMode"
+          "faxMode",
+          "geolocation"
         ],
         "properties": {
           "srtp": {
@@ -30581,6 +31910,10 @@
             "type": "string",
             "enum": ["passthrough", "t38", "off"],
             "description": "How a fax call on this trunk is carried: passthrough (G.711 audio, the default), t38 (re-INVITE to T.38 when the carrier offers it, falling back to passthrough on 488) or off (fax calls on the trunk are refused with 488)."
+          },
+          "geolocation": {
+            "type": "boolean",
+            "description": "Whether an emergency call sent through this trunk carries the caller's location: the Geolocation header and a PIDF-LO body (RFC 6442), the phone's own when it sent one, else the location assigned to it. Off by default; turn it on only for a carrier that accepts them. The request grows past the usual size of a SIP datagram, which a carrier on UDP must take."
           }
         }
       },
@@ -30739,6 +32072,10 @@
             "type": "string",
             "enum": ["passthrough", "t38", "off"],
             "description": "How a fax call on this trunk is carried: passthrough (G.711 audio, the default), t38 (re-INVITE to T.38 when the carrier offers it, falling back to passthrough on 488) or off (fax calls on the trunk are refused with 488)."
+          },
+          "geolocation": {
+            "type": "boolean",
+            "description": "Whether an emergency call sent through this trunk carries the caller's location (Geolocation header and PIDF-LO body, RFC 6442). Default false."
           }
         }
       },
@@ -30896,6 +32233,10 @@
             "type": "string",
             "enum": ["passthrough", "t38", "off"],
             "description": "How a fax call on this trunk is carried: passthrough (G.711 audio, the default), t38 (re-INVITE to T.38 when the carrier offers it, falling back to passthrough on 488) or off (fax calls on the trunk are refused with 488)."
+          },
+          "geolocation": {
+            "type": "boolean",
+            "description": "Whether an emergency call sent through this trunk carries the caller's location (Geolocation header and PIDF-LO body, RFC 6442). Default false."
           }
         }
       },
@@ -31888,6 +33229,50 @@
                     "at": {
                       "type": "string",
                       "format": "date-time"
+                    }
+                  }
+                }
+              },
+              "followMeLegs": {
+                "type": "array",
+                "description": "For a call that rang a follow-me profile, what each leg did, in the order they rang: own (the extension's own devices), extension, ring_group or external, and how it ended (answered, declined: an external target did not press 1, busy, no_answer, failed, skipped, cancelled)",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "extension",
+                    "trunk",
+                    "result"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "own",
+                        "extension",
+                        "ring_group",
+                        "external"
+                      ]
+                    },
+                    "extension": {
+                      "type": "string",
+                      "description": "The extension that rang, or the external number dialled"
+                    },
+                    "trunk": {
+                      "type": "string",
+                      "description": "The trunk an external leg left on; empty otherwise"
+                    },
+                    "result": {
+                      "type": "string",
+                      "enum": [
+                        "answered",
+                        "declined",
+                        "busy",
+                        "no_answer",
+                        "failed",
+                        "skipped",
+                        "cancelled"
+                      ]
                     }
                   }
                 }
@@ -33159,6 +34544,33 @@
             "type": "boolean",
             "description": "Whether the action deletes a resource; the console marks it and asks for confirmation."
           },
+          "preview": {
+            "type": "object",
+            "description": "For applyConfigBatch: what the batch's dry run answered when the proposal was made, so the console can show it on the call-flow canvas.",
+            "required": ["baseRevision", "results", "warnings", "flowDiff"],
+            "properties": {
+              "baseRevision": {
+                "type": "integer",
+                "format": "int64",
+                "description": "The configuration revision the batch is based on."
+              },
+              "results": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ConfigBatchResult"
+                }
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FlowWarning"
+                }
+              },
+              "flowDiff": {
+                "$ref": "#/components/schemas/FlowGraphDiff"
+              }
+            }
+          },
           "references": {
             "type": "array",
             "description": "For a delete, what it takes with it or leaves dangling: members of a ring group, the inbound routes sending calls to it, a route's trunks and destination.",
@@ -33238,7 +34650,9 @@
           "dismissedAt",
           "dismissReason",
           "dismissText",
-          "failure"
+          "failure",
+          "appliedVia",
+          "batchId"
         ],
         "properties": {
           "id": {
@@ -33346,6 +34760,15 @@
               }
             ],
             "description": "Why a failed proposal stopped."
+          },
+          "appliedVia": {
+            "type": ["string", "null"],
+            "description": "How an applied proposal was applied: `ai:<session>` when the assistant applied its own batch for appliedBy (the user turned on \"Let AI apply changes\"); null when appliedBy applied it."
+          },
+          "batchId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The configuration batch an applied batch proposal ran as: revertConfigBatch undoes it. Null otherwise, and once the batch is pruned."
           }
         }
       },
@@ -33498,6 +34921,62 @@
             "type": "string",
             "format": "date-time",
             "description": "When it was written."
+          },
+          "context": {
+            "$ref": "#/components/schemas/AIMessageContext"
+          }
+        }
+      },
+      "AIMessageContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "What the console showed when the question was asked from a call-flow canvas. The model receives it as data with the question and reads the graph and traces the call with its own tools.",
+        "properties": {
+          "allowApply": {
+            "type": "boolean",
+            "default": false,
+            "description": "The canvas switch \"Let AI apply changes\". When true the assistant may apply the change asked for itself: its batch is validated and dry-run as a proposal, then applied through applyConfigBatch as the asking user with their role (a viewer never can), audited with via `ai:<session>` and revertible. False (ask first): a change is a proposal a person applies."
+          },
+          "canvasId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "The canvas the question was asked from."
+          },
+          "nodes": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string"
+            },
+            "description": "The flow node ids selected on it, such as `ivr:3`."
+          },
+          "trace": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["from", "number"],
+            "description": "A call traced on the canvas, with the parameters of traceFlow.",
+            "properties": {
+              "from": {
+                "type": "string",
+                "description": "An extension number or `trunk:<id>`."
+              },
+              "number": {
+                "type": "string",
+                "description": "The dialled number."
+              },
+              "callerId": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "digits": {
+                "type": "string",
+                "description": "Keys pressed in IVR menus, at most 32 of 0-9, * and #."
+              }
+            }
           }
         }
       },
@@ -33561,6 +35040,9 @@
             "minLength": 1,
             "maxLength": 4000,
             "description": "The question, at most 4000 characters."
+          },
+          "context": {
+            "$ref": "#/components/schemas/AIMessageContext"
           }
         },
         "additionalProperties": false
@@ -34371,6 +35853,119 @@
           }
         }
       },
+      "PhoneGroupLDAP": {
+        "type": "object",
+        "required": ["enabled", "served", "host", "port", "base", "phoneCount"],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "The group's phones are given the LDAP directory."
+          },
+          "served": {
+            "type": "boolean",
+            "description": "This server serves LDAP (HELLO_LDAP_ENABLED and a public provisioning URL)."
+          },
+          "host": {
+            "type": "string",
+            "description": "Where phones reach the LDAPS listener; empty when not served."
+          },
+          "port": {
+            "type": "integer"
+          },
+          "base": {
+            "type": "string",
+            "description": "The base DN phones search (ou=phonebook under HELLO_LDAP_BASE)."
+          },
+          "phoneCount": {
+            "type": "integer"
+          }
+        }
+      },
+      "PhoneGroupLDAPInput": {
+        "type": "object",
+        "required": ["enabled"],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Give the group's phones the LDAP directory."
+          }
+        }
+      },
+      "PhoneLDAP": {
+        "type": "object",
+        "required": [
+          "served",
+          "supported",
+          "groupEnabled",
+          "host",
+          "port",
+          "base",
+          "bindDn",
+          "passwordSet",
+          "rotatedAt",
+          "previousValid",
+          "lastBindAt"
+        ],
+        "properties": {
+          "served": {
+            "type": "boolean"
+          },
+          "supported": {
+            "type": "boolean",
+            "description": "The phone's model has an LDAP client the built-in template writes keys for."
+          },
+          "groupEnabled": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "base": {
+            "type": "string"
+          },
+          "bindDn": {
+            "type": "string",
+            "description": "The phone's own bind DN, uid=<phone id>,ou=phones under the base."
+          },
+          "passwordSet": {
+            "type": "boolean"
+          },
+          "rotatedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "previousValid": {
+            "type": "boolean",
+            "description": "The password before the last rotation still binds, because the phone has not fetched its new configuration."
+          },
+          "lastBindAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the phone last bound (a minute's resolution). Null: the phone has not queried the directory."
+          }
+        }
+      },
+      "PhoneLDAPPassword": {
+        "type": "object",
+        "required": ["bindDn", "password", "resyncQueued"],
+        "properties": {
+          "bindDn": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The new password, shown once."
+          },
+          "resyncQueued": {
+            "type": "boolean",
+            "description": "A check-sync was queued so the phone takes the password."
+          }
+        }
+      },
       "PhoneGroupPage": {
         "type": "object",
         "required": ["items", "next"],
@@ -34810,6 +36405,170 @@
           }
         }
       },
+      "FollowMe": {
+        "type": "object",
+        "required": [
+          "extensionId",
+          "number",
+          "enabled",
+          "strategy",
+          "ringOwnDevices",
+          "timeoutSeconds",
+          "confirmExternal",
+          "dndBlocks",
+          "targets"
+        ],
+        "properties": {
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "type": "string",
+            "description": "The extension number."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the profile rings. The feature codes follow_me_on and follow_me_off flip it."
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "simultaneous",
+              "sequential"
+            ]
+          },
+          "ringOwnDevices": {
+            "type": "boolean",
+            "description": "Whether the extension's own devices ring too (default true)."
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 120,
+            "description": "How long the whole follow-me rings before the no-answer forward or voicemail applies (default 30)."
+          },
+          "confirmExternal": {
+            "type": "boolean",
+            "description": "An external target plays 'press 1 to accept' and is dropped after 10 seconds without the digit (default true)."
+          },
+          "dndBlocks": {
+            "type": "boolean",
+            "description": "When the extension is on do-not-disturb, follow-me does not ring (default true)."
+          },
+          "targets": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/components/schemas/FollowMeTarget"
+            }
+          }
+        }
+      },
+      "FollowMeTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "target",
+          "delaySeconds"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "external",
+              "extension",
+              "ring_group"
+            ],
+            "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
+          },
+          "target": {
+            "type": "string",
+            "description": "The number (external: 2 to 32 digits, optional leading +), the extension number, or the ring group name."
+          },
+          "delaySeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60,
+            "description": "Sequential only: how many seconds the target rings before the next one starts. 0 on a target that is not last rings it until it fails."
+          }
+        }
+      },
+      "FollowMeTargetInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "target"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "external",
+              "extension",
+              "ring_group"
+            ],
+            "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
+          },
+          "target": {
+            "type": "string",
+            "description": "The number (external: 2 to 32 digits, optional leading +), the extension number, or the ring group name."
+          },
+          "delaySeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60,
+            "description": "Sequential only: how many seconds the target rings before the next one starts. 0 on a target that is not last rings it until it fails."
+          }
+        }
+      },
+      "FollowMeUpdate": {
+        "type": "object",
+        "minProperties": 1,
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Turns the profile on or off; on needs at least one target."
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "simultaneous",
+              "sequential"
+            ],
+            "description": "simultaneous rings everything at once; sequential starts the targets one after another."
+          },
+          "ringOwnDevices": {
+            "type": "boolean",
+            "description": "Whether the extension's own devices ring too."
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 120,
+            "description": "How long the whole follow-me rings before the no-answer forward or voicemail applies."
+          },
+          "confirmExternal": {
+            "type": "boolean",
+            "description": "Whether an external target must press 1 to accept the call."
+          },
+          "dndBlocks": {
+            "type": "boolean",
+            "description": "Whether do-not-disturb on the extension stops follow-me."
+          },
+          "targets": {
+            "type": "array",
+            "maxItems": 5,
+            "description": "Replaces the whole list, in ring order.",
+            "items": {
+              "$ref": "#/components/schemas/FollowMeTargetInput"
+            }
+          }
+        }
+      },
       "RingTag": {
         "type": "object",
         "required": [
@@ -35091,6 +36850,62 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/RingMapGroup"
+            }
+          }
+        }
+      },
+      "Ringtone": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "sizeBytes",
+          "sha256",
+          "sampleRate",
+          "durationMs",
+          "createdAt",
+          "usedBy"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer"
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Hex SHA-256 of the WAV; the ETag a phone gets."
+          },
+          "sampleRate": {
+            "type": "integer",
+            "enum": [8000, 16000]
+          },
+          "durationMs": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "usedBy": {
+            "type": "integer",
+            "description": "How many ring map choices name the tone."
+          }
+        }
+      },
+      "RingtoneList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ringtone"
             }
           }
         }
@@ -36609,471 +38424,6 @@
           }
         }
       },
-      "EventTicket": {
-        "type": "object",
-        "required": ["ticket", "expiresAt"],
-        "properties": {
-          "ticket": {
-            "type": "string",
-            "description": "Pass as ?ticket= on GET /events/stream. Single use, valid 30 seconds, shown once.",
-            "x-hello-secret": true
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "FirmwareMinimum": {
-        "type": "object",
-        "required": ["vendor", "modelGlob"],
-        "properties": {
-          "vendor": {
-            "type": "string"
-          },
-          "modelGlob": {
-            "type": "string"
-          },
-          "minVersion": {
-            "type": "string"
-          },
-          "recommended": {
-            "type": "string"
-          }
-        }
-      },
-      "BackupSettings": {
-        "type": "object",
-        "required": [
-          "enabled",
-          "cron",
-          "kind",
-          "bucket",
-          "s3Endpoint",
-          "s3Bucket",
-          "s3Region",
-          "s3PathStyle",
-          "s3KeysSet",
-          "keepCount",
-          "notifyEmail",
-          "updatedAt"
-        ],
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          },
-          "cron": {
-            "type": "string",
-            "description": "Five-field cron expression in server time; the default 0 2 * * * is daily at 02:00."
-          },
-          "kind": {
-            "type": "string",
-            "enum": ["minio", "s3"]
-          },
-          "bucket": {
-            "type": "string",
-            "description": "The bucket archives go to for the minio destination."
-          },
-          "s3Endpoint": {
-            "type": "string"
-          },
-          "s3Bucket": {
-            "type": "string"
-          },
-          "s3Region": {
-            "type": "string"
-          },
-          "s3PathStyle": {
-            "type": "boolean"
-          },
-          "s3KeysSet": {
-            "type": "boolean",
-            "description": "Whether S3 credentials are stored. They are never returned."
-          },
-          "keepCount": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 365
-          },
-          "notifyEmail": {
-            "type": "string",
-            "description": "Where the email goes when a scheduled backup fails twice; empty for none."
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "BackupSettingsUpdate": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["enabled", "cron", "kind", "keepCount"],
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "description": "Whether scheduled backups run; manual backups are always possible."
-          },
-          "cron": {
-            "type": "string",
-            "description": "Five-field cron expression in server time, such as 0 2 * * * for daily at 02:00."
-          },
-          "kind": {
-            "type": "string",
-            "enum": ["minio", "s3"],
-            "description": "minio is the bundled bucket hello-backups; s3 is an external S3-compatible service."
-          },
-          "s3Endpoint": {
-            "type": "string",
-            "description": "https://host[:port] of the S3 service (kind s3)."
-          },
-          "s3Bucket": {
-            "type": "string",
-            "description": "The bucket archives go to (kind s3)."
-          },
-          "s3Region": {
-            "type": "string",
-            "description": "The S3 region; empty when the service has none."
-          },
-          "s3PathStyle": {
-            "type": "boolean",
-            "description": "Use path-style bucket addressing instead of virtual-hosted style."
-          },
-          "s3AccessKey": {
-            "type": "string",
-            "description": "Send with s3SecretKey to replace the stored credentials; both empty remove them; omit both to keep them."
-          },
-          "s3SecretKey": {
-            "type": "string",
-            "description": "The S3 secret key; write-only, sealed in the database and never returned."
-          },
-          "keepCount": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 365,
-            "description": "How many of the newest archives to keep."
-          },
-          "notifyEmail": {
-            "type": "string",
-            "description": "The address told when a scheduled backup fails twice; empty for none."
-          }
-        }
-      },
-      "BackupRun": {
-        "type": "object",
-        "required": [
-          "id",
-          "kind",
-          "status",
-          "attempt",
-          "startedAt",
-          "finishedAt",
-          "dbBytes",
-          "objectCount",
-          "objectBytes",
-          "archiveBytes",
-          "objectKey",
-          "errorClass"
-        ],
-        "properties": {
-          "id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "kind": {
-            "type": "string",
-            "enum": ["scheduled", "manual"]
-          },
-          "status": {
-            "type": "string",
-            "enum": ["running", "succeeded", "failed"]
-          },
-          "attempt": {
-            "type": "integer"
-          },
-          "startedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "finishedAt": {
-            "type": ["string", "null"],
-            "format": "date-time"
-          },
-          "dbBytes": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "objectCount": {
-            "type": "integer"
-          },
-          "objectBytes": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "archiveBytes": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "objectKey": {
-            "type": "string"
-          },
-          "errorClass": {
-            "type": "string",
-            "description": "A short class (db_dump, storage, verify, source, settings, interrupted, ...) for a failed run; never a message with names or secrets."
-          }
-        }
-      },
-      "BackupRestore": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "confirm": {
-            "type": "string",
-            "description": "RESTORE <id>; required unless dry_run=true."
-          }
-        }
-      },
-      "BackupRestoreReport": {
-        "type": "object",
-        "required": [
-          "dryRun",
-          "helloVersion",
-          "schemaVersion",
-          "createdAt",
-          "dbBytes",
-          "objects",
-          "objectBytes",
-          "objectsToRestore",
-          "objectsMissingInBackup"
-        ],
-        "properties": {
-          "dryRun": {
-            "type": "boolean"
-          },
-          "helloVersion": {
-            "type": "string"
-          },
-          "schemaVersion": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "dbBytes": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "objects": {
-            "type": "integer"
-          },
-          "objectBytes": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "objectsToRestore": {
-            "type": "integer",
-            "description": "Live objects that are missing or differ from the backup."
-          },
-          "objectsMissingInBackup": {
-            "type": "integer",
-            "description": "Objects the archive lists that the backup store no longer holds; a restore refuses while this is not zero."
-          }
-        }
-      },
-      "DoorTargets": {
-        "type": "object",
-        "additionalProperties": false,
-        "description": "The extra destinations a door station may call besides every Door ring group: extension ids and ring group ids. A door station cannot list itself or another door station.",
-        "properties": {
-          "extensions": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "int64"
-            },
-            "maxItems": 50
-          },
-          "ringGroups": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "int64"
-            },
-            "maxItems": 50
-          }
-        }
-      },
-      "PhoneGroupLDAP": {
-        "type": "object",
-        "required": ["enabled", "served", "host", "port", "base", "phoneCount"],
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "description": "The group's phones are given the LDAP directory."
-          },
-          "served": {
-            "type": "boolean",
-            "description": "This server serves LDAP (HELLO_LDAP_ENABLED and a public provisioning URL)."
-          },
-          "host": {
-            "type": "string",
-            "description": "Where phones reach the LDAPS listener; empty when not served."
-          },
-          "port": {
-            "type": "integer"
-          },
-          "base": {
-            "type": "string",
-            "description": "The base DN phones search (ou=phonebook under HELLO_LDAP_BASE)."
-          },
-          "phoneCount": {
-            "type": "integer"
-          }
-        }
-      },
-      "PhoneGroupLDAPInput": {
-        "type": "object",
-        "required": ["enabled"],
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "description": "Give the group's phones the LDAP directory."
-          }
-        }
-      },
-      "PhoneLDAP": {
-        "type": "object",
-        "required": [
-          "served",
-          "supported",
-          "groupEnabled",
-          "host",
-          "port",
-          "base",
-          "bindDn",
-          "passwordSet",
-          "rotatedAt",
-          "previousValid",
-          "lastBindAt"
-        ],
-        "properties": {
-          "served": {
-            "type": "boolean"
-          },
-          "supported": {
-            "type": "boolean",
-            "description": "The phone's model has an LDAP client the built-in template writes keys for."
-          },
-          "groupEnabled": {
-            "type": "boolean"
-          },
-          "host": {
-            "type": "string"
-          },
-          "port": {
-            "type": "integer"
-          },
-          "base": {
-            "type": "string"
-          },
-          "bindDn": {
-            "type": "string",
-            "description": "The phone's own bind DN, uid=<phone id>,ou=phones under the base."
-          },
-          "passwordSet": {
-            "type": "boolean"
-          },
-          "rotatedAt": {
-            "type": ["string", "null"],
-            "format": "date-time"
-          },
-          "previousValid": {
-            "type": "boolean",
-            "description": "The password before the last rotation still binds, because the phone has not fetched its new configuration."
-          },
-          "lastBindAt": {
-            "type": ["string", "null"],
-            "format": "date-time",
-            "description": "When the phone last bound (a minute's resolution). Null: the phone has not queried the directory."
-          }
-        }
-      },
-      "PhoneLDAPPassword": {
-        "type": "object",
-        "required": ["bindDn", "password", "resyncQueued"],
-        "properties": {
-          "bindDn": {
-            "type": "string"
-          },
-          "password": {
-            "type": "string",
-            "x-hello-secret": true,
-            "description": "The new password, shown once."
-          },
-          "resyncQueued": {
-            "type": "boolean",
-            "description": "A check-sync was queued so the phone takes the password."
-          }
-        }
-      },
-      "Ringtone": {
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "sizeBytes",
-          "sha256",
-          "sampleRate",
-          "durationMs",
-          "createdAt",
-          "usedBy"
-        ],
-        "properties": {
-          "id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "name": {
-            "type": "string"
-          },
-          "sizeBytes": {
-            "type": "integer"
-          },
-          "sha256": {
-            "type": "string",
-            "description": "Hex SHA-256 of the WAV; the ETag a phone gets."
-          },
-          "sampleRate": {
-            "type": "integer",
-            "enum": [8000, 16000]
-          },
-          "durationMs": {
-            "type": "integer"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "usedBy": {
-            "type": "integer",
-            "description": "How many ring map choices name the tone."
-          }
-        }
-      },
-      "RingtoneList": {
-        "type": "object",
-        "required": ["items"],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Ringtone"
-            }
-          }
-        }
-      },
       "OriginateRequest": {
         "type": "object",
         "required": ["destination"],
@@ -37191,6 +38541,21 @@
           "autoAnswerAllowed": {
             "type": "boolean",
             "description": "Whether a click-to-call may ask the phone to answer by itself."
+          }
+        }
+      },
+      "EventTicket": {
+        "type": "object",
+        "required": ["ticket", "expiresAt"],
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "description": "Pass as ?ticket= on GET /events/stream. Single use, valid 30 seconds, shown once.",
+            "x-hello-secret": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -37741,6 +39106,227 @@
         "properties": {
           "redelivered": {
             "type": "integer"
+          }
+        }
+      },
+      "DoorWebhook": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "action",
+          "rateLimit",
+          "enabled",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "description": "The caller name the phones show on a ring"
+          },
+          "action": {
+            "type": "string",
+            "enum": ["ring_door", "chime_page"]
+          },
+          "ringGroupId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The Door ring group to ring; absent rings every Door group"
+          },
+          "ringGroup": {
+            "type": "string"
+          },
+          "pagingGroupId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The paging group a chime page plays to"
+          },
+          "pagingGroup": {
+            "type": "string"
+          },
+          "announcementId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The chime; absent plays the built-in chime"
+          },
+          "announcement": {
+            "type": "string"
+          },
+          "rateLimit": {
+            "type": "integer",
+            "description": "Triggers accepted per minute"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "lastTriggeredAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DoorWebhookList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DoorWebhook"
+            }
+          }
+        }
+      },
+      "DoorWebhookWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "1-64 of A-Z a-z 0-9 . _ - and space"
+          },
+          "action": {
+            "type": "string",
+            "enum": ["ring_door", "chime_page"],
+            "description": "ring_door rings the Door group; chime_page plays the chime to a paging group"
+          },
+          "ringGroupId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "ring_door only: a Door group; null rings every Door group"
+          },
+          "pagingGroupId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "chime_page only, and required for it"
+          },
+          "announcementId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The chime announcement; null plays the built-in chime"
+          },
+          "rateLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 600,
+            "default": 11,
+            "description": "Triggers accepted per minute"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "A disabled webhook answers its triggers with the same 401 as an unknown one"
+          }
+        },
+        "required": ["name", "action"],
+        "description": "Create and replace body: name and action are required."
+      },
+      "DoorWebhookCreated": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DoorWebhook"
+          },
+          {
+            "type": "object",
+            "required": ["secret"],
+            "properties": {
+              "secret": {
+                "type": "string",
+                "description": "The signing secret, shown only in this response. Sign hex HMAC-SHA256(secret, timestamp + \".\" + body).",
+                "x-hello-secret": true
+              }
+            }
+          }
+        ]
+      },
+      "DoorTriggerBody": {
+        "type": "object",
+        "description": "Optional. Any other field is ignored.",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Shown in the call trace, cut to 64 printable characters"
+          }
+        }
+      },
+      "DoorTriggerResult": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["queued", "coalesced"],
+            "description": "coalesced: a trigger of this webhook within the last 10 seconds is already ringing"
+          }
+        }
+      },
+      "PhoneLine": {
+        "type": "object",
+        "required": [
+          "line",
+          "deviceId",
+          "extensionId",
+          "extensionNumber",
+          "extensionName",
+          "sipUsername",
+          "provisioned"
+        ],
+        "properties": {
+          "line": {
+            "type": "integer",
+            "description": "1 for the phone's first line, 2 and up for the others."
+          },
+          "deviceId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "extensionNumber": {
+            "type": "string"
+          },
+          "extensionName": {
+            "type": "string"
+          },
+          "sipUsername": {
+            "type": "string",
+            "description": "The SIP username of the line's device."
+          },
+          "provisioned": {
+            "type": "boolean",
+            "description": "Whether the phone's template writes the line; false for lines 2 and up of a Grandstream phone until their account keys are confirmed."
+          }
+        }
+      },
+      "PhoneLineInput": {
+        "type": "object",
+        "required": ["extensionId"],
+        "properties": {
+          "extensionId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Id of the extension the line registers to."
+          },
+          "deviceId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Id of an existing device of the extension to bind (its secret is rotated); omit to create one."
           }
         }
       },
@@ -40949,6 +42535,329 @@
               "format": "int64"
             },
             "description": "The ids of the Wi-Fi profiles, the whole list; at most 10."
+          }
+        }
+      },
+      "Location": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "parentId",
+          "country",
+          "state",
+          "city",
+          "street",
+          "houseNumber",
+          "postalCode",
+          "latitude",
+          "longitude",
+          "radiusM",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["site", "floor", "room"],
+            "description": "A site carries the civic address; a floor belongs to a site; a room to a floor or a site."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Unique among the locations with the same parent. A floor's name is the civic floor (FLR) and a room's the civic room (ROOM)."
+          },
+          "parentId": {
+            "type": ["integer", "null"],
+            "description": "The site of a floor, the floor or site of a room; null for a site."
+          },
+          "country": {
+            "type": "string",
+            "pattern": "^([A-Z]{2})?$",
+            "description": "ISO 3166 alpha-2 code in capitals, or empty. A site only."
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element A1. A site only."
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element A3. A site only."
+          },
+          "street": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element A6. A site only."
+          },
+          "houseNumber": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element HNO. A site only."
+          },
+          "postalCode": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element PC. A site only."
+          },
+          "latitude": {
+            "type": ["number", "null"],
+            "description": "WGS 84 degrees; set together with longitude."
+          },
+          "longitude": {
+            "type": ["number", "null"],
+            "description": "WGS 84 degrees."
+          },
+          "radiusM": {
+            "type": ["number", "null"],
+            "description": "Uncertainty radius in metres; needs a latitude and longitude."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LocationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "name"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["site", "floor", "room"],
+            "description": "A site carries the civic address; a floor belongs to a site; a room to a floor or a site."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Unique among the locations with the same parent. A floor's name is the civic floor (FLR) and a room's the civic room (ROOM)."
+          },
+          "parentId": {
+            "type": ["integer", "null"],
+            "description": "The site of a floor, the floor or site of a room; null for a site."
+          },
+          "country": {
+            "type": "string",
+            "pattern": "^([A-Z]{2})?$",
+            "description": "ISO 3166 alpha-2 code in capitals, or empty. A site only."
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element A1. A site only."
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element A3. A site only."
+          },
+          "street": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element A6. A site only."
+          },
+          "houseNumber": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element HNO. A site only."
+          },
+          "postalCode": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Civic element PC. A site only."
+          },
+          "latitude": {
+            "type": ["number", "null"],
+            "description": "WGS 84 degrees; set together with longitude."
+          },
+          "longitude": {
+            "type": ["number", "null"],
+            "description": "WGS 84 degrees."
+          },
+          "radiusM": {
+            "type": ["number", "null"],
+            "description": "Uncertainty radius in metres; needs a latitude and longitude."
+          }
+        }
+      },
+      "LocationList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Location"
+            }
+          }
+        }
+      },
+      "LocationAssignment": {
+        "type": "object",
+        "required": ["kind", "id", "name", "locationId"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["group", "extension", "phone"]
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "description": "The group's name, the extension's number and name, or the phone's MAC and label."
+          },
+          "locationId": {
+            "type": ["integer", "null"]
+          }
+        }
+      },
+      "LocationAssignmentList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocationAssignment"
+            }
+          }
+        }
+      },
+      "LocationAssignmentInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["locationId"],
+        "properties": {
+          "locationId": {
+            "type": ["integer", "null"],
+            "description": "The location to assign, or null to unassign."
+          }
+        }
+      },
+      "Place": {
+        "type": "object",
+        "required": [
+          "path",
+          "country",
+          "state",
+          "city",
+          "street",
+          "houseNumber",
+          "postalCode",
+          "floor",
+          "room",
+          "latitude",
+          "longitude",
+          "radiusM"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The names from the site down, such as HQ / 3 / Server room."
+          },
+          "country": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "street": {
+            "type": "string"
+          },
+          "houseNumber": {
+            "type": "string"
+          },
+          "postalCode": {
+            "type": "string"
+          },
+          "floor": {
+            "type": "string"
+          },
+          "room": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": ["number", "null"]
+          },
+          "longitude": {
+            "type": ["number", "null"]
+          },
+          "radiusM": {
+            "type": ["number", "null"]
+          }
+        }
+      },
+      "PhoneLocation": {
+        "type": "object",
+        "required": ["source", "locationId", "place", "e911"],
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": ["", "phone", "extension", "group"],
+            "description": "Which assignment decided: the phone's own, its extension's or its phone group's; empty when none is assigned."
+          },
+          "locationId": {
+            "type": ["integer", "null"]
+          },
+          "place": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Place"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "e911": {
+            "type": "boolean",
+            "description": "Whether the phone's group has E911 switched on."
+          }
+        }
+      },
+      "PhoneGroupEmergency": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["e911Enabled", "alarmTarget"],
+        "properties": {
+          "e911Enabled": {
+            "type": "boolean",
+            "description": "Provision the group's WP8x6 phones for E911 and HELD (Grandstream P8565 and related keys)."
+          },
+          "alarmTarget": {
+            "type": "string",
+            "pattern": "^[0-9A-Za-z._-]{0,64}$",
+            "description": "The extension or ring group number *55 rings; empty for none."
+          }
+        }
+      },
+      "EmergencySettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["notifyGroup"],
+        "properties": {
+          "notifyGroup": {
+            "type": "string",
+            "pattern": "^[0-9A-Za-z._-]{0,64}$",
+            "description": "The ring group told of every emergency call; empty for none."
           }
         }
       }

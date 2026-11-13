@@ -933,6 +933,9 @@ func (c *call) storeRecording(rec *media.Recorder, by string) {
 // (spec S-4). Digits also flow into the call's feature-code buffer, so an
 // INFO dtmf-relay *1 and an in-band *1 behave the same.
 func (c *call) relayDTMF(leg string, digit byte) {
+	if leg == legCallee && c.fmDigit(nil, digit) {
+		return // a follow-me target is being asked to press 1
+	}
 	if leg == legCallee && c.screenDigit(digit) {
 		return // the assistant answers the screening prompt
 	}
@@ -1200,6 +1203,7 @@ func (c *call) byeCallerRaw() {
 	inv, tag := c.inv, c.vmTag
 	c.mu.Unlock()
 	if inv == nil {
+		c.s.log.Warn("no BYE sent to caller: the call has no INVITE", "correlation_id", c.id)
 		return
 	}
 	target := inv.Recipient
@@ -1224,7 +1228,7 @@ func (c *call) byeCallerRaw() {
 	defer cancel()
 	res, err := c.s.do(ctx, req)
 	if err != nil {
-		c.s.log.Debug("announcement BYE failed", "error", err)
+		c.s.log.Warn("BYE to caller on the raw dialog failed", "correlation_id", c.id, "error", err)
 		return
 	}
 	c.s.m.response(res.StatusCode)

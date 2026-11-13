@@ -173,3 +173,15 @@
 | `deleteRingtone`                    | write | Delete a tone no ring map choice uses.                             |
 | `listFirmwareMinimums`              | read  | Minimum and recommended firmware per vendor.                       |
 | `putFirmwareMinimums`               | write | Replace every firmware minimum rule.                               |
+| `listLocations`                     | read  | The sites, floors and rooms.                                       |
+| `getLocation`                       | read  | One location.                                                      |
+| `createLocation`                    | write | Add a site, floor or room.                                         |
+| `putLocation`                       | write | Replace a location.                                                |
+| `deleteLocation`                    | write | Delete a location nothing uses.                                    |
+| `listLocationAssignments`           | read  | What each group, extension and phone is assigned to.               |
+| `putLocationAssignment`             | write | Assign a group, extension or phone to a location.                  |
+| `getPhoneLocation`                  | read  | The location a phone resolves to.                                  |
+| `getPhoneGroupEmergency`            | read  | A group's E911 switch and alarm destination.                       |
+| `putPhoneGroupEmergency`            | admin | Set them.                                                          |
+| `getEmergencySettings`              | read  | The ring group told of emergency calls.                            |
+| `putEmergencySettings`              | admin | Set it.                                                            |

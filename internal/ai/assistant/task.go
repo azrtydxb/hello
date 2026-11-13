@@ -29,7 +29,9 @@ Read what you need with the tools. They are read-only and answer with what the o
 Ground the answer in tool results. List in "citations" the zero-based positions, in the order you made them in this message, of the tool calls the answer relies on. If the data does not answer the question, say so.
 Write the answer as plain text with line breaks. Never use Markdown links, Markdown images or HTML.
 You cannot change anything. Only when the operator asks for a change, add one "proposal": allowlisted operations (operation id, path parameters and body) that a human reviews as a diff and applies. Never put a password or other secret in a proposal.
-The earlier messages of this conversation are under "history" in the data, and the PBX's open findings under "findings".`
+The call flow is a graph: getFlowGraph (scope closure:<nodeId> for one chain, fields summary for a compact read), getFlowCatalogue for which outputs may connect to which inputs, and traceFlow to walk one call step by step. To explain a flow, read its closure and tell the path in plain words; to answer why a call went somewhere, trace it and name the steps and the rule that chose each one.
+A change that spans several objects, or any change to IVR menus, time conditions, schedules, queues, conferences, park lots, pickup groups, paging or extensions, is one proposal with the single action applyConfigBatch: its body is {"ops": [...]} where each op is {"operationId", "pathParams", "body"} of an object write and "ref" names a created object that later ops use as ${ref.id} or ${ref.name}. Add "canvasId" when the question came from a canvas. Hello fills in baseRevision and the expected versions and dry-runs the batch; the operator sees it on the canvas and applies or discards it. Call describeOperation for the body of an operation before you propose it.
+The earlier messages of this conversation are under "history" in the data, and the PBX's open findings under "findings". A question asked from a call-flow canvas has "canvas" in the data: the canvas id, the selected node ids and a traced call (traceFlow's parameters).`
 
 // SystemPrompt is systemPrompt, for the kw smoke test.
 const SystemPrompt = systemPrompt
@@ -40,6 +42,18 @@ type historyEntry struct {
 	Role    string    `json:"role"`
 	Content string    `json:"content"`
 	At      time.Time `json:"at"`
+	Context *Context  `json:"context,omitempty"`
+}
+
+// messageData is the data the model gets with a question: the history, the
+// open findings and, when the question came from a call-flow canvas, what
+// the canvas showed (spec flow-canvas S-19).
+func messageData(prior []historyEntry, findings []Finding, mc *Context) map[string]any {
+	data := map[string]any{"history": prior, "findings": findings}
+	if mc != nil {
+		data["canvas"] = mc
+	}
+	return data
 }
 
 // answered is what a finished message task produced.
@@ -63,9 +77,10 @@ func (r answered) done(taskID string, userMessageID int64) chat.Done {
 			ReasoningTokens: r.usage.ReasoningTokens, Calls: r.usage.Calls}}
 }
 
-// answer is the message task: one Generate with the read tools, the answer
-// validated against the calls made, its proposal validated and stored, and
-// the assistant message stored with the calls' summaries. With a sink it
+// answer is the message task: one Generate with the read tools (and the
+// write tool when the user allowed it), the answer validated against the
+// calls made, its proposal validated and stored, and the assistant message
+// stored with the calls' summaries, linking the batch applied if any. With a sink it
 // also reports progress to it, and stops when the sink's reader is gone.
 func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID string, history []Message, k *sink) (answered, error) {
 	if len(history) == 0 {
@@ -83,9 +98,17 @@ func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID 
 	}
 
 	current := history[len(history)-1]
+	system := systemPrompt
+	if current.Context != nil && current.Context.AllowApply {
+		// The user let the assistant apply this question's change.
+		if t := a.applyTool(ts, ident, sessionID); t != nil {
+			tools = append(tools, t)
+			system += "\n" + applyPrompt
+		}
+	}
 	prior := make([]historyEntry, 0, len(history)-1)
 	for _, m := range history[:len(history)-1] {
-		prior = append(prior, historyEntry{Role: m.Role, Content: m.Content, At: m.CreatedAt})
+		prior = append(prior, historyEntry{Role: m.Role, Content: m.Content, At: m.CreatedAt, Context: m.Context})
 	}
 	findings, err := a.cfg.Store.OpenAIFindings(ctx, findingsLimit)
 	if err != nil {
@@ -100,8 +123,8 @@ func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID 
 	started := time.Now()
 	ans, usage, err := a.cfg.Generate(ctx, ai.Call[Answer]{
 		Feature:     Feature,
-		System:      systemPrompt,
-		Data:        map[string]any{"history": prior, "findings": findings},
+		System:      system,
+		Data:        messageData(prior, findings, current.Context),
 		Prompt:      current.Content,
 		Tools:       tools,
 		MaxSteps:    a.cfg.MaxSteps,
@@ -142,6 +165,11 @@ func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID 
 		default:
 			proposalID = &id
 		}
+	}
+	if applied := ts.appliedProposal(); applied != "" {
+		// The batch the assistant applied (or tried to) is what the
+		// message links, so the canvas shows what was done.
+		proposalID = &applied
 	}
 	calls := ts.Calls()
 	citations := ans.Citations

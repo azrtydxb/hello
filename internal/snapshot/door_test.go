@@ -37,3 +37,14 @@ func TestDoorTargets(t *testing.T) {
 		t.Errorf("pickup scope of 200 = %v contains the door station", got)
 	}
 }
+
+// TestDoorGroups fails if DoorGroups misses a Door group, lists an ordinary
+// one, or is not sorted.
+func TestDoorGroups(t *testing.T) {
+	s := New(1, "d", nil).WithRingGroups([]RingGroup{
+		{Name: "820", IsDoor: true}, {Name: "810"}, {Name: "800", IsDoor: true},
+	}, [][]RingGroupMember{nil, nil, nil})
+	if got := s.DoorGroups(); !slices.Equal(got, []string{"800", "820"}) {
+		t.Errorf("DoorGroups = %v, want [800 820]", got)
+	}
+}

@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"encoding/binary"
 	"testing"
 	"time"
 )
@@ -56,5 +57,28 @@ func TestPageTone(t *testing.T) {
 	}
 	if pkt := m.recv(t); pkt.PayloadType != 0 {
 		t.Fatalf("member got pt %d", pkt.PayloadType)
+	}
+}
+
+// TestChimePCM fails if the built-in chime is not about a second of audible,
+// bounded 16-bit PCM that dies away to near silence at its end.
+func TestChimePCM(t *testing.T) {
+	pcm := ChimePCM()
+	if n := len(pcm) / 2; n < 7000 || n > 10000 || len(pcm)%2 != 0 {
+		t.Fatalf("chime is %d samples, want about 1.05 s at 8 kHz", n)
+	}
+	peak := func(b []byte) int {
+		m := 0
+		for i := 0; i+1 < len(b); i += 2 {
+			v := int(int16(binary.LittleEndian.Uint16(b[i:])))
+			m = max(m, v, -v)
+		}
+		return m
+	}
+	if p := peak(pcm[:1600]); p < 4000 || p > 12000 {
+		t.Errorf("peak of the first 100 ms = %d, want audible and bounded", p)
+	}
+	if p := peak(pcm[len(pcm)-320:]); p > 1000 {
+		t.Errorf("peak of the last 20 ms = %d, want near silence", p)
 	}
 }

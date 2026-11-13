@@ -20,6 +20,7 @@ import (
 	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/location"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/originate"
 	"github.com/azrtydxb/hello/internal/phonebook"
@@ -79,6 +80,15 @@ type Store interface {
 	UpdateExtension(ctx context.Context, actor string, id int64, c store.ExtensionChange, check store.Check) (store.Extension, error)
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
 
+	ListDoorWebhooks(ctx context.Context) ([]store.DoorWebhook, error)
+	GetDoorWebhook(ctx context.Context, id int64) (store.DoorWebhook, error)
+	CreateDoorWebhook(ctx context.Context, actor string, in store.DoorWebhookInput) (store.DoorWebhook, string, error)
+	UpdateDoorWebhook(ctx context.Context, actor string, id int64, in store.DoorWebhookInput) (store.DoorWebhook, error)
+	DeleteDoorWebhook(ctx context.Context, actor string, id int64) error
+	RotateDoorWebhookSecret(ctx context.Context, actor string, id int64) (string, error)
+	DoorWebhookForTrigger(ctx context.Context, id int64) (store.DoorTriggerHook, bool, error)
+	NoteDoorWebhookTriggered(ctx context.Context, id int64) error
+
 	GetVoicemailBox(ctx context.Context, extensionID int64) (store.VoicemailBox, error)
 	GetVoicemailBoxByID(ctx context.Context, boxID int64) (store.VoicemailBox, error)
 	VoicemailPromptLanguages(ctx context.Context) ([]string, error)
@@ -118,6 +128,8 @@ type Store interface {
 	UpdateCalendar(ctx context.Context, actor string, id int64, in store.CalendarInput, check store.Check) (store.Calendar, error)
 	ImportCalendarEntries(ctx context.Context, actor string, id int64, entries []timecond.Entry, replace bool, check store.Check) (store.Calendar, error)
 	DeleteCalendar(ctx context.Context, actor string, id int64, check store.Check) error
+	GetFollowMe(ctx context.Context, id int64) (store.FollowMe, error)
+	PutFollowMe(ctx context.Context, actor string, id int64, in store.FollowMeInput) (store.FollowMe, error)
 	ListRingTags(ctx context.Context) ([]store.RingTag, error)
 	GetRingTag(ctx context.Context, name string) (store.RingTag, error)
 	CreateRingTag(ctx context.Context, actor string, in store.RingTagInput) (store.RingTag, error)
@@ -127,6 +139,18 @@ type Store interface {
 	ReplaceRingRules(ctx context.Context, actor string, in []store.RingRuleInput) ([]store.RingRule, error)
 	GetRingMap(ctx context.Context) (store.RingMap, error)
 	ReplaceRingMap(ctx context.Context, actor string, groupID *int64, in []store.RingMapEntry) (store.RingMap, error)
+	ListLocations(ctx context.Context) ([]store.Location, error)
+	GetLocation(ctx context.Context, id int64) (store.Location, error)
+	CreateLocation(ctx context.Context, actor string, n location.Node) (store.Location, error)
+	UpdateLocation(ctx context.Context, actor string, id int64, n location.Node) (store.Location, error)
+	DeleteLocation(ctx context.Context, actor string, id int64) error
+	ListLocationAssignments(ctx context.Context) ([]store.LocationAssignment, error)
+	SetLocationAssignment(ctx context.Context, actor, kind string, id int64, locationID *int64) error
+	PhoneLocation(ctx context.Context, phoneID int64) (store.PhoneLocation, error)
+	GetPhoneGroupEmergency(ctx context.Context, id int64) (store.PhoneEmergency, error)
+	SetPhoneGroupEmergency(ctx context.Context, actor string, id int64, in store.PhoneEmergency) (store.PhoneEmergency, error)
+	GetEmergencySettings(ctx context.Context) (store.EmergencySettings, error)
+	PutEmergencySettings(ctx context.Context, actor string, in store.EmergencySettings) (store.EmergencySettings, error)
 	ListWifiProfiles(ctx context.Context) ([]store.WifiProfile, error)
 	GetWifiProfile(ctx context.Context, id int64) (store.WifiProfile, error)
 	CreateWifiProfile(ctx context.Context, actor string, in store.WifiProfileInput) (store.WifiProfile, error)
@@ -333,6 +357,9 @@ type Config struct {
 	OriginateMetrics *OriginateMetrics
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
+	// DoorTriggers carries doorbell webhook triggers to hello-sip and keeps
+	// their rate and duplicate windows; nil answers 503.
+	DoorTriggers DoorTriggers
 	// Fax is the fax feature (destinations, the fax list, sending a PDF); the
 	// zero value answers 503 on its routes.
 	Fax FaxConfig
@@ -464,7 +491,7 @@ func Handler(c Config) http.Handler {
 	for _, rt := range s.routes() {
 		h := s.aiGuard(rt.Pattern, rt.H)
 		if !rt.Public {
-			guarded := auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, h))
+			guarded := auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, agentGuard(rt.Method, rt.Pattern, h)))
 			h = authed(guarded)
 			if rt.Pattern == "/api/v1/events/stream" {
 				// A client that cannot send an Authorization header
@@ -485,6 +512,52 @@ func Handler(c Config) http.Handler {
 	h := maintenance(c.Maintenance, wrapForTest(http.NewCrossOriginProtection().Handler(mux)))
 	c.self.Store(&h)
 	return h
+}
+
+// batchRoute is the configuration batch's route.
+const batchRoute = "/api/v1/config/batch"
+
+// isPreview reports whether the request is the dry run of an AI proposal's
+// batch (auth.Agent.Preview): the agent then holds write scopes, which only
+// a dry-run batch may use.
+func isPreview(r *http.Request) bool {
+	a, _ := auth.ActorFrom(r.Context())
+	ag, ok := auth.AgentFrom(r.Context())
+	return a.Kind == auth.KindAgent && ok && ag.Preview
+}
+
+// isAgentApply reports whether the request is the assistant applying its
+// own batch for the user (auth.Agent.Apply): it holds write scopes, which
+// only a configuration batch may use.
+func isAgentApply(r *http.Request) bool {
+	a, _ := auth.ActorFrom(r.Context())
+	ag, ok := auth.AgentFrom(r.Context())
+	return a.Kind == auth.KindAgent && ok && ag.Apply && !ag.Preview
+}
+
+// agentGuard confines the agent identities that hold write scopes. A batch
+// preview (spec flow-canvas S-19) may write only POST /api/v1/config/batch,
+// whose handler accepts only a dry run, and the operations replayed inside
+// a dry-run batch, which roll back. The assistant applying its own batch
+// (decision of 2026-11-10) may write only POST /api/v1/config/batch and
+// the operations replayed inside that batch: never an object directly, a
+// layout, or a revert. Reads pass; the user's role is checked before this.
+func agentGuard(method, pattern string, next http.Handler) http.Handler {
+	if method == http.MethodGet || method == http.MethodHead {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inBatch := store.BatchFrom(r.Context())
+		switch {
+		case isPreview(r) && pattern != batchRoute && !inBatch.DryRun():
+			writeError(w, http.StatusForbidden, "insufficient_scope", "an AI preview may only dry-run a configuration batch")
+			return
+		case isAgentApply(r) && (pattern != batchRoute || method != http.MethodPost) && inBatch == nil:
+			writeError(w, http.StatusForbidden, "insufficient_scope", "the assistant may only change configuration through a configuration batch")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // passwordGate refuses every route but the few a user needs to choose their

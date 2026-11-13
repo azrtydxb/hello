@@ -1291,6 +1291,65 @@ column ("a" when both legs agree, "a → b" when they differ).
   `haNewCall` restores them, so a taken-over door call keeps the trunk ban and CDR
   kind door (`TestDoorCallerSurvivesTakeover`).
 
+## Doorbell webhook (2026-11-09) — phone-feature-parity item 16 (S-48)
+
+- Independent of #222 (outbound event webhooks: signing, retries, dead
+  letters). S-48 is the inverse: an inbound, signed trigger. Nothing is shared
+  with `internal/webhook`; the routes live under `/api/v1/door/webhooks` and the
+  table is `door_webhooks`, so the two cannot collide.
+- Migration `00078_door_webhooks`. #225 owns 00053 and the item-14 PR 00054; the
+  next free numbers of the open PRs are 00061 and 00062 (00055 to 00060 and 00063
+  to 00066 are taken), so 00061 is this one and 00062 is item 17. Columns: name,
+  sealed secret (AAD `door-webhook:<id>`), action, ring group (null: every Door
+  group), paging group, announcement (set null when it is deleted: the built-in
+  chime), rate limit, enabled, last triggered. Check constraints keep a ring
+  action from naming a paging group and a chime from missing one.
+- Management is admin (scope admin; read for list and get, viewer). Not the
+  `secrets` scope, which spec S-5 and `TestRoutesTable` pin to a fixed list.
+  Create and rotate return the secret once; no other response has it. All
+  management routes are excluded from MCP (a signing secret is a console
+  matter), so no tool needs teaching in `skills/`.
+- Trigger route: the only new public route (added to the public lists of
+  `TestRoutesTable` and `TestVersionAndOpenAPI`). Order of checks: both headers
+  present, timestamp an integer within 300 s, body at most 1 KiB (`413`), then
+  the signature, computed for an unknown id against a random per-process decoy
+  secret so an unknown, a disabled and a wrong-secret request cost the same and
+  give the same `401`. Only after the signature: body must be a JSON object
+  (`400`), Valkey present (`503`), rate limit (`429` with `Retry-After`), duplicate
+  window, enqueue. A disabled webhook is `401`, not `403`, for the same reason.
+- Rate limit: a fixed one-minute window per webhook in Valkey, counted by a Lua
+  script that sets the expiry in the same step as the first count (a crash
+  between INCR and EXPIRE cannot lock a webhook out); default 11, 1 to 600 per
+  webhook. It counts every signed request, coalesced ones included.
+- Coalescing: a `SET NX PX` of 10 s per webhook. A second signed trigger inside
+  it answers `202 {"status":"coalesced"}` and queues nothing. Chosen over
+  de-duplicating on the label because a doorbell button has no idempotency key.
+- Origination reuses the paging-group test path instead of a synthetic `call`:
+  hello-control queues a `DoorTrigger` (Valkey list, 60 s TTL), any READY
+  hello-sip node takes it and sends INVITEs to the registered contacts of the
+  members (like `testPage`), with a sendonly offer from a media fan-out. The
+  ring carries the doorbell Alert-Info from the ring tag table and the webhook's
+  name as caller name (From `door-webhook@<domain>`); the first answer wins and
+  the rest are CANCELled; the winner hears the chime (announcement, or a built-in
+  two-note chime), is hung up, and the call also ends after 30 s.
+- Group strategy is not honoured by the webhook: every member rings at once (the
+  strategies belong to calls that have a caller to hold). A member in DND (the
+  group's ignore-DND aside), in a call, or a door station is skipped and the
+  trace says so; the longest ring timeout of the groups bounds the ringing.
+- `chime_page` uses the page auto-answer headers and PAI of a server page and
+  plays to every member that answers.
+- CDR: kind door, source the webhook name, destination the group (or code),
+  ring tag doorbell for a ring, status 200 when somebody answered, 480 when
+  nobody could be reached. Audit rows are `webhook:<name>` `trigger` or
+  `coalesce`, without the body or label. The label (cut to 64 printable
+  characters) appears only in the call trace.
+- Console: a Door page under Call flow (list, create, edit, new secret, delete;
+  viewers see no write control), the secret in a notice that goes away for good
+  when dismissed.
+- Not done: the trigger is acknowledged when queued, not when someone answered,
+  so the doorbell cannot tell. Trigger results could be polled later if a
+  doorbell needs it.
+
 ## Ring map provisioning, phone-feature-parity S-42 and S-44 (2026-10-27)
 
 - Storage: `ring_map` (migration 00051) holds explicit choices only, keyed by
@@ -2149,6 +2208,160 @@ Spec: `phone-feature-parity.md` S-16, with `clients-webrtc-mobile-video.md` S-4
   relay address (Trickle ICE `P95003` on and off); that hold, resume and a
   re-INVITE keep the session; and that a WP822 ignores the keys it does not have.
 
+## Locations, HELD, Geolocation, callback tag and alarm `*55`, phone-feature-parity S-28 and S-29 (2026-11-09)
+
+- **Already built, left as it was.** The emergency flag on outbound routes and
+  its bypass of the trunk call limit and a down trunk (`acquireSlot`), P8385 and
+  the ring tag constants (`alarm`, `emergency-callback`). The caller's DND and
+  forwarding never act on a call out to a trunk, so (a) needs nothing there. The
+  door extension's target list (S-45) is not on main; the bypass is documented
+  for it to honour when it lands.
+- **Locations** (migration 00052): one table, kind site, floor or room, parent
+  RESTRICT. The civic address is on the site only; a floor's name is `FLR`, a
+  room's `ROOM`; the most specific geo point on the path wins. The user asked for
+  locations assignable to devices and extensions, the spec for a group with an
+  extension override; both are built, plus the phone itself, and the most
+  specific wins: phone, then extension, then phone group. Assignments are one
+  `location_id` column on `phone_groups`, `extensions` and `phones` (RESTRICT),
+  written through `PUT /location-assignments/{kind}/{id}`; a delete names what
+  holds the location. Resolution is the pure `internal/location` package, used by
+  the store, the snapshot and the HELD server.
+- **HELD**: `POST /p/<token>/held` on the provisioning listener, through the same
+  `authorize` as a config fetch (token, HTTPS, allowlisted phone; every denial an
+  empty 404). The body is parsed (root `locationRequest`, no DOCTYPE, 8 KiB) but
+  never picks the location. Answers are `application/held+xml` with status 200
+  also for HELD errors (`locationUnavailable`, `requestError`), the usual client
+  behaviour; a Store without `LocationSource` answers 404, so the fake stores of
+  other tests need no change. No audit kind was added: a HELD request is audited
+  as kind `other`, result `served` (the fetch table's CHECK lists would need a
+  migration for nothing).
+- **Vendor keys, from Grandstream's own documents only.** Fetched
+  `config-template-10212026.zip` (`wp8x6_config_1.0.3.39.txt`) and the WP8x6
+  Administration Guide (documentation.grandstream.com). Written on a WP8x6 with
+  E911: P8565 = 1, P8566 = 1 (HTTPS), P8567 = 60, P8568 = location server,
+  P8597 = emergency numbers separated by ";" (the guide's delimiter), P8725 = 1
+  (RFC 6442 header format), P26059 = 1. With an alarm destination: P22269 = 1,
+  P22270 = `*55`, P22601 = 1, P22602 = 1. Not written, because neither document
+  fixes the value: P8574 (location types; the template spells it
+  `Geodetic,civic,locationURI`, the guide differently), P8576, P8577 to P8596,
+  P8598/P8599. Unconfirmed: the form of P8568 ("address"): written as
+  `host/p/<token>/held` without scheme, as P331 takes its path; a phone check
+  settles it. No other vendor was changed: the spec names none and no vendor
+  document in hand has an E911 key set.
+- **Geolocation on trunks** (migration 00052 `trunks.geolocation`, off). Only an
+  emergency call, only a flagged trunk. The phone's own PIDF-LO (multipart
+  part, well-formed XML with a `presence` root and no DOCTYPE, 16 KiB) is
+  forwarded in place of the stored one; a location by reference in the phone's
+  header is passed on; `Geolocation-Routing` and `P-Emergency-Info` are passed
+  on, never generated (their value is the phone's). The caller's INVITE is
+  reduced to its SDP part at the start of every call, so the media code never
+  sees a multipart body. **UDP size**: sipgo refuses datagrams over 1300 bytes
+  and an INVITE with a PIDF-LO does not fit; the package-level limit is raised to
+  4000 in an `init`, before any server exists (no race), so the request leaves
+  and fragments. The PIDF-LO is as small as RFC 4119 allows (only the namespaces
+  used, no timestamp). The risk is a carrier that drops fragments; that is why
+  the flag is per trunk and off. The alternative, leaving the location out,
+  would make the flag useless on UDP.
+- **Callback tag** (f): `hello:emergency:<ext>` in Valkey (30 min) plus a
+  node-local map, written when a call over an emergency route is routed. A call
+  that entered on a trunk and rings that extension gets ringKind
+  `emergency-callback` and ignores DND; the CDR kind stays `call` (its CHECK
+  has no such value, and the callback is a plain call). Only a trunk call counts:
+  a colleague's call is not the callback.
+- **Notify group** (g): `emergency_settings.notify_group` (one row), a ring group.
+  Its phones are paged like the paging-group test (auto-answer headers, sendonly
+  offer) and hear "Emergency call from <name>, extension <digits>" in the
+  deployment's prompt language, a tone when speech is off. DND is not honoured
+  (a notice, not a call); the calling extension is skipped.
+- **Alarm `*55`**: handled in `handleInvite` before the paging, conference and
+  feature-code lookups, so a feature code or paging code on `*55` can never shadow
+  it; the dial-space guard counts `*55` as a built-in code, so a new overlap is
+  refused (an existing one does not block unrelated changes). Kind `alarm` (CDR
+  CHECK widened), ring tag `alarm`, `ignoreDND` on the call (extension DND and
+  the DND of ring group members), "Panic alarm from <name>" played to the callee
+  leg only after the answer, 404 without a destination or with a deleted one.
+  Forwarding of the destination still applies.
+- **Collision check against origin/main and the open PRs** (2026-11-09): codes
+  taken are `*28 *40 *41 *42 *45 *46 *47 *48 *70 *71 *74 *75 *80` (main), `*76`
+  `*77` (#272), `*64` (#236), `*63` (#220), `*85` as a paging code (#225 test);
+  nobody takes `*55`. Migration 00052 is also taken by #272, #270, #266 and #238:
+  whoever merges second renumbers (and the three migrate counts move by one).
+- **API roles**: locations and assignments write/operator like the ring map and
+  tags; a phone group's E911 switch and alarm destination, and the emergency
+  settings, admin/admin like the phone group changes. They bump the
+  configuration revision (hello-sip reads them).
+- **Not done**: a HELD location URI, LLDP or NAI based lookup, E911 keys for other
+  vendors, the door target list bypass (waits for S-45), an UI picker on the
+  Phones page (the Assignments tab does it).
+
+## Follow-me (pbx-gaps B1: S-5, S-6) (2026-11-09)
+
+- **Feature codes are `*76` (on) and `*77` (off), not `*74` and `*75`.** Those
+  are the default park and park-retrieve codes (migration 00032); the dial-space
+  guard refuses a code that equals or extends another, so the spec's codes could
+  never be seeded. The actions are `follow_me_on` and `follow_me_off`, so an
+  installation can move them; migration 00052 seeds them on existing installs
+  when free, `DefaultFeatureCodes` on fresh ones. The spec text is corrected.
+  A code dialled by an extension with no profile that has a target answers 404
+  and changes nothing.
+- **Migration 00052** (highest on main was 00050): `follow_me`,
+  `follow_me_targets`, the two feature-code actions, and `cdr_legs`. No branch
+  has `cdr_legs` yet (A4 landed as `cdrs.codec` only), so 00052 creates it as the
+  spec's S-22 shape (`CREATE TABLE IF NOT EXISTS`) plus two additive columns,
+  `result` and `target_kind`. Follow-me writes the role `follow_me`; the codec
+  columns stay NULL for it. Down removes the follow-me rows and the two columns,
+  and leaves the table. The migrate test counts are 39/36/37.
+- **Where it runs.** In `ringExtension` (`internal/sip/callflow.go`) after
+  forward-always and before the DND, busy, unreachable and no-answer handling,
+  and in `ivrRingExtension`, the same step for an IVR option that dials an
+  extension. The ring is its own loop (`followMeRun`) because the generic
+  setup loop cannot start legs on a schedule, but it reuses the legs, the
+  event channel, the trunk slot and outbound decision of a forwarded external
+  number, the ring group members, and `exhausted` for the no-answer forward and
+  voicemail, so an unanswered follow-me ends exactly where a plain ring ends. It
+  is not applied to ring group members or to a group or queue failing over to
+  an extension (they ring phones directly), reported in docs/follow-me.md.
+- **Strategies.** Simultaneous rings own phones and all targets at once.
+  Sequential keeps the own phones ringing and starts the targets in order; a
+  target's `delay_seconds` is how long it rings before the next starts, the last
+  one rings to the timeout, 0 on a non-last target means until it fails. In an
+  IVR dial-out the ring primitive cannot stop one leg, so earlier targets keep
+  ringing there (documented).
+- **DND.** `dnd_blocks` (default on) skips follow-me and the ordinary DND
+  handling runs. With it off, DND only silences the own phones.
+- **Targets.** An extension target rings that extension's phones directly (its
+  DND skips it; its own forwarding does not apply), a ring group target rings
+  the eligible members at once, and the first usable trunk of an external
+  target's route carries it. A number that routes to one of our own extensions is
+  treated as that extension. Loops: the extension itself or one in the forward
+  chain is skipped. A leg that goes through a carrier and comes back is a new call
+  and is not detectable; documented as the carrier's hop limit.
+- **Press 1.** The answered external leg is held before it may claim the call
+  (`leg.screen`, run by `fmScreen`): the relay's callee leg is aimed at it, both
+  directions are muted, the prompt `followme.accept` (new key, English and
+  Dutch) is played with the call's Speaker (a beep without one), and the digit
+  `1` (RFC 2833 on the relay, or INFO) connects it; 10 s after the prompt without
+  the digit drops it. One leg is asked at a time. A call with no SDP offer has no
+  media anchor, so its external targets are skipped with a trace line. The Dutch
+  wording needs a native-speaker review before merge (S-21).
+- **CDR.** `cdrs` is unchanged; each leg is a `cdr_legs` row (role `follow_me`,
+  `target_kind`, extension or number, trunk, result). `GET /api/v1/cdrs/{id}`
+  gains `followMeLegs`. The insert statement gains one CTE and one argument. When
+  an external leg wins the call's trunk, route and direction are that leg's.
+- **API.** GET is read-scope/viewer (the route table test ties the read scope to
+  the viewer role; the spec said operator), PUT is write/operator, and the same
+  pair under `/me/extensions/{id}` for a user. A save names the fields it changes;
+  `targets` replaces the list; enabling needs a target; the store re-checks
+  self-target and existence, and refuses deleting or renumbering an extension or
+  group a profile names (409).
+- **HA.** The profile is in the snapshot every node loads, a change goes through
+  `configChange` (revision bump and NOTIFY), and an answered follow-me call is
+  replicated like any answered call, including one an external target answered.
+  A ringing call and a leg being asked to press 1 are not replicated, as for every
+  ringing call.
+- **Tests that need real hardware or a carrier** stay on the lab list (item 4 of
+  the spec): a mobile on a real carrier with press 1.
+
 ## Multiple lines and account sharing (parity item 21, S-10 and S-11) (2026-11-09)
 
 - **Data model.** Line 1 stays `phones.device_id`. Lines 2 to 6 are rows of
@@ -2713,6 +2926,69 @@ so the VIP stage cannot sit in that file.
 - Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
 - Account sharing group password: shared default `AccountSharing`, or a per-group secret
 
+## Flow canvas P6: AI on the canvas (2026-11-09)
+
+Built per `.procoder/specs/flow-canvas.md` (P6, S-17, S-19, S-20). Choices the
+spec left open, and one deviation:
+
+- **The assistant may apply its own batch (decision 2, user decision of
+  2026-11-10 below).** It has one write tool, `applyConfigBatch`, offered only
+  for a question asked with the canvas switch "Let AI apply changes" on;
+  otherwise a change is a proposal whose batch the operator previews on the
+  canvas and applies or discards. Write-scoped MCP clients keep
+  `applyConfigBatch` as before.
+- **A batch proposal is one action.** `applyConfigBatch` joins
+  `proposal.Allowlist`; a proposal that carries it has no other action, so the
+  whole change is one transaction. The inner allowlist is the batch's own
+  table (`configbatch.Ops`, every object type the canvas draws); `createDevice`,
+  `createPhone`, credential, multipart and external-effect operations stay
+  out. At most 50 inner operations.
+- **Credentials stay out of proposals.** Decision 2 allows the AI to set
+  secrets with redacted reads; a proposal's body is stored and shown to
+  people and to the model, so an inner operation that sets a password, PIN or
+  secret is refused, as for every other proposal (S-12).
+- **The dry run runs as the user, rolled back.** The validator dry-runs the
+  batch through the API as the user's agent identity with a new `Preview`
+  flag (`auth.Agent.Preview`): it then holds write scopes with the user's own
+  role, but the API admits its writes only on `POST /api/v1/config/batch`
+  with `dryRun` and inside a dry-run store batch (`agentGuard`,
+  `Batch.DryRun`). A viewer's or an operator's admin-only batch is refused
+  there and the model is told the user cannot make the change.
+- **Hello fills the staleness tokens.** The model does not send
+  `baseRevision` or `expect`: the validator reads the graph (devices
+  included) and sets `baseRevision` to its revision and each update or
+  delete's `expect` to the node's version. A configuration that moves under
+  the proposal makes the batch's own check answer 409, which makes the
+  proposal `stale`; changes to other objects do not.
+- **The preview is stored.** The dry run's results (redacted), warnings and a
+  new `flowDiff` (added, changed, removed nodes, edges added and removed,
+  `flow.Diff`) are kept on the action as `preview`, so the overlay and the
+  proposal page need no write scope and viewers see them. Every dry-run batch
+  answer now carries `flowDiff` (documented in `openapi.json` and
+  `docs/config-batch.md`).
+- **Overlay placement.** Created nodes have dry-run ids (sequences do not roll
+  back), so the canvas draws them as ghosts placed next to a connected node
+  (not draggable) and, after apply, places the real nodes at the ghost
+  positions by matching kind and label (`placementsAfterApply`).
+- **Canvas context.** A question carries a `context` with `canvasId`,
+  `nodes` and `trace`, stored in `ai_messages.context` (migration `00057`) so the task and
+  the history see it, and given to the model as data (`canvas`), never as
+  instructions. The panel sends the canvas, the selected node and the traced
+  call.
+- **`describeOperation`.** One assistant tool that is not an API read: it
+  answers the request schema of an operation a proposal may carry, from the
+  embedded document, so the model writes valid batch bodies. It is not an MCP
+  tool and reads no PBX data.
+- **`getFlowGraph` `fields=summary`** (S-17) empties node summaries and drops
+  edge `data`, keeping ids, labels, versions, ports and owners.
+- **Roles.** Asking needs operator (the chat already did); viewers see the
+  panel's proposal list and the overlay, without Apply. Discard is
+  `dismissAIProposal` with reason `not_needed`. With the agent off the panel
+  shows the same reason as every AI page.
+- **Import cycle.** `configbatch` used `proposal.Change`; the JSON diff moved
+  to `internal/jsondiff` (proposal keeps aliases) so `proposal` can use
+  `configbatch`.
+
 ## Integrations P4: recording links and lookup (2026-11-09)
 
 - Links are Hello-signed proxy URLs (`/r/<token>.wav`), not MinIO presigned
@@ -3006,6 +3282,44 @@ Built in one change: the engine, passthrough, T.38, email, API, page and docs.
 - Answer (user): the AI may apply. Give the assistant a write tool that applies its batch,
   audited and revertible, in line with the earlier AI-access decision. Operators still see
   and can revert every applied batch.
+
+Built on #280 (choices the decision left open):
+
+- **The write tool.** `applyConfigBatch` in the assistant (go-ai-sdk tool,
+  `internal/ai/assistant/apply.go`). Its batch is validated exactly as a
+  proposal's batch (inner allowlist, no credential property, at most 50 ops,
+  `baseRevision` and `expect` from the graph, the dry run as the user), stored
+  as a proposal (so the overlay, the proposal page and the session link show
+  it), then applied with `proposal.DBStore.ApplyAsAgent`:
+  `POST /api/v1/config/batch` replayed as the user under a new
+  `auth.Agent.Apply` identity. That identity holds write and admin scopes with the user's own
+  role, so a viewer's batch is `403 forbidden_role` and an operator's
+  admin-only op is refused; `agentGuard` admits its writes only on the batch
+  route and inside that batch (no direct object write, layout or revert). One
+  applied batch per question; an answer may not add a proposal after it.
+  Credentials stay out, as for every proposal.
+- **Audit.** The actor is the user (`user:<name>`), the via `ai:<session>`
+  (decision 2's form) on the `config_batches` row, on the proposal
+  (`ai_proposals.applied_via`, new) and on the proposal's `apply_applied`
+  audit row (now with its via); each object's row carries `batch:<id>` as for
+  every batch. The proposal also keeps `batch_id` (new, set for a person's
+  apply too) so the console reverts it with the ordinary
+  `revertConfigBatch`. Migration `00086_ai_proposal_applied_via.sql`,
+  additive.
+- **The switch: per session, ask first by default (chosen).** Decision 2 lets
+  the AI apply but sets no default, so the canvas panel's "Let AI apply
+  changes" starts off each time the panel opens and holds for the questions
+  sent while it stays open; each question stores it (`context.allowApply` in
+  `ai_messages.context`), and only that question gets the write tool. Viewers
+  see no switch. Not a stored per-user setting: no setting outlives the panel,
+  so nothing applies without the user turning it on where they are looking.
+- **UI.** An AI-applied batch is drawn as what was applied: the canvas
+  reloads, places the new nodes and marks new and changed nodes; the panel
+  shows "Applied by the assistant for you" with the operations and a
+  Revert (dry run, then confirm). History and the proposal page label it
+  "by the assistant for <user>".
+- **No new API status codes.** The refusals are the existing
+  `403 forbidden_role` and `403 insufficient_scope`.
 
 ## Integrations P6: HubSpot and the internal/crm framework (2026-11-10)
 

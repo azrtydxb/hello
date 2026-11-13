@@ -33,7 +33,7 @@ func (l *leg) addRingTag(req *sip.Request) {
 
 	c.mu.Lock()
 	in := ringtag.Input{
-		Kind: c.kind, CallerNumber: c.callerNum, DID: c.dialled, CallerKind: ringtag.CallerExtension,
+		Kind: c.ringKindLocked(), CallerNumber: c.callerNum, DID: c.dialled, CallerKind: ringtag.CallerExtension,
 		At: time.Now(),
 	}
 	if c.doorCaller {
@@ -67,4 +67,14 @@ func (l *leg) addRingTag(req *sip.Request) {
 	}
 	req.RemoveHeader("Alert-Info") // the INVITE is built from scratch; this keeps it true
 	req.AppendHeader(sip.NewHeader("Alert-Info", tbl.Header(ch.Tag, l.binding.UserAgent)))
+}
+
+// ringKindLocked is the call kind the ring tag is chosen by: the CDR kind,
+// or the emergency callback kind a call carries without a CDR kind of its
+// own. c.mu must be held.
+func (c *call) ringKindLocked() string {
+	if c.ringKind != "" {
+		return c.ringKind
+	}
+	return c.kind
 }

@@ -57,10 +57,10 @@ type CDR struct {
 	RingTag  string `json:"ringTag"`
 	RingRule string `json:"ringRule"`
 	// SRTP is which legs carried SRTP: none, caller, callee or both
-	// (migration 00079).
+	// (migration 00081).
 	SRTP string `json:"srtp"`
 	// SRTPKeyEx is how the encrypted legs agreed their keys: none, sdes, dtls
-	// or mixed, and ICE whether a leg ran ICE-lite (migration 00079).
+	// or mixed, and ICE whether a leg ran ICE-lite (migration 00084).
 	SRTPKeyEx string `json:"srtpKeyEx"`
 	ICE       bool   `json:"ice"`
 	// RecordingID is the call's recording; set by GetCDR when it has one.
@@ -71,9 +71,23 @@ type CDR struct {
 	// QueueLegs is what the call did in a call queue (migration 00040); set
 	// by GetCDR.
 	QueueLegs []QueueLeg `json:"queueLegs,omitempty"`
+	// FollowMeLegs is what each follow-me target did (migration 00084); set
+	// by GetCDR.
+	FollowMeLegs []FollowMeLeg `json:"followMeLegs,omitempty"`
 	// RTCPXR is what the phones on the call reported (migration 00066); set
 	// by GetCDR, empty when no phone sent a report.
 	RTCPXR []RTCPXRQuality `json:"rtcpxr,omitempty"`
+}
+
+// FollowMeLeg is one follow-me leg of a call: the target's kind (own,
+// extension, ring_group or external), the extension it rang or the trunk it
+// left on, and how it ended (answered, declined, busy, no_answer, failed,
+// skipped or cancelled).
+type FollowMeLeg struct {
+	Kind      string `json:"kind"`
+	Extension string `json:"extension"`
+	Trunk     string `json:"trunk"`
+	Result    string `json:"result"`
 }
 
 // QueueLeg is one event of a call in a queue: enter, agent, answered, wait,
@@ -251,5 +265,21 @@ func (s *Store) GetCDR(ctx context.Context, id int64) (CDR, routing.Trace, error
 		return c, trace, err
 	}
 	c.RTCPXR, err = s.rtcpxrOf(ctx, id)
-	return c, trace, err
+	if err != nil {
+		return c, trace, err
+	}
+	frows, err := s.db.QueryContext(ctx, `SELECT target_kind, extension, trunk, result
+		FROM cdr_legs WHERE cdr_id = $1 AND role = 'follow_me' ORDER BY position`, id)
+	if err != nil {
+		return c, trace, fmt.Errorf("store: follow-me legs of cdr %d: %w", id, err)
+	}
+	defer func() { _ = frows.Close() }()
+	for frows.Next() {
+		var l FollowMeLeg
+		if err := frows.Scan(&l.Kind, &l.Extension, &l.Trunk, &l.Result); err != nil {
+			return c, trace, err
+		}
+		c.FollowMeLegs = append(c.FollowMeLegs, l)
+	}
+	return c, trace, frows.Err()
 }
