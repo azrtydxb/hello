@@ -81,6 +81,42 @@ describe("Messaging channels", () => {
     expect(document.body.textContent).not.toMatch(/password|secret|token/i);
   });
 
+  it("leaves website chat sites to their own page", async () => {
+    api({
+      "GET /api/v1/messaging/channels": () =>
+        json({
+          items: [
+            channel(),
+            channel({
+              id: 9,
+              kind: "webchat",
+              provider: "chat",
+              name: "Help desk",
+              trunkId: null,
+              trunkName: "",
+            }),
+          ],
+        }),
+      "GET /api/v1/messaging/addresses": () =>
+        json({
+          items: [
+            address,
+            {
+              ...address,
+              id: 6,
+              channelId: 9,
+              address: "0123456789abcdef01234567",
+            },
+          ],
+        }),
+    });
+    renderApp("/messaging/channels");
+    const channels = await screen.findByRole("table", { name: "Channels" });
+    expect(within(channels).queryByText("Help desk")).toBeNull();
+    const numbers = await screen.findByRole("table", { name: "Numbers" });
+    expect(within(numbers).queryByText("0123456789abcdef01234567")).toBeNull();
+  });
+
   it("adds a channel on a trunk and warns when SMS over SIP is off", async () => {
     const calls = api({
       "POST /api/v1/messaging/channels": () =>

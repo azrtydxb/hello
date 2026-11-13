@@ -260,6 +260,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "admin",
       },
       {
+        label: "Chat sites",
+        path: "/messaging/chat",
+        phase: 5,
+        icon: "messages-square",
+        minRole: "admin",
+      },
+      {
         label: "Opt-outs",
         path: "/messaging/optouts",
         phase: 5,

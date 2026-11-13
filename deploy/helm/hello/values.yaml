@@ -53,6 +53,17 @@ control:
     # An announcement upload (up to 64 MiB) is held in memory while it is
     # converted, about 1.5x its size.
     limits: { memory: 512Mi }
+  # LAN chat widget listener (docs/inbox.md, "Website chat"): its own port
+  # serving only /chat/*, reached through the UI's /chat/ on the LAN host.
+  # Off until lanAddr is set (for example ":8087").
+  chat:
+    lanAddr: ""
+    # The global kill switch: false makes every /chat request answer 503.
+    enabled: true
+    # Proxies whose X-Forwarded-For is believed: the UI pods and the ingress
+    # controller's pods (comma separated CIDRs). Without them every visitor
+    # shares one address and one set of limits.
+    trustedProxies: ""
   # Phone provisioning listener (:8083). Enabled when provisioning.publicUrl is set.
   provisioning:
     publicUrl: ""
