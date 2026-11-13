@@ -599,13 +599,23 @@ func (s *server) updateDevice(w http.ResponseWriter, r *http.Request) {
 		Enabled     *bool   `json:"enabled"`
 		ExtensionID *int64  `json:"extensionId"`
 		SRTP        *string `json:"srtp"`
+		KeyExchange *string `json:"srtpKeyExchange"`
+		MediaICE    *bool   `json:"mediaIce"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.Enabled == nil && in.ExtensionID == nil && in.SRTP == nil {
-		badRequest(w, "enabled, extensionId or srtp is required")
+	if in.Enabled == nil && in.ExtensionID == nil && in.SRTP == nil && in.KeyExchange == nil && in.MediaICE == nil {
+		badRequest(w, "enabled, extensionId, srtp, srtpKeyExchange or mediaIce is required")
 		return
+	}
+	if in.KeyExchange != nil {
+		v, ok := secmedia.ParseKeyEx(*in.KeyExchange)
+		if !ok {
+			badRequest(w, "srtpKeyExchange must be sdes or dtls")
+			return
+		}
+		in.KeyExchange = &v
 	}
 	if in.SRTP != nil && !secmedia.Valid(*in.SRTP) {
 		badRequest(w, "srtp must be off, optional or required")
@@ -620,7 +630,7 @@ func (s *server) updateDevice(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "extensionId must be positive")
 		return
 	}
-	d, err := s.Store.UpdateDevice(r.Context(), actor(r).String(), id, in.Enabled, in.ExtensionID, in.SRTP)
+	d, err := s.Store.UpdateDevice(r.Context(), actor(r).String(), id, in.Enabled, in.ExtensionID, store.DeviceMedia{SRTP: in.SRTP, KeyEx: in.KeyExchange, ICE: in.MediaICE})
 	if errors.Is(err, store.ErrDerivedDevice) {
 		writeError(w, http.StatusConflict, "derived_device", "a web device stays on the extension its owner is linked to; revoke it and enrol again")
 		return

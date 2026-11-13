@@ -59,6 +59,9 @@ type Config struct {
 	RecountInterval time.Duration
 	// MaxCallDuration ends a connected call with BYE to both legs (4h).
 	MaxCallDuration time.Duration
+	// DoorHangup is how long a door call stays up after the door-open code
+	// was sent, when the station hangs up after open (3s; spec S-47).
+	DoorHangup time.Duration
 	// SessionExpires is the RFC 4028 interval Hello requests on legs to
 	// phones and applies when a phone's call names none (30m); 0 turns
 	// session timers off. SessionMinSE is the smallest interval accepted
@@ -450,6 +453,7 @@ func New(cfg Config, deps Deps) (*Server, error) {
 	setDefault(&cfg.RingTimeout, 30*time.Second)
 	setDefault(&cfg.MaxCallDuration, 4*time.Hour)
 	setDefault(&cfg.PageMaxDuration, 120*time.Second)
+	setDefault(&cfg.DoorHangup, 3*time.Second)
 	setDefault(&cfg.PageAnswerTimeout, 10*time.Second)
 	if cfg.PageFanout <= 0 {
 		cfg.PageFanout = 200
