@@ -1268,9 +1268,7 @@
         "operationId": "getMyFollowMe",
         "summary": "Get my extension's follow-me profile",
         "description": "Returns the follow-me profile of one of the signed-in user's own extensions. An extension that is not the user's answers 404, exactly like one that does not exist.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1311,9 +1309,7 @@
         "operationId": "putMyFollowMe",
         "summary": "Change my extension's follow-me profile",
         "description": "Changes the follow-me profile of one of the signed-in user's own extensions, with the same fields and rules as the operator route. An extension that is not the user's answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3903,6 +3899,16 @@
               "type": "string",
               "enum": ["devices"]
             }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "description": "`all` (default) or `summary`: every node's `summary` is empty and edges carry no `data`, a compact read that keeps an AI tool result of a small PBX under 16 KiB.",
+            "schema": {
+              "type": "string",
+              "enum": ["all", "summary"]
+            }
           }
         ],
         "responses": {
@@ -4739,9 +4745,7 @@
         "operationId": "getFollowMe",
         "summary": "Get an extension's follow-me profile",
         "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Returns the profile; an extension that has none reads as the defaults, off with no targets.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4779,9 +4783,7 @@
         "operationId": "putFollowMe",
         "summary": "Change an extension's follow-me profile",
         "description": "Follow-me rings an extension's own devices and up to five more targets (an external number, another extension or a ring group), either all at once (simultaneous) or one after another (sequential). It runs when a call reaches the extension's ring step: after forward-always, before the no-answer forward and voicemail. An external target is asked to press 1 before the call is connected when confirmExternal is on. Fields left out keep their stored value; targets, when sent, replace the whole list (at most 5, in ring order). A profile can be turned on only with at least one target. A target cannot be the extension itself, an external target is 2 to 32 digits with an optional leading +, and an extension or ring group target must exist.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -17893,11 +17895,11 @@
         }
       }
     },
-    "/api/v1/extensions/{id}/camera": {
+    "/api/v1/extensions/{id}/door-open": {
       "get": {
-        "operationId": "getDoorCamera",
-        "summary": "Show a door station's camera",
-        "description": "Shows where a door station's camera picture comes from. The password is never returned. An ordinary user extension answers 409.",
+        "operationId": "getDoorOpen",
+        "summary": "Show a door station's door-open settings",
+        "description": "Says whether a door-open code is set on a door station and whether the call hangs up after the door was opened. The code itself is never returned. An ordinary user extension answers 409.",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -17906,11 +17908,11 @@
         ],
         "responses": {
           "200": {
-            "description": "Camera settings",
+            "description": "Door-open settings",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DoorCamera"
+                  "$ref": "#/components/schemas/DoorOpen"
                 }
               }
             }
@@ -17933,15 +17935,12 @@
         },
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
-        "x-hello-mcp": {
-          "exclude": "door camera credentials and pictures are handled in the console",
-          "category": "credentials"
-        }
+        "x-hello-mcp": true
       },
       "put": {
-        "operationId": "updateDoorCamera",
-        "summary": "Set a door station's camera",
-        "description": "Sets the address of a door station's camera, an MJPEG stream or a snapshot, with its credentials. hello-control fetches the picture itself, and only from addresses it may reach (public ones and the networks in HELLO_DOOR_CAMERA_ALLOW). An ordinary user extension answers 409.",
+        "operationId": "updateDoorOpen",
+        "summary": "Set or clear a door station's door-open code",
+        "description": "Sets the door-open code (1 to 8 characters of 0-9, * and #) or clears it with an empty string, and the hang-up-after-open flag. When the user who answered a door call dials *50, or presses Open door in the console, Hello sends the code to the door as RFC 2833 events. The code is stored sealed and is never returned or logged. An ordinary user extension answers 409.",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -17953,18 +17952,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DoorCameraUpdate"
+                "$ref": "#/components/schemas/DoorOpenUpdate"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Camera settings after the change",
+            "description": "Door-open settings after the change",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DoorCamera"
+                  "$ref": "#/components/schemas/DoorOpen"
                 }
               }
             }
@@ -17991,23 +17990,76 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "door camera credentials and pictures are handled in the console",
+          "exclude": "the door-open code is set only in the console",
           "category": "credentials"
         }
-      },
-      "delete": {
-        "operationId": "deleteDoorCamera",
-        "summary": "Remove a door station's camera",
-        "description": "Removes the camera and its stored password.",
-        "tags": ["extensions"],
+      }
+    },
+    "/api/v1/me/door-calls": {
+      "get": {
+        "operationId": "listMyDoorCalls",
+        "summary": "List the door calls you answered and that are still up",
+        "description": "Lists the live calls with a door station that the signed-in user's extension answered (or, for a call the user placed to a station, started). The console offers Open door on them.",
+        "tags": ["me"],
+        "responses": {
+          "200": {
+            "description": "Your live door calls",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorCallList"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console",
+          "category": "self-service"
+        }
+      }
+    },
+    "/api/v1/calls/{id}/door-open": {
+      "post": {
+        "operationId": "openDoorForCall",
+        "summary": "Open the door of your live door call",
+        "description": "Asks the hello-sip node holding the call to send the door station's door-open code to the door, as `*50` does. Only the user whose extension answered the call (or placed it to the station) may; anyone else gets 403. The path id is the call's correlation id from GET /api/v1/calls. 409 when the call is not an answered door call or the station has no code or the media does not allow it; 502 when the node could not send; 504 when no node answered in time.",
+        "tags": ["live"],
         "parameters": [
           {
-            "$ref": "#/components/parameters/id"
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Correlation id of the live call",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
-          "204": {
-            "description": "Removed"
+          "200": {
+            "description": "The code is being sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorOpenSent"
+                }
+              }
+            }
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -18023,60 +18075,15 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "admin",
-        "x-hello-role": "admin",
-        "x-hello-mcp": {
-          "exclude": "door camera credentials and pictures are handled in the console",
-          "category": "credentials"
-        }
-      }
-    },
-    "/api/v1/extensions/{id}/camera/view": {
-      "get": {
-        "operationId": "viewDoorCamera",
-        "summary": "Show a door station's camera picture",
-        "description": "Fetches the door station's picture from its camera and passes it on: image/jpeg for a snapshot camera, multipart/x-mixed-replace for an MJPEG stream (ended after ten minutes; at most eight pictures at a time per node). 404 when the station has no camera, 502 when the camera cannot be reached or does not answer with a picture (its address may be outside HELLO_DOOR_CAMERA_ALLOW), 429 when too many pictures are shown.",
-        "tags": ["extensions"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The picture",
-            "content": {
-              "image/jpeg": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              },
-              "multipart/x-mixed-replace": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              }
-            }
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
+          "502": {
+            "$ref": "#/components/responses/Upstream"
           },
-          "429": {
-            "description": "Too many pictures are being shown; see Retry-After",
-            "headers": {
-              "Retry-After": {
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            },
+          "504": {
+            "description": "No hello-sip node answered in time",
             "content": {
               "application/json": {
                 "schema": {
@@ -18084,28 +18091,13 @@
                 }
               }
             }
-          },
-          "502": {
-            "$ref": "#/components/responses/Upstream"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
           }
         },
-        "x-hello-scope": "read",
-        "x-hello-role": "viewer",
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "door camera credentials and pictures are handled in the console",
-          "category": "binary-download"
+          "exclude": "physical access: only the user who answered the door call opens it, from the console",
+          "category": "human-in-the-loop"
         }
       }
     },
@@ -25465,6 +25457,222 @@
         "x-hello-role": "admin",
         "x-hello-mcp": true
       }
+    },
+    "/api/v1/extensions/{id}/camera": {
+      "get": {
+        "operationId": "getDoorCamera",
+        "summary": "Show a door station's camera",
+        "description": "Shows where a door station's camera picture comes from. The password is never returned. An ordinary user extension answers 409.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Camera settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorCamera"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "credentials"
+        }
+      },
+      "put": {
+        "operationId": "updateDoorCamera",
+        "summary": "Set a door station's camera",
+        "description": "Sets the address of a door station's camera, an MJPEG stream or a snapshot, with its credentials. hello-control fetches the picture itself, and only from addresses it may reach (public ones and the networks in HELLO_DOOR_CAMERA_ALLOW). An ordinary user extension answers 409.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DoorCameraUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Camera settings after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoorCamera"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteDoorCamera",
+        "summary": "Remove a door station's camera",
+        "description": "Removes the camera and its stored password.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/extensions/{id}/camera/view": {
+      "get": {
+        "operationId": "viewDoorCamera",
+        "summary": "Show a door station's camera picture",
+        "description": "Fetches the door station's picture from its camera and passes it on: image/jpeg for a snapshot camera, multipart/x-mixed-replace for an MJPEG stream (ended after ten minutes; at most eight pictures at a time per node). 404 when the station has no camera, 502 when the camera cannot be reached or does not answer with a picture (its address may be outside HELLO_DOOR_CAMERA_ALLOW), 429 when too many pictures are shown.",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The picture",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "multipart/x-mixed-replace": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "description": "Too many pictures are being shown; see Retry-After",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "door camera credentials and pictures are handled in the console",
+          "category": "binary-download"
+        }
+      }
     }
   },
   "components": {
@@ -29083,6 +29291,57 @@
               "type": "string"
             },
             "description": "What a revert could not put back."
+          },
+          "flowDiff": {
+            "$ref": "#/components/schemas/FlowGraphDiff"
+          }
+        }
+      },
+      "FlowGraphDiff": {
+        "type": "object",
+        "description": "Only on a dry run: what the batch would do to the drawn flow graph, so a client can show it as an overlay before it applies.",
+        "required": [
+          "added",
+          "changed",
+          "removed",
+          "edgesAdded",
+          "edgesRemoved"
+        ],
+        "properties": {
+          "added": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowNode"
+            },
+            "description": "Nodes the batch creates, as they would be drawn."
+          },
+          "changed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowNode"
+            },
+            "description": "Nodes whose object the batch changes, as they would be after it."
+          },
+          "removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the nodes the batch deletes."
+          },
+          "edgesAdded": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowEdge"
+            },
+            "description": "Connections the batch makes; an edge whose details change is listed here and in edgesRemoved."
+          },
+          "edgesRemoved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of the connections the batch drops."
           }
         }
       },
@@ -29148,7 +29407,7 @@
           },
           "via": {
             "type": "string",
-            "description": "The origin: an OAuth client id, ai-proposal:<id> or ai-assistant; empty for the console and API tokens."
+            "description": "The origin: an OAuth client id, ai-proposal:<id> (a person applied an AI proposal), ai:<session> (the assistant applied its own batch for the actor) or ai-assistant; empty for the console and API tokens."
           },
           "baseRevision": {
             "type": "integer",
@@ -29491,7 +29750,8 @@
                   "caller_id_not_allowed",
                   "route_denied",
                   "device_limit",
-                  "derived_device"
+                  "derived_device",
+                  "not_your_call"
                 ]
               },
               "message": {
@@ -31238,6 +31498,15 @@
             "enum": ["off", "optional", "required"],
             "description": "Media-encryption policy of the device: off (plain RTP), optional (SDES SRTP is offered on a TLS leg and used when the phone answers with it) or required (SRTP only; a call that cannot be encrypted is refused with 488). Crypto is never offered on a leg that is not TLS."
           },
+          "srtpKeyExchange": {
+            "type": "string",
+            "enum": ["sdes", "dtls"],
+            "description": "How Hello agrees SRTP keys with the device when it makes the offer: sdes (a=crypto lines in the SDP, the default) or dtls (DTLS-SRTP, UDP/TLS/RTP/SAVP with a fingerprint). An offer from the phone is answered in kind. Either is only used on a leg whose signalling is TLS."
+          },
+          "mediaIce": {
+            "type": "boolean",
+            "description": "Whether Hello offers the device ICE-lite and provisions its ICE setting (Grandstream WP826 and WP836, P95002). An ICE offer from a phone is answered as ICE-lite whatever this says."
+          },
           "id": {
             "type": "integer",
             "format": "int64"
@@ -31313,6 +31582,15 @@
             "type": "string",
             "enum": ["off", "optional", "required"],
             "description": "Media-encryption policy of the device: off (plain RTP), optional (SDES SRTP is offered on a TLS leg and used when the phone answers with it) or required (SRTP only; a call that cannot be encrypted is refused with 488). Crypto is never offered on a leg that is not TLS."
+          },
+          "srtpKeyExchange": {
+            "type": "string",
+            "enum": ["sdes", "dtls"],
+            "description": "How Hello agrees SRTP keys with the device when it makes the offer: sdes (a=crypto lines in the SDP, the default) or dtls (DTLS-SRTP, UDP/TLS/RTP/SAVP with a fingerprint). An offer from the phone is answered in kind. Either is only used on a leg whose signalling is TLS."
+          },
+          "mediaIce": {
+            "type": "boolean",
+            "description": "Whether Hello offers the device ICE-lite and provisions its ICE setting (Grandstream WP826 and WP836, P95002). An ICE offer from a phone is answered as ICE-lite whatever this says."
           },
           "id": {
             "type": "integer",
@@ -31414,6 +31692,15 @@
             "type": "string",
             "enum": ["off", "optional", "required"],
             "description": "Media-encryption policy of the device: off (plain RTP), optional (SDES SRTP is offered on a TLS leg and used when the phone answers with it) or required (SRTP only; a call that cannot be encrypted is refused with 488). Crypto is never offered on a leg that is not TLS."
+          },
+          "srtpKeyExchange": {
+            "type": "string",
+            "enum": ["sdes", "dtls"],
+            "description": "How Hello agrees SRTP keys with the device when it makes the offer: sdes (a=crypto lines in the SDP, the default) or dtls (DTLS-SRTP, UDP/TLS/RTP/SAVP with a fingerprint). An offer from the phone is answered in kind. Either is only used on a leg whose signalling is TLS."
+          },
+          "mediaIce": {
+            "type": "boolean",
+            "description": "Whether Hello offers the device ICE-lite and provisions its ICE setting (Grandstream WP826 and WP836, P95002). An ICE offer from a phone is answered as ICE-lite whatever this says."
           },
           "enabled": {
             "type": "boolean",
@@ -31528,6 +31815,10 @@
             "enum": ["internal", "inbound", "outbound"],
             "description": "Call direction as its CDR will record it; absent on records from older nodes"
           },
+          "door": {
+            "type": "string",
+            "description": "Extension number of the door station on the call (spec S-45); absent when no station takes part"
+          },
           "ha": {
             "type": "string",
             "enum": ["owned", "taken-over"],
@@ -31572,6 +31863,15 @@
             "type": "string",
             "enum": ["none", "caller", "callee", "both"],
             "description": "Which legs of the call carried SRTP: none, caller, callee or both. Direct-media calls are none."
+          },
+          "srtpKeyEx": {
+            "type": "string",
+            "enum": ["none", "sdes", "dtls", "mixed"],
+            "description": "How the call's encrypted legs agreed their keys: none, sdes, dtls, or mixed (one leg each)."
+          },
+          "ice": {
+            "type": "boolean",
+            "description": "Whether a leg of the call ran ICE-lite."
           },
           "id": {
             "type": "integer",
@@ -31882,7 +32182,7 @@
           "srtp": {
             "type": "string",
             "enum": ["off", "optional", "required"],
-            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are not TLS today, so optional behaves as off and required refuses calls over the trunk."
+            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are SIP over UDP today, so optional behaves as off, and required is refused with 422 because it needs a TLS trunk transport that Hello does not have yet (a trunk stored as required before that rule refuses its calls until it is changed)."
           },
           "id": {
             "type": "integer",
@@ -32044,7 +32344,7 @@
           "srtp": {
             "type": "string",
             "enum": ["off", "optional", "required"],
-            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are not TLS today, so optional behaves as off and required refuses calls over the trunk.",
+            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are SIP over UDP today, so optional behaves as off, and required is refused with 422 because it needs a TLS trunk transport that Hello does not have yet (a trunk stored as required before that rule refuses its calls until it is changed).",
             "default": "off"
           },
           "name": {
@@ -32206,7 +32506,7 @@
           "srtp": {
             "type": "string",
             "enum": ["off", "optional", "required"],
-            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are not TLS today, so optional behaves as off and required refuses calls over the trunk."
+            "description": "Media-encryption policy of the trunk: off, optional or required (see the device policy). Trunk legs are SIP over UDP today, so optional behaves as off, and required is refused with 422 because it needs a TLS trunk transport that Hello does not have yet (a trunk stored as required before that rule refuses its calls until it is changed)."
           },
           "name": {
             "type": "string",
@@ -33357,21 +33657,11 @@
                 "description": "For a call that rang a follow-me profile, what each leg did, in the order they rang: own (the extension's own devices), extension, ring_group or external, and how it ended (answered, declined: an external target did not press 1, busy, no_answer, failed, skipped, cancelled)",
                 "items": {
                   "type": "object",
-                  "required": [
-                    "kind",
-                    "extension",
-                    "trunk",
-                    "result"
-                  ],
+                  "required": ["kind", "extension", "trunk", "result"],
                   "properties": {
                     "kind": {
                       "type": "string",
-                      "enum": [
-                        "own",
-                        "extension",
-                        "ring_group",
-                        "external"
-                      ]
+                      "enum": ["own", "extension", "ring_group", "external"]
                     },
                     "extension": {
                       "type": "string",
@@ -34663,6 +34953,33 @@
             "type": "boolean",
             "description": "Whether the action deletes a resource; the console marks it and asks for confirmation."
           },
+          "preview": {
+            "type": "object",
+            "description": "For applyConfigBatch: what the batch's dry run answered when the proposal was made, so the console can show it on the call-flow canvas.",
+            "required": ["baseRevision", "results", "warnings", "flowDiff"],
+            "properties": {
+              "baseRevision": {
+                "type": "integer",
+                "format": "int64",
+                "description": "The configuration revision the batch is based on."
+              },
+              "results": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ConfigBatchResult"
+                }
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FlowWarning"
+                }
+              },
+              "flowDiff": {
+                "$ref": "#/components/schemas/FlowGraphDiff"
+              }
+            }
+          },
           "references": {
             "type": "array",
             "description": "For a delete, what it takes with it or leaves dangling: members of a ring group, the inbound routes sending calls to it, a route's trunks and destination.",
@@ -34742,7 +35059,9 @@
           "dismissedAt",
           "dismissReason",
           "dismissText",
-          "failure"
+          "failure",
+          "appliedVia",
+          "batchId"
         ],
         "properties": {
           "id": {
@@ -34850,6 +35169,15 @@
               }
             ],
             "description": "Why a failed proposal stopped."
+          },
+          "appliedVia": {
+            "type": ["string", "null"],
+            "description": "How an applied proposal was applied: `ai:<session>` when the assistant applied its own batch for appliedBy (the user turned on \"Let AI apply changes\"); null when appliedBy applied it."
+          },
+          "batchId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The configuration batch an applied batch proposal ran as: revertConfigBatch undoes it. Null otherwise, and once the batch is pruned."
           }
         }
       },
@@ -35002,6 +35330,62 @@
             "type": "string",
             "format": "date-time",
             "description": "When it was written."
+          },
+          "context": {
+            "$ref": "#/components/schemas/AIMessageContext"
+          }
+        }
+      },
+      "AIMessageContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "What the console showed when the question was asked from a call-flow canvas. The model receives it as data with the question and reads the graph and traces the call with its own tools.",
+        "properties": {
+          "allowApply": {
+            "type": "boolean",
+            "default": false,
+            "description": "The canvas switch \"Let AI apply changes\". When true the assistant may apply the change asked for itself: its batch is validated and dry-run as a proposal, then applied through applyConfigBatch as the asking user with their role (a viewer never can), audited with via `ai:<session>` and revertible. False (ask first): a change is a proposal a person applies."
+          },
+          "canvasId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "The canvas the question was asked from."
+          },
+          "nodes": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string"
+            },
+            "description": "The flow node ids selected on it, such as `ivr:3`."
+          },
+          "trace": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["from", "number"],
+            "description": "A call traced on the canvas, with the parameters of traceFlow.",
+            "properties": {
+              "from": {
+                "type": "string",
+                "description": "An extension number or `trunk:<id>`."
+              },
+              "number": {
+                "type": "string",
+                "description": "The dialled number."
+              },
+              "callerId": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "digits": {
+                "type": "string",
+                "description": "Keys pressed in IVR menus, at most 32 of 0-9, * and #."
+              }
+            }
           }
         }
       },
@@ -35065,6 +35449,9 @@
             "minLength": 1,
             "maxLength": 4000,
             "description": "The question, at most 4000 characters."
+          },
+          "context": {
+            "$ref": "#/components/schemas/AIMessageContext"
           }
         },
         "additionalProperties": false
@@ -36455,10 +36842,7 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "simultaneous",
-              "sequential"
-            ]
+            "enum": ["simultaneous", "sequential"]
           },
           "ringOwnDevices": {
             "type": "boolean",
@@ -36490,19 +36874,11 @@
       "FollowMeTarget": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "target",
-          "delaySeconds"
-        ],
+        "required": ["kind", "target", "delaySeconds"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "external",
-              "extension",
-              "ring_group"
-            ],
+            "enum": ["external", "extension", "ring_group"],
             "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
           },
           "target": {
@@ -36520,18 +36896,11 @@
       "FollowMeTargetInput": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "target"
-        ],
+        "required": ["kind", "target"],
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "external",
-              "extension",
-              "ring_group"
-            ],
+            "enum": ["external", "extension", "ring_group"],
             "description": "external is a number dialled through outbound routing; extension rings that extension's devices; ring_group rings the eligible members of the group."
           },
           "target": {
@@ -36557,10 +36926,7 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "simultaneous",
-              "sequential"
-            ],
+            "enum": ["simultaneous", "sequential"],
             "description": "simultaneous rings everything at once; sequential starts the targets one after another."
           },
           "ringOwnDevices": {
@@ -39131,57 +39497,73 @@
           }
         }
       },
-      "DoorCamera": {
+      "DoorOpen": {
         "type": "object",
-        "required": ["configured", "kind", "url", "username", "passwordSet"],
+        "required": ["codeSet", "hangupAfterOpen"],
         "properties": {
-          "configured": {
+          "codeSet": {
             "type": "boolean",
-            "description": "Whether the station has a camera"
+            "description": "Whether a door-open code is stored. The code itself is never returned."
           },
-          "kind": {
-            "type": "string",
-            "enum": ["mjpeg", "snapshot", ""],
-            "description": "mjpeg: a multipart/x-mixed-replace stream; snapshot: one JPEG per request"
-          },
-          "url": {
-            "type": "string",
-            "description": "The camera address, without credentials"
-          },
-          "username": {
-            "type": "string"
-          },
-          "passwordSet": {
+          "hangupAfterOpen": {
             "type": "boolean",
-            "description": "Whether a password is stored. The password itself is never returned."
+            "description": "Whether the call ends HELLO_DOOR_HANGUP_SECONDS after the code was sent."
           }
         }
       },
-      "DoorCameraUpdate": {
+      "DoorOpenUpdate": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["kind", "url"],
+        "description": "At least one field is required.",
         "properties": {
-          "kind": {
+          "code": {
             "type": "string",
-            "enum": ["mjpeg", "snapshot"],
-            "description": "mjpeg: a multipart/x-mixed-replace stream; snapshot: one JPEG per request"
+            "maxLength": 8,
+            "pattern": "^[0-9*#]*$",
+            "description": "The door-open code: 1 to 8 characters of 0-9, * and #; an empty string clears it. Stored sealed, write-only."
           },
-          "url": {
+          "hangupAfterOpen": {
+            "type": "boolean",
+            "description": "End the call after the code was sent."
+          }
+        }
+      },
+      "DoorCall": {
+        "type": "object",
+        "required": ["id", "door", "startedAt"],
+        "properties": {
+          "id": {
             "type": "string",
-            "maxLength": 2048,
-            "description": "An absolute http:// or https:// address without credentials. rtsp:// cannot be shown in a browser."
+            "description": "Correlation id of the call"
           },
-          "username": {
+          "door": {
             "type": "string",
-            "maxLength": 128,
-            "description": "The camera's user name for HTTP basic authentication"
+            "description": "The door station's extension number"
           },
-          "password": {
+          "startedAt": {
             "type": "string",
-            "maxLength": 256,
-            "x-hello-secret": true,
-            "description": "The camera's password, stored sealed and never returned. Absent keeps the stored one, an empty string clears it."
+            "format": "date-time"
+          }
+        }
+      },
+      "DoorCallList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DoorCall"
+            }
+          }
+        }
+      },
+      "DoorOpenSent": {
+        "type": "object",
+        "required": ["sent"],
+        "properties": {
+          "sent": {
+            "type": "boolean"
           }
         }
       },
@@ -42934,6 +43316,60 @@
             "type": "string",
             "pattern": "^[0-9A-Za-z._-]{0,64}$",
             "description": "The ring group told of every emergency call; empty for none."
+          }
+        }
+      },
+      "DoorCamera": {
+        "type": "object",
+        "required": ["configured", "kind", "url", "username", "passwordSet"],
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "Whether the station has a camera"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["mjpeg", "snapshot", ""],
+            "description": "mjpeg: a multipart/x-mixed-replace stream; snapshot: one JPEG per request"
+          },
+          "url": {
+            "type": "string",
+            "description": "The camera address, without credentials"
+          },
+          "username": {
+            "type": "string"
+          },
+          "passwordSet": {
+            "type": "boolean",
+            "description": "Whether a password is stored. The password itself is never returned."
+          }
+        }
+      },
+      "DoorCameraUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "url"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["mjpeg", "snapshot"],
+            "description": "mjpeg: a multipart/x-mixed-replace stream; snapshot: one JPEG per request"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "An absolute http:// or https:// address without credentials. rtsp:// cannot be shown in a browser."
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The camera's user name for HTTP basic authentication"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 256,
+            "x-hello-secret": true,
+            "description": "The camera's password, stored sealed and never returned. Absent keeps the stored one, an empty string clears it."
           }
         }
       }

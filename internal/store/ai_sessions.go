@@ -114,13 +114,19 @@ func (s *Store) DeleteAISession(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-const aiMessageCols = `id, session_id::text, role, content, tool_calls, citations, proposal_id::text, task_id::text, created_at`
+const aiMessageCols = `id, session_id::text, role, content, tool_calls, citations, proposal_id::text, task_id::text, created_at, context`
 
 func scanAIMessage(row interface{ Scan(...any) error }) (chat.Message, error) {
 	var m chat.Message
-	var calls, cites []byte
-	if err := row.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &calls, &cites, &m.ProposalID, &m.TaskID, &m.CreatedAt); err != nil {
+	var calls, cites, mc []byte
+	if err := row.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &calls, &cites, &m.ProposalID, &m.TaskID, &m.CreatedAt, &mc); err != nil {
 		return m, err
+	}
+	if len(mc) > 0 && string(mc) != "null" {
+		m.Context = &chat.Context{}
+		if err := json.Unmarshal(mc, m.Context); err != nil {
+			return m, err
+		}
 	}
 	m.ToolCalls, m.Citations = []chat.ToolCall{}, []int{}
 	if len(calls) > 0 {
@@ -202,9 +208,17 @@ func (s *Store) ActiveAITask(ctx context.Context, sessionID string) (*chat.Task,
 // S-8). start runs inside the transaction: it records the task on its own
 // connection, and the task sees the history read here, the new message
 // last.
-func (s *Store) PostAIMessage(ctx context.Context, sessionID, content, title string, window int, start chat.StartFunc) (int64, string, error) {
+func (s *Store) PostAIMessage(ctx context.Context, sessionID, content string, mc *chat.Context, title string, window int, start chat.StartFunc) (int64, string, error) {
 	if !uuidText.MatchString(sessionID) {
 		return 0, "", chat.ErrNotFound
+	}
+	var mcJSON any
+	if mc != nil {
+		b, err := json.Marshal(mc)
+		if err != nil {
+			return 0, "", err
+		}
+		mcJSON = string(b)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -230,8 +244,8 @@ func (s *Store) PostAIMessage(ctx context.Context, sessionID, content, title str
 		return 0, "", chat.ErrTaskRunning
 	}
 	var msgID int64
-	if err := tx.QueryRowContext(ctx, `INSERT INTO ai_messages (session_id, role, content) VALUES ($1, 'user', $2) RETURNING id`,
-		sessionID, content).Scan(&msgID); err != nil {
+	if err := tx.QueryRowContext(ctx, `INSERT INTO ai_messages (session_id, role, content, context) VALUES ($1, 'user', $2, $3::jsonb) RETURNING id`,
+		sessionID, content, mcJSON).Scan(&msgID); err != nil {
 		return 0, "", err
 	}
 	history, err := queryAIMessages(ctx, tx, `SELECT `+aiMessageCols+` FROM ai_messages WHERE session_id = $1 ORDER BY id DESC LIMIT $2`,

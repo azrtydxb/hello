@@ -51,7 +51,14 @@ type call struct {
 	// srtpClosed is set once the call's media ended: the gauge is released.
 	srtpClosed bool
 	srtpNoted  map[string]bool
+	// kexA and kexB are how each leg's keys were agreed ("sdes" or "dtls"),
+	// iceLegs the legs that ran ICE-lite (the CDR's srtp_keyex and ice).
+	kexA, kexB string
+	iceLegs    map[string]bool
 	srtpSnap   *snapshot.Snapshot
+	// soloSec is the SRTP state of the media a call Hello answers itself
+	// uses (voicemail, a conference room, a page's caller leg).
+	soloSec *media.Secure
 	// rel is the reliable provisional response toward the caller (S-17).
 	rel relState
 	// secure marks a sips: call: it forks only onto bindings registered over
@@ -140,6 +147,9 @@ type call struct {
 	// the one dialled after the code).
 	vmTarget string
 	held     bool
+	// doorOpening is set while a door-open code is being sent (spec S-47),
+	// guarded by mu, so two presses never interleave their events.
+	doorOpening bool
 	// video is the door station's video through the anchor (S-49), nil for a
 	// call without one; guarded by mu.
 	video *callVideo
@@ -396,8 +406,12 @@ type leg struct {
 	c       *call
 	binding livestate.Binding
 	callID  string
-	ctx     context.Context
-	cancel  context.CancelFunc
+	// offerBody, when set, is the SDP offer this leg is sent instead of the
+	// call's own.
+	offerBody []byte
+
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	mu    sync.Mutex
 	dcs   *sipgo.DialogClientSession
@@ -1370,6 +1384,23 @@ func (c *call) byeA() {
 	if c.dss == nil {
 		return // a call Hello placed has no caller dialog
 	}
+	if res := c.dss.InviteResponse; res == nil || !res.IsSuccess() {
+		// The 200 went out through the raw transaction (voicemail, feature
+		// codes), so sipgo's session never recorded it: its InviteResponse
+		// is nil (Bye dereferences it and panics) or only the last
+		// provisional (Bye refuses). The dialog is real, though:
+		// end it with the raw BYE, or the caller's phone stays in a call
+		// nobody answers.
+		c.mu.Lock()
+		raw := c.vmTag != "" && c.inv != nil
+		c.mu.Unlock()
+		if raw {
+			c.byeCallerRaw()
+		} else {
+			c.s.log.Warn("no BYE sent to caller: the call was never answered on its dialog", "correlation_id", c.id)
+		}
+		return
+	}
 	ctx, cancel := c.s.timeoutUntilShutdown(byeTimeout)
 	defer cancel()
 	if err := c.dss.Bye(ctx); err != nil {
@@ -1541,6 +1572,7 @@ func (c *call) record(status int, side, reason, result string) {
 		r.MediaMode = media
 	}
 	r.SRTP = c.srtpCDR()
+	r.SRTPKeyEx, r.ICE = c.srtpKeyExCDR(), c.iceCDR()
 	if r.MediaMode == "anchored" && !answer.IsZero() {
 		if p, l, j, ok := c.qualityStats(); ok {
 			r.RTPPackets, r.RTPLost, r.RTPJitterMs = &p, &l, &j
@@ -1560,6 +1592,7 @@ func (c *call) record(status int, side, reason, result string) {
 }
 
 func (c *call) live() livestate.Call {
+	door, _, _ := c.doorStation(c.s.deps.Snapshots.Current()) // takes c.mu itself
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	state := "ringing"
@@ -1576,7 +1609,7 @@ func (c *call) live() livestate.Call {
 		callee = c.winner.binding.Extension
 	}
 	return livestate.Call{
-		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, Callee: callee, State: state,
+		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, Callee: callee, Door: door, State: state,
 		Node: c.s.cfg.NodeID, Media: "direct", StartedAt: c.start, AnsweredAt: answered, HA: ha, Direction: c.direction,
 	}
 }
@@ -1818,6 +1851,11 @@ func (l *leg) invite() (*sip.Request, error) {
 			req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 		}
 		req.SetBody(body)
+	}
+	if l.offerBody != nil {
+		// A leg with an offer of its own (a returned parked call, whose
+		// device is offered keys under its own SRTP policy).
+		req.SetBody(l.offerBody)
 	}
 	// An anchored call terminates media: the fork's offer is the anchor's
 	// leg-b port, not the caller's SDP (spec S-2).

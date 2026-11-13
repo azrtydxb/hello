@@ -482,6 +482,10 @@ type SIP struct {
 	PageMaxDuration time.Duration
 	PageConcurrent  int
 	PageFanout      int
+	// DoorHangup is how long a call with a door station stays up after the
+	// door-open code was sent, when the station is set to hang up after
+	// open (HELLO_DOOR_HANGUP_SECONDS, 3 s; spec phone-feature-parity S-47).
+	DoorHangup time.Duration
 	// A paging group with a multicast channel also sends the page there:
 	// PageMulticastIface (HELLO_PAGE_MULTICAST_IFACE, default the system's
 	// choice) is the network interface the packets leave on, which must be on
@@ -511,6 +515,13 @@ type SIP struct {
 	// keeps the old behaviour of mirroring the offer's own c= address,
 	// which only carries audio when the peer can reach the pod directly.
 	MediaAnchorHost string
+	// MediaDTLS (HELLO_MEDIA_DTLS, default true) lets the anchor terminate
+	// DTLS-SRTP (phone-feature-parity S-16); off, an offer that carries only
+	// DTLS is refused with 488 and no device is offered it. MediaICE
+	// (HELLO_MEDIA_ICE, default true) lets the anchor answer ICE offers as
+	// ICE-lite; off, ICE attributes are ignored.
+	MediaDTLS bool
+	MediaICE  bool
 	// HATakeoverEnabled (HELLO_HA_TAKEOVER_ENABLED, default true) lets the
 	// node poll for orphaned dialogs and take calls over; disabling it
 	// leaves the node replication-only.
@@ -1085,6 +1096,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	}
 	c.Dial = r.dialing()
 	c.PageMaxDuration = time.Duration(r.positiveInt("HELLO_PAGE_MAX_SECONDS", 120)) * time.Second
+	c.DoorHangup = time.Duration(r.positiveInt("HELLO_DOOR_HANGUP_SECONDS", 3)) * time.Second
 	c.SessionExpires = time.Duration(r.seconds("HELLO_SIP_SESSION_EXPIRES_SECONDS", 1800)) * time.Second
 	c.SessionMinSE = time.Duration(r.seconds("HELLO_SIP_SESSION_MIN_SE_SECONDS", 90)) * time.Second
 	c.MediaDeadAfter = time.Duration(r.seconds("HELLO_MEDIA_DEAD_SECONDS", 60)) * time.Second
@@ -1103,6 +1115,8 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.DSCPRTP = r.dscp("HELLO_DSCP_RTP", DefaultDSCPRTP)
 	c.MediaForceAnchor = r.getenv("HELLO_MEDIA_FORCE_ANCHOR") == "true"
 	c.MediaRecordingNotice = r.getenv("HELLO_MEDIA_RECORDING_NOTICE") != "false"
+	c.MediaDTLS = r.getenv("HELLO_MEDIA_DTLS") != "false"
+	c.MediaICE = r.getenv("HELLO_MEDIA_ICE") != "false"
 	c.MediaAnchorHost = r.optional("HELLO_MEDIA_ANCHOR_HOST", "")
 	if c.MediaAnchorHost != "" {
 		if ip := net.ParseIP(c.MediaAnchorHost); ip == nil || ip.To4() == nil {

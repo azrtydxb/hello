@@ -12,7 +12,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | done (#226)         |
 | 12  | Tone library (S-43)                                                           | done (#238)         |
 | 13  | Door station extension kind, Door group (S-45, S-46)                          | done (#225)         |
-| 14  | Door-open DTMF `*50` (S-47)                                                   | todo (after 13)     |
+| 14  | Door-open DTMF `*50` (S-47)                                                   | wip (#283)          |
 | 15  | Setting overrides and WP extras (S-12)                                        | todo                |
 | 16  | Doorbell webhook (S-48)                                                       | wip (#284)          |
 | 17  | Door video preview (S-49)                                                     | wip (#285)          |
@@ -23,7 +23,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial      | todo                |
 | 23  | SIP over TLS and sips (S-14)                                                  | done (#202)         |
 | 24  | SRTP SDES (S-15)                                                              | wip (#266)          |
-| 25  | DTLS-SRTP and ICE-lite (S-16)                                                 | todo (after 24)     |
+| 25  | DTLS-SRTP and ICE-lite (S-16)                                                 | wip (#276)          |
 | 26  | PRACK/100rel, anonymous outbound (Privacy), partial                           | todo                |
 | 27  | Provisioning hardening (S-22, S-32), TR-069 off etc. (explicitly in spec)     | todo                |
 | 28  | DSCP marking (S-21)                                                           | done (#231)         |
@@ -159,7 +159,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P3  | Batch backend                                             | done (#214)             |
 | P4  | Editing UI                                                | done (#227)             |
 | P5  | traceFlow, trace mode                                     | done (#224)             |
-| P6  | AI on the canvas                                          | todo (after P4)         |
+| P6  | AI on the canvas                                          | wip (#280)              |
 | P7  | New node types: batch ops, trace, override badge          | wip (#277)              |
 | D3  | Every call output accepts every target kind               | done (#196)             |
 | -   | Routes form `conference` destination chooser              | wip (routes-conference) |

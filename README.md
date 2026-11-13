@@ -18,7 +18,8 @@ them automatically, [docs/trunks.md](docs/trunks.md) for trunks,
 [docs/voice-prompts.md](docs/voice-prompts.md) for generating announcements and
 voicemail greetings from text, [docs/voicemail.md](docs/voicemail.md) for the spoken voicemail and `*97` menus, [docs/ai-access.md](docs/ai-access.md) for connecting AI agents over MCP and
 [docs/ai-agent.md](docs/ai-agent.md) for the in-product AI agent (assistant,
-findings and proposals). For the IVR / auto-attendant see
+findings and proposals). The call-flow canvas (draw, edit, trace and ask AI about
+a call flow) is in [docs/flow-canvas.md](docs/flow-canvas.md). For the IVR / auto-attendant see
 [docs/ivr.md](docs/ivr.md), and for call queues [docs/queues.md](docs/queues.md). For time and date routing (schedules, holiday calendars, time conditions, the day/night toggle) see
 [docs/time-conditions.md](docs/time-conditions.md). For a boss and assistant who share a line (ring modes, screening, the `*64` divert) see [docs/boss-secretary.md](docs/boss-secretary.md). For answering customers' text messages from the console see [docs/inbox.md](docs/inbox.md). For locations, E911 and the HELD server, the location sent with an emergency call and the `*55` alarm call see [docs/locations.md](docs/locations.md). For backups and restore see [docs/backup.md](docs/backup.md). For the call events that integrations read (live stream, history, scopes) see [docs/integrations.md](docs/integrations.md). For fax (receive to email, send a PDF, T.38) see [docs/fax.md](docs/fax.md). For follow-me (ring other phones, numbers and groups when an extension is called, with "press 1 to accept" for an external number) see [docs/follow-me.md](docs/follow-me.md). For ring tags and distinctive ringing (which tag a call rings with, and the `Alert-Info` header phones map to a tone) see [docs/ring-tags.md](docs/ring-tags.md). To run Hello on Kubernetes (Helm chart, SIP
 networking, highly available state, rolling upgrades) see
@@ -125,6 +126,7 @@ naming the key, if one is missing or malformed.
 | `HELLO_SIP_SESSION_TIMERS_TRUNKS`                 | sip     | `false`; what a trunk set to "default" does: `true` requests and keeps a session timer on its calls                           |
 | `HELLO_MEDIA_DEAD_SECONDS`                        | sip     | `60`; an anchored call with no RTP in either direction for this long is ended unless held; `0` turns it off                   |
 | `HELLO_PAGE_MAX_SECONDS`                          | sip     | `120`; a server page ends after this many seconds                                                                             |
+| `HELLO_DOOR_HANGUP_SECONDS`                       | sip     | `3`; a door call stays up this long after the door-open code was sent, when the station hangs up after open                   |
 | `HELLO_DOOR_CAMERA_ALLOW`                         | control | empty; private CIDRs a door camera picture may be fetched from; public addresses need none                                    |
 | `HELLO_PAGE_CONCURRENT`                           | sip     | `5`; pages one node runs at once, beyond that the caller hears busy                                                           |
 | `HELLO_PAGE_FANOUT`                               | sip     | `200`; legs of one page, beyond that the caller hears busy                                                                    |

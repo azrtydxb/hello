@@ -255,6 +255,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Valkey:       vk,
 		PageTests:    vk,
 		Parked:       vk,
+		DoorCalls:    vk,
 		DoorTriggers: vk,
 		CameraHTTP: &http.Client{
 			Transport:     safehttp.NewTransport(safehttp.Options{Allow: cfg.DoorCameraAllow}),
@@ -325,7 +326,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			},
 			API:       &assistantAPI,
 			Spec:      spec,
-			Proposals: &assistant.Proposals{Validator: validator, Store: props},
+			Proposals: &assistant.Proposals{Validator: validator, Store: props, Applier: props},
 			MaxSteps:  cfg.AIAgent.MaxSteps,
 			Log:       log,
 			ToolCalls: agent.Metrics().ToolCall,

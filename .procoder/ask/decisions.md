@@ -1291,12 +1291,63 @@ column ("a" when both legs agree, "a → b" when they differ).
   `haNewCall` restores them, so a taken-over door call keeps the trunk ban and CDR
   kind door (`TestDoorCallerSurvivesTakeover`).
 
+## Door-open DTMF `*50` (2026-11-09) — phone-feature-parity item 14 (S-47)
+
+- Migration `00078_door_open` (after #225's 00053; the number is a gap-numbered
+  slot like the others, goose does not need it contiguous): table `door_open`
+  (`extension_id` primary key, cascade; `code_enc` BYTEA sealed under
+  HELLO_SECRET_KEY with AAD `door-open:<extension id>`; `hangup_after_open`).
+  A separate table, not columns on `extensions`, so none of the extension
+  queries scan or return the code. A station that becomes a user loses its row.
+- The code rides the configuration snapshot (opened at load, unexported and
+  redacting its `String`), so the SIP path reads no PostgreSQL. A code that does
+  not open is logged by extension number only and treated as no code.
+- Settings API: `GET` (viewer) says `codeSet` and `hangupAfterOpen`; `PUT` is
+  admin (scope `admin`, role admin). It could not use the `secrets` scope: that
+  list is pinned by spec S-5 and `TestRoutesTable`. The code is write-only, an
+  empty string clears it, a user extension answers `409`. `GET` is an MCP tool
+  (`getDoorOpen`, taught in hello-setup); `PUT` and the open request are
+  excluded from MCP (a code must be set in the console; opening a physical door
+  is a user action).
+- `*50` is matched as the end of the call's digit buffer, in `dispatchDigit`
+  after the feature codes, so a stale digit before it does not hide it; a
+  feature code row named `*50` wins. It acts only on a connected call with a door
+  station, only for keys from the far side of the station (the station's own
+  keys never open its door), and otherwise does nothing: the keys were already
+  relayed as ordinary DTMF.
+- The code goes out through `Relay.SendDTMF`: 5 packets of 20 ms per digit and 3
+  end packets, a 60 ms gap between digits, as its own RTP stream (fresh SSRC)
+  like `PlayTo`, using the leg's negotiated telephone-event type. Without one the
+  trace says so and nothing is sent. Door calls are always anchored today (every
+  call is), which `*50` needs. Open: whether GDS/2N/Akuvox accept events on a
+  different SSRC than the call's audio; hardware check.
+- The user's own `*`, `5`, `0` events still reach the door before the code
+  (the relay forwards DTMF); suppressing them would need the relay to hold back
+  events, which is not done.
+- Only one open at a time per call (`doorOpening`); a second press while the
+  first is going out is refused with a trace line.
+- API open: `POST /api/v1/calls/{id}/door-open` (user role, write scope; added
+  to the self-service allowlist of `TestRoutesTable`, the spec fixes the path).
+  The API checks the caller's extension is the one that answered (live call
+  `callee`), or placed the call to a station, queues a park-command
+  `door_open` to the call's node and waits for the reply (the existing
+  Valkey park command channel); the node checks again against the live dialog.
+  `403` has error code `not_your_call`, `404` no such call, `409` not an answered
+  door call, no code, or media unusable, `502` node error, `504` no node
+  answered. `GET /api/v1/me/door-calls` lists the user's own for the console;
+  live calls gained `door` (the station's number).
+- Hang-up-after-open: `HELLO_DOOR_HANGUP_SECONDS` (default 3, positive) after
+  the code finished sending, both legs get BYE (`endBoth`, CDR side system).
+- Not done: provisioning an "Open door" key on the phones (Yealink DSS DTMF,
+  Grandstream WP DialDTMF softkey, Poly/Snom/Fanvil soft keys). The spec marks
+  each **verify**, and no vendor key was confirmed from the templates in this
+  change; it stays with the hardware pass.
+
 ## Door video preview (2026-11-10) — phone-feature-parity item 17 (S-49)
 
 - Three parts, all optional like the spec says: video in the call, a camera
   picture in the console, and the Grandstream WP door-system entries.
-- Migration `00083_door_cameras` (00061 is the webhook PR, 00054 item 14, 00053
-  #225): `door_cameras` keyed by the station, kind mjpeg or snapshot, URL, user
+- Migration `00086_door_cameras` (after item 14's 00085): `door_cameras` keyed by the station, kind mjpeg or snapshot, URL, user
   name, password sealed with AAD `door-camera:<extension id>`.
 - **Video in the call.** Only when a door station is a party and the caller's
   SDP offers H.264 over plain RTP/AVP(F). The anchor adds a `VideoRelay`: a
@@ -2079,6 +2130,189 @@ legs) and `internal/sip/srtp.go` (policy and negotiation). Choices:
   and in slog; traces name the leg and suite only (`TestSRTPKeysNeverFormatted`,
   and the call test checks the CDR trace).
 
+## SRTP SDES: the known gaps of #266 closed (2026-11-09)
+
+Follow-up to "SRTP SDES on the anchor". Choices:
+
+- **One SRTP state type for every media object.** `media.Secure` (SDES
+  negotiation plus the SRTP contexts, with `Protect`/`Unprotect`) is what each
+  relay leg already was; the relay leg now embeds it and a voicemail session
+  (`Anchor.AnswerSecure`), a conference participant (`NewPartySecure`) and a
+  page (`Fanout.CallerSecure`, one `Secure` per member via `AddSecureTarget`)
+  carry their own. Same keys-per-leg rule, same redaction, same drop of anything
+  that fails authentication, no second implementation to keep in step.
+- **Voicemail, conference and paging use the caller leg's policy**
+  (`call.soloPolicy`: allowed = policy not off and the leg is TLS, required =
+  policy required). The answer mirrors the offer's profile. A caller that
+  requires SRTP and cannot get it is refused with 488, never answered in clear.
+  A conference participant has its own SRTP session, so the mixer encrypts the
+  mix per participant. A page encrypts per member: each member's contact is
+  offered its own keys under its device's policy and transport (RTP/SAVP when it
+  requires them), a required member that is not on TLS is skipped
+  (`srtp_required`), one that answers without crypto is hung up. A page's
+  multicast copy stays plain RTP: one stream to a group address cannot carry
+  per-listener keys; multicast paging is a deliberate plain-RTP feature.
+  The test page (`pagetest.go`) follows the same member rule.
+- **A parked call sent to voicemail keeps its encryption**: the voicemail
+  session is offered keys in the profile the party's relay leg had, and the
+  call ends if the party does not answer with crypto.
+- **HA for solo calls.** The replicated mode (`avp`/`savp`) now covers
+  voicemail and conference calls (`call.soloSec`); the taker offers fresh keys
+  and a caller that does not answer with crypto ends the call (zombie count)
+  instead of continuing in clear. Hello's own key (the `SDP` of the leg, which
+  now carries one) is stripped before replication, as the far end's was.
+- **Hand-over legs negotiate again** instead of restarting plain. A transfer
+  target (blind and attended), a retrieved park, a pickup and the parker's
+  device on a park return are new endpoints on a relay leg: the previous
+  endpoint's keys are dropped (`ResetCrypto`) and the new party is offered, or
+  answered with, keys under its own policy and transport (`cryptoOfferOn`,
+  `cryptoAnswerOn`, `learnCryptoOn`). A party whose policy is `required` and
+  that cannot be encrypted is refused (488, or the call ends); an `optional`
+  party that does not answer with crypto is plain RTP, counted as `plain` and
+  traced. A pickup now also answers the ringing caller's SDES offer (the caller
+  had only been given a key when the leg was already negotiated).
+- **Roaming is not a hand-over.** `relearnMedia` (the same phone at a new media
+  address after a re-INVITE) called the hand-over helper and so dropped the
+  leg's keys, silently continuing in clear. It now uses `moveLeg`, which
+  re-aims the leg and keeps the SRTP state.
+- **Across nodes, retrieve and pickup are plain or refused.** The retriever's
+  offer travels to the holding node through the shared store, and a key must
+  not be written there (the replication rule), so its `a=crypto` lines are
+  dropped: an `optional` phone is plain RTP (counted, traced), a phone that
+  requires SRTP or offers `RTP/SAVP` only is refused with 488 before it takes
+  the slot. Same-node retrieve and pickup negotiate fully.
+- **A trunk cannot be set to `required`** (gap 3). The trunks-routing spec lists
+  SIP over TLS for trunks as a later phase, so there is no trunk TLS transport
+  to require. Rather than build one inside an SRTP change, the state is made
+  impossible: `POST`/`PATCH /api/v1/trunks` answer 422 on `srtp` when it is set
+  to `required` (only the value being set is checked, so a trunk stored as
+  `required` earlier can still be edited and fixed), the Trunks page offers
+  `off` and `optional` only and says why, a stored `required` is flagged on its
+  card and refuses to save as it is, and the OpenAPI text and the skills say
+  so. No migration: existing rows are not rewritten, since turning `required`
+  into `off` behind the operator's back would be a silent downgrade. Calls over
+  such a trunk keep failing with 488, and the CDR trace says why. When trunk TLS
+  exists this check becomes "required needs a TLS trunk".
+- **Not changed.** An in-dialog re-INVITE that rekeys a voicemail or conference
+  caller is answered with the call's existing key (a phone that rekeys on its
+  own re-INVITE is followed on relay legs only). AES-256 is still not offered.
+
+## DTLS-SRTP and ICE-lite on the anchor (phone-feature-parity item 25, S-16) (2026-11-09)
+
+Spec: `phone-feature-parity.md` S-16, with `clients-webrtc-mobile-video.md` S-4
+(same code, delivered once). Stacked on the SRTP gaps PR (#274). Choices:
+
+- **Modules.** `pion/dtls/v3` v3.1.5 (the handshake, over a packet conn fed from
+  the leg's receive loop) and `pion/stun/v3` v3.1.6 (STUN parsing, integrity,
+  fingerprint) join `pion/srtp/v3`; `pion/transport/v4` moves to v4.0.2 as they
+  require. The spec names `pion/ice` too. It is not used here: ICE-lite is a
+  fixed answer (host candidate out, authenticated binding requests answered),
+  and `pion/ice`'s agent gathers, runs its own sockets and wants to own the
+  UDP port, which fights the relay's per-leg sockets. The WebRTC phase decides
+  about `pion/ice` and its UDP mux when it needs one shared port; nothing here
+  blocks it.
+- **One per-leg crypto layer.** The DTLS handshake fills the same `legKeys` SDES
+  fills (`Secure`), so the relay, recording, announcements, voicemail, the
+  conference mixer and the page caller keep one `Protect`/`Unprotect`. A
+  leg's socket now carries STUN, DTLS and RTP, told apart by the first byte
+  (RFC 7983); `Secure.UnprotectFrom` is the one place that does it. A DTLS leg
+  with no keys yet carries nothing in either direction: it can never fall back
+  to plain RTP.
+- **What to offer and accept when.**
+  - Answering mirrors the offer: `UDP/TLS/RTP/SAVP(F)` with a fingerprint gets
+    DTLS-SRTP, `RTP/AVP` or `RTP/SAVP` with `a=crypto` gets SDES (S-15). A
+    fingerprint on an `RTP/AVP` line is ignored, not read as an offer.
+  - Offering follows the device: new `devices.srtp_keyex` (`sdes` default,
+    `dtls`). `off` offers nothing; `optional` and `required` offer the chosen
+    exchange (`required` = SAVP-only semantics as before). A DTLS transport
+    cannot carry a plain fallback inside the same offer, so a device set to
+    `dtls` is for phones that do DTLS-SRTP; there is no dual SDES+DTLS offer
+    (no vendor documentation says phones accept one).
+  - **TLS only, as SDES.** DTLS carries no key in the SDP, but the fingerprint
+    is the only thing that authenticates the peer certificate, so it is trusted
+    only when it arrived over protected signalling (the decision recorded under
+    S-14: SRTP and DTLS-SRTP are offered only where `bindingOnTLS` or the
+    caller's `clientTransport` is TLS). The same `off`/`optional`/`required`
+    policy gates it. A DTLS-only offer on a UDP leg, with policy `off`, without a
+    usable fingerprint, or on a node with `HELLO_MEDIA_DTLS=false` is refused
+    with 488.
+  - A required callee that answers without DTLS ends the call (488), as for
+    SDES. A trunk never carries DTLS (trunk legs are UDP).
+- **Roles.** Hello answers `active` (client) to `actpass` and `passive`, and
+  `passive` to `active`, as RFC 5763 section 5 says (SHOULD be active); when it
+  offers it sends `actpass` and takes the role the answer leaves. A client waits
+  until the peer address is known and, with ICE, authenticated.
+- **Fingerprints.** `sha-1`, `sha-256`, `sha-384`, `sha-512` accepted for the
+  peer (matching any listed one; sha-1 is only compared against a certificate
+  the peer must already hold, a second-preimage problem, and some phone stacks
+  only send it); md5/md2 refused. Hello's own is sha-256. The extended master
+  secret is requested, not required (phones on an old TLS stack lack it, and the
+  certificate is pinned by fingerprint either way); the WebRTC leg should
+  require it. SRTP profiles offered: AEAD_AES_128_GCM, AES128_CM_HMAC_SHA1_80,
+  AES128_CM_HMAC_SHA1_32. GCM is a DTLS-only suite: SDES still offers the two
+  CM suites and refuses a GCM `a=crypto` line.
+- **Certificate.** One self-signed ECDSA P-256 certificate per hello-sip process,
+  made on first use and replaced for new sessions after 30 days (valid 90),
+  never stored or shared (a restart or takeover gives a new fingerprint; the
+  taker's re-INVITE carries it). A session keeps the certificate it started
+  with. The peer sees only the fingerprint.
+- **Failure.** A handshake that times out (8 s), presents a certificate that
+  does not match, or fails is counted, traced and ends the call (BYE to both
+  legs, or an abort during setup). There is nothing to fall back to: the offer
+  or answer was DTLS only. (The spec's "otherwise falls back to RTP" is read as
+  the negotiation: an answer without DTLS from an `optional` device is plain
+  RTP, as with SDES.) Voicemail greetings and announcements wait for the
+  handshake instead of losing their first frames.
+- **ICE-lite.** Answers an offer's ICE credentials with `a=ice-lite`, its own
+  ufrag and pwd per leg, one host candidate (the relay address, component 1) and
+  `a=rtcp-mux`; always controlled (487 to a peer that is also controlled);
+  binding requests are answered only with the right USERNAME and
+  MESSAGE-INTEGRITY, everything else is dropped silently (no oracle). A valid
+  check vouches for its source address (the leg then accepts media from it) and
+  the first or nominated pair becomes where media goes. Remote `a=candidate`
+  lines are parsed and kept, never checked. ICE does not need TLS (it carries
+  no secret) and does not encrypt. Answering ICE has no per-device switch: a
+  phone that sends ICE credentials expects an answer, and `HELLO_MEDIA_ICE=false`
+  turns it off node-wide. The device's `media_ice` only decides whether Hello
+  offers ICE-lite and what provisioning writes. The far end's ICE password is not
+  replicated for HA.
+- **rtcp-mux** is answered on DTLS and ICE legs only (RTCP on the media port is
+  consumed). Plain legs are unchanged: no mux claimed, nothing to drop.
+- **Hosts.** The relay legs, the voicemail/IVR session, the conference
+  participant and the page caller leg all bind their socket to their `Secure`.
+  Page members are offered SDES, never DTLS (a member socket only sends). A
+  retrieve or pickup that crosses nodes with a DTLS leg is refused with 488 (the
+  shared-store command carries neither the retriever's policy nor its
+  transport), like a required SDES one. The replicated leg mode gains `dtls`.
+- **Provisioning (vendor docs, Grandstream WP8x6 config templates).** `P60078`
+  SRTP Key Exchange of account 1 (`0` SDES, `1` DTLS; WP826, WP836, WP856),
+  written with `P183` for a TLS phone; `P95002` Media NAT Traversal of account 1
+  (`1` Auto, the documented default, `4` ICE; WP826 and WP836, the WP856
+  template does not list it), written for a phone of those models whatever its
+  transport. No other vendor's key is confirmed, so none is written.
+- **Migration 00079** (highest on #266 is 00078): `devices.srtp_keyex`,
+  `devices.media_ice`, `cdrs.srtp_keyex` (`none`, `sdes`, `dtls`, `mixed`),
+  `cdrs.ice`.
+- **Metrics.** `hello_dtls_handshakes_total{result}`,
+  `hello_dtls_handshake_seconds`, `hello_ice_checks_total{result}`;
+  `hello_srtp_negotiations_total` gains `dtls` and `dtls_failed`.
+- **What the WebRTC phase gets.** The ICE-lite agent, the DTLS handshake over a
+  demultiplexed socket, the node certificate and fingerprint, the GCM profile,
+  `a=rtcp-mux` and the SDP parsing of `fingerprint`, `setup`, `ice-*`,
+  `candidate` and SAVPF. Still to build there: the multi-section SDP model,
+  BUNDLE, `a=mid`, the shared WebRTC UDP port with a ufrag demultiplexer, the
+  public candidate address, trickle/`end-of-candidates` and the Kamailio
+  WebSocket and TURN pieces. No port or chart change is needed for phones.
+- **Needs hardware (lab item 10, WP822/WP836).** That `P60078 = 1` makes the
+  phone offer `UDP/TLS/RTP/SAVP` with a fingerprint and `a=setup:actpass`, which
+  fingerprint hash and SRTP profile it uses, that it handshakes as client against
+  Hello's `active` answer and as server against Hello's offer, what its answer
+  to Hello's offer says in `a=setup`, and what "enabled but not forced"
+  (`P183 = 1`) does together with DTLS; that `P95002 = 4` makes it send ICE
+  credentials and candidates, accept the lite answer and send its checks to the
+  relay address (Trickle ICE `P95003` on and off); that hold, resume and a
+  re-INVITE keep the session; and that a WP822 ignores the keys it does not have.
+
 ## Locations, HELD, Geolocation, callback tag and alarm `*55`, phone-feature-parity S-28 and S-29 (2026-11-09)
 
 - **Already built, left as it was.** The emergency flag on outbound routes and
@@ -2797,6 +3031,69 @@ so the VIP stage cannot sit in that file.
 - Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
 - Account sharing group password: shared default `AccountSharing`, or a per-group secret
 
+## Flow canvas P6: AI on the canvas (2026-11-09)
+
+Built per `.procoder/specs/flow-canvas.md` (P6, S-17, S-19, S-20). Choices the
+spec left open, and one deviation:
+
+- **The assistant may apply its own batch (decision 2, user decision of
+  2026-11-10 below).** It has one write tool, `applyConfigBatch`, offered only
+  for a question asked with the canvas switch "Let AI apply changes" on;
+  otherwise a change is a proposal whose batch the operator previews on the
+  canvas and applies or discards. Write-scoped MCP clients keep
+  `applyConfigBatch` as before.
+- **A batch proposal is one action.** `applyConfigBatch` joins
+  `proposal.Allowlist`; a proposal that carries it has no other action, so the
+  whole change is one transaction. The inner allowlist is the batch's own
+  table (`configbatch.Ops`, every object type the canvas draws); `createDevice`,
+  `createPhone`, credential, multipart and external-effect operations stay
+  out. At most 50 inner operations.
+- **Credentials stay out of proposals.** Decision 2 allows the AI to set
+  secrets with redacted reads; a proposal's body is stored and shown to
+  people and to the model, so an inner operation that sets a password, PIN or
+  secret is refused, as for every other proposal (S-12).
+- **The dry run runs as the user, rolled back.** The validator dry-runs the
+  batch through the API as the user's agent identity with a new `Preview`
+  flag (`auth.Agent.Preview`): it then holds write scopes with the user's own
+  role, but the API admits its writes only on `POST /api/v1/config/batch`
+  with `dryRun` and inside a dry-run store batch (`agentGuard`,
+  `Batch.DryRun`). A viewer's or an operator's admin-only batch is refused
+  there and the model is told the user cannot make the change.
+- **Hello fills the staleness tokens.** The model does not send
+  `baseRevision` or `expect`: the validator reads the graph (devices
+  included) and sets `baseRevision` to its revision and each update or
+  delete's `expect` to the node's version. A configuration that moves under
+  the proposal makes the batch's own check answer 409, which makes the
+  proposal `stale`; changes to other objects do not.
+- **The preview is stored.** The dry run's results (redacted), warnings and a
+  new `flowDiff` (added, changed, removed nodes, edges added and removed,
+  `flow.Diff`) are kept on the action as `preview`, so the overlay and the
+  proposal page need no write scope and viewers see them. Every dry-run batch
+  answer now carries `flowDiff` (documented in `openapi.json` and
+  `docs/config-batch.md`).
+- **Overlay placement.** Created nodes have dry-run ids (sequences do not roll
+  back), so the canvas draws them as ghosts placed next to a connected node
+  (not draggable) and, after apply, places the real nodes at the ghost
+  positions by matching kind and label (`placementsAfterApply`).
+- **Canvas context.** A question carries a `context` with `canvasId`,
+  `nodes` and `trace`, stored in `ai_messages.context` (migration `00057`) so the task and
+  the history see it, and given to the model as data (`canvas`), never as
+  instructions. The panel sends the canvas, the selected node and the traced
+  call.
+- **`describeOperation`.** One assistant tool that is not an API read: it
+  answers the request schema of an operation a proposal may carry, from the
+  embedded document, so the model writes valid batch bodies. It is not an MCP
+  tool and reads no PBX data.
+- **`getFlowGraph` `fields=summary`** (S-17) empties node summaries and drops
+  edge `data`, keeping ids, labels, versions, ports and owners.
+- **Roles.** Asking needs operator (the chat already did); viewers see the
+  panel's proposal list and the overlay, without Apply. Discard is
+  `dismissAIProposal` with reason `not_needed`. With the agent off the panel
+  shows the same reason as every AI page.
+- **Import cycle.** `configbatch` used `proposal.Change`; the JSON diff moved
+  to `internal/jsondiff` (proposal keeps aliases) so `proposal` can use
+  `configbatch`.
+
 ## Integrations P4: recording links and lookup (2026-11-09)
 
 - Links are Hello-signed proxy URLs (`/r/<token>.wav`), not MinIO presigned
@@ -3090,6 +3387,44 @@ Built in one change: the engine, passthrough, T.38, email, API, page and docs.
 - Answer (user): the AI may apply. Give the assistant a write tool that applies its batch,
   audited and revertible, in line with the earlier AI-access decision. Operators still see
   and can revert every applied batch.
+
+Built on #280 (choices the decision left open):
+
+- **The write tool.** `applyConfigBatch` in the assistant (go-ai-sdk tool,
+  `internal/ai/assistant/apply.go`). Its batch is validated exactly as a
+  proposal's batch (inner allowlist, no credential property, at most 50 ops,
+  `baseRevision` and `expect` from the graph, the dry run as the user), stored
+  as a proposal (so the overlay, the proposal page and the session link show
+  it), then applied with `proposal.DBStore.ApplyAsAgent`:
+  `POST /api/v1/config/batch` replayed as the user under a new
+  `auth.Agent.Apply` identity. That identity holds write and admin scopes with the user's own
+  role, so a viewer's batch is `403 forbidden_role` and an operator's
+  admin-only op is refused; `agentGuard` admits its writes only on the batch
+  route and inside that batch (no direct object write, layout or revert). One
+  applied batch per question; an answer may not add a proposal after it.
+  Credentials stay out, as for every proposal.
+- **Audit.** The actor is the user (`user:<name>`), the via `ai:<session>`
+  (decision 2's form) on the `config_batches` row, on the proposal
+  (`ai_proposals.applied_via`, new) and on the proposal's `apply_applied`
+  audit row (now with its via); each object's row carries `batch:<id>` as for
+  every batch. The proposal also keeps `batch_id` (new, set for a person's
+  apply too) so the console reverts it with the ordinary
+  `revertConfigBatch`. Migration `00086_ai_proposal_applied_via.sql`,
+  additive.
+- **The switch: per session, ask first by default (chosen).** Decision 2 lets
+  the AI apply but sets no default, so the canvas panel's "Let AI apply
+  changes" starts off each time the panel opens and holds for the questions
+  sent while it stays open; each question stores it (`context.allowApply` in
+  `ai_messages.context`), and only that question gets the write tool. Viewers
+  see no switch. Not a stored per-user setting: no setting outlives the panel,
+  so nothing applies without the user turning it on where they are looking.
+- **UI.** An AI-applied batch is drawn as what was applied: the canvas
+  reloads, places the new nodes and marks new and changed nodes; the panel
+  shows "Applied by the assistant for you" with the operations and a
+  Revert (dry run, then confirm). History and the proposal page label it
+  "by the assistant for <user>".
+- **No new API status codes.** The refusals are the existing
+  `403 forbidden_role` and `403 insufficient_scope`.
 
 ## Integrations P6: HubSpot and the internal/crm framework (2026-11-10)
 

@@ -46,6 +46,13 @@
     <P60078>0</P60078>
 {{- end}}
 {{- end}}
+{{- /* DTLS-SRTP and ICE (phone-feature-parity S-16). P60078 = SRTP Key Exchange of account 1 (0 SDES, 1 DTLS) and P95002 = Media NAT Traversal of account 1 (0 No, 1 Auto, 2 STUN, 3 TURN, 4 ICE) are from Grandstream's WP8x6 config templates (wp8x6_config 1.0.3.35 and later; the WP856 template has P60078 only). The key exchange is written with P183, on a TLS phone only, because DTLS and SDES both need the signalling to be protected (Server.SRTPKeyEx is empty otherwise); ICE does not need TLS, so it is written for any phone of a model that has the key. Ordinary phones keep Auto (1). Unverified on hardware (verify, lab item 10). */}}
+{{- if .Server.SRTPKeyEx}}
+    <P60078>{{if eq .Server.SRTPKeyEx "dtls"}}1{{else}}0{{end}}</P60078>
+{{- end}}
+{{- if .Server.ICE}}
+    <P95002>{{if eq .Server.ICE "ice"}}4{{else}}1{{end}}</P95002>
+{{- end}}
 {{- /* HD voice: Preferred Vocoder choices 1 to 6 of account 1 (P57, P58, P59, P60, P61, P62; Grandstream config templates, "Preferred Vocoder"): 0 PCMU, 8 PCMA, 9 G.722, 123 Opus (the models that have it; payload type P2385 stays at its default 123). Order Opus (the models that have it), G.722, PCMU, PCMA; the choices after the last codec repeat it, which the phone ignores, so no other codec is offered. Another account of a multi-account model has its own choice keys (account 2 P451 to P456, account 3 P551 to P556, and so on in steps of 100); Hello provisions account 1. Unverified on hardware (verify). */}}
 {{- if .Codecs.Opus}}
     <P57>123</P57>

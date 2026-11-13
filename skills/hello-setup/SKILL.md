@@ -79,7 +79,24 @@ on a leg whose signalling is TLS, so a phone on UDP stays plain RTP whatever
 the policy says, and a `required` device on UDP cannot call or be called. After
 a change, `getCDR` shows `srtp` (none, caller, callee or both) on the next
 call, and the call's trace says which legs were encrypted. Keys are never
-shown.
+shown. Voicemail, conference rooms and paging follow the same policy, and a
+call moved to another party (transfer target, retrieved park, pickup) is
+negotiated again with that party's own policy; a `required` party that cannot
+be encrypted is refused, never carried in clear.
+
+`updateDevice` also takes `srtpKeyExchange` and `mediaIce`. `srtpKeyExchange`
+is how Hello agrees the keys when it makes the offer: `sdes` (the default,
+`a=crypto` lines in the SDP) or `dtls` (DTLS-SRTP, a handshake on the media
+path); set `dtls` only for a phone that does DTLS-SRTP, because a DTLS offer
+cannot fall back to plain RTP, and a call whose handshake fails is ended. An
+offer from the phone is always answered in kind, and DTLS, like SDES, is only
+used on a leg whose signalling is TLS. `mediaIce` makes Hello offer the phone
+ICE-lite and provisions its ICE setting (Grandstream WP826 and WP836 only); a
+phone that offers ICE is answered as ICE-lite whatever this says. `getCDR`
+shows `srtpKeyEx` (none, sdes, dtls or mixed) and `ice`. Provisioning writes
+the Grandstream key exchange (`P60078`) and ICE (`P95002`) from these two
+settings; other vendors write nothing until their keys are confirmed.
+
 ### Web devices (browser softphones)
 
 A user adds a browser softphone to their own extension under **My phone, Web
@@ -104,6 +121,16 @@ the box's own audio in a slot so callers hear the default spoken prompt again.
 `effective` one callers hear); `updateVoicemailBoxLanguage` sets it to one of
 the listed `languages`, or empty to inherit.
 `listVoicemailBoxes` shows every box with its message counts.
+
+### Door stations
+
+A door unit (GDS, 2N, Akuvox, DoorBird) is an extension with kind `door`
+(`getExtension` shows its kind and door targets). `getDoorOpen` says whether
+its door-open code is set and whether the call hangs up after the door opens;
+it never shows the code. The code is set in the console only (Extensions, the
+station's drawer, administrators): tell the administrator to do that, and that
+the user who answers a door call opens the door by dialling `*50` or pressing
+Open door under **My phone**.
 
 ### Remove someone
 

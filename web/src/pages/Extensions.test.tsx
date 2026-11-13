@@ -255,6 +255,91 @@ describe("Extensions", () => {
     });
   });
 
+  it("sets a door station's door-open code without ever showing it", async () => {
+    const door = {
+      ...EXT,
+      id: 9,
+      number: "900",
+      name: "Front door",
+      kind: "door",
+      voicemailEnabled: false,
+      doorTargets: { extensions: [], ringGroups: [] },
+    };
+    const calls = api([EXT, door], {
+      "GET /api/v1/ring-groups": () => json({ items: [] }),
+      "GET /api/v1/extensions/9/door-open": () =>
+        json({ codeSet: false, hangupAfterOpen: false }),
+      "PUT /api/v1/extensions/9/door-open": () =>
+        json({ codeSet: true, hangupAfterOpen: true }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer("900");
+    expect(await within(drawer).findByText("No code is set.")).toBeVisible();
+
+    const field = within(drawer).getByLabelText("New code");
+    expect(field).toHaveAttribute("type", "password");
+    fireEvent.change(field, { target: { value: "12ab" } });
+    fireEvent.click(
+      within(drawer).getByRole("button", { name: "Save door-open settings" }),
+    );
+    expect(
+      await within(drawer).findByText("1 to 8 characters of 0-9, * and #."),
+    ).toBeVisible();
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
+
+    fireEvent.change(field, { target: { value: "8#42" } });
+    fireEvent.click(
+      within(drawer).getByRole("switch", { name: /Hang up after opening/ }),
+    );
+    fireEvent.click(
+      within(drawer).getByRole("button", { name: "Save door-open settings" }),
+    );
+    expect(
+      await within(drawer).findByText("Door-open settings saved."),
+    ).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PUT",
+      url: "/api/v1/extensions/9/door-open",
+      body: { code: "8#42", hangupAfterOpen: true },
+    });
+    // The code is gone from the field and from the page.
+    expect(within(drawer).getByLabelText("New code")).toHaveValue("");
+    expect(within(drawer).getByText("A code is set.")).toBeVisible();
+    expect(document.body.textContent).not.toContain("8#42");
+  });
+
+  it("offers no door-open code on a user extension", async () => {
+    const calls = api([EXT]);
+    renderApp("/extensions");
+    const drawer = await openDrawer("100");
+    expect(within(drawer).queryByLabelText("New code")).toBeNull();
+    expect(calls.filter((c) => c.url.endsWith("/door-open"))).toHaveLength(0);
+  });
+
+  it("hides the door-open code from an operator", async () => {
+    const door = {
+      ...EXT,
+      id: 9,
+      number: "900",
+      name: "Front door",
+      kind: "door",
+      doorTargets: { extensions: [], ringGroups: [] },
+    };
+    const calls = mockApi({
+      "GET /api/v1/auth/me": () => json({ username: "ops", role: "operator" }),
+      "GET /api/v1/extensions": () => json({ items: [door] }),
+      "GET /api/v1/devices": () => json({ items: [] }),
+      "GET /api/v1/ring-groups": () => json({ items: [] }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer("900");
+    expect(within(drawer).queryByLabelText("New code")).toBeNull();
+    expect(
+      within(drawer).queryByRole("button", { name: "Save door-open settings" }),
+    ).toBeNull();
+    expect(calls.filter((c) => c.url.endsWith("/door-open"))).toHaveLength(0);
+  });
+
   it("sets a door station's camera, keeps the password write-only and shows the picture", async () => {
     const door = {
       ...EXT,

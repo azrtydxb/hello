@@ -398,6 +398,25 @@ func TestLoadMediaAnchorHost(t *testing.T) {
 	}
 }
 
+// TestLoadMediaDTLSICE fails if DTLS-SRTP and ICE-lite are not on by default
+// or HELLO_MEDIA_DTLS and HELLO_MEDIA_ICE do not switch them off.
+func TestLoadMediaDTLSICE(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.MediaDTLS || !c.MediaICE {
+		t.Fatalf("defaults dtls %v ice %v, want both on", c.MediaDTLS, c.MediaICE)
+	}
+	c, err = LoadSIP(env(map[string]string{"HELLO_MEDIA_DTLS": "false", "HELLO_MEDIA_ICE": "false"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MediaDTLS || c.MediaICE {
+		t.Fatalf("dtls %v ice %v, want both off", c.MediaDTLS, c.MediaICE)
+	}
+}
+
 // TestLoadAIDefaults fails if OAuth and MCP are on without HELLO_PUBLIC_URL
 // or a default lifetime or switch differs from the spec's.
 func TestLoadAIDefaults(t *testing.T) {
@@ -496,6 +515,23 @@ func TestLoadDoorCameraAllow(t *testing.T) {
 		_, err := LoadControl(env(map[string]string{"HELLO_DOOR_CAMERA_ALLOW": bad}))
 		if err == nil || !strings.Contains(err.Error(), "HELLO_DOOR_CAMERA_ALLOW") || strings.Contains(err.Error(), bad) {
 			t.Errorf("%q: err = %v, want the key named and the value not echoed", bad, err)
+		}
+	}
+}
+
+// TestLoadDoorHangup fails if HELLO_DOOR_HANGUP_SECONDS does not default to
+// 3 s, parse, or reject zero, negative and junk values.
+func TestLoadDoorHangup(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil || c.DoorHangup != 3*time.Second {
+		t.Fatalf("default = %v, %v; want 3s", c.DoorHangup, err)
+	}
+	if c, err := LoadSIP(env(map[string]string{"HELLO_DOOR_HANGUP_SECONDS": "10"})); err != nil || c.DoorHangup != 10*time.Second {
+		t.Fatalf("10 = %v, %v", c.DoorHangup, err)
+	}
+	for _, bad := range []string{"0", "-2", "soon"} {
+		if _, err := LoadSIP(env(map[string]string{"HELLO_DOOR_HANGUP_SECONDS": bad})); err == nil || !strings.Contains(err.Error(), "HELLO_DOOR_HANGUP_SECONDS") {
+			t.Fatalf("%q accepted: %v", bad, err)
 		}
 	}
 }

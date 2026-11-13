@@ -34,6 +34,37 @@ with no ring tag gets `doorbell`. Calls to it, from a station or from anyone, ha
 kind `door` and ring the members with the doorbell tone (see [ring tags](ring-tags.md)).
 Door stations can always call Door groups.
 
+## Door-open code
+
+A door station may hold a door-open code of 1 to 8 characters of `0-9`, `*` and `#`
+(Extensions, the station's drawer, administrators; or `PUT
+/api/v1/extensions/{id}/door-open` with `{"code": "..."}`; an empty string clears it). The
+code is stored sealed, is never returned, logged, traced or written to the audit log, and
+the API says only whether one is set (`GET`).
+
+During an answered call with the station, the user on the far side opens the door in
+either of two ways:
+
+- dial `*50` on the phone: Hello sends the code to the station as RFC 2833 events;
+- press **Open door** under **My phone** (`POST /api/v1/calls/{id}/door-open`). Only the
+  user whose extension answered the call, or placed it to the station, may; anyone else
+  gets `403`. The id is the call's correlation id from `GET /api/v1/me/door-calls`.
+
+Door calls are always anchored, so Hello can put the events on the station's leg. The
+keys `*`, `5`, `0` the user dialled are still relayed to the station as ordinary DTMF
+before the code. Keys dialled by the station itself never open its door. On an ordinary
+call `*50` does nothing. The call-flow trace shows "Door open pressed" and "Door open code
+sent", never the digits. If the station negotiated no `telephone-event`, the trace says so
+and nothing is sent.
+
+Turn on **Hang up after opening** and Hello ends both legs `HELLO_DOOR_HANGUP_SECONDS`
+(default 3) after the code was sent. The callee can also key the station's own code; that
+is relayed like any DTMF.
+
+Provisioning an "Open door" key on the phones (Yealink DSS DTMF key, Grandstream WP
+DialDTMF softkey, and so on) is not done yet: the template keys must first be confirmed
+on hardware.
+
 ## Video and the camera picture
 
 Two separate things, both optional:

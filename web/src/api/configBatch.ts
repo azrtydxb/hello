@@ -3,6 +3,7 @@
 // reverting an applied batch. See docs/config-batch.md.
 
 import { ApiError, request, type Id } from "../api";
+import type { FlowEdge, FlowNode } from "./flow";
 
 /** One operation of a batch, as the API documents it. */
 export interface BatchOp {
@@ -45,6 +46,16 @@ export interface BatchWarning {
   message: string;
 }
 
+/** What a dry-run batch would do to the drawn graph (spec flow-canvas S-19). */
+export interface FlowGraphDiff {
+  added: FlowNode[];
+  changed: FlowNode[];
+  removed: string[];
+  /** An edge whose details change is in both edgesAdded and edgesRemoved. */
+  edgesAdded: FlowEdge[];
+  edgesRemoved: string[];
+}
+
 export interface BatchResponse {
   applied: boolean;
   batchId?: string;
@@ -53,6 +64,8 @@ export interface BatchResponse {
   results: BatchResult[];
   warnings: BatchWarning[];
   skipped?: string[];
+  /** Only on a dry run. */
+  flowDiff?: FlowGraphDiff;
 }
 
 export interface BatchSummary {

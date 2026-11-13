@@ -333,8 +333,14 @@ type Server struct {
 	// "required") on a TLS phone; empty on a phone that registers over UDP,
 	// where Hello offers no crypto and the templates leave the phone's SRTP
 	// setting alone (phone-feature-parity S-15).
-	SRTP   string
-	Expiry int // registration expiry, seconds
+	SRTP string
+	// SRTPKeyEx is "sdes" or "dtls" for a phone model that has the setting
+	// (GrandstreamDTLSKey), empty for the others and for a phone on UDP; ICE
+	// is "ice" or "auto" for a model that has the Media NAT Traversal
+	// setting (GrandstreamICEKey), empty otherwise (S-16).
+	SRTPKeyEx string
+	ICE       string
+	Expiry    int // registration expiry, seconds
 }
 
 // The DNS modes of Server.DNSMode.

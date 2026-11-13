@@ -88,7 +88,7 @@ type ErrorEvent struct {
 // channel delivers EventStarted first and a terminal event last, then
 // closes. Cancelling ctx stops the work.
 type Streamer interface {
-	PostMessageStream(ctx context.Context, u User, sessionID, content string) (<-chan Event, error)
+	PostMessageStream(ctx context.Context, u User, sessionID, content string, mc *Context) (<-chan Event, error)
 }
 
 // Frame is the event in the text/event-stream wire format.

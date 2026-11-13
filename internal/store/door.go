@@ -162,6 +162,10 @@ func afterKindChange(ctx context.Context, tx *sql.Tx, e Extension) error {
 	if e.Kind != ExtensionUser {
 		return nil
 	}
+	// A user has no door-open code (migration 00054).
+	if _, err := tx.ExecContext(ctx, `DELETE FROM door_open WHERE extension_id = $1`, e.ID); err != nil {
+		return err
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO voicemail_boxes (extension_id) VALUES ($1) ON CONFLICT (extension_id) DO NOTHING`, e.ID)
 	return err
 }

@@ -1,9 +1,10 @@
 // Package assistant is the in-product AI assistant (spec ai-agent S-6 to
 // S-9): chat sessions and messages, the read-only tools the model may call,
 // replayed through Hello's own API as the user with scope read only, and
-// the message task whose structured answer may carry a proposal. Nothing
-// here changes configuration: a proposal is validated and stored for a
-// human to apply.
+// the message task whose structured answer may carry a proposal. A
+// proposal is validated and stored for a human to apply; only when the user
+// turned on "Let AI apply changes" for a question may the assistant apply
+// its own batch, as the user (apply.go).
 package assistant
 
 import (
@@ -52,6 +53,9 @@ type (
 	StartFunc = chat.StartFunc
 	Store     = chat.Store
 	User      = chat.User
+	Context   = chat.Context
+	// TraceContext is a call traced on the canvas a question came from.
+	TraceContext = chat.TraceContext
 )
 
 // Roles and errors of package chat.
@@ -80,6 +84,10 @@ type Tasks interface {
 type Proposals struct {
 	Validator proposal.Validator
 	Store     proposal.Store
+	// Applier, when set, lets the assistant apply its own batch for a
+	// question asked with "Let AI apply changes" on (ApplyTool); nil keeps
+	// every change a proposal.
+	Applier AgentApplier
 }
 
 // Config wires an Assistant.
@@ -114,6 +122,8 @@ type Assistant struct {
 	cfg       Config
 	tools     []toolDef
 	toolCalls *prometheus.CounterVec
+	// describe is what DescribeTool answers; nil without proposals.
+	describe map[string]apispec.Operation
 }
 
 // New checks the tool list against the document and returns the assistant.
@@ -143,7 +153,11 @@ func New(cfg Config) (*Assistant, error) {
 			return nil, err
 		}
 	}
-	return &Assistant{cfg: cfg, tools: defs, toolCalls: calls}, nil
+	a := &Assistant{cfg: cfg, tools: defs, toolCalls: calls}
+	if cfg.Proposals != nil {
+		a.describe = describable(cfg.Spec)
+	}
+	return a, nil
 }
 
 // ListSessions lists the user's sessions, or every session for an admin.
@@ -218,15 +232,19 @@ func (a *Assistant) DeleteSession(ctx context.Context, u User, id string) error 
 
 // PostMessage stores the user's question and starts the task answering it.
 // Only the session's owner may post, admin or not: the task reads as them.
-func (a *Assistant) PostMessage(ctx context.Context, u User, sessionID, content string) (messageID int64, taskID string, err error) {
-	return a.post(ctx, u, sessionID, content, nil)
+// mc is what the console showed with the question (nil for none).
+func (a *Assistant) PostMessage(ctx context.Context, u User, sessionID, content string, mc *Context) (messageID int64, taskID string, err error) {
+	return a.post(ctx, u, sessionID, content, mc, nil)
 }
 
 // post is PostMessage; with a sink the task also streams its progress.
-func (a *Assistant) post(ctx context.Context, u User, sessionID, content string, k *sink) (messageID int64, taskID string, err error) {
+func (a *Assistant) post(ctx context.Context, u User, sessionID, content string, mc *Context, k *sink) (messageID int64, taskID string, err error) {
 	content = strings.TrimSpace(content)
 	if content == "" || utf8.RuneCountInString(content) > MaxMessageLen {
 		return 0, "", fmt.Errorf("%w: content must have 1 to %d characters", ErrInvalid, MaxMessageLen)
+	}
+	if err := checkContext(mc); err != nil {
+		return 0, "", fmt.Errorf("%w: context: %w", ErrInvalid, err)
 	}
 	s, err := a.cfg.Store.GetAISession(ctx, sessionID)
 	if err != nil {
@@ -247,7 +265,7 @@ func (a *Assistant) post(ctx context.Context, u User, sessionID, content string,
 			return out.result(), nil
 		})
 	}
-	return a.cfg.Store.PostAIMessage(ctx, sessionID, content, autoTitle(content), HistoryWindow, start)
+	return a.cfg.Store.PostAIMessage(ctx, sessionID, content, mc, autoTitle(content), HistoryWindow, start)
 }
 
 // autoTitle is a session's title from its first message: the first line,
