@@ -91,13 +91,49 @@ until an administrator connects again. Then the waiting jobs are written.
 - The owner is the HubSpot owner whose email equals the Hello user's.
 - Updates are `PATCH /crm/v3/objects/calls/{id}`: they never rewrite the title
   or notes a person edited in HubSpot.
-- The HubSpot calling iframe (click-to-call from HubSpot's phone icon) is not
-  part of this release. The handshake it will use is: the iframe tells the
-  server which engagement it created with `POST
-/api/v1/integrations/hubspot/engagements` (`calls` scope; a user may only
-  record their own calls), and the server then patches that engagement
-  instead of creating a second one. If the server already logged the call, its
-  engagement is kept and the answer says `adopted: false`.
+- A call placed from HubSpot's phone icon goes through the calling iframe
+  (below). The iframe tells the server which engagement HubSpot created with
+  `POST /api/v1/integrations/hubspot/engagements` (`calls` scope; a user may
+  only record their own calls), and the server then patches that engagement
+  (duration, status, the recording link) instead of creating a second one. If
+  the server already logged the call, its engagement is kept and the answer
+  says `adopted: false`.
+
+## The HubSpot calling iframe
+
+Hello serves a calling widget at `/integrations/hubspot/iframe` (HubSpot's
+Calling Extensions SDK, `@hubspot/calling-extensions-sdk`). HubSpot frames it
+as its phone widget. Desk phones are not WebRTC, so it only steers:
+
+- `onDialNumber` places a Hello click-to-call (`POST /api/v1/calls/originate`):
+  the user's own phone rings first, and Hello dials the number when it is
+  answered. The widget then tells HubSpot `outgoingCall` with
+  `createEngagement`, `callAnswered`, `callEnded` and `callCompleted` as the
+  call's events arrive on Hello's event stream.
+- When HubSpot creates the engagement (`onCreateEngagementSucceeded`) the
+  widget posts it to the handshake route above, so the server patches that
+  record. The recording link (`hs_call_recording_url`, minted by the
+  recording-link store, see "Recording links") lands in the same engagement
+  when the recording is ready, and is renewed there before it expires.
+- An inbound call on one of the user's extensions pops as `incomingCall` while
+  the widget is open (whether HubSpot offers it to an unlisted app is on the
+  lab checklist).
+- Sign-in is a popup. HubSpot frames the widget, where the console's session
+  cookie is not sent, so the widget signs the user in with Hello's own OAuth
+  client `hello-hubspot` (public, PKCE, redirect
+  `/integrations/hubspot/callback`, scopes `calls` and `events`) and keeps its
+  token in its own storage. Each user signs in once; **Sign out** in the widget
+  forgets the token.
+- Only this page may be framed, and only by `https://app.hubspot.com` and
+  `https://*.hubspot.com` (every region is a subdomain of `hubspot.com`):
+  nginx answers it with `frame-ancestors` for those hosts and every other page,
+  the consent page included, with `frame-ancestors 'none'`.
+
+To enable it, add a calling extension to the HubSpot app (**Calling** in the
+app's settings, or the calling settings API) with the values the connector's
+**HubSpot app settings** panel shows, and have each user open the phone widget
+once. It needs `HELLO_PUBLIC_URL` (the first-party client exists only with
+it).
 
 ## Caller names
 
@@ -203,7 +239,9 @@ test account is enough) and are not blocking the merge:
       contact's name, and a second call from the same number is instant.
 - [ ] 429 from HubSpot (many calls at once) slows the jobs without losing
       one.
-- [ ] The calling iframe (not in this release): `onDialNumber`, the
-      `outgoingCall` / `callEnded` / `callCompleted` messages and `incomingCall`
-      are available to an unlisted app, and the engagement handshake adopts the
-      iframe's engagement.
+- [ ] The calling iframe: `onDialNumber`, the `outgoingCall` / `callAnswered` /
+      `callEnded` / `callCompleted` messages and `incomingCall` are available to
+      an unlisted app; the iframe loads in every region's HubSpot host
+      (`frame-ancestors`); the sign-in popup opens from inside HubSpot's frame
+      and its token survives a reload; the engagement handshake adopts the
+      iframe's engagement; and the recording link appears in that engagement.

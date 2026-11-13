@@ -3333,3 +3333,14 @@ Decided while building, without asking, within the spec and the brief:
 - Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
+
+## HubSpot calling iframe and recording links (2026-11-13, feat/hubspot-iframe)
+
+Completes the part of P6 (#289) that waited for the originate API and the first-party clients (decisions of 2026-11-10).
+
+- **The iframe is a console route**, `/integrations/hubspot/iframe`, built on HubSpot's own `@hubspot/calling-extensions-sdk` (0.9.7) rather than a hand-written postMessage protocol. The SDK is loaded on demand, so the console bundle does not carry it.
+- **First-party client `hello-hubspot`** (public, PKCE, redirect `/integrations/hubspot/callback`, scopes `calls events`), registered with the dialer at start-up. Sign-in is a popup, because a framed page gets no Strict session cookie. The popup hands the code to the iframe with `postMessage` to its own origin; the state value and the PKCE verifier stay in the iframe. Tokens live in the iframe's localStorage (HubSpot's frame gives it partitioned storage); a refused refresh drops them.
+- **The click-to-call id is HubSpot's call id.** `externalCallId` is the originate id; events carry `originateId` and `callId`, so the first event of the call gives the SIP call id, which goes with the engagement id to the existing handshake route. An inbound call on a user's extension uses its SIP call id.
+- **Recording links in engagements need no new code in the connector:** HubSpot already writes `hs_call_recording_url` and the worker patches the adopted engagement; a test now covers it. The link store is the one #328 wires in `cmd/hello-control/crmlinks.go`; this change does not wire a second minter, so links appear once #328 is merged.
+- **Framing.** nginx answers the iframe route with `frame-ancestors https://app.hubspot.com https://*.hubspot.com` and every other console page with `frame-ancestors 'none'` and `X-Frame-Options: DENY` (spec T-12; only the consent page had it). A deploy test checks the template.
+- **Not done, needs a HubSpot account:** whether `incomingCall` reaches an unlisted app, the exact calling-settings fields (the connector panel shows name, url, width, height, isReady, supportsCustomObjects), and the framing hosts per region (all are `*.hubspot.com`). They are on the lab checklist in docs/crm.md.

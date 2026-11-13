@@ -105,6 +105,12 @@ describe("CRM connectors (spec integrations P6)", () => {
     expect(
       within(panel).getByText(/crm\.objects\.owners\.read/),
     ).toBeInTheDocument();
+    // The calling extension's values: Hello's iframe URL.
+    expect(
+      within(panel).getByText(
+        /https:\/\/hello\.example\/integrations\/hubspot\/iframe/,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("warns when the connection needs signing in again", async () => {
