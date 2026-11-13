@@ -1,6 +1,6 @@
 ---
 name: hello-call-handling
-description: Configure and run the call-handling features of a Kuvryn Hello PBX through its MCP server - call queues and their agents (log in, pause, live wallboard), conference rooms and their live controls, call park lots and parked calls, pickup groups, paging groups and multicast channels, text messaging, presence, voicemail messages and call recordings. Use when someone asks for a support queue, a meeting room, to park or pick up a call, to page a warehouse, to see who is busy or what is waiting in a queue, or to clean up voicemail and recordings.
+description: Configure and run the call-handling features of a Kuvryn Hello PBX through its MCP server - call queues and their agents (log in, pause, live wallboard), follow-me (ring other numbers, extensions and groups when an extension is called), conference rooms and their live controls, fax (receive to email, send a PDF, fax destinations and trunk fax mode), call park lots and parked calls, pickup groups, paging groups and multicast channels, text messaging, presence, voicemail messages and call recordings. Use when someone asks for a support queue, to ring a mobile as well as the desk phone, a meeting room, to park or pick up a call, to page a warehouse, to see who is busy or what is waiting in a queue, to receive or send a fax, or to clean up voicemail and recordings.
 license: Apache-2.0
 metadata:
   hello-version: "v1"
@@ -76,6 +76,47 @@ lists the open requests of the queue, with their position and attempts.
 `cancelQueueCallback` (path `id`, `callbackId`) cancels one request the caller
 no longer wants. Say which caller you cancelled for.
 
+## Follow-me
+
+An extension's follow-me profile rings its own devices and up to five more
+targets when a call reaches it: an external number (through outbound routing),
+another extension or a ring group. It runs after forward-always and before the
+no-answer forward and voicemail; do-not-disturb stops it unless `dndBlocks` is
+off.
+
+- `getFollowMe` (path `id` is the extension id) reads the profile; an extension
+  with none reads as off with no targets. `putFollowMe` changes it: fields left
+  out keep their value, and `targets` (at most 5, in ring order) replaces the
+  whole list.
+
+```json
+{
+  "enabled": true,
+  "strategy": "sequential",
+  "timeoutSeconds": 40,
+  "targets": [
+    { "kind": "external", "target": "+32475123456", "delaySeconds": 15 },
+    { "kind": "extension", "target": "102" }
+  ]
+}
+```
+
+- `simultaneous` rings everything at once. `sequential` starts the targets in
+  order; `delaySeconds` is how long a target rings before the next starts
+  (the last one rings to `timeoutSeconds`). A call nobody answers within
+  `timeoutSeconds` goes on to the no-answer forward or voicemail.
+- An external target with `confirmExternal` (the default) plays "press 1 to
+  accept" and is dropped after 10 seconds without the digit, so a mobile's
+  voicemail cannot take the call. Say so before turning it off.
+- A target cannot be the extension itself (400). An external target is 2 to 32
+  digits with an optional leading +. An extension or ring group target must
+  exist, and cannot be deleted or renamed while a profile names it (409).
+- A person turns their own profile on with `*76` and off with `*77` (the
+  feature codes `follow_me_on` and `follow_me_off`; the dial plan keeps `*74`
+  and `*75` for park). They do nothing for an extension without a target.
+- A call's follow-me legs are in `getCDR` as `followMeLegs` (kind, extension,
+  trunk, result), and in the call's trace.
+
 ## Conferences
 
 `createConference` (admin): `{ "name": "weekly", "number": "8100", "userPin":
@@ -124,6 +165,44 @@ within half a second; read `getConference` again to confirm. Ask before
   `putPagingGroup`, `getPagingGroup`, `listPagingGroups`, `deletePagingGroup`
   (409 while an IVR menu names the group). An `emergency` priority group
   overrides do-not-disturb: confirm with the user first.
+
+## Fax
+
+Faxes are received by a fax destination and sent from an uploaded PDF. The
+fax engine (hello-fax) must be on: when it is not, a fax call is refused with
+488 and `sendFax` answers 503.
+
+1. `listExtensions` for the owner, then `createFaxDestination`:
+   `{"name": "main", "extension": "101", "email": ""}`. The owner extension
+   owns what arrives there; with an `email` the PDF goes to that address,
+   otherwise to the users linked to the owner. The name cannot change later
+   (`updateFaxDestination` changes the owner and the email only).
+2. Point something at it: an inbound route with `destinationKind` `fax` and
+   the destination name (`createInboundRoute`), or an IVR key of kind `fax`
+   (see `hello-routing` and `hello-ivr-and-hours`). `getFlowGraph` shows a
+   "Fax destination" node.
+3. Trunks carry a fax as G.711 passthrough by default. Set a trunk's `faxMode`
+   to `t38` (through `updateTrunk`) to move the call to T.38 when the carrier
+   offers it or when the fax tone is heard; a carrier that refuses with 488
+   leaves the call on G.711. `off` refuses fax calls on the trunk.
+4. `listFaxes` (filter `direction` and `status`) and `getFax` show the state:
+   `received`, `partial` (some pages arrived before the call failed; the pages
+   are kept), `failed`, `sent`, `queued`, `sending`, with the T.30 result,
+   the pages, the mode (`g711` or `t38`) and the email state. The PDF itself
+   is downloaded in the console.
+5. `sendFax` queues a PDF: `to` in E.164, optional `callerId`, and either the
+   PDF as `pdfBase64` (at most 700 KiB; larger files go through the console)
+   or multipart. A PDF that cannot be rasterised is refused with 422. Hello
+   dials through an outbound route that applies to every extension and
+   retries three times, five minutes apart, on busy, no answer or no carrier.
+   `deleteFax` removes a fax and its PDF, or cancels one being sent.
+6. Faxes are kept 90 days (HELLO_FAX_RETENTION_DAYS). Fax calls appear in the
+   call history with kind `fax`; the fax row carries the call's
+   `correlationId`.
+
+Failure modes worth knowing: `fax is off on trunk` and `the fax engine is
+unavailable` in a call's trace mean a 488; a fax on a trunk with `faxMode`
+`passthrough` never switches to T.38, whatever the carrier offers.
 
 ## Messaging
 

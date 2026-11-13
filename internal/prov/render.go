@@ -2,6 +2,7 @@ package prov
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/xml"
 	"errors"
@@ -100,7 +101,12 @@ func urlParts(s string) url.URL {
 func Render(ctx context.Context, t Template, file string, d RenderData) ([]byte, error) {
 	for _, f := range t.Files {
 		if strings.EqualFold(ExpandPattern(f.Pattern, d.Phone), file) {
-			return renderBody(ctx, f.Body, d, renderBudget)
+			out, err := renderBody(ctx, f.Body, d, renderBudget)
+			if err != nil || len(d.Overrides) == 0 || !strings.Contains(strings.ToLower(f.Pattern), "{mac}") {
+				return out, err
+			}
+			// Setting overrides (S-12) change the per-phone file only.
+			return ApplyOverrides(d.Phone.Vendor, out, d.Overrides)
 		}
 	}
 	return nil, ErrNoFile
@@ -139,19 +145,37 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 	d.Phone.PTTCapable, d.Phone.WP = SupportsPTT(d.Phone.Vendor, d.Phone.Model), WPFamily(d.Phone.Vendor, d.Phone.Model)
 	d.Phone.CWInverted = d.Phone.Vendor == Grandstream && strings.HasPrefix(strings.ToUpper(strings.ReplaceAll(d.Phone.Model, " ", "")), "WP856")
 	d.Phone.FXO = HasFXOPort(d.Phone.Vendor, d.Phone.Model)
+	d.Phone.SCEPCapable = SupportsSCEP(d.Phone.Vendor, d.Phone.Model)
+	d.Phone.Wired8021X = SupportsWired8021X(d.Phone.Vendor, d.Phone.Model)
 	if d.Phone.Vendor == Grandstream {
 		d.Phone.Family = GrandstreamFamily(d.Phone.Model)
 		if d.Book != nil {
 			b := *d.Book
-			b.RefreshMinutes = BookRefreshFor(d.Phone.Family, b.RefreshMinutes)
+			b.RefreshMinutes = BookRefreshForPhone(d.Phone.Family, d.Phone.WP, b.RefreshMinutes)
 			d.Book = &b
 		}
 	}
+	if d.Wifi != nil {
+		w := *d.Wifi
+		var profiles []Dot1XProfile
+		if d.Dot1X != nil {
+			profiles = d.Dot1X.Profiles
+		}
+		w.Keys = WifiKeys(WifiFamily(d.Phone.Vendor, d.Phone.Model), w, profiles)
+		d.Wifi = &w
+	}
 	d.Prov.CACertBase64 = pemBase64(d.Prov.CACertPEM)
-	d.BLF = PlaceBLF(d.Phone.Vendor, d.Phone.Model, d.BLF, d.Codes.PickupDirected)
+	d.Line.N = 1
+	d.Lines = renderLines(d)
+	lines := 1 + len(d.Lines)
+	d.BLF = PlaceBLFLines(d.Phone.Vendor, d.Phone.Model, d.BLF, d.Codes.PickupDirected, lines)
+	d.Line.BLFListURI = ""
+	if len(d.BLF) > 0 && d.Line.Username != "" {
+		d.Line.BLFListURI = "sip:blf-" + d.Line.Username + "@" + d.Line.Domain
+	}
 	d.VMKey = nil
 	if !d.Line.NoVoicemail {
-		d.VMKey = PlaceVMKey(d.Phone.Vendor, d.Phone.Model, len(d.BLF), d.Line.VoicemailCode, d.Line.Label, d.Line.Domain)
+		d.VMKey = PlaceVMKeyLines(d.Phone.Vendor, d.Phone.Model, len(d.BLF), d.Line.VoicemailCode, d.Line.Label, d.Line.Domain, lines)
 	}
 	w := &cappedWriter{ctx: ctx}
 	if err := tmpl.Execute(w, toData(reflect.ValueOf(d))); err != nil {
@@ -164,6 +188,32 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 		return nil, w.err
 	}
 	return w.buf.Bytes(), nil
+}
+
+// renderLines returns the further lines of d ready for a template: numbered
+// 2 and up, labelled, and carrying the PBX-wide codes and server settings of
+// line 1. It returns none for a vendor and model whose template does not
+// write further lines (SupportsLineKeys), and no more than the model takes
+// (MaxLines), so a template never writes a line the phone cannot hold.
+func renderLines(d RenderData) []Line {
+	if !SupportsLineKeys(d.Phone.Vendor, d.Phone.Model) {
+		return nil
+	}
+	room := MaxLines(d.Phone.Vendor, d.Phone.Model) - 1
+	out := make([]Line, 0, min(len(d.Lines), room))
+	for i, l := range d.Lines {
+		if i >= room {
+			break
+		}
+		l.N = i + 2
+		l.AuthName = cmp.Or(l.AuthName, l.Username)
+		l.AccountLabel = AccountLabel(l.Label, l.DisplayName)
+		l.Domain = cmp.Or(l.Domain, d.Line.Domain)
+		l.VoicemailCode, l.ParkCode, l.ParkRetrieveCode = d.Line.VoicemailCode, d.Line.ParkCode, d.Line.ParkRetrieveCode
+		l.PickupGroupCode, l.PickupDirectedCode = d.Line.PickupGroupCode, d.Line.PickupDirectedCode
+		out = append(out, l)
+	}
+	return out
 }
 
 var (
@@ -509,6 +559,7 @@ func SampleData(full bool) RenderData {
 		d.Codecs = CodecInfo{Opus: true}
 		d.Phone.Label = "Reception"
 		d.Line.VoicemailCode = "*97"
+		d.Lines = []Line{{Username: "1002-1234ab", AuthName: "1002-1234ab", Password: "sample-secret-2", DisplayName: "Second User", Label: "1002", Domain: "hello.example", CallWaiting: true}}
 		d.Line.ParkCode, d.Line.ParkRetrieveCode = "*74", "*75"
 		d.Line.PickupGroupCode, d.Line.PickupDirectedCode = "*40", "*41"
 		d.Firmware = &FirmwareInfo{URL: "https://prov.hello.example/p/sample/fw/firmware.rom", Dir: "https://prov.hello.example/p/sample/fw", Via: 2, Version: "1.2.3"}

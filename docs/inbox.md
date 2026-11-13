@@ -15,10 +15,13 @@ This is the first phase of the messaging channels. What works now:
   notes, tags, states, search, live updates and notifications;
 - Hello's own opt-out handling, retention and erasing a customer.
 
-Not yet: SMS through a carrier's web API (Twilio, Telnyx), WhatsApp, the chat
-widget, texts on desk phones, queues and automatic assignment, and AI. None of
-the providers that need an Internet-facing address is possible while Hello is
-reachable only on the LAN.
+- sending SMS through a **Twilio** account (see "Sending through Twilio"):
+  outbound only.
+
+Not yet: receiving texts from a carrier's web API (needs an Internet-facing
+address), Telnyx, WhatsApp, the chat widget, texts on desk phones, queues and
+automatic assignment, and AI. None of the providers that need an
+Internet-facing address is possible while Hello is reachable only on the LAN.
 
 ## Setting it up
 
@@ -38,6 +41,81 @@ reachable only on the LAN.
 
 A channel or a number that has conversations cannot be deleted (`409`):
 retention, or erasing the customer, removes them first.
+
+## Sending through Twilio
+
+A **Twilio** channel sends texts through your own Twilio account. Hello has no
+shared account or relay: the account, its numbers and its fees are yours.
+
+**What works, and what does not.** Hello is reachable only on the LAN, and
+Twilio delivers an inbound text by calling a public webhook. So a Twilio
+number **cannot receive** texts yet, and a customer's reply to a text from it
+does not arrive in the inbox. A conversation on a Twilio number starts with a
+**first-contact** text (below), and everything after that is Hello's outbound
+side: the agent's texts and their delivery status. Receiving needs the public
+listener, which is not built; do not plan on replies arriving.
+
+1. **Messaging > Channels > Add channel**, carrier **Twilio**: the account SID
+   (`AC` and 32 hex digits), the auth token, and optionally a Messaging Service
+   SID (`MG...`) when texts should leave through its sender pool instead of the
+   number. Hello checks the account with Twilio before it saves anything (a
+   refused token is `422`, an unreachable Twilio `502`), then seals the SID and
+   token with `HELLO_SECRET_KEY`. **The token is never shown again**, not in
+   the API, the console, a log or an audit row. To change it, enter the SID and
+   the token together; they replace the stored ones after Twilio accepts them.
+   **Test** asks Twilio whether the stored credentials work and the numbers can
+   be listed; it sends nothing. `GET /api/v1/messaging/channels/{id}/numbers`
+   lists the numbers of the account.
+2. **Add number**: the Twilio number in international format
+   (`+3270123456`). **Texts per minute** (default 60) caps how fast a number
+   sends; the rest wait queued.
+3. Before go-live, start the **A2P 10DLC** brand and campaign registration (and
+   toll-free verification if you want it) in your Twilio account. Hello only
+   sends; the registration, the carrier fees and what Twilio filters are
+   Twilio's. Unregistered US traffic is filtered or surcharged by carriers.
+
+**First contact.** Off by default. An administrator turns it on in **Messaging
+settings** ("Allowed with a consent attestation"). An operator or
+administrator then starts a conversation from the Inbox (**Text a customer**,
+or `POST /api/v1/inbox/conversations`): one customer number in international
+format, one message, the carrier number it leaves from, a confirmation that the
+customer agreed to be texted and a note saying how. The attestation and the
+note are stored on the conversation and the audit log records who sent it,
+never the number or the note. Hello refuses a number that opted out (`422`), a
+customer who already has an open conversation on that number (`409`, reply
+there), and a number that is not in international format (`400`). It is rate
+limited per agent (default 20 an hour) and per number (default 200 a day):
+`429`. There is no list, import or multi-recipient form, and there never will
+be: Hello is not a campaign tool.
+
+**How a text is sent, and what its state means.** A text is stored **queued**
+in the same transaction that checks the opt-out, then a worker claims it
+(**sending**) and calls Twilio once. It is sent **at most once**: if Twilio's
+answer is lost (a timeout, a dropped connection, a 5xx), Hello cannot know
+whether Twilio has the text, so it is never sent again; after five minutes it
+becomes **unknown** ("may have been delivered"). Otherwise it is **sent** when
+Twilio accepts it, then **delivered** or **failed** (with Twilio's error code)
+when Twilio reports it. There are no status callbacks on the LAN, so Hello
+**polls** Twilio for each text: every 5 seconds at first, backing off to every
+5 minutes, then every 30 minutes after the first hour, and it stops at the
+final state or after 48 hours. A text still queued after an hour (the channel
+is off) fails with `not_sent`. A reply can be up to 1600 characters (Twilio
+segments it); media is not sent.
+
+**Opt-out.** Twilio blocks a recipient who replied STOP and fails the send with
+error 21610. Hello records that as an opt-out on the number (source
+"carrier"), so its own list and the composer agree, and nobody can text that
+customer from that number.
+
+**When the carrier fails.** Five failed or lost sends in a row mark the channel
+**degraded** (a banner; sends continue and a good send clears it). A refused
+token (`401`) marks it **credentials invalid**: the text fails, later texts
+wait queued and are not sent, and the channel accepts no new ones until a
+working token is entered.
+
+Metrics: `hello_msg_outbound_total{provider,result}` (sent, failed, unknown).
+The send, status and settle workers run on every control replica; the store
+hands each text to one attempt, so two replicas never send the same text.
 
 ## Conversations
 
@@ -80,6 +158,58 @@ never "delivered". The composer shows how many texts a message makes (GSM-7:
 nothing more.
 
 Internal **notes** are visible to agents and supervisors and are never sent.
+
+## Contacts and names
+
+A customer's number is named for whoever reads it, at read time, from the same
+books as caller-name lookup: the extensions, **their own personal contacts**,
+the named books of their phones' groups, then the company book. A personal
+contact names the number for its owner only and is never stored on the
+conversation; a name from a shared book (extensions, company) is stored with
+its source, so everyone sees it. If no book names the number, the name the
+carrier sent is shown. **Add to contacts** in the conversation's details saves
+the number under a name: to your own contacts (a user an administrator has not
+linked to an extension has none), or, for an operator or administrator, to the
+company book.
+
+The details also show a **Call** button and the number's **recent calls**. The
+button opens the Dial page (click-to-call): Hello rings your own phone first and
+dials the customer when you answer. The list holds the latest calls to or from
+the number; a supervisor sees every such call, an agent only the calls their own
+extension took part in, as in their own call history. A chat visitor has neither.
+The numbers match by their last nine digits, so `0475 12 34 56` and
+`+32 475 12 34 56` are one customer.
+
+## Desk phones
+
+A text can follow the conversation to the desk phone. Two switches must both be
+on, both off by default: **Deliver to desk phones** on the number (Messaging
+channels) and **Show customer texts on my desk phone** in the user's profile.
+Then, when a conversation is assigned to or taken by that user, and for each
+later customer text while it is theirs, Hello queues a SIP MESSAGE to every
+registered phone of the user's extension (an unregistered phone gets it at its
+next REGISTER, within the text queue's TTL). The phone shows it from the
+customer, with the contact name resolved for that user, and a non-SMS channel
+is prefixed (`[WhatsApp] `). A text longer than 700 bytes is split into parts
+numbered `(1/3) `. Turning text messaging off ([messaging.md](messaging.md))
+stops phone delivery but never the inbox.
+
+A text typed on the phone to the customer's number replies into the
+conversation, in this order: the user's own open conversation with that
+customer; else an existing conversation with them on a number whose **owner
+extension** is the phone's extension (unassigned or the user's). It is sent as a
+reply from the web would be: the sender is the phone's authenticated extension
+(never the `From` header), an opted-out customer is refused, and it is limited
+to the text queue's per-minute rate. A refusal is answered to the phone as a
+text from the system with the reason (`403`, or `429` for the rate). A customer
+who is in another agent's open conversation is refused too, not texted around
+the inbox. A number with no conversation is not the inbox's and takes the
+ordinary external-number path unchanged: **a phone never makes first contact
+through the inbox**. Only text is accepted from a phone.
+
+Only Grandstream is known to show SIP MESSAGE on the handset (P22650 in the
+built-in template); other vendors are off until a lab check. A user whose phones
+are all of such vendors does not see the profile switch.
 
 ## Opt-out (STOP)
 
@@ -157,6 +287,8 @@ The page also:
 | `POST /api/v1/inbox/erase`                                           | admin, `admin`        |
 | `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`              | operator, `messages`  |
 | `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream` | any agent, `messages` |
+| `POST .../conversations/{id}/contact` (add to contacts)              | as the area it is in  |
+| `GET .../conversations/{id}/calls` (the number's recent calls)       | as the area it is in  |
 
 Conversations list with `view` (`all`, `mine`, `unassigned`), `status`, `q`
 (number, name or text), `channelId`, and a cursor. Every operation is in
@@ -165,7 +297,8 @@ Conversations list with `view` (`all`, `mine`, `unassigned`), `status`, `q`
 ## Metrics
 
 `hello_msg_inbound_total{provider,result}` (stored, duplicate, not_text,
-failed), `hello_msg_optout_total{source}`, `hello_msg_purged_total{kind}`,
+failed), `hello_msg_device_replies_total{result}` (sent, refused, failed: texts typed on
+a desk phone), `hello_msg_optout_total{source}`, `hello_msg_purged_total{kind}`,
 `hello_msg_unassigned` and `hello_msg_unassigned_oldest_seconds`. No label
 carries a number, a name or text.
 
@@ -185,3 +318,10 @@ IP-authenticated trunk, and whether it accepts outbound MESSAGE for SMS, is
 unverified. With a real trunk check: receive a text; send a reply; a long reply
 (split); non-ASCII text; what the carrier does on STOP; what happens when the
 trunk refuses (the reply shows failed).
+
+With real Grandstream phones (WP822 and WP836, IM account `P22650 = 1`):
+assign a conversation to a user with both switches on and see the text on the
+phone; a long text arrives as numbered parts; reply from the phone and see it
+in the conversation and at the customer; a reply to an opted-out customer is
+refused with the reason shown on the phone; the contact name shows as the
+sender.

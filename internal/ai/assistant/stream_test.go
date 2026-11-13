@@ -50,7 +50,7 @@ func (r *streamRig) post(t *testing.T, ctx context.Context, content string) (Ses
 	if err != nil {
 		t.Fatal(err)
 	}
-	ch, err := r.a.PostMessageStream(ctx, u, s.ID, content)
+	ch, err := r.a.PostMessageStream(ctx, u, s.ID, content, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestPostMessageStream(t *testing.T) {
 			t.Errorf("task still active after the stream closed: %+v", d.Task)
 		}
 		// A client reacting to the final event may post the next message.
-		next, err := r.a.PostMessageStream(ctx, User{ID: 7}, s.ID, "and 202?")
+		next, err := r.a.PostMessageStream(ctx, User{ID: 7}, s.ID, "and 202?", nil)
 		if err != nil {
 			t.Fatalf("posting right after done: %v", err)
 		}
@@ -248,13 +248,13 @@ func TestPostMessageStream(t *testing.T) {
 		cctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		s, ch := r.post(t, cctx, "first")
-		if _, err := r.a.PostMessageStream(ctx, User{ID: 7}, s.ID, "second"); !errors.Is(err, ErrTaskRunning) {
+		if _, err := r.a.PostMessageStream(ctx, User{ID: 7}, s.ID, "second", nil); !errors.Is(err, ErrTaskRunning) {
 			t.Errorf("second message while running: %v", err)
 		}
-		if _, err := r.a.PostMessageStream(ctx, User{ID: 8}, s.ID, "stolen"); !errors.Is(err, ErrNotFound) {
+		if _, err := r.a.PostMessageStream(ctx, User{ID: 8}, s.ID, "stolen", nil); !errors.Is(err, ErrNotFound) {
 			t.Errorf("another user: %v", err)
 		}
-		if _, err := r.a.PostMessageStream(ctx, User{ID: 7}, s.ID, "  "); !errors.Is(err, ErrInvalid) {
+		if _, err := r.a.PostMessageStream(ctx, User{ID: 7}, s.ID, "  ", nil); !errors.Is(err, ErrInvalid) {
 			t.Errorf("empty message: %v", err)
 		}
 		cancel()

@@ -28,9 +28,9 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { ApiError, errorMessage, request } from "../../api";
-import type { FlowTrace } from "../../api/flowTrace";
+import type { FlowTrace, FlowTraceQuery } from "../../api/flowTrace";
 import {
   applyConfigBatch,
   conflictsOf,
@@ -103,6 +103,8 @@ import { emptyLayout, layoutReducer, pendingWrite } from "./layoutState";
 import { buildView, kindLabel, neighbour, type FlowRFNode } from "./model";
 import { NodePanel } from "./NodePanel";
 import { TracePanel } from "./TracePanel";
+import { FlowAIPanel } from "./ai/FlowAIPanel";
+import { useFlowAI } from "./ai/useFlowAI";
 import {
   applyHighlight,
   highlightOf,
@@ -472,29 +474,48 @@ function CanvasView({
       : [];
 
   // --- the drawn nodes ------------------------------------------------------
+  // AI on the canvas (P6): a proposal's batch drawn over the graph.
+  const [searchParams] = useSearchParams();
+  const marks = useMemo(() => draftMarks(draft), [draft]);
+  const ai = useFlowAI({
+    shown,
+    positions: layout.positions,
+    marks,
+    proposalId: searchParams.get("proposal"),
+  });
   const baseView = useMemo(
     () =>
       buildView({
-        graph: shown,
+        graph: ai.graph,
         catalogue,
-        positions: layout.positions,
+        positions: ai.positions,
         selected,
         edit: canEdit,
-        marks: draftMarks(draft),
+        marks: ai.marks,
         errors: nodeErrors,
       }),
-    [shown, catalogue, layout.positions, selected, canEdit, draft, nodeErrors],
+    [
+      ai.graph,
+      catalogue,
+      ai.positions,
+      selected,
+      canEdit,
+      ai.marks,
+      nodeErrors,
+    ],
   );
   // Trace mode (P5): the path of a traced call is marked on the view.
   const [tracing, setTracing] = useState(false);
   const [trace, setTrace] = useState<FlowTrace | null>(null);
+  const [traceQuery, setTraceQuery] = useState<FlowTraceQuery | null>(null);
   const highlight = useMemo(
     () => (trace ? highlightOf(trace, graph) : null),
     [trace, graph],
   );
+  const { mark } = ai;
   const view = useMemo(
-    () => applyHighlight(baseView, highlight),
-    [baseView, highlight],
+    () => mark(applyHighlight(baseView, highlight)),
+    [mark, baseView, highlight],
   );
   const traceOffCanvas = highlight
     ? missingFromCanvas(highlight, (id) => layout.positions[id] !== undefined)
@@ -502,7 +523,8 @@ function CanvasView({
   const closeTrace = useCallback(() => {
     setTracing(false);
     setTrace(null);
-  }, [setTrace]);
+    setTraceQuery(null);
+  }, [setTrace, setTraceQuery]);
   const focusTraced = useCallback(
     (id: string) => {
       if (rf.getNode(id)) {
@@ -1016,6 +1038,15 @@ function CanvasView({
             >
               Trace a call
             </Button>
+            <Button
+              variant={ai.open ? "primary" : "secondary"}
+              size="sm"
+              icon="sparkles"
+              aria-pressed={ai.open}
+              onClick={() => ai.setOpen(!ai.open)}
+            >
+              Ask AI
+            </Button>
             {canEdit && (
               <>
                 <Select
@@ -1283,16 +1314,58 @@ function CanvasView({
             )}
           </div>
         </PortStylesContext.Provider>
-        {tracing && (
+        {ai.open && (
+          <FlowAIPanel
+            canvasId={canvas.id}
+            graph={graph}
+            selected={selected}
+            trace={trace ? traceQuery : null}
+            preview={ai.preview}
+            onPreview={ai.setPreview}
+            onApplied={async (p) => {
+              const placed = await ai.applied(graph);
+              acceptGraph(placed.graph);
+              if (placed.nodes.length > 0) {
+                dispatch({ type: "place", nodes: placed.nodes });
+              }
+              setNote(`Applied the AI proposal "${p.title}".`);
+            }}
+            aiApplied={ai.aiApplied}
+            onAIApplied={async (p) => {
+              const placed = await ai.applied(graph, p);
+              acceptGraph(placed.graph);
+              if (placed.nodes.length > 0) {
+                dispatch({ type: "place", nodes: placed.nodes });
+              }
+              ai.showAIApplied(
+                p,
+                placed.nodes.map((n) => n.node),
+              );
+              setNote(`The assistant applied "${p.title}" for you.`);
+            }}
+            onAIAppliedClear={(reverted) => {
+              ai.clearAIApplied();
+              if (reverted) {
+                setNote("Reverted what the assistant applied.");
+                void reload().catch(() => undefined);
+              }
+            }}
+            onClose={() => ai.setOpen(false)}
+          />
+        )}
+        {tracing && !ai.open && (
           <TracePanel
             graph={graph}
             trace={trace}
-            onTrace={setTrace}
+            onTrace={(t, q) => {
+              setTrace(t);
+              setTraceQuery(t && q ? q : null);
+            }}
             onFocusNode={focusTraced}
             onClose={closeTrace}
           />
         )}
-        {selectedNode && !tracing && (
+        {selectedNode && !tracing && !ai.open && (
           <NodePanel
             node={selectedNode}
             graph={shown}

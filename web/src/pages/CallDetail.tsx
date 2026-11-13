@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
-import { errorMessage, listTrunks } from "../api";
+import { errorMessage, listTrunks, type RtcpxrQuality } from "../api";
 import { getCallRecord, type CallRecord } from "../api/calls";
 import {
   Alert,
@@ -32,6 +32,23 @@ const PAGE_RESULT: Record<string, string> = {
   dnd: "Do not disturb",
   no_answer: "No answer",
   no_registration: "Not registered",
+};
+
+const FOLLOW_ME_KIND: Record<string, string> = {
+  own: "Own phones",
+  extension: "Extension",
+  ring_group: "Ring group",
+  external: "External",
+};
+
+const FOLLOW_ME_RESULT: Record<string, string> = {
+  answered: "Answered",
+  declined: "Did not press 1",
+  busy: "Busy",
+  no_answer: "No answer",
+  failed: "Failed",
+  skipped: "Skipped",
+  cancelled: "Stopped, answered elsewhere",
 };
 
 /** One call's record: timeline, the CDR fields, its routing trace and, if it failed, why. */
@@ -179,6 +196,38 @@ export function timeline(cdr: CallRecord): Moment[] {
   ];
 }
 
+/** Which legs of the call carried SRTP, for the detail card. */
+function srtpText(srtp: CallRecord["srtp"]): string {
+  switch (srtp) {
+    case "both":
+      return "SRTP on both legs";
+    case "caller":
+      return "SRTP on the caller leg only";
+    case "callee":
+      return "SRTP on the callee leg only";
+    default:
+      return "None (plain RTP)";
+  }
+}
+
+/** How the call's SRTP keys were agreed, and whether ICE-lite ran. */
+function keyExText(cdr: CallRecord): string {
+  const kex = (() => {
+    switch (cdr.srtpKeyEx) {
+      case "sdes":
+        return "SDES (keys in the SDP)";
+      case "dtls":
+        return "DTLS-SRTP";
+      case "mixed":
+        return "SDES on one leg, DTLS-SRTP on the other";
+      default:
+        return "";
+    }
+  })();
+  if (kex === "" && !cdr.ice) return "—";
+  return [kex, cdr.ice ? "ICE-lite" : ""].filter(Boolean).join(" · ");
+}
+
 /** Loss percent and jitter of an anchored call, or "not measured". */
 function qualityText(cdr: CallRecord): string {
   const { rtpPackets: packets, rtpLost: lost, rtpJitterMs: jitter } = cdr;
@@ -186,6 +235,17 @@ function qualityText(cdr: CallRecord): string {
   const total = packets + lost;
   const loss = total > 0 ? (lost / total) * 100 : 0;
   return `${loss.toFixed(2)}% loss · ${jitter.toFixed(1)} ms jitter`;
+}
+
+/** One phone's reported figures, e.g. "ext 200: MOS 4.1 · 0.50% loss · 6.0 ms jitter". */
+function phoneQualityText(q: RtcpxrQuality): string {
+  const parts: string[] = [];
+  if (q.mosLq != null) parts.push(`MOS ${q.mosLq.toFixed(1)}`);
+  if (q.lossPct != null) parts.push(`${q.lossPct.toFixed(2)}% loss`);
+  if (q.jitterMs != null) parts.push(`${q.jitterMs.toFixed(1)} ms jitter`);
+  if (q.roundTripMs != null)
+    parts.push(`${q.roundTripMs.toFixed(0)} ms round trip`);
+  return `${q.extension || q.device}: ${parts.join(" · ") || "no figures"}`;
 }
 
 function Detail({ cdr }: { cdr: CallRecord }) {
@@ -228,9 +288,15 @@ function Detail({ cdr }: { cdr: CallRecord }) {
     { label: "Billable", value: formatDuration(cdr.billableMs) },
     { label: "SIP node", value: cdr.sipNode || "—", mono: true },
     { label: "Media", value: cdr.mediaMode || "—" },
+    { label: "Media encryption", value: srtpText(cdr.srtp) },
+    { label: "Key exchange", value: keyExText(cdr) },
     { label: "Caller codec", value: cdr.callerCodec || "—", mono: true },
     { label: "Callee codec", value: cdr.calleeCodec || "—", mono: true },
     { label: "Call quality", value: qualityText(cdr) },
+    ...(cdr.rtcpxr ?? []).map((q) => ({
+      label: `Phone report (${q.final ? "call end" : "interval"})`,
+      value: phoneQualityText(q),
+    })),
     { label: "SIP Call-ID", value: cdr.sipCallId || "—", mono: true },
     { label: "Correlation ID", value: cdr.correlationId || "—", mono: true },
   ];
@@ -279,6 +345,21 @@ function Detail({ cdr }: { cdr: CallRecord }) {
                   value: (
                     <Badge tone={l.result === "answered" ? "good" : "neutral"}>
                       {PAGE_RESULT[l.result] ?? l.result}
+                    </Badge>
+                  ),
+                }))}
+              />
+            </div>
+          )}
+          {cdr.followMeLegs && cdr.followMeLegs.length > 0 && (
+            <div className="az-card calls-card">
+              <h2 className="calls-card__title">Follow-me</h2>
+              <PropertyList
+                items={cdr.followMeLegs.map((l) => ({
+                  label: `${FOLLOW_ME_KIND[l.kind] ?? l.kind} ${l.extension}${l.trunk ? ` (${l.trunk})` : ""}`,
+                  value: (
+                    <Badge tone={l.result === "answered" ? "good" : "neutral"}>
+                      {FOLLOW_ME_RESULT[l.result] ?? l.result}
                     </Badge>
                   ),
                 }))}

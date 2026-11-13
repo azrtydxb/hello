@@ -61,6 +61,12 @@ var toolLabels = map[string]string{
 	"getAIFinding":          "Reading a finding…",
 	"listAIProposals":       "Reading proposals…",
 	"getAIProposal":         "Reading a proposal…",
+	"getFlowGraph":          "Reading the call flow…",
+	"getFlowCatalogue":      "Reading the call flow node types…",
+	"listFlowCanvases":      "Reading call flow canvases…",
+	"traceFlow":             "Tracing a call…",
+	DescribeTool:            "Reading how to make the change…",
+	ApplyTool:               "Applying the change…",
 }
 
 // ToolLabel is the human label of a tool call for the typing indicator.
@@ -154,9 +160,9 @@ func errorEvent(err error) chat.ErrorEvent {
 // then closes. An error returned here is PostMessage's, before anything
 // started. Cancelling ctx stops the work; a message already generated is
 // still stored, so a dropped stream neither loses nor repeats it.
-func (a *Assistant) PostMessageStream(ctx context.Context, u User, sessionID, content string) (<-chan chat.Event, error) {
+func (a *Assistant) PostMessageStream(ctx context.Context, u User, sessionID, content string, mc *Context) (<-chan chat.Event, error) {
 	k := newSink(ctx)
-	if _, _, err := a.post(ctx, u, sessionID, content, k); err != nil {
+	if _, _, err := a.post(ctx, u, sessionID, content, mc, k); err != nil {
 		k.cancel()
 		return nil, err
 	}

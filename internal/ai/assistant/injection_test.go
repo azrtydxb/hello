@@ -67,7 +67,7 @@ func TestInjection(t *testing.T) {
 			r.store.mu.Lock()
 			r.store.messages = append(r.store.messages, Message{ID: 1, SessionID: s.ID, Role: RoleAssistant, Content: injected})
 			r.store.mu.Unlock()
-			_, task, err := r.a.PostMessage(t.Context(), User{ID: 7}, s.ID, "why do registrations fail?")
+			_, task, err := r.a.PostMessage(t.Context(), User{ID: 7}, s.ID, "why do registrations fail?", nil)
 			if err != nil {
 				t.Fatal(err)
 			}

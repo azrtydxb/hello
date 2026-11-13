@@ -22,8 +22,10 @@ import (
 
 // assistantTools is the fixed list of read operations the model may call
 // (spec S-6). Each must be a GET with x-hello-scope read that MCP exposes;
-// New refuses a document where one is not. No write operation is ever a
-// tool: a change is a proposal a human applies.
+// New refuses a document where one is not. No write operation is in it: a
+// change is a proposal a human applies, except that a question asked with
+// "Let AI apply changes" on also gets the one write tool, ApplyTool
+// (apply.go).
 var assistantTools = []string{
 	"listExtensions", "getExtension",
 	"listDevices", "getDevice",
@@ -42,6 +44,10 @@ var assistantTools = []string{
 	"listVoicemailBoxes", "listVoicemailMessages",
 	"listAIFindings", "getAIFinding",
 	"listAIProposals", "getAIProposal",
+	// The call flow (spec flow-canvas S-17): the graph, its node kinds,
+	// the canvases and a traced call, for "what happens when ..." and
+	// "why did this call go there".
+	"getFlowGraph", "getFlowCatalogue", "listFlowCanvases", "traceFlow",
 }
 
 // MaxResultBytes caps one tool result's indented JSON (spec S-6).
@@ -160,14 +166,21 @@ type toolset struct {
 	mu    sync.Mutex
 	calls []ToolCall
 	tries int
+	// applied is the proposal the write tool last applied (or tried to)
+	// for this message; appliedDone is set once one was applied.
+	applied     string
+	appliedDone bool
 }
 
 // newToolset returns the read tools for one message, replayed as ident.
 func (a *Assistant) newToolset(ident auth.Agent, abort context.CancelCauseFunc) (*toolset, []aisdk.Tool) {
 	ts := &toolset{api: a.cfg.API, ident: ident, dataBlock: a.cfg.DataBlock, metric: a.toolCalls, hook: a.cfg.ToolCalls, abort: abort}
-	tools := make([]aisdk.Tool, len(a.tools))
-	for i, d := range a.tools {
-		tools[i] = &readTool{def: d, ts: ts}
+	tools := make([]aisdk.Tool, 0, len(a.tools)+1)
+	for _, d := range a.tools {
+		tools = append(tools, &readTool{def: d, ts: ts})
+	}
+	if a.describe != nil {
+		tools = append(tools, &describeTool{ops: a.describe, ts: ts})
 	}
 	return ts, tools
 }
@@ -436,3 +449,18 @@ func largestArray(obj map[string]any) (string, []any) {
 
 // ToolNames is the assistant's tool list, in order, for docs/ai-agent.md.
 func ToolNames() []string { return append([]string(nil), assistantTools...) }
+
+// appliedProposal is the proposal the write tool applied (or tried to) for
+// this message, or "".
+func (ts *toolset) appliedProposal() string {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return ts.applied
+}
+
+// didApply reports whether the write tool applied a batch for this message.
+func (ts *toolset) didApply() bool {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return ts.appliedDone
+}

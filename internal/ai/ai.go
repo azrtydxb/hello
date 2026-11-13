@@ -105,7 +105,8 @@ type Call[T any] struct {
 	Data any
 	// Prompt is the user turn, trusted text only.
 	Prompt string
-	// Tools are the read-only tools the model may call, at most MaxSteps
+	// Tools are the tools the model may call (reads; the assistant adds its
+	// one write tool only when the user allowed it), at most MaxSteps
 	// steps (default HELLO_AI_MAX_STEPS) in all.
 	// A call with tools runs a tool phase (tools, no structured output),
 	// then an answer phase (structured output, no tools); see Generate.

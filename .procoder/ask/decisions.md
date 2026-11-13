@@ -1291,6 +1291,170 @@ column ("a" when both legs agree, "a → b" when they differ).
   `haNewCall` restores them, so a taken-over door call keeps the trunk ban and CDR
   kind door (`TestDoorCallerSurvivesTakeover`).
 
+## Door-open DTMF `*50` (2026-11-09) — phone-feature-parity item 14 (S-47)
+
+- Migration `00078_door_open` (after #225's 00053; the number is a gap-numbered
+  slot like the others, goose does not need it contiguous): table `door_open`
+  (`extension_id` primary key, cascade; `code_enc` BYTEA sealed under
+  HELLO_SECRET_KEY with AAD `door-open:<extension id>`; `hangup_after_open`).
+  A separate table, not columns on `extensions`, so none of the extension
+  queries scan or return the code. A station that becomes a user loses its row.
+- The code rides the configuration snapshot (opened at load, unexported and
+  redacting its `String`), so the SIP path reads no PostgreSQL. A code that does
+  not open is logged by extension number only and treated as no code.
+- Settings API: `GET` (viewer) says `codeSet` and `hangupAfterOpen`; `PUT` is
+  admin (scope `admin`, role admin). It could not use the `secrets` scope: that
+  list is pinned by spec S-5 and `TestRoutesTable`. The code is write-only, an
+  empty string clears it, a user extension answers `409`. `GET` is an MCP tool
+  (`getDoorOpen`, taught in hello-setup); `PUT` and the open request are
+  excluded from MCP (a code must be set in the console; opening a physical door
+  is a user action).
+- `*50` is matched as the end of the call's digit buffer, in `dispatchDigit`
+  after the feature codes, so a stale digit before it does not hide it; a
+  feature code row named `*50` wins. It acts only on a connected call with a door
+  station, only for keys from the far side of the station (the station's own
+  keys never open its door), and otherwise does nothing: the keys were already
+  relayed as ordinary DTMF.
+- The code goes out through `Relay.SendDTMF`: 5 packets of 20 ms per digit and 3
+  end packets, a 60 ms gap between digits, as its own RTP stream (fresh SSRC)
+  like `PlayTo`, using the leg's negotiated telephone-event type. Without one the
+  trace says so and nothing is sent. Door calls are always anchored today (every
+  call is), which `*50` needs. Open: whether GDS/2N/Akuvox accept events on a
+  different SSRC than the call's audio; hardware check.
+- The user's own `*`, `5`, `0` events still reach the door before the code
+  (the relay forwards DTMF); suppressing them would need the relay to hold back
+  events, which is not done.
+- Only one open at a time per call (`doorOpening`); a second press while the
+  first is going out is refused with a trace line.
+- API open: `POST /api/v1/calls/{id}/door-open` (user role, write scope; added
+  to the self-service allowlist of `TestRoutesTable`, the spec fixes the path).
+  The API checks the caller's extension is the one that answered (live call
+  `callee`), or placed the call to a station, queues a park-command
+  `door_open` to the call's node and waits for the reply (the existing
+  Valkey park command channel); the node checks again against the live dialog.
+  `403` has error code `not_your_call`, `404` no such call, `409` not an answered
+  door call, no code, or media unusable, `502` node error, `504` no node
+  answered. `GET /api/v1/me/door-calls` lists the user's own for the console;
+  live calls gained `door` (the station's number).
+- Hang-up-after-open: `HELLO_DOOR_HANGUP_SECONDS` (default 3, positive) after
+  the code finished sending, both legs get BYE (`endBoth`, CDR side system).
+- Not done: provisioning an "Open door" key on the phones (Yealink DSS DTMF,
+  Grandstream WP DialDTMF softkey, Poly/Snom/Fanvil soft keys). The spec marks
+  each **verify**, and no vendor key was confirmed from the templates in this
+  change; it stays with the hardware pass.
+
+## Door video preview (2026-11-10) — phone-feature-parity item 17 (S-49)
+
+- Three parts, all optional like the spec says: video in the call, a camera
+  picture in the console, and the Grandstream WP door-system entries.
+- Migration `00086_door_cameras` (after item 14's 00085): `door_cameras` keyed by the station, kind mjpeg or snapshot, URL, user
+  name, password sealed with AAD `door-camera:<extension id>`.
+- **Video in the call.** Only when a door station is a party and the caller's
+  SDP offers H.264 over plain RTP/AVP(F). The anchor adds a `VideoRelay`: a
+  second RTP `Relay` on an even/odd port pair per leg plus an RTCP bridge on the
+  odd ports, so a phone's PLI/FIR reaches the door. RTCP is accepted only from
+  the sources the RTP leg accepts. Each SDP gets one video m-line on Hello's
+  ports with the H.264 payload types, fmtp and feedback lines of the other side,
+  and an explicit `a=rtcp`; the callee gets the caller's section, the caller
+  the callee's. A callee with no video gets none and the door's offer is
+  answered with port 0 (RFC 3264). A call with no door station is untouched
+  (video beyond S-49 is out of scope, as the spec says). Re-INVITEs on an
+  anchored call keep the section on both sides; hold does not touch the video
+  direction. Not carried: takeover (HA), transfer, re-anchor, SRTP, VP8. A phone
+  that sends RTCP on the RTP port (rtcp-mux) is not supported; the section does
+  not offer it.
+- **Camera in the console.** Hello fetches the picture itself and the browser
+  gets it from `GET /extensions/{id}/camera/view` (viewer), so neither the
+  browser nor a user needs a route to the camera or its credentials. Settings
+  are admin (`PUT`, `DELETE`); `GET` (viewer) never returns the password. MJPEG
+  is passed through (10 minutes at most, eight pictures at once per node, `429`
+  above), a snapshot is fetched per request (10 s, 4 MiB). The console polls a
+  snapshot every 2 s. `rtsp://` is refused with a field error: a browser cannot
+  show it and transcoding H.264 to MJPEG is out of scope. Basic authentication
+  only (no digest). No redirects are followed.
+- SSRF: the client is `safehttp.NewTransport`, so loopback, link-local and
+  metadata addresses are never reachable and private networks only when listed
+  in the new `HELLO_DOOR_CAMERA_ALLOW` (hello-control, CIDRs, validated by
+  `safehttp.ParseAllow`; the error names the key and not the value). Empty by
+  default: a camera on a LAN needs its network listed. kw's values are not set
+  here (deploy/kuvryn-sync is out of scope); the parent task must add the camera
+  network there.
+- The phone's own copy of the stream is the first part (SDP video); no camera
+  URL is provisioned to phones, and there is no phone-side RTSP.
+- **WP door systems.** The WP8x6 (`wp8x6_config_1.0.3.39`, Settings/External
+  Service/Door System) and WP810/820/822/825 (`wp810_822_825_config_1.0.11.83`,
+  Settings/External Service) take ten entries of five P-values from P32000: type
+  (0 GDS), account (0), system identification (name), system number (the
+  station's number), access password. Hello writes the first four per station
+  that can call the phone's extension (target, listed group, or a Door group it
+  belongs to). It never writes the access password: the sealed door-open code
+  stays on the server and `*50` (item 14) opens the door. The WP856 uses
+  P32001 for another meaning and gets none; other vendors get none. The key
+  meaning is from the official templates; what a WP does with an entry that has
+  no access password is a bench check.
+- Open-door softkeys (item 14's "Open door" key) are not provisioned: the
+  WP8x6 key P-values for DialDTMF/GDS Opendoor are listed in the templates but
+  need a key-placement design and a WP to try; left for the bench.
+
+## Doorbell webhook (2026-11-09) — phone-feature-parity item 16 (S-48)
+
+- Independent of #222 (outbound event webhooks: signing, retries, dead
+  letters). S-48 is the inverse: an inbound, signed trigger. Nothing is shared
+  with `internal/webhook`; the routes live under `/api/v1/door/webhooks` and the
+  table is `door_webhooks`, so the two cannot collide.
+- Migration `00078_door_webhooks`. #225 owns 00053 and the item-14 PR 00054; the
+  next free numbers of the open PRs are 00061 and 00062 (00055 to 00060 and 00063
+  to 00066 are taken), so 00061 is this one and 00062 is item 17. Columns: name,
+  sealed secret (AAD `door-webhook:<id>`), action, ring group (null: every Door
+  group), paging group, announcement (set null when it is deleted: the built-in
+  chime), rate limit, enabled, last triggered. Check constraints keep a ring
+  action from naming a paging group and a chime from missing one.
+- Management is admin (scope admin; read for list and get, viewer). Not the
+  `secrets` scope, which spec S-5 and `TestRoutesTable` pin to a fixed list.
+  Create and rotate return the secret once; no other response has it. All
+  management routes are excluded from MCP (a signing secret is a console
+  matter), so no tool needs teaching in `skills/`.
+- Trigger route: the only new public route (added to the public lists of
+  `TestRoutesTable` and `TestVersionAndOpenAPI`). Order of checks: both headers
+  present, timestamp an integer within 300 s, body at most 1 KiB (`413`), then
+  the signature, computed for an unknown id against a random per-process decoy
+  secret so an unknown, a disabled and a wrong-secret request cost the same and
+  give the same `401`. Only after the signature: body must be a JSON object
+  (`400`), Valkey present (`503`), rate limit (`429` with `Retry-After`), duplicate
+  window, enqueue. A disabled webhook is `401`, not `403`, for the same reason.
+- Rate limit: a fixed one-minute window per webhook in Valkey, counted by a Lua
+  script that sets the expiry in the same step as the first count (a crash
+  between INCR and EXPIRE cannot lock a webhook out); default 11, 1 to 600 per
+  webhook. It counts every signed request, coalesced ones included.
+- Coalescing: a `SET NX PX` of 10 s per webhook. A second signed trigger inside
+  it answers `202 {"status":"coalesced"}` and queues nothing. Chosen over
+  de-duplicating on the label because a doorbell button has no idempotency key.
+- Origination reuses the paging-group test path instead of a synthetic `call`:
+  hello-control queues a `DoorTrigger` (Valkey list, 60 s TTL), any READY
+  hello-sip node takes it and sends INVITEs to the registered contacts of the
+  members (like `testPage`), with a sendonly offer from a media fan-out. The
+  ring carries the doorbell Alert-Info from the ring tag table and the webhook's
+  name as caller name (From `door-webhook@<domain>`); the first answer wins and
+  the rest are CANCELled; the winner hears the chime (announcement, or a built-in
+  two-note chime), is hung up, and the call also ends after 30 s.
+- Group strategy is not honoured by the webhook: every member rings at once (the
+  strategies belong to calls that have a caller to hold). A member in DND (the
+  group's ignore-DND aside), in a call, or a door station is skipped and the
+  trace says so; the longest ring timeout of the groups bounds the ringing.
+- `chime_page` uses the page auto-answer headers and PAI of a server page and
+  plays to every member that answers.
+- CDR: kind door, source the webhook name, destination the group (or code),
+  ring tag doorbell for a ring, status 200 when somebody answered, 480 when
+  nobody could be reached. Audit rows are `webhook:<name>` `trigger` or
+  `coalesce`, without the body or label. The label (cut to 64 printable
+  characters) appears only in the call trace.
+- Console: a Door page under Call flow (list, create, edit, new secret, delete;
+  viewers see no write control), the secret in a notice that goes away for good
+  when dismissed.
+- Not done: the trigger is acknowledged when queued, not when someone answered,
+  so the doorbell cannot tell. Trigger results could be polled later if a
+  doorbell needs it.
+
 ## Ring map provisioning, phone-feature-parity S-42 and S-44 (2026-10-27)
 
 - Storage: `ring_map` (migration 00051) holds explicit choices only, keyed by
@@ -1875,6 +2039,911 @@ Implementation notes (template route, no migration):
 - Start with wave 0 and 1 only, then review
 - Item 27 provisioning hardening: include turning TR-069 off, or leave TR-069 alone
 
+## SRTP SDES on the anchor (phone-feature-parity item 24, S-15) (2026-11-09)
+
+Built in `internal/media/srtp.go` (keys, SDES, protect/unprotect on the relay
+legs) and `internal/sip/srtp.go` (policy and negotiation). Choices:
+
+- **Library: `github.com/pion/srtp/v3` v3.0.10.** Maintained, pure Go (keeps
+  `CGO_ENABLED=0`), same Pion family as the decided anchor modules. It brings
+  `pion/rtp`, `pion/rtcp`, `pion/transport` and `pion/logging` as indirect
+  modules; the spec's "one new module" limit was amended for S-16 and this is
+  the same family. Measured on a laptop: protect plus unprotect of a 160-byte
+  packet is about 0.75 µs, far under the 50 µs p99 bound (`TestSRTPPacketP99`).
+- **Per-leg keys.** A relay leg has a local key (Hello sends with it, written
+  in the SDP for that leg) and a remote key (the far end sends with it). The
+  relay decrypts with the receiving leg's remote key, rewrites as plain RTP,
+  and encrypts with the sending leg's local key, so the legs never share a key
+  and the recording tap, DTMF and announcements see clear audio. Every write
+  to a leg (pump, `PlayTo`, MOH) goes through one `write` that protects when
+  the leg is encrypted and drops, never sends in clear, if it cannot.
+- **Offer shape follows the policy.** `optional` offers `RTP/AVP` with the
+  crypto lines (a phone without SRTP ignores them and answers plain, which is
+  what Grandstream "enabled but not forced" does); `required` offers `RTP/SAVP`.
+  An answer mirrors the offer's profile, and later SDPs for a leg keep the
+  profile it negotiated (a transport profile must not change inside a dialog).
+  The suites offered are `AES_CM_128_HMAC_SHA1_80` then `_32`; `AES_256_CM_..._80`
+  is accepted when asked for, never offered (the spec calls it optional; no
+  phone in scope needs it). Lines with an MKI or unsupported session
+  parameters are skipped. A lifetime is accepted and ignored.
+- **TLS only.** A leg is eligible when its policy is not `off` and its signalling
+  is TLS: the caller's `clientTransport`, a callee binding's `bindingOnTLS`
+  (the decision "SIP over TLS terminates at the edge"). Trunk legs and external
+  URIs are UDP, so they are never eligible: a trunk's `optional` behaves as
+  `off`, and `required` refuses calls over it (the trunk policy is stored so it
+  takes effect once trunk TLS exists). It does not depend on SIP TCP (#258).
+- **Policy storage.** Migration `00052_srtp_policy.sql`: `devices.srtp`
+  (default `optional`), `trunks.srtp` (default `off`), `cdrs.srtp` (`none`,
+  `caller`, `callee`, `both`). The device default is optional because the spec
+  provisions WP phones optional once TLS is deployed, and nothing is offered
+  off TLS anyway.
+- **Refusals (488).** The caller gate runs before routing: a `required` caller
+  not on TLS or without usable crypto, or an `RTP/SAVP`-only offer on a leg
+  Hello cannot encrypt (UDP, or policy off). A `required` callee is not rung
+  when it is not on TLS, and a `required` callee whose answer lacks crypto is
+  BYEd and the caller gets 488. `optional` falls back to plain RTP per leg and
+  counts `hello_srtp_negotiations_total{result="plain"}`. The previous
+  behaviour for `RTP/SAVP` offers (not parsed, so the call went direct with the
+  crypto passed through) is kept only where a call is direct, which is only the
+  anchor-failure fallback now that every call anchors.
+- **No downgrade after a re-INVITE or a takeover.** Hold, resume and refresh
+  answers and offers repeat the leg's key (`keepSecurity`). Replicated dialog
+  state carries the leg's mode (`DialogLeg.SRTP`: `savp` or `avp`) and the
+  far end's SDP with its `a=crypto` lines removed, so no key is stored in
+  Valkey; a taker offers fresh keys in the same profile, and a leg that does not
+  answer with crypto fails (one-sided close) instead of continuing in clear.
+- **Handed-over legs restart plain.** A transfer target, a retrieved parked
+  call, a pickup and the conference loopback take over a relay leg from
+  another endpoint, so the leg's keys are reset (`ResetCrypto`) and that party
+  is offered plain RTP. Negotiating crypto with those parties is not built.
+  Voicemail, paging and the conference mixer (their own media objects, not
+  relay legs) answer plain RTP too. A phone forced to SRTP cannot use them;
+  recorded here as a known gap, not a hidden one.
+- **Provisioning.** Only Grandstream is written: `P183` for a phone on TLS
+  (`0` off, `1` optional, `2` required), plus `P60078 = 0` (SDES) where the
+  template has it. Checked against Grandstream's own configuration templates
+  (config-template-10212026.zip, 2026-11-09 review): `P183` "SRTP Mode" with
+  `0` disabled, `1` enabled but not forced and `2` enabled and forced is in
+  `wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`,
+  `wp820_config_1.0.7.90` and `wp856_config_1.0.3.16` (confirmed; also
+  `ht813_config_1.0.19.6`). The WP8x6 and WP810/822/825 add `3` Optional and
+  `4` Follow SIP Transport; the WP820 has `3` Follow SIP transport and no
+  Optional; the WP856 stops at `2`. Hello writes only `0`, `1` and `2`, so the
+  mapping holds on every WP. Which of `1` ("enabled but not forced") and `3`
+  ("Optional") is the mode that offers `a=crypto` on an RTP/AVP line is not
+  stated by a template, so the choice of `1` stays a hardware check. Newly
+  found: `P60078` "SRTP Key Exchange" (`0` SDES, `1` DTLS, default 0) in the
+  WP8x6 and WP856 templates, written `0` next to `P183`; the WP810/822/825 and
+  WP820 templates have no such key. `P2383` SRTP Key Length (default `0`, both
+  AES-128 and AES-256) and `P2363` Crypto Life Time stay at their defaults:
+  Hello offers AES_CM_128, accepts AES-256 and ignores a lifetime. Account 2 is
+  `P443` and account 3 `P543` (WP856: `P643`, `P1743`, `P1843`), written with
+  the lines of item 21. No vendor documentation file for Yealink, Poly, Fanvil
+  and Snom is in the repository, so they write nothing until their key is
+  confirmed (the Snom TLS precedent).
+- **Metrics and CDR.** `hello_srtp_legs` (gauge of encrypted legs, moved with
+  the relay across a transfer), `hello_srtp_negotiations_total{result}`
+  (`srtp`, `plain`, `refused`); the CDR `srtp` column, the CallDetail card and
+  the CSV export. A packet that fails authentication is counted per direction
+  in the relay stats (`AuthFailed`) and never latches the leg.
+- **Keys are never logged.** `media.Crypto` redacts itself under every fmt verb
+  and in slog; traces name the leg and suite only (`TestSRTPKeysNeverFormatted`,
+  and the call test checks the CDR trace).
+
+## SRTP SDES: the known gaps of #266 closed (2026-11-09)
+
+Follow-up to "SRTP SDES on the anchor". Choices:
+
+- **One SRTP state type for every media object.** `media.Secure` (SDES
+  negotiation plus the SRTP contexts, with `Protect`/`Unprotect`) is what each
+  relay leg already was; the relay leg now embeds it and a voicemail session
+  (`Anchor.AnswerSecure`), a conference participant (`NewPartySecure`) and a
+  page (`Fanout.CallerSecure`, one `Secure` per member via `AddSecureTarget`)
+  carry their own. Same keys-per-leg rule, same redaction, same drop of anything
+  that fails authentication, no second implementation to keep in step.
+- **Voicemail, conference and paging use the caller leg's policy**
+  (`call.soloPolicy`: allowed = policy not off and the leg is TLS, required =
+  policy required). The answer mirrors the offer's profile. A caller that
+  requires SRTP and cannot get it is refused with 488, never answered in clear.
+  A conference participant has its own SRTP session, so the mixer encrypts the
+  mix per participant. A page encrypts per member: each member's contact is
+  offered its own keys under its device's policy and transport (RTP/SAVP when it
+  requires them), a required member that is not on TLS is skipped
+  (`srtp_required`), one that answers without crypto is hung up. A page's
+  multicast copy stays plain RTP: one stream to a group address cannot carry
+  per-listener keys; multicast paging is a deliberate plain-RTP feature.
+  The test page (`pagetest.go`) follows the same member rule.
+- **A parked call sent to voicemail keeps its encryption**: the voicemail
+  session is offered keys in the profile the party's relay leg had, and the
+  call ends if the party does not answer with crypto.
+- **HA for solo calls.** The replicated mode (`avp`/`savp`) now covers
+  voicemail and conference calls (`call.soloSec`); the taker offers fresh keys
+  and a caller that does not answer with crypto ends the call (zombie count)
+  instead of continuing in clear. Hello's own key (the `SDP` of the leg, which
+  now carries one) is stripped before replication, as the far end's was.
+- **Hand-over legs negotiate again** instead of restarting plain. A transfer
+  target (blind and attended), a retrieved park, a pickup and the parker's
+  device on a park return are new endpoints on a relay leg: the previous
+  endpoint's keys are dropped (`ResetCrypto`) and the new party is offered, or
+  answered with, keys under its own policy and transport (`cryptoOfferOn`,
+  `cryptoAnswerOn`, `learnCryptoOn`). A party whose policy is `required` and
+  that cannot be encrypted is refused (488, or the call ends); an `optional`
+  party that does not answer with crypto is plain RTP, counted as `plain` and
+  traced. A pickup now also answers the ringing caller's SDES offer (the caller
+  had only been given a key when the leg was already negotiated).
+- **Roaming is not a hand-over.** `relearnMedia` (the same phone at a new media
+  address after a re-INVITE) called the hand-over helper and so dropped the
+  leg's keys, silently continuing in clear. It now uses `moveLeg`, which
+  re-aims the leg and keeps the SRTP state.
+- **Across nodes, retrieve and pickup are plain or refused.** The retriever's
+  offer travels to the holding node through the shared store, and a key must
+  not be written there (the replication rule), so its `a=crypto` lines are
+  dropped: an `optional` phone is plain RTP (counted, traced), a phone that
+  requires SRTP or offers `RTP/SAVP` only is refused with 488 before it takes
+  the slot. Same-node retrieve and pickup negotiate fully.
+- **A trunk cannot be set to `required`** (gap 3). The trunks-routing spec lists
+  SIP over TLS for trunks as a later phase, so there is no trunk TLS transport
+  to require. Rather than build one inside an SRTP change, the state is made
+  impossible: `POST`/`PATCH /api/v1/trunks` answer 422 on `srtp` when it is set
+  to `required` (only the value being set is checked, so a trunk stored as
+  `required` earlier can still be edited and fixed), the Trunks page offers
+  `off` and `optional` only and says why, a stored `required` is flagged on its
+  card and refuses to save as it is, and the OpenAPI text and the skills say
+  so. No migration: existing rows are not rewritten, since turning `required`
+  into `off` behind the operator's back would be a silent downgrade. Calls over
+  such a trunk keep failing with 488, and the CDR trace says why. When trunk TLS
+  exists this check becomes "required needs a TLS trunk".
+- **Not changed.** An in-dialog re-INVITE that rekeys a voicemail or conference
+  caller is answered with the call's existing key (a phone that rekeys on its
+  own re-INVITE is followed on relay legs only). AES-256 is still not offered.
+
+## DTLS-SRTP and ICE-lite on the anchor (phone-feature-parity item 25, S-16) (2026-11-09)
+
+Spec: `phone-feature-parity.md` S-16, with `clients-webrtc-mobile-video.md` S-4
+(same code, delivered once). Stacked on the SRTP gaps PR (#274). Choices:
+
+- **Modules.** `pion/dtls/v3` v3.1.5 (the handshake, over a packet conn fed from
+  the leg's receive loop) and `pion/stun/v3` v3.1.6 (STUN parsing, integrity,
+  fingerprint) join `pion/srtp/v3`; `pion/transport/v4` moves to v4.0.2 as they
+  require. The spec names `pion/ice` too. It is not used here: ICE-lite is a
+  fixed answer (host candidate out, authenticated binding requests answered),
+  and `pion/ice`'s agent gathers, runs its own sockets and wants to own the
+  UDP port, which fights the relay's per-leg sockets. The WebRTC phase decides
+  about `pion/ice` and its UDP mux when it needs one shared port; nothing here
+  blocks it.
+- **One per-leg crypto layer.** The DTLS handshake fills the same `legKeys` SDES
+  fills (`Secure`), so the relay, recording, announcements, voicemail, the
+  conference mixer and the page caller keep one `Protect`/`Unprotect`. A
+  leg's socket now carries STUN, DTLS and RTP, told apart by the first byte
+  (RFC 7983); `Secure.UnprotectFrom` is the one place that does it. A DTLS leg
+  with no keys yet carries nothing in either direction: it can never fall back
+  to plain RTP.
+- **What to offer and accept when.**
+  - Answering mirrors the offer: `UDP/TLS/RTP/SAVP(F)` with a fingerprint gets
+    DTLS-SRTP, `RTP/AVP` or `RTP/SAVP` with `a=crypto` gets SDES (S-15). A
+    fingerprint on an `RTP/AVP` line is ignored, not read as an offer.
+  - Offering follows the device: new `devices.srtp_keyex` (`sdes` default,
+    `dtls`). `off` offers nothing; `optional` and `required` offer the chosen
+    exchange (`required` = SAVP-only semantics as before). A DTLS transport
+    cannot carry a plain fallback inside the same offer, so a device set to
+    `dtls` is for phones that do DTLS-SRTP; there is no dual SDES+DTLS offer
+    (no vendor documentation says phones accept one).
+  - **TLS only, as SDES.** DTLS carries no key in the SDP, but the fingerprint
+    is the only thing that authenticates the peer certificate, so it is trusted
+    only when it arrived over protected signalling (the decision recorded under
+    S-14: SRTP and DTLS-SRTP are offered only where `bindingOnTLS` or the
+    caller's `clientTransport` is TLS). The same `off`/`optional`/`required`
+    policy gates it. A DTLS-only offer on a UDP leg, with policy `off`, without a
+    usable fingerprint, or on a node with `HELLO_MEDIA_DTLS=false` is refused
+    with 488.
+  - A required callee that answers without DTLS ends the call (488), as for
+    SDES. A trunk never carries DTLS (trunk legs are UDP).
+- **Roles.** Hello answers `active` (client) to `actpass` and `passive`, and
+  `passive` to `active`, as RFC 5763 section 5 says (SHOULD be active); when it
+  offers it sends `actpass` and takes the role the answer leaves. A client waits
+  until the peer address is known and, with ICE, authenticated.
+- **Fingerprints.** `sha-1`, `sha-256`, `sha-384`, `sha-512` accepted for the
+  peer (matching any listed one; sha-1 is only compared against a certificate
+  the peer must already hold, a second-preimage problem, and some phone stacks
+  only send it); md5/md2 refused. Hello's own is sha-256. The extended master
+  secret is requested, not required (phones on an old TLS stack lack it, and the
+  certificate is pinned by fingerprint either way); the WebRTC leg should
+  require it. SRTP profiles offered: AEAD_AES_128_GCM, AES128_CM_HMAC_SHA1_80,
+  AES128_CM_HMAC_SHA1_32. GCM is a DTLS-only suite: SDES still offers the two
+  CM suites and refuses a GCM `a=crypto` line.
+- **Certificate.** One self-signed ECDSA P-256 certificate per hello-sip process,
+  made on first use and replaced for new sessions after 30 days (valid 90),
+  never stored or shared (a restart or takeover gives a new fingerprint; the
+  taker's re-INVITE carries it). A session keeps the certificate it started
+  with. The peer sees only the fingerprint.
+- **Failure.** A handshake that times out (8 s), presents a certificate that
+  does not match, or fails is counted, traced and ends the call (BYE to both
+  legs, or an abort during setup). There is nothing to fall back to: the offer
+  or answer was DTLS only. (The spec's "otherwise falls back to RTP" is read as
+  the negotiation: an answer without DTLS from an `optional` device is plain
+  RTP, as with SDES.) Voicemail greetings and announcements wait for the
+  handshake instead of losing their first frames.
+- **ICE-lite.** Answers an offer's ICE credentials with `a=ice-lite`, its own
+  ufrag and pwd per leg, one host candidate (the relay address, component 1) and
+  `a=rtcp-mux`; always controlled (487 to a peer that is also controlled);
+  binding requests are answered only with the right USERNAME and
+  MESSAGE-INTEGRITY, everything else is dropped silently (no oracle). A valid
+  check vouches for its source address (the leg then accepts media from it) and
+  the first or nominated pair becomes where media goes. Remote `a=candidate`
+  lines are parsed and kept, never checked. ICE does not need TLS (it carries
+  no secret) and does not encrypt. Answering ICE has no per-device switch: a
+  phone that sends ICE credentials expects an answer, and `HELLO_MEDIA_ICE=false`
+  turns it off node-wide. The device's `media_ice` only decides whether Hello
+  offers ICE-lite and what provisioning writes. The far end's ICE password is not
+  replicated for HA.
+- **rtcp-mux** is answered on DTLS and ICE legs only (RTCP on the media port is
+  consumed). Plain legs are unchanged: no mux claimed, nothing to drop.
+- **Hosts.** The relay legs, the voicemail/IVR session, the conference
+  participant and the page caller leg all bind their socket to their `Secure`.
+  Page members are offered SDES, never DTLS (a member socket only sends). A
+  retrieve or pickup that crosses nodes with a DTLS leg is refused with 488 (the
+  shared-store command carries neither the retriever's policy nor its
+  transport), like a required SDES one. The replicated leg mode gains `dtls`.
+- **Provisioning (vendor docs, Grandstream WP8x6 config templates).** `P60078`
+  SRTP Key Exchange of account 1 (`0` SDES, `1` DTLS; WP826, WP836, WP856),
+  written with `P183` for a TLS phone; `P95002` Media NAT Traversal of account 1
+  (`1` Auto, the documented default, `4` ICE; WP826 and WP836, the WP856
+  template does not list it), written for a phone of those models whatever its
+  transport. No other vendor's key is confirmed, so none is written.
+- **Migration 00079** (highest on #266 is 00078): `devices.srtp_keyex`,
+  `devices.media_ice`, `cdrs.srtp_keyex` (`none`, `sdes`, `dtls`, `mixed`),
+  `cdrs.ice`.
+- **Metrics.** `hello_dtls_handshakes_total{result}`,
+  `hello_dtls_handshake_seconds`, `hello_ice_checks_total{result}`;
+  `hello_srtp_negotiations_total` gains `dtls` and `dtls_failed`.
+- **What the WebRTC phase gets.** The ICE-lite agent, the DTLS handshake over a
+  demultiplexed socket, the node certificate and fingerprint, the GCM profile,
+  `a=rtcp-mux` and the SDP parsing of `fingerprint`, `setup`, `ice-*`,
+  `candidate` and SAVPF. Still to build there: the multi-section SDP model,
+  BUNDLE, `a=mid`, the shared WebRTC UDP port with a ufrag demultiplexer, the
+  public candidate address, trickle/`end-of-candidates` and the Kamailio
+  WebSocket and TURN pieces. No port or chart change is needed for phones.
+- **Needs hardware (lab item 10, WP822/WP836).** That `P60078 = 1` makes the
+  phone offer `UDP/TLS/RTP/SAVP` with a fingerprint and `a=setup:actpass`, which
+  fingerprint hash and SRTP profile it uses, that it handshakes as client against
+  Hello's `active` answer and as server against Hello's offer, what its answer
+  to Hello's offer says in `a=setup`, and what "enabled but not forced"
+  (`P183 = 1`) does together with DTLS; that `P95002 = 4` makes it send ICE
+  credentials and candidates, accept the lite answer and send its checks to the
+  relay address (Trickle ICE `P95003` on and off); that hold, resume and a
+  re-INVITE keep the session; and that a WP822 ignores the keys it does not have.
+
+## Locations, HELD, Geolocation, callback tag and alarm `*55`, phone-feature-parity S-28 and S-29 (2026-11-09)
+
+- **Already built, left as it was.** The emergency flag on outbound routes and
+  its bypass of the trunk call limit and a down trunk (`acquireSlot`), P8385 and
+  the ring tag constants (`alarm`, `emergency-callback`). The caller's DND and
+  forwarding never act on a call out to a trunk, so (a) needs nothing there. The
+  door extension's target list (S-45) is not on main; the bypass is documented
+  for it to honour when it lands.
+- **Locations** (migration 00052): one table, kind site, floor or room, parent
+  RESTRICT. The civic address is on the site only; a floor's name is `FLR`, a
+  room's `ROOM`; the most specific geo point on the path wins. The user asked for
+  locations assignable to devices and extensions, the spec for a group with an
+  extension override; both are built, plus the phone itself, and the most
+  specific wins: phone, then extension, then phone group. Assignments are one
+  `location_id` column on `phone_groups`, `extensions` and `phones` (RESTRICT),
+  written through `PUT /location-assignments/{kind}/{id}`; a delete names what
+  holds the location. Resolution is the pure `internal/location` package, used by
+  the store, the snapshot and the HELD server.
+- **HELD**: `POST /p/<token>/held` on the provisioning listener, through the same
+  `authorize` as a config fetch (token, HTTPS, allowlisted phone; every denial an
+  empty 404). The body is parsed (root `locationRequest`, no DOCTYPE, 8 KiB) but
+  never picks the location. Answers are `application/held+xml` with status 200
+  also for HELD errors (`locationUnavailable`, `requestError`), the usual client
+  behaviour; a Store without `LocationSource` answers 404, so the fake stores of
+  other tests need no change. No audit kind was added: a HELD request is audited
+  as kind `other`, result `served` (the fetch table's CHECK lists would need a
+  migration for nothing).
+- **Vendor keys, from Grandstream's own documents only.** Fetched
+  `config-template-10212026.zip` (`wp8x6_config_1.0.3.39.txt`) and the WP8x6
+  Administration Guide (documentation.grandstream.com). Written on a WP8x6 with
+  E911: P8565 = 1, P8566 = 1 (HTTPS), P8567 = 60, P8568 = location server,
+  P8597 = emergency numbers separated by ";" (the guide's delimiter), P8725 = 1
+  (RFC 6442 header format), P26059 = 1. With an alarm destination: P22269 = 1,
+  P22270 = `*55`, P22601 = 1, P22602 = 1. Not written, because neither document
+  fixes the value: P8574 (location types; the template spells it
+  `Geodetic,civic,locationURI`, the guide differently), P8576, P8577 to P8596,
+  P8598/P8599. Unconfirmed: the form of P8568 ("address"): written as
+  `host/p/<token>/held` without scheme, as P331 takes its path; a phone check
+  settles it. No other vendor was changed: the spec names none and no vendor
+  document in hand has an E911 key set.
+- **Geolocation on trunks** (migration 00052 `trunks.geolocation`, off). Only an
+  emergency call, only a flagged trunk. The phone's own PIDF-LO (multipart
+  part, well-formed XML with a `presence` root and no DOCTYPE, 16 KiB) is
+  forwarded in place of the stored one; a location by reference in the phone's
+  header is passed on; `Geolocation-Routing` and `P-Emergency-Info` are passed
+  on, never generated (their value is the phone's). The caller's INVITE is
+  reduced to its SDP part at the start of every call, so the media code never
+  sees a multipart body. **UDP size**: sipgo refuses datagrams over 1300 bytes
+  and an INVITE with a PIDF-LO does not fit; the package-level limit is raised to
+  4000 in an `init`, before any server exists (no race), so the request leaves
+  and fragments. The PIDF-LO is as small as RFC 4119 allows (only the namespaces
+  used, no timestamp). The risk is a carrier that drops fragments; that is why
+  the flag is per trunk and off. The alternative, leaving the location out,
+  would make the flag useless on UDP.
+- **Callback tag** (f): `hello:emergency:<ext>` in Valkey (30 min) plus a
+  node-local map, written when a call over an emergency route is routed. A call
+  that entered on a trunk and rings that extension gets ringKind
+  `emergency-callback` and ignores DND; the CDR kind stays `call` (its CHECK
+  has no such value, and the callback is a plain call). Only a trunk call counts:
+  a colleague's call is not the callback.
+- **Notify group** (g): `emergency_settings.notify_group` (one row), a ring group.
+  Its phones are paged like the paging-group test (auto-answer headers, sendonly
+  offer) and hear "Emergency call from <name>, extension <digits>" in the
+  deployment's prompt language, a tone when speech is off. DND is not honoured
+  (a notice, not a call); the calling extension is skipped.
+- **Alarm `*55`**: handled in `handleInvite` before the paging, conference and
+  feature-code lookups, so a feature code or paging code on `*55` can never shadow
+  it; the dial-space guard counts `*55` as a built-in code, so a new overlap is
+  refused (an existing one does not block unrelated changes). Kind `alarm` (CDR
+  CHECK widened), ring tag `alarm`, `ignoreDND` on the call (extension DND and
+  the DND of ring group members), "Panic alarm from <name>" played to the callee
+  leg only after the answer, 404 without a destination or with a deleted one.
+  Forwarding of the destination still applies.
+- **Collision check against origin/main and the open PRs** (2026-11-09): codes
+  taken are `*28 *40 *41 *42 *45 *46 *47 *48 *70 *71 *74 *75 *80` (main), `*76`
+  `*77` (#272), `*64` (#236), `*63` (#220), `*85` as a paging code (#225 test);
+  nobody takes `*55`. Migration 00052 is also taken by #272, #270, #266 and #238:
+  whoever merges second renumbers (and the three migrate counts move by one).
+- **API roles**: locations and assignments write/operator like the ring map and
+  tags; a phone group's E911 switch and alarm destination, and the emergency
+  settings, admin/admin like the phone group changes. They bump the
+  configuration revision (hello-sip reads them).
+- **Not done**: a HELD location URI, LLDP or NAI based lookup, E911 keys for other
+  vendors, the door target list bypass (waits for S-45), an UI picker on the
+  Phones page (the Assignments tab does it).
+
+## Follow-me (pbx-gaps B1: S-5, S-6) (2026-11-09)
+
+- **Feature codes are `*76` (on) and `*77` (off), not `*74` and `*75`.** Those
+  are the default park and park-retrieve codes (migration 00032); the dial-space
+  guard refuses a code that equals or extends another, so the spec's codes could
+  never be seeded. The actions are `follow_me_on` and `follow_me_off`, so an
+  installation can move them; migration 00052 seeds them on existing installs
+  when free, `DefaultFeatureCodes` on fresh ones. The spec text is corrected.
+  A code dialled by an extension with no profile that has a target answers 404
+  and changes nothing.
+- **Migration 00052** (highest on main was 00050): `follow_me`,
+  `follow_me_targets`, the two feature-code actions, and `cdr_legs`. No branch
+  has `cdr_legs` yet (A4 landed as `cdrs.codec` only), so 00052 creates it as the
+  spec's S-22 shape (`CREATE TABLE IF NOT EXISTS`) plus two additive columns,
+  `result` and `target_kind`. Follow-me writes the role `follow_me`; the codec
+  columns stay NULL for it. Down removes the follow-me rows and the two columns,
+  and leaves the table. The migrate test counts are 39/36/37.
+- **Where it runs.** In `ringExtension` (`internal/sip/callflow.go`) after
+  forward-always and before the DND, busy, unreachable and no-answer handling,
+  and in `ivrRingExtension`, the same step for an IVR option that dials an
+  extension. The ring is its own loop (`followMeRun`) because the generic
+  setup loop cannot start legs on a schedule, but it reuses the legs, the
+  event channel, the trunk slot and outbound decision of a forwarded external
+  number, the ring group members, and `exhausted` for the no-answer forward and
+  voicemail, so an unanswered follow-me ends exactly where a plain ring ends. It
+  is not applied to ring group members or to a group or queue failing over to
+  an extension (they ring phones directly), reported in docs/follow-me.md.
+- **Strategies.** Simultaneous rings own phones and all targets at once.
+  Sequential keeps the own phones ringing and starts the targets in order; a
+  target's `delay_seconds` is how long it rings before the next starts, the last
+  one rings to the timeout, 0 on a non-last target means until it fails. In an
+  IVR dial-out the ring primitive cannot stop one leg, so earlier targets keep
+  ringing there (documented).
+- **DND.** `dnd_blocks` (default on) skips follow-me and the ordinary DND
+  handling runs. With it off, DND only silences the own phones.
+- **Targets.** An extension target rings that extension's phones directly (its
+  DND skips it; its own forwarding does not apply), a ring group target rings
+  the eligible members at once, and the first usable trunk of an external
+  target's route carries it. A number that routes to one of our own extensions is
+  treated as that extension. Loops: the extension itself or one in the forward
+  chain is skipped. A leg that goes through a carrier and comes back is a new call
+  and is not detectable; documented as the carrier's hop limit.
+- **Press 1.** The answered external leg is held before it may claim the call
+  (`leg.screen`, run by `fmScreen`): the relay's callee leg is aimed at it, both
+  directions are muted, the prompt `followme.accept` (new key, English and
+  Dutch) is played with the call's Speaker (a beep without one), and the digit
+  `1` (RFC 2833 on the relay, or INFO) connects it; 10 s after the prompt without
+  the digit drops it. One leg is asked at a time. A call with no SDP offer has no
+  media anchor, so its external targets are skipped with a trace line. The Dutch
+  wording needs a native-speaker review before merge (S-21).
+- **CDR.** `cdrs` is unchanged; each leg is a `cdr_legs` row (role `follow_me`,
+  `target_kind`, extension or number, trunk, result). `GET /api/v1/cdrs/{id}`
+  gains `followMeLegs`. The insert statement gains one CTE and one argument. When
+  an external leg wins the call's trunk, route and direction are that leg's.
+- **API.** GET is read-scope/viewer (the route table test ties the read scope to
+  the viewer role; the spec said operator), PUT is write/operator, and the same
+  pair under `/me/extensions/{id}` for a user. A save names the fields it changes;
+  `targets` replaces the list; enabling needs a target; the store re-checks
+  self-target and existence, and refuses deleting or renumbering an extension or
+  group a profile names (409).
+- **HA.** The profile is in the snapshot every node loads, a change goes through
+  `configChange` (revision bump and NOTIFY), and an answered follow-me call is
+  replicated like any answered call, including one an external target answered.
+  A ringing call and a leg being asked to press 1 are not replicated, as for every
+  ringing call.
+- **Tests that need real hardware or a carrier** stay on the lab list (item 4 of
+  the spec): a mobile on a real carrier with press 1.
+
+## Multiple lines and account sharing (parity item 21, S-10 and S-11) (2026-11-09)
+
+- **Data model.** Line 1 stays `phones.device_id`. Lines 2 to 6 are rows of
+  `phone_lines (phone_id, line, device_id UNIQUE)` (migration `00052_phone_lines.sql`).
+  A device is one line of one phone (the store refuses a device that is line 1
+  or another line of any phone, and a second line of a phone on the same
+  extension). One extension on several phones (the shared line appearance) is
+  each phone binding a device of its own on the extension; hello-sip already
+  forks a call to every device of an extension, so no SIP change was needed for
+  it. No bridged line appearance (dialog-state mirroring) is built: S-10 and S-11
+  do not ask for it.
+- **API.** `PUT/DELETE /phones/{id}/lines/{line}` (`setPhoneLine`,
+  `clearPhoneLine`), `lines`/`maxLines`/`sharingRole` on the phone,
+  `PUT /phone-groups/{id}/account-sharing`. Line 1 keeps `extensionId`/`deviceId`
+  on create and update, so existing clients do not change.
+- **Line counts** (`prov.MaxLines`): Grandstream from the account blocks of its
+  own templates (config-template-10212026.zip, checked 2026-11-09): WP8x6 3
+  (`wp8x6_config_1.0.3.39` has accounts 1 to 3; its header labels account 3
+  "GRP2602/2603/2604 only", a template shared with that family, while the
+  account-sharing and default-account choices list Account 3 and the spec gives
+  the WP8x6 three: confirm the third on a handset), WP810, WP820, WP822 and
+  WP825 2 (`wp810_822_825_config_1.0.11.83` and `wp820_config_1.0.7.90` have
+  accounts 1 and 2), WP856 6 (`wp856_config_1.0.3.16` has accounts 1 to 6; this
+  was 1 before, for lack of a template); other Grandstream models 1. Yealink
+  and Snom the line-key count of the key table capped at 6; Poly and Fanvil 6.
+  The cap of 6 is Hello's, not a vendor figure. A model change that would leave
+  a phone with more lines than the new model takes is refused with 409.
+- **Keys written: only those the repo's templates already confirm.**
+  Yealink `account.N.*` (the existing Yealink template states another account
+  takes the same keys), Poly `reg.N.*` and `msg.mwi.N.*`, Snom `idx="N"` on the
+  per-identity settings, Fanvil `SIPN ...` (the Fanvil template names SIP2, SIP3).
+  Each is marked unverified in the template.
+- **Grandstream lines are written** (reversing the earlier "held, not
+  written"; the templates were not in hand then). Account N of the
+  four WP templates starts at `b = 201 + 100 N` (account 2 `P401`, 3 `P501`, 4
+  `P601`) and at `b = 1201 + 100 N` for the WP856's accounts 5 and 6 (`P1701`,
+  `P1801`). Inside it, all confirmed in the templates for every family and
+  account (checked programmatically against each file): `b` Account Active,
+  `b+1` SIP Server, `b+3` SIP User ID, `b+4` SIP Authentication ID, `b+5` SIP
+  Authentication Password, `b+6` Name, `b+11` Register Expiration (minutes),
+  `b+14` SUBSCRIBE for MWI, `b+16` Account Name, `b+23` Special Feature,
+  `b+25` Voice Mail Access Number, `b+47` SIP Transport, `b+50` to `b+55`
+  Preferred Vocoder choices 1 to 6 (`P451` to `P456` for account 2: the codec
+  keys the earlier note had only from a template comment). Other keys sit
+  100 (N - 1) above account 1's: `P2325` Feature Key Synchronization (account 2
+  `P2425`), `P2347` Accept Incoming SIP from Proxy Only (`P2447`), `P26063` call
+  waiting (`P26163`; the WP820 template has no such key, only the phone-wide
+  `P91`), `P2397` OPTIONS Keep Alive (WP8x6 only, as for line 1) and `P2329`
+  SIP URI Scheme when using TLS. Values are line 1's: Special Feature 102
+  (Broadsoft, which the feature key sync needs), `P2347` = 1 so a second line
+  is as closed as the first (S-32), call waiting 1 on / 2 off (WP856 2 on / 1
+  off, as for line 1), transport 0 / 1 / 2 for UDP / TCP / TLS (the TCP value
+  needs the SIP-over-TCP item). Not written for lines: SRTP (`P443`, `P543`,
+  WP856 `P643`, `P1743`, `P1843`, with the SRTP item), DNS SRV and backup
+  (`P408`, `P2412`, `P2433`, `P29195`, `P26140`, `P60156`, with the backup
+  item: a phone in SRV mode still registers lines 2 and up by A record until
+  those are added), RTCP-XR (`P26193`, `P60187`, `P26194`, `P26195`),
+  PUBLISH/Subscribe for Registration (`P488`, `P2419`; both off by default) and
+  send anonymous (`P421`). `TestMultiLineProvisioning` pins the keys for the WP8x6
+  (two lines), WP822/825/820, and the WP856's six, and that a seventh and a
+  third on a WP822 are not written. The deny list of the setting overrides
+  covers the identity keys of accounts 2 to 6.
+- **Account sharing (S-11).** `phone_groups.account_sharing` (the group switch)
+  and `phones.sharing_role` host|guest (default host). Corrected against
+  `wp8x6_config_1.0.3.39` ("Application/Account Sharing"): `P22521` is "Enable
+  Account Sharing" (0 No, 1 Yes, default 0) and `P22522` is "Role in Account
+  Sharing" (0 Host Device, 1 Guest Device, default 1), so they are not a
+  host/guest pair of switches. The first version wrote host 1/0 and guest 0/1,
+  which was right for a host by chance and switched sharing off for a guest.
+  Now a WP8x6 in a group with the switch on gets `P22521 = 1` and `P22522` 0
+  (host) or 1 (guest); any other WP8x6 gets `P22521 = 0`, so leaving the group
+  turns sharing off. The WP810/822/825, WP820 and WP856 templates have no such
+  key. Newly found, left at their defaults: `P22527` Group Name and `P22523`
+  Group Password (both `AccountSharing`), `P22537` SIP Server Port (15060),
+  `P22524` Account (0 Account 1, 1 Account 2, 2 Account 3, default 0) and
+  `P22525` Account Name. Every Hello group therefore shares one group name and
+  password; a per-group password would need a stored secret and is a follow-up.
+  Rejected: a per-group host/guest value (a group of handsets needs a role per
+  handset).
+- **Key placement.** On a Yealink and a Snom, line key N is account N by default,
+  so BLF and the voicemail key start after the lines (`PlaceBLFLines`). Fanvil's
+  DSS keys are on the extended screen and Poly's attendant list is unbounded, so
+  they do not shift. Line keys are not written explicitly (their types are not
+  confirmed in the repo); the phones' defaults are relied on.
+- **hello-sip.** Check-sync goes to line 1's contacts and falls back to the next
+  line only while line 1 has none registered (`PushJob.Lines`), so a phone with
+  two registered lines is notified once and one with line 1 down is still
+  reached. Registration, MWI, ring tags and call handling are per device already.
+- **Unchanged and open:** an incoming INVITE has the binding's contact as
+  request URI and the dialled number in To (`b2bua.go`), so which line of a
+  multi-line phone rings depends on the phone telling its accounts apart by the
+  contact user it registered. To confirm on hardware.
+
+## Provisioning parity items 15, 18, 29, 27 and the left-out vendor keys (2026-11-09)
+
+### Item 15: setting overrides (S-12)
+
+- Table `prov_setting_overrides` (migration 00069: numbered after the 00061 to
+  00068 the open PRs use, so the PRs do not collide). One table for both scopes
+  (`group_id` or `phone_id`), secret values sealed with the scope, owner and key
+  as additional data.
+- Applied to the finished per-phone file (`ApplyOverrides`), not through the
+  template language, so an administrator's copy of a built-in gets them too.
+  Only two formats are edited: Grandstream `<Pn>` elements and Yealink
+  `key = value` lines. Poly (attributes under arbitrary element names), Snom
+  (`idx`/`perm` attributes) and Fanvil (section-scoped `KEY :value`) are
+  refused, because inserting a new key there would be a guess. They can be added
+  once their insertion rules are confirmed on a phone.
+- Deny list: the account, provisioning URL (carries the token), CA and admin
+  password keys, from what the built-in templates write for them
+  (`internal/prov/builtin/grandstream/device.xml`, `yealink/device.cfg`).
+- Grandstream keys reachable through overrides, checked 2026-11-09 against
+  Grandstream's own templates (config-template-10212026.zip): the numbers and
+  values below replace the earlier "unconfirmed" note, which was written without
+  the templates. Still no first-class fields (database, API, console) for side
+  keys or speed dials: the overrides carry them, and building fields is a
+  product decision rather than a missing key.
+  - Speed dial, WP810/822/825 (`wp810_822_825_config_1.0.11.83`, section "P
+    values not on WEB"): `P23001` account (0 Account 1, 1 Account 2) and
+    `P23003` number (up to 64 characters, must match the dial plan) for key 0;
+    keys 2 to 9 are `P23011`/`P23013`, `P23016`/`P23018`, `P23021`/`P23023`,
+    `P23026`/`P23028`, `P23031`/`P23033`, `P23036`/`P23038`,
+    `P23041`/`P23043`, `P23046`/`P23048`. The WP820 template lists the same
+    numbers commented out (`wp820_config_1.0.7.90`, "Handset/Speed Dial") and
+    adds the multi-function button: `P22258` function (0 PTT/Paging, 1 Mute, 2
+    SAFE/Panic call, 3 Speed dial, 4 Disable), `P23051` account, `P23053`
+    number. The same `P23001`/`P23003` in `wp856_config_1.0.3.16` are the
+    account and user ID of expansion key 1 (`P23000` is its mode, 0 Speed Dial,
+    1 BLF, 4 Speed Dial via active account, 5 DialDTMF, 8 Call Transfer, 9
+    CallPark, 10 Call Intercom, 13 Multicast Paging, 15 Speed Conference, 16
+    Dial prefix, 17 Send URL): a different feature, not the handset speed dial.
+    The WP8x6 template has no speed dial key.
+  - Off-hook auto dial `P71` (string, up to 512 characters) and its delay
+    `P8388` (WP810/822/825: 0 to 30, default 4; WP820: 0 to 60): in those two
+    templates and `ht813_config_1.0.19.6` (`P71`), not in the WP8x6 or WP856.
+  - Wallpaper `P2916` (0 Default, 1 Download, 2 Uploaded) and `P2917` (server
+    path): `wp810_822_825_config_1.0.11.83` and `wp820_config_1.0.7.90` only.
+  - `P82281` VoWLAN Target Delay (0 low, 1 medium, 2 high, default 0):
+    `wp8x6_config_1.0.3.39` and `wp810_822_825_config_1.0.11.83`.
+  - `P82269` Wi-Fi power saving: the two templates disagree on the values, so
+    the key is correct but the value is not portable. WP8x6: 0 Generic, 1
+    Disabled, 2 U-APSD. WP810/822/825: 0 Optimum, 1 Relaxed Fast-PS, 2 Disable
+    During Calling, 3 Disable. Not in the WP820 or WP856 templates.
+  - `P25438` Wi-Fi Band (0 5G and 2.4G, 1 2.4G, 2 5G): `wp8x6_config_1.0.3.39`
+    only. The WP820 uses two flags, `P25420` (2.4G) and `P25421` (5G), both 1 by
+    default.
+  - Side key `P82317`: `wp8x6_config_1.0.3.39` "Side Key Funtions", 0
+    PTT/Paging, 2 Alarm, 4 None (default 0; the alarm value, 2, was unknown
+    before). `wp856_config_1.0.3.16` calls it the PTT button with different
+    values (0 PTT, 1 Mute, 3 Speed Dial, 4 Disable, 5 Scan, 6 Open the app) and
+    adds `P82318` account (-1 dynamic, 0 to 5), `P82319` value and `P82320`
+    description, and the left button `P82321` to `P82324` (default 5) and right
+    button `P82325` to `P82328` (default 5). Hello writes `P82317 = 0` for a
+    WP8x6 and a WP856 with PTT, which is PTT/Paging in both.
+  - `TestOverrideWPKeys` renders each of these through the overrides. The
+    deny list now also holds the identity keys of accounts 2 to 6 (active,
+    server, user, auth ID, password, name, account name: `P401`, `P501`,
+    `P601`, `P1701`, `P1801` and the offsets 0, 1, 3, 4, 5, 6, 16 in the WP8x6,
+    WP810/822/825, WP820 and WP856 templates), which the lines of item 21 write.
+    Speed dials replacing BLF on WP stay unbuilt as a feature.
+
+### Item 18: vCard phonebook slot (S-31), partial
+
+- Already on main: the model caps (WP822 500, WP8x6 1000) in `FormatForModel`,
+  truncation of the tail of the delivery order, and P330 = 3, P331 without a
+  scheme, P332 clamped to 5 to 720 (`BookRefreshFor`), P333 = 1.
+- Built: `pb/0.vcf` (vCard 3.0, RFC 2426, folded at 75 octets) for the WP816,
+  WP826 and WP836; `GET /api/v1/phones/{id}/directory` (delivered, capacity,
+  dropped) and the warning on the phone page.
+- Source for the vCard slot: the WP816/WP826/WP836 Administration Guide
+  (documentation.grandstream.com/knowledge-base/wp8x6-administration-guide/,
+  Phonebook: "Download vCard Phonebook", "Upload vCard Phonebook"). It names a
+  web page upload only, so the slot is unused by the template (spec: "unused by
+  default"). The vCard version the phone exports is not documented; 3.0 is the
+  widest-read form and is **verify** on a phone.
+- The two settings the Administration Guide names are in Grandstream's own
+  configuration templates (config-template-10212026.zip, 2026-11-09 review), so
+  they are written: `P333` "Remove Manually-edited Entries on Download" (0 No, 1
+  Yes, default 1) is in `wp8x6_config_1.0.3.39` and
+  `wp810_822_825_config_1.0.11.83` (confirmed; already written as 1);
+  `P8462` "Import Group Method" (0 Replace, 1 Append, default 0) is in
+  `wp8x6_config_1.0.3.39` only (newly found, written 0). `wp820_config_1.0.7.90`
+  and `wp856_config_1.0.3.16` have neither; they have `P1435` "Clear The Old
+  List" (0 No, 1 Clear all, 2 Keep Local Contacts, default 0) and `P1436`
+  "Replace Duplicate Items" (WP820 default 0, WP856 default 1: 0 No, 1 by name,
+  2 by number) in "Download Contacts". `P1435 = 1` is written for those two, the
+  same effect as `P333 = 1`, and `P333` is no longer written to a WP820, which
+  has no such key (corrected). `P1436` stays at its default.
+- Corrected: `P332` on the WP820 and WP856 takes only 0, 5, 30, 60, 120, 240,
+  360, 480 or 720 (both templates), not any value from 5 to 720; the WP820 now
+  gets the WP856's rounding (`BookRefreshForPhone`). `P330` is 3 for HTTPS in
+  every WP template, though the numbers 1 and 2 differ (WP8x6 1 HTTP, 2 TFTP;
+  WP856 1 TFTP, 2 HTTP). The firmware gate "1.0.3.24 and later" is not checked:
+  the page simply does not exist on older firmware.
+
+### Item 29: backup and secondary servers (S-20), partial
+
+- Sources for the Grandstream P-values: first read from the Pvalue-annotated
+  copies of Grandstream's templates in the FusionPBX repository, then checked on
+  2026-11-09 against Grandstream's own configuration templates
+  (config-template-10212026.zip), which replace the third-party copies as the
+  source. Result per key:
+  - `P103` DNS Mode (0 A Record, 1 SRV, 2 NAPTR/SRV; the WP8x6 and WP810/822/825
+    add 3 Use Configured IP) confirmed in `wp8x6_config_1.0.3.39`,
+    `wp810_822_825_config_1.0.11.83`, `wp820_config_1.0.7.90`,
+    `wp856_config_1.0.3.16` (and `ht813_config_1.0.19.6`).
+  - `P29095` Register Before DNS SRV Fail-over (0 No, 1 Yes) confirmed in the
+    same four.
+  - `P26040` DNS SRV Failover Mode (0 Default, 1 saved one until DNS TTL, 2
+    saved one until no response, 3 failback follows the failback expiration
+    timer) confirmed in the same four, and now written `3` in SRV mode:
+    without it the failback timer of `P60056` has nothing to time (added).
+  - `P60056` Failback Timer (minutes, 1 to 64800, default 60) confirmed in the
+    WP8x6, WP820 and WP856 templates. The WP810/822/825 template lists its
+    "Failback Timer" under `P60055`, the key of "Maximum Number of SIP Request
+    Retries" (default 4) a few lines above: a mistake in that template, so
+    `P60056` is no longer written to the WP810/822/825 (corrected; it keeps its
+    default of 60 minutes).
+  - `P48` Outbound Proxy and `P2333` confirmed in all four ("Secondary Outbound
+    Proxy" in the WP8x6, WP820 and WP856; "Backup Outbound Proxy" in the
+    WP810/822/825). Newly found: `P2312` "Secondary SIP Server" in the WP8x6,
+    WP810/822/825 and WP856 templates (not the WP820), the registrar-level
+    counterpart of Yealink's `sip_server.2` and Poly's `server.2`; written with
+    the backup next to the outbound proxy pair. Also newly found: `P2308` Primary
+    IP, `P2309` Backup IP 1 and `P2310` Backup IP 2 (DNS mode 3, at most 15
+    characters, so IPv4 without a port): they would give a second backup but
+    cannot carry a port, so they are not used. Account 2 is `P402`, `P403`,
+    `P2412`, `P2433`, `P408`, `P29195`, `P60156`, `P26140` in the WP8x6 (account
+    3 `P502`...), left to item 21.
+    Every one stays **verify** on a phone.
+- Yealink `account.N.sip_server.2.address/port/transport_type/expires` and Poly
+  `reg.N.server.2.address/port/transport/expires` are confirmed the same way
+  (the T7x and VVX templates in the same repository) and are the same key
+  families the Hello templates already use for server 1.
+- Left out: Snom and Fanvil backup keys (snom `user_outbound` has an `idx` for
+  the line, not a second registrar; no Fanvil key found), SRV mode for Yealink
+  and Poly (their SRV setting is DNS-NAPTR, which is not plain SRV), the WP822's
+  RN-only keys beyond the ones above, a second backup (Grandstream has one
+  backup proxy slot and one secondary SIP server; P2308 to P2310 hold at most
+  15-character IPs), and a chart
+  that publishes DNS (Hello cannot manage DNS: the record set is documented).
+- The backup list is an explicit setting, not read from an HA node list: on main
+  hello-control has no list of the SIP nodes phones can use (the Kamailio pair
+  PRs are not merged). The default stays A-record mode; `P103 = 0` is written to
+  every Grandstream file so leaving SRV mode reverts.
+
+### Item 27: provisioning hardening (S-22, S-32)
+
+- TR-069 off is included: the user approved it explicitly on 2026-11-09 (the
+  completion plan's open question). Grandstream WP: P1409 = 0 and an empty
+  P4503; Yealink: `static.managementserver.enable = 0`.
+- Keys and values, checked on 2026-11-09 against Grandstream's own configuration
+  templates (config-template-10212026.zip: `wp8x6_config_1.0.3.39`,
+  `wp810_822_825_config_1.0.11.83`, `wp820_config_1.0.7.90`,
+  `wp856_config_1.0.3.16`), which replace the FusionPBX copies the first version
+  was written from:
+  - Confirmed in all four, value meaning as written: `P1409` Enable TR-069 (0
+    No; the WP810/822/825 default is 1), `P4503` ACS URL (written empty; the
+    WP8x6 and WP810/822/825 default is `https://acs.gdms.cloud`), `P8469` Enable
+    User Web Access (0 Disabled), `P2347` Accept Incoming SIP from Proxy Only
+    (1 Yes; the WP820 calls it "Only Accept SIP Requests from Known Servers"),
+    `P26015` Allow SIP Reset (0 No). `P276` SSH: the templates ask the question
+    both ways, "Enable SSH. 0 Yes, 1 No" in the WP8x6, WP820 and WP856 and
+    "Disable SSH. 0 No, 1 Yes" in the WP810/822/825, so `1` is SSH off in all.
+  - Corrected, written only where the template has the key: `P1357`
+    Configuration via Keypad Menu is in the WP8x6, WP810/822/825 and WP820, not
+    the WP856, and `1` is "Basic settings only" in all three (the WP810/822/825
+    has `4` Basic and Network Settings, the WP820 `3` Basic settings and Network
+    settings; either keeps Wi-Fi setup on the keypad, `1` stays per the spec and
+    the Wi-Fi question stays a hardware check). `P1310` Direct IP Call is in the
+    WP8x6 ("Enable Direct IP Call. 0 Yes, 1 No") and WP810/822/825 ("Disable
+    Direct IP Call. 0 No, 1 Yes"), both off at `1`, and in neither the WP820 nor
+    the WP856 template.
+  - `P2347` is per account (account 2 `P2447`, account 3 `P2547`, WP856 accounts
+    4 to 6 `P2647`, `P2747`, `P2847`): the lines of item 21 must write it too,
+    or a second line accepts SIP from anywhere.
+  - Newly found, added: the firmware upgrade confirmation prompt, which holds an
+    upgrade until someone presses OK. `P8375` Firmware Upgrade Confirmation (0
+    No, 1 Yes, default 1) in `wp8x6_config_1.0.3.39`, written 0; `P84988`
+    Disable Firmware Upgrade Confirmation (0 No, 1 Yes, default 0) in
+    `wp810_822_825_config_1.0.11.83`, written 1. The WP820 and WP856 templates
+    have neither.
+- Yealink TR-069 key: Yealink's own comment in the T-series templates,
+  "Enable or disable the TR069 feature; 0-Disabled (default), 1-Enabled".
+- Left out, each now with the meaning the templates give:
+  - `P2346` Authenticate Incoming INVITE (0 No, 1 Yes, default 0; in all four
+    templates, per account: account 2 `P2446`, account 3 `P2546`) and the S-22
+    requirement that Hello answer a phone's 401 on an INVITE it originates
+    (`TestAuthenticatedInviteToPhone`). With it on the phone challenges every
+    INVITE it receives. sipgo's `WaitAnswer` answers a challenge only from a
+    plaintext password and a device leg has HA1 only; a real phone challenges in
+    its own realm (`<server host:port>`, see the resync fix), so the answer needs
+    the sealed device password as `checksync.go` now uses. That is a change to
+    the call setup path that cannot be validated without a phone. Not enabling
+    `P2346` is what keeps calls working; the template test asserts it stays
+    unwritten.
+  - `P60082` Trusted Domain Name List (string up to 256 characters; WP8x6 and
+    WP810/822/825 only) belongs to `P2311` Check Domain Certificates (RFC 5922,
+    0 No, 1 Yes) in the same security block. The templates do not give the list
+    format, and a wrong list would fail TLS registration, so neither is written.
+  - `P240` Authenticate Conf File (0 No, 1 Yes; all four) and `P1359` XML Config
+    File Password (string; all four): the HT813 template says a file "would be
+    authenticated before acceptance" with `P240` on, but no template says how
+    (Grandstream ships a config encryption tool with the bundle, and `P1359` is
+    the password it uses), and Hello serves plain files over HTTPS with a token,
+    so neither is written. `P1` is in none of the WP or HT813 templates.
+  - Snom, Fanvil and Poly TR-069/SSH keys (Fanvil's text format key not found,
+    Poly and Snom none found); outside this review.
+- The group can undo any of it with a setting override (item 15).
+
+### "Vendor template keys left out" (Poly caps/pickup, record keys, Fanvil CA, Snom/Yealink EXP, pickup values)
+
+- Result: no new key. The tracker row names five gaps without the keys they
+  need, and none could be confirmed this session:
+  - Poly caps and pickup: the UC Software Administrator Guide is script-rendered
+    and not fetchable (the same finding as `keycaps.go`); the FusionPBX Poly
+    templates use `attendant.resourceList` up to 47 entries, which is a template
+    default, not a documented limit. No BLF pickup attribute on a Poly key found.
+  - Record keys: Yealink's `bw.call_recording.mode` and
+    `account.N.call_recording.enable` are BroadSoft server-side recording, not a
+    key that sends the `*1` toggle. No Poly equivalent found. The Grandstream
+    record keys checked against Grandstream's own templates (2026-11-09):
+    `P26028`/`P26029` (Call Recording On/Off codes) and `P29066` (Record Key
+    Default Function, 0 Record On, 1 Record Off) are only in
+    `wp8x6_config_1.0.3.39`, `P6760` (Record Mode, 0 Locally, 2 on UCM, 4
+    Disabled) only in `wp856_config_1.0.3.16`: confirmed for those two families,
+    absent from the WP810/822/825 and WP820 templates (nothing to write). Mode 2
+    "on UCM" for the WP856 is a hardware check.
+  - Fanvil CA: re-checked in the FusionPBX Fanvil templates (X-series, text and
+    XML forms): no CA certificate key. Still none.
+  - Yealink and Snom expansion modules: no Yealink Administrator Guide or Snom
+    page beyond what `keycaps.go` already cites.
+  - Pickup values: unchanged.
+- Documented in `docs/provisioning.md` ("Keys deliberately not written") so the
+  gaps are visible to operators. The tracker row stays open until sources are
+  found; the setting overrides (item 15) can carry a key meanwhile.
+
+## Item 26: PRACK/100rel and anonymous outbound (2026-11-09)
+
+- 100rel is negotiated hop by hop, not relayed: Hello offers `Supported: 100rel`
+  on every INVITE it originates and PRACKs any reliable 18x from a phone or
+  trunk. Toward the caller it sends reliable provisionals only when the INVITE
+  says `Require: 100rel`; `Supported` alone gets plain responses, as phones keep
+  100rel off (P272 = 0). The 2xx waits up to 64*T1 for the PRACK. A PRACK that
+  never arrives is traced and the call is answered anyway rather than failed.
+- Anonymous outbound is trunk-leg only. It triggers on the trunk policy
+  `always`, the extension flag, or a device request (Privacy id/user/header, or
+  From `anonymous`; `Privacy: none` cancels). The leg gets an anonymous From,
+  the trunk's asserted identity in PAI or PPI (trunk setting, default PAI) and
+  `Privacy: id` merged with the device's values. A device's own PAI/PPI is
+  never forwarded.
+- The spec has no feature code for per-call anonymity, so none was added: a
+  per-call request is the device's Privacy header or anonymous From.
+- The WP "Send Anonymous" setting is found in Grandstream's own templates
+  (config-template-10212026.zip, 2026-11-09 review): `P65` "Send Anonymous
+  (caller ID will be blocked if set to Yes). 0 - No, 1 - Yes. Default is 0" for
+  account 1, in `wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`,
+  `wp820_config_1.0.7.90` and `wp856_config_1.0.3.16` (also
+  `ht813_config_1.0.19.6`); account 2 is `P421`, account 3 `P521` (WP8x6,
+  WP856). It is deliberately not written: the extension flag
+  `anonymousOutbound` is applied by Hello on trunk legs only, so a phone sending
+  an anonymous From on every call, internal ones included, would add nothing the
+  flag does not already do and would blank the caller on internal calls. A site
+  that wants one phone always anonymous sets `P65 = 1` through the S-12 per-phone
+  override. `TestAnonymousKeyNotProvisioned` pins this. Related keys in the same
+  templates, left at their defaults: `P2338` Use Privacy Header (0 Default, 1
+  No, 2 Yes), `P2339` Use P-Preferred-Identity Header (0 Default, 1 No, 2 Yes),
+  `P29098` Use P-Asserted-Identity Header (0 No, 1 Yes; WP8x6 and WP856
+  templates only), `P129` Anonymous Call Rejection (0 No, 1 Yes; Hello rejects
+  anonymous callers itself, item A1) and `P272` Enable 100rel (0 No, 1 Yes,
+  default 0, confirmed as the key behind "phones keep 100rel off").
+- Migration 00051: `extensions.anonymous_outbound`, `trunks.anonymous_policy`,
+  `trunks.asserted_identity`, `trunks.identity_header`. Replaces and call
+  waiting of the same delivery-plan item are not in this PR.
+
+## RTCP-XR collector (parity-rtcpxr, item 35, S-36) (2026-11-09)
+
+- Reports live in their own table `cdr_rtcpxr` (migration 00066), not in
+  columns on `cdrs` as the spec's Data says. A phone sends its call-end
+  report within moments of the BYE, usually before the CDR is written, and
+  the report names the phone's own leg of a B2BUA call, which is not always
+  the CDR's `sip_call_id`. The CDR therefore also stores the answering callee
+  leg's Call-ID (`cdrs.peer_call_id`) and `GetCDR` joins on either. A report
+  with no CDR yet (or ever) costs nothing.
+- One row per (dialog Call-ID, device): a later report replaces the earlier,
+  an interval report never replaces the call-end one. Kept 90 days, pruned on
+  every 1000th write. A device is held to 60 reports a minute in memory per
+  node. Remote metrics (what the far end reported) are ignored; the phone's
+  own receive-side view is the figure.
+- A malformed or out-of-range report (MOS outside 0 to 5, loss outside 0 to
+  100, no dialog id, no metrics, over 4 KiB) is answered 400 and stored not at
+  all. Wrong content type 415, other Event 489 (item 34 adds presence),
+  store down 503. The sender must authenticate as a device.
+- Vendor keys, checked against Grandstream's own configuration templates
+  (config-template-10212026.zip; 2026-11-09 review). Account 1:
+  P26093 collector name, P26094 collector address and P26095 collector port
+  (default 5060) are in `wp8x6_config_1.0.3.39`,
+  `wp810_822_825_config_1.0.11.83` and `wp856_config_1.0.3.16` (confirmed;
+  account 2 is P26193, P26194, P26195 in the same three). P60087 collector
+  address selection (0 Manual, 1 Auto) is in `wp8x6_config_1.0.3.39` and
+  `wp810_822_825_config_1.0.11.83` only (confirmed; account 2 is P60187).
+  P8489 "VQ RTCP-XR Session Report" (0 Disabled, 1 Enabled, default 0) is in
+  the same two and is newly found: without it the phone sends no call-end
+  report, so the collector would stay empty. `wp820_config_1.0.7.90` has no
+  RTCP-XR key. The earlier reading that the WP8x6 and WP856 name no such keys
+  (from release notes) was wrong: corrected, they now get the keys.
+  Template (only when `HELLO_PROV_RTCPXR=true`, default off, spec "off by
+  default"): WP8x6 and WP810/822/825 get P26093 = SIP server host, P60087 = 1,
+  empty P26094, P26095 = SIP server port, P8489 = 1; the WP856 has no Auto
+  selection and no session report key, so it gets P26093 and P26094 = SIP
+  server host and P26095, and nothing else; the WP820 and non-WP Grandstream
+  phones get none. P8490 (interval report) stays at its default off, because
+  the collector keeps the call-end report. Yealink, Poly, Snom and Fanvil are
+  not provisioned (no confirmed keys read). Behaviour is not yet seen on a
+  phone (verify: Auto with an empty address; the WP856 with the address set).
+- No MCP tool added; nothing to teach in skills/. The CDR REST read gains
+  `rtcpxr`, and the call detail page shows it beside the relay figures.
+- Merge note: `handlePublish` in `internal/sip/rtcpxr.go` owns the PUBLISH
+  route and answers 489 for other events; item 34 (presence PUBLISH) should
+  dispatch its event from there.
+
+## SIP over TCP is provisioned per model, on the UDP address (2026-11-09)
+
+Phone-feature-parity S-13 (delivery item 22). hello-sip already records the
+phone leg's transport (`X-Hello-Transport`, set by Kamailio) on the binding, and
+Kamailio already shares port 5060 between UDP and TCP, reuses the phone's
+connection for requests towards it (`phones_tcp` socket, alias with the
+protocol) and closes idle connections after an hour. What was missing was
+provisioning. `HELLO_PROV_SIP_TCP_MODELS` (same format as the TLS list, default
+none, so nothing changes until a model is listed) puts the listed models on
+transport TCP with `HELLO_PROV_SIP_SERVER`: Grandstream `P130 = 1`, Yealink
+`transport_type = 1`, Poly `TCPOnly`, Fanvil `SIP1 Transport = 1`; Snom has no
+confirmed key and stays UDP. A model in both lists uses TLS while the TLS server
+is set, and falls back to TCP when it is not. The setting is per model, not per
+device: a device that needs another transport has its model taken out of the
+list (per-device overrides belong to S-12). Helm: `control.prov.sipTcpModels`.
+Keys checked against Grandstream's own configuration templates
+(config-template-10212026.zip, 2026-11-09 review): `P130` "SIP Transport. 0 -
+UDP, 1 - TCP, 2 - TLS/TCP" is the same key with the same values in
+`wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`,
+`wp820_config_1.0.7.90`, `wp856_config_1.0.3.16` and `ht813_config_1.0.19.6`
+(confirmed). Account 2 is `P448` and account 3 `P548` in the WP8x6 (account 2 in
+the WP810/822/825 and WP820, accounts 2 to 6 in the WP856 at `P448`, `P548`,
+`P648`, `P1748`, `P1848`); lines 2 and up are item 21. Newly found and left at
+their defaults: `P2331` Use Actual Ephemeral Port in Contact with TCP/TLS
+(default 0) and `P60065` Enable TCP Keep-alive (default 1), in the same
+templates. The other vendors' keys remain from vendor notes, unconfirmed on
+hardware.
+
+## Presence extensions (item 34, S-35)
+
+- Resource list URI: `sip:blf-<device username>@<domain>`. Its members are the BLF keys of the phone bound to that device (`phones.blf`), loaded into the snapshot (`WithBLFLists`); only that device may subscribe (`403` otherwise), and the phone must send `Supported: eventlist` (`421` with `Require: eventlist`). Editing a phone's BLF keys now bumps the configuration revision so the list reaches hello-sip. No migration.
+- Datagram limit: sipgo refuses UDP packets over 1300 bytes, so a list is one full-state NOTIFY plus partial ones (RFC 4662 `fullState="false"`), and a change sends only the changed resource. At about 600 body bytes a resource, that is one resource per NOTIFY. TCP/TLS toward Kamailio (#258) would allow bigger chunks; the budget constant stays until then.
+- PUBLISH event state lives in Valkey (`hello:pubpres:<ext>:<etag>`, the publication's lifetime as TTL), so both hello-sip nodes serve, refresh and remove it. Nodes learn of the other node's PUBLISH and REGISTER by a 5 s poll of the shared state (`presencePollInterval`), plus an immediate NOTIFY for changes handled locally. Kamailio needs no change: PUBLISH and SUBSCRIBE already go to any Hello node.
+- Several publications per extension are allowed (a desk phone and a softphone); the extension is "open" if any is open, the newest note wins. With none, it is "open" while a device is registered.
+- Grandstream keys, checked against Grandstream's own configuration templates
+  (config-template-10212026.zip, 2026-11-09 review). `P188` "PUBLISH for
+  Presence" (0 Disabled, 1 Enabled, default 0; account 2 `P488`, account 3
+  `P588` in the WP8x6) and `P2319` "SUBSCRIBE for Registration" (0 No, 1 Yes,
+  default 0; account 2 `P2419`, account 3 `P2519`) are in `wp8x6_config_1.0.3.39`
+  and `wp810_822_825_config_1.0.11.83` (confirmed), and in neither
+  `wp820_config_1.0.7.90` nor `wp856_config_1.0.3.16`. The spec keeps both off for
+  the WP phones [R8x6 section 4], so the template now writes `P188 = 0` and
+  `P2319 = 0` for the WP8x6 and WP810/822/825 (a phone someone switched on goes
+  back); a test asserts the rendered keys and that the WP820 and WP856, whose
+  templates lack them, get none. No WP template has an Eventlist BLF URI, a
+  Presence Eventlist URI or a PUBLISH-for-presence list key: not in the
+  templates, so `.Line.BLFListURI` is not written to a WP. The key exists only in
+  the GRP templates (`grp26xx_config_1.0.15.23`: `P134` Eventlist BLF URI,
+  `P26084` Presence Eventlist URI, `P2389` Auto Provision Eventlists, 0
+  Disabled, 1 BLF Eventlist, 2 Presence Eventlist; account 2 `P444`, `P26184`,
+  `P2489`); Hello's non-WP Grandstream BLF block writes per-key subscriptions
+  (`P323` and on), so switching to the list is a hardware decision and is not
+  written. Yealink, Snom, Fanvil and Poly keys were not in scope and stay unwritten.
+- The spec lists no UI or REST fields for S-35, so none were added.
+- PUBLISH for events other than presence answers `489`; `vq-rtcpxr` (S-36, item 35) is not served here.
+
 ## Kamailio HA: the VIP ships off, go-live is a separate step (2026-11-09)
 
 The user's deploy constraint: the PRs of kamailio-ha get merged ready, but the
@@ -1962,12 +3031,451 @@ so the VIP stage cannot sit in that file.
 - Send Anonymous (P65): stay unwritten (extension flag anonymises trunk legs) or write it
 - Account sharing group password: shared default `AccountSharing`, or a per-group secret
 
+## Flow canvas P6: AI on the canvas (2026-11-09)
+
+Built per `.procoder/specs/flow-canvas.md` (P6, S-17, S-19, S-20). Choices the
+spec left open, and one deviation:
+
+- **The assistant may apply its own batch (decision 2, user decision of
+  2026-11-10 below).** It has one write tool, `applyConfigBatch`, offered only
+  for a question asked with the canvas switch "Let AI apply changes" on;
+  otherwise a change is a proposal whose batch the operator previews on the
+  canvas and applies or discards. Write-scoped MCP clients keep
+  `applyConfigBatch` as before.
+- **A batch proposal is one action.** `applyConfigBatch` joins
+  `proposal.Allowlist`; a proposal that carries it has no other action, so the
+  whole change is one transaction. The inner allowlist is the batch's own
+  table (`configbatch.Ops`, every object type the canvas draws); `createDevice`,
+  `createPhone`, credential, multipart and external-effect operations stay
+  out. At most 50 inner operations.
+- **Credentials stay out of proposals.** Decision 2 allows the AI to set
+  secrets with redacted reads; a proposal's body is stored and shown to
+  people and to the model, so an inner operation that sets a password, PIN or
+  secret is refused, as for every other proposal (S-12).
+- **The dry run runs as the user, rolled back.** The validator dry-runs the
+  batch through the API as the user's agent identity with a new `Preview`
+  flag (`auth.Agent.Preview`): it then holds write scopes with the user's own
+  role, but the API admits its writes only on `POST /api/v1/config/batch`
+  with `dryRun` and inside a dry-run store batch (`agentGuard`,
+  `Batch.DryRun`). A viewer's or an operator's admin-only batch is refused
+  there and the model is told the user cannot make the change.
+- **Hello fills the staleness tokens.** The model does not send
+  `baseRevision` or `expect`: the validator reads the graph (devices
+  included) and sets `baseRevision` to its revision and each update or
+  delete's `expect` to the node's version. A configuration that moves under
+  the proposal makes the batch's own check answer 409, which makes the
+  proposal `stale`; changes to other objects do not.
+- **The preview is stored.** The dry run's results (redacted), warnings and a
+  new `flowDiff` (added, changed, removed nodes, edges added and removed,
+  `flow.Diff`) are kept on the action as `preview`, so the overlay and the
+  proposal page need no write scope and viewers see them. Every dry-run batch
+  answer now carries `flowDiff` (documented in `openapi.json` and
+  `docs/config-batch.md`).
+- **Overlay placement.** Created nodes have dry-run ids (sequences do not roll
+  back), so the canvas draws them as ghosts placed next to a connected node
+  (not draggable) and, after apply, places the real nodes at the ghost
+  positions by matching kind and label (`placementsAfterApply`).
+- **Canvas context.** A question carries a `context` with `canvasId`,
+  `nodes` and `trace`, stored in `ai_messages.context` (migration `00057`) so the task and
+  the history see it, and given to the model as data (`canvas`), never as
+  instructions. The panel sends the canvas, the selected node and the traced
+  call.
+- **`describeOperation`.** One assistant tool that is not an API read: it
+  answers the request schema of an operation a proposal may carry, from the
+  embedded document, so the model writes valid batch bodies. It is not an MCP
+  tool and reads no PBX data.
+- **`getFlowGraph` `fields=summary`** (S-17) empties node summaries and drops
+  edge `data`, keeping ids, labels, versions, ports and owners.
+- **Roles.** Asking needs operator (the chat already did); viewers see the
+  panel's proposal list and the overlay, without Apply. Discard is
+  `dismissAIProposal` with reason `not_needed`. With the agent off the panel
+  shows the same reason as every AI page.
+- **Import cycle.** `configbatch` used `proposal.Change`; the JSON diff moved
+  to `internal/jsondiff` (proposal keeps aliases) so `proposal` can use
+  `configbatch`.
+
+## Integrations P4: recording links and lookup (2026-11-09)
+
+- Links are Hello-signed proxy URLs (`/r/<token>.wav`), not MinIO presigned
+  URLs: the object store endpoint is cluster-internal. The token is 256
+  random bits, base64url (43 characters); only its SHA-256 is stored.
+- All refusals of `/r/` (unknown, expired, revoked, used up, malformed) are
+  the same 404, so a token's history is not revealed; the reason is counted
+  in `hello_recording_link_hits_total{result}`. Rate limit is 30 requests per
+  minute per token and address, plus 300 per address, in memory per replica.
+- `maxUses` counts every request, including a player's Range requests, so a
+  forged `Range` cannot get past the limit. Default is 0 (unlimited).
+- Who may mint: a user or any credential with an `extensionScope` only for
+  calls involving its extensions; a viewer likewise (their linked
+  extensions), since the spec says operator/admin for any call. A recording
+  whose CDR is not written yet can only be linked by an unrestricted
+  credential. Revoking needs the same, or being the creator.
+- Links die with their recording through `ON DELETE CASCADE` (migration 00052)
+  rather than a trigger. `connector_id` is a plain column until the CRM tables
+  exist (P6).
+- The lookup API is two operations, `GET /lookup/calls` (scope `calls`) and
+  `GET /lookup/recordings` (scope `recordings`), both with the `user` role and
+  the extension restriction in SQL. The spec's contact lookup
+  `GET /lookup/number` (I-43) is a separate feature (phonebook, not calls) and
+  is not part of this PR. Number matching is digits-only with a last-eight-digit
+  suffix match from eight digits (not `phonebook.Dialing.Key`, which needs the
+  dial context and would hide calls recorded in another format; eight, not the
+  phonebook's nine, because the national form's trunk prefix 0 is dropped in
+  the international one, so a 9-digit national number shares only 8 digits).
+- Not built because they cannot work as written: `GET /cdrs/{id}/recording-link`
+  (a token cannot be shown again, only its hash is stored; the lookup returns
+  `recordingId` and `POST /recordings/{id}/links` mints) and the CDR fields
+  `origin` and `origin_client` (they belong to P3, click-to-call, which
+  is unmerged). `recordingId` is on the lookup results and on
+  `GET /cdrs/{id}` (not on the list).
+- Minting and revoking are excluded from MCP (they hand out a public URL to
+  call audio); the lookups are MCP tools, taught in the hello-troubleshoot
+  skill.
+
+## SCEP and 802.1X, item 37 (S-25) (2026-11-09)
+
+Builder's design choices, within the spec; nothing here was asked of the user.
+
+- **Hello is the SCEP server** (RFC 8894), as S-25 says, not a SCEP client
+  pointed at an outside CA. An enterprise PKI is served by importing one of
+  its intermediate CAs (certificate and RSA key) as the device CA, so RADIUS
+  already trusts what Hello issues.
+- **Library:** `github.com/smallstep/scep` (the SCEP code step-ca uses,
+  maintained, last change 2026-10-14) with its `github.com/smallstep/pkcs7`;
+  no hand-rolled PKCS#7. This amends the spec's "one new module" rule for
+  this item, on the brief's instruction to prefer a maintained SCEP library.
+- **Device CA, separate from the provisioning CA.** The provisioning CA
+  (HELLO_PROV_CA_CERT) is cert-manager's `cluster-ca` on kw and Hello holds
+  only its certificate (the SIP TLS certificate of #202 is issued by
+  cert-manager too), so it cannot sign. Hello keeps its own device CA in
+  `scep_ca`: generated (RSA 3072, self-signed, 10 years) or imported; RSA
+  because SCEP clients encrypt to the CA certificate. The key is sealed under
+  HELLO_SECRET_KEY (`scep-ca:<id>`), one CA active, a replaced one kept for
+  its certificates' rows.
+- **Switches:** SCEP is off per phone group by default (S-25);
+  `HELLO_SCEP` defaults to `true` and is a deployment-wide kill switch, so the
+  feature needs no deploy change on kw (the `/p/` path is already routed).
+- **Endpoint:** `/p/<token>/scep` (also `/scep/pkiclient.exe` and
+  `/scep/cgi-bin/pkiclient.exe`), GET and POST, HTTPS and an allowlisted phone
+  like a config fetch; a group with SCEP off answers the empty 404. The CA and
+  CRL are public at `/p/scep-ca.crt` and `/p/scep-ca.crl` (plain HTTP too,
+  for RADIUS).
+- **Challenge:** one per phone, sealed (`scep-challenge:<phone id>`), made at
+  the first render after SCEP is on, consumed by the enrolment it authorises
+  (row-locked, so two racing enrolments get one certificate), and replaced at
+  the next render. A retried transaction (same phone, CA and key) gets its
+  certificate again without a second issue.
+- **Renewal:** RenewalReq/UpdateReq signed by a live certificate Hello issued
+  to the same phone from the active CA; no challenge.
+- **Issued certificate:** CN = the phone's MAC, nothing taken from the
+  request's subject or SANs; client auth; CRL distribution point; the group's
+  lifetime (default 365 days, 30 to 1825). Weak keys refused (RSA < 2048, EC
+  other than P-256/P-384). The CertRep is encrypted with AES-128-CBC (set on
+  the pkcs7 package variable; GetCACaps advertises AES, SHA-256, POST,
+  Renewal, SCEPStandard).
+- **Revocation:** admin revokes from the API/UI; removing a phone revokes its
+  live certificates (trigger). The CRL is signed per request, valid 24 h, its
+  number the Unix time.
+- **Vendor keys, Grandstream templates only** (config-template-10212026.zip):
+  SCEP on the WP8x6 (wp8x6_config_1.0.3.39) and GRP2601-2604
+  (grp260x_config_1.0.7.74), P8647/P8648/P8653/P8654/P8655, P8647 = 0 when
+  off; P8652 (fingerprint, format undocumented), P8662 and P8663 not written.
+  Wired 802.1X on the GRP26xx (grp26xx 1.0.15.23, grp261x 1.0.13.127,
+  grp260x 1.0.7.74): P7901/P7902/P7903/P8439, written only while the group
+  names a profile (never switches 802.1X off a port), EAP-TLS only where SCEP
+  is on, P8440 not written. WP856/WP8xx have no SCEP keys; Yealink, Poly,
+  Snom and Fanvil get nothing (no confirmed vendor keys at hand).
+- **802.1X model:** `dot1x_profiles` (name, method eap-tls/peap/eap-md5,
+  identity with {mac}/{MAC}, anonymous identity, sealed write-only password
+  `dot1x:<id>`, RADIUS CA PEM, server name). A phone group names its wired
+  profile; Wi-Fi profiles (item 31) reference a profile by id with
+  `ON DELETE RESTRICT` and read the resolved profile from
+  `RenderData.Dot1X.Profiles` (WP8x6 P83004/P83016 values precomputed).
+- **API:** `GET /scep`, `PUT /scep/ca`, `GET /scep/certificates`,
+  `POST /scep/certificates/{id}/revoke`, `POST /phones/{id}/scep-challenge`,
+  `/dot1x-profiles` CRUD, `GET|PUT /phone-groups/{id}/security`; viewers read,
+  admins change (S-25 RBAC). UI: Phones > Certificates, and "New SCEP
+  challenge" on the phone page.
+
+## Clients 3 and 4: web devices, coturn and ICE servers (2026-11-09)
+
+Spec: `.procoder/specs/clients-webrtc-mobile-video.md`, phases 3 and 4 (S-13 to S-17, S-21 to S-24). One PR: the two share the configuration, the credentials Secret and the chart wiring, and neither depends on the media foundation (#276) or the WSS edge.
+
+- **Derived credentials, stored under the base name.** A web device row stores `sip_username = w<id>` and no HA1 (`auth_mode = derived`, HA1 columns nullable); the client presents `w<id>.<expiryUnix>`. `Snapshot.DeviceByUsername` resolves the expiring name to the base device (only when that device is derived, so a desk device named like `w99` is never reached through the derived path), and bindings are keyed by the base AOR, so a refreshed credential replaces the old binding. Revocation is `enabled = false`; the snapshot then drops the device and `SnapshotChanged` removes its bindings.
+- **Browser session only.** The five new routes use `ScopeSession` (a bearer token, an OAuth grant or a service account is refused) because the SIP password is minted there. The spec's `softphone` scope is for the mobile pairing flow (S-27, not now). They are excluded from the MCP tools (category `credentials`), so no new tool and no skill teaching is needed; the skills mention the `kind` filter of `listDevices` and the 409 on web devices.
+- **Only `web` is enrolable.** `devices.kind` allows `mobile` so the schema does not change when the apps come, but the API refuses `kind: mobile` (decision of 2026-10-25: apps not now).
+- **Revoke disables, the list shows active only.** Following S-14. The cap counts active client devices, under a lock on the user row (a concurrent test proves it).
+- **Account changes revoke devices.** Disabling or deleting a user, or unlinking an extension from a user, disables the user's client devices on it in the same transaction and moves the revision, otherwise a removed person would keep a working softphone until its credential expired.
+- **Ring preferences.** `users.ring_web` and `ring_mobile` (default on) reach hello-sip as `Device.RingOff` in the snapshot; `bindingsFor` skips such a device before forking. Every fork that is cancelled because another answered now carries `Reason: SIP;cause=200;text="Call completed elsewhere"` (it was pickup only).
+- **`last_seen_at` is the last enrol or refresh**, not the last REGISTER: hello-sip does not write to PostgreSQL on a registration, and "registered now" is read from the live bindings.
+- **Not in this PR, with the reason.** `cdrs.video` and the ICE candidate type in the CDR (there is no video or WebRTC leg yet; the trace names the web device that answered); the Diagnostics "Clients" tab and `GET /api/v1/webrtc/status` (S-52, nothing to count before the WSS edge and the softphone; REGISTER attempts of web devices already show in the existing per-device diagnostics); the pairing code and `softphone` scope (mobile). These belong to items 2, 5 and 6.
+- **TURN secret and key are environment values from the credentials Secret** (`turnSecret`, `clientAuthKey`, `clientAuthKeyPrevious`), referenced by the chart and never rendered; "sealed" is the sops Secret on kw, as for `secretKey`. They are never logged or put in an audit row (tests check it). Rotating the TURN secret needs a rolling restart of control and coturn together (coturn has no multiple concurrent secrets that were verified).
+- **coturn.** One Deployment per address, one replica, `Recreate`, `hostNetwork` by default (the relay leaves from the node address that is `externalIP`); without hostNetwork each server is a LoadBalancer Service listing at most 200 relay ports. `allowedPeers` is required, so the chart cannot render an open relay. The Prometheus exporter is off by default because the Debian build was not checked. `ct-<tree hash of docker/coturn>` is the content tag, like `kc-` for Kamailio.
+- **ICE servers.** `GET /api/v1/me/ice-servers[?deviceId=]`, 60 requests a minute per user (in-process window, per node), counted by `hello_ice_credentials_issued_total` and not audited per credential. STUN defaults to the `turn:` hosts.
+- **Migration 00075** (web devices; the highest on main is now 00074). `test/integration/migrate_{prov,ai,ai_agent}_test.go` counts bumped by one.
+
+## Wi-Fi profiles and roaming (item 31, S-23, S-24)
+
+Keys come from Grandstream's official templates only (config-template-10212026.zip):
+`wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`, `wp856_config_1.0.3.16`.
+Nothing here is confirmed on a handset.
+
+- **Model scope.** WP816/826/836, WP810/822/825 and WP856 get Wi-Fi keys. The
+  WP820 has its own template (`wp820_config_1.0.7.90`) and is not written. No
+  other vendor is written: no vendor document for their Wi-Fi keys is on hand.
+- **Profiles are named records**, assigned to phone groups and to single phones
+  (a phone's profile with the same SSID replaces its group's). The spec said
+  groups only; phones were asked for. At most 10 per group and per phone; a
+  model writes at most its slots (WP8x6 10, WP810/822/825 17, WP856 1), lowest
+  priority dropped first.
+- **17 networks on the WP810/822/825, not 20.** The template gives networks
+  18 to 20 a security key outside the pattern of the other 17 (P84772, P84872,
+  P84972 against P83002 + 100 (n - 1)). Unconfirmed keys are not written.
+- **No enterprise profile in network 5 of a WP8x6.** The template names its
+  EAP method P83304 where the pattern needs P83404; the profile moves to the
+  next network.
+- **No 802.1X, WPA3 or OWE on models whose template has no key for it.** WP8x6:
+  open, WPA2/WPA3 personal, OWE, WPA2/WPA3 enterprise (PEAP, MSCHAPv2).
+  WP810/822/825: open, WPA2 and WPA3 personal (no EAP keys in the template).
+  WP856: open and WPA2 personal. A profile a model cannot take is skipped for
+  that model. EAP-TLS and an uploaded CA wait for S-25 (device certificates).
+- **Server certificate check** defaults to system certificates (P83016 = 1);
+  trust on first use and skip are offered, uploaded CA is not (S-25).
+- **Band is a group radio setting, not a profile field.** The templates have
+  one band key per phone (P25438 on the WP8x6, P25420 and P25421 on the
+  WP856), none per network. Hidden is written to the WP810/822/825 only
+  (P83050), priority and preferred account to the WP8x6 only (P83049, P83085).
+- **802.11k is not provisioned.** No key for it in any of the three templates.
+  802.11r is P83048 per network (WP810/822/825) and P25315 (WP856); 802.11v is
+  P84992 (WP810/822/825) and P82333 (WP856); the WP8x6 template has neither.
+  The spec's P22232/P22231 map to all three; P82281 is the VoWLAN target delay
+  in the templates (not a roaming threshold), left to S-12 overrides with the
+  power-save mode P82269.
+- **Safety gate (decision 14) is enforced at render time**: profiles are
+  written only when the phone's effective set holds one marked verified. The
+  radio settings do not wait for it. The API shows `pushing`. An assigned but
+  unverified set is accepted (so the test-phone step can be prepared), and
+  writes nothing.
+- **Hello owns the slots once a phone has profiles**: slots it does not fill are
+  written empty so a removed profile disappears from the handset.
+- **P84991 (provisionable OEM override) is never written**, so an OEM Wi-Fi
+  setup survives.
+- **Sealing**: the PSK and the 802.1X password use the store's secret box with
+  contexts `wifi-psk:<id>` and `wifi-password:<id>`; the API shows only
+  `pskSet` and `passwordSet`; previews mask them. A change does not bump the
+  configuration revision (as the ring map): the automatic resync notices the
+  changed render data.
+- Migration 00052 (`wifi_profiles`, `wifi_assignments`, `wifi_radio`); the
+  migrate test counts follow it.
+
+## Fax (pbx-gaps B5 and B6, S-15 to S-17) (2026-11-09)
+
+Built in one change: the engine, passthrough, T.38, email, API, page and docs.
+
+- **Engine: spandsp through cgo, as D13 decided; there is no pure-Go option.**
+  No maintained pure-Go T.30 or T.38 implementation exists (the V.17, V.29 and
+  V.27ter modems, T.30 and ECM are the work). Upstream spandsp 0.0.6 is itself
+  unmaintained (Homebrew marks it deprecated); Debian and Homebrew still ship
+  it and a fork (spandsp3) continues it. The API used is the 0.0.6 one, so the
+  engine builds on both. Risk and exit: the C code is confined to
+  `cmd/hello-fax/engine_spandsp.go` behind the `spandsp` build tag; moving to
+  spandsp3 is a header and a handful of calls.
+- **Image: Debian, not Alpine.** The `hello-fax` Dockerfile target builds on
+  `golang:1.27-bookworm` (`libspandsp-dev`, `libtiff-dev`) and runs on
+  `debian:bookworm-slim` with `libspandsp2`, `libtiff6` and `poppler-utils`.
+  Alpine's spandsp3 has a different API and a static musl build buys nothing
+  here. The other images are untouched and never link spandsp. CI gains a `fax`
+  job (container `golang:1.27-bookworm` plus the packages) that runs the cgo
+  tests; publish builds the image after it passes.
+- **Pages cross the cgo line as TIFF files.** spandsp's T.30 writes received
+  pages to a TIFF and reads pages to send from one; there is no row API on the
+  T.30 state. Sending is an uncompressed bilevel TIFF written in Go; receiving
+  asks spandsp for T.6 output and decodes it in Go with
+  `golang.org/x/image/ccitt` (new module, Go team, BSD). Rows are then encoded
+  to PDF with stdlib `compress/zlib`, as D13 says.
+- **Control protocol.** hello-sip and hello-control speak HTTP to hello-fax
+  (`internal/fax/client.go`): start a session, poll it, fetch the PDF, stop,
+  forget. A session opens a UDP port; hello-sip's relay forwards RTP or UDPTL
+  there. The response names the pod (`HELLO_FAX_MEDIA_HOST`, the pod IP in the
+  chart): media goes to the pod, not through the Service (replies from a pod
+  would otherwise fail the relay's source check), and later calls for the
+  session go to that pod, so several replicas work. An optional bearer token
+  (`HELLO_FAX_TOKEN`) guards the API.
+- **hello-sip owns the call and the data.** It answers or places the call,
+  runs the relay, writes the `faxes` row, uploads the PDF and records the CDR;
+  hello-fax holds no credentials. hello-control owns the API, the email worker
+  (through `internal/mailer`, claimed from the table so one node sends each)
+  and the retention job (`TryLock`, batches of 500, objects before rows).
+- **UDPTL is read and written in Go** (`internal/fax/udptl.go`, redundancy
+  error recovery, three secondary packets); spandsp's T.38 terminal sees IFP
+  packets only. The relay gained a UDPTL mode (`Relay.SetUDPTL`): datagrams
+  cross unmodified, no RTP parse, no sequence rewrite.
+- **T.38 is per trunk (`trunks.fax_mode`, default passthrough, D14).** CNG
+  (Goertzel, 1100 Hz, three 100 ms windows) on a `t38` trunk re-INVITEs the
+  caller to `m=image`; a carrier's own T.38 re-INVITE is accepted the same way.
+  Outbound: the engine asks for T.38 from the start of a session on a `t38`
+  trunk, and hello-sip re-INVITEs when the carrier answers the call. A 488, a
+  port 0 or parameters Hello does not serve (version above 0, local TCF, FEC)
+  leave the call on G.711. Calls routed through an IVR key do not watch for CNG
+  (the relay is shared with the menu); they still accept a carrier's re-INVITE.
+- **Destinations.** A fax destination is a row (`fax_destinations`: name,
+  owner extension, optional email) that an inbound route (kind `fax`) or an IVR
+  key (kind `fax`) names; admin writes, viewer reads. A destination in use
+  cannot be deleted. An IVR key moves the answered call to G.711 with a
+  re-INVITE; if the caller refuses, the menu says the choice is invalid.
+- **Outbound routing.** A fax is routed as a call from the pseudo source
+  `fax`: outbound routes that apply to every extension carry it, routes that
+  list source extensions do not (documented). Retries: 3 attempts, 5 minutes
+  apart, only for calls that did not connect; a T.30 failure after connection
+  is final (`failed` or `partial`).
+- **Fax email.** The recipient is the destination's address, else the enabled
+  users linked to the owner extension (stored as the sentinel `@owner` and
+  resolved at send time). Six attempts with backoff; no recipient is a final
+  `mail failed`. The attachment is `fax-<yyyymmdd-hhmm>-<id>.pdf`.
+- **Storage and retention.** PDFs live in the `hello-recordings` bucket under
+  `fax/<yyyy>/<id>.pdf`. `HELLO_FAX_RETENTION_DAYS` (default 90, 1 to 3650) is
+  an environment setting, not a console one. A fax still `receiving` after two
+  hours is closed as failed.
+- **API.** `GET|POST /faxes`, `GET|DELETE /faxes/{id}`, `GET /faxes/{id}/pdf`
+  as the spec says, plus `GET|POST /fax-destinations`, `GET|PUT|DELETE
+/fax-destinations/{id}`, and `GET /me/faxes` with `GET /me/faxes/{id}/pdf` so
+  a `user` role reaches the faxes of its own extensions. Viewers read the list;
+  the PDF needs operator (a fax is a document); operators send and delete.
+  `POST /faxes` takes multipart or JSON (`pdfBase64`, 700 KiB) so an agent can
+  send; `GET .../pdf` is excluded from MCP as a binary download. A fax being
+  sent is cancelled by `DELETE`; one being received answers 409.
+- **CDR.** Kind `fax` (constraint widened in `00076`), the direction, the trunk
+  and the route as for any call, and the fax result in the failure reason of a
+  call that ends normally. The fax row carries the CDR correlation id; the CDR
+  API gains no fax columns.
+- **Not replicated.** Fax calls are not part of in-call HA: a node lost during
+  a fax drops it (the sender retries; a received fax keeps its pages as
+  `partial`).
+- **Migration.** `00076_faxes.sql` (renumbered at merge; highest on main was `00060`): `faxes`,
+  `fax_destinations`, `trunks.fax_mode`, and `fax` added to the inbound route,
+  IVR key, IVR exit and CDR kind constraints. The migrate test counts are
+  main's plus this one (49, 47 and 46). Other branches in flight take higher numbers; the merge
+  captain renumbers.
+- **Hardware.** Interop with a real carrier and a real fax machine (G.711 and
+  T.38, ECM, a carrier-initiated re-INVITE, a 488) is the lab list in
+  docs/fax.md. Everything else is tested: a generated multi-page fax goes
+  through the modems over G.711 (PCMU and PCMA) and over T.38 UDPTL, from a PDF
+  rasterised by pdftoppm to the received PDF, and a stopped session keeps its
+  pages.
+
+## Flow canvas P7: node badges and extensible kinds (2026-11-09)
+
+- **What was already done.** The graph side of P7, the batch ops for every
+  merged object (`TestBatchCoverage`), time conditions with override in the
+  trace (P5) and the catalogue guards were on main. The one visible gap was the
+  badges: the server sent `summary.forced` / `summary.generated` but the canvas
+  drew them as plain text.
+- **Badges are rules, not per-kind code.** `web/src/pages/flow/badges.ts` holds
+  a list of rules `(node, summary) -> badge`; `buildView` puts the result in
+  `FlowNodeData.badges` and `FlowNodeView` draws it. Override badge: a time
+  condition with `forced` shows "Override: open|closed" (tooltip says the
+  schedule is ignored). Generated badge: a TTS announcement shows "Generated".
+  A new kind (follow-me, fax, locations) adds one rule and no other web code;
+  unknown kinds already render from the catalogue.
+- **Open PRs (#272, #273, #275)** add their kinds through the checklist in
+  `internal/flow/README.md`; nothing here depends on them. No API, migration or
+  MCP change, so no conformance, count or skill update is needed.
+
 ## AI on the canvas may apply its own batch (2026-11-10)
 
 - Asked: should the canvas AI assistant only propose (a person applies), or may it apply?
 - Answer (user): the AI may apply. Give the assistant a write tool that applies its batch,
   audited and revertible, in line with the earlier AI-access decision. Operators still see
   and can revert every applied batch.
+
+Built on #280 (choices the decision left open):
+
+- **The write tool.** `applyConfigBatch` in the assistant (go-ai-sdk tool,
+  `internal/ai/assistant/apply.go`). Its batch is validated exactly as a
+  proposal's batch (inner allowlist, no credential property, at most 50 ops,
+  `baseRevision` and `expect` from the graph, the dry run as the user), stored
+  as a proposal (so the overlay, the proposal page and the session link show
+  it), then applied with `proposal.DBStore.ApplyAsAgent`:
+  `POST /api/v1/config/batch` replayed as the user under a new
+  `auth.Agent.Apply` identity. That identity holds write and admin scopes with the user's own
+  role, so a viewer's batch is `403 forbidden_role` and an operator's
+  admin-only op is refused; `agentGuard` admits its writes only on the batch
+  route and inside that batch (no direct object write, layout or revert). One
+  applied batch per question; an answer may not add a proposal after it.
+  Credentials stay out, as for every proposal.
+- **Audit.** The actor is the user (`user:<name>`), the via `ai:<session>`
+  (decision 2's form) on the `config_batches` row, on the proposal
+  (`ai_proposals.applied_via`, new) and on the proposal's `apply_applied`
+  audit row (now with its via); each object's row carries `batch:<id>` as for
+  every batch. The proposal also keeps `batch_id` (new, set for a person's
+  apply too) so the console reverts it with the ordinary
+  `revertConfigBatch`. Migration `00086_ai_proposal_applied_via.sql`,
+  additive.
+- **The switch: per session, ask first by default (chosen).** Decision 2 lets
+  the AI apply but sets no default, so the canvas panel's "Let AI apply
+  changes" starts off each time the panel opens and holds for the questions
+  sent while it stays open; each question stores it (`context.allowApply` in
+  `ai_messages.context`), and only that question gets the write tool. Viewers
+  see no switch. Not a stored per-user setting: no setting outlives the panel,
+  so nothing applies without the user turning it on where they are looking.
+- **UI.** An AI-applied batch is drawn as what was applied: the canvas
+  reloads, places the new nodes and marks new and changed nodes; the panel
+  shows "Applied by the assistant for you" with the operations and a
+  Revert (dry run, then confirm). History and the proposal page label it
+  "by the assistant for <user>".
+- **No new API status codes.** The refusals are the existing
+  `403 forbidden_role` and `403 insufficient_scope`.
+
+## Integrations P6: HubSpot and the internal/crm framework (2026-11-10)
+
+Decided while building, without asking, within the spec and the brief:
+
+- **Scope of P6 as built.** Framework, HubSpot connector (OAuth, contact search, call
+  engagements, owners, caller names), admin API, console page, MCP reads, the `hello-crm`
+  skill and docs. The HubSpot calling iframe and its SDK controller (I-50) are NOT in this
+  PR: its click-to-call needs the originate API and the first-party `hello-hubspot` OAuth
+  client from P3 (#234), which are not on main. The server half of the handshake
+  (`POST /api/v1/integrations/hubspot/engagements`) is built and tested so the iframe can
+  land as a small follow-up once P3 merges.
+- **Recording links** are behind a `crm.LinkMinter` interface (mint, revoke by label). The
+  link service is P4's (#281, not merged), so `hello-control` passes none yet: a connector
+  with recordings on logs calls without a link. Wiring P4's service in is one line in
+  `cmd/hello-control/crm.go`. Links are minted with label `crm:<connectorId>`; disabling a
+  connector, switching recordings off, disconnecting or deleting it revokes that label.
+- **Caller-name budget.** The spec bounds a lookup to 1.5 s, but a call must never be held
+  that long. The CRM query keeps the 1.5 s bound and runs in the background (it fills the
+  Valkey cache); the SIP path waits at most 250 ms (`DefaultCallerNameBudget`). A repeat
+  caller is a cache hit. Three failures in a row open a 30 s breaker per connector.
+- **Carrier name wins** when it is a real name; a display name that is only a number is
+  replaced by the CRM's. Numbers under 6 digits (extensions) are never looked up.
+- **Ownership.** A call is owned by the HubSpot owner with the same email as the Hello user
+  of the call's extension (exact, case-insensitive match; never display name). Hello's
+  `users.email` is administrator-set, so it is treated as verified. No match: the
+  connector's fallback owner, or the call is `skipped` and shows in the console with a
+  retry. A manual mapping is never replaced by an automatic one.
+- **One log per call per connector** (unique `(connector, callId)`): a missed call logged
+  first is not logged again by the call's `call.completed`; a ring group's call is logged for
+  the first member's event.
+- **Late engagement handshake:** if the server already logged a call, its engagement is kept
+  (`adopted: false`); the iframe's stays in HubSpot as a separate record.
+- **Callback is a public route** (`GET /api/v1/integrations/crm/oauth/callback`): the
+  cross-site redirect carries no Strict session cookie, so the single-use 10-minute state
+  (stored as a hash, bound to the administrator) is the credential. It always redirects to
+  `/integrations/crm`. No PKCE: HubSpot does not use it for confidential apps.
+- **Routes beyond the spec table:** `DELETE .../{id}/connection` (disconnect),
+  `GET .../{id}/users` and `PUT .../{id}/users/{userId}` (user mapping, the "field mapping"
+  of the console), `GET .../oauth/callback`. The job list is scope `write`, role `operator`
+  (the route test ties `read` to viewer; the spec wants operator).
+- **MCP:** reads only (`listCRMConnectors`, `getCRMConnector`, `listCRMUsers`,
+  `listCRMLogs`); everything that handles credentials or requeues is console-only.
+- **Needs-reauth notice** is e-mailed to every administrator with an address, when SMTP is
+  configured; otherwise it is the console banner only. "The owner" in the spec is read as
+  the administrators, since a connection has no single owner.
+- **Link renewal job** runs hourly on every replica (idempotent single UPDATE) instead of a
+  daily job under an advisory lock.
+- **HubSpot facts still to prove with a real account** (listed in docs/crm.md): the scope
+  set (`crm.objects.contacts.write` for the Calls object), the phone search filters, the
+  disposition ids lookup, and the EU host split.
 
 ## Conference two-node test raced on srv.deps (2026-11-10)
 
@@ -2131,3 +3639,547 @@ connector_in_use`) unless `release=true`, which turns the users into local
 - Live tests against a real Active Directory (certificate chains, paging at
   1000, nested groups, `userAccountControl` flags) are on the PR's
   hardware-and-accounts list; the suite uses an in-process LDAP server.
+
+## Messaging item 3: desk-phone texting and the SIP trunk channel (2026-11-10)
+
+The SIP-trunk adapter, the inbox gateway hand-off (`InboundFromTrunk`), replies
+through the trunk and the `messages.conversation_message_id` link already
+shipped with the inbox core (#211). This item adds what was missing. Where the
+spec left a product decision open, the conservative option below was chosen by
+default; each is a one-line change if the user decides otherwise.
+
+- Part size stays 700 bytes (the sip-messaging queue limit, which also keeps a
+  part in one UDP datagram), not the spec's 1000. Desk-phone parts include the
+  `(1/3) ` counter and any `[WhatsApp] ` prefix inside the 700. A body from a
+  phone above 700 bytes is refused with 413 as sip-messaging already does,
+  below RFC 3428's 1300.
+- Delivery to the desk phone happens when a conversation is assigned or taken
+  (the latest customer text) and on each later customer text while it is
+  assigned. Resolving, snoozing or returning it to the pool sends nothing.
+- A phone never makes first contact: a number with no conversation is
+  `handled=false` and takes the old external-number path, so no conversation is
+  opened from a handset. Spec M-17 consent gating therefore needs no phone path.
+- A customer who is in another agent's open conversation is refused to a phone
+  (with the reason sent to it), never texted around the inbox, and so are
+  opted-out customers. A resolved conversation of the user's own is not
+  reachable from a phone unless the number's owner extension is theirs.
+- A phone's reply is rate limited per user by the text queue's
+  `rate_per_minute`, counted on inbox replies; the refusal is 429.
+- `owner_extension_id` lets the owner's phone reply only into an existing
+  conversation that is unassigned or its user's. It does not create one.
+- Desk-phone delivery is off for the number and for the user by default and
+  needs both. A text that cannot be queued for the phone (text messaging off, a
+  door station, the text queue's rate limit) is skipped silently: the inbox
+  always keeps the text.
+- Vendor capability `sip_message` is on for Grandstream only. Every other
+  vendor stays off until a lab check shows its handset has a text UI. An
+  extension with no phone yet counts as capable, so an administrator can set it
+  up first.
+- Contact naming overlays the stored name at read time with the reader's own
+  books (personal, named, company, extensions), contact first, then the
+  carrier's name. Only a shared source is ever stored on the conversation. Add
+  to contacts defaults to the user's own book; the company book is chosen
+  explicitly by an operator or administrator. The click-to-call button and the
+  peer's recent CDRs in the right panel of spec M-15 wait for the integrations
+  click-to-call and the CDR number filter.
+- Chat visitor alerts ("New chat in Support") are not built: there is no chat
+  channel yet (item 4).
+
+## Browser extension (integrations P5, 2026-11-13)
+
+- The extension is plain JavaScript modules under `web/extension/`, with no
+  bundler, so the source loads unpacked as it is. It is packaged by
+  `web/extension/tools/build.mjs` (a deterministic zip, and a CRX3 signed with
+  `node:crypto`, no dependencies) in the web image build, and served by nginx
+  from `/downloads/`. The download card is on the Dial page (user role), not a
+  new nav item.
+- Fixed id: the manifest carries a fixed public key, so the extension id is
+  `kengpjalagamnmmkljldjhhgonmbdcph` everywhere, and the preregistered client
+  `hello-extension` has the single redirect `https://<id>.chromiumapp.org/`
+  (not derived from the deployment URL, since it cannot vary). A Go test and a
+  web test recompute the id from the manifest.
+- Signing key: the private key is never committed. The image build reads it from
+  the `extension_key` build secret (CI repo secret `HELLO_EXTENSION_KEY`); with
+  none, only the zip is built and the card says "unsigned". Docker's layer cache
+  does not key on a secret, so the first build without it must not be reused
+  once the secret exists (bump the cache or rebuild).
+- `GrantableScopes(user)` now includes `calls`, `events` and `recordings`, as
+  spec I-31 says. Without it a `user` could not grant the extension its scopes.
+  The handlers already limit a user to their own extensions (originate, events,
+  recording links), so no new access is opened; `docs/ai-access.md` and the
+  role tests are updated.
+- Tokens are kept in `chrome.storage.local` (the refresh token must survive a
+  browser restart). Refreshes are serialised, since the refresh token rotates and
+  reuse revokes the grant.
+- The page script is registered dynamically only for sites the user lists and
+  the browser has granted (`optional_host_permissions`), so there is no
+  `<all_urls>` grant and no always-on content script.
+- Not built here: `GET /api/v1/lookup/number` (I-43) is not on main, so the
+  incoming-call notification shows the name in the `call.ringing` event itself.
+  A CRM contact lookup belongs to the connectors.
+
+## Integrations P17: Slack, n8n and Make (2026-11-13)
+
+- **Slack is its own small queue, not a webhook endpoint format.** The webhook
+  dispatcher signs Hello's own JSON and counts health per endpoint; Slack needs a
+  different body, no signature, an `Authorization` header for a bot and an
+  answer to parse (`{"ok":false,"error":...}` comes with HTTP 200). Bending
+  `webhook_endpoints` for that would touch P2 code other builders and P7 use, so
+  `internal/slack` has its own two tables (`slack_destinations`, `slack_posts`,
+  migration 00089) and reuses the exported pieces of P2: `webhook.RetryDelay`
+  (the same eight-attempt schedule) and the retry and dead-letter rules.
+- **Posts are queued in the event ingest transaction** (a `TxHook`, like webhooks
+  and the CRM), with the event stored in the row, so a post never waits on
+  `integration_events` retention and a repeated event posts once
+  (`UNIQUE (destination_id, event_id)`).
+- **Both Slack credentials are supported** (spec table): an incoming webhook URL
+  (host pinned to `hooks.slack.com` / `hooks.slack-gov.com`, https, path
+  `/services/`) and a bot token with a channel (`xoxb-` only, fixed API address).
+  The secret is write-only and sealed under the AAD `slack:<id>`; the MCP
+  decision is exclude, category credentials.
+- **Slack failures decide the destination's state.** `invalid_auth`,
+  `token_revoked`, 401 and 403 switch the destination off (`auth_failed`), a 404
+  or 410 from a webhook switches it off (`destination_gone`), 50 failures in a
+  row too; a new credential switches it back on. Channel errors
+  (`not_in_channel`, `channel_not_found`) only kill the post. Names and numbers
+  of callers are untrusted: `<`, `>`, `&` and mrkdwn characters are neutralised
+  (no `<!channel>` or links from a caller name) and each field is cut to 80
+  characters.
+- **`voicemail.received` is a new event type** (spec: "voicemail posted to a
+  channel" needed one). hello-sip emits it after the message row is stored, once
+  per box for a voicemail group, with the caller, the box extension and
+  `durationMs`; never the audio. An endpoint that subscribes to every event now
+  receives it too (the envelope is additive).
+- **n8n and Make reuse the generic surface, no new routes.** The trigger
+  subscribes through `POST /webhooks` and deletes through `DELETE`; the actions
+  are originate, `cdrs` and the lookup route. The n8n trigger verifies
+  `Hello-Signature` itself (Hello's signing secret is returned once at
+  subscription and kept in the workflow's static data; a subscription that
+  already existed has no secret, so it is replaced). Make cannot compute an HMAC
+  in IML, so its hook URL is the secret, as decided for Zapier (P7). The Find
+  Contact operation uses `GET /api/v1/lookup/number`, which comes with P7 (#304):
+  it is not duplicated here, so those two operations work once #304 is merged.
+- **No build step for n8n.** The node is plain CommonJS (no TypeScript, no
+  `n8n-workflow` dependency) so `node --test` runs it in CI with a fake n8n
+  context and the tests read `openapi.json` to prove every request is a
+  documented route.
+
+## Integrations P18: Outlook and Google contacts, calendar DND (2026-11-13)
+
+- **Per-user connectors in the existing framework.** `crm_connections` already
+  had `scope = 'user'`; the framework now uses it: `Capabilities.UserScope`,
+  `Repo.{UserConnection,SaveUserConnection,DeleteUserConnection,UserConnections,UserConnectionsOf}`,
+  `TokenManager.ConnFor` and `RefreshFor`. Per-user tokens are sealed under
+  `crm:<connector>:user:<user>:<access|refresh>` so a blob copied to another user's
+  row does not open. The administrator creates one connector (the customer's own
+  Microsoft or Google app) and each user connects; the org-level connect and test
+  refuse a per-user connector. A re-authorisation need of a personal connection
+  is shown to that user, not e-mailed to the administrators.
+- **The OAuth state carries who started it** (`user:<id>:<actor>` in the existing
+  actor column, no schema change), so the shared callback finishes a personal
+  sign-in for the right user and redirects to `/me/connections`; a state of the
+  wrong scope is refused.
+- **Caller names from the called user's contacts, after the organisation's
+  CRM.** `Lookup.NameFor(extension, number)` resolves the extension to its user
+  (cached 60 s) and asks only that user's connected connectors; hello-sip tries
+  it when the route sends the call straight to an extension (`dec.Extension`),
+  within what is left of the same 250 ms budget. A ring group, queue or IVR is
+  named from nobody's contacts: choosing whose address book would be a guess.
+  The carrier's real name still wins. Cache keys are per user.
+- **Contacts are matched locally on an in-memory index.** Graph has no phone
+  search on contacts and People's `searchContacts` is prefix-based and a
+  warm-up-dependent, so the connectors read the address book (20 pages of up to
+  1000, 20,000 contacts) into `crm.ContactIndex` kept 10 minutes per account. The
+  key is the **last eight digits** (nine would miss the trunk `0`: `050 12 34 56`
+  vs `+32 50 12 34 56`); two contacts with one key are ambiguous and name nobody.
+  The read outlives the 1.5 s lookup (`WithoutCancel`, one minute) so the first
+  call after a quiet spell misses and the next ones hit.
+- **Features choose the scopes.** Per-user connectors take `features`
+  (`contacts`, `calendar`); the sign-in asks only for what is on. Google asks for
+  `calendar.freebusy` only, never event content; Outlook asks `Calendars.Read`
+  but selects only `showAs`, `isCancelled`, `isAllDay`, `start`, `end` and
+  `responseStatus`.
+- **Calendar DND is polled every two minutes** by one replica (`TryLock`), eight
+  calendars at a time. Change notifications are not used (public callback plus
+  renewal for a 2-minute gain). `extensions.dnd_source` (`manual`, `calendar`,
+  migration 00090) records who set DND; the two manual writers (extension update
+  and the feature-code path) set it to `manual` whenever they set `dnd`, the
+  poller writes `calendar` only where DND was off and clears only `calendar`
+  ones, in a config transaction (audit, revision bump, hello-sip reload) that is
+  skipped when nothing would change. A user who turns DND on by hand during a
+  meeting therefore takes it over; one who turns it off is not fought until the
+  next stretch. With several connected calendars DND stays while any is busy; an
+  unreadable calendar keeps it until the last known end plus 5 minutes.
+- **`dndSource` joins the extension in the API** (`Extension`, `SelfExtension`),
+  so the console and agents can tell a calendar DND from a manual one.
+- **Pre-existing behaviour changed:** `ActiveConnectors` now means "has any
+  non-revoked connection" (org or user) instead of "has an org connection", so a
+  per-user connector is listed once someone connects; the org lookup and the
+  logging hook skip it (`Capabilities.UserScope`, `LogCalls` false).
+
+## Integrations P7: Zapier private integration (2026-11-10)
+
+Built per spec `integrations.md` I-52 and the P7 phase line. Choices the spec left
+open; each was chosen by default (the conservative option), not by the user.
+
+- **`GET /api/v1/lookup/number` (I-43) is built here.** The Find Contact search
+  needs it, and neither main nor the P4 PR (#281, which carries only the call
+  and recording lookups) has it. It is a thin wrapper over the existing
+  caller-name lookup (extensions, then company, no callee) and adds the
+  credential's own personal contacts only when nothing there names the number.
+  Chosen by default: no `extension`/`callee` parameter (the named books of a
+  phone group need a callee; a connector has none), the personal book is the
+  last resort (so the answer for a number does not depend on who asks when the
+  company already names it), and a service account never reads a personal book.
+  Scope `read`, role `user` (listed as self-service in `TestRoutesTable`).
+  `PhonebookLookup.source` gains `personal`.
+- **Webhooks API unchanged.** I-42 already made `POST /api/v1/webhooks`
+  idempotent on `(url, events)` and `DELETE` by id, which is all a Zapier REST
+  hook needs. Subscribing therefore keeps the existing requirement: an
+  administrator credential with the `secrets` scope. Chosen by default over
+  letting a user subscribe to their own events; widening webhook access to
+  non-admins is a separate product decision. Actions and searches need no admin.
+- **Zapier does not store the signing secret and Hello's signature is not checked
+  on this route.** Zapier hook URLs are unguessable and cannot verify an HMAC;
+  the docs say so.
+- **Find Call has no server-side number filter.** `GET /cdrs` has no number
+  parameter, and adding one is not in the P7 text. The search takes a CDR ID
+  (exact, `GET /cdrs/{id}`) or a number, matched in the app against the latest
+  200 calls (caller, called and original destination, as written or on the last
+  nine digits). `lookup/calls` of P4 is not used because it is unmerged.
+- **Place Call input**: destination, optional extension, optional idempotency
+  key; nothing else (no caller ID, no auto-answer), so the originate limits and
+  the emergency refusal are the only policy.
+- **The app is plain JavaScript with no installed dependencies** and its tests
+  run with `node --test` against a fake Zapier runtime (CI job `zapier`). The
+  `zapier-platform-core` version in `package.json` is the current release at the
+  time of writing and is only needed by `zapier push`. Not tested here: a real
+  Zapier account (invite, a Zap run end to end).
+
+## 2026-11-13: per-line Grandstream keys (feat/prov-perline-keys)
+
+- Lines 2 and up now get SRTP mode and key exchange, presence, RTCP-XR collector and backup server keys, at the account offsets found in the official templates (wp8x6 1.0.3.39, wp810_822_825 1.0.11.83, wp820 1.0.7.90, wp856 1.0.3.16).
+- Correction to #262: the WP820 template does have a Secondary SIP Server, at P50602 (account 1) and P51102 (account 2); line 1 now writes it.
+- Send Anonymous (P421, P521, ...) for further lines stays unwritten, as decided before.
+
+## HubSpot calling iframe and recording links (2026-11-13, feat/hubspot-iframe)
+
+Completes the part of P6 (#289) that waited for the originate API and the first-party clients (decisions of 2026-11-10).
+
+- **The iframe is a console route**, `/integrations/hubspot/iframe`, built on HubSpot's own `@hubspot/calling-extensions-sdk` (0.9.7) rather than a hand-written postMessage protocol. The SDK is loaded on demand, so the console bundle does not carry it.
+- **First-party client `hello-hubspot`** (public, PKCE, redirect `/integrations/hubspot/callback`, scopes `calls events`), registered with the dialer at start-up. Sign-in is a popup, because a framed page gets no Strict session cookie. The popup hands the code to the iframe with `postMessage` to its own origin; the state value and the PKCE verifier stay in the iframe. Tokens live in the iframe's localStorage (HubSpot's frame gives it partitioned storage); a refused refresh drops them.
+- **The click-to-call id is HubSpot's call id.** `externalCallId` is the originate id; events carry `originateId` and `callId`, so the first event of the call gives the SIP call id, which goes with the engagement id to the existing handshake route. An inbound call on a user's extension uses its SIP call id.
+- **Recording links in engagements need no new code in the connector:** HubSpot already writes `hs_call_recording_url` and the worker patches the adopted engagement; a test now covers it. The link store is the one #328 wires in `cmd/hello-control/crmlinks.go`; this change wires no second minter.
+- **Framing.** nginx answers the iframe route with `frame-ancestors https://app.hubspot.com https://*.hubspot.com` and every other console page with `frame-ancestors 'none'` and `X-Frame-Options: DENY` (spec T-12; only the consent page had it). A deploy test checks the template.
+- **Not done, needs a HubSpot account:** whether `incomingCall` reaches an unlisted app, the exact calling-settings fields (the connector panel shows name, url, width, height, isReady, supportsCustomObjects), and the framing hosts per region (all are `*.hubspot.com`). They are on the lab checklist in docs/crm.md.
+
+## Integrations P14, P15, P21: Pipedrive, Zoho CRM, Odoo, Bitrix24 (2026-11-13)
+
+Decided while building, without asking, within the spec and the brief:
+
+- **One migration, 00087.** `crm_call_logs.state TEXT NOT NULL DEFAULT ''`
+  (additive). The connector settings live in the existing `config` JSON and `kind` has no CHECK.
+  The migrate counts in `test/integration/migrate_{prov,ai,ai_agent}_test.go` are main's plus one.
+- **Sign-in follows #328's names.** Odoo (API key) and Bitrix24 (inbound webhook) are `crm.Direct`
+  connectors (`auth` is `direct`; Connect verifies the stored secret and returns an empty
+  `authorizeUrl`; a refused one is a field error on `clientSecret`) and use `crm.SecretBound`
+  (Zoho: `region`; Odoo: `url`, `db`; Bitrix24: none, its webhook address is the secret), the
+  shared `internal/crm/kit` helper and `crm.ErrNoTarget` (Odoo, a call with neither a contact
+  nor an owner). Odoo's access token is the API key, Bitrix24's the webhook address.
+- **Multi-step writes survive a restart.** A connector returns `crm.PartialError{State, Err}`
+  from `LogCall` when it fails after a step that cannot be repeated; the worker saves State on
+  the job and hands it back as `CallLog.State` on the retry, clearing it on success. Bitrix24
+  uses it for register then finish then attachRecord, so a retry (also after a `hello-control`
+  restart) never registers the call twice. This replaces an in-memory record.
+- **Pipedrive: one org-level connection, not one per user.** The spec's table says tokens are
+  per user "for attribution"; the call log's `user_id` gives the same attribution from one
+  administrator's connection, so per-user sign-in (and its console flow) is not built. The
+  user is matched by email (`users/find`), manual mapping as for every connector. Pipedrive's
+  `api_domain` is kept as the connection account and used as the REST base only when it is an
+  https `*.pipedrive.com` host.
+- **Pipedrive recording is an upload.** `Capabilities.RecordingUpload`: the worker keeps the
+  call log's reference first (status `update`), then opens the audio from MinIO through
+  `crm.AudioSource` (wired in `cmd/hello-control/crmaudio.go`) and the connector uploads it
+  once. A failed upload is retried as an update, never as a second create. Over
+  `HELLO_CRM_UPLOAD_MAX_MB` (default 50) or a deleted recording: the call stays logged and the
+  job's `lastError` says why. No link is minted, so nothing is renewed.
+- **Bitrix24 copies its recording.** `Capabilities.RecordingCopy`: a link of at most one day
+  (`CopyLinkTTL`) is minted, Bitrix24 fetches it once, and `link_expires_at` stays empty so
+  the renewal job never re-attaches a duplicate file.
+- **Zoho** sends the recording link in the call's description, as the spec says; a renewal
+  rewrites the description. Leads are looked up after contacts and attached as `Who_Id`.
+  Zoho's refused-code answer is HTTP 200 with an `error` member and is treated as permanent.
+  PhoneBridge click-to-call is not built (marketplace only, decision 1).
+- **Odoo logs a note in the chatter** (spec: "chatter/log, verify"): no call model is shared
+  by all editions. Unknown caller: the note goes to the call owner's own partner so the call
+  is not lost. It speaks `/jsonrpc` (Odoo 14 to 19); `/json/2` is on the lab list, since
+  `/jsonrpc` is deprecated for removal in Odoo 20. `author_id` is not set (the note is the API
+  user's), so the later body update is always allowed; the owner's name is in the body.
+- **Bitrix24 register is not idempotent** on the Bitrix side; see the state above. No lead is
+  created for an unknown number (`CRM_CREATE = 0`), `SHOW = 0` (no screen-pop in the portal).
+- **Private-network CRMs.** The CRM HTTP client now allows `HELLO_INTEGRATIONS_ALLOWED_CIDRS`
+  (RFC 1918 by default) in `hello-control` and, via a new config field, `hello-sip`, so a
+  self-hosted Odoo or Bitrix24 is reachable. Loopback, link-local and metadata stay blocked.
+- **Recording links** come from #328's `cmd/hello-control/crmlinks.go` minter (no second
+  wiring here); `newCRM` gains only the audio source for Pipedrive's upload.
+- **MCP:** unchanged. The four read tools list the new kinds; the `hello-crm` skill and its
+  failures table were taught the new kinds.
+
+## Integrations P16 and P20: helpdesks, PSA tools and Clio (2026-11-13)
+
+Decided while building, without asking, within the spec and the brief:
+
+- **Direct sign-in is a framework concept.** Zendesk, Freshdesk, ConnectWise, Autotask and
+  HaloPSA have no browser consent (spec: customer API token / org-level API member). A
+  connector implements `crm.Direct` (`Authenticate`) instead of `crm.OAuth`; the existing
+  `Connect` call signs in with the stored credentials, proves them with a harmless read and
+  stores the result as the org connection. A static credential has no expiry; HaloPSA's
+  client-credentials token has one and is requested again by the TokenManager. The API
+  `auth` field says `oauth` or `direct`. No migration: the secret is the connector's sealed
+  client secret and the other settings are `config`.
+- **Secret-bound settings.** A setting that decides where the secret is sent (subdomain,
+  host, company, region, identity) asks for the secret again when it changes
+  (`crm.SecretBound`; default `clientId` only). A new secret on a connected direct
+  connector is proved before it replaces the stored one.
+- **`crm.ErrNoTarget` means skipped, not dead.** ConnectWise, Autotask and Clio need a
+  contact (and Halo a client) to put a call on; a call from an unknown number is `skipped`
+  with the reason and can be retried. Zendesk creates an end user for an unknown caller
+  (setting `createContacts`, default on, international numbers only); Freshdesk lets
+  Freshdesk create the contact from the phone.
+- **One ticket per call for helpdesks** (Zendesk Talk's behaviour), the first Zendesk comment
+  private so the customer is never e-mailed. The recording link is a second private
+  comment/note, added only if the ticket does not already carry it (a read first), so a
+  retry or a renewal never repeats it. PSA/Clio records are rewritten whole (idempotent).
+- **Record choice for the "verify each" cells of the spec:** ConnectWise = Sales activity of
+  type Call; Autotask = company note with the contact; Clio = PhoneCommunication; HaloPSA =
+  ticket. Phone search is by the last four digits (or the exact E.164 for Zendesk and
+  Freshdesk) followed by a digit comparison in Hello, because each system stores numbers as
+  typed. Contact ids that need two values are compound (`contact:company`, `Person:id`,
+  `user:client`).
+- **Sidebar apps do not hold a Hello credential.** The Call button opens `/dial?n=` in a new
+  tab (the agent is signed in there). So the "pop from the SSE stream" inside the helpdesk is
+  not shipped; the pop stays in `/dial` and the events stream. The Zendesk app is a ZAF 2
+  zip; the Freshdesk app is an FDK 2.3 source package (`fdk pack` then upload). Both are
+  built per request by `GET /integrations/crm/{id}/app` with Hello's https address embedded
+  as an escaped JSON string; Zendesk Talk Partner Edition stays out of scope, as in the spec.
+- **Recording links are now wired** (`cmd/hello-control/crmlinks.go`): the P6 follow-up that
+  P6 left as "one line". Links carry `recording_links.connector_id` (reserved by P4), so
+  revoking a connector's links is one UPDATE. No migration, so no placeholder number is
+  used and the migrate counts are unchanged.
+- **Clio revoke on disconnect is not done:** Clio's deauthorize takes the access token, the
+  framework's `Revoker` passes the refresh token; the administrator revokes in Clio.
+
+## Clients item 1: media foundation on pion (2026-11-13)
+
+Spec: `clients-webrtc-mobile-video.md` S-2 to S-6. Built on main without
+waiting for #276 (DTLS-SRTP, ICE-lite per leg). Choices:
+
+- **The SDP model wraps pion/sdp and keeps every attribute in order.** A parse
+  then build is a no-op, tested over a corpus of vendor and browser SDPs
+  (`testdata/sdp`). `ParseAudioSDP` is not re-implemented on it: the spec says
+  "where trivial", it is not, and #276 changes that code. `AudioSection`
+  bridges a section to it instead.
+- **The shared port is a mux that routes by ufrag, then by source address.** It
+  does not authenticate: the leg's ICE-lite agent does. Addresses per leg are
+  capped at 8 so a forged check cannot grow the table. This replaces pion/ice's
+  UDP mux, which assumes a full agent per connection.
+- **Relay legs read a `LegConn`** (a UDP socket or a mux endpoint) so the relay,
+  recorder and announcements are untouched.
+- **The thin seam to #276** is three calls after it merges: bind the leg's
+  `Secure` to the endpoint (`Bind(ep.LocalAddr(), ep.WriteToUDP, ...)`), call
+  `ep.SetUfrag` with the ufrag its `iceLocal` made, and pass `Fingerprint()` and
+  the answered setup into `WebRTCNode.Local`. The mux and SDP code use no #276
+  names (`muxIsSTUN`, `fingerprintUsable`), so the two merge without clashes.
+  `TestWebRTCToPhoneAudio`, `TestDTLSFingerprintMismatch` and the plaintext
+  check need #276's handshake and follow with that glue.
+- Video is rejected in the answer; accepting it is item 6.
+
+## Clients item 1 glue: WebRTC legs keyed by DTLS-SRTP (2026-11-13)
+
+Follow-up to "Clients item 1: media foundation on pion". Choices:
+
+- **`Relay.AnswerWebRTC` is the one join.** It validates the offer on the model,
+  routes the leg's ICE-lite ufrag to its mux endpoint before the answer exists,
+  lets the leg's `Secure` accept the DTLS offer (the handshake, fingerprint
+  pinning and keys are #276's code, unchanged) and writes the answer on the
+  model with the fingerprint and role Secure chose. A leg that cannot be keyed is
+  refused, never answered in the clear (`SecurePolicy{Require: true}`).
+- **`AddMuxLeg` binds the leg's `Secure` exactly as `AddLeg` does**, so the
+  relay, recorder and announcements see no difference between a socket and the
+  shared port.
+- **`ParseAudioSDP` is not unified on the SDP model.** The model (pion/sdp) needs
+  v=, o=, s= and t= lines; phones and trunks send SDPs without them and call
+  setup must answer them, so the strict reader cannot replace the tolerant one.
+  `TestParseAudioSDPStaysTolerant` pins the difference. `AudioSection` remains the
+  bridge.
+- **Tests:** `TestWebRTCToPhoneAudio` (PCMU and Opus; Opus is off in `-race`
+  builds, as everywhere), `TestDTLSFingerprintMismatch`, with a pion DTLS-SRTP
+  client as the browser. They check that nothing but STUN and DTLS crosses the
+  browser leg before the keys are in, that nothing on it is in the clear after,
+  and that a cleartext packet from the browser is not relayed.
+
+## Integrations P13 and P19: Salesforce Open CTI and Dynamics 365 CIF (2026-11-13)
+
+Decided while building, without asking, within the spec and the brief:
+
+- **Two halves per CRM.** The interactive half is a static page Hello serves
+  (`web/public/integrations/{salesforce,dynamics}`), served by the UI's nginx with a
+  per-page Content-Security-Policy (`frame-ancestors` only the CRM's hosts, no inline
+  script, `connect-src 'self'`); the server half is a `internal/crm` connector. The
+  pages need no CRM token: Open CTI and CIF run in the user's own CRM session.
+- **No Hello cookie in the frame.** A third-party frame does not get Hello's session
+  cookie, so the pages sign in through a popup (authorization code with PKCE) against two
+  new pre-registered public clients, `hello-salesforce` and `hello-dynamics` (spec I-32),
+  with scopes `calls events`; the callback pages postMessage the code to their own opener
+  (origin and state checked) and the token stays in the frame's session storage.
+- **Client credentials use the framework's `crm.Direct`** (introduced by #328). `Authenticate`
+  signs in with the customer's client id and secret and no browser. `Connect` connects at once
+  (empty `authorizeUrl`), and the token manager signs in again at expiry or on a 401 instead of
+  refreshing. Refused credentials are the same `needs_reauth` once as a refused refresh token;
+  an outage is not. Salesforce and Dynamics both use it (spec: connected app / org service
+  principal). JWT bearer for Salesforce is not built: client credentials is the simpler flow
+  Salesforce offers for an integration user and needs no certificate handling.
+- **Salesforce interactive-only mode.** `config.serverLogging` (default `false`): with it
+  off the connector is only the softphone's settings. It needs no credentials, the hook
+  queues no job, the lookup skips it and the engagement handshake is a no-op
+  (`adopted: true`), so nothing waits for a connection that will never exist. `crm.ServerSide`
+  is the framework switch for it. The softphone then also logs missed calls for its user
+  (`?missed=1` in the adapter URL the call center definition carries).
+- **No duplicate Tasks.** The softphone saves the Task at answer (`saveLog`), then tells the
+  server (`POST /api/v1/integrations/salesforce/engagements`, `callId` and `recordId`);
+  the server patches that Task with the duration, outcome and recording link. A server
+  Task that exists first wins (`adopted: false`). This is the HubSpot handshake
+  generalised: `Service.Engagement` validates the record id through the optional
+  `crm.RefValidator` of the connector.
+- **Dynamics logs only on the server.** The CIF widget does click-to-act and the screen pop;
+  it does not write activities, so there is no Dynamics handshake route.
+- **Dynamics channel provider is entered, not imported.** The spec says "customer-imported
+  solution". A CIF v2 channel provider is a data record (Customer Service admin center,
+  Channel Providers), not a solution component, so Hello shows the exact values to enter
+  (`GET /api/v1/integrations/crm/{id}/setup`, also an MCP read `getCRMSetup`) instead of
+  generating a solution zip nobody could verify here. The channel URL carries
+  `?org=<environment URL>` so the page knows where to load the CIF library from; it loads
+  that library only from `https://*.dynamics.com`. The same endpoint gives Salesforce its
+  Call Center definition XML and adapter URL.
+- **Dynamics phone call states.** Created open, then closed (Made for outbound, Received for
+  inbound; a missed call is Received with "Missed call from" and "No answer", Dynamics has
+  no missed reason). A closed activity is read-only, so an update reopens, patches and
+  closes. A failed close after a successful create is retried once and never repeats the
+  create. Sovereign clouds (`.us`, `.cn`) are not supported: only `*.dynamics.com`.
+- **Phone matching.** Salesforce: SOSL `IN PHONE FIELDS` on the last nine digits. Dynamics:
+  Dataverse has no normalised phone column, so the lookup queries a bounded list of
+  spellings (the last eight digits run together, and grouped with a space, dash, dot or
+  slash) with `contains`, and the server verifies the digits of each candidate (last eight,
+  which national and international spellings share). The widget's screen pop uses the same
+  list unverified. Mixed or unusual separators can still be missed (documented).
+- **Shared HTTP client is `kit.Do`** (#328's kit), which gained an optional `Classify`
+  (the CRM's own error message, and a retry for a failure such as Salesforce's 403
+  `REQUEST_LIMIT_EXCEEDED`). `crm.RecordingLine` (replace-not-repeat of the `Recording:`
+  description line, never touching what a person wrote) stays Salesforce and Dynamics
+  specific. HubSpot keeps its own client; it is not touched.
+- **Frames' lint.** `web/public/integrations` are classic scripts without a build and are
+  excluded from eslint; `web/src/integrations/embedded.test.ts` runs them against fakes.
+- **No migration.** The connector kind column has no CHECK; the placeholder 00102 is
+  unused.
+
+## One 802.1X model for Wi-Fi and wired ports (2026-11-13, feat/prov-wifi-8021x)
+
+Reconciles the Wi-Fi profiles (#278, migration 00074) with the 802.1X and SCEP profiles (#279, migration 00076). Migration 00088.
+
+- **An enterprise Wi-Fi profile names an 802.1X profile** (`wifi_profiles.dot1x_id`, `dot1xProfileId` in the API, `ON DELETE RESTRICT`). The EAP method, identity, anonymous identity, password and the RADIUS CA live in the 802.1X profile only. The Wi-Fi profile keeps SSID, security, PSK, priority, hidden, preferred account and the verified mark. The API fields `eapMethod`, `identity`, `anonymousIdentity`, `password`, `caCert` and `passwordSet` are gone (a request carrying them is refused as an unknown field).
+- **Old columns stay, unread** (`eap_method`, `identity`, `anonymous_identity`, `password_enc`, `ca_cert`), because the repo's migrations are additive for rolling upgrades; a later migration drops them.
+- **Existing enterprise profiles are adopted by hello-control at start-up** (`Store.AdoptWifiEAP`), not in SQL, because the sealed password has to be re-sealed under the 802.1X profile's context (`dot1x:<id>`, read from `wifi-password:<id>`). Each becomes an 802.1X PEAP profile "Wi-Fi <name> #<id>". A profile whose identity has spaces or exceeds 64 characters (the 802.1X rule) stays unadopted, is logged and writes no network until an 802.1X profile is named.
+- **Server certificate check is the 802.1X profile's:** the system certificates, or its uploaded CA (P83016 = 3, CA in P83011) with the optional server name (P83018 = 1, P83019). "Trust on first use" (2) and "skip verification" (0) are no longer offered; an adopted profile that had either becomes the system certificates. Reason: #279 decided Hello never writes 0, and one check per profile is what a shared model means.
+- **EAP-TLS on Wi-Fi** is now possible (P83004 = 1, P83007 CA, P83009 identity) where the phone has a SCEP certificate; the client certificate (P83008) is not written, as P8440 is not on the wired port (verify on a handset). EAP-MD5 is refused for a Wi-Fi profile (the API, and a 802.1X profile in use cannot be changed to it); a network whose 802.1X profile is missing, EAP-MD5 or EAP-TLS without SCEP is skipped at render, and its slot goes to the next profile.
+- **Template re-check of #278** against config-template-10212026.zip: WP8x6 slots 1 to 10 at P83000 + 100 (n - 1) (SSID +0, security +2, key +3, EAP +4, priority +49, preferred account +85), security codes 0, 4, 5, 11, 12, 14, EAP codes 1 TLS and 2 PEAP, CA type 0 skip / 1 system / 2 TOFU / 3 uploaded, phase 2 0 MSCHAPv2, and the network-5 EAP key at P83304: all confirmed. WP810/822/825: SSID +0, enabled +1, security +2, key +3, 802.11r +48, hidden +50 per slot for 17 slots; slots 18 to 20 have security at +72: confirmed. WP856: P7812, P7814 (0, 1 WEP, 2 WPA/WPA2 PSK; the template calls it "Security Mode for Hidden SSID"), P7830: confirmed. Radio keys P25438, P82332, P22232, P22231, P82334 (WP8x6), P84992 (WP810), P25420, P25421, P22443, P22230, P25315, P82333 (WP856): confirmed. No mismatch found. Not written because #278 did not know them: P83018 and P83019 (domain validation, now written), P83086 and P83087 (management frame protection and transition mode), P83051 and P83052 (IP mode, IPv4 mode).
+
+## WP lab sweep runs against a third control replica (2026-11-13)
+
+- `TestWPPhonesAsVendors` (S-38) needs the server-wide provisioning settings
+  that are environment variables (TCP models, TLS models and server, backup
+  registrar, RTCP-XR) rendered into WP files, without changing what the
+  other lab tests' phones get. The compose lab therefore gains
+  `hello-control-wp` (host 8444) with those settings; phones are bound through
+  the API on hello-control-1 and fetch their files from it.
+- The WP822 is provisioned for TCP (with a backup server), the WP836 for TLS
+  with SRTP required, because a model has one transport; between them every
+  transport key is read back. The emulated phones register over UDP direct to
+  hello-sip-1, as the park test does; TLS and TCP signalling stay covered by
+  the TLS lab test and the unit tests.
+- 802.1X on a WP is the Wi-Fi enterprise (PEAP) profile on the WP836; wired
+  802.1X is GRP26xx only, so the sweep asserts a WP file carries no P7901.
+- The hardware lab list is printed at the end as "confirmed" (Hello's side
+  proven by a subtest of the run) or "needs hardware".
+
+## Messaging item 2: outbound sending on Twilio (2026-11-10)
+
+Delivery item 2 of `.procoder/specs/messaging-channels.md`, on the inbox core
+(item 1, #211). Migration `00091_messaging_twilio.sql`. Everything additive: no existing CHECK constraint
+changes, so `pg_temp.hello_check_values` is not needed.
+
+What is in: `internal/messaging/provider` (the interface and registry; only
+what works on the LAN: `Validate`, `Send`, `Status`, `Numbers`) and its Twilio
+adapter; the send, status-poll and settle workers (`messaging.Worker`, run on
+every control replica); sealed credentials (`secret.MsgChannelAAD`, the same
+`secret.Box` as trunk passwords); first contact (`POST /api/v1/inbox/conversations`,
+settings `firstContact` and two limits); the per-number throughput cap; the
+numbers route; the Inbox "Text a customer" dialog, the Twilio fields of the
+channel dialog and the first-contact settings.
+
+How inbound replies arrive without N1: **they do not.** A Twilio number cannot
+receive a text while there is no public listener (spec Default 6), and polling
+for inbound (`Reconcile`, N3) is not scheduled. So a Twilio conversation starts
+with a first-contact text and only the outbound side lives in the inbox. This
+is documented in `docs/inbox.md` and the channel dialog.
+
+Choices made by default (the spec leaves them open; the conservative option was
+taken):
+
+1. **First contact is a supervisor action only** (`POST /api/v1/inbox/conversations`,
+   operator and above, scope `messages`); the `user` role has no route to start
+   one (no `/me/inbox` form). Fewer people can send to a customer who has not
+   texted. The Inbox status carries `senders` for supervisors only.
+2. **The first-contact guard applies to every new outbound conversation**, even
+   to a number that texted before in a resolved conversation. A customer with
+   an **open** conversation on the number is `409 conversation_exists` (reply
+   there) rather than reused.
+3. **First contact only through a carrier number**; a SIP trunk number is
+   `409 channel_unavailable` (its texts have no web API, and the spec names
+   provider numbers as the case).
+4. **No idempotency key on first contact:** a double submit hits the open
+   conversation (`409`). One message, one recipient, one attestation.
+5. **A consent note is mandatory** (1-500 characters) besides the attestation
+   flag. It is stored on the conversation (`consent_note`); the audit row holds
+   ids only ("first_contact attested"), never the note or the number.
+6. **Credentials are replaced as a whole** (SID and token together, optionally
+   the Messaging Service SID), after Twilio accepts them. The token cannot be
+   changed alone, so a stored SID is never paired with an unchecked token.
+7. **Save is refused when the carrier is unreachable** (`502`), not stored
+   unvalidated: an administrator who cannot reach Twilio cannot add a channel.
+8. **A lost or 5xx answer is `unknown`, never retried.** A 429 from Twilio is a
+   definite refusal (`failed`, `rate_limited`). Failures that are not the
+   customer's (lost answers, 429) count toward `degraded` at five in a row; a
+   bad number (21211 and the like) does not.
+9. **Queued for an hour without a send becomes `failed` (`not_sent`)**, since it
+   never reached the carrier, rather than `unknown`.
+10. **Throughput cap default 60 texts a minute per number**, enforced when a
+    text is claimed (one advisory lock), so the cap holds across replicas.
+11. **Limits default as in the spec:** 20 first-contact texts per agent per
+    hour, 200 per number per 24 hours; the `429` carries `Retry-After: 600`.
+12. **Status polling schedule:** 5 s doubling to 5 min for the first hour, then
+    30 min, stopping at the final state, on `404`, after 48 hours, or while the
+    channel's credentials are invalid. No `StatusCallback` is sent (LAN-only).
+13. **Twilio's `21610` on send or on a status read** records an opt-out with
+    source `provider`, as if the customer had texted STOP.
+14. **Body limit 1600 characters** for a carrier text (Twilio's), on top of the
+    API's 2000 bytes; longer is `400` on `body`. Media is never sent (MMS is N1).
+15. **Erasing a customer does not call Twilio** (no provider-side `Redact`; that
+    is item 8). The report already says the carrier keeps its own logs.
+16. **MCP:** every new operation is excluded, category `private-data` (the
+    messaging configuration and message content are never exposed to an agent),
+    so no skill teaches them and the `docs/ai-access.md` doctable is unchanged.
+
+Not testable without a Twilio account (hardware/accounts list in the PR): a real
+send and delivery receipt, error code mapping against live Twilio, 10DLC and
+toll-free registration state, Messaging Service sends, what carriers do to an
+unregistered sender.

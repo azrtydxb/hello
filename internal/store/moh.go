@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Music on hold (phone-feature-parity S-33, migration 00021). A class is a
+// Music on hold (phone-feature-parity S-33, migration 00029). A class is a
 // named, ordered playlist of announcements played in a loop or shuffled; at
 // most one class is the global default, and a class with no announcements
 // plays the built-in tone.

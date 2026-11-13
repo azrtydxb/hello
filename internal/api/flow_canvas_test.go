@@ -30,7 +30,7 @@ func newCanvasFake() *canvasFake {
 		canvas: map[int64]*store.FlowCanvas{}, nodes: map[int64]map[string]store.FlowCanvasNode{}}
 }
 
-func (f *canvasFake) ListDevices(context.Context) ([]store.Device, error) { return nil, nil }
+func (f *canvasFake) ListDevices(context.Context, string) ([]store.Device, error) { return nil, nil }
 
 func (f *canvasFake) ListFlowCanvases(context.Context) ([]store.FlowCanvas, error) {
 	f.mu.Lock()

@@ -1,5 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { errorMessage, fieldErrors, listTrunks, type Trunk } from "../api";
+import {
+  errorMessage,
+  fieldErrors,
+  listExtensions,
+  listTrunks,
+  type Extension,
+  type Trunk,
+} from "../api";
 import {
   createAddress,
   createChannel,
@@ -10,6 +17,7 @@ import {
   testChannel,
   updateAddress,
   updateChannel,
+  type ChannelInput,
   type ChannelTest,
   type MessagingAddress,
   type MessagingChannel,
@@ -51,9 +59,15 @@ function ChannelDialog({
 }) {
   useRestoreFocus();
   const [name, setName] = useState(channel?.name ?? "");
+  const [carrier, setCarrier] = useState<"sip_trunk" | "twilio">(
+    channel?.provider === "twilio" ? "twilio" : "sip_trunk",
+  );
   const [trunkId, setTrunkId] = useState(
     channel?.trunkId ? String(channel.trunkId) : "",
   );
+  const [accountSid, setAccountSid] = useState("");
+  const [authToken, setAuthToken] = useState("");
+  const [serviceSid, setServiceSid] = useState("");
   const [enabled, setEnabled] = useState(channel?.enabled ?? true);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -66,19 +80,19 @@ function ChannelDialog({
     setError(null);
     setFields({});
     try {
-      const body = {
-        name: name.trim(),
-        enabled,
-        trunkId: trunkId ? Number(trunkId) : undefined,
-      };
+      const body: ChannelInput = { name: name.trim(), enabled };
+      if (carrier === "sip_trunk") {
+        body.trunkId = trunkId ? Number(trunkId) : undefined;
+      } else if (accountSid.trim() || authToken.trim() || serviceSid.trim()) {
+        // Credentials are sent together and replace the stored ones.
+        body.accountSid = accountSid.trim();
+        body.authToken = authToken.trim();
+        body.messagingServiceSid = serviceSid.trim();
+      }
       onSaved(
         channel
           ? await updateChannel(channel.id, body)
-          : await createChannel({
-              ...body,
-              kind: "sms",
-              provider: "sip_trunk",
-            }),
+          : await createChannel({ ...body, kind: "sms", provider: carrier }),
       );
     } catch (err: unknown) {
       setFields(
@@ -92,7 +106,11 @@ function ChannelDialog({
   return (
     <Modal
       title={channel ? `Edit ${channel.name}` : "Add a messaging channel"}
-      description="A channel reads customer texts from a SIP trunk that carries SMS as SIP MESSAGE, and sends replies through it. It works only where your carrier supports that."
+      description={
+        carrier === "twilio"
+          ? "A Twilio channel sends texts through your own Twilio account. A Twilio number cannot receive texts while Hello has no public address, so conversations on it start with a first-contact text."
+          : "A channel reads customer texts from a SIP trunk that carries SMS as SIP MESSAGE, and sends replies through it. It works only where your carrier supports that."
+      }
       onClose={onClose}
       actions={
         <>
@@ -118,20 +136,66 @@ function ChannelDialog({
           autoFocus
           onChange={(e) => setName(e.target.value)}
         />
-        <Select
-          label="SIP trunk"
-          value={trunkId}
-          error={fields.trunkId}
-          options={[
-            { value: "", label: "Choose a trunk…" },
-            ...trunks.map((t) => ({
-              value: String(t.id),
-              label: t.messaging ? t.name : `${t.name} (SMS over SIP is off)`,
-            })),
-          ]}
-          onChange={(e) => setTrunkId(e.target.value)}
-        />
-        {chosen && !chosen.messaging && (
+        {!channel && (
+          <Select
+            label="Carrier"
+            value={carrier}
+            options={[
+              { value: "sip_trunk", label: "A SIP trunk (SMS over SIP)" },
+              { value: "twilio", label: "Twilio" },
+            ]}
+            onChange={(e) => setCarrier(e.target.value as typeof carrier)}
+          />
+        )}
+        {carrier === "twilio" && (
+          <>
+            <Input
+              label="Account SID"
+              hint={
+                channel
+                  ? `Stored account ends in ${channel.accountHint}. Leave the account fields empty to keep it.`
+                  : "From the Twilio console: AC followed by 32 characters."
+              }
+              value={accountSid}
+              error={fields.accountSid}
+              autoComplete="off"
+              onChange={(e) => setAccountSid(e.target.value)}
+            />
+            <Input
+              label="Auth token"
+              type="password"
+              hint="Checked with Twilio, then stored sealed. It is never shown again."
+              value={authToken}
+              error={fields.authToken}
+              autoComplete="new-password"
+              onChange={(e) => setAuthToken(e.target.value)}
+            />
+            <Input
+              label="Messaging Service SID (optional)"
+              hint="Send through a Twilio Messaging Service's sender pool instead of the number the text belongs to."
+              value={serviceSid}
+              error={fields.messagingServiceSid}
+              autoComplete="off"
+              onChange={(e) => setServiceSid(e.target.value)}
+            />
+          </>
+        )}
+        {carrier === "sip_trunk" && (
+          <Select
+            label="SIP trunk"
+            value={trunkId}
+            error={fields.trunkId}
+            options={[
+              { value: "", label: "Choose a trunk…" },
+              ...trunks.map((t) => ({
+                value: String(t.id),
+                label: t.messaging ? t.name : `${t.name} (SMS over SIP is off)`,
+              })),
+            ]}
+            onChange={(e) => setTrunkId(e.target.value)}
+          />
+        )}
+        {carrier === "sip_trunk" && chosen && !chosen.messaging && (
           <Alert tone="warn" title="SMS over SIP is off on this trunk">
             Turn it on in the trunk's settings, or no text arrives.
           </Alert>
@@ -169,9 +233,30 @@ function AddressDialog({
   const [words, setWords] = useState(address?.optOutKeywords.join(", ") ?? "");
   const [help, setHelp] = useState(address?.helpText ?? "");
   const [optOut, setOptOut] = useState(address?.optOutText ?? "");
+  const [desk, setDesk] = useState(address?.deskPhoneDelivery ?? false);
+  const [owner, setOwner] = useState(
+    address?.ownerExtensionId == null ? "" : String(address.ownerExtensionId),
+  );
+  const [extensions, setExtensions] = useState<Extension[]>([]);
+  const [perMinute, setPerMinute] = useState(
+    String(address?.sendsPerMinute ?? 60),
+  );
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const chosenChannel = channels.find((c) => String(c.id) === channelId);
+  const carrierNumber = chosenChannel?.provider === "twilio";
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listExtensions(controller.signal).then(
+      (list) => {
+        if (!controller.signal.aborted) setExtensions(list);
+      },
+      () => undefined,
+    );
+    return () => controller.abort();
+  }, []);
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -180,6 +265,9 @@ function AddressDialog({
     setFields({});
     try {
       const body = {
+        deskPhoneDelivery: desk,
+        ownerExtensionId: owner === "" ? null : Number(owner),
+        sendsPerMinute: carrierNumber ? Number(perMinute) : undefined,
         label: label.trim(),
         enabled,
         optOutKeywords: words
@@ -243,7 +331,11 @@ function AddressDialog({
             />
             <Input
               label="Number"
-              hint="The number customers text, as the carrier dials it to you, such as +3270123456."
+              hint={
+                carrierNumber
+                  ? "The Twilio number in international format, such as +3270123456."
+                  : "The number customers text, as the carrier dials it to you, such as +3270123456."
+              }
               value={number}
               error={fields.address}
               autoFocus
@@ -277,6 +369,37 @@ function AddressDialog({
           value={optOut}
           error={fields.optOutText}
           onChange={(e) => setOptOut(e.target.value)}
+        />
+        {carrierNumber && (
+          <Input
+            label="Texts per minute"
+            hint="The most texts this number sends in a minute; the rest wait."
+            inputMode="numeric"
+            value={perMinute}
+            error={fields.sendsPerMinute}
+            onChange={(e) => setPerMinute(e.target.value)}
+          />
+        )}
+        <Switch
+          label="Deliver to desk phones"
+          hint="A customer text of a conversation assigned to a user who turned this on in their profile is also sent to the phones of their extension. Replies typed there go back to the customer."
+          labelPosition="end"
+          checked={desk}
+          onChange={(e) => setDesk(e.target.checked)}
+        />
+        <Select
+          label="Owner extension"
+          hint="Its phone may reply into an existing conversation on this number that is unassigned or its user's."
+          value={owner}
+          error={fields.ownerExtensionId}
+          options={[
+            { value: "", label: "None" },
+            ...extensions.map((x) => ({
+              value: String(x.id),
+              label: `${x.number} ${x.name}`.trim(),
+            })),
+          ]}
+          onChange={(e) => setOwner(e.target.value)}
         />
         <Switch
           label="Number on"
@@ -374,7 +497,10 @@ export function MessagingChannels() {
               {
                 key: "trunk",
                 label: "SIP trunk",
-                render: (c) => c.trunkName || "Deleted",
+                render: (c) =>
+                  c.provider === "twilio"
+                    ? `Twilio …${c.accountHint}`
+                    : c.trunkName || "Deleted",
               },
               {
                 key: "state",

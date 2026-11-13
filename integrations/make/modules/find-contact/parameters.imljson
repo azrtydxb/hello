@@ -1,0 +1,3 @@
+[
+  { "name": "number", "type": "text", "label": "Number", "required": true, "help": "A phone number in any form; Hello matches on its digits." }
+]

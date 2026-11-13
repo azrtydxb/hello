@@ -6,7 +6,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { errorMessage } from "../api";
+import { errorMessage, fieldErrors } from "../api";
 import {
   getInboxStatus,
   listInboxAgents,
@@ -16,6 +16,7 @@ import {
   type ConversationStatus,
   type InboxAgent,
   type InboxApi,
+  type InboxCall,
   type InboxMessage,
   type StatusFilter,
 } from "../api/inbox";
@@ -36,6 +37,7 @@ import { formatTime } from "../format";
 import { Can } from "../role";
 import { usePolling } from "../usePolling";
 import { peerLabel, smsSegments } from "./inbox/sms";
+import { StartConversation } from "./inbox/StartConversation";
 import { useInboxStream, type InboxEvent } from "./inbox/useInboxStream";
 import "./inbox/inbox.css";
 
@@ -158,6 +160,8 @@ function Thread({
   const [busy, setBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [tags, setTags] = useState(conversation.tags.join(", "));
+  const [calls, setCalls] = useState<InboxCall[] | null>(null);
+  const [callsFailed, setCallsFailed] = useState(false);
   const clientId = useRef(newClientId());
   const toast = useToast();
 
@@ -198,6 +202,24 @@ function Thread({
       });
     return () => controller.abort();
   }, [api, id, refreshKey, apply]);
+
+  // The customer's recent calls, for a number (a chat visitor has none).
+  const isPhone = conv.peerKind === "phone";
+  useEffect(() => {
+    if (!isPhone) return;
+    const controller = new AbortController();
+    api
+      .calls(id, controller.signal)
+      .then((r) => {
+        if (controller.signal.aborted) return;
+        setCalls(r.items);
+        setCallsFailed(false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCallsFailed(true);
+      });
+    return () => controller.abort();
+  }, [api, id, isPhone, refreshKey]);
 
   async function loadOlder() {
     try {
@@ -389,6 +411,39 @@ function Thread({
               <dd style={{ margin: 0 }}>{conv.peerName}</dd>
             </>
           )}
+          <dt className="az-caption">Contact</dt>
+          <dd style={{ margin: 0 }}>
+            <AddContact
+              api={api}
+              id={id}
+              supervisor={supervisor}
+              named={conv.peerName !== ""}
+              onSaved={(c) => {
+                setConv(c);
+                toast.show("Saved to contacts.");
+                onChanged();
+              }}
+            />
+          </dd>
+          {isPhone && (
+            <>
+              <dt className="az-caption">Call</dt>
+              <dd style={{ margin: 0 }}>
+                {/* The existing click-to-call page: it rings your phone first. */}
+                <LinkButton
+                  to={`/dial?n=${encodeURIComponent(conv.peer)}`}
+                  size="sm"
+                  icon="phone-outgoing"
+                >
+                  Call {conv.peer}
+                </LinkButton>
+              </dd>
+              <dt className="az-caption">Recent calls</dt>
+              <dd style={{ margin: 0 }}>
+                <RecentCalls calls={calls} failed={callsFailed} />
+              </dd>
+            </>
+          )}
           <dt className="az-caption">Assigned to</dt>
           <dd style={{ margin: 0 }}>
             {unassigned ? "Nobody" : conv.assigneeName}
@@ -513,6 +568,147 @@ function Thread({
       </div>
       {toast.node}
     </>
+  );
+}
+
+/** The customer's recent calls, newest first. */
+function RecentCalls({
+  calls,
+  failed,
+}: {
+  calls: InboxCall[] | null;
+  failed: boolean;
+}) {
+  if (failed) return <span className="az-caption">Calls unavailable.</span>;
+  if (calls === null) return <Spinner />;
+  if (calls.length === 0)
+    return <span className="az-caption">No recent calls.</span>;
+  return (
+    <ul style={{ margin: 0, paddingLeft: "1.1em" }} aria-label="Recent calls">
+      {calls.map((c) => (
+        <li key={c.id}>
+          {c.direction === "inbound" ? "Incoming" : "Outgoing"},{" "}
+          {c.answered
+            ? `${Math.max(1, Math.round(c.durationMs / 1000))} s`
+            : "not answered"}
+          , {formatTime(c.startTime)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * "Add to contacts": names the customer's number. A personal contact names it
+ * for the person who saves it; a supervisor may save it to the shared company
+ * book instead.
+ */
+function AddContact({
+  api,
+  id,
+  supervisor,
+  named,
+  onSaved,
+}: {
+  api: InboxApi;
+  id: number;
+  supervisor: boolean;
+  named: boolean;
+  onSaved: (c: Conversation) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [first, setFirst] = useState("");
+  const [last, setLast] = useState("");
+  const [company, setCompany] = useState("");
+  const [book, setBook] = useState<"personal" | "company">("personal");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <Button
+        size="sm"
+        variant="secondary"
+        icon="user-plus"
+        onClick={() => setOpen(true)}
+      >
+        {named ? "Add another contact" : "Add to contacts"}
+      </Button>
+    );
+  }
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const c = await api.addContact(id, {
+        firstName: first.trim(),
+        lastName: last.trim(),
+        company: company.trim(),
+        book,
+      });
+      setOpen(false);
+      setFirst("");
+      setLast("");
+      setCompany("");
+      onSaved(c);
+    } catch (err: unknown) {
+      const f = fieldErrors(err)[0];
+      setError(f ? `${f.path}: ${f.message}` : errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form
+      className="cf-stack"
+      onSubmit={(e) => void save(e)}
+      aria-label="Add to contacts"
+    >
+      {error && <Alert tone="bad">{error}</Alert>}
+      <Input
+        label="First name"
+        value={first}
+        onChange={(e) => setFirst(e.target.value)}
+      />
+      <Input
+        label="Last name"
+        value={last}
+        onChange={(e) => setLast(e.target.value)}
+      />
+      <Input
+        label="Company"
+        value={company}
+        onChange={(e) => setCompany(e.target.value)}
+      />
+      {supervisor && (
+        <Select
+          label="Save to"
+          value={book}
+          options={[
+            { value: "personal", label: "My contacts" },
+            { value: "company", label: "Company book (everyone)" },
+          ]}
+          onChange={(e) => setBook(e.target.value as "personal" | "company")}
+        />
+      )}
+      <div className="inbox-actions">
+        <Button type="submit" size="sm" disabled={busy}>
+          Save contact
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => setOpen(false)}
+        >
+          Cancel
+        </Button>
+      </div>
+    </form>
   );
 }
 
@@ -747,6 +943,9 @@ function InboxView({ api, supervisor }: ViewProps) {
 
 function Shell({ api, supervisor }: ViewProps) {
   const status = usePolling(getInboxStatus, REFRESH_MS);
+  const toast = useToast();
+  const [starting, setStarting] = useState(false);
+  const senders = status.status === "ready" ? (status.data.senders ?? []) : [];
   return (
     <section aria-labelledby="page-title">
       <PageHeader
@@ -770,8 +969,28 @@ function Shell({ api, supervisor }: ViewProps) {
           }
         />
       ) : (
-        <InboxView api={api} supervisor={supervisor} />
+        <>
+          {supervisor && senders.length > 0 && (
+            <div className="msg-toolbar">
+              <Button icon="send" onClick={() => setStarting(true)}>
+                Text a customer
+              </Button>
+            </div>
+          )}
+          <InboxView api={api} supervisor={supervisor} />
+        </>
       )}
+      {starting && (
+        <StartConversation
+          senders={senders}
+          onClose={() => setStarting(false)}
+          onStarted={() => {
+            setStarting(false);
+            toast.show("The text is queued and will be sent in a moment.");
+          }}
+        />
+      )}
+      {toast.node}
     </section>
   );
 }

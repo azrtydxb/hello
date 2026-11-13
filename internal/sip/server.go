@@ -39,11 +39,17 @@ type Config struct {
 	Domain         string // digest realm and AOR host
 	AdvertisedAddr string // host:port written into Via and Contact
 	NonceSecret    []byte
-	MinExpires     time.Duration
-	MaxExpires     time.Duration
-	RingTimeout    time.Duration
-	AuthFailLimit  int
-	StateTimeout   time.Duration
+	// ClientAuthKey and ClientAuthKeyPrevious derive the digest secret of a
+	// web device; empty turns derived credentials off. MaxContacts caps the
+	// bindings of one AOR (10 when zero).
+	ClientAuthKey         string
+	ClientAuthKeyPrevious string
+	MaxContacts           int
+	MinExpires            time.Duration
+	MaxExpires            time.Duration
+	RingTimeout           time.Duration
+	AuthFailLimit         int
+	StateTimeout          time.Duration
 	// CallHeartbeat and CallTTL govern the live call record (10s / 30s).
 	CallHeartbeat time.Duration
 	CallTTL       time.Duration
@@ -53,6 +59,9 @@ type Config struct {
 	RecountInterval time.Duration
 	// MaxCallDuration ends a connected call with BYE to both legs (4h).
 	MaxCallDuration time.Duration
+	// DoorHangup is how long a door call stays up after the door-open code
+	// was sent, when the station hangs up after open (3s; spec S-47).
+	DoorHangup time.Duration
 	// SessionExpires is the RFC 4028 interval Hello requests on legs to
 	// phones and applies when a phone's call names none (30m); 0 turns
 	// session timers off. SessionMinSE is the smallest interval accepted
@@ -139,6 +148,9 @@ type Config struct {
 	// CallbackInterval is how often this node sweeps the queues' callback
 	// requests; zero means every 3 s.
 	CallbackInterval time.Duration
+	// FaxInterval is how often this node looks for queued faxes to send; zero
+	// means every 5 s.
+	FaxInterval time.Duration
 	// PromptLanguage is the language of the spoken voicemail prompts ("en",
 	// "nl"; empty is English) and Timezone the IANA zone message times are
 	// spoken in (empty is UTC).
@@ -204,6 +216,9 @@ type Deps struct {
 	// PageTests is the queue of paging-group test requests from the admin
 	// API; nil disables them.
 	PageTests PageTests
+	// DoorTriggers is the queue of doorbell webhook triggers (spec S-48);
+	// nil leaves the webhook unanswered.
+	DoorTriggers DoorTriggers
 	// Queues is the call queues' shared state (Valkey); nil disables call
 	// queues (a call to a queue is refused with 503).
 	Queues queue.Store
@@ -213,6 +228,9 @@ type Deps struct {
 	// Messages is the SIP MESSAGE queue (PostgreSQL); nil answers every
 	// MESSAGE 503.
 	Messages MessageQueue
+	// QualityReports stores the voice-quality reports phones publish
+	// (Event: vq-rtcpxr); nil answers them 503.
+	QualityReports QualityReports
 	// Conversations is the messaging inbox's gateway: a text a trunk
 	// delivers to one of its numbers becomes a conversation instead of
 	// going to an extension. nil leaves every trunk text to the extension
@@ -230,33 +248,49 @@ type Deps struct {
 	// Park is the shared call-park store (Valkey); nil disables call park,
 	// retrieve and cross-node pickup. A parked party hears music on hold.
 	Park ParkState
+	// Fax is the fax feature (hello-fax, the fax table and the PDF store); nil
+	// answers fax calls 488 and sends nothing.
+	Fax *FaxDeps
+	// CallerNames finds an inbound caller's name in a CRM (spec integrations
+	// I-47); nil leaves the carrier's display name. CallerNameBudget bounds
+	// the wait at ringing time (DefaultCallerNameBudget when zero).
+	CallerNames      CallerNamer
+	CallerNameBudget time.Duration
+	// Published is the shared event state of PUBLISHed presence (Valkey);
+	// nil answers PUBLISH 503 (S-35).
+	Published PublishedPresence
+
 	// Originates is the queue of click-to-call requests (spec integrations
 	// I-37); nil disables click-to-call on this node.
 	Originates Originates
 	// Events receives call events (ringing, answered, ended, missed,
 	// recording ready) for the event stream; nil emits none.
 	Events EventSink
+	// Emergency is the shared record of extensions that placed an emergency
+	// call lately (Valkey); nil keeps it on this node alone.
+	Emergency EmergencyMarks
 }
 
 // Server is one SIP node.
 type Server struct {
-	cfg     Config
-	deps    Deps
-	log     *slog.Logger
-	m       *Metrics
-	digest  *Digest
-	contact sip.ContactHeader
-	advHost string
-	advPort int
-	recount chan struct{}
-	ua      *sipgo.UserAgent
-	client  *sipgo.Client
-	uas     *sipgo.DialogUA // A legs: callers
-	uac     *sipgo.DialogUA // B legs: forks
-	// uacElsewhere is uac with "Call completed elsewhere" on its CANCELs,
-	// for the ringing legs of a picked-up call.
-	uacElsewhere *sipgo.DialogUA
-	bg           sync.WaitGroup
+	cfg  Config
+	deps Deps
+	log  *slog.Logger
+	m    *Metrics
+	// rtcpxrRate bounds the quality reports per device (S-36).
+	rtcpxrRate reportWindow
+	digest     *Digest
+	contact    sip.ContactHeader
+	advHost    string
+	advPort    int
+	recount    chan struct{}
+	ua         *sipgo.UserAgent
+	client     *sipgo.Client
+	uas        *sipgo.DialogUA // A legs: callers
+	uac        *sipgo.DialogUA // B legs: forks
+	bg         sync.WaitGroup
+	// emMarks is the node-local record of emergency calls (emergency.go).
+	emMarks emergencyMarks
 	// bgMu guards bgClosed: once shutdown waits for bg, a late call event
 	// (a call ending as the node stops) must not start more work on it.
 	bgMu     sync.Mutex
@@ -283,6 +317,11 @@ type Server struct {
 	// a test can inject the fork failure that races the abort.
 	abortHook atomic.Pointer[func(*call)]
 
+	// takeoverMu serializes takeover passes: a pass reads the membership
+	// once and acts on that snapshot, so a pass holding an older snapshot
+	// must not run after a newer one (it would forget an OFFLINE node the
+	// newer pass already counted, and the next pass would count it again).
+	takeoverMu sync.Mutex
 	// haOffline tracks OFFLINE nodes for the zombie reaper (guarded by
 	// haOfflineMu).
 	haOfflineMu sync.Mutex
@@ -419,6 +458,7 @@ func New(cfg Config, deps Deps) (*Server, error) {
 	setDefault(&cfg.RingTimeout, 30*time.Second)
 	setDefault(&cfg.MaxCallDuration, 4*time.Hour)
 	setDefault(&cfg.PageMaxDuration, 120*time.Second)
+	setDefault(&cfg.DoorHangup, 3*time.Second)
 	setDefault(&cfg.PageAnswerTimeout, 10*time.Second)
 	if cfg.PageFanout <= 0 {
 		cfg.PageFanout = 200
@@ -518,7 +558,6 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.refreshPeers(ctx) // before serving, so the edge knows its peers
 	s.uas = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
 	s.uac = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
-	s.uacElsewhere = newElsewhereUA(ua, client, s.uac)
 
 	s.handle(srv, sip.OPTIONS, s.handleOptions)
 	s.handle(srv, sip.REGISTER, s.handleRegister)
@@ -527,8 +566,10 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.handle(srv, sip.BYE, s.handleBye)
 	s.handle(srv, sip.CANCEL, s.handleStrayCancel)
 	s.handle(srv, sip.UPDATE, s.handleInDialog)
+	s.handle(srv, sip.PRACK, s.handlePrack)
 	s.handle(srv, sip.REFER, s.handleRefer)
 	s.handle(srv, sip.SUBSCRIBE, s.handleSubscribe)
+	s.handle(srv, sip.PUBLISH, s.handlePublish)
 	s.handle(srv, sip.INFO, s.handleInfo)
 	s.handle(srv, sip.MESSAGE, s.handleMessage)
 	srv.OnNoRoute(s.wrap(s.handleNotAllowed))
@@ -539,8 +580,10 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.peerLoop(rctx) })
 	s.bg.Go(func() { s.subExpireLoop(rctx) })
 	s.bg.Go(func() { s.mwiPollLoop(rctx) })
+	s.bg.Go(func() { s.presencePollLoop(rctx) })
 	s.bg.Go(func() { s.queueLoop(rctx) })
 	s.bg.Go(func() { s.callbackLoop(rctx) })
+	s.bg.Go(func() { s.faxSendLoop(rctx) })
 	if s.deps.MailboxEvents != nil {
 		s.bg.Go(func() { s.deps.MailboxEvents.Watch(rctx, s.mailboxChanged) })
 	}
@@ -549,6 +592,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	}
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })
+	}
+	if s.deps.DoorTriggers != nil {
+		s.bg.Go(func() { s.doorTriggerLoop(rctx) })
 	}
 	if s.deps.Originates != nil {
 		s.bg.Go(func() { s.originateLoop(rctx) })
@@ -640,7 +686,7 @@ func waitListening(ctx context.Context, ua *sipgo.UserAgent, addr string) bool {
 	}
 }
 
-const allow = "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, UPDATE, REFER, SUBSCRIBE, INFO, MESSAGE"
+const allow = "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, UPDATE, REFER, SUBSCRIBE, PUBLISH, INFO, MESSAGE, PRACK"
 
 func (s *Server) handle(srv *sipgo.Server, m sip.RequestMethod, h sipgo.RequestHandler) {
 	srv.OnRequest(m, s.wrap(h))
@@ -803,7 +849,15 @@ func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 		s.authFailed(tx, req, ip, "unknown or disabled device", false)
 		return snapshot.Device{}, false
 	}
-	verdict, check := s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256)
+	var (
+		verdict Verdict
+		check   string
+	)
+	if dev.AuthMode == snapshot.AuthDerived {
+		verdict, check = s.digest.VerifyDerived(creds, req.Method.String(), req.Recipient, ip, dev.Username, s.clientKeys())
+	} else {
+		verdict, check = s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256)
+	}
 	switch verdict {
 	case OK:
 		return s.checkReplay(req, tx, creds.Username, creds.Nonce, creds.Cnonce, creds.Nc, dev)
@@ -850,6 +904,18 @@ func (s *Server) checkReplay(req *sip.Request, tx sip.ServerTransaction, user, n
 		return snapshot.Device{}, false
 	}
 	return dev, true
+}
+
+// clientKeys are the keys a derived credential may have been made under,
+// the current one first.
+func (s *Server) clientKeys() [][]byte {
+	var keys [][]byte
+	for _, k := range []string{s.cfg.ClientAuthKey, s.cfg.ClientAuthKeyPrevious} {
+		if k != "" {
+			keys = append(keys, []byte(k))
+		}
+	}
+	return keys
 }
 
 func (s *Server) challenge(tx sip.ServerTransaction, req *sip.Request, stale bool) {

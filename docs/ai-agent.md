@@ -36,7 +36,7 @@ The endpoint host must resolve only to loopback, RFC 1918, RFC 6598, IPv6 unique
 
 ## What the assistant can and cannot do
 
-The assistant answers questions by calling read tools. Each call is replayed through Hello's own API as the asking user, so a user sees only what their role allows, and the answer lists the calls it relies on. It cannot change anything: it has no write tool. When asked for a change it drafts a proposal that a human applies. It does not see secrets (SIP secrets, provisioning URLs, API keys). Its answers are plain text.
+The assistant answers questions by calling read tools. Each call is replayed through Hello's own API as the asking user, so a user sees only what their role allows, and the answer lists the calls it relies on. By default it cannot change anything: when asked for a change it drafts a proposal that a human applies. The one exception is a question asked from a call-flow canvas with **Let AI apply changes** on (`context.allowApply`, off by default): that question also gets one write tool, `applyConfigBatch`, which validates the batch as a proposal, stores it and applies it as the asking user with their role (a viewer is refused), audited with `via` `ai:<session>` and revertible. It may write nothing else. See [the flow canvas guide](flow-canvas.md#let-ai-apply-changes). It does not see secrets (SIP secrets, provisioning URLs, API keys). Its answers are plain text.
 
 Each message runs in two phases. First the model reads what it needs with the tools and replies in plain text, with no structured-output instruction (at most `HELLO_AI_MAX_STEPS` steps and 16 tool calls). Its first step is sent with `tool_choice: "required"` and the later ones with `"auto"`, so the model reads data before it answers; a question that needs none (a greeting, "what can you do?") takes the extra tool `no_data_needed`, which reads nothing and is never cited. An endpoint that rejects `"required"` is asked again without it, and from then on the model is told once to call a tool when it answers without one. A model that writes out a tool call or announces a lookup instead of making it is also told once to make the call. Then one call without tools turns the question and the tool results into the structured answer (`answer`, `citations`, optional `proposal`) in the configured `HELLO_AI_STRUCTURED_OUTPUT` mode, validated and retried as usual; it is shown the calls made by position so its citations name them. Detector explanations use no tools and make a single structured call.
 
@@ -78,6 +78,14 @@ The tools are fixed, all `GET` operations with scope `read`:
 | `getAIFinding`          | `GET /api/v1/ai/findings/{id}`          | One finding                                                           |
 | `listAIProposals`       | `GET /api/v1/ai/proposals`              | AI proposals                                                          |
 | `getAIProposal`         | `GET /api/v1/ai/proposals/{id}`         | One proposal with its diff                                            |
+| `getFlowGraph`          | `GET /api/v1/flow/graph`                | Read the call flow as a graph                                         |
+| `getFlowCatalogue`      | `GET /api/v1/flow/catalogue`            | Read the flow node and port catalogue                                 |
+| `listFlowCanvases`      | `GET /api/v1/flow/canvases`             | List flow canvases                                                    |
+| `traceFlow`             | `GET /api/v1/flow/trace`                | Trace the path a call would take through the call flow                |
+
+One more tool reads no PBX data: `describeOperation` answers the request (method, path, path parameters and the JSON schema of the body) of an operation a proposal may carry, directly or inside a batch, so the model writes a valid body instead of guessing. It reads only the embedded API document.
+
+A question asked from a call-flow canvas carries a `context` (`POST /api/v1/ai/sessions/{id}/messages` with `{"content", "context": {"canvasId", "nodes", "trace", "allowApply"}}`): the canvas, the nodes selected on it and a call traced there. It is stored with the message and reaches the model as data, never as instructions; the model reads the graph and traces the call with its own tools. See [the flow canvas guide](flow-canvas.md).
 
 ## Streaming answers
 
@@ -105,25 +113,28 @@ Nothing between the model and the browser may buffer the stream. hello-control s
 
 A proposal has a title, a rationale and up to 8 ordered actions, each with the target as it is now (`before`) and as the action would leave it (`after`). Nothing is sent until an operator applies it. Applying replays the actions in order through the API with the applier's own credentials, so roles, validation and audit are those of a direct call; each action is its own configuration change with an audit row whose `via` is `ai-proposal:<id>`. If the targets changed since the proposal was made it becomes `stale` and nothing is sent; the first failing action stops it as `failed`, with the earlier ones listed as applied. Deletes are marked, and the console asks for confirmation naming each operation. A dismissed proposal cannot be applied.
 
+A proposal may instead carry one configuration batch, the single action `applyConfigBatch` whose body is a batch of up to 50 object writes (any operation of `docs/config-batch.md`'s list, which covers every object type the call-flow canvas draws). Its validation recurses: each inner operation must be batchable and may not set a password, PIN or secret, and the batch is then dry-run as the user, with their role, exactly as the apply would run it, rolled back. Hello sets the batch's `baseRevision` and each operation's `expect` from the graph at that moment, and stores the dry run's per-operation diff, warnings and graph change (`preview`) with the action. The canvas shows the proposal as an overlay (`/flow/<canvasId>?proposal=<id>`); applying it replays the batch in one transaction with the applier's credentials (the batch's `via` is `ai-proposal:<id>`, revertible like any batch), and a configuration that moved under it makes the proposal `stale`.
+
 Only these operations may appear in a proposal; anything else, every admin-scoped operation and every operation whose response carries a secret is refused:
 
-| Operation             | Request                               | Role     | Kind                                |
-| --------------------- | ------------------------------------- | -------- | ----------------------------------- |
-| `updateExtension`     | `PATCH /api/v1/extensions/{id}`       | operator | change                              |
-| `updateDevice`        | `PATCH /api/v1/devices/{id}`          | operator | change                              |
-| `createRingGroup`     | `POST /api/v1/ring-groups`            | operator | create                              |
-| `updateRingGroup`     | `PATCH /api/v1/ring-groups/{id}`      | operator | change                              |
-| `deleteRingGroup`     | `DELETE /api/v1/ring-groups/{id}`     | operator | delete (marked, needs confirmation) |
-| `putFeatureCodes`     | `PUT /api/v1/feature-codes`           | operator | change                              |
-| `createOutboundRoute` | `POST /api/v1/routes/outbound`        | operator | create                              |
-| `updateOutboundRoute` | `PATCH /api/v1/routes/outbound/{id}`  | operator | change                              |
-| `deleteOutboundRoute` | `DELETE /api/v1/routes/outbound/{id}` | operator | delete (marked, needs confirmation) |
-| `createInboundRoute`  | `POST /api/v1/routes/inbound`         | operator | create                              |
-| `updateInboundRoute`  | `PATCH /api/v1/routes/inbound/{id}`   | operator | change                              |
-| `deleteInboundRoute`  | `DELETE /api/v1/routes/inbound/{id}`  | operator | delete (marked, needs confirmation) |
-| `updateTrunk`         | `PATCH /api/v1/trunks/{id}`           | operator | change                              |
-| `updatePhone`         | `PATCH /api/v1/phones/{id}`           | operator | change                              |
-| `sendMessage`         | `POST /api/v1/messages`               | operator | change                              |
+| Operation             | Request                               | Role     | Kind                                                   |
+| --------------------- | ------------------------------------- | -------- | ------------------------------------------------------ |
+| `updateExtension`     | `PATCH /api/v1/extensions/{id}`       | operator | change                                                 |
+| `updateDevice`        | `PATCH /api/v1/devices/{id}`          | operator | change                                                 |
+| `createRingGroup`     | `POST /api/v1/ring-groups`            | operator | create                                                 |
+| `updateRingGroup`     | `PATCH /api/v1/ring-groups/{id}`      | operator | change                                                 |
+| `deleteRingGroup`     | `DELETE /api/v1/ring-groups/{id}`     | operator | delete (marked, needs confirmation)                    |
+| `putFeatureCodes`     | `PUT /api/v1/feature-codes`           | operator | change                                                 |
+| `createOutboundRoute` | `POST /api/v1/routes/outbound`        | operator | create                                                 |
+| `updateOutboundRoute` | `PATCH /api/v1/routes/outbound/{id}`  | operator | change                                                 |
+| `deleteOutboundRoute` | `DELETE /api/v1/routes/outbound/{id}` | operator | delete (marked, needs confirmation)                    |
+| `createInboundRoute`  | `POST /api/v1/routes/inbound`         | operator | create                                                 |
+| `updateInboundRoute`  | `PATCH /api/v1/routes/inbound/{id}`   | operator | change                                                 |
+| `deleteInboundRoute`  | `DELETE /api/v1/routes/inbound/{id}`  | operator | delete (marked, needs confirmation)                    |
+| `updateTrunk`         | `PATCH /api/v1/trunks/{id}`           | operator | change                                                 |
+| `updatePhone`         | `PATCH /api/v1/phones/{id}`           | operator | change                                                 |
+| `sendMessage`         | `POST /api/v1/messages`               | operator | change                                                 |
+| `applyConfigBatch`    | `POST /api/v1/config/batch`           | operator | batch of up to 50 object writes, alone in its proposal |
 
 ## Detectors and findings
 

@@ -23,6 +23,7 @@ const (
 	AnchorRecording    AnchorReason = "recording"
 	AnchorAnnouncement AnchorReason = "announcement"
 	AnchorVoicemail    AnchorReason = "voicemail"
+	AnchorFax          AnchorReason = "fax"
 	AnchorForced       AnchorReason = "forced"
 	// AnchorPolicy is the Phase 7 reason: every call anchors (spec S-7).
 	// The conditional triggers above remain as trace information only.

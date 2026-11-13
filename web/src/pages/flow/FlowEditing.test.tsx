@@ -244,7 +244,11 @@ describe("flow canvas editing", { timeout: 90000 }, () => {
     expect(sent).toHaveLength(1);
     expect(batchBody(sent[0]!)).toMatchObject({ baseRevision: 7 });
     expect(screen.getByText("No staged changes.")).toBeInTheDocument();
-    expect(localStorage.getItem("hello.flow.draft.1.ann")).toBeNull();
+    // The draft is saved from an effect that runs after the commit that
+    // shows "No staged changes.", so wait for the store to catch up.
+    await waitFor(() =>
+      expect(localStorage.getItem("hello.flow.draft.1.ann")).toBeNull(),
+    );
   });
 
   it("shows a rejected change on its node", async () => {

@@ -25,12 +25,12 @@ type streamAssistant struct {
 	ctx         chan context.Context // receives the stream's context
 }
 
-func (a *streamAssistant) PostMessage(_ context.Context, _ chat.User, _, content string) (int64, string, error) {
+func (a *streamAssistant) PostMessage(_ context.Context, _ chat.User, _, content string, _ *chat.Context) (int64, string, error) {
 	a.posted <- "json:" + content
 	return 5, "11111111-1111-4111-8111-111111111111", a.err
 }
 
-func (a *streamAssistant) PostMessageStream(ctx context.Context, _ chat.User, _, content string) (<-chan chat.Event, error) {
+func (a *streamAssistant) PostMessageStream(ctx context.Context, _ chat.User, _, content string, _ *chat.Context) (<-chan chat.Event, error) {
 	if a.err != nil {
 		return nil, a.err
 	}
