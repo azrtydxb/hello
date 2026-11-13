@@ -3554,3 +3554,29 @@ Decided while building, without asking, within the spec and the brief:
 - Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
+
+## TLS hop from Kamailio to hello-sip (2026-11-13)
+
+- S-12 is opt-in at both ends: `KAMAILIO_HELLO_TLS_PORT` on Kamailio and
+  `HELLO_SIP_TLS_ADDR` on hello-sip (chart `kamailio.helloTLS`, `sip.tls`). Off,
+  kamailio.cfg and hello-sip behave as before; kw does not set either, so its
+  ConfigMap only gains the unused `tls-hop.cfg` key and the new defines.
+- It carries every encrypted phone leg (tls, ws, wss), not only WebSocket, so
+  it is testable in the lab with the existing TLS phone. The dispatcher still
+  holds one set; Kamailio converts the chosen destination to its TLS address
+  (host kept, port 5061, transport=tls) rather than keeping a second set,
+  because a second set would be probed over TLS from the UDP probe socket.
+- Hello's requests come back to `hello_tls` on the instance's own address (as
+  `hello_ws` does for WSS), mutual TLS with one certificate of the Hello CA.
+  Kamailio verifies the node's certificate only on connections it opens
+  (`tls-hop.cfg` client section); what arrives on hello_tls is vetted by source
+  address like the UDP socket, because the tls module's server section cannot be
+  set per socket from a static file.
+- hello-sip needs the edge to present a client certificate (RequireAndVerify).
+  The certificate is re-read when it changes (cert-manager renewals).
+- Not built: a TLS probe in the dispatcher, and the cleartext-hop refusal flag
+  (it belongs to the media path). This branch is based on main without #326;
+  kamailio.cfg, the kw ConfigMap and test/deploy tests need re-syncing against
+  #326 and #338 at merge (NEED_TLS defined in both, the hello-socket checks, the
+  TLS opt-in test).
+

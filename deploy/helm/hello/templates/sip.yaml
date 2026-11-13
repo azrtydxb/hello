@@ -2,6 +2,7 @@
 {{- $ctx := dict "root" . "component" "sip" -}}
 {{- $sip := .Values.sip -}}
 {{- if lt (int $sip.nodes) 1 }}{{ fail "sip.nodes must be at least 1" }}{{ end }}
+{{- if and $sip.tls.enabled (not $sip.tls.secretName) }}{{ fail "sip.tls.secretName is required when sip.tls.enabled: a kubernetes.io/tls Secret issued by the Hello CA, with its ca.crt, usable as a server and a client certificate" }}{{ end }}
 {{- if ge (int $sip.drainTimeoutSeconds) (int $sip.terminationGracePeriodSeconds) }}
 {{- fail "sip.drainTimeoutSeconds must be below sip.terminationGracePeriodSeconds, or Kubernetes kills a node mid-drain" }}
 {{- end }}
@@ -35,6 +36,12 @@ spec:
       port: 8082
       protocol: TCP
       targetPort: http
+    {{- if $sip.tls.enabled }}
+    - name: sip-tls
+      port: {{ $sip.tls.port }}
+      protocol: TCP
+      targetPort: sip-tls
+    {{- end }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -115,6 +122,18 @@ spec:
               value: {{ $sip.maxContacts | quote }}
             - name: HELLO_SIP_TRUSTED_PROXIES
               value: {{ $sip.trustedProxies | quote }}
+            {{- if $sip.tls.enabled }}
+            # SIP over mutual TLS from Kamailio for encrypted phone legs
+            # (docs/webrtc.md, "TLS hop").
+            - name: HELLO_SIP_TLS_ADDR
+              value: {{ printf ":%d" (int $sip.tls.port) | quote }}
+            - name: HELLO_SIP_TLS_CERT
+              value: /etc/hello-sip-tls/tls.crt
+            - name: HELLO_SIP_TLS_KEY
+              value: /etc/hello-sip-tls/tls.key
+            - name: HELLO_SIP_TLS_CA
+              value: /etc/hello-sip-tls/ca.crt
+            {{- end }}
             - name: HELLO_SIP_ADVERTISED_ADDR
               # What the node tells Kamailio and phones it is: its stable
               # pod DNS name, as the dispatcher list names it.
@@ -167,6 +186,17 @@ spec:
             - name: sip
               containerPort: 5060
               protocol: UDP
+            {{- if $sip.tls.enabled }}
+            - name: sip-tls
+              containerPort: {{ $sip.tls.port }}
+              protocol: TCP
+            {{- end }}
+          {{- if $sip.tls.enabled }}
+          volumeMounts:
+            - name: sip-tls
+              mountPath: /etc/hello-sip-tls
+              readOnly: true
+          {{- end }}
           readinessProbe:
             httpGet:
               path: /readyz
@@ -183,3 +213,10 @@ spec:
             {{- toYaml $sip.resources | nindent 12 }}
           securityContext:
             {{- include "hello.containerSecurity" . | nindent 12 }}
+      {{- if $sip.tls.enabled }}
+      volumes:
+        - name: sip-tls
+          secret:
+            secretName: {{ $sip.tls.secretName }}
+            defaultMode: 288
+      {{- end }}

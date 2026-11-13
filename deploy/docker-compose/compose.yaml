@@ -38,6 +38,12 @@ x-sip-env: &sip-env
   HELLO_SIP_RING_TIMEOUT: 10s
   # Kamailio's fixed edge address: only it may send Path and X-Hello-Client.
   HELLO_SIP_TRUSTED_PROXIES: 10.89.53.10/32
+  # SIP over mutual TLS from Kamailio for the encrypted phone legs
+  # (S-12): the lab SIP certificate (sip-certs) is both ends' certificate.
+  HELLO_SIP_TLS_ADDR: ":5061"
+  HELLO_SIP_TLS_CERT: /etc/hello-sip-tls/tls.crt
+  HELLO_SIP_TLS_KEY: /etc/hello-sip-tls/tls.key
+  HELLO_SIP_TLS_CA: /etc/hello-sip-tls/ca.crt
 
 x-valkey-deps: &valkey-deps
   sentinel-1: { condition: service_healthy }
@@ -104,6 +110,8 @@ x-sip: &sip
   depends_on:
     <<: *valkey-deps
     hello-migrate: { condition: service_completed_successfully }
+    sip-certs: { condition: service_completed_successfully }
+  volumes: [siptls:/etc/hello-sip-tls:ro]
   healthcheck:
     <<: *readyz
     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/readyz"]
@@ -279,8 +287,8 @@ services:
         printf '%s\n' '[req]' 'distinguished_name=dn' 'prompt=no' '[dn]' 'CN=Hello lab SIP CA' \
           '[ca]' 'basicConstraints=critical,CA:TRUE' 'keyUsage=critical,keyCertSign,cRLSign' 'subjectKeyIdentifier=hash' > ca.cnf
         printf '%s\n' '[req]' 'distinguished_name=dn' 'prompt=no' '[dn]' 'CN=localhost' \
-          '[leaf]' 'basicConstraints=critical,CA:FALSE' 'keyUsage=critical,digitalSignature,keyEncipherment' 'extendedKeyUsage=serverAuth' \
-          'subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:kamailio,IP:10.89.53.10' > leaf.cnf
+          '[leaf]' 'basicConstraints=critical,CA:FALSE' 'keyUsage=critical,digitalSignature,keyEncipherment' 'extendedKeyUsage=serverAuth,clientAuth' \
+          'subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:kamailio,IP:10.89.53.10,DNS:hello-sip-1,IP:10.89.53.11,DNS:hello-sip-2,IP:10.89.53.12' > leaf.cnf
         openssl req -x509 -config ca.cnf -extensions ca -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 30 -keyout ca.key -out ca.crt
         openssl req -new -config leaf.cnf -newkey rsa:2048 -nodes -keyout tls.key -out tls.csr
         openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 30 -extfile leaf.cnf -extensions leaf -out tls.part
@@ -368,6 +376,9 @@ services:
       # sip-certs at /etc/hello-tls (read by deploy/kamailio/tls.cfg).
       KAMAILIO_TLS_PORT: "5061"
       KAMAILIO_PUBLIC_TLS_PORT: ${HELLO_KAMAILIO_PUBLIC_TLS_PORT:-5081}
+      # The TLS hop to hello-sip (S-12): TLS and WebSocket phone legs go to
+      # the nodes over mutual TLS (tls-hop.cfg, the same certificate).
+      KAMAILIO_HELLO_TLS_PORT: "5073"
     volumes:
       - ../kamailio:/etc/kamailio:ro
       - siptls:/etc/hello-tls:ro

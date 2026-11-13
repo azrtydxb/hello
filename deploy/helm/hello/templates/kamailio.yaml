@@ -6,6 +6,11 @@
 {{- $pair := gt (int $k.replicas) 1 -}}
 {{- $list := include "hello.dispatcherList" . -}}
 {{- $tls := $k.tls | default dict -}}
+{{- $hop := $k.helloTLS | default dict -}}
+{{- if $hop.enabled }}
+{{- if not .Values.sip.tls.enabled }}{{ fail "kamailio.helloTLS.enabled needs sip.tls.enabled: hello-sip must take TLS" }}{{ end }}
+{{- if not $tls.secretName }}{{ fail "kamailio.helloTLS.enabled needs kamailio.tls.secretName: the certificate (and ca.crt) Kamailio presents and verifies with" }}{{ end }}
+{{- end }}
 {{- if and $tls.enabled (not $tls.secretName) }}{{ fail "kamailio.tls.secretName is required when kamailio.tls.enabled: a kubernetes.io/tls Secret issued by the Hello CA" }}{{ end }}
 {{- if le (int .Values.sip.nodes) 0 }}{{ fail "sip.nodes must be at least 1" }}{{ end }}
 {{- if lt (int $k.replicas) 1 }}{{ fail "kamailio.replicas must be at least 1" }}{{ end }}
@@ -27,6 +32,9 @@ data:
   # A copy of deploy/kamailio/tls.cfg; read only when kamailio.tls.enabled.
   tls.cfg: |
     {{- .Files.Get "files/tls.cfg" | nindent 4 }}
+  # A copy of deploy/kamailio/tls-hop.cfg; read only when kamailio.helloTLS.enabled.
+  tls-hop.cfg: |
+    {{- .Files.Get "files/tls-hop.cfg" | nindent 4 }}
   dispatcher.list: |
     {{- $list | nindent 4 }}
 ---
@@ -207,6 +215,13 @@ spec:
             - name: KAMAILIO_PUBLIC_TLS_PORT
               value: {{ $tls.publicPort | quote }}
             {{- end }}
+            {{- if $hop.enabled }}
+            # The TLS hop to Hello (docs/webrtc.md): tls-hop.cfg is read.
+            - name: KAMAILIO_HELLO_TLS_PORT
+              value: {{ $hop.port | quote }}
+            - name: KAMAILIO_HELLO_SIP_TLS_PORT
+              value: {{ $hop.sipPort | quote }}
+            {{- end }}
           ports:
             - name: phones
               containerPort: {{ $k.phonesPort }}
@@ -217,6 +232,11 @@ spec:
             {{- if $tls.enabled }}
             - name: phones-tls
               containerPort: {{ $tls.port }}
+              protocol: TCP
+            {{- end }}
+            {{- if $hop.enabled }}
+            - name: hello-tls
+              containerPort: {{ $hop.port }}
               protocol: TCP
             {{- end }}
             - name: hello
@@ -256,7 +276,7 @@ spec:
               readOnly: true
             - name: run
               mountPath: /run/kamailio
-            {{- if $tls.enabled }}
+            {{- if or $tls.enabled $hop.enabled }}
             - name: tls
               mountPath: /etc/hello-tls
               readOnly: true
@@ -360,7 +380,7 @@ spec:
                       fieldRef:
                         fieldPath: metadata.namespace
         {{- end }}
-        {{- if $tls.enabled }}
+        {{- if or $tls.enabled $hop.enabled }}
         - name: tls
           secret:
             secretName: {{ $tls.secretName }}

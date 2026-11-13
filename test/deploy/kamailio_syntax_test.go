@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,7 +39,7 @@ func TestKamailioConfigSyntax(t *testing.T) {
 
 	root := repoRoot(t)
 	dir := t.TempDir()
-	for _, f := range []string{"kamailio.cfg", "dispatcher.list"} {
+	for _, f := range []string{"kamailio.cfg", "dispatcher.list", "tls.cfg", "tls-hop.cfg"} {
 		b, err := os.ReadFile(filepath.Join(root, "deploy", "kamailio", f))
 		if err != nil {
 			t.Fatal(err)
@@ -52,6 +53,16 @@ func TestKamailioConfigSyntax(t *testing.T) {
 	for name, env := range kwKamailioEnvs(t) {
 		variants[name] = env
 	}
+	// The TLS hop to hello-sip (S-12) is off in every variant above, kw's
+	// included: that is the check that kw is unchanged while it is off. On:
+	// the lab layout, and the kw environment with the VIP and the legacy
+	// sockets, with and without SIP over TLS for phones.
+	hop := map[string]string{"KAMAILIO_HELLO_TLS_PORT": "5073", "KAMAILIO_HELLO_SIP_TLS_PORT": "5061"}
+	variants["lab with the TLS hop"] = maps.Clone(hop)
+	variants["lab with TLS phones and the TLS hop"] = map[string]string{"KAMAILIO_TLS_PORT": "5061", "KAMAILIO_HELLO_TLS_PORT": "5073"}
+	withHop := maps.Clone(variants["kw environment with the VIP"])
+	maps.Copy(withHop, hop)
+	variants["kw environment with the VIP and the TLS hop"] = withHop
 	names := make([]string, 0, len(variants))
 	for n := range variants {
 		names = append(names, n)

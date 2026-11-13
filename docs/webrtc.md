@@ -47,7 +47,7 @@ credentials that are derived, not stored.
   default on) choose whether a kind of client is forked to. Do not disturb,
   forwarding and schedules still apply first. The first branch to answer
   cancels the others with `Reason: SIP;cause=200;text="Call completed
-  elsewhere"`, so clients show "answered elsewhere".
+elsewhere"`, so clients show "answered elsewhere".
 
 ## coturn
 
@@ -56,7 +56,7 @@ LAN, calls normally connect directly (host candidates) and never touch it.
 
 - Image: `docker/coturn/Dockerfile`, Debian trixie's `coturn` (native arm64),
   published by CI as `coturn:sha-<commit>` and `coturn:ct-<hash of
-  docker/coturn>`. Its entrypoint writes the configuration from the
+docker/coturn>`. Its entrypoint writes the configuration from the
   environment, so the shared secret comes from a Secret and is in no image or
   ConfigMap.
 - Mode: `use-auth-secret` (the TURN REST API). Credentials are
@@ -114,3 +114,52 @@ builds them from `coturn.servers`), `HELLO_STUN_URLS` (default: the plain
 `turn:` hosts as `stun:`), `HELLO_TURN_SECRET` and `HELLO_TURN_TTL` (default
 1h) configure it. With no server configured it answers 503. Issuing is
 counted in `hello_ice_credentials_issued_total`, not logged per credential.
+
+## TLS hop from Kamailio to hello-sip
+
+The signalling of a browser carries the fingerprint of its media (DTLS-SRTP),
+which is only as trustworthy as the path that carries it. Browsers reach
+Kamailio over WSS; the hop from Kamailio to hello-sip must be encrypted too
+before a WebRTC call is accepted in production. It is off by default, and
+with it off Kamailio and hello-sip behave exactly as before.
+
+- **What uses it.** A request that arrives over an encrypted phone leg (`tls`,
+  `ws` or `wss`) goes to the hello-sip node over mutual TLS. Hello's requests
+  for that phone come back to a TLS socket of the same Kamailio instance,
+  `hello_tls`, on its own address and `kamailio.helloTLS.port` (5073), which
+  the Path and Record-Route name. Everything else (UDP and TCP phones, the
+  dispatcher's OPTIONS probes) stays UDP on the `hello` socket.
+- **Mutual.** hello-sip listens on `sip.tls.port` (5061) and requires a client
+  certificate signed by the Hello CA (`HELLO_SIP_TLS_ADDR`, `_CERT`, `_KEY`,
+  `_CA`; TLS 1.2 minimum). Kamailio presents its certificate and verifies the
+  node's against the same CA (`tls-hop.cfg`, which is `tls.cfg` plus the CA, a
+  client certificate and `verify_certificate = yes` for the connections
+  Kamailio opens). Hello verifies Kamailio's certificate on its own
+  connections. What arrives on `hello_tls` is still vetted by source address,
+  like the UDP socket: only a dispatcher node's address is a Hello node.
+- **Certificates.** One certificate of the Hello CA with its `ca.crt`, usable as
+  a server and a client certificate (`serverAuth` and `clientAuth`), whose
+  names include the addresses Hello dials (the Kamailio node addresses) and
+  the pod DNS names of the hello-sip nodes. hello-sip re-reads it when the
+  file changes, at most once a minute, so cert-manager renewals need no
+  restart. Kamailio reads it at start.
+- **Chart.** `sip.tls.enabled` and `sip.tls.secretName` (hello-sip), and
+  `kamailio.helloTLS.enabled` (with `port`, `sipPort`), which needs
+  `kamailio.tls.secretName` for Kamailio's own certificate. Both are off by
+  default; the chart refuses one without the other's prerequisites. In
+  Kamailio it is `KAMAILIO_HELLO_TLS_PORT` and `KAMAILIO_HELLO_SIP_TLS_PORT`.
+  The kw manifests do not set them: turning the hop on there is a manifest
+  change together with the certificate.
+- **Failover.** A retry on another node, and an in-dialog request aimed at a
+  dead node, are converted to the TLS address too (a message flag carries the
+  choice into the failure routes). The dispatcher's node list is unchanged, so
+  a node is healthy as the UDP probes say; a node whose TLS port is down
+  fails that request over to the next node.
+- **Not done.** A node whose TLS listener is down is not marked down by the
+  UDP probes; there is no TLS probe. The `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP`
+  flag that refuses WebRTC calls over a cleartext hop belongs to the WebRTC
+  media path and arrives with it. Hello's trunk legs and Hello to SBC
+  connections are not part of this hop.
+- **Lab.** The compose lab turns it on at both ends (the lab SIP certificate is
+  both ends' certificate), so every TLS phone of the lab suite travels it:
+  `TestLabSIPTLS` registers over TLS and the node answers on the hop.

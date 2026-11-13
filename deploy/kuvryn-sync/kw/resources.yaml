@@ -54,6 +54,8 @@ data:
     #   - tells Hello the phone's real source in X-Hello-Client and the transport
     #     of the phone's connection (udp, tcp or tls) in X-Hello-Transport;
     #   - terminates SIP over TLS for phones (optional, see TLS below);
+    #   - talks to Hello over mutual TLS for the encrypted phone legs (TLS, WSS;
+    #     optional, see "TLS hop" below);
     #   - rate-limits REGISTER, INVITE and MESSAGE per source IP (pike).
     #
     # SIP MESSAGE (RFC 3428, text messaging) is routed like an initial INVITE:
@@ -167,6 +169,37 @@ data:
     #!endif
     #!endif
 
+    # TLS hop to Hello (clients-webrtc-mobile-video S-12), off unless
+    # KAMAILIO_HELLO_TLS_PORT is set. The signalling of a browser carries the
+    # fingerprint of its media, which is only as trustworthy as the path that
+    # carries it, so requests that arrive over an encrypted phone leg (tls, ws,
+    # wss) go on to the hello-sip node over mutual TLS (the dispatcher's node,
+    # port KAMAILIO_HELLO_SIP_TLS_PORT, default 5061), and Hello's requests for
+    # that phone come back to a TLS socket of this instance, "hello_tls", on its
+    # own address (the phone's connection is pinned to this instance anyway) and
+    # KAMAILIO_HELLO_TLS_PORT. Everything else, and the dispatcher's probes, stay
+    # UDP on the "hello" socket. Both sides present a certificate of the Hello CA
+    # (tls-hop.cfg: /etc/hello-tls, the same Secret as SIP over TLS) and Kamailio
+    # verifies the node's; hello-sip verifies this one and requires it
+    # (HELLO_SIP_TLS_*). Source-address vetting of what arrives on hello_tls is
+    # unchanged: only a dispatcher node's address is a Hello node.
+    #!trydefenv HELLO_TLS_PORT=KAMAILIO_HELLO_TLS_PORT
+    #!trydefenv HELLO_SIP_TLS_PORT=KAMAILIO_HELLO_SIP_TLS_PORT
+    #!ifdef HELLO_TLS_PORT
+    #!ifndef HELLO_SIP_TLS_PORT
+    #!define HELLO_SIP_TLS_PORT 5061
+    #!endif
+    #!endif
+
+    # tls.so is needed by SIP over TLS and by the TLS hop.
+    #!ifdef TLS_PORT
+    #!define NEED_TLS
+    #!else
+    #!ifdef HELLO_TLS_PORT
+    #!define NEED_TLS
+    #!endif
+    #!endif
+
     # How long (ms) an INVITE towards Hello may stay unanswered after its first
     # provisional reply. Hello ends ringing itself (HELLO_SIP_RING_TIMEOUT,
     # default 30s), so this only matters when the node dies mid-ring: the
@@ -190,10 +223,13 @@ data:
 
     # FLT_FROM_HELLO: the request came from a hello-sip node.
     # FLT_RETRIED: already failed over once (ds_next_dst).
+    # FLT_HOP_TLS: the request goes to Hello over the TLS hop (kept for the
+    # failure routes, which retry on another node).
     # FLB_NATB (branch): the phone is behind NAT (usrloc nat_bflag).
     # FLB_NATSIPPING (branch): send it SIP OPTIONS keep-alives.
     #!define FLT_FROM_HELLO 1
     #!define FLT_RETRIED 2
+    #!define FLT_HOP_TLS 3
     #!define FLB_NATB 6
     #!define FLB_NATSIPPING 7
 
@@ -256,6 +292,11 @@ data:
     #!endif
     listen=udp:LISTEN_IP:5070 name "hello"
     #!endif
+    #!ifdef HELLO_TLS_PORT
+    # Hello's requests for an encrypted phone leg (Path, Record-Route): this
+    # instance's own address, see "TLS hop to Hello" above.
+    listen=tls:LISTEN_IP:HELLO_TLS_PORT name "hello_tls"
+    #!endif
     #!ifdef LEGACY_IP
     listen=udp:LEGACY_IP:PHONES_PORT name "phones_legacy"
     listen=tcp:LEGACY_IP:PHONES_PORT name "phones_legacy_tcp"
@@ -270,7 +311,7 @@ data:
     # NOTIFY, MESSAGE) take back to it, so an idle one stays open for an hour
     # (phone-feature-parity S-13); a phone's keep-alive (OPTIONS, CRLF) resets it.
     tcp_connection_lifetime=3600
-    #!ifdef TLS_PORT
+    #!ifdef NEED_TLS
     enable_tls=yes
     #!endif
 
@@ -314,7 +355,7 @@ data:
     loadmodule "xhttp.so"
     loadmodule "xhttp_prom.so"
     loadmodule "rtimer.so"
-    #!ifdef TLS_PORT
+    #!ifdef NEED_TLS
     loadmodule "tls.so"
     #!endif
 
@@ -322,9 +363,15 @@ data:
     # `docker compose exec kamailio kamcmd dispatcher.list` works as the
     # kamailio user the container runs as.
 
+    #!ifdef HELLO_TLS_PORT
+    # tls: tls-hop.cfg is tls.cfg plus the CA and a client certificate, and it
+    # verifies the hello-sip node's certificate on the connections Kamailio opens.
+    modparam("tls", "config", "/etc/kamailio/tls-hop.cfg")
+    #!else
     #!ifdef TLS_PORT
     # tls: certificate, key and the 1.2 minimum are in tls.cfg (next to this file).
     modparam("tls", "config", "/etc/kamailio/tls.cfg")
+    #!endif
     #!endif
 
     # jsonrpcs: RPC over the FIFO only (no HTTP transport here).
@@ -438,7 +485,7 @@ data:
     	route(EDGE_SIDE);
     	prom_counter_inc("edge_requests_total", "1", "$Rn");
 
-    	if ($Rn == "hello" || $Rn == "hello_legacy") {
+    	if ($Rn == "hello" || $Rn == "hello_legacy" || $Rn == "hello_tls") {
     		# Received on the Hello-facing socket (5070). On kw that socket is on
     		# the node address (hostNetwork), reachable from the whole LAN, so it
     		# is trusted only from an address the dispatcher holds (set 1, the
@@ -457,7 +504,7 @@ data:
 
     	route(REQINIT);
 
-    	if ($Rn == "hello" || $Rn == "hello_legacy") {
+    	if ($Rn == "hello" || $Rn == "hello_legacy" || $Rn == "hello_tls") {
     		# A hello-sip node (vetted above).
     		setflag(FLT_FROM_HELLO);
     	}
@@ -512,12 +559,24 @@ data:
     	if ($Rn == "phones_legacy" || $Rn == "phones_legacy_tcp" || $Rn == "hello_legacy") {
     		$var(legacy) = 1;
     	}
+    	# $var(sec) is 1 for an encrypted phone leg (tls, ws, wss) and for Hello's
+    	# own requests on hello_tls: they use the TLS hop (always 0 without it).
+    	$var(sec) = 0;
+    #!ifdef HELLO_TLS_PORT
+    	if ($pr == "tls" || $pr == "wss" || $pr == "ws") {
+    		$var(sec) = 1;
+    	}
+    #!endif
     }
 
     # The Hello-facing socket of this request's family.
     route[HELLO_SOCKET] {
     	if ($var(legacy) == 1) {
     		$fsn = "hello_legacy";
+    #!ifdef HELLO_TLS_PORT
+    	} else if ($var(sec) == 1) {
+    		$fsn = "hello_tls";
+    #!endif
     	} else {
     		$fsn = "hello";
     	}
@@ -590,6 +649,12 @@ data:
     	# Only our own Path reaches Hello: a phone could otherwise steer Hello's
     	# requests for its binding through a host of its choosing.
     	remove_hf("Path");
+    #!ifdef HELLO_TLS_PORT
+    	if ($var(sec) == 1) {
+    		# The Path names the socket Hello's requests come back to: hello_tls.
+    		route(HELLO_SOCKET);
+    	}
+    #!endif
     	if (!add_path_received()) {
     		sl_send_reply("503", "Internal Path Error");
     		exit;
@@ -687,6 +752,13 @@ data:
     # Forward to the Hello node in $du with the client's address.
     route[TO_HELLO] {
     	route(HELLO_SOCKET);
+    #!ifdef HELLO_TLS_PORT
+    	if ($var(sec) == 1) {
+    		# An encrypted phone leg: on to Hello over the TLS hop.
+    		setflag(FLT_HOP_TLS);
+    		route(HELLO_TLS_DST);
+    	}
+    #!endif
     	# Hello answers at the source port of what we send it (rport), not at a
     	# Via port that a replaced pod or a NAT no longer owns (kw: stale
     	# conntrack on 5070 after a Kamailio pod replacement).
@@ -711,6 +783,21 @@ data:
     	route(RELAY);
     	exit;
     }
+
+    #!ifdef HELLO_TLS_PORT
+    # Turn the next hop towards a Hello node into its TLS address: the node the
+    # dispatcher chose (or, with no chosen hop, the Request-URI's), on
+    # HELLO_SIP_TLS_PORT with transport=tls.
+    route[HELLO_TLS_DST] {
+    	$var(hp) = HELLO_SIP_TLS_PORT;
+    	if ($du != $null && $du != "") {
+    		$var(hh) = $(du{uri.host});
+    	} else {
+    		$var(hh) = $(ru{uri.host});
+    	}
+    	$du = "sip:" + $var(hh) + ":" + $var(hp) + ";transport=tls";
+    }
+    #!endif
 
     route[NO_NODE] {
     	xlog("L_WARN", "no active hello-sip node for $rm\n");
@@ -842,13 +929,24 @@ data:
     		xlog("L_WARN", "in-dialog failover of $rm: no other hello-sip node\n");
     		exit;
     	}
+    #!ifdef HELLO_TLS_PORT
+    	# Compared by host: over the TLS hop the dead hop is the TLS form of the
+    	# node the dispatcher lists.
+    	if ($(var(dead){uri.host}) == $(du{uri.host})) {
+    #!else
     	if ($var(dead) == $du) {
+    #!endif
     		if (!ds_next_dst()) {
     			xlog("L_WARN", "in-dialog failover of $rm: only the dead node is listed\n");
     			exit;
     		}
     	}
     	setflag(FLT_RETRIED);
+    #!ifdef HELLO_TLS_PORT
+    	if (isflagset(FLT_HOP_TLS)) {
+    		route(HELLO_TLS_DST);
+    	}
+    #!endif
     	xlog("L_INFO", "in-dialog failover of $rm: $var(dead) is dead, trying $du\n");
     	t_relay();
     	exit;
@@ -866,6 +964,11 @@ data:
     	if (t_check_status("503") || (t_branch_timeout() && !t_branch_replied())) {
     		if (ds_next_dst()) {
     			setflag(FLT_RETRIED);
+    #!ifdef HELLO_TLS_PORT
+    			if (isflagset(FLT_HOP_TLS)) {
+    				route(HELLO_TLS_DST);
+    			}
+    #!endif
     			xlog("L_INFO", "failover of $rm to $du\n");
     			t_on_failure("HELLO_FAILOVER");
     			t_relay();
@@ -936,6 +1039,41 @@ data:
     method = TLSv1.2+
     verify_certificate = no
     require_certificate = no
+  # Verbatim copy of deploy/kamailio/tls-hop.cfg (test/deploy). Read only when
+  # KAMAILIO_HELLO_TLS_PORT is set on the pod (the TLS hop to hello-sip,
+  # S-12); not set on kw today.
+  tls-hop.cfg: |
+    # Kamailio tls module configuration when the TLS hop to Hello is on
+    # (KAMAILIO_HELLO_TLS_PORT, see kamailio.cfg; clients-webrtc-mobile-video
+    # S-12). It replaces tls.cfg then: the same server settings for phones, plus
+    # the CA and a client certificate for the connections Kamailio opens.
+    #
+    # The certificate is the one of SIP over TLS (the Hello CA's, mounted with its
+    # ca.crt at /etc/hello-tls) and must be usable as a server and as a client
+    # certificate: hello-sip requires a client certificate on its TLS port, and
+    # Kamailio verifies the node's certificate against the CA. Hello's own
+    # connections to the hello_tls socket are vetted by their source address, as
+    # the UDP hello socket is.
+    #
+    # Connections Kamailio opens verify the far side, so a phone that has no
+    # connection to reuse cannot be dialled over TLS with an unverifiable
+    # certificate: that is the point of the hop, and phones normally reuse their
+    # own connection.
+    [server:default]
+    method = TLSv1.2+
+    certificate = /etc/hello-tls/tls.crt
+    private_key = /etc/hello-tls/tls.key
+    ca_list = /etc/hello-tls/ca.crt
+    verify_certificate = no
+    require_certificate = no
+
+    [client:default]
+    method = TLSv1.2+
+    certificate = /etc/hello-tls/tls.crt
+    private_key = /etc/hello-tls/tls.key
+    ca_list = /etc/hello-tls/ca.crt
+    verify_certificate = yes
+    require_certificate = yes
   dispatcher.list: |
     # Hello SIP edge dispatcher destinations (lab twin:
     # deploy/kamailio/dispatcher.list). Format:
@@ -1046,7 +1184,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: 4f9c03d844b862a1c43a8c404ef4f00094e64852c21908a09372ca51b7de25d0
+        hello.watteel.com/kamailio-config-sha256: dd0dc365cd84a259519d7f1fa34367e631fa9996f0d66031787ec14fb65aefcf
     spec:
       # Phones must reach Kamailio with no NAT in between: through a NodePort
       # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's
