@@ -103,6 +103,9 @@ func (a *Assistant) validator(ident proposal.Identity, sessionID string, ts *too
 		if ans.Proposal == nil {
 			return nil
 		}
+		if ts.didApply() {
+			return ai.Reject("proposal_after_apply", errors.New("the change was applied with applyConfigBatch: answer without a proposal, saying what changed"))
+		}
 		if a.cfg.Proposals == nil || a.cfg.Proposals.Validator == nil || a.cfg.Proposals.Store == nil {
 			return ai.Reject("proposal_unavailable", errors.New("proposals are not available here: answer without a proposal"))
 		}

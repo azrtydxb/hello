@@ -39,6 +39,8 @@ func Tables(spec *apispec.Spec) (string, error) {
 		switch {
 		case proposal.IsDelete(id):
 			kind = "delete (marked, needs confirmation)"
+		case id == proposal.BatchOp:
+			kind = fmt.Sprintf("batch of up to %d object writes, alone in its proposal", proposal.MaxBatchOps)
 		case strings.HasPrefix(id, "create"):
 			kind = "create"
 		}

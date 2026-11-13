@@ -470,6 +470,9 @@ type FeatureUpdate struct {
 	CallWaiting     *bool
 	// NoAnswerRings is the no-answer ring count (0 = system default).
 	NoAnswerRings *int
+	// FollowMe turns the extension's follow-me profile on or off (migration
+	// 00079); it changes nothing for an extension without a profile.
+	FollowMe *bool
 	// BossDivert sets divert_on of the boss link whose boss is Number (the
 	// *64 code, pbx-gaps S-19); nil leaves it alone. A number with no link is
 	// ErrNotFound.
@@ -515,6 +518,16 @@ func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureU
 				return "", err
 			}
 		}
+		if u.FollowMe != nil {
+			// An extension without a profile and a target has nothing to turn
+			// on; the feature code is answered before it gets here.
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE follow_me SET enabled = $2, updated_at = now()
+				WHERE extension_id = $1 AND EXISTS (SELECT 1 FROM follow_me_targets t WHERE t.extension_id = $1)`,
+				id, *u.FollowMe); err != nil {
+				return "", err
+			}
+		}
 		return strconv.FormatInt(id, 10), nil
 	})
 }
@@ -545,7 +558,7 @@ type RingGroup struct {
 	FailureTarget string `json:"failureTarget"`
 	// MOHClassID is the music on hold class of calls to this group (nil
 	// uses the global default); MOHRingback plays it to the caller instead
-	// of ringback while the group rings (migration 00021).
+	// of ringback while the group rings (migration 00029).
 	MOHClassID  *int64 `json:"mohClassId"`
 	MOHRingback bool   `json:"mohRingback"`
 	// RingTag overrides the ringgroup ring tag for calls through the group
@@ -809,6 +822,24 @@ func refuseIfGroupFailsTo(ctx context.Context, tx *sql.Tx, what, target, kind st
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	// A follow-me profile names its extension and group targets the same way.
+	frows, err := tx.QueryContext(ctx, `
+		SELECT e.number FROM follow_me_targets t JOIN extensions e ON e.id = t.extension_id
+		WHERE t.kind = $1 AND t.target = $2 ORDER BY e.number`, kind, target)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = frows.Close() }()
+	for frows.Next() {
+		var n string
+		if err := frows.Scan(&n); err != nil {
+			return err
+		}
+		refs = append(refs, "follow-me of extension "+n)
+	}
+	if err := frows.Err(); err != nil {
+		return err
+	}
 	if len(refs) > 0 {
 		return inUseBy(what, refs)
 	}
@@ -968,6 +999,8 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*48", Action: ActionQueueUnpause},
 		{Code: "*64", Action: ActionBossDivert},
 		{Code: "*42", Action: ActionDirectory},
+		{Code: "*76", Action: "follow_me_on"},
+		{Code: "*77", Action: "follow_me_off"},
 	}
 }
 

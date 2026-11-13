@@ -20,6 +20,7 @@ import (
 	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/location"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/originate"
 	"github.com/azrtydxb/hello/internal/phonebook"
@@ -78,6 +79,21 @@ type Store interface {
 	CreateExtensionKind(ctx context.Context, actor, number, name, externalNumber, kind string, targets store.DoorTargets, check store.Check) (store.Extension, error)
 	UpdateExtension(ctx context.Context, actor string, id int64, c store.ExtensionChange, check store.Check) (store.Extension, error)
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
+	GetDoorOpen(ctx context.Context, id int64) (store.DoorOpen, error)
+	SetDoorOpen(ctx context.Context, actor string, id int64, c store.DoorOpenChange, check store.Check) (store.DoorOpen, error)
+
+	GetDoorCamera(ctx context.Context, id int64) (store.DoorCamera, error)
+	SetDoorCamera(ctx context.Context, actor string, id int64, in store.DoorCameraInput) (store.DoorCamera, error)
+	DeleteDoorCamera(ctx context.Context, actor string, id int64) error
+	DoorCameraForView(ctx context.Context, id int64) (store.DoorCameraAccess, bool, error)
+	ListDoorWebhooks(ctx context.Context) ([]store.DoorWebhook, error)
+	GetDoorWebhook(ctx context.Context, id int64) (store.DoorWebhook, error)
+	CreateDoorWebhook(ctx context.Context, actor string, in store.DoorWebhookInput) (store.DoorWebhook, string, error)
+	UpdateDoorWebhook(ctx context.Context, actor string, id int64, in store.DoorWebhookInput) (store.DoorWebhook, error)
+	DeleteDoorWebhook(ctx context.Context, actor string, id int64) error
+	RotateDoorWebhookSecret(ctx context.Context, actor string, id int64) (string, error)
+	DoorWebhookForTrigger(ctx context.Context, id int64) (store.DoorTriggerHook, bool, error)
+	NoteDoorWebhookTriggered(ctx context.Context, id int64) error
 
 	GetVoicemailBox(ctx context.Context, extensionID int64) (store.VoicemailBox, error)
 	GetVoicemailBoxByID(ctx context.Context, boxID int64) (store.VoicemailBox, error)
@@ -118,6 +134,8 @@ type Store interface {
 	UpdateCalendar(ctx context.Context, actor string, id int64, in store.CalendarInput, check store.Check) (store.Calendar, error)
 	ImportCalendarEntries(ctx context.Context, actor string, id int64, entries []timecond.Entry, replace bool, check store.Check) (store.Calendar, error)
 	DeleteCalendar(ctx context.Context, actor string, id int64, check store.Check) error
+	GetFollowMe(ctx context.Context, id int64) (store.FollowMe, error)
+	PutFollowMe(ctx context.Context, actor string, id int64, in store.FollowMeInput) (store.FollowMe, error)
 	ListRingTags(ctx context.Context) ([]store.RingTag, error)
 	GetRingTag(ctx context.Context, name string) (store.RingTag, error)
 	CreateRingTag(ctx context.Context, actor string, in store.RingTagInput) (store.RingTag, error)
@@ -127,6 +145,27 @@ type Store interface {
 	ReplaceRingRules(ctx context.Context, actor string, in []store.RingRuleInput) ([]store.RingRule, error)
 	GetRingMap(ctx context.Context) (store.RingMap, error)
 	ReplaceRingMap(ctx context.Context, actor string, groupID *int64, in []store.RingMapEntry) (store.RingMap, error)
+	ListLocations(ctx context.Context) ([]store.Location, error)
+	GetLocation(ctx context.Context, id int64) (store.Location, error)
+	CreateLocation(ctx context.Context, actor string, n location.Node) (store.Location, error)
+	UpdateLocation(ctx context.Context, actor string, id int64, n location.Node) (store.Location, error)
+	DeleteLocation(ctx context.Context, actor string, id int64) error
+	ListLocationAssignments(ctx context.Context) ([]store.LocationAssignment, error)
+	SetLocationAssignment(ctx context.Context, actor, kind string, id int64, locationID *int64) error
+	PhoneLocation(ctx context.Context, phoneID int64) (store.PhoneLocation, error)
+	GetPhoneGroupEmergency(ctx context.Context, id int64) (store.PhoneEmergency, error)
+	SetPhoneGroupEmergency(ctx context.Context, actor string, id int64, in store.PhoneEmergency) (store.PhoneEmergency, error)
+	GetEmergencySettings(ctx context.Context) (store.EmergencySettings, error)
+	PutEmergencySettings(ctx context.Context, actor string, in store.EmergencySettings) (store.EmergencySettings, error)
+	ListWifiProfiles(ctx context.Context) ([]store.WifiProfile, error)
+	GetWifiProfile(ctx context.Context, id int64) (store.WifiProfile, error)
+	CreateWifiProfile(ctx context.Context, actor string, in store.WifiProfileInput) (store.WifiProfile, error)
+	UpdateWifiProfile(ctx context.Context, actor string, id int64, in store.WifiProfileInput) (store.WifiProfile, error)
+	DeleteWifiProfile(ctx context.Context, actor string, id int64) error
+	GetWifiGroup(ctx context.Context, groupID int64) (store.WifiScope, error)
+	PutWifiGroup(ctx context.Context, actor string, groupID int64, ids []int64, radio prov.WifiRadio) (store.WifiScope, error)
+	GetWifiPhone(ctx context.Context, phoneID int64) (store.WifiScope, error)
+	PutWifiPhone(ctx context.Context, actor string, phoneID int64, ids []int64) (store.WifiScope, error)
 	ListRingtones(ctx context.Context) ([]store.RingtoneFile, error)
 	RingtoneExists(ctx context.Context, name string) (bool, error)
 	CreateRingtone(ctx context.Context, actor, name string, info prov.ToneInfo, size int64, sha256 string) (store.RingtoneFile, error)
@@ -179,10 +218,10 @@ type Store interface {
 	ListBossLinks(ctx context.Context) ([]store.BossLink, error)
 	PutBossLinks(ctx context.Context, actor string, links []store.BossLinkInput) error
 
-	ListDevices(ctx context.Context) ([]store.Device, error)
+	ListDevices(ctx context.Context, kind string) ([]store.Device, error)
 	GetDevice(ctx context.Context, id int64) (store.Device, error)
 	CreateDevice(ctx context.Context, actor string, in store.NewDevice) (store.Device, error)
-	UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64) (store.Device, error)
+	UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, m store.DeviceMedia) (store.Device, error)
 	RotateDeviceSecret(ctx context.Context, actor string, id int64, realm, secret string) (store.Device, error)
 	DeleteDevice(ctx context.Context, actor string, id int64) error
 
@@ -194,6 +233,13 @@ type Store interface {
 	ListRecordings(ctx context.Context, extension string, before int64, limit int) ([]store.Recording, string, error)
 	GetRecording(ctx context.Context, id int64) (store.Recording, error)
 	DeleteRecording(ctx context.Context, actor string, id int64) (string, error)
+	CreateRecordingLink(ctx context.Context, actor string, recordingID int64, hash []byte, expires time.Time, maxUses int) (store.RecordingLink, error)
+	GetRecordingLink(ctx context.Context, id int64) (store.RecordingLink, error)
+	RevokeRecordingLink(ctx context.Context, actor string, id int64) error
+	UseRecordingLink(ctx context.Context, hash []byte) (object string, id int64, res store.LinkResult, err error)
+	RecordingParties(ctx context.Context, id int64) ([]string, error)
+	LookupCalls(ctx context.Context, f store.LookupFilter, before int64, limit int) ([]store.CallMatch, string, error)
+	LookupRecordings(ctx context.Context, f store.LookupFilter, before int64, limit int) ([]store.Recording, string, error)
 
 	ListAnnouncements(ctx context.Context) ([]store.Announcement, error)
 	GetAnnouncement(ctx context.Context, id int64) (store.Announcement, error)
@@ -294,6 +340,12 @@ type Config struct {
 	TwoFactor      TwoFactorStore
 	TwoFALogins    *prometheus.CounterVec
 	ConferenceLive ConferenceLive
+	// LinkMetrics counts recording link requests; nil counts nothing.
+	LinkMetrics *LinkMetrics
+	links       *linkLimiter
+	// CRM is the CRM connector administration (spec integrations I-47); nil
+	// answers 503 on the CRM routes.
+	CRM CRMService
 	// Events is the call-event pipeline (stream, history, tickets); nil
 	// answers 503 on the event routes.
 	Events EventService
@@ -311,6 +363,19 @@ type Config struct {
 	OriginateMetrics *OriginateMetrics
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
+	// DoorCalls carries door-open requests to the hello-sip node holding a
+	// call; nil answers 503. DoorOpenWait bounds the wait (0 means 5 s).
+	DoorCalls    DoorControl
+	DoorOpenWait time.Duration
+	// CameraHTTP fetches door station camera pictures; it should be built on
+	// the SSRF-guarded safehttp transport. nil answers 503.
+	CameraHTTP *http.Client
+	// DoorTriggers carries doorbell webhook triggers to hello-sip and keeps
+	// their rate and duplicate windows; nil answers 503.
+	DoorTriggers DoorTriggers
+	// Fax is the fax feature (destinations, the fax list, sending a PDF); the
+	// zero value answers 503 on its routes.
+	Fax FaxConfig
 	// Objects is the voicemail audio store; nil makes the audio routes and
 	// greeting uploads answer 503 instead of touching MinIO.
 	Objects Objects
@@ -352,6 +417,11 @@ type Config struct {
 	// Messages is the SIP MESSAGE persistence; nil answers 503 on the
 	// message routes.
 	Messages MessageStore
+	// Clients is the web device persistence and ClientAuth the softphone
+	// settings (derived credentials, ICE servers); nil Clients, or an empty
+	// ClientAuth.AuthKey, answers 503 on the enrolment routes.
+	Clients    ClientStore
+	ClientAuth ClientConfig
 	// Inbox is the messaging inbox persistence (spec messaging-channels);
 	// nil answers 503 on the inbox and messaging routes.
 	Inbox InboxStore
@@ -391,6 +461,8 @@ type Config struct {
 	// are set by Handler.
 	speech    *ttscache.Cache
 	prewarmMu *sync.Mutex
+	// credLimit bounds how often a user mints device credentials.
+	credLimit *rateLimiter
 	// prewarmKick asks the background worker to pre-generate the prompts of a
 	// language a queue just set. Batchable handlers kick it rather than call
 	// the pre-generation, which uses the speech cache and must not run inside a
@@ -415,9 +487,11 @@ func Handler(c Config) http.Handler {
 	if c.TTS == nil {
 		c.TTS = &tts.Client{}
 	}
+	c.credLimit = &rateLimiter{}
 	c.speech, c.prewarmMu = newSpeechCache(c), &sync.Mutex{}
 	c.prewarmKick = make(chan struct{}, 1)
 	c.self = new(atomic.Pointer[http.Handler])
+	c.links = newLinkLimiter()
 	s := &server{c}
 	go s.runPrewarmKicks()
 	opts := auth.Options{Cookies: true}
@@ -430,7 +504,7 @@ func Handler(c Config) http.Handler {
 	for _, rt := range s.routes() {
 		h := s.aiGuard(rt.Pattern, rt.H)
 		if !rt.Public {
-			guarded := auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, h))
+			guarded := auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, agentGuard(rt.Method, rt.Pattern, h)))
 			h = authed(guarded)
 			if rt.Pattern == "/api/v1/events/stream" {
 				// A client that cannot send an Authorization header
@@ -440,6 +514,9 @@ func Handler(c Config) http.Handler {
 		}
 		mux.Handle(rt.Method+" "+rt.Pattern, h)
 	}
+	// The recording link route is public (the token is the credential) and
+	// outside /api/v1, so it is not in the route table or the OpenAPI document.
+	mux.HandleFunc("GET /r/{token}", s.publicRecording)
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.
@@ -448,6 +525,52 @@ func Handler(c Config) http.Handler {
 	h := maintenance(c.Maintenance, wrapForTest(http.NewCrossOriginProtection().Handler(mux)))
 	c.self.Store(&h)
 	return h
+}
+
+// batchRoute is the configuration batch's route.
+const batchRoute = "/api/v1/config/batch"
+
+// isPreview reports whether the request is the dry run of an AI proposal's
+// batch (auth.Agent.Preview): the agent then holds write scopes, which only
+// a dry-run batch may use.
+func isPreview(r *http.Request) bool {
+	a, _ := auth.ActorFrom(r.Context())
+	ag, ok := auth.AgentFrom(r.Context())
+	return a.Kind == auth.KindAgent && ok && ag.Preview
+}
+
+// isAgentApply reports whether the request is the assistant applying its
+// own batch for the user (auth.Agent.Apply): it holds write scopes, which
+// only a configuration batch may use.
+func isAgentApply(r *http.Request) bool {
+	a, _ := auth.ActorFrom(r.Context())
+	ag, ok := auth.AgentFrom(r.Context())
+	return a.Kind == auth.KindAgent && ok && ag.Apply && !ag.Preview
+}
+
+// agentGuard confines the agent identities that hold write scopes. A batch
+// preview (spec flow-canvas S-19) may write only POST /api/v1/config/batch,
+// whose handler accepts only a dry run, and the operations replayed inside
+// a dry-run batch, which roll back. The assistant applying its own batch
+// (decision of 2026-11-10) may write only POST /api/v1/config/batch and
+// the operations replayed inside that batch: never an object directly, a
+// layout, or a revert. Reads pass; the user's role is checked before this.
+func agentGuard(method, pattern string, next http.Handler) http.Handler {
+	if method == http.MethodGet || method == http.MethodHead {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inBatch := store.BatchFrom(r.Context())
+		switch {
+		case isPreview(r) && pattern != batchRoute && !inBatch.DryRun():
+			writeError(w, http.StatusForbidden, "insufficient_scope", "an AI preview may only dry-run a configuration batch")
+			return
+		case isAgentApply(r) && (pattern != batchRoute || method != http.MethodPost) && inBatch == nil:
+			writeError(w, http.StatusForbidden, "insufficient_scope", "the assistant may only change configuration through a configuration batch")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // passwordGate refuses every route but the few a user needs to choose their

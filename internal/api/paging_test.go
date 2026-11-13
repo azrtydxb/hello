@@ -164,6 +164,30 @@ func TestExtensionCallWaiting(t *testing.T) {
 	}})
 }
 
+// TestExtensionPhoneSendAnonymous: the phone's Send Anonymous setting is off
+// by default, changes through PATCH independently of the trunk-only
+// anonymousOutbound flag, and GET returns it. It fails if the field is
+// missing, on by default, stored under the other flag, or not persisted.
+func TestExtensionPhoneSendAnonymous(t *testing.T) {
+	e := newPBXEnv(t, newMemObjects())
+	c := e.login()
+	if e.ext101["phoneSendAnonymous"] != false {
+		t.Fatalf("new extension phoneSendAnonymous = %v, want false", e.ext101["phoneSendAnonymous"])
+	}
+	path := fmt.Sprintf("/api/v1/extensions/%v", e.ext101["id"])
+	got := c.must(http.StatusOK, "PATCH", path, map[string]any{"phoneSendAnonymous": true}).json(t)
+	if got["phoneSendAnonymous"] != true || got["anonymousOutbound"] != false {
+		t.Fatalf("after PATCH phoneSendAnonymous = %v, anonymousOutbound = %v", got["phoneSendAnonymous"], got["anonymousOutbound"])
+	}
+	if got := c.must(http.StatusOK, "GET", path, nil).json(t); got["phoneSendAnonymous"] != true {
+		t.Fatalf("GET phoneSendAnonymous = %v, want true", got["phoneSendAnonymous"])
+	}
+	got = c.must(http.StatusOK, "PATCH", path, map[string]any{"anonymousOutbound": true, "phoneSendAnonymous": false}).json(t)
+	if got["phoneSendAnonymous"] != false || got["anonymousOutbound"] != true {
+		t.Fatalf("flags are not independent: %v", got)
+	}
+}
+
 // TestExtensionNoAnswerRings: the ring count before the no-answer forward
 // starts at 0 (system default), changes through PATCH, and a count outside 0
 // to 20 is a field error. It fails if any of those differ.

@@ -136,6 +136,25 @@ capabilities:
     - ALL
 {{- end -}}
 
+{{/* The TURN URIs clients are given, for every coturn server (comma separated). */}}
+{{- define "hello.turnUrls" -}}
+{{- $c := .Values.coturn -}}
+{{- $urls := list -}}
+{{- range $s := $c.servers -}}
+{{- $urls = append $urls (printf "turn:%s:%v?transport=udp" $s.externalIP $c.port) -}}
+{{- $urls = append $urls (printf "turn:%s:%v?transport=tcp" $s.externalIP $c.port) -}}
+{{- if $c.tls.enabled -}}
+{{- $urls = append $urls (printf "turns:%s:%v?transport=tcp" $s.externalIP $c.tlsPort) -}}
+{{- end -}}
+{{- end -}}
+{{- join "," $urls -}}
+{{- end -}}
+
+{{/* Derived web device credentials: the key (and the previous one while it is replaced). */}}
+{{- define "hello.clientKeyEnv" -}}
+{{ include "hello.secretEnv" (dict "root" . "env" "HELLO_CLIENT_AUTH_KEY" "key" "clientAuthKey" "optional" true) }}
+{{ include "hello.secretEnv" (dict "root" . "env" "HELLO_CLIENT_AUTH_KEY_PREVIOUS" "key" "clientAuthKeyPrevious" "optional" true) }}
+{{- end -}}
 {{/* Where phones reach Kamailio: the VIP with kamailio.vip.enabled, else kamailio.publicHost. */}}
 {{- define "hello.kamailioPublicHost" -}}
 {{- $k := .Values.kamailio -}}

@@ -22,9 +22,13 @@ func TestRoutesTable(t *testing.T) {
 		// The events scope guards the call-event routes, which every role
 		// reads (a user only their own extensions' events).
 		auth.ScopeEvents: auth.RoleViewer,
-		// The calls scope guards click-to-call, which a user places from their
-		// own extension (the handler checks ownership).
-		auth.ScopeCalls: auth.RoleViewer,
+		// The calls scope guards the HubSpot engagement handshake, which a
+		// user makes for their own calls only. The calls scope also guards
+		// click-to-call, which a user places from their own extension (the
+		// handler checks ownership). The calls and recordings scopes guard the
+		// lookup and the recording links, which a user reaches for their own
+		// extensions' calls.
+		auth.ScopeCalls: auth.RoleViewer, auth.ScopeRecordings: auth.RoleViewer,
 	}
 	secrets := map[string]bool{
 		"POST /api/v1/devices/{id}/rotate-secret":        true,
@@ -50,11 +54,22 @@ func TestRoutesTable(t *testing.T) {
 		switch r.Pattern {
 		case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password", "/api/v1/lookup/number":
 			return true
+		case "/api/v1/calls/{id}/door-open":
+			// Open the door of the user's own answered door call (spec
+			// S-47); the handler checks that the caller's extension is the
+			// one on the call.
+			return true
 		}
 		return strings.HasPrefix(r.Pattern, "/api/v1/me/") || strings.HasPrefix(r.Pattern, "/api/v1/events") ||
+			strings.HasPrefix(r.Pattern, "/api/v1/lookup/") || r.Pattern == "/api/v1/recording-links/{id}" ||
+			r.Pattern == "/api/v1/recordings/{id}/links" || r.Pattern == "/api/v1/integrations/hubspot/engagements" ||
+			r.Pattern == "/api/v1/integrations/salesforce/engagements" ||
 			strings.HasPrefix(r.Pattern, "/api/v1/calls/originate")
 	}
-	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true, "POST /api/v1/auth/login/2fa": true}
+	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true, "POST /api/v1/auth/login/2fa": true,
+		// The doorbell webhook is signature-checked and rate-limited instead (spec S-48).
+		"POST /api/v1/door/webhooks/{id}/trigger":     true,
+		"GET /api/v1/integrations/crm/oauth/callback": true}
 	seen := map[string]bool{}
 	for _, r := range Routes() {
 		key := r.Method + " " + r.Pattern

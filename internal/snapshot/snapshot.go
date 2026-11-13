@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/ringtag"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/secret"
@@ -35,7 +36,28 @@ type Device struct {
 	HA1SHA256     string
 	Extension     string // extension number
 	ExtensionName string
+	// SRTP is the device's media-encryption policy (secmedia): "off",
+	// "optional" or "required"; empty (a test fixture) is optional.
+	SRTP string
+	// SRTPKeyEx is how the device's SRTP keys are agreed when Hello offers
+	// ("sdes" or "dtls", S-16) and MediaICE whether Hello offers it ICE-lite.
+	SRTPKeyEx string
+	MediaICE  bool
+	// Kind is desk (or empty), web or mobile. A client device has an owner
+	// (UserID) and derived credentials (AuthMode "derived"): it has no stored
+	// HA1, and its Username is the stable base w<id> that the expiring name
+	// it registers with (w<id>.<expiry>) resolves to.
+	Kind     string
+	AuthMode string
+	UserID   int64
+	// RingOff is set when the owner's preference excludes this kind of
+	// client from forked calls (users.ring_web, users.ring_mobile).
+	RingOff bool
 }
+
+// AuthDerived is Device.AuthMode of a device whose digest secret is derived
+// from the client auth key.
+const AuthDerived = "derived"
 
 // LogValue keeps the HA1 values out of logs.
 func (d Device) LogValue() slog.Value {
@@ -64,8 +86,11 @@ type Extension struct {
 	// rung. The inverted sense keeps the zero value (and every extension
 	// built without the flag) on the default, call waiting on.
 	NoCallWaiting bool
+	// AnonymousOutbound makes the extension's trunk calls anonymous
+	// (migration 00067, spec S-19).
+	AnonymousOutbound bool
 	// MOHClassID is the music on hold class callers hear while this
-	// extension holds them (migration 00021); 0 uses the global default.
+	// extension holds them (migration 00029); 0 uses the global default.
 	MOHClassID int64
 	// NoAnswerRings is the ring count before the no-answer forward
 	// (migration 00035); 0 uses the system ring timeout.
@@ -99,7 +124,7 @@ type RingGroup struct {
 	FailureKind, FailureTarget string
 	// MOHClassID is the music on hold class of calls to the group (0: the
 	// global default); MOHRingback plays it instead of ringback while the
-	// group rings (migration 00021).
+	// group rings (migration 00029).
 	MOHClassID  int64
 	MOHRingback bool
 	// RingTag overrides the ringgroup ring tag for calls through the group
@@ -201,6 +226,7 @@ type Snapshot struct {
 	// Skipped lists usernames whose realm did not match the SIP domain.
 	Skipped []string
 
+	blf    map[string][]string // device username -> BLF key extension numbers (S-35)
 	byUser map[string]Device
 	byExt  map[string][]Device
 	// known holds extension numbers that exist but have no enabled device,
@@ -216,6 +242,8 @@ type Snapshot struct {
 	codes  map[string]FeatureCode
 	pages  map[string]PagingGroup
 	anns   map[string]string
+	// faxDests maps a fax destination name to it (migration 00073).
+	faxDests map[string]FaxDestination
 	// confs maps a dialled number to its conference room (spec S-34).
 	confs map[string]Conference
 	// ivrByName and ivrByNumber are the IVR menus (migration 00033).
@@ -239,6 +267,14 @@ type Snapshot struct {
 	// ringTags are the ring tags and rules (migration 00050); nil means the
 	// built-in tags and no rules.
 	ringTags *ringtag.Table
+	// doorOpens are the door stations' door-open codes by number (migration
+	// 00054); unexported and redacting, see doorOpen.
+	doorOpens map[string]doorOpen
+	// emergency is the alarm destinations, device locations and notify group
+	// (migration 00080).
+	emergency EmergencyData
+	// followMe are the follow-me profiles by extension number (migration 00079).
+	followMe map[string]FollowMe
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState
 }
@@ -493,9 +529,21 @@ func (s *Snapshot) FeatureCode(code string) (FeatureCode, bool) {
 }
 
 // DeviceByUsername returns the enabled device with that SIP username.
+//
+// A derived device (a web client) is found by the expiring name it
+// registers with, w<id>.<expiryUnix>, as well as by its base name. The
+// expiry is not checked here: the digest check does that, with the
+// credentials in hand.
 func (s *Snapshot) DeviceByUsername(username string) (Device, bool) {
-	d, ok := s.byUser[username]
-	return d, ok
+	if d, ok := s.byUser[username]; ok {
+		return d, true
+	}
+	if base, _, ok := auth.SplitDerived(username); ok {
+		if d, ok := s.byUser[base]; ok && d.AuthMode == AuthDerived {
+			return d, true
+		}
+	}
+	return Device{}, false
 }
 
 // DevicesForExtension returns the enabled devices of an extension number.
@@ -543,11 +591,14 @@ type Querier interface {
 // ride along in the same row, so one query keeps devices and features on one
 // revision.
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
-       d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name,
+       d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, coalesce(d.srtp, 'optional'), coalesce(d.srtp_keyex, 'sdes'), coalesce(d.media_ice, false), e.number, e.name,
+       d.kind, d.auth_mode, d.user_id,
+       (d.kind = 'web' AND NOT u.ring_web) OR (d.kind = 'mobile' AND NOT u.ring_mobile),
        e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id,
-       e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, e.directory_hidden, (e.kind = 'door')
+       e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0), e.no_answer_rings, e.directory_hidden, e.anonymous_outbound, (e.kind = 'door')
 FROM extensions e
 LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled
+LEFT JOIN users u ON u.id = d.user_id
 LEFT JOIN voicemail_boxes v ON v.extension_id = e.id
 ORDER BY d.id`
 
@@ -573,13 +624,19 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 			d                              Device
 			id                             *int64
 			user, realm, ha1MD5, ha1SHA256 *string
+			srtpPolicy, srtpKeyEx          string
+			mediaICE                       bool
+			kind, authMode                 *string
+			userID                         *int64
+			ringOff                        *bool
 			e                              Extension
 			boxID                          *int64
 			callWaiting                    bool
 		)
-		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &d.Extension, &d.ExtensionName,
+		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &srtpPolicy, &srtpKeyEx, &mediaICE, &d.Extension, &d.ExtensionName,
+			&kind, &authMode, &userID, &ringOff,
 			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID,
-			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden, &e.Door); err != nil {
+			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID, &e.NoAnswerRings, &e.DirectoryHidden, &e.AnonymousOutbound, &e.Door); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan: %w", err)
 		}
@@ -595,7 +652,25 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 		if id == nil { // extension with no enabled device
 			bare = append(bare, d.Extension)
 		} else {
-			d.ID, d.Username, d.Realm, d.HA1MD5, d.HA1SHA256 = *id, *user, *realm, *ha1MD5, *ha1SHA256
+			d.ID, d.Username, d.Realm = *id, *user, *realm
+			// A derived device has no stored HA1 (NULL).
+			if ha1MD5 != nil {
+				d.HA1MD5 = *ha1MD5
+			}
+			if ha1SHA256 != nil {
+				d.HA1SHA256 = *ha1SHA256
+			}
+			if kind != nil {
+				d.Kind = *kind
+			}
+			if authMode != nil {
+				d.AuthMode = *authMode
+			}
+			if userID != nil {
+				d.UserID = *userID
+			}
+			d.RingOff = ringOff != nil && *ringOff
+			d.SRTP, d.SRTPKeyEx, d.MediaICE = srtpPolicy, srtpKeyEx, mediaICE
 			devices = append(devices, d)
 		}
 		if !seen[e.Number] {
@@ -664,12 +739,28 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	blf, err := loadBLFLists(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	emerg, err := loadEmergency(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	fm, err := loadFollowMe(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	if err := loadDoorTargets(ctx, db, exts); err != nil {
 		return nil, err
 	}
-	return New(rev, domain, devices).WithExtensions(bare...).WithQueues(queues).
+	faxes, err := loadFaxDestinations(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	return New(rev, domain, devices).WithFaxDestinations(faxes).WithExtensions(bare...).WithQueues(queues).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithBossLinks(bosses).WithVoicemailGroups(vmgs).WithRingTags(rtags), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithVoicemailGroups(vmgs).WithRingTags(rtags).WithBLFLists(blf).WithBossLinks(bosses).WithEmergency(emerg).WithFollowMe(fm), nil
 }
 
 // loadMOHClasses reads the music on hold classes with their playlists
@@ -1133,6 +1224,11 @@ func (w *Watcher) loadAll(ctx context.Context, conn Querier) (*Snapshot, error) 
 		return nil, err
 	}
 	s.WithConferences(rooms)
+	doors, err := loadDoorOpen(ctx, q, w.Box, w.Log)
+	if err != nil {
+		return nil, err
+	}
+	s.WithDoorOpen(doors)
 	cfg, bad, err := loadRouting(ctx, q, w.Box, w.Log)
 	if err != nil {
 		return nil, err

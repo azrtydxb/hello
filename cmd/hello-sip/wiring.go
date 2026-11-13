@@ -189,6 +189,7 @@ func (q *settings) apply(u sip.ExtUpdate) {
 		ForwardBusy:     u.ForwardBusy,
 		ForwardNoAnswer: u.ForwardNoAnswer,
 		CallWaiting:     u.CallWaiting,
+		FollowMe:        u.FollowMe,
 		NoAnswerRings:   u.NoAnswerRings,
 		BossDivert:      u.BossDivert,
 	})

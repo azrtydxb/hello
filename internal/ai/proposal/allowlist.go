@@ -22,6 +22,10 @@ var Allowlist = []string{
 	// A text message is a one-shot create: the assistant proposes the
 	// words and the recipients, a person applies it.
 	"sendMessage",
+	// A configuration batch (spec flow-canvas S-19): many object writes
+	// in one transaction, validated by recursion (batch.go) and shown on
+	// the canvas before anybody applies it.
+	BatchOp,
 }
 
 // deletes are the allowlisted operations that remove a resource: only ring

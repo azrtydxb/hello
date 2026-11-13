@@ -36,10 +36,10 @@ func TestAssistantSessions(t *testing.T) {
 		if err := r.a.DeleteSession(ctx, other, s.ID); !errors.Is(err, ErrNotFound) {
 			t.Errorf("other user deleted: %v", err)
 		}
-		if _, _, err := r.a.PostMessage(ctx, other, s.ID, "hi"); !errors.Is(err, ErrNotFound) {
+		if _, _, err := r.a.PostMessage(ctx, other, s.ID, "hi", nil); !errors.Is(err, ErrNotFound) {
 			t.Errorf("other user posted: %v", err)
 		}
-		if _, _, err := r.a.PostMessage(ctx, admin, s.ID, "hi"); !errors.Is(err, ErrNotFound) {
+		if _, _, err := r.a.PostMessage(ctx, admin, s.ID, "hi", nil); !errors.Is(err, ErrNotFound) {
 			t.Errorf("admin posted as the owner: %v", err)
 		}
 		if l, _ := r.a.ListSessions(ctx, other); len(l) != 0 {
@@ -54,7 +54,7 @@ func TestAssistantSessions(t *testing.T) {
 		if _, err := r.a.RenameSession(ctx, owner, s.ID, strings.Repeat("t", MaxTitleLen+1)); !errors.Is(err, ErrInvalid) {
 			t.Errorf("long title: %v", err)
 		}
-		if _, _, err := r.a.PostMessage(ctx, owner, s.ID, strings.Repeat("q", MaxMessageLen+1)); !errors.Is(err, ErrInvalid) {
+		if _, _, err := r.a.PostMessage(ctx, owner, s.ID, strings.Repeat("q", MaxMessageLen+1), nil); !errors.Is(err, ErrInvalid) {
 			t.Errorf("long message: %v", err)
 		}
 	})
@@ -64,11 +64,11 @@ func TestAssistantSessions(t *testing.T) {
 		r.tasks.hold = make(chan struct{})
 		u := User{ID: 7}
 		s, _ := r.a.CreateSession(ctx, u, "")
-		_, task, err := r.a.PostMessage(ctx, u, s.ID, "Why did 201's call fail?\nDetails follow")
+		_, task, err := r.a.PostMessage(ctx, u, s.ID, "Why did 201's call fail?\nDetails follow", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := r.a.PostMessage(ctx, u, s.ID, "and again"); !errors.Is(err, ErrTaskRunning) {
+		if _, _, err := r.a.PostMessage(ctx, u, s.ID, "and again", nil); !errors.Is(err, ErrTaskRunning) {
 			t.Errorf("second message while running: %v", err)
 		}
 		if err := r.a.DeleteSession(ctx, u, s.ID); !errors.Is(err, ErrTaskRunning) {
@@ -85,7 +85,7 @@ func TestAssistantSessions(t *testing.T) {
 		if o := r.tasks.outcome(t, task); o.err != nil {
 			t.Fatal(o.err)
 		}
-		if _, _, err := r.a.PostMessage(ctx, u, s.ID, strings.Repeat("y", MaxMessageLen)); err != nil {
+		if _, _, err := r.a.PostMessage(ctx, u, s.ID, strings.Repeat("y", MaxMessageLen), nil); err != nil {
 			t.Errorf("message after the task: %v", err)
 		}
 		r.tasks.wg.Wait()
@@ -96,7 +96,7 @@ func TestAssistantSessions(t *testing.T) {
 		u := User{ID: 7}
 		s, _ := r.a.CreateSession(ctx, u, "")
 		r.store.addHistory(s.ID, 30)
-		_, task, err := r.a.PostMessage(ctx, u, s.ID, "current question")
+		_, task, err := r.a.PostMessage(ctx, u, s.ID, "current question", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

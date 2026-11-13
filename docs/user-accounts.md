@@ -21,6 +21,13 @@ it with `403 forbidden_role`. A user token or OAuth grant can hold `read` and
 `write` at most, and only reaches the same `/me` routes. Service accounts
 cannot have the role.
 
+## Web devices
+
+A user can add browsers that ring for, and place calls on, their extension
+under **My phone, Web devices** (`/api/v1/me/devices`), and choose whether
+they ring (`ringWeb`). Their credentials are derived and expire; see
+[docs/webrtc.md](webrtc.md).
+
 ## Sign-in, passwords and the first login
 
 Sign-in is local. Passwords are hashed with argon2id (19 MiB, t=2, p=1, PHC

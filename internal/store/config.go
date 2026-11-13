@@ -31,6 +31,15 @@ type Extension struct {
 	// waiting); false answers the caller with the forward-busy target or
 	// 486 (migration 00026, spec S-18).
 	CallWaiting bool `json:"callWaiting"`
+	// AnonymousOutbound makes every trunk call from the extension anonymous
+	// (migration 00067, spec S-19): Privacy: id and an anonymous From, the
+	// identity asserted by the trunk.
+	AnonymousOutbound bool `json:"anonymousOutbound"`
+	// PhoneSendAnonymous is the phone's own "Send Anonymous" setting
+	// (migration 00068): provisioning writes P65=1 to the bound Grandstream
+	// phone, which then blanks its caller ID on every call, internal ones
+	// included. Not the trunk-only AnonymousOutbound.
+	PhoneSendAnonymous bool `json:"phoneSendAnonymous"`
 	// NoAnswerRings is the ring count before the no-answer forward (migration
 	// 00035); 0 uses the system ring timeout.
 	NoAnswerRings int `json:"noAnswerRings"`
@@ -38,7 +47,7 @@ type Extension struct {
 	// book (spec P-1).
 	DirectoryHidden bool `json:"directoryHidden"`
 	// MOHClassID is the music on hold class callers hear while this
-	// extension holds them (migration 00021); nil uses the global default.
+	// extension holds them (migration 00029); nil uses the global default.
 	MOHClassID *int64 `json:"mohClassId"`
 	// Kind is user (default) or door (migration 00053, spec S-45): a door
 	// station has no voicemail, joins no group, receives no pickup, page,
@@ -50,14 +59,14 @@ type Extension struct {
 }
 
 const extensionCols = `id, number, name, external_number, dnd, forward_always, forward_busy, forward_no_answer,
-	voicemail_enabled, record_default, allow_intercom, call_waiting, no_answer_rings, directory_hidden, moh_class_id, kind, door_targets, created_at, updated_at`
+	voicemail_enabled, record_default, allow_intercom, call_waiting, no_answer_rings, directory_hidden, moh_class_id, anonymous_outbound, phone_send_anonymous, kind, door_targets, created_at, updated_at`
 
 func scanExtension(r interface{ Scan(...any) error }) (Extension, error) {
 	var e Extension
 	var moh sql.NullInt64
 	var targets []byte
 	err := r.Scan(&e.ID, &e.Number, &e.Name, &e.ExternalNumber, &e.DND, &e.ForwardAlways, &e.ForwardBusy,
-		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.CallWaiting, &e.NoAnswerRings, &e.DirectoryHidden, &moh,
+		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.CallWaiting, &e.NoAnswerRings, &e.DirectoryHidden, &moh, &e.AnonymousOutbound, &e.PhoneSendAnonymous,
 		&e.Kind, &targets, &e.CreatedAt, &e.UpdatedAt)
 	if moh.Valid {
 		e.MOHClassID = &moh.Int64
@@ -144,6 +153,8 @@ type ExtensionChange struct {
 	CallWaiting                  *bool
 	NoAnswerRings                *int
 	DirectoryHidden              *bool
+	AnonymousOutbound            *bool
+	PhoneSendAnonymous           *bool
 	// MOHClassID sets the extension's MOH class; ClearMOHClass clears it
 	// (a nil MOHClassID alone keeps the current value).
 	MOHClassID    *int64
@@ -194,10 +205,11 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 			       record_default = COALESCE($10, record_default), allow_intercom = COALESCE($11, allow_intercom),
 			       directory_hidden = COALESCE($12, directory_hidden), call_waiting = COALESCE($13, call_waiting),
 			       moh_class_id = CASE WHEN $15 THEN NULL ELSE COALESCE($14, moh_class_id) END,
-			       no_answer_rings = COALESCE($16, no_answer_rings), kind = $17, door_targets = $18, updated_at = now()
+			       no_answer_rings = COALESCE($16, no_answer_rings), anonymous_outbound = COALESCE($17, anonymous_outbound),
+			       phone_send_anonymous = COALESCE($18, phone_send_anonymous), kind = $19, door_targets = $20, updated_at = now()
 			WHERE id = $1 RETURNING `+extensionCols, id, c.Number, c.Name, c.ExternalNumber,
 			c.DND, c.ForwardAlways, c.ForwardBusy, c.ForwardNoAnswer, c.VoicemailEnabled, c.RecordDefault, c.AllowIntercom, c.DirectoryHidden, c.CallWaiting,
-			c.MOHClassID, c.ClearMOHClass, c.NoAnswerRings, kind, targets.JSON()))
+			c.MOHClassID, c.ClearMOHClass, c.NoAnswerRings, c.AnonymousOutbound, c.PhoneSendAnonymous, kind, targets.JSON()))
 		if err != nil {
 			return id, err
 		}
@@ -244,19 +256,39 @@ type Device struct {
 	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+	// Kind is desk (a phone, digest secret), web or mobile (a client of a
+	// user, derived credentials). UserID, Label, Platform, AppVersion and
+	// LastSeenAt describe a client; AuthMode is digest or derived.
+	Kind       string     `json:"kind"`
+	AuthMode   string     `json:"authMode"`
+	UserID     *int64     `json:"userId"`
+	Label      string     `json:"label"`
+	Platform   string     `json:"platform"`
+	AppVersion string     `json:"appVersion"`
+	LastSeenAt *time.Time `json:"lastSeenAt"`
+	// SRTP is the media-encryption policy: off, optional or required.
+	SRTP string `json:"srtp"`
+	// SRTPKeyEx is how Hello offers the device SRTP keys: sdes (the default)
+	// or dtls; MediaICE makes Hello offer it ICE-lite and provisions its ICE
+	// setting (migration 00079).
+	SRTPKeyEx string `json:"srtpKeyExchange"`
+	MediaICE  bool   `json:"mediaIce"`
 }
 
-const deviceCols = `id, extension_id, sip_username, enabled, created_at, updated_at`
+const deviceCols = `id, extension_id, sip_username, enabled, created_at, updated_at, kind, auth_mode, user_id, label,
+	coalesce(platform, ''), coalesce(app_version, ''), last_seen_at, srtp, srtp_keyex, media_ice`
 
 func scanDevice(r interface{ Scan(...any) error }) (Device, error) {
 	var d Device
-	err := r.Scan(&d.ID, &d.ExtensionID, &d.SIPUsername, &d.Enabled, &d.CreatedAt, &d.UpdatedAt)
+	err := r.Scan(&d.ID, &d.ExtensionID, &d.SIPUsername, &d.Enabled, &d.CreatedAt, &d.UpdatedAt,
+		&d.Kind, &d.AuthMode, &d.UserID, &d.Label, &d.Platform, &d.AppVersion, &d.LastSeenAt, &d.SRTP, &d.SRTPKeyEx, &d.MediaICE)
 	return d, err
 }
 
-// ListDevices returns every device ordered by SIP username.
-func (s *Store) ListDevices(ctx context.Context) ([]Device, error) {
-	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+deviceCols+` FROM devices ORDER BY sip_username`)
+// ListDevices returns every device ordered by SIP username, only those of
+// kind when kind is not empty.
+func (s *Store) ListDevices(ctx context.Context, kind string) ([]Device, error) {
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE ($1 = '' OR kind = $1) ORDER BY sip_username`, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -303,14 +335,35 @@ func (s *Store) CreateDevice(ctx context.Context, actor string, in NewDevice) (D
 	return d, err
 }
 
+// DeviceMedia is the media-security part of a device update: the SRTP policy
+// (secmedia), how keys are agreed when Hello offers them (sdes or dtls) and
+// the ICE-lite setting. A nil field is left alone; the caller has validated
+// the values.
+type DeviceMedia struct {
+	SRTP, KeyEx *string
+	ICE         *bool
+}
+
 // UpdateDevice changes the fields that are not nil.
-func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64) (Device, error) {
+func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, m DeviceMedia) (Device, error) {
 	var d Device
 	err := s.configChange(ctx, actor, "update", "device", nil, func(tx *sql.Tx) (int64, error) {
+		if extensionID != nil {
+			// A client belongs to the extension its owner is linked to.
+			var kind string
+			if err := tx.QueryRowContext(ctx, `SELECT kind FROM devices WHERE id = $1`, id).Scan(&kind); err != nil {
+				return id, err
+			}
+			if kind != "desk" {
+				return id, ErrDerivedDevice
+			}
+		}
 		var err error
 		d, err = scanDevice(tx.QueryRowContext(ctx, `
-			UPDATE devices SET enabled = COALESCE($2, enabled), extension_id = COALESCE($3, extension_id), updated_at = now()
-			WHERE id = $1 RETURNING `+deviceCols, id, enabled, extensionID))
+			UPDATE devices SET enabled = COALESCE($2, enabled), extension_id = COALESCE($3, extension_id),
+			       srtp = COALESCE($4, srtp), srtp_keyex = COALESCE($5, srtp_keyex),
+			       media_ice = COALESCE($6, media_ice), updated_at = now()
+			WHERE id = $1 RETURNING `+deviceCols, id, enabled, extensionID, m.SRTP, m.KeyEx, m.ICE))
 		return id, err
 	})
 	return d, err
@@ -321,15 +374,18 @@ func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enable
 func (s *Store) RotateDeviceSecret(ctx context.Context, actor string, id int64, realm, secret string) (Device, error) {
 	var d Device
 	err := s.configChange(ctx, actor, "rotate-secret", "device", nil, func(tx *sql.Tx) (int64, error) {
-		var username string
-		if err := tx.QueryRowContext(ctx, `SELECT sip_username FROM devices WHERE id = $1 FOR UPDATE`, id).Scan(&username); err != nil {
+		var username, mode string
+		if err := tx.QueryRowContext(ctx, `SELECT sip_username, auth_mode FROM devices WHERE id = $1 FOR UPDATE`, id).Scan(&username, &mode); err != nil {
 			return id, err
+		}
+		if mode == "derived" {
+			return id, ErrDerivedDevice
 		}
 		// A device a phone provisions keeps its secret sealed for the
 		// renderer (spec S-2): re-seal it so the phone picks the new one up
 		// at its next fetch.
 		var bound bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM phones WHERE device_id = $1)`, id).Scan(&bound); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM phones WHERE device_id = $1) OR EXISTS (SELECT 1 FROM phone_lines WHERE device_id = $1)`, id).Scan(&bound); err != nil {
 			return id, err
 		}
 		if bound {

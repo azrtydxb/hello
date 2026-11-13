@@ -18,6 +18,11 @@ type Metrics struct {
 	// known, ignored, full, rate_limited, error); "full" counts the new
 	// MACs dropped because the queue is at its cap.
 	OnboardingCaptures *prometheus.CounterVec
+	// SCEP counts SCEP requests by operation (GetCACaps, GetCACert,
+	// PKIOperation, unknown, any) and result (ok, issued, off, refused,
+	// bad_request, no_challenge, bad_renewal, bad_csr, weak_key,
+	// undecryptable, unsupported) (phone-feature-parity S-25).
+	SCEP *prometheus.CounterVec
 }
 
 // NewMetrics registers the provisioning metrics on reg.
@@ -48,9 +53,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		OnboardingCaptures: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "hello_onboarding_captures_total", Help: "Onboarding candidate captures by outcome (stored, known, ignored, full, rate_limited, error).",
 		}, []string{"outcome"}),
+		SCEP: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "hello_scep_requests_total", Help: "SCEP requests by operation and result.",
+		}, []string{"op", "result"}),
 	}
 	reg.MustRegister(m.Requests, m.RenderSeconds, m.Phones, m.RedirectOps, m.FirmwareBytes, m.AuditDropped,
-		m.OnboardingCandidates, m.OnboardingCaptures)
+		m.OnboardingCandidates, m.OnboardingCaptures, m.SCEP)
 	return m
 }
 

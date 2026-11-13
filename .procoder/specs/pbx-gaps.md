@@ -44,7 +44,7 @@ These settle the design questions the user left open. Each is listed for confirm
 - **D1 Backup format and encryption.** A PostgreSQL custom-format dump (`pg_dump -Fc`) with MinIO objects copied by server-side copy. The archive is encrypted with AES-256-GCM, key from HKDF-SHA256 over `HELLO_SECRET_KEY` (stdlib `crypto/hkdf`), so no new module is needed. The image gains the `postgresql-client` package.
 - **D2 Backup schedule and retention.** Daily at 02:00 server time. The last 14 archives are kept. The destination is the MinIO bucket `hello-backups`. An S3-compatible destination is optional.
 - **D3 Restore is offline for writes.** A restore enters maintenance mode, where API writes get `503` and calls keep running on the current snapshot. A restore needs an admin and a typed confirmation, and it has a CLI form for when the API is down.
-- **D4 Follow-me codes.** `*74` turns follow-me on and `*75` turns it off, for the extension's own profile. Each is checked against the existing dial-number space at save time.
+- **D4 Follow-me codes.** `*76` turns follow-me on and `*77` turns it off, for the extension's own profile (`*74` and `*75` are the park defaults, so the first draft's codes could not be seeded). Each is checked against the existing dial-number space at save time.
 - **D5 Follow-me prompts.** External follow-me legs require "press 1 to accept" by default, so carrier voicemail cannot take the call. DND on the extension stops follow-me. Call forward unconditional (CFU) wins over follow-me.
 - **D6 Blocked-call response.** `603 Decline` by default, per trunk, with an optional `486` alternative. Anonymous reject is off per trunk by default. Country restriction is off by default.
 - **D7 Unparseable caller numbers.** When a trunk has a country restriction, a caller number that cannot be normalised is blocked. Without a restriction it is allowed.
@@ -65,7 +65,7 @@ These settle the design questions the user left open. Each is listed for confirm
 ## Common rules (S-1)
 
 - [S-1] Every item in this spec follows these rules unless the item says otherwise.
-  - **Feature codes.** New codes are registered with the other feature codes. Save-time checks (`checkDialNumber` in `internal/store/dialspace.go` and `dialGuard`) refuse a clash. Codes added here: `*74` and `*75` (follow-me), `*411` (dial-by-name), `*63<n>` (voicemail group broadcast), `*64` (boss divert). A code must not collide with the existing `*72`/`*73`, `*90` to `*93`, `*78`/`*79`, `*97`, `*2`, `*1`, `*8<n>`, `*80`, park, pickup, MOH and time-condition codes.
+  - **Feature codes.** New codes are registered with the other feature codes. Save-time checks (`checkDialNumber` in `internal/store/dialspace.go` and `dialGuard`) refuse a clash. Codes added here: `*76` and `*77` (follow-me), `*411` (dial-by-name), `*63<n>` (voicemail group broadcast), `*64` (boss divert). A code must not collide with the existing `*72`/`*73`, `*90` to `*93`, `*78`/`*79`, `*97`, `*2`, `*1`, `*8<n>`, `*80`, park, pickup, MOH and time-condition codes.
   - **Prompts.** Every prompt key a PR adds is added to `internal/voiceprompt/english.go` and `dutch.go` in that PR. `TestCatalogueComplete` must pass.
   - **API.** Each route is in `internal/api/routes.go` with its scope and role, and in `internal/api/openapi.json`. The OpenAPI conformance test must pass.
   - **Audit.** Configuration changes use `configChange`. Security events (2FA enrolment and reset, backup and restore, LDAP credential set and rotate) are audited with actor and target ids. No names, numbers, codes, secrets or message bodies appear in audit rows, logs or metric labels.
@@ -99,7 +99,7 @@ These settle the design questions the user left open. Each is listed for confirm
 ### B. Follow-me
 
 - [S-5] **Profile and codes.** Table `follow_me` (extension id primary key, `enabled`, `strategy` as `simultaneous` or `sequential`, `ring_own_devices` default true, `timeout_seconds` 5 to 120 default 30, `confirm_external` default true, `dnd_blocks` default true). Table `follow_me_targets` (extension id, `position` 1 to 5, `kind` as `external`, `extension` or `ring_group`, `target` text, `delay_seconds` 0 to 60 default 0; primary key on extension id and position). An external target is validated like a trunk dial number, and a target equal to the extension itself is refused.
-  - Codes: `*74` turns the extension's profile on, `*75` turns it off. A user may toggle only the extension that the device belongs to. No PIN.
+  - Codes: `*76` turns the extension's profile on, `*77` turns it off. A user may toggle only the extension that the device belongs to. No PIN.
   - API: `GET|PUT /api/v1/extensions/{id}/follow-me` (operator and above; a user through `/me` for their own extension).
 - [S-6] **Ring behaviour.** Follow-me runs when a call reaches the extension's ring step, after CFU and before CFNA.
   - `simultaneous`: the extension's own devices (if `ring_own_devices`) and all targets ring at once.
@@ -306,8 +306,8 @@ These settle the design questions the user left open. Each is listed for confirm
 
 ## Interfaces
 
-- **SIP (hello-sip):** follow-me legs; blocked-call response (`603`, `486`); the `*64`, `*63<n>`, `*74`, `*75`, `*411` feature codes; blind transfer through the existing REFER path for dial-by-name; UDPTL and re-INVITE to `image` (S-16); no new SUBSCRIBE events.
-- **Feature codes:** `*74`, `*75`, `*411`, `*63<n>`, `*64`.
+- **SIP (hello-sip):** follow-me legs; blocked-call response (`603`, `486`); the `*64`, `*63<n>`, `*76`, `*77`, `*411` feature codes; blind transfer through the existing REFER path for dial-by-name; UDPTL and re-INVITE to `image` (S-16); no new SUBSCRIBE events.
+- **Feature codes:** `*76`, `*77`, `*411`, `*63<n>`, `*64`.
 - **Provisioning (phone-facing):** the LDAP listener (S-24) on 636, and 389 if enabled. Vendor keys in the templates (S-26).
 - **REST (each in `internal/api/routes.go` and `openapi.json`):**
   - `GET|PUT /api/v1/extensions/{id}/follow-me`;

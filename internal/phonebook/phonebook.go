@@ -172,6 +172,9 @@ type Group struct {
 	Multicast     []MulticastChannel `json:"multicast"`
 	PagingOptions PagingOptions      `json:"pagingOptions"`
 	PTT           PTT                `json:"ptt"`
+	// AccountSharing switches Grandstream WP8x6 account sharing on for the
+	// group's phones, each a host or a guest (phone-feature-parity S-11).
+	AccountSharing bool `json:"accountSharing"`
 	// Syslog is whether the group's phones send their log to Hello's syslog
 	// sink (phone-feature-parity S-27).
 	Syslog Syslog `json:"syslog"`

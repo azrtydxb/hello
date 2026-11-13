@@ -29,6 +29,7 @@ var StoredKinds = map[string]Reach{
 	"sip_uri":         {KindSIPURI, "call"},
 	"internal":        {KindInternalDID, "call"},
 	"directory":       {KindDirectory, "call"},
+	"fax":             {KindFax, "call"},
 }
 
 // NoDestination lists the stored values that mean "no edge": the call ends
@@ -80,6 +81,8 @@ var FeatureCodeNoTarget = map[string]string{
 	"dnd_off":             "setting on the caller's own extension",
 	"call_waiting_on":     "setting on the caller's own extension",
 	"call_waiting_off":    "setting on the caller's own extension",
+	"follow_me_on":        "setting on the caller's own extension",
+	"follow_me_off":       "setting on the caller's own extension",
 	"voicemail":           "opens the caller's own voicemail box, or the box of the extension dialled after the code",
 	"blind_transfer":      "a transfer key, the target is dialled during the call",
 	"attended_transfer":   "a transfer key, the target is dialled during the call",
@@ -122,6 +125,7 @@ var ResourceNodes = map[string]string{
 	"schedules":          KindSchedule,
 	"calendars":          KindHolidayCal,
 	"moh-classes":        KindMOHClass,
+	"fax-destinations":   KindFax,
 }
 
 // SingletonNodes are node kinds drawn from configuration that has no
@@ -146,14 +150,21 @@ var NonFlowResources = map[string]string{
 	"prov/firmware":                 "phone firmware files, not call routing",
 	"phone-groups":                  "provisioning groups of phones (templates, multicast listening, PTT), not call routing",
 	"phonebooks":                    "directory data shown on phones, not call routing",
+	"locations":                     "where phones are, for the HELD server and the location sent with an emergency call; it does not change where a call goes",
+	"wifi-profiles":                 "networks a Wi-Fi handset joins, written to its provisioned configuration, not call routing",
 	"ringtones":                     "custom tones phones download for the ring map, not call routing",
 	"ring-tags":                     "names the tone a phone plays, sent to it as Alert-Info; the tag a call gets does not change where it goes",
 	"phonebooks/{id}/entries":       "directory data shown on phones, not call routing",
+	"door/webhooks":                 "signed triggers from non-SIP doorbells; they start a ring or a chime, not a route a caller takes",
 	"me/contacts":                   "a user's personal contacts, not call routing",
+	"me/devices":                    "a user's own browser softphones, managed by the user, not call routing",
 	"calls/originate":               "click-to-call requests (a call placed on demand, not call routing)",
 	"ai/sessions":                   "assistant conversations, not call routing",
+	"faxes":                         "received and sent documents, not a call destination (a fax destination is the routing object)",
 	"blocklist":                     "a screen on every trunk's inbound calls before routing (its trunk settings are on the trunk), not a step of a call's route",
 	"flow/canvases":                 "named views of the canvas that store only node positions, not call routing",
+	"dot1x-profiles":                "802.1X network identities provisioned to phones, not call routing",
+	"integrations/crm":              "CRM connectors that log finished calls and name callers in a CRM; they never change where a call goes",
 	"messaging/channels":            "customer text channels of the messaging inbox, not call routing",
 	"messaging/addresses":           "numbers customers text in the messaging inbox, not call routing",
 }
@@ -163,9 +174,12 @@ var NonFlowResources = map[string]string{
 // each with why. The key is the schema path of the enum. Anything else that
 // overlaps fails TestCatalogueDrift until it is classified.
 var NotDestinationEnums = map[string]string{
-	"/components/schemas/MessageSend/properties/targetKind": "who a text message is addressed to, not where a call goes",
+	"/components/schemas/MessageSend/properties/targetKind":                               "who a text message is addressed to, not where a call goes",
+	"/components/schemas/CDRDetail/allOf/1/properties/followMeLegs/items/properties/kind": "which follow-me target a call leg rang (own phones included), not where a call goes",
 }
 
 // NotDestinationConstraints is NotDestinationEnums for database CHECK
 // constraints, keyed by constraint name.
-var NotDestinationConstraints = map[string]string{}
+var NotDestinationConstraints = map[string]string{
+	"follow_me_targets_kind_check": "a follow-me target is an extra ring of the extension, not a destination the call is sent to",
+}

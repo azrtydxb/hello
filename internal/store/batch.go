@@ -78,6 +78,7 @@ type Batch struct {
 	dirty    bool
 	touches  []batchTouch
 	baseline routing.Config
+	dryRun   bool
 }
 
 // ID is the batch's uuid.
@@ -89,6 +90,9 @@ func (b *Batch) Revision() int64 { return b.revision }
 // SetOp records which operation of the batch is running, so an error found
 // by the final check can name it.
 func (b *Batch) SetOp(i int) { b.op = i }
+
+// DryRun reports whether the batch rolls back whatever it does.
+func (b *Batch) DryRun() bool { return b != nil && b.dryRun }
 
 // Changed reports whether any operation changed the configuration.
 func (b *Batch) Changed() bool { return b.dirty }
@@ -160,7 +164,7 @@ func (s *Store) RunBatch(ctx context.Context, dryRun bool, fn func(context.Conte
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(configLockKey)); err != nil {
 		return BatchOutcome{}, err
 	}
-	b := &Batch{s: s, tx: tx, checkPtr: map[uintptr]bool{}}
+	b := &Batch{s: s, tx: tx, checkPtr: map[uintptr]bool{}, dryRun: dryRun}
 	if err := tx.QueryRowContext(ctx, `SELECT gen_random_uuid()::text, config_revision FROM schema_info`).Scan(&b.id, &b.revision); err != nil {
 		return BatchOutcome{}, err
 	}
