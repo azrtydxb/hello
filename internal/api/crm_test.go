@@ -427,6 +427,7 @@ func TestSalesforceClientCredentialsAndSetup(t *testing.T) {
 	e := newCRMEnv(t, "https://hello.example")
 	sf := &sfFake{}
 	e.svc.Tokens.Providers = func(k string) (crm.Connector, bool) { return sf, k == "salesforce" }
+	e.want(t, 404, "alice", "POST", "/api/v1/integrations/salesforce/engagements", map[string]any{"callId": "c1", "recordId": "00T000000000001"}) // no connector yet
 	c := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "salesforce", "name": "Salesforce",
 		"clientSecret": "CLIENT-SECRET", "config": map[string]string{"clientId": "cid", "serverLogging": "true"}})
 	p := connPath(c["id"])
