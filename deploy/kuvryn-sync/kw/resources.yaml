@@ -1028,7 +1028,7 @@ data:
     	if ($hdr(Origin) != $null && $hdr(Origin) != "") {
     		$var(origin) = "," + $hdr(Origin) + ",";
     		$var(allowed) = "," + $env(KAMAILIO_WS_ORIGINS) + ",";
-    		if ($env(KAMAILIO_WS_ORIGINS) == $null || $(var(allowed){s.find,$var(origin)}) < 0) {
+    		if ($env(KAMAILIO_WS_ORIGINS) == $null || $(var(allowed){s.index,$var(origin)}) < 0) {
     			xlog("L_WARN", "refused WebSocket from $si:$sp: origin $hdr(Origin) is not allowed\n");
     			xhttp_reply("403", "Forbidden", "text/plain", "forbidden\n");
     			exit;
@@ -1187,7 +1187,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: 14e29701d1710c96ff0962d27dd970a6bea5362c355b060a42c0ddf16cdfbb91
+        hello.watteel.com/kamailio-config-sha256: e7e1b9dddbeedc7388f291f8b2ad86d8a339a1a1e4e7141d84709d72ee333916
     spec:
       # Phones must reach Kamailio with no NAT in between: through a NodePort
       # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's

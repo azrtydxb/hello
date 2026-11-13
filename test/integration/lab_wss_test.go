@@ -114,7 +114,7 @@ func TestLabWSSRegister(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode < 400 {
 			t.Fatalf("GET /metrics on the WSS socket = %d, want an error", resp.StatusCode)
 		}

@@ -301,7 +301,7 @@ func TestTrunkSBCPeerProfile(t *testing.T) {
 	c := p.login()
 	sbc := func(extra map[string]any) map[string]any {
 		b := map[string]any{
-			"name": trunkName(), "profile": "sbc-peer",
+			"name": trunkName(), "profile": "sbc-peer", "mode": "ip",
 			"sourceCidrs":  []string{"192.0.2.10/32"},
 			"destinations": []map[string]any{{"host": "192.0.2.10", "port": 5060}},
 		}

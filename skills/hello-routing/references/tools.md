@@ -4,6 +4,7 @@
 | ----------------------- | ----- | ------------------------------------------------------------------------------------------------------------ |
 | `testRouting`           | read  | Decide a call against the saved configuration without placing it; returns the decision and a numbered trace. |
 | `listTrunks`            | read  | Every trunk; never its password.                                                                             |
+| `listTrunkProfiles`     | read  | The trunk profiles (generic, sbc-peer) with the defaults and limits each applies.                            |
 | `getTrunk`              | read  | One trunk.                                                                                                   |
 | `createTrunk`           | write | Create a registration or IP trunk.                                                                           |
 | `updateTrunk`           | write | Change a trunk, including its `srtp` policy; an omitted password keeps the stored one.                       |
