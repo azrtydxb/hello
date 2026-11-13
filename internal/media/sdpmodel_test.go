@@ -218,3 +218,22 @@ func TestAudioSectionBridge(t *testing.T) {
 		}
 	}
 }
+
+// ParseAudioSDP is not built on the model: phones and trunks send SDPs the
+// strict reader refuses (no o= or s= line, bare LF, a missing t=), and call
+// setup must still answer them. This pins that difference so a later change
+// that unifies the two notices it.
+func TestParseAudioSDPStaysTolerant(t *testing.T) {
+	for name, body := range map[string]string{
+		"no o= or s=": "v=0\nc=IN IP4 10.0.0.9\nt=0 0\nm=audio 5004 RTP/AVP 0\n",
+		"no v= line":  "c=IN IP4 10.0.0.9\nm=audio 5004 RTP/AVP 0 8\n",
+		"no t= line":  "v=0\no=- 1 1 IN IP4 10.0.0.9\ns=-\nc=IN IP4 10.0.0.9\nm=audio 5004 RTP/AVP 0\n",
+	} {
+		if _, err := ParseAudioSDP([]byte(body)); err != nil {
+			t.Errorf("%s: the audio parser refused it: %v", name, err)
+		}
+		if _, err := ParseSDPSession([]byte(body)); err == nil {
+			t.Errorf("%s: the strict model accepted it, so the two readers could be unified", name)
+		}
+	}
+}
