@@ -268,15 +268,20 @@ type Device struct {
 	LastSeenAt *time.Time `json:"lastSeenAt"`
 	// SRTP is the media-encryption policy: off, optional or required.
 	SRTP string `json:"srtp"`
+	// SRTPKeyEx is how Hello offers the device SRTP keys: sdes (the default)
+	// or dtls; MediaICE makes Hello offer it ICE-lite and provisions its ICE
+	// setting (migration 00079).
+	SRTPKeyEx string `json:"srtpKeyExchange"`
+	MediaICE  bool   `json:"mediaIce"`
 }
 
 const deviceCols = `id, extension_id, sip_username, enabled, created_at, updated_at, kind, auth_mode, user_id, label,
-	coalesce(platform, ''), coalesce(app_version, ''), last_seen_at, srtp`
+	coalesce(platform, ''), coalesce(app_version, ''), last_seen_at, srtp, srtp_keyex, media_ice`
 
 func scanDevice(r interface{ Scan(...any) error }) (Device, error) {
 	var d Device
 	err := r.Scan(&d.ID, &d.ExtensionID, &d.SIPUsername, &d.Enabled, &d.CreatedAt, &d.UpdatedAt,
-		&d.Kind, &d.AuthMode, &d.UserID, &d.Label, &d.Platform, &d.AppVersion, &d.LastSeenAt, &d.SRTP)
+		&d.Kind, &d.AuthMode, &d.UserID, &d.Label, &d.Platform, &d.AppVersion, &d.LastSeenAt, &d.SRTP, &d.SRTPKeyEx, &d.MediaICE)
 	return d, err
 }
 
@@ -330,9 +335,17 @@ func (s *Store) CreateDevice(ctx context.Context, actor string, in NewDevice) (D
 	return d, err
 }
 
-// UpdateDevice changes the fields that are not nil. srtp is a media-
-// encryption policy (secmedia); the caller has validated it.
-func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, srtp *string) (Device, error) {
+// DeviceMedia is the media-security part of a device update: the SRTP policy
+// (secmedia), how keys are agreed when Hello offers them (sdes or dtls) and
+// the ICE-lite setting. A nil field is left alone; the caller has validated
+// the values.
+type DeviceMedia struct {
+	SRTP, KeyEx *string
+	ICE         *bool
+}
+
+// UpdateDevice changes the fields that are not nil.
+func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, m DeviceMedia) (Device, error) {
 	var d Device
 	err := s.configChange(ctx, actor, "update", "device", nil, func(tx *sql.Tx) (int64, error) {
 		if extensionID != nil {
@@ -348,8 +361,9 @@ func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enable
 		var err error
 		d, err = scanDevice(tx.QueryRowContext(ctx, `
 			UPDATE devices SET enabled = COALESCE($2, enabled), extension_id = COALESCE($3, extension_id),
-			       srtp = COALESCE($4, srtp), updated_at = now()
-			WHERE id = $1 RETURNING `+deviceCols, id, enabled, extensionID, srtp))
+			       srtp = COALESCE($4, srtp), srtp_keyex = COALESCE($5, srtp_keyex),
+			       media_ice = COALESCE($6, media_ice), updated_at = now()
+			WHERE id = $1 RETURNING `+deviceCols, id, enabled, extensionID, m.SRTP, m.KeyEx, m.ICE))
 		return id, err
 	})
 	return d, err

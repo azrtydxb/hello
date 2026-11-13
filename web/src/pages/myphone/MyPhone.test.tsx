@@ -97,6 +97,48 @@ describe("My phone (role user)", () => {
     }
   });
 
+  it("shows an Open door button on a door call the user answered", async () => {
+    const calls = api({
+      "GET /api/v1/me/door-calls": () =>
+        json({ items: [{ id: "c-1", door: "900", startedAt: STAMP }] }),
+      "POST /api/v1/calls/c-1/door-open": () => json({ sent: true }),
+    });
+    renderApp("/");
+    const button = await screen.findByRole("button", { name: "Open door" });
+    expect(screen.getByText(/Door station/)).toHaveTextContent("900");
+    fireEvent.click(button);
+    expect(
+      await screen.findByText(/The door-open code was sent/),
+    ).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "POST",
+      url: "/api/v1/calls/c-1/door-open",
+      body: undefined,
+    });
+  });
+
+  it("says why the door did not open", async () => {
+    api({
+      "GET /api/v1/me/door-calls": () =>
+        json({ items: [{ id: "c-1", door: "900", startedAt: STAMP }] }),
+      "POST /api/v1/calls/c-1/door-open": () =>
+        apiError(409, "conflict", "the door station has no door-open code"),
+    });
+    renderApp("/");
+    fireEvent.click(await screen.findByRole("button", { name: "Open door" }));
+    expect(
+      await screen.findByText(/the door station has no door-open code/),
+    ).toBeVisible();
+    expect(screen.queryByText(/The door-open code was sent/)).toBeNull();
+  });
+
+  it("shows nothing when no door call is up", async () => {
+    api({ "GET /api/v1/me/door-calls": () => json({ items: [] }) });
+    renderApp("/");
+    expect(await screen.findByText("Hello, Alice")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open door" })).toBeNull();
+  });
+
   it("does not open an admin page for a user", async () => {
     api();
     renderApp("/users");
