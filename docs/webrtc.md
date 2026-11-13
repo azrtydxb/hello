@@ -164,9 +164,11 @@ with it off Kamailio and hello-sip behave exactly as before.
 - **Metrics.** hello-sip counts requests by the transport they arrived on,
   `hello_sip_requests_by_wire_total{transport="udp|tcp|tls"}`, and Kamailio
   counts those on the hop socket in `kamailio_edge_requests_total{socket="hello_tls"}`.
-- **Not done.** The `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP` flag that refuses
-  WebRTC calls over a cleartext hop belongs to the WebRTC media path and
-  arrives with it. Hello's trunk legs and Hello to SBC connections are not
+- **Cleartext refusal.** With the hop off, a WebRTC offer is refused unless
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP=true` (default false), because its
+  DTLS fingerprint would travel in the clear between Kamailio and the node; see
+  [media.md](media.md). The offer must have arrived on the node's TLS listener
+  from a trusted edge. Hello's trunk legs and Hello to SBC connections are not
   part of this hop.
 - **Lab.** The compose lab turns it on at both ends (the lab SIP certificate is
   both ends' certificate), so every TLS phone of the lab suite travels it:

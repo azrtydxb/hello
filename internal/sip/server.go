@@ -126,6 +126,10 @@ type Config struct {
 	// present Hello's own certificate. The edge uses this hop for browsers.
 	TLSListener net.Listener
 	TLSClient   *tls.Config
+	// WebRTCAllowCleartextHop (HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP, default
+	// false) lets a WebRTC offer be answered although it did not arrive over
+	// the TLS hop: its DTLS fingerprint then travelled in the clear.
+	WebRTCAllowCleartextHop bool
 	// Dialing is the numbering context (HELLO_DIAL_INTL_PREFIX and
 	// HELLO_DIAL_COUNTRY_CODE) caller numbers are normalised in for the
 	// blocklist and the country restriction (pbx-gaps S-7, S-8).

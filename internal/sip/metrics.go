@@ -89,7 +89,10 @@ type Metrics struct {
 	// RequestsByWire counts requests by the transport they arrived on at this
 	// node (udp, tcp or tls, from the top Via), the TLS hop of S-12 included.
 	RequestsByWire *prometheus.CounterVec // transport
-	SecureRefused  *prometheus.CounterVec // reason
+	// WebRTCRefused counts WebRTC offers refused before an answer, by reason
+	// (cleartext_hop: the offer did not arrive over the TLS hop).
+	WebRTCRefused *prometheus.CounterVec // reason
+	SecureRefused *prometheus.CounterVec // reason
 
 	// Phase E (spec P-12, P-13): server pages and intercom calls.
 	PagingTotal   *prometheus.CounterVec // result
@@ -301,6 +304,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.RequestsByWire = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_sip_requests_by_wire_total", Help: "Requests received, by the transport they arrived on at this node (udp, tcp, tls).",
 	}, []string{"transport"})
+	m.WebRTCRefused = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_sip_webrtc_refused_total", Help: "WebRTC offers refused before an answer, by reason (cleartext_hop).",
+	}, []string{"reason"})
 	m.RegistrationsByTransport = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "hello_sip_registrations_by_transport", Help: "Bindings last registered through this node, by the phone's transport (udp, tcp, tls).",
 	}, []string{"transport"})
@@ -371,7 +377,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailGroupDeliveries, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Originates, m.OriginateSetup, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags, m.Emergency,
-		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.RequestsByWire, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.BossDivert, m.DirectoryTotal, m.TimeConditionTotal, m.BlockedCalls,
+		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.RequestsByWire, m.WebRTCRefused, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.BossDivert, m.DirectoryTotal, m.TimeConditionTotal, m.BlockedCalls,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal, m.FaxTotal, m.FollowMeLegs,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	m.Conf = newConfMetrics(reg)

@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/media"
+	"github.com/emiago/sipgo/sip"
 	"github.com/icholy/digest"
 )
 
@@ -385,5 +387,62 @@ func TestPathHopTransport(t *testing.T) {
 		if got := pathHopTransport(path); got != want {
 			t.Errorf("pathHopTransport(%q) = %s, want %s", path, got, want)
 		}
+	}
+}
+
+// TestWebRTCOfferNeedsTheTLSHop fails if a WebRTC offer is answered over a
+// cleartext edge-to-node hop while HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP is
+// false (the default): the offer must have arrived on the node's TLS listener
+// from a trusted edge, a Via that merely says TLS does not count, a refusal is
+// counted and carries the reason, and the operator's allowance lifts it.
+func TestWebRTCOfferNeedsTheTLSHop(t *testing.T) {
+	pki := newHopPKI(t)
+	cert, key := pki.leaf(t, "hello-sip", nil)
+	hop, err := ListenTLS("127.0.0.1:0", cert, key, pki.caFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = hop.Listener.Close() })
+	for name, tc := range map[string]struct {
+		withHop     bool
+		allow       bool
+		transport   string
+		source      string
+		viaSaysTLS  bool
+		wantRefused bool
+	}{
+		"TLS from the trusted edge":                  {withHop: true, transport: "TLS", source: "127.0.0.1:5073"},
+		"UDP from the trusted edge":                  {withHop: true, transport: "UDP", source: "127.0.0.1:5070", wantRefused: true},
+		"a Via that says TLS over UDP":               {withHop: true, transport: "UDP", source: "127.0.0.1:5070", viaSaysTLS: true, wantRefused: true},
+		"TLS from an address that is not the edge":   {withHop: true, transport: "TLS", source: "198.51.100.9:5073", wantRefused: true},
+		"no TLS hop on this node":                    {transport: "UDP", source: "127.0.0.1:5070", wantRefused: true},
+		"cleartext hop allowed by the operator":      {transport: "UDP", source: "127.0.0.1:5070", allow: true},
+		"cleartext hop allowed, TLS hop also in use": {withHop: true, allow: true, transport: "TLS", source: "127.0.0.1:5073"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pbx := startPBX(t, ringAllDevices(), trustLoopback, func(c *Config, _ *Deps) {
+				c.WebRTCAllowCleartextHop = tc.allow
+				if tc.withHop {
+					c.TLSListener, c.TLSClient = hop.Listener, hop.Client
+				}
+			})
+			req := sip.NewRequest(sip.INVITE, sip.Uri{Scheme: "sip", User: "200", Host: testDomain})
+			req.SetTransport(tc.transport)
+			req.SetSource(tc.source)
+			if tc.viaSaysTLS {
+				req.AppendHeader(&sip.ViaHeader{ProtocolName: "SIP", ProtocolVersion: "2.0", Transport: "TLS", Host: "127.0.0.1", Port: 5073})
+			}
+			err := pbx.srv.checkWebRTCHop(req)
+			if tc.wantRefused != (err != nil) {
+				t.Fatalf("checkWebRTCHop = %v, want refused=%v", err, tc.wantRefused)
+			}
+			n := pbx.metric(t, "hello_sip_webrtc_refused_total", map[string]string{"reason": "cleartext_hop"})
+			if tc.wantRefused && (!errors.Is(err, media.ErrCleartextHop) || n != 1) {
+				t.Fatalf("a refusal must be media.ErrCleartextHop and counted once (err %v, count %v)", err, n)
+			}
+			if !tc.wantRefused && n != 0 {
+				t.Fatalf("refusals counted for an offer that was let through: %v", n)
+			}
+		})
 	}
 }

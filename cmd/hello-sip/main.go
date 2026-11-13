@@ -204,7 +204,7 @@ func run(args []string) error {
 		MaxContacts: cfg.MaxContacts, MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
-		TLSListener: tlsListener(hop), TLSClient: tlsClient(hop),
+		TLSListener: tlsListener(hop), TLSClient: tlsClient(hop), WebRTCAllowCleartextHop: cfg.MediaWebRTCAllowCleartextHop,
 		SessionExpires: cfg.SessionExpires, SessionMinSE: cfg.SessionMinSE, SessionTimersTrunks: cfg.SessionTimersTrunks, MediaDeadAfter: cfg.MediaDeadAfter,
 		DoorHangup: cfg.DoorHangup, PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
 		PageMulticastIface: cfg.PageMulticastIface, PageMulticastTTL: cfg.PageMulticastTTL,

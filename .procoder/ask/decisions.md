@@ -3731,3 +3731,17 @@ Follow-up to "Clients item 1: media foundation on pion". Choices:
   client as the browser. They check that nothing but STUN and DTLS crosses the
   browser leg before the keys are in, that nothing on it is in the clear after,
   and that a cleartext packet from the browser is not relayed.
+
+## WebRTC offers need the TLS hop (2026-11-13)
+
+- `media.Relay.AnswerWebRTC` takes a `SignalingHop`; an offer that arrived over a
+  cleartext edge-to-node hop is refused with `ErrCleartextHop` unless
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP=true` (default false). The check runs
+  first, before the leg is routed or a handshake starts.
+- hello-sip decides "encrypted" from the transport sipgo read the message on
+  (its TLS listener) from a trusted edge, never from the Via the sender wrote;
+  `wireLabel` (and so `hello_sip_requests_by_wire_total`) uses the same source.
+  `Server.checkWebRTCHop` logs the refusal at warn with the fix and counts
+  `hello_sip_webrtc_refused_total{reason="cleartext_hop"}`; the softphone call
+  path (not built yet) answers 488.
+

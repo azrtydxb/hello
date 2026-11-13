@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/emiago/sipgo/sip"
 )
 
@@ -113,17 +114,42 @@ func ListenTLS(addr, certFile, keyFile, caFile string) (*TLSHop, error) {
 	return &TLSHop{Listener: tls.NewListener(ln, server), Client: client}, nil
 }
 
-// wireLabel is the transport a request arrived on at this node, from its top
-// Via (set by the sender, so only a trusted edge makes it a claim about the
-// TLS hop): udp, tcp or tls; anything else, or a request with no Via, is udp.
+// wireLabel is the transport a request arrived on at this node: what sipgo's
+// transport recorded when it read the message, not what the sender wrote in
+// its Via. udp, tcp or tls; anything else is udp.
 func wireLabel(req *sip.Request) string {
-	if v := req.Via(); v != nil {
-		switch strings.ToLower(v.Transport) {
-		case "tcp":
-			return "tcp"
-		case "tls":
-			return "tls"
-		}
+	switch strings.ToLower(req.Transport()) {
+	case "tcp":
+		return "tcp"
+	case "tls":
+		return "tls"
 	}
 	return "udp"
+}
+
+// WebRTCHop is how a WebRTC offer in req reached this node, for
+// media.Relay.AnswerWebRTC: encrypted when the request arrived on this node's
+// TLS listener from a trusted edge (the hop of S-12), with the operator's
+// permission to answer over a cleartext hop (HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP).
+func (s *Server) WebRTCHop(req *sip.Request) media.SignalingHop {
+	return media.SignalingHop{
+		Encrypted:      s.cfg.TLSListener != nil && s.fromTrustedProxy(req) && wireLabel(req) == transportTLS,
+		AllowCleartext: s.cfg.WebRTCAllowCleartextHop,
+	}
+}
+
+// checkWebRTCHop refuses a WebRTC offer that arrived over a cleartext hop
+// while that is not allowed: it counts and logs the refusal with its reason and
+// returns media.ErrCleartextHop for the caller to answer with (488). It is
+// what a softphone call path runs before AnswerWebRTC, which checks it again.
+func (s *Server) checkWebRTCHop(req *sip.Request) error {
+	if err := s.WebRTCHop(req).Check(); err != nil {
+		s.m.WebRTCRefused.WithLabelValues("cleartext_hop").Inc()
+		s.log.Warn("WebRTC offer refused: it arrived over a cleartext edge-to-node hop",
+			"reason", "cleartext_hop", "source", req.Source(), "wire", wireLabel(req),
+			"hop_tls_enabled", s.cfg.TLSListener != nil,
+			"fix", "enable the TLS hop (HELLO_SIP_TLS_ADDR, KAMAILIO_HELLO_TLS_PORT) or set HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP=true")
+		return err
+	}
+	return nil
 }
