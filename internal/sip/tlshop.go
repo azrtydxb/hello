@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/emiago/sipgo/sip"
 )
 
 // SIP over mutual TLS between the edge (Kamailio) and hello-sip
@@ -108,4 +111,19 @@ func ListenTLS(addr, certFile, keyFile, caFile string) (*TLSHop, error) {
 		return nil, err
 	}
 	return &TLSHop{Listener: tls.NewListener(ln, server), Client: client}, nil
+}
+
+// wireLabel is the transport a request arrived on at this node, from its top
+// Via (set by the sender, so only a trusted edge makes it a claim about the
+// TLS hop): udp, tcp or tls; anything else, or a request with no Via, is udp.
+func wireLabel(req *sip.Request) string {
+	if v := req.Via(); v != nil {
+		switch strings.ToLower(v.Transport) {
+		case "tcp":
+			return "tcp"
+		case "tls":
+			return "tls"
+		}
+	}
+	return "udp"
 }

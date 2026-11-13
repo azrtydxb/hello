@@ -721,6 +721,7 @@ func (s *Server) handle(srv *sipgo.Server, m sip.RequestMethod, h sipgo.RequestH
 func (s *Server) wrap(h sipgo.RequestHandler) sipgo.RequestHandler {
 	return func(req *sip.Request, tx sip.ServerTransaction) {
 		s.m.request(req.Method.String())
+		s.m.RequestsByWire.WithLabelValues(wireLabel(req)).Inc()
 		if req.IsAck() {
 			s.noteAck(req)
 		}

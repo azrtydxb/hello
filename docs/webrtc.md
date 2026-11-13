@@ -150,16 +150,28 @@ with it off Kamailio and hello-sip behave exactly as before.
   Kamailio it is `KAMAILIO_HELLO_TLS_PORT` and `KAMAILIO_HELLO_SIP_TLS_PORT`.
   The kw manifests do not set them: turning the hop on there is a manifest
   change together with the certificate.
-- **Failover.** A retry on another node, and an in-dialog request aimed at a
-  dead node, are converted to the TLS address too (a message flag carries the
-  choice into the failure routes). The dispatcher's node list is unchanged, so
-  a node is healthy as the UDP probes say; a node whose TLS port is down
-  fails that request over to the next node.
-- **Not done.** A node whose TLS listener is down is not marked down by the
-  UDP probes; there is no TLS probe. The `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP`
-  flag that refuses WebRTC calls over a cleartext hop belongs to the WebRTC
-  media path and arrives with it. Hello's trunk legs and Hello to SBC
-  connections are not part of this hop.
+- **Health.** The dispatcher holds a second set: the same nodes by their TLS
+  address (`sip:<node>:5061;transport=tls`, `sockname=hello_tls`), probed with
+  OPTIONS over TLS from the `hello_tls` socket like set 1 is over UDP. An
+  encrypted phone leg is balanced over set 2, so a node whose TLS listener is
+  down (or whose certificate no longer verifies) is marked down for those legs
+  only, and its UDP entry stays up for everything else. The chart writes set 2
+  into the dispatcher list when `kamailio.helloTLS.enabled`. A retry on
+  another node and an in-dialog request aimed at a dead node stay in the same
+  set (a message flag carries the choice into the failure routes); a request
+  that follows a Route to a node (the node that owns the dialog) is converted
+  to that node's TLS address without a health check.
+- **Metrics.** hello-sip counts requests by the transport they arrived on,
+  `hello_sip_requests_by_wire_total{transport="udp|tcp|tls"}`, and Kamailio
+  counts those on the hop socket in `kamailio_edge_requests_total{socket="hello_tls"}`.
+- **Not done.** The `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP` flag that refuses
+  WebRTC calls over a cleartext hop belongs to the WebRTC media path and
+  arrives with it. Hello's trunk legs and Hello to SBC connections are not
+  part of this hop.
 - **Lab.** The compose lab turns it on at both ends (the lab SIP certificate is
   both ends' certificate), so every TLS phone of the lab suite travels it:
-  `TestLabSIPTLS` registers over TLS and the node answers on the hop.
+  `TestLabSIPTLS` registers over TLS and the node answers on the hop, and
+  `TestLabTLSHop` asserts it: the nodes count the REGISTERs as arrived over
+  TLS, Kamailio counts Hello's INVITE to the phone on `hello_tls` and the
+  phone's connection receives it, and stopping a node marks only its TLS
+  destination down through the TLS probes.

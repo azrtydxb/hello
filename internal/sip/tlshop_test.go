@@ -196,6 +196,9 @@ func TestSIPOverTLSHop(t *testing.T) {
 		if !strings.Contains(status, " 200 ") {
 			t.Fatalf("authenticated REGISTER over TLS: %q, want 200", status)
 		}
+		if n := pbx.metric(t, "hello_sip_requests_by_wire_total", map[string]string{"transport": "tls"}); n != 2 {
+			t.Fatalf("requests counted as arrived over TLS = %v, want the 2 REGISTERs", n)
+		}
 		var transports []string
 		for _, b := range bindings(t, pbx, "sip:b1@"+testDomain) {
 			transports = append(transports, b.Transport)

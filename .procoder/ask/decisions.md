@@ -3574,9 +3574,15 @@ Decided while building, without asking, within the spec and the brief:
   set per socket from a static file.
 - hello-sip needs the edge to present a client certificate (RequireAndVerify).
   The certificate is re-read when it changes (cert-manager renewals).
-- Not built: a TLS probe in the dispatcher, and the cleartext-hop refusal flag
-  (it belongs to the media path). This branch is based on main without #326;
+- The dispatcher has a second set (the same nodes by TLS address, `sockname`
+  attributes naming hello_tls) probed over TLS; an encrypted leg is balanced
+  over it, so a node whose TLS listener is down is skipped for those legs only.
+  The lab proves it by stopping a node and checking set 2 follows. hello-sip
+  counts `hello_sip_requests_by_wire_total{transport}` so the lab can assert a
+  REGISTER arrived on the TLS listener; Kamailio's `edge_requests_total` shows
+  Hello's requests on hello_tls.
+- Not built: the cleartext-hop refusal flag (it belongs to the media path;
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP` is added when #324 merges). This branch is based on main without #326;
   kamailio.cfg, the kw ConfigMap and test/deploy tests need re-syncing against
   #326 and #338 at merge (NEED_TLS defined in both, the hello-socket checks, the
   TLS opt-in test).
-

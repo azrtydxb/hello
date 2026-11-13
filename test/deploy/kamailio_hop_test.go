@@ -44,7 +44,7 @@ func TestKamailioTLSHopIsOptIn(t *testing.T) {
 		}
 	}
 	// Every use of the flag and of the destination route is guarded too.
-	for _, want := range []string{"route(HELLO_TLS_DST);", "isflagset(FLT_HOP_TLS)", "$var(sec) == 1"} {
+	for _, want := range []string{"route(HELLO_TLS_DST);", "route(PICK_SET);", "route(PICK_SET_FAIL);", "isflagset(FLT_HOP_TLS)", "$var(sec) == 1"} {
 		for i, off := 0, 0; ; off = i + len(want) {
 			j := strings.Index(cfg[off:], want)
 			if j < 0 {
@@ -66,6 +66,18 @@ func TestKamailioTLSHopIsOptIn(t *testing.T) {
 	// The dispatcher's probes stay on the UDP socket.
 	if !strings.Contains(cfg, `modparam("dispatcher", "ds_default_sockname", "hello")`) {
 		t.Error("the dispatcher no longer probes from the UDP hello socket")
+	}
+	// Off, the dispatcher set stays the literal 1 everywhere it was.
+	if !strings.Contains(cfg, "#!else\n#!define HELLO_SET \"1\"") || strings.Count(cfg, "ds_select_dst(HELLO_SET,") != 4 || strings.Contains(cfg, `ds_select_dst("1"`) {
+		t.Error("ds_select_dst must take HELLO_SET (1 without the hop, the PICK_SET result with it) at its four places")
+	}
+	// An encrypted leg is balanced over the nodes' TLS addresses (set 2),
+	// which are probed over TLS, so a node whose TLS listener is down is skipped.
+	if body, _ := kamailioRoute(cfg, "PICK_SET"); !strings.Contains(body, "$var(dset) = 2;") {
+		t.Error("route[PICK_SET] does not pick dispatcher set 2 for an encrypted leg")
+	}
+	if body, _ := kamailioRoute(cfg, "PICK_SET_FAIL"); !strings.Contains(body, "isflagset(FLT_HOP_TLS)") {
+		t.Error("route[PICK_SET_FAIL] does not follow the message flag in a failure route")
 	}
 	if body, _ := kamailioRoute(cfg, "TO_HELLO"); !strings.Contains(body, "setflag(FLT_HOP_TLS)") {
 		t.Error("route[TO_HELLO] does not send an encrypted phone leg over the TLS hop")
@@ -130,8 +142,15 @@ func TestChartTLSHop(t *testing.T) {
 		t.Errorf("sip.tls without a Secret: want a failure naming sip.tls.secretName, got %v", err)
 	}
 
+	// The TLS set of the dispatcher list exists only with the hop.
+	if cm := findObj(t, off, "ConfigMap", "hello-kamailio"); strings.Contains(str(dig(cm, "data", "dispatcher.list")), "\n2 sip:") {
+		t.Error("the default dispatcher list has a TLS set")
+	}
 	objs := render(t, "-f", eval, "--set", "kamailio.helloTLS.enabled=true", "--set", "sip.tls.enabled=true", "--set", "sip.tls.secretName=hello-sip-tls",
 		"--set", "kamailio.tls.secretName=hello-kamailio-tls")
+	if cm := findObj(t, objs, "ConfigMap", "hello-kamailio"); strings.Count(str(dig(cm, "data", "dispatcher.list")), ":5061;transport=tls 0 0 duid=") != 2 {
+		t.Errorf("the dispatcher list does not hold the two nodes' TLS addresses as set 2:\n%s", str(dig(cm, "data", "dispatcher.list")))
+	}
 	kam := envNames(containerNamed(t, findObj(t, objs, "Deployment", "hello-kamailio"), false, "kamailio"))
 	if str(kam["KAMAILIO_HELLO_TLS_PORT"]["value"]) != "5073" || str(kam["KAMAILIO_HELLO_SIP_TLS_PORT"]["value"]) != "5061" {
 		t.Errorf("kamailio env = %v", kam)
@@ -161,5 +180,8 @@ func TestLabTLSHop(t *testing.T) {
 		if !strings.Contains(c, want) {
 			t.Errorf("compose.yaml does not contain %q", want)
 		}
+	}
+	if l := readRepo(t, "deploy", "kamailio", "dispatcher.list"); strings.Count(l, "\n2 sip:") != 2 {
+		t.Error("the lab dispatcher.list does not hold the two nodes' TLS addresses as set 2")
 	}
 }

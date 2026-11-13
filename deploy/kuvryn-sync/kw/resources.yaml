@@ -191,6 +191,16 @@ data:
     #!endif
     #!endif
 
+    # The dispatcher set a request to Hello is balanced over: 1 (UDP nodes), or
+    # with the hop 2 for an encrypted phone leg: the same nodes by their TLS
+    # address, probed over TLS from hello_tls, so a node whose TLS listener is down
+    # is skipped for those legs only (route PICK_SET, PICK_SET_FAIL).
+    #!ifdef HELLO_TLS_PORT
+    #!define HELLO_SET "$var(dset)"
+    #!else
+    #!define HELLO_SET "1"
+    #!endif
+
     # tls.so is needed by SIP over TLS and by the TLS hop.
     #!ifdef TLS_PORT
     #!define NEED_TLS
@@ -637,7 +647,10 @@ data:
     		set_contact_alias();
     	}
 
-    	if (!ds_select_dst("1", "4")) {
+    #!ifdef HELLO_TLS_PORT
+    	route(PICK_SET);
+    #!endif
+    	if (!ds_select_dst(HELLO_SET, "4")) {
     		route(NO_NODE);
     	}
     	route(TO_HELLO);
@@ -666,7 +679,10 @@ data:
     		setbflag(FLB_NATSIPPING);
     	}
     	t_on_reply("REGISTER_REPLY");
-    	if (!ds_select_dst("1", "7")) {
+    #!ifdef HELLO_TLS_PORT
+    	route(PICK_SET);
+    #!endif
+    	if (!ds_select_dst(HELLO_SET, "7")) {
     		route(NO_NODE);
     	}
     	route(TO_HELLO);
@@ -719,7 +735,10 @@ data:
     	# Spec S-3: an in-dialog request aimed at a dead Hello node goes to a
     	# surviving one, which answers from the replicated dialog state. The
     	# R-URI (the dead node's Contact) stays; only the next hop changes.
-    	if (!ds_select_dst("1", "4")) {
+    #!ifdef HELLO_TLS_PORT
+    	route(PICK_SET);
+    #!endif
+    	if (!ds_select_dst(HELLO_SET, "4")) {
     		route(NO_NODE);
     	}
     	xlog("L_INFO", "in-dialog $rm to dead Hello node $var(next): rerouted to $du\n");
@@ -785,6 +804,22 @@ data:
     }
 
     #!ifdef HELLO_TLS_PORT
+    # $var(dset): 2 (the nodes' TLS addresses) for an encrypted phone leg, else 1.
+    # A failure route has no $var(sec) of its own: it asks the message flag.
+    route[PICK_SET] {
+    	$var(dset) = 1;
+    	if ($var(sec) == 1) {
+    		$var(dset) = 2;
+    	}
+    }
+
+    route[PICK_SET_FAIL] {
+    	$var(dset) = 1;
+    	if (isflagset(FLT_HOP_TLS)) {
+    		$var(dset) = 2;
+    	}
+    }
+
     # Turn the next hop towards a Hello node into its TLS address: the node the
     # dispatcher chose (or, with no chosen hop, the Request-URI's), on
     # HELLO_SIP_TLS_PORT with transport=tls.
@@ -925,7 +960,10 @@ data:
     	} else {
     		$var(dead) = $ru;
     	}
-    	if (!ds_select_dst("1", "4")) {
+    #!ifdef HELLO_TLS_PORT
+    	route(PICK_SET_FAIL);
+    #!endif
+    	if (!ds_select_dst(HELLO_SET, "4")) {
     		xlog("L_WARN", "in-dialog failover of $rm: no other hello-sip node\n");
     		exit;
     	}
@@ -995,6 +1033,11 @@ data:
     	ds_dsg_fetch("1");
     	prom_gauge_set("dispatcher_set_destinations", "$dsg(count)", "1");
     	prom_gauge_set("dispatcher_set_active", "$dsg(active)", "1");
+    #!ifdef HELLO_TLS_PORT
+    	ds_dsg_fetch("2");
+    	prom_gauge_set("dispatcher_set_destinations", "$dsg(count)", "2");
+    	prom_gauge_set("dispatcher_set_active", "$dsg(active)", "2");
+    #!endif
     }
 
     # HTTP is answered on the metrics socket only, never on the phones TCP one.
@@ -1184,7 +1227,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: dd0dc365cd84a259519d7f1fa34367e631fa9996f0d66031787ec14fb65aefcf
+        hello.watteel.com/kamailio-config-sha256: 0aab6db82a6d397523ef6a83d9bb08b48d3bfb267d8c0d356187bb0fee598c7a
     spec:
       # Phones must reach Kamailio with no NAT in between: through a NodePort
       # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's
