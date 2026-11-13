@@ -14,13 +14,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/azrtydxb/hello/internal/crm/kit"
 	"net/http"
 	"net/url"
 	"path"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/crm"
@@ -37,24 +37,10 @@ var WebhookScopes = []string{"crm", "telephony", "user"}
 var webhookPath = regexp.MustCompile(`^(.*)/rest/\d+/[A-Za-z0-9]+/?$`)
 
 // Connector is the Bitrix24 connector.
-type Connector struct {
-	hc *http.Client
-
-	mu   sync.Mutex
-	done map[string]*progress // call id -> steps already done
-}
-
-// progress remembers what a call's failed attempt already did in Bitrix24,
-// so a retry does not register the call a second time (register has no
-// idempotency key). It lives in memory for a day.
-type progress struct {
-	bitrixID string
-	finished bool
-	at       time.Time
-}
+type Connector struct{ hc *http.Client }
 
 // New returns the connector on hc.
-func New(hc *http.Client) *Connector { return &Connector{hc: hc, done: map[string]*progress{}} }
+func New(hc *http.Client) *Connector { return &Connector{hc: hc} }
 
 // Kind implements crm.Connector.
 func (c *Connector) Kind() string { return Kind }
@@ -78,7 +64,7 @@ func (c *Connector) ValidateConfig(cfg map[string]string) (map[string]string, er
 	return out, nil
 }
 
-// SecretBoundKeys implements crm.SecretBinder: the webhook address holds
+// SecretBoundKeys implements crm.SecretBound: the webhook address holds
 // both the host and the secret, so no other setting steers it.
 func (c *Connector) SecretBoundKeys() []string { return nil }
 
@@ -118,7 +104,7 @@ func (c *Connector) call(ctx context.Context, hook, method string, params map[st
 		return crm.ErrAuth
 	}
 	var r reply
-	if err := crm.Do(ctx, c.hc, crm.Request{Method: http.MethodPost, URL: base + method + ".json", Body: params, Authed: true}, &r); err != nil {
+	if err := kit.Do(ctx, c.hc, kit.Request{Method: http.MethodPost, URL: base + method + ".json", Body: params, Authed: true}, &r); err != nil {
 		return err
 	}
 	if r.Error != "" {
@@ -145,7 +131,7 @@ func (c *Connector) call(ctx context.Context, hook, method string, params map[st
 	return nil
 }
 
-// Authenticate implements crm.StaticAuth: the webhook must answer profile.
+// Authenticate implements crm.Direct: the webhook must answer profile.
 func (c *Connector) Authenticate(ctx context.Context, cfg crm.Config) (crm.Tokens, error) {
 	hook, err := parseWebhook(cfg.ClientSecret)
 	if err != nil {
@@ -161,7 +147,7 @@ func (c *Connector) Authenticate(ctx context.Context, cfg crm.Config) (crm.Token
 		return crm.Tokens{}, err
 	}
 	u, _ := url.Parse(hook)
-	return crm.Tokens{Access: "credential", Account: u.Hostname(), Scopes: WebhookScopes}, nil
+	return crm.Tokens{Access: hook, Account: u.Hostname(), Scopes: WebhookScopes}, nil
 }
 
 // Ping implements crm.Pinger.
@@ -294,26 +280,23 @@ func statusCode(o crm.Outcome) string {
 	return "304"
 }
 
-func (c *Connector) progress(key string) *progress {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for k, p := range c.done {
-		if time.Since(p.at) > 24*time.Hour {
-			delete(c.done, k)
-		}
-	}
-	p, ok := c.done[key]
-	if !ok {
-		p = &progress{at: time.Now()}
-		c.done[key] = p
-	}
+// progress is what a failed attempt already did in Bitrix24. The framework
+// keeps it on the job (crm.PartialError, crm_call_logs.state), so a retry
+// continues with the failed step even after a restart.
+type progress struct {
+	BitrixID string `json:"id,omitempty"`
+	Finished bool   `json:"finished,omitempty"`
+}
+
+func loadProgress(state string) progress {
+	var p progress
+	_ = json.Unmarshal([]byte(state), &p)
 	return p
 }
 
-func (c *Connector) forget(key string) {
-	c.mu.Lock()
-	delete(c.done, key)
-	c.mu.Unlock()
+func (p progress) fail(err error) error {
+	raw, _ := json.Marshal(p)
+	return &crm.PartialError{State: string(raw), Err: err}
 }
 
 // LogCall implements crm.Connector: register the call (bound to the CRM
@@ -321,15 +304,14 @@ func (c *Connector) forget(key string) {
 // the recording when there is one. A retry resumes where a failed attempt
 // stopped.
 func (c *Connector) LogCall(ctx context.Context, cc crm.Conn, l crm.CallLog) (string, error) {
-	key := cc.AccessToken + "|" + l.CallID
-	p := c.progress(key)
+	p := loadProgress(l.State)
 	typ := 2
 	if l.Direction == "outbound" {
 		typ = 1
 	}
-	if p.bitrixID == "" {
+	if p.BitrixID == "" {
 		params := map[string]any{
-			"USER_ID": l.OwnerID, "PHONE_NUMBER": l.Number, "CALL_START_DATE": crm.CallTime(l).Format(time.RFC3339),
+			"USER_ID": l.OwnerID, "PHONE_NUMBER": l.Number, "CALL_START_DATE": kit.Timestamp(l).Format(time.RFC3339),
 			"CRM_CREATE": 0, "CRM_SOURCE": "CALL", "TYPE": typ, "SHOW": 0,
 		}
 		if l.Extension != "" {
@@ -349,26 +331,24 @@ func (c *Connector) LogCall(ctx context.Context, cc crm.Conn, l crm.CallLog) (st
 		if res.CallID == "" {
 			return "", &crm.APIError{Msg: "the response has no call id"}
 		}
-		p.bitrixID = res.CallID
+		p.BitrixID = res.CallID
 	}
-	if !p.finished {
+	if !p.Finished {
 		err := c.call(ctx, cc.AccessToken, "telephony.externalcall.finish", map[string]any{
-			"CALL_ID": p.bitrixID, "USER_ID": l.OwnerID, "DURATION": int64(l.Duration.Seconds()),
+			"CALL_ID": p.BitrixID, "USER_ID": l.OwnerID, "DURATION": int64(l.Duration.Seconds()),
 			"COST": 0, "STATUS_CODE": statusCode(l.Outcome), "ADD_TO_CHAT": 0,
 		}, nil)
 		if err != nil {
-			return "", err
+			return "", p.fail(err)
 		}
-		p.finished = true
+		p.Finished = true
 	}
 	if l.RecordingURL != "" {
-		if err := c.attach(ctx, cc, p.bitrixID, l.RecordingURL); err != nil {
-			return "", err
+		if err := c.attach(ctx, cc, p.BitrixID, l.RecordingURL); err != nil {
+			return "", p.fail(err)
 		}
 	}
-	id := p.bitrixID
-	c.forget(key)
-	return id, nil
+	return p.BitrixID, nil
 }
 
 func (c *Connector) attach(ctx context.Context, cc crm.Conn, callID, link string) error {

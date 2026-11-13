@@ -148,7 +148,7 @@ func (s staticFake) Authenticate(_ context.Context, c Config) (Tokens, error) {
 	if c.ClientSecret != "good-key" {
 		return Tokens{}, errors.New("refused")
 	}
-	return Tokens{Access: "credential", Account: "7"}, nil
+	return Tokens{Access: c.ClientSecret, Account: "7"}, nil
 }
 func (s staticFake) SecretBoundKeys() []string { return []string{"clientId", "url"} }
 
@@ -163,8 +163,8 @@ func TestCredentialConnectorConnectsWithoutABrowser(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.svc.PublicURL = "" // no HELLO_PUBLIC_URL needed
-	var ce *ConnectError
-	if _, err := r.svc.Connect(ctx, "admin", c.ID); !errors.As(err, &ce) {
+	var ve0 *ValidationError
+	if _, err := r.svc.Connect(ctx, "admin", c.ID); !errors.As(err, &ve0) {
 		t.Fatalf("bad key = %v", err)
 	}
 	if _, err := r.svc.Update(ctx, "admin", c.ID, Settings{ClientSecret: ptr("good-key")}); err != nil {
@@ -174,10 +174,10 @@ func TestCredentialConnectorConnectsWithoutABrowser(t *testing.T) {
 		t.Fatalf("connect = %q, %v", u, err)
 	}
 	v, _ := r.svc.Get(ctx, c.ID)
-	if v.Auth != "credential" || v.RedirectURI != "" || v.Connection == nil || v.Connection.ExternalAccount != "7" {
+	if v.Auth != "direct" || v.RedirectURI != "" || v.Connection == nil || v.Connection.ExternalAccount != "7" {
 		t.Fatalf("view = %+v", v)
 	}
-	// The secret is the access token, read from the stored client secret.
+	// The access token is the verified secret.
 	_, cc, err := r.tokens.Conn(ctx, c)
 	if err != nil || cc.AccessToken != "good-key" || cc.ExternalAcct != "7" {
 		t.Fatalf("conn = %+v, %v", cc, err)
@@ -190,5 +190,42 @@ func TestCredentialConnectorConnectsWithoutABrowser(t *testing.T) {
 	}
 	if _, err := r.svc.Update(ctx, "admin", c.ID, Settings{Config: map[string]string{"url": "https://b.example"}, ClientSecret: ptr("good-key")}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// partialFake fails its first LogCall after "registering", saving state.
+type partialFake struct {
+	*fake
+	seen []string
+}
+
+func (p *partialFake) LogCall(_ context.Context, _ Conn, l CallLog) (string, error) {
+	p.seen = append(p.seen, l.State)
+	if l.State == "" {
+		return "", &PartialError{State: `{"id":"x1"}`, Err: &APIError{Status: 503, Retry: true, Msg: "busy"}}
+	}
+	return "x1", nil
+}
+
+func TestPartialStateSurvivesTheRetryAndIsClearedOnSuccess(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	pf := &partialFake{fake: r.f}
+	r.tokens.Providers = func(kind string) (Connector, bool) { return pf, kind == "fake" }
+	r.f.owners["anna@example.com"] = "o1"
+	r.feed(t, completed("c1", "inbound", "201"))
+	r.worker.Process(ctx)
+	row, _ := r.repo.Log(r.conn.ID, "c1")
+	if row.Status != LogPending || row.Attempts != 1 || row.State != `{"id":"x1"}` || row.ExternalID != "" {
+		t.Fatalf("after the failure: %+v", row)
+	}
+	r.now = r.now.Add(time.Hour)
+	r.worker.Process(ctx)
+	row, _ = r.repo.Log(r.conn.ID, "c1")
+	if row.Status != LogLogged || row.ExternalID != "x1" || row.State != "" {
+		t.Fatalf("after the retry: %+v", row)
+	}
+	if len(pf.seen) != 2 || pf.seen[0] != "" || pf.seen[1] != `{"id":"x1"}` {
+		t.Fatalf("states handed to LogCall = %q", pf.seen)
 	}
 }

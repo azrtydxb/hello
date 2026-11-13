@@ -420,16 +420,16 @@ func TestCRMRoutesAnswer503WithoutService(t *testing.T) {
 func TestCRMCredentialConnectorConnectsOnTheSpot(t *testing.T) {
 	e := newCRMEnv(t, "") // no HELLO_PUBLIC_URL
 	c := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "staticcrm", "name": "S", "clientSecret": "bad-key"})
-	if c["auth"] != "credential" || c["redirectUri"] != nil {
+	if c["auth"] != "direct" || c["redirectUri"] != nil {
 		t.Fatalf("view = %v", c)
 	}
 	code, b, _ := e.do(t, "carol", "POST", connPath(c["id"])+"/connect", nil)
-	if code != 502 || strings.Contains(string(b), "bad-key") {
+	if code != 400 && code != 422 || strings.Contains(string(b), "bad-key") {
 		t.Fatalf("refused key = %d %s", code, b)
 	}
 	e.want(t, 200, "carol", "PATCH", connPath(c["id"]), map[string]any{"clientSecret": "good-key"})
 	got := e.want(t, 200, "carol", "POST", connPath(c["id"])+"/connect", nil)
-	if got["authorizeUrl"] != "" || got["connected"] != true {
+	if got["authorizeUrl"] != "" {
 		t.Fatalf("connect = %v", got)
 	}
 	v := e.want(t, 200, "carol", "GET", connPath(c["id"]), nil)

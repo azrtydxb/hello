@@ -34,6 +34,7 @@ type CRMService interface {
 	Mappings(ctx context.Context, id int64) ([]crm.UserMapping, error)
 	SetMapping(ctx context.Context, actor string, id, userID int64, externalID string) error
 	Engagement(ctx context.Context, actor, kind, callID, ref string, exts []string, restricted bool) (bool, error)
+	SidebarApp(ctx context.Context, actor string, id int64) (name string, data []byte, err error)
 }
 
 func (s *server) crmReady(w http.ResponseWriter) bool {
@@ -47,7 +48,6 @@ func (s *server) crmReady(w http.ResponseWriter) bool {
 // crmError answers a failed CRM operation.
 func (s *server) crmError(w http.ResponseWriter, what string, err error) {
 	var ve *crm.ValidationError
-	var ce *crm.ConnectError
 	switch {
 	case errors.As(err, &ve):
 		keys := make([]string, 0, len(ve.Fields))
@@ -64,14 +64,14 @@ func (s *server) crmError(w http.ResponseWriter, what string, err error) {
 		writeError(w, http.StatusNotFound, "not_found", what+": not found")
 	case errors.Is(err, crm.ErrConflict):
 		writeError(w, http.StatusConflict, "conflict", what+": a connector with that name exists, or the job is not dead or skipped")
-	case errors.As(err, &ce):
-		writeError(w, http.StatusBadGateway, "upstream", "the CRM refused the credentials: "+ce.Msg)
 	case errors.Is(err, crm.ErrNoPublicURL):
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "HELLO_PUBLIC_URL is not set, so the CRM sign-in cannot return to Hello")
 	case errors.Is(err, crm.ErrNotOAuth):
 		writeError(w, http.StatusConflict, "conflict", "this connector does not sign in with OAuth")
 	case errors.Is(err, crm.ErrNoCredentials):
 		writeError(w, http.StatusConflict, "conflict", "set the client id and client secret first")
+	case errors.Is(err, crm.ErrNoApp):
+		writeError(w, http.StatusConflict, "conflict", "this connector has no sidebar app")
 	case errors.Is(err, crm.ErrNotConnected):
 		writeError(w, http.StatusConflict, "conflict", "the connector is not connected")
 	case errors.Is(err, crm.ErrRateLimited):
@@ -185,6 +185,27 @@ func (s *server) deleteCRMConnector(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// downloadCRMApp is GET /integrations/crm/{id}/app: the ticket-sidebar app of
+// a helpdesk connector, as a zip the customer uploads to their own account.
+func (s *server) downloadCRMApp(w http.ResponseWriter, r *http.Request) {
+	if !s.crmReady(w) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	name, data, err := s.CRM.SidebarApp(r.Context(), actor(r).String(), id)
+	if err != nil {
+		s.crmError(w, "CRM sidebar app", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
+}
+
 func (s *server) connectCRMConnector(w http.ResponseWriter, r *http.Request) {
 	if !s.crmReady(w) {
 		return
@@ -198,9 +219,7 @@ func (s *server) connectCRMConnector(w http.ResponseWriter, r *http.Request) {
 		s.crmError(w, "CRM connector", err)
 		return
 	}
-	// A credential connector (Odoo, Bitrix24) is verified and connected on
-	// the spot: there is no address to send the browser to.
-	writeJSON(w, http.StatusOK, map[string]any{"authorizeUrl": u, "connected": u == ""})
+	writeJSON(w, http.StatusOK, map[string]string{"authorizeUrl": u})
 }
 
 func (s *server) disconnectCRMConnector(w http.ResponseWriter, r *http.Request) {

@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/azrtydxb/hello/internal/crm/kit"
 	"html"
 	"net/http"
 	"net/url"
@@ -74,7 +75,7 @@ func (c *Connector) ValidateConfig(cfg map[string]string) (map[string]string, er
 	return out, nil
 }
 
-// SecretBoundKeys implements crm.SecretBinder: the API key is sent to the
+// SecretBoundKeys implements crm.SecretBound: the API key is sent to the
 // server in url, for the database and user named here.
 func (c *Connector) SecretBoundKeys() []string { return []string{"clientId", "url", "db"} }
 
@@ -102,7 +103,7 @@ func (c *Connector) rpc(ctx context.Context, cfg crm.Config, service, method str
 		Result json.RawMessage `json:"result"`
 		Error  *fault          `json:"error"`
 	}
-	if err := crm.Do(ctx, c.hc, crm.Request{Method: http.MethodPost, URL: base + "/jsonrpc", Body: req}, &res); err != nil {
+	if err := kit.Do(ctx, c.hc, kit.Request{Method: http.MethodPost, URL: base + "/jsonrpc", Body: req}, &res); err != nil {
 		return err
 	}
 	if res.Error != nil {
@@ -140,7 +141,7 @@ func (c *Connector) call(ctx context.Context, cc crm.Conn, model, method string,
 		[]any{cc.Config.Extra["db"], uid, cc.AccessToken, model, method, args, kwargs}, out)
 }
 
-// Authenticate implements crm.StaticAuth: the login and API key must give a
+// Authenticate implements crm.Direct: the login and API key must give a
 // user id.
 func (c *Connector) Authenticate(ctx context.Context, cfg crm.Config) (crm.Tokens, error) {
 	switch {
@@ -163,7 +164,7 @@ func (c *Connector) Authenticate(ctx context.Context, cfg crm.Config) (crm.Token
 	if !ok || f < 1 {
 		return crm.Tokens{}, errors.New("Odoo refused the login or API key")
 	}
-	return crm.Tokens{Access: "credential", Account: strconv.FormatInt(int64(f), 10)}, nil
+	return crm.Tokens{Access: cfg.ClientSecret, Account: strconv.FormatInt(int64(f), 10)}, nil
 }
 
 // Ping implements crm.Pinger.
@@ -205,7 +206,7 @@ func (c *Connector) Lookup(ctx context.Context, cc crm.Conn, number string) (*cr
 	if !ok {
 		return nil, nil
 	}
-	tail := crm.Tail(n)
+	tail := tail9(n)
 	var ps []partner
 	kw := map[string]any{"fields": []string{"name", "phone", "parent_id"}, "limit": 5}
 	err := c.call(ctx, cc, "res.partner", "search_read", []any{[]any{[]any{"phone_mobile_search", "ilike", tail}}}, kw, &ps)
@@ -217,7 +218,7 @@ func (c *Connector) Lookup(ctx context.Context, cc crm.Conn, number string) (*cr
 			[]any{[]any{[]any{"phone", "ilike", tail[max(0, len(tail)-3):]}}}, kw, &ps)
 		kept := ps[:0]
 		for _, p := range ps {
-			if crm.SameNumber(p.phone(), n) {
+			if kit.Same(p.phone(), n) {
 				kept = append(kept, p)
 			}
 		}
@@ -277,7 +278,7 @@ func outcomeText(l crm.CallLog) string {
 // note is the chatter note, HTML with every value escaped.
 func note(l crm.CallLog, owner string) string {
 	var b strings.Builder
-	b.WriteString("<p><b>" + html.EscapeString(crm.CallTitle(l)) + "</b></p><ul>")
+	b.WriteString("<p><b>" + html.EscapeString(kit.Title(l)) + "</b></p><ul>")
 	row := func(k, v string) {
 		if v != "" {
 			b.WriteString("<li>" + html.EscapeString(k) + ": " + html.EscapeString(v) + "</li>")
@@ -286,7 +287,7 @@ func note(l crm.CallLog, owner string) string {
 	row("Direction", l.Direction)
 	row("From", l.From)
 	row("To", l.To)
-	row("Started", crm.CallTime(l).Format("2006-01-02 15:04:05 UTC"))
+	row("Started", kit.Timestamp(l).Format("2006-01-02 15:04:05 UTC"))
 	row("Duration", l.Duration.Round(time.Second).String())
 	row("Result", outcomeText(l))
 	row("Handled by", owner)
@@ -332,7 +333,7 @@ func (c *Connector) LogCall(ctx context.Context, cc crm.Conn, l crm.CallLog) (st
 		}
 	}
 	if target == 0 {
-		return "", &crm.APIError{Status: http.StatusBadRequest, Msg: "no Odoo contact or call owner to attach the note to"}
+		return "", fmt.Errorf("%w: no Odoo contact or call owner to attach the note to", crm.ErrNoTarget)
 	}
 	var msg int64
 	kw := map[string]any{"body": note(l, ownerName), "message_type": "comment", "subtype_xmlid": "mail.mt_note"}
@@ -360,4 +361,13 @@ func (c *Connector) UpdateCallLog(ctx context.Context, cc crm.Conn, ref string, 
 		return err
 	}
 	return c.call(ctx, cc, "mail.message", "write", []any{[]int64{id}, map[string]any{"body": note(l, ownerName)}}, nil, nil)
+}
+
+// tail9 is the last nine digits of a number.
+func tail9(n string) string {
+	d := kit.Digits(n)
+	if len(d) > 9 {
+		d = d[len(d)-9:]
+	}
+	return d
 }

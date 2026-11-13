@@ -148,6 +148,10 @@ func (w *Worker) fail(ctx context.Context, row LogRow, err error) {
 	if permanent || !more {
 		res.Status, res.NextAttemptAt = LogDead, w.now()
 	}
+	var pe *PartialError
+	if errors.As(err, &pe) {
+		res.State = &pe.State
+	}
 	w.log().Warn("crm: job failed", "log", row.ID, "connector", row.ConnectorID, "attempt", n, "dead", res.Status == LogDead, "error", msg)
 	w.settle(ctx, row, res)
 }
@@ -239,6 +243,7 @@ func (w *Worker) handle(ctx context.Context, row LogRow) {
 		}
 	}
 
+	call.State = row.State
 	ref := row.ExternalID
 	if ref == "" {
 		ref, err = withAuth(ctx, w, cr, &cc, func(cc Conn) (string, error) { return conn.LogCall(ctx, cc, call) })
@@ -274,6 +279,12 @@ func (w *Worker) handle(ctx context.Context, row LogRow) {
 		}
 	}
 	if err != nil {
+		if errors.Is(err, ErrNoTarget) {
+			// The CRM has no record to put this call on: leave it out, with the
+			// reason in the console and a retry for when the contact exists.
+			w.settle(ctx, row, LogResult{Status: LogSkipped, Attempts: row.Attempts, NextAttemptAt: w.now(), LastError: scrub(err.Error())})
+			return
+		}
 		if errors.Is(err, ErrNeedsReauth) {
 			w.settle(ctx, row, LogResult{Status: row.Status, Attempts: row.Attempts, NextAttemptAt: w.now().Add(5 * time.Minute), LastError: "the connection needs re-authorisation"})
 			return
@@ -281,7 +292,7 @@ func (w *Worker) handle(ctx context.Context, row LogRow) {
 		w.fail(ctx, row, err)
 		return
 	}
-	w.settle(ctx, row, LogResult{Status: LogLogged, ExternalID: ref, NextAttemptAt: w.now(), LinkExpiresAt: linkExpires})
+	w.settle(ctx, row, LogResult{Status: LogLogged, ExternalID: ref, NextAttemptAt: w.now(), LinkExpiresAt: linkExpires, State: &noState})
 }
 
 // withAuth runs f with the connection's token; when the CRM refuses the
@@ -396,3 +407,6 @@ func (r *Renewer) Once(ctx context.Context) {
 	}
 	_ = r.Repo.PurgeStates(ctx, now)
 }
+
+// noState clears a job's saved connector state.
+var noState = ""

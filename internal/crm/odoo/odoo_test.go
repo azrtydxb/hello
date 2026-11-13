@@ -178,11 +178,10 @@ func TestLogCallPostsANoteOnThePartner(t *testing.T) {
 	}
 }
 
-func TestLogCallWithNowhereToPostFailsPermanently(t *testing.T) {
+func TestLogCallWithNowhereToPostIsSkipped(t *testing.T) {
 	c, _, cc := setup(t, map[string]string{"res.users.read": `{"result":[]}`})
 	_, err := c.LogCall(context.Background(), cc, crm.CallLog{OwnerID: "9"})
-	var ae *crm.APIError
-	if !errors.As(err, &ae) || ae.Retry {
+	if !errors.Is(err, crm.ErrNoTarget) {
 		t.Fatalf("err = %v", err)
 	}
 }

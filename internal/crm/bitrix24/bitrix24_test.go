@@ -161,7 +161,7 @@ func TestLogCallRegistersFinishesAndAttaches(t *testing.T) {
 	}
 }
 
-func TestRetryResumesWithoutRegisteringTwice(t *testing.T) {
+func TestRetryAfterARestartResumesWithoutRegisteringTwice(t *testing.T) {
 	fail := true
 	var calls []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -176,14 +176,17 @@ func TestRetryResumesWithoutRegisteringTwice(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := New(srv.Client())
 	cc := crm.Conn{AccessToken: srv.URL + "/rest/1/code123/"}
 	l := crm.CallLog{CallID: "c1", Number: "+3211223344", OwnerID: "8", Outcome: crm.OutcomeNoAnswer, Missed: true}
-	if _, err := c.LogCall(context.Background(), cc, l); err == nil {
-		t.Fatal("the failed finish was not reported")
+	_, err := New(srv.Client()).LogCall(context.Background(), cc, l)
+	var pe *crm.PartialError
+	if !errors.As(err, &pe) {
+		t.Fatalf("the failed finish was not reported as partial: %v", err)
 	}
 	fail = false
-	ref, err := c.LogCall(context.Background(), cc, l)
+	// A new connector (a restarted hello-control) continues from the saved state.
+	l.State = pe.State
+	ref, err := New(srv.Client()).LogCall(context.Background(), cc, l)
 	if err != nil || ref != "x1" {
 		t.Fatalf("ref=%q err=%v", ref, err)
 	}

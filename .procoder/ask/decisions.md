@@ -3338,21 +3338,20 @@ Decided while building, without asking, within the spec and the brief:
 
 Decided while building, without asking, within the spec and the brief:
 
-- **No migration.** `crm_connectors.kind` has no CHECK, and the per-connector settings live
-  in the existing `config` JSON, so the placeholder 00104 is not used and the migrate counts
-  are unchanged.
-- **Two sign-in modes in the framework.** `crm.StaticAuth` (Odoo API key, Bitrix24 inbound
-  webhook): Connect verifies the stored secret with the CRM and connects at once, with no
-  browser step and no `HELLO_PUBLIC_URL`. The stored client secret is handed to the
-  connector as the access token each time, never copied into the connection, so changing the
-  secret needs no re-connect. A refused key (Odoo `AccessDenied`, Bitrix `INVALID_CREDENTIALS`)
-  is `ErrAuth`, and a connection that cannot refresh becomes `needs_reauth` like OAuth ones.
-  `ConnectorView.auth` is `oauth` or `credential`; Connect answers `connected: true` with an
-  empty `authorizeUrl`, a refused secret is 502.
-- **Secret destinations.** `crm.SecretBinder` lists the settings that decide where the
-  secret goes (default `clientId`). Zoho adds `region`, Odoo adds `url` and `db`; changing one
-  without sending the secret again is a validation error. Bitrix24 has none, since its
-  webhook address is the secret.
+- **One migration, 00104 (placeholder).** `crm_call_logs.state TEXT NOT NULL DEFAULT ''`
+  (additive). The connector settings live in the existing `config` JSON and `kind` has no CHECK.
+  The migrate counts in `test/integration/migrate_{prov,ai,ai_agent}_test.go` are main's plus one.
+- **Sign-in follows #328's names.** Odoo (API key) and Bitrix24 (inbound webhook) are `crm.Direct`
+  connectors (`auth` is `direct`; Connect verifies the stored secret and returns an empty
+  `authorizeUrl`; a refused one is a field error on `clientSecret`) and use `crm.SecretBound`
+  (Zoho: `region`; Odoo: `url`, `db`; Bitrix24: none, its webhook address is the secret), the
+  shared `internal/crm/kit` helper and `crm.ErrNoTarget` (Odoo, a call with neither a contact
+  nor an owner). Odoo's access token is the API key, Bitrix24's the webhook address.
+- **Multi-step writes survive a restart.** A connector returns `crm.PartialError{State, Err}`
+  from `LogCall` when it fails after a step that cannot be repeated; the worker saves State on
+  the job and hands it back as `CallLog.State` on the retry, clearing it on success. Bitrix24
+  uses it for register then finish then attachRecord, so a retry (also after a `hello-control`
+  restart) never registers the call twice. This replaces an in-memory record.
 - **Pipedrive: one org-level connection, not one per user.** The spec's table says tokens are
   per user "for attribution"; the call log's `user_id` gives the same attribution from one
   administrator's connection, so per-user sign-in (and its console flow) is not built. The
@@ -3377,15 +3376,56 @@ Decided while building, without asking, within the spec and the brief:
   is not lost. It speaks `/jsonrpc` (Odoo 14 to 19); `/json/2` is on the lab list, since
   `/jsonrpc` is deprecated for removal in Odoo 20. `author_id` is not set (the note is the API
   user's), so the later body update is always allowed; the owner's name is in the body.
-- **Bitrix24 register is not idempotent.** A failed finish is resumed from an in-memory record
-  (24 h) instead of registering again; a `hello-control` restart in between can leave one
-  unfinished registered call. No lead is created for an unknown number (`CRM_CREATE = 0`),
-  `SHOW = 0` (no screen-pop in the portal).
+- **Bitrix24 register is not idempotent** on the Bitrix side; see the state above. No lead is
+  created for an unknown number (`CRM_CREATE = 0`), `SHOW = 0` (no screen-pop in the portal).
 - **Private-network CRMs.** The CRM HTTP client now allows `HELLO_INTEGRATIONS_ALLOWED_CIDRS`
   (RFC 1918 by default) in `hello-control` and, via a new config field, `hello-sip`, so a
   self-hosted Odoo or Bitrix24 is reachable. Loopback, link-local and metadata stay blocked.
-- **Recording-link service still not wired** into `hello-control` (`newCRM` passes no
-  `LinkMinter`; that is the HubSpot follow-up). Zoho, Odoo and Bitrix24 recordings send a
-  link only once it is; Pipedrive's upload does not depend on it.
+- **Recording links** come from #328's `cmd/hello-control/crmlinks.go` minter (no second
+  wiring here); `newCRM` gains only the audio source for Pipedrive's upload.
 - **MCP:** unchanged. The four read tools list the new kinds; the `hello-crm` skill and its
   failures table were taught the new kinds.
+
+## Integrations P16 and P20: helpdesks, PSA tools and Clio (2026-11-13)
+
+Decided while building, without asking, within the spec and the brief:
+
+- **Direct sign-in is a framework concept.** Zendesk, Freshdesk, ConnectWise, Autotask and
+  HaloPSA have no browser consent (spec: customer API token / org-level API member). A
+  connector implements `crm.Direct` (`Authenticate`) instead of `crm.OAuth`; the existing
+  `Connect` call signs in with the stored credentials, proves them with a harmless read and
+  stores the result as the org connection. A static credential has no expiry; HaloPSA's
+  client-credentials token has one and is requested again by the TokenManager. The API
+  `auth` field says `oauth` or `direct`. No migration: the secret is the connector's sealed
+  client secret and the other settings are `config`.
+- **Secret-bound settings.** A setting that decides where the secret is sent (subdomain,
+  host, company, region, identity) asks for the secret again when it changes
+  (`crm.SecretBound`; default `clientId` only). A new secret on a connected direct
+  connector is proved before it replaces the stored one.
+- **`crm.ErrNoTarget` means skipped, not dead.** ConnectWise, Autotask and Clio need a
+  contact (and Halo a client) to put a call on; a call from an unknown number is `skipped`
+  with the reason and can be retried. Zendesk creates an end user for an unknown caller
+  (setting `createContacts`, default on, international numbers only); Freshdesk lets
+  Freshdesk create the contact from the phone.
+- **One ticket per call for helpdesks** (Zendesk Talk's behaviour), the first Zendesk comment
+  private so the customer is never e-mailed. The recording link is a second private
+  comment/note, added only if the ticket does not already carry it (a read first), so a
+  retry or a renewal never repeats it. PSA/Clio records are rewritten whole (idempotent).
+- **Record choice for the "verify each" cells of the spec:** ConnectWise = Sales activity of
+  type Call; Autotask = company note with the contact; Clio = PhoneCommunication; HaloPSA =
+  ticket. Phone search is by the last four digits (or the exact E.164 for Zendesk and
+  Freshdesk) followed by a digit comparison in Hello, because each system stores numbers as
+  typed. Contact ids that need two values are compound (`contact:company`, `Person:id`,
+  `user:client`).
+- **Sidebar apps do not hold a Hello credential.** The Call button opens `/dial?n=` in a new
+  tab (the agent is signed in there). So the "pop from the SSE stream" inside the helpdesk is
+  not shipped; the pop stays in `/dial` and the events stream. The Zendesk app is a ZAF 2
+  zip; the Freshdesk app is an FDK 2.3 source package (`fdk pack` then upload). Both are
+  built per request by `GET /integrations/crm/{id}/app` with Hello's https address embedded
+  as an escaped JSON string; Zendesk Talk Partner Edition stays out of scope, as in the spec.
+- **Recording links are now wired** (`cmd/hello-control/crmlinks.go`): the P6 follow-up that
+  P6 left as "one line". Links carry `recording_links.connector_id` (reserved by P4), so
+  revoking a connector's links is one UPDATE. No migration, so no placeholder number is
+  used and the migrate counts are unchanged.
+- **Clio revoke on disconnect is not done:** Clio's deauthorize takes the access token, the
+  framework's `Revoker` passes the refresh token; the administrator revokes in Clio.

@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/azrtydxb/hello/internal/crm/kit"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -108,7 +109,7 @@ func basic(cfg crm.Config) map[string]string {
 
 func (c *Connector) token(ctx context.Context, cfg crm.Config, form url.Values) (crm.Tokens, error) {
 	var tr tokenResponse
-	if err := crm.Do(ctx, c.hc, crm.Request{Method: http.MethodPost, URL: c.OAuthBase + "/oauth/token", Header: basic(cfg), Body: form}, &tr); err != nil {
+	if err := kit.Do(ctx, c.hc, kit.Request{Method: http.MethodPost, URL: c.OAuthBase + "/oauth/token", Header: basic(cfg), Body: form}, &tr); err != nil {
 		return crm.Tokens{}, err
 	}
 	if tr.AccessToken == "" {
@@ -137,7 +138,7 @@ func (c *Connector) Refresh(ctx context.Context, cfg crm.Config, refresh string)
 
 // RevokeToken implements crm.Revoker.
 func (c *Connector) RevokeToken(ctx context.Context, cfg crm.Config, refresh string) error {
-	return crm.Do(ctx, c.hc, crm.Request{Method: http.MethodPost, URL: c.OAuthBase + "/oauth/revoke", Header: basic(cfg),
+	return kit.Do(ctx, c.hc, kit.Request{Method: http.MethodPost, URL: c.OAuthBase + "/oauth/revoke", Header: basic(cfg),
 		Body: url.Values{"token": {refresh}, "token_type_hint": {"refresh_token"}}}, nil)
 }
 
@@ -151,7 +152,7 @@ func (c *Connector) api(ctx context.Context, cc crm.Conn, method, path string, b
 	if err != nil {
 		return err
 	}
-	return crm.Do(ctx, c.hc, crm.Request{Method: method, URL: base + path, Body: body, Authed: true,
+	return kit.Do(ctx, c.hc, kit.Request{Method: method, URL: base + path, Body: body, Authed: true,
 		Header: map[string]string{"Authorization": "Bearer " + cc.AccessToken}}, out)
 }
 
@@ -167,7 +168,7 @@ func (c *Connector) Lookup(ctx context.Context, cc crm.Conn, number string) (*cr
 	}
 	digits := strings.TrimPrefix(n, "+")
 	terms := []string{digits}
-	if t := crm.Tail(n); t != digits {
+	if t := tail9(n); t != digits {
 		terms = append(terms, t)
 	}
 	for _, term := range terms {
@@ -192,7 +193,7 @@ func (c *Connector) Lookup(ctx context.Context, cc crm.Conn, number string) (*cr
 		}
 		for _, it := range res.Data.Items {
 			for _, ph := range it.Item.Phones {
-				if !crm.SameNumber(ph, n) {
+				if !kit.Same(ph, n) {
 					continue
 				}
 				ct := &crm.Contact{ID: strconv.FormatInt(it.Item.ID, 10), Name: strings.TrimSpace(it.Item.Name)}
@@ -246,7 +247,7 @@ const timeFormat = "2006-01-02 15:04:05"
 // LogCall implements crm.Connector: POST /api/v1/callLogs. The recording
 // is uploaded afterwards by UpdateCallLog.
 func (c *Connector) LogCall(ctx context.Context, cc crm.Conn, l crm.CallLog) (string, error) {
-	start := crm.CallTime(l)
+	start := kit.Timestamp(l)
 	end := l.EndedAt.UTC()
 	if end.Before(start) {
 		end = start.Add(l.Duration)
@@ -258,7 +259,7 @@ func (c *Connector) LogCall(ctx context.Context, cc crm.Conn, l crm.CallLog) (st
 		"start_time":        start.Format(timeFormat),
 		"end_time":          end.Format(timeFormat),
 		"duration":          strconv.FormatInt(int64(l.Duration.Seconds()), 10),
-		"subject":           crm.CallTitle(l),
+		"subject":           kit.Title(l),
 		"note":              note(l),
 	}
 	if id, err := strconv.ParseInt(l.OwnerID, 10, 64); err == nil {
@@ -335,7 +336,16 @@ func (c *Connector) UpdateCallLog(ctx context.Context, cc crm.Conn, ref string, 
 	if err != nil {
 		return err
 	}
-	return crm.Do(ctx, c.hc, crm.Request{Method: http.MethodPost, URL: base + "/api/v1/callLogs/" + url.PathEscape(ref) + "/recordings",
-		Body: crm.Raw{Type: w.FormDataContentType(), Data: mp.Bytes()}, Authed: true,
+	return kit.Do(ctx, c.hc, kit.Request{Method: http.MethodPost, URL: base + "/api/v1/callLogs/" + url.PathEscape(ref) + "/recordings",
+		Body: mp.Bytes(), ContentType: w.FormDataContentType(), Authed: true,
 		Header: map[string]string{"Authorization": "Bearer " + cc.AccessToken}}, nil)
+}
+
+// tail9 is the last nine digits of a number.
+func tail9(n string) string {
+	d := kit.Digits(n)
+	if len(d) > 9 {
+		d = d[len(d)-9:]
+	}
+	return d
 }

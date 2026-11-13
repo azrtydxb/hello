@@ -119,11 +119,6 @@ func (m *TokenManager) Conn(ctx context.Context, row ConnectorRow) (Connector, C
 	if cr.Status != StatusConnected {
 		return nil, Conn{}, ErrNeedsReauth
 	}
-	if _, static := conn.(StaticAuth); static {
-		// The stored client secret is the credential; it never expires and
-		// is never copied into the connection.
-		return conn, Conn{Config: cfg, AccessToken: cfg.ClientSecret, ExternalAcct: t.Account}, nil
-	}
 	if !t.ExpiresAt.IsZero() && !t.ExpiresAt.After(m.now().Add(m.skew())) {
 		if t, err = m.refresh(ctx, row, conn, cfg, false); err != nil {
 			return nil, Conn{}, err
@@ -161,16 +156,27 @@ func (m *TokenManager) refresh(ctx context.Context, row ConnectorRow, conn Conne
 	if !force && (t.ExpiresAt.IsZero() || t.ExpiresAt.After(m.now().Add(m.skew()))) {
 		return t, nil
 	}
-	oa, ok := conn.(OAuth)
-	if !ok || t.Refresh == "" {
+	var nt Tokens
+	switch c := conn.(type) {
+	case OAuth:
+		if t.Refresh == "" {
+			m.needsReauth(ctx, row, cr.ID, "no refresh token")
+			return Tokens{}, ErrNeedsReauth
+		}
+		nt, err = c.Refresh(ctx, cfg, t.Refresh)
+	case Direct:
+		// A client-credentials token is requested again; a static
+		// credential comes back unchanged, so a second refusal marks the
+		// connection needs_reauth in the caller.
+		nt, err = c.Authenticate(ctx, cfg)
+	default:
 		m.needsReauth(ctx, row, cr.ID, "no refresh token")
 		return Tokens{}, ErrNeedsReauth
 	}
-	nt, err := oa.Refresh(ctx, cfg, t.Refresh)
 	if err != nil {
 		var ae *APIError
 		if errors.As(err, &ae) && !ae.Retry {
-			m.needsReauth(ctx, row, cr.ID, "the CRM refused the refresh token")
+			m.needsReauth(ctx, row, cr.ID, "the CRM refused the credentials")
 			return Tokens{}, ErrNeedsReauth
 		}
 		return Tokens{}, err

@@ -4,7 +4,7 @@ Hello can write every external call into a CRM, show the caller's name from
 the CRM on an incoming call, and attach a link to the recording. This page
 covers the connector framework (`internal/crm`) and its connectors: HubSpot
 (spec `.procoder/specs/integrations.md`, phase P6), Pipedrive (P14), Zoho CRM
-(P15), Odoo and Bitrix24 (P21). Later connectors plug into the same framework.
+(P15), Odoo and Bitrix24 (P21), the helpdesks Zendesk and Freshdesk (P16) and the PSA and legal tools ConnectWise, Autotask, HaloPSA and Clio (P20). Later connectors plug into the same framework.
 
 | Connector | Sign-in                                  | Lookup by phone                        | A call is written as                         | Recording                                     |
 | --------- | ---------------------------------------- | -------------------------------------- | -------------------------------------------- | --------------------------------------------- |
@@ -172,15 +172,93 @@ Bitrix24 specifics:
   lead is created for an unknown number) and **finished**
   (`telephony.externalcall.finish`: duration, `STATUS_CODE` 200 answered, 304
   missed, 486 busy, 503 failed).
-- Bitrix24 has no idempotency key on register. If the finish step fails, a
-  retry resumes with the registered call (kept in memory for a day) instead of
-  registering again; a restart of `hello-control` in between can still leave
-  one registered call that was never finished.
+- Bitrix24 has no idempotency key on register. Hello saves how far a call got
+  on the job (`crm_call_logs.state`: the registered call id and whether it was
+  finished), so when the finish or the recording attach fails, the retry
+  continues with that step instead of registering the call again, also after a
+  restart of `hello-control`.
 - The recording is attached with `telephony.externalCall.attachRecord` from a
   link Hello mints for **one day**. Bitrix24 fetches it once and keeps its own
   copy, so the link is not renewed.
 - Bitrix24's own telephony REST screen-pop (`telephony.externalcall.show`) and
   its click-to-call are not part of this release.
+
+## Helpdesks, PSA tools and Clio
+
+| Connector              | Sign-in                                          | A call becomes                                                         | Caller found by                                                   |
+| ---------------------- | ------------------------------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **Zendesk**            | Agent email and API token (direct)               | An internal ticket (first comment private), tags `hello`, `call_<dir>` | `type:user phone:+E164` search                                    |
+| **Freshdesk**          | API key (direct)                                 | A phone-source ticket, recording as a private note                     | Contact `phone` / `mobile` filter                                 |
+| **HaloPSA**            | API application, client credentials (direct)     | A ticket for the caller's client; recording as a hidden action         | User search on the last four digits, then compared digit by digit |
+| **ConnectWise Manage** | API member keys and integrator clientId (direct) | A Call activity of the contact's company, assigned to the member       | Contact communication items containing the last four digits       |
+| **Autotask PSA**       | API user, secret and integration code (direct)   | A company note on the contact's company, assigned to the resource      | Contact phone fields containing the last four digits              |
+| **Clio Manage**        | OAuth 2 with your own Clio application           | A phone communication between the contact and the Clio user            | Contact query on the last four digits                             |
+
+### Direct sign-in
+
+Zendesk, Freshdesk, HaloPSA, ConnectWise and Autotask have no browser consent:
+the administrator types the credentials and Hello signs in with them.
+**Connect** (the console presses it after **Add connector**) proves the
+credentials against the system and stores the connection; a refused credential
+is shown on the secret field and nothing is stored. Saving a new secret on a
+connected connector signs in with it first, so a typo never replaces a working
+credential. HaloPSA's client-credentials token expires and is requested again
+before that; the others are static, and a refusal after a working period makes
+the connection `needs_reauth` once, like a revoked OAuth app. The secret (API
+token, key, private key) is sealed like an OAuth client secret and never
+returned. Changing a setting that decides where the secret is sent (a
+subdomain, host, company, region or the identity) asks for the secret again.
+
+### Where a call goes
+
+- **Zendesk, Freshdesk, HaloPSA** (capability `ticket`): one ticket per call.
+  A missed call is a new or open ticket; the status of an answered call is a
+  setting (`answeredStatus`). Zendesk's first comment is private, so the
+  customer is never e-mailed about their own call. A caller Zendesk does not
+  know becomes a new end user with the number when `createContacts` is on
+  (international numbers only); Freshdesk creates the contact itself from the
+  phone number; Halo needs a client, so an unknown caller is logged only when
+  the connector has a `fallbackClientId`.
+- **ConnectWise, Autotask, Clio**: the record needs a contact, so a call from
+  a number that is no contact is **skipped** with the reason in the console
+  (**Calls**, status `skipped`) and can be retried once the contact exists.
+  The owner (assigned member, resource or Clio user) is found by email like
+  HubSpot's owner; without one the fallback owner is used, else the call is
+  skipped.
+- The recording link is added when the recording arrives: as a second private
+  comment or note on tickets (never twice: Hello reads the ticket first), or by
+  rewriting the activity notes, note text or communication body.
+- Phone matching: every system stores numbers as typed, so Hello asks for the
+  last four digits (or the exact E.164 form for Zendesk and Freshdesk) and then
+  compares digits itself (last nine digits, never fewer than seven).
+
+### Setup values
+
+| Connector   | Settings (`config`)                                                                                                      |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Zendesk     | `clientId` (agent email), `subdomain`, `createContacts`, `answeredStatus`                                                |
+| Freshdesk   | `subdomain`, `answeredStatus`                                                                                            |
+| HaloPSA     | `clientId`, `host`, `tenant` (hosted instances), `ticketTypeId`, `fallbackClientId`                                      |
+| ConnectWise | `clientId` (integrator client id), `host`, `companyId`, `publicKey`, `codebase` (v4_6_release), `activityType` (Call)    |
+| Autotask    | `clientId` (API user), `integrationCode`, `host` (zone, found from the user when empty), `actionType` (found when empty) |
+| Clio        | `clientId` (application key), `region` (us, eu, ca, au); redirect URI as shown in the console                            |
+
+The API creates and reads them with `kind` and `config` as for HubSpot; the
+console form lists the fields of each kind.
+
+### Sidebar apps (Zendesk, Freshdesk)
+
+`GET /api/v1/integrations/crm/{id}/app` (administrator) downloads a zip of a
+ticket-sidebar app for the customer to upload to their own account (no
+marketplace listing). It shows the requester's phone numbers with a **Call**
+button and their latest tickets. It holds no Hello credential: Call opens
+Hello's dialer (`/dial?n=`) in a new tab, where the agent is signed in and
+click-to-call applies. The Zendesk app is a ZAF 2 app (upload the zip as a
+private app); the Freshdesk app is an FDK 2.3 app (unzip, `fdk pack`, upload;
+it asks for the subdomain and an API key to list tickets, kept as a secure
+installation parameter). Needs `HELLO_PUBLIC_URL` (https). A live pop on an
+incoming call needs a Hello token inside the helpdesk, which is not shipped:
+the incoming-call pop stays in `/dial` and the events stream.
 
 ## The logging pipeline
 
@@ -263,9 +341,10 @@ switching recordings off revokes all its links. HubSpot only accepts `https`
 links ending in `.mp3` or `.wav`; anything else is left out of the record.
 Recording notices and consent stay governed by the media settings.
 
-> The recording-link service itself ships with integrations phase P4.
-> Until it is wired into `hello-control`, a connector with recording links
-> switched on logs calls without a link.
+Links are minted by the recording-link store of integrations phase P4 and
+carry the connector that minted them (`recording_links.connector_id`), so the
+revocation above is one statement. Zendesk, Freshdesk, HaloPSA, ConnectWise,
+Autotask and Clio accept any `https` link in a note or comment.
 
 ## API and MCP
 
@@ -305,15 +384,13 @@ pressed Connect is its only credential, and it always redirects to
 ## Adding a connector
 
 Implement `crm.Connector` (`Lookup`, `LogCall`, `UpdateCallLog`,
-`ResolveUser`, `Capabilities`), then either `crm.OAuth` or `crm.StaticAuth`
-(a credential the CRM checks on Connect: an API key, a webhook address; the
-stored client secret is handed to the connector as the access token), and
-optionally `crm.ConfigValidator`, `crm.SecretBinder` (the settings that decide
-where the secret is sent; changing one asks for the secret again),
-`crm.Pinger` and `crm.Revoker`. `Capabilities.RecordingUpload` asks the worker
-for the audio (`CallLog.Recording`) instead of a link; `RecordingCopy` gives a
-one-day link that is never renewed. `internal/crm/httpx.go` has the shared
-request and error handling. Register it with `crm.Register(kind, factory)`
+`ResolveUser`, `Capabilities`), optionally `crm.OAuth` (browser consent) or
+`crm.Direct` (`Authenticate` with the typed credentials: a static token or a
+client-credentials grant), `crm.SecretBound` (settings that choose where the
+secret goes), `crm.ConfigValidator`, `crm.Pinger` and `crm.Revoker`. A
+connector with no place for a call returns `crm.ErrNoTarget` and the job is
+skipped, not dead (Odoo does this for a call with no contact and no owner). `Capabilities.RecordingUpload` asks the worker for the audio (`CallLog.Recording`) instead of a link; `RecordingCopy` gives a one-day link that is never renewed. A connector that writes a call in several steps returns `crm.PartialError` with the state to keep; it is saved on the job (`crm_call_logs.state`) and handed back as `CallLog.State` on the retry, also after a restart. `internal/crm/kit` has the shared request helper, the phone
+comparison and the call text, and `kit/kittest` the fake server for tests, register it with `crm.Register(kind, factory)`
 and import its package from `cmd/hello-control` and `cmd/hello-sip`. The
 framework supplies the sealed token storage and refresh, the cache and
 timeouts, the retry schedule and dead letters, the owner mapping, recording
@@ -412,3 +489,41 @@ Bitrix24
       and the player works after the link has expired.
 - [ ] Bitrix24's rate limit (`QUERY_LIMIT_EXCEEDED`) slows the jobs without
       losing one.
+
+## Lab checklist for the helpdesk, PSA and Clio connectors
+
+The tests mock every API. Each item needs a real account or sandbox and none
+blocks the merge. Request shapes follow each vendor's published reference and
+the **verify** items are the ones most likely to need a correction.
+
+- [ ] **Zendesk**: the API token signs in; `type:user phone:+E164` finds a user
+      whose phone is stored in E.164; a ticket is created with a private first
+      comment, the requester, the assignee agent and the tags; an unknown
+      caller becomes an end user; the recording comment appears once.
+- [ ] **Freshdesk**: `GET /contacts?phone=` and `?mobile=` match the formats
+      your contacts use (E.164, bare digits or `00`); a phone ticket without a
+      contact creates one (it needs the name Hello sends); status mapping
+      (open 2, pending 3, resolved 4); the private note appears once.
+- [ ] **HaloPSA**: the client-credentials token request with `scope=all` (and
+      `?tenant=` for a hosted instance); the `users?search=` term finds the
+      user by the last four digits and the phone fields are returned; the ticket
+      needs `client_id`, `user_id`, `agent_id` and `tickettype_id` as sent; the
+      hidden action with `note_html` is accepted.
+- [ ] **ConnectWise**: the `clientId` header plus `company+public:private`
+      Basic auth; the `childConditions` wildcard (`like "*1234*"`) on
+      `communicationItems/value`; the `Call` activity type is found by name; an
+      activity with `type`, `company`, `contact`, `assignTo`, `dateStart`,
+      `dateEnd` is accepted; the JSON Patch of `/notes` works.
+- [ ] **Autotask**: zone discovery from the API user; the `contains` filter on
+      `phone`, `mobilePhone` and `alternatePhone`; the `CompanyNotes` create and
+      PATCH shape (fields and the action type pick list); `Resources/query` by
+      email.
+- [ ] **Clio**: the authorize and token hosts per region; `contacts.json?query=`
+      finds a contact by the last four digits of a formatted number;
+      `communications.json` accepts a `PhoneCommunication` with `senders` and
+      `receivers` and the fields Hello sends; the PATCH of `body` works.
+- [ ] **Sidebar apps**: the Zendesk zip uploads as a private app and shows the
+      requester; the Freshdesk package builds with `fdk pack`; Call opens
+      `/dial` for the number.
+- [ ] A recording link written into a ticket or note plays, expires and is
+      revoked when the connector is disabled.

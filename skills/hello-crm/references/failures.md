@@ -10,6 +10,6 @@
 | `lastError` 403 from the CRM                        | The CRM app lacks a scope (HubSpot: contacts read and write, owners read). Add it and sign in again.    |
 | `lastError` 429                                     | The CRM rate-limited Hello; the job retries after the CRM's Retry-After (at most an hour).              |
 | `lastError` "recording not sent: ..."               | Pipedrive only: the recording was over the upload limit or deleted. The call is logged without it.      |
-| `lastError` "no Odoo contact or call owner ..."     | Odoo: the caller is unknown and the call's owner has no partner. Map the user to an Odoo user.          |
+| skipped job "no Odoo contact or call owner ..."     | Odoo: the caller is unknown and the call's owner has no partner. Map the user to an Odoo user.          |
 | `lastError` "the Pipedrive account address ..."     | The stored Pipedrive account address is not a pipedrive.com address; connect again.                     |
 | `lastError` from Bitrix24 "insufficient_scope"      | The inbound webhook lacks CRM, Telephony or Users permission. Fix it in Bitrix24, then Connect again.   |

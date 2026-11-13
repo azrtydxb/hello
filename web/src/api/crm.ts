@@ -41,8 +41,8 @@ export interface CRMConnector {
   createdAt: string;
   capabilities: CRMCapabilities;
   connection: CRMConnection | null;
-  /** oauth signs in through the browser; credential verifies the secret on Connect. Absent means oauth. */
-  auth?: "oauth" | "credential";
+  /** oauth: the administrator approves the app at the CRM; direct: Hello signs in with the typed credentials. */
+  auth: "oauth" | "direct";
   /** The redirect URI to register in the CRM app; absent without HELLO_PUBLIC_URL. */
   redirectUri?: string;
 }
@@ -132,8 +132,9 @@ export function deleteCRMConnector(id: number): Promise<void> {
 }
 
 /**
- * Starts the sign-in; the browser goes to the returned address. An empty
- * address means a credential connector was verified and is connected.
+ * Starts the sign-in; the browser goes to the returned address. A direct
+ * connector has no browser step: it is connected when this resolves, and the
+ * address is empty.
  */
 export async function connectCRMConnector(id: number): Promise<string> {
   const r = await request<{ authorizeUrl: string }>(
@@ -186,4 +187,9 @@ export function setCRMUser(
   return request("PUT", `${base}/${id}/users/${userId}`, {
     body: { externalUserId },
   });
+}
+
+/** The address of the ticket-sidebar app package of a helpdesk connector. */
+export function crmAppUrl(id: number): string {
+  return `${base}/${id}/app`;
 }

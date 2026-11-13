@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/azrtydxb/hello/internal/crm/kit"
 	"net/http"
 	"net/url"
 	"strings"
@@ -86,7 +87,7 @@ func (c *Connector) ValidateConfig(cfg map[string]string) (map[string]string, er
 	return out, nil
 }
 
-// SecretBoundKeys implements crm.SecretBinder: the region picks the host
+// SecretBoundKeys implements crm.SecretBound: the region picks the host
 // that receives the client secret.
 func (c *Connector) SecretBoundKeys() []string { return []string{"clientId", "region"} }
 
@@ -125,7 +126,7 @@ func (c *Connector) token(ctx context.Context, cfg crm.Config, form url.Values) 
 	form.Set("client_id", cfg.ClientID)
 	form.Set("client_secret", cfg.ClientSecret)
 	var tr tokenResponse
-	if err := crm.Do(ctx, c.hc, crm.Request{Method: http.MethodPost, URL: c.Accounts(region(cfg.Extra)) + "/oauth/v2/token", Body: form}, &tr); err != nil {
+	if err := kit.Do(ctx, c.hc, kit.Request{Method: http.MethodPost, URL: c.Accounts(region(cfg.Extra)) + "/oauth/v2/token", Body: form}, &tr); err != nil {
 		return crm.Tokens{}, err
 	}
 	if tr.Error != "" {
@@ -180,7 +181,7 @@ func (c *Connector) Refresh(ctx context.Context, cfg crm.Config, refresh string)
 
 // RevokeToken implements crm.Revoker.
 func (c *Connector) RevokeToken(ctx context.Context, cfg crm.Config, refresh string) error {
-	return crm.Do(ctx, c.hc, crm.Request{Method: http.MethodPost,
+	return kit.Do(ctx, c.hc, kit.Request{Method: http.MethodPost,
 		URL: c.Accounts(region(cfg.Extra)) + "/oauth/v2/token/revoke?token=" + url.QueryEscape(refresh)}, nil)
 }
 
@@ -190,7 +191,7 @@ func (c *Connector) Ping(ctx context.Context, cc crm.Conn) error {
 }
 
 func (c *Connector) api(ctx context.Context, cc crm.Conn, method, path string, body, out any) error {
-	return crm.Do(ctx, c.hc, crm.Request{Method: method, URL: c.API(region(cc.Config.Extra)) + path, Body: body, Authed: true,
+	return kit.Do(ctx, c.hc, kit.Request{Method: method, URL: c.API(region(cc.Config.Extra)) + path, Body: body, Authed: true,
 		Header: map[string]string{"Authorization": "Zoho-oauthtoken " + cc.AccessToken}}, out)
 }
 
@@ -214,7 +215,7 @@ func (r record) matches(n string) bool {
 	if r.Phone == "" && r.Mobile == "" {
 		return true
 	}
-	return (r.Phone != "" && crm.SameNumber(r.Phone, n)) || (r.Mobile != "" && crm.SameNumber(r.Mobile, n))
+	return (r.Phone != "" && kit.Same(r.Phone, n)) || (r.Mobile != "" && kit.Same(r.Mobile, n))
 }
 
 // Lookup implements crm.Connector: contacts, then leads, whose phone
@@ -334,9 +335,9 @@ func (w writeResult) check() (string, error) {
 // contact or lead is the call's Who_Id.
 func (c *Connector) LogCall(ctx context.Context, cc crm.Conn, l crm.CallLog) (string, error) {
 	rec := map[string]any{
-		"Subject":         crm.CallTitle(l),
+		"Subject":         kit.Title(l),
 		"Call_Type":       callType(l),
-		"Call_Start_Time": crm.CallTime(l).Format("2006-01-02T15:04:05-07:00"),
+		"Call_Start_Time": kit.Timestamp(l).Format("2006-01-02T15:04:05-07:00"),
 		"Call_Duration":   minSec(l.Duration),
 		"Description":     description(l),
 	}

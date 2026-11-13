@@ -12,6 +12,7 @@ function connector(extra: Partial<CRMConnector> = {}): CRMConnector {
     id: 1,
     kind: "hubspot",
     name: "HubSpot",
+    auth: "oauth",
     enabled: true,
     config: { clientId: "cid-1", region: "na" },
     hasClientSecret: true,
@@ -365,7 +366,7 @@ describe("CRM connectors (spec integrations P6)", () => {
       ...me("admin"),
       "GET /api/v1/integrations/crm": () => json({ items: [] }),
       "POST /api/v1/integrations/crm": () =>
-        json({ ...connector({ kind: "odoo", auth: "credential" }) }, 201),
+        json({ ...connector({ kind: "odoo", auth: "direct" }) }, 201),
     });
     renderApp("/integrations/crm");
     fireEvent.click(await screen.findByRole("button", { name: "Add a CRM" }));
@@ -410,7 +411,7 @@ describe("CRM connectors (spec integrations P6)", () => {
       ...me("admin"),
       "GET /api/v1/integrations/crm": () => json({ items: [] }),
       "POST /api/v1/integrations/crm": () =>
-        json({ ...connector({ kind: "bitrix24", auth: "credential" }) }, 201),
+        json({ ...connector({ kind: "bitrix24", auth: "direct" }) }, 201),
     });
     renderApp("/integrations/crm");
     fireEvent.click(await screen.findByRole("button", { name: "Add a CRM" }));
@@ -446,7 +447,7 @@ describe("CRM connectors (spec integrations P6)", () => {
           items: [
             connector({
               kind: "odoo",
-              auth: "credential",
+              auth: "direct",
               config: {
                 clientId: "me@x.com",
                 url: "https://o.example",
@@ -458,7 +459,7 @@ describe("CRM connectors (spec integrations P6)", () => {
           ],
         }),
       "POST /api/v1/integrations/crm/1/connect": () =>
-        json({ authorizeUrl: "", connected: true }),
+        json({ authorizeUrl: "" }),
     });
     renderApp("/integrations/crm");
     expect(screen.queryByText("Redirect URI")).toBeNull();
@@ -481,7 +482,7 @@ describe("CRM connectors (spec integrations P6)", () => {
           items: [
             connector({
               kind: "odoo",
-              auth: "credential",
+              auth: "direct",
               config: {
                 clientId: "me@x.com",
                 url: "https://o.example",
@@ -516,5 +517,115 @@ describe("CRM connectors (spec integrations P6)", () => {
     await waitFor(() =>
       expect(calls.some((c) => c.method === "DELETE")).toBe(true),
     );
+  });
+  it("adds a Zendesk connector with its own fields and connects it without a browser step", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    const zendesk = connector({
+      id: 2,
+      kind: "zendesk",
+      name: "Zendesk",
+      auth: "direct",
+      config: { clientId: "agent@acme.test", subdomain: "acme" },
+      connection: null,
+      redirectUri: undefined,
+    });
+    const calls = mockApi({
+      ...me("admin"),
+      "GET /api/v1/integrations/crm": () => json({ items: [] }),
+      "POST /api/v1/integrations/crm": () => json(zendesk, 201),
+      "POST /api/v1/integrations/crm/2/connect": () =>
+        json({ authorizeUrl: "" }),
+    });
+    renderApp("/integrations/crm");
+    fireEvent.click(await screen.findByRole("button", { name: "Add a CRM" }));
+    const form = screen.getByRole("form", { name: "New CRM connector" });
+    fireEvent.change(within(form).getByLabelText("CRM"), {
+      target: { value: "zendesk" },
+    });
+    expect(within(form).queryByLabelText("Client ID")).toBeNull();
+    fireEvent.change(within(form).getByLabelText("Agent email"), {
+      target: { value: "agent@acme.test" },
+    });
+    fireEvent.change(within(form).getByLabelText("API token"), {
+      target: { value: "tok" },
+    });
+    fireEvent.change(within(form).getByLabelText("Zendesk subdomain"), {
+      target: { value: "acme" },
+    });
+    fireEvent.click(
+      within(form).getByRole("button", { name: "Add connector" }),
+    );
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.endsWith("/2/connect"))).toBe(true),
+    );
+    expect(calls.find((c) => c.method === "POST")!.body).toEqual({
+      kind: "zendesk",
+      name: "Zendesk",
+      clientSecret: "tok",
+      config: {
+        clientId: "agent@acme.test",
+        subdomain: "acme",
+        createContacts: "true",
+        answeredStatus: "open",
+      },
+    });
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("offers the sidebar app of a helpdesk connector and no redirect URI", async () => {
+    mockApi({
+      ...me("admin"),
+      "GET /api/v1/integrations/crm": () =>
+        json({
+          items: [
+            connector({
+              id: 2,
+              kind: "freshdesk",
+              name: "Freshdesk",
+              auth: "direct",
+              config: { subdomain: "acme", answeredStatus: "open" },
+              redirectUri: undefined,
+            }),
+          ],
+        }),
+    });
+    renderApp("/integrations/crm");
+    const panel = await screen.findByRole("article", {
+      name: "Freshdesk connector",
+    });
+    const link = within(panel).getByRole("link", {
+      name: /Download the Freshdesk sidebar app/,
+    });
+    expect(link).toHaveAttribute("href", "/api/v1/integrations/crm/2/app");
+    expect(within(panel).queryByText("Redirect URI")).toBeNull();
+    expect(
+      within(panel).getByRole("button", { name: "Connect again" }),
+    ).toBeEnabled();
+  });
+
+  it("asks for the secret again when the address of a direct connector changes", async () => {
+    mockApi({
+      ...me("admin"),
+      "GET /api/v1/integrations/crm": () =>
+        json({
+          items: [
+            connector({
+              id: 3,
+              kind: "halopsa",
+              name: "Halo",
+              auth: "direct",
+              config: { clientId: "cid", host: "acme.halopsa.com" },
+            }),
+          ],
+        }),
+    });
+    renderApp("/integrations/crm");
+    const form = await screen.findByRole("form", { name: "Halo settings" });
+    expect(within(form).getByLabelText("Client secret")).not.toBeRequired();
+    fireEvent.change(within(form).getByLabelText("Halo address"), {
+      target: { value: "other.halopsa.com" },
+    });
+    expect(within(form).getByLabelText("Client secret")).toBeRequired();
   });
 });
