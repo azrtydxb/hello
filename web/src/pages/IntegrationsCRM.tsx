@@ -70,6 +70,30 @@ const ERRORS: Record<string, string> = {
   failed: "The CRM did not accept the sign-in. Check the client id and secret.",
 };
 
+/** The values of the HubSpot calling extension (the iframe URL is Hello's). */
+function callingSettings(redirectUri?: string): string {
+  let origin = "";
+  try {
+    if (redirectUri) origin = new URL(redirectUri).origin;
+  } catch {
+    // Not a URL: the page says the public URL is missing.
+  }
+  return JSON.stringify(
+    {
+      name: "Hello",
+      url: origin
+        ? `${origin}/integrations/hubspot/iframe`
+        : "Set HELLO_PUBLIC_URL first",
+      width: 320,
+      height: 240,
+      isReady: true,
+      supportsCustomObjects: false,
+    },
+    null,
+    2,
+  );
+}
+
 function statusLabel(c: CRMConnector): { text: string; tone: BadgeTone } {
   if (!c.connection) return { text: "Not connected", tone: "warn" };
   if (c.connection.status === "needs_reauth")
@@ -466,6 +490,21 @@ function ConnectionTab({
         )}
         {spec.guide.scopes && (
           <CodeBlock title="Scopes" code={spec.guide.scopes.join("\n")} />
+        )}
+        {c.kind === "hubspot" && (
+          <>
+            <p>
+              <strong>Calling from HubSpot.</strong> For HubSpot&apos;s phone
+              icon to place a call with the user&apos;s Hello phone, add a
+              calling extension to the same app (Calling, in the app&apos;s
+              settings) with these values. Each user opens the phone widget
+              once and signs in to Hello in the window that appears.
+            </p>
+            <CodeBlock
+              title="Calling settings"
+              code={callingSettings(c.redirectUri)}
+            />
+          </>
         )}
         {spec.sidebarApp && (
           <p>
