@@ -868,7 +868,7 @@ func (e *wpEnv) checkRTCPXR(t *testing.T) {
 			return err
 		}
 		for _, q := range c.RTCPXR {
-			if q.Device == e.wp.User && q.Final && q.MOSLQ != nil && *q.MOSLQ == 4.1 {
+			if q.Device == e.wp.User && q.Final && q.MOSLQ != nil && *q.MOSLQ > 4.09 && *q.MOSLQ < 4.11 {
 				return nil
 			}
 		}
