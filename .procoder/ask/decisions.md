@@ -3333,3 +3333,21 @@ Decided while building, without asking, within the spec and the brief:
 - Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
+
+## WP lab sweep runs against a third control replica (2026-11-13)
+
+- `TestWPPhonesAsVendors` (S-38) needs the server-wide provisioning settings
+  that are environment variables (TCP models, TLS models and server, backup
+  registrar, RTCP-XR) rendered into WP files, without changing what the
+  other lab tests' phones get. The compose lab therefore gains
+  `hello-control-wp` (host 8444) with those settings; phones are bound through
+  the API on hello-control-1 and fetch their files from it.
+- The WP822 is provisioned for TCP (with a backup server), the WP836 for TLS
+  with SRTP required, because a model has one transport; between them every
+  transport key is read back. The emulated phones register over UDP direct to
+  hello-sip-1, as the park test does; TLS and TCP signalling stay covered by
+  the TLS lab test and the unit tests.
+- 802.1X on a WP is the Wi-Fi enterprise (PEAP) profile on the WP836; wired
+  802.1X is GRP26xx only, so the sweep asserts a WP file carries no P7901.
+- The hardware lab list is printed at the end as "confirmed" (Hello's side
+  proven by a subtest of the run) or "needs hardware".
