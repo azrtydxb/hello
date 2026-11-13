@@ -1052,8 +1052,23 @@ func (c *call) ivrConnect(w *leg, ext string) ivrResult {
 	c.cancelForks(w)
 	dcs := w.session()
 	bres := dcs.InviteResponse
+	// The destination is recorded before the ACK: the caller may hang up the
+	// moment the callee is connected, and the CDR written by that hangup
+	// must already carry where the call went. A refusal below puts it back.
+	c.mu.Lock()
+	prevRewritten, prevBridged := c.rewritten, c.bridgedExt
+	if ext != "" {
+		c.rewritten, c.bridgedExt = ext, ext
+	}
+	c.mu.Unlock()
+	refused := func() {
+		c.mu.Lock()
+		c.rewritten, c.bridgedExt = prevRewritten, prevBridged
+		c.mu.Unlock()
+	}
 	w.ack(nil, "")
 	if hom := c.homed(); hom != nil && !c.ivrHomeCallee(hom, w) {
+		refused()
 		w.bye()
 		c.clearBossAnswer()
 		c.addTrace("IVR: the new leg could not be taken into the recovered call")
@@ -1063,6 +1078,7 @@ func (c *call) ivrConnect(w *leg, ext string) ivrResult {
 	if relay := c.anchorRelay(); relay != nil && bres != nil && len(bres.Body()) > 0 {
 		if ans, err := media.ParseAudioSDP(bres.Body()); err == nil {
 			if !c.learnCalleeCrypto(w, ans) {
+				refused()
 				w.bye()
 				c.addTrace("IVR: the destination did not answer with the SRTP its policy requires")
 				return ivrResult{kind: ivrFailed}
@@ -1077,10 +1093,6 @@ func (c *call) ivrConnect(w *leg, ext string) ivrResult {
 	answered := c.ivrAnswered
 	if !answered.IsZero() {
 		c.answerTime = answered // billing runs from the menu's answer
-	}
-	if ext != "" {
-		c.rewritten = ext
-		c.bridgedExt = ext
 	}
 	st := c.ivr
 	c.haSolo, c.haPhase, c.haDetail = false, "", ""
