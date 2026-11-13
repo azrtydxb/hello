@@ -594,16 +594,30 @@ describe("Dynamics 365 widget", () => {
     expect(f("", g.HelloEmbed)).toBe("");
   });
 
-  it("matches on the last nine digits and quotes them", () => {
+  it("queries the spellings a stored number is likely to have, quoted", () => {
     const q = decodeURIComponent(
       g.HelloDynamics.phoneQuery("contact", "+32 (11) 22 33 44"),
     );
-    expect(q).toContain("contains(telephone1,'211223344')");
-    expect(q).toContain("contains(telephone2,'211223344')");
+    for (const v of [
+      "11223344",
+      "11 22 33 44",
+      "11-223-344",
+      "1122.3344",
+      "122/3344",
+    ])
+      expect(q).toContain(`contains(telephone1,'${v}')`);
+    expect(q).toContain("contains(telephone2,'11223344')");
     expect(
       decodeURIComponent(g.HelloDynamics.phoneQuery("lead", "0111223344")),
     ).not.toContain("telephone2");
     expect(g.HelloDynamics.phoneQuery("contact", "1'2")).not.toContain("1'2");
+    expect(g.HelloDynamics.phoneVariants("+32 11 22 33 44")).toEqual(
+      g.HelloDynamics.phoneVariants("011/22.33.44"),
+    );
+    expect(g.HelloDynamics.phoneVariants("123456")[0]).toBe("123456");
+    expect(g.HelloDynamics.phoneQuery("contact", "1'2").length).toBeLessThan(
+      6000,
+    );
   });
 
   it("opens the contact, else the lead, of an incoming call", async () => {

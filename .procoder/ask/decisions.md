@@ -3384,8 +3384,11 @@ Decided while building, without asking, within the spec and the brief:
   closes. A failed close after a successful create is retried once and never repeats the
   create. Sovereign clouds (`.us`, `.cn`) are not supported: only `*.dynamics.com`.
 - **Phone matching.** Salesforce: SOSL `IN PHONE FIELDS` on the last nine digits. Dynamics:
-  `contains` on the last nine digits of `telephone1`, `mobilephone`, `telephone2`; numbers
-  stored with separators are not found (documented, on the lab list).
+  Dataverse has no normalised phone column, so the lookup queries a bounded list of
+  spellings (the last eight digits run together, and grouped with a space, dash, dot or
+  slash) with `contains`, and the server verifies the digits of each candidate (last eight,
+  which national and international spellings share). The widget's screen pop uses the same
+  list unverified. Mixed or unusual separators can still be missed (documented).
 - **Shared HTTP client** `crm.REST` (bearer, form or JSON, retry classification) and
   `crm.RecordingLine` (replace-not-repeat of the `Recording:` description line, never
   touching what a person wrote). HubSpot keeps its own client; it is not touched.

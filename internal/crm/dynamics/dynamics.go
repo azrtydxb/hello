@@ -187,50 +187,58 @@ func (c *Connector) Ping(ctx context.Context, cc crm.Conn) error {
 // odataString quotes s as an OData string literal.
 func odataString(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
-// Lookup implements crm.Connector: contacts, then leads, whose phone fields
-// contain the last nine digits of the number. Dataverse keeps phone numbers
-// as typed, so a number stored with spaces is not found (docs/crm.md).
+// Lookup implements crm.Connector: contacts, then leads, with a phone field
+// holding the number in any of the common spellings (see phoneVariants). The
+// candidates are checked digit by digit, so a number stored with spaces,
+// dashes or in national form is found and a different number is not.
 func (c *Connector) Lookup(ctx context.Context, cc crm.Conn, number string) (*crm.Contact, error) {
 	n, ok := crm.NormalizeNumber(number)
 	if !ok {
 		return nil, nil
 	}
-	tail := strings.TrimPrefix(n, "+")
-	if len(tail) > 9 {
-		tail = tail[len(tail)-9:]
-	}
-	q := odataString(tail)
-	for _, e := range []struct{ set, id, name, company, etn string }{
-		{"contacts", "contactid", "fullname", "", "contact"},
-		{"leads", "leadid", "fullname", "companyname", "lead"},
+	digits := strings.TrimPrefix(n, "+")
+	variants := phoneVariants(digits)
+	for _, e := range []struct {
+		set, id, name, company, etn string
+		fields                      []string
+	}{
+		{"contacts", "contactid", "fullname", "", "contact", []string{"telephone1", "mobilephone", "telephone2"}},
+		{"leads", "leadid", "fullname", "companyname", "lead", []string{"telephone1", "mobilephone"}},
 	} {
-		sel := e.id + "," + e.name
+		sel := e.id + "," + e.name + "," + strings.Join(e.fields, ",")
 		if e.company != "" {
 			sel += "," + e.company
 		}
-		filter := "contains(telephone1," + q + ") or contains(mobilephone," + q + ")"
-		if e.set == "contacts" {
-			filter += " or contains(telephone2," + q + ")"
+		var clauses []string
+		for _, f := range e.fields {
+			for _, v := range variants {
+				clauses = append(clauses, "contains("+f+","+odataString(v)+")")
+			}
 		}
-		path := "/" + e.set + "?$select=" + sel + "&$filter=" + url.QueryEscape(filter) + "&$orderby=modifiedon%20desc&$top=1"
+		path := "/" + e.set + "?$select=" + sel + "&$filter=" + url.QueryEscape(strings.Join(clauses, " or ")) + "&$orderby=modifiedon%20desc&$top=25"
 		var res struct {
 			Value []map[string]any `json:"value"`
 		}
 		if err := c.do(ctx, cc, http.MethodGet, path, nil, nil, &res); err != nil {
 			return nil, err
 		}
-		if len(res.Value) == 0 {
-			continue
+		for _, r := range res.Value {
+			str := func(k string) string { s, _ := r[k].(string); return s }
+			id := str(e.id)
+			if id == "" {
+				continue
+			}
+			hit := false
+			for _, f := range e.fields {
+				hit = hit || phoneMatches(str(f), digits)
+			}
+			if !hit {
+				continue
+			}
+			ct := &crm.Contact{ID: id, Name: str(e.name), Company: str(e.company)}
+			ct.URL = cc.Config.Extra["orgUrl"] + "/main.aspx?etn=" + e.etn + "&pagetype=entityrecord&id=" + url.QueryEscape(id)
+			return ct, nil
 		}
-		r := res.Value[0]
-		str := func(k string) string { s, _ := r[k].(string); return s }
-		id := str(e.id)
-		if id == "" {
-			continue
-		}
-		ct := &crm.Contact{ID: id, Name: str(e.name), Company: str(e.company)}
-		ct.URL = cc.Config.Extra["orgUrl"] + "/main.aspx?etn=" + e.etn + "&pagetype=entityrecord&id=" + url.QueryEscape(id)
-		return ct, nil
 	}
 	return nil, nil
 }

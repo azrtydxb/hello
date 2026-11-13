@@ -136,7 +136,7 @@ func TestLookupContactsThenLeads(t *testing.T) {
 		case "/api/data/v9.2/contacts":
 			_, _ = w.Write([]byte(`{"value":[]}`))
 		case "/api/data/v9.2/leads":
-			_, _ = w.Write([]byte(`{"value":[{"leadid":"` + cid + `","fullname":"Lee Lead","companyname":"LeadCo"}]}`))
+			_, _ = w.Write([]byte(`{"value":[{"leadid":"` + cid + `","fullname":"Lee Lead","companyname":"LeadCo","telephone1":"+32 11 22 33 44","mobilephone":null}]}`))
 		default:
 			t.Errorf("path %s", r.URL.Path)
 		}
@@ -146,11 +146,76 @@ func TestLookupContactsThenLeads(t *testing.T) {
 		t.Fatalf("contact = %+v, %v", ct, err)
 	}
 	f, _ := url.QueryUnescape(strings.Split(strings.Split(d.calls[0].Query, "$filter=")[1], "&")[0])
-	if f != "contains(telephone1,'211223344') or contains(mobilephone,'211223344') or contains(telephone2,'211223344')" {
-		t.Fatalf("filter = %q", f)
+	for _, want := range []string{"contains(telephone1,'11223344')", "contains(mobilephone,'11223344')", "contains(telephone2,'11223344')",
+		"contains(telephone1,'11 22 33 44')", "contains(mobilephone,'11-223-344')"} {
+		if !strings.Contains(f, want) {
+			t.Errorf("the filter lacks %q: %s", want, f)
+		}
 	}
 	if d.calls[0].Auth != "Bearer tok" {
 		t.Fatalf("auth = %q", d.calls[0].Auth)
+	}
+}
+
+// TestLookupFindsNumbersStoredWithSeparators: Dataverse keeps a phone number
+// as typed. It fails if a number stored with spaces, dashes, dots, in national
+// form or in a 3-4 split is not found, if a different number that shares only
+// a short run of digits is, or if the filter grows beyond what a URL carries.
+func TestLookupFindsNumbersStoredWithSeparators(t *testing.T) {
+	stored := ""
+	c, d := newDV(t, func(w http.ResponseWriter, _ *http.Request, _ string) {
+		_, _ = w.Write([]byte(`{"value":[{"contactid":"` + cid + `","fullname":"Ann","telephone1":"` + stored + `"}]}`))
+	})
+	for _, s := range []string{"+32 11 22 33 44", "011 22 33 44", "011/22.33.44", "0032 11-22-33-44", "+32 (0)11 22 33 44", "011223344", "+32 11 223 344", "+32 1122 3344"} {
+		stored = s
+		ct, err := c.Lookup(context.Background(), conn(), "+3211223344")
+		if err != nil || ct == nil {
+			t.Errorf("a contact stored as %q was not found (%v)", s, err)
+		}
+	}
+	// US style, 3-3-4 and 3-4.
+	for _, s := range []string{"(555) 123-4567", "555.123.4567", "+1 555 123 4567"} {
+		stored = s
+		if ct, _ := c.Lookup(context.Background(), conn(), "+15551234567"); ct == nil {
+			t.Errorf("a contact stored as %q was not found", s)
+		}
+	}
+	// Candidates the filter returns for a shared fragment are not the number.
+	for _, s := range []string{"+32 11 22 33 45", "099 22 33 44", "", "44", "+32 4 11 22 33 44 55"} {
+		stored = s
+		if ct, _ := c.Lookup(context.Background(), conn(), "+3211223344"); ct != nil {
+			t.Errorf("a contact stored as %q matched +3211223344", s)
+		}
+	}
+	for _, k := range d.calls {
+		if len(k.Query) > 6000 {
+			t.Fatalf("the query is %d bytes", len(k.Query))
+		}
+	}
+}
+
+func TestPhoneVariantsAndMatch(t *testing.T) {
+	v := phoneVariants("3211223344")
+	for _, want := range []string{"11223344", "11 22 33 44", "11.223.344", "1122-3344", "22/33/44", "122-3344"} {
+		found := false
+		for _, x := range v {
+			found = found || x == want
+		}
+		if want != "" && !found {
+			t.Errorf("no variant %q in %v", want, v)
+		}
+	}
+	if len(v) > 30 {
+		t.Errorf("%d variants", len(v))
+	}
+	if got := phoneVariants("123456"); len(got) < 1 || got[0] != "123456" {
+		t.Errorf("short number variants = %v", got)
+	}
+	if !phoneMatches("011 22 33 44", "3211223344") || phoneMatches("011 22 33 55", "3211223344") || phoneMatches("", "3211223344") {
+		t.Error("phoneMatches")
+	}
+	if !phoneMatches("123 456", "123456") || phoneMatches("23 456", "123456") {
+		t.Error("a short number must match in full")
 	}
 }
 

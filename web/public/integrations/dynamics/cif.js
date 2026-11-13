@@ -21,20 +21,73 @@
     return HelloEmbed.originAllowed(o, DYN_HOSTS) ? o : "";
   }
 
-  /** The last nine digits Hello matches phone fields on (as the server does). */
-  function tail(number) {
-    var d = String(number || "").replace(/\D/g, "");
-    return d.length > 9 ? d.slice(-9) : d;
+  var MATCH_DIGITS = 8;
+
+  function grouped(d, sizes, sep) {
+    var n = sizes.reduce(function (a, b) {
+      return a + b;
+    }, 0);
+    if (d.length < n) return "";
+    d = d.slice(d.length - n);
+    var parts = [];
+    sizes.forEach(function (s) {
+      parts.push(d.slice(0, s));
+      d = d.slice(s);
+    });
+    return parts.join(sep);
+  }
+
+  /**
+   * The spellings of a number a stored phone is likely to contain, the same
+   * list the server's lookup uses: the last eight digits run together (national
+   * and international spellings share them) and grouped the way people write
+   * them, with a space, dash, dot or slash between the groups. Dataverse has no
+   * normalised phone column.
+   */
+  function phoneVariants(number) {
+    var digits = String(number || "").replace(/\D/g, "");
+    var tail = digits.slice(-MATCH_DIGITS);
+    var out = [];
+    function add(v) {
+      if (v && out.indexOf(v) < 0) out.push(v);
+    }
+    add(tail);
+    [" ", "-", ".", "/"].forEach(function (sep) {
+      [
+        [2, 2, 2, 2],
+        [2, 3, 3],
+        [3, 3, 2],
+        [4, 4],
+        [2, 2, 2],
+        [3, 4],
+      ].forEach(function (g) {
+        add(grouped(tail, g, sep));
+      });
+    });
+    return out;
   }
 
   /** The OData query that finds the records of a number in one table. */
   function phoneQuery(table, number) {
-    var q = "'" + tail(number).replace(/'/g, "''") + "'";
-    var f = "contains(telephone1," + q + ") or contains(mobilephone," + q + ")";
+    var fields =
+      table === "contact"
+        ? ["telephone1", "mobilephone", "telephone2"]
+        : ["telephone1", "mobilephone"];
+    var clauses = [];
+    fields.forEach(function (f) {
+      phoneVariants(number).forEach(function (v) {
+        clauses.push("contains(" + f + ",'" + v.replace(/'/g, "''") + "')");
+      });
+    });
     var sel =
       table === "lead" ? "leadid,fullname,companyname" : "contactid,fullname";
-    if (table === "contact") f += " or contains(telephone2," + q + ")";
-    return "?$select=" + sel + "&$filter=" + encodeURIComponent(f) + "&$top=1";
+    return (
+      "?$select=" +
+      sel +
+      "&$filter=" +
+      encodeURIComponent(clauses.join(" or ")) +
+      "&$top=1"
+    );
   }
 
   /** The number of a click-to-act event (CIF hands it over as a JSON string). */
@@ -59,7 +112,7 @@
 
     /** Opens the caller's record; contacts first, then leads. */
     ctl.screenPop = async function (number) {
-      if (tail(number).length < 6) return false;
+      if (String(number || "").replace(/\D/g, "").length < 6) return false;
       var tables = ["contact", "lead"];
       for (var i = 0; i < tables.length; i++) {
         try {
@@ -219,6 +272,7 @@
     controller: controller,
     orgOrigin: orgOrigin,
     phoneQuery: phoneQuery,
+    phoneVariants: phoneVariants,
     clickedNumber: clickedNumber,
   };
   if (root.document && root.document.getElementById("dial-form")) boot();

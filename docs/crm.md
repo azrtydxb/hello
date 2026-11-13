@@ -171,11 +171,19 @@ expands the panel and opens the caller's contact, or lead.
   its renewal) reopens it, patches it and closes it again. If closing the new
   call fails, Hello does not create it a second time: the next update closes
   it.
-- Dataverse stores phone numbers as typed, so the lookup uses `contains` on
-  the last nine digits of `telephone1`, `mobilephone` and `telephone2`
-  (contacts, then leads). A number stored with spaces or dashes is not found;
-  store numbers without separators (or in E.164) for caller names and screen
-  pops.
+- Dataverse stores phone numbers as typed and has no normalised phone column,
+  so the lookup queries the spellings a stored number is likely to have in
+  `telephone1`, `mobilephone` and `telephone2` (leads: the first two): the last
+  eight digits run together, and grouped as pairs, 2-3-3, 3-3-2, 4-4, the last
+  six in pairs and the last seven as 3-4, each with a space, dash, dot or slash
+  between the groups. The national and the international spelling of a line
+  share their last eight digits, so `011 22 33 44` and `+32 11 22 33 44` find
+  each other. The server then compares the digits of every candidate (the same
+  last eight), so a different number that shares a fragment is never returned.
+  A number written with mixed separators (`011/22.33 44`) or grouped in an
+  unusual way is found only when its last six digits happen to be grouped
+  alike; the widget's screen pop uses the same list but cannot verify the
+  candidates.
 - As for Salesforce there is no refresh token: Hello signs in again when the
   token expires, and `needs_reauth` follows refused credentials (an expired
   client secret is the usual cause).
@@ -410,8 +418,8 @@ The tests fake Entra and Dataverse. These are not blocking the merge:
       contact or lead; closing it as Made (outbound) or Received (inbound) is
       accepted; reopening a closed call to add the recording link works with
       the role's privileges.
-- [ ] `contains(telephone1, '<last nine digits>')` finds a number stored
-      without separators; consider a plugin or a normalised column for numbers
-      stored with spaces.
+- [ ] The `contains` filter with about 75 clauses is accepted (URL length) by
+      Dataverse and the CIF `searchAndOpenRecords` call, and finds a contact
+      stored as `+32 11 22 33 44`, `011/22.33.44` and `0032 11-22-33-44`.
 - [ ] Letting the client secret expire makes the connection `needs_reauth`
       once, with the banner and the email.
