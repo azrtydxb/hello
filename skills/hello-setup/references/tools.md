@@ -14,7 +14,7 @@ the `viewer` role; change tools need `write` and `operator`.
 | `listDevices`                | read  | Every device, ordered by SIP username.                                                   |
 | `getDevice`                  | read  | One device; never its secret.                                                            |
 | `createDevice`               | write | Create a device for an extension; its secret is withheld from MCP results.               |
-| `updateDevice`               | write | Enable, disable, move a device to another extension, or set its `srtp` media-encryption policy. |
+| `updateDevice`               | write | Enable, disable, move a device to another extension, or set its `srtp` media-encryption policy, `srtpKeyExchange` (sdes or dtls) or `mediaIce`. |
 | `deleteDevice`               | write | Delete a device.                                                                         |
 | `listRegistrations`          | read  | Every registered contact in the cluster.                                                 |
 | `getExtensionVoicemail`      | read  | One extension's voicemail box.                                                           |

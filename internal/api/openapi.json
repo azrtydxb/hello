@@ -31290,6 +31290,15 @@
             "enum": ["off", "optional", "required"],
             "description": "Media-encryption policy of the device: off (plain RTP), optional (SDES SRTP is offered on a TLS leg and used when the phone answers with it) or required (SRTP only; a call that cannot be encrypted is refused with 488). Crypto is never offered on a leg that is not TLS."
           },
+          "srtpKeyExchange": {
+            "type": "string",
+            "enum": ["sdes", "dtls"],
+            "description": "How Hello agrees SRTP keys with the device when it makes the offer: sdes (a=crypto lines in the SDP, the default) or dtls (DTLS-SRTP, UDP/TLS/RTP/SAVP with a fingerprint). An offer from the phone is answered in kind. Either is only used on a leg whose signalling is TLS."
+          },
+          "mediaIce": {
+            "type": "boolean",
+            "description": "Whether Hello offers the device ICE-lite and provisions its ICE setting (Grandstream WP826 and WP836, P95002). An ICE offer from a phone is answered as ICE-lite whatever this says."
+          },
           "id": {
             "type": "integer",
             "format": "int64"
@@ -31365,6 +31374,15 @@
             "type": "string",
             "enum": ["off", "optional", "required"],
             "description": "Media-encryption policy of the device: off (plain RTP), optional (SDES SRTP is offered on a TLS leg and used when the phone answers with it) or required (SRTP only; a call that cannot be encrypted is refused with 488). Crypto is never offered on a leg that is not TLS."
+          },
+          "srtpKeyExchange": {
+            "type": "string",
+            "enum": ["sdes", "dtls"],
+            "description": "How Hello agrees SRTP keys with the device when it makes the offer: sdes (a=crypto lines in the SDP, the default) or dtls (DTLS-SRTP, UDP/TLS/RTP/SAVP with a fingerprint). An offer from the phone is answered in kind. Either is only used on a leg whose signalling is TLS."
+          },
+          "mediaIce": {
+            "type": "boolean",
+            "description": "Whether Hello offers the device ICE-lite and provisions its ICE setting (Grandstream WP826 and WP836, P95002). An ICE offer from a phone is answered as ICE-lite whatever this says."
           },
           "id": {
             "type": "integer",
@@ -31466,6 +31484,15 @@
             "type": "string",
             "enum": ["off", "optional", "required"],
             "description": "Media-encryption policy of the device: off (plain RTP), optional (SDES SRTP is offered on a TLS leg and used when the phone answers with it) or required (SRTP only; a call that cannot be encrypted is refused with 488). Crypto is never offered on a leg that is not TLS."
+          },
+          "srtpKeyExchange": {
+            "type": "string",
+            "enum": ["sdes", "dtls"],
+            "description": "How Hello agrees SRTP keys with the device when it makes the offer: sdes (a=crypto lines in the SDP, the default) or dtls (DTLS-SRTP, UDP/TLS/RTP/SAVP with a fingerprint). An offer from the phone is answered in kind. Either is only used on a leg whose signalling is TLS."
+          },
+          "mediaIce": {
+            "type": "boolean",
+            "description": "Whether Hello offers the device ICE-lite and provisions its ICE setting (Grandstream WP826 and WP836, P95002). An ICE offer from a phone is answered as ICE-lite whatever this says."
           },
           "enabled": {
             "type": "boolean",
@@ -31628,6 +31655,15 @@
             "type": "string",
             "enum": ["none", "caller", "callee", "both"],
             "description": "Which legs of the call carried SRTP: none, caller, callee or both. Direct-media calls are none."
+          },
+          "srtpKeyEx": {
+            "type": "string",
+            "enum": ["none", "sdes", "dtls", "mixed"],
+            "description": "How the call's encrypted legs agreed their keys: none, sdes, dtls, or mixed (one leg each)."
+          },
+          "ice": {
+            "type": "boolean",
+            "description": "Whether a leg of the call ran ICE-lite."
           },
           "id": {
             "type": "integer",

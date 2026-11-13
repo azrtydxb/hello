@@ -212,6 +212,7 @@ func run(args []string) error {
 	// into anchored SDP answers, so LAN phones send RTP to a reachable
 	// node address instead of mirroring the offer's own c= line. Empty
 	// keeps the tests'/lab's offer-mirroring behaviour.
+	media.SetFeatures(cfg.MediaDTLS, cfg.MediaICE)
 	if cfg.MediaAnchorHost != "" {
 		srv.SetMediaAnchor(media.NewAnchor(cfg.MediaAnchorHost, log.With("component", "media")))
 	}

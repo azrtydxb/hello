@@ -84,6 +84,19 @@ call moved to another party (transfer target, retrieved park, pickup) is
 negotiated again with that party's own policy; a `required` party that cannot
 be encrypted is refused, never carried in clear.
 
+`updateDevice` also takes `srtpKeyExchange` and `mediaIce`. `srtpKeyExchange`
+is how Hello agrees the keys when it makes the offer: `sdes` (the default,
+`a=crypto` lines in the SDP) or `dtls` (DTLS-SRTP, a handshake on the media
+path); set `dtls` only for a phone that does DTLS-SRTP, because a DTLS offer
+cannot fall back to plain RTP, and a call whose handshake fails is ended. An
+offer from the phone is always answered in kind, and DTLS, like SDES, is only
+used on a leg whose signalling is TLS. `mediaIce` makes Hello offer the phone
+ICE-lite and provisions its ICE setting (Grandstream WP826 and WP836 only); a
+phone that offers ICE is answered as ICE-lite whatever this says. `getCDR`
+shows `srtpKeyEx` (none, sdes, dtls or mixed) and `ice`. Provisioning writes
+the Grandstream key exchange (`P60078`) and ICE (`P95002`) from these two
+settings; other vendors write nothing until their keys are confirmed.
+
 ### Web devices (browser softphones)
 
 A user adds a browser softphone to their own extension under **My phone, Web
