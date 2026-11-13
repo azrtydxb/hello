@@ -143,6 +143,30 @@ spec:
             {{- end }}
             - name: HELLO_MEDIA_FORCE_ANCHOR
               value: "false"
+            {{- if $sip.webrtc.enabled }}
+            - name: HELLO_MEDIA_WEBRTC_ENABLED
+              value: "true"
+            - name: HELLO_MEDIA_WEBRTC_PORT
+              value: {{ $sip.webrtc.port | quote }}
+            {{- if $sip.webrtc.publicIp }}
+            - name: HELLO_MEDIA_WEBRTC_PUBLIC_IP
+              value: {{ $sip.webrtc.publicIp | quote }}
+            {{- end }}
+            - name: HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP
+              value: {{ $sip.webrtc.allowCleartextHop | quote }}
+            {{- end }}
+            {{- if hasKey $sip.video "enabled" }}
+            - name: HELLO_VIDEO_ENABLED
+              value: {{ $sip.video.enabled | quote }}
+            {{- end }}
+            {{- if hasKey $sip.video "maxKbps" }}
+            - name: HELLO_VIDEO_MAX_KBPS
+              value: {{ $sip.video.maxKbps | quote }}
+            {{- end }}
+            {{- if hasKey $sip.video "maxSessions" }}
+            - name: HELLO_VIDEO_MAX_SESSIONS
+              value: {{ $sip.video.maxSessions | quote }}
+            {{- end }}
             - name: HELLO_MEDIA_RECORDING_NOTICE
               value: {{ $sip.recordingNotice | quote }}
             - name: HELLO_VOICEMAIL_LANGUAGE

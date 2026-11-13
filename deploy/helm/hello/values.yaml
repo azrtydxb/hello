@@ -159,6 +159,20 @@ sip:
   # The IPv4 stamped into anchored SDP: "hostIP" (the node the pod runs on),
   # "podIP" (a routable pod network), or a literal IPv4 address.
   mediaAnchorHost: hostIP
+  # WebRTC media for the browser softphone (clients S-3, S-4): one shared UDP
+  # port for every browser leg, ICE-lite and DTLS-SRTP. Needs hostNetwork and
+  # mediaAnchorHost (the candidate address). allowCleartextHop lets browser
+  # calls in while Kamailio to hello-sip is not TLS (the DTLS fingerprint then
+  # travels in the clear on that hop); leave it off once the TLS hop is on.
+  webrtc:
+    enabled: false
+    port: 21100
+    publicIp: ""
+    allowCleartextHop: false
+  # Video between web clients (clients S-36 to S-41). Empty keeps the code's
+  # defaults (enabled, 1500 kbit/s each way, 20 calls per node); set any of
+  # enabled, maxKbps and maxSessions to change them.
+  video: {}
   # Kamailio's addresses: only these may set Path/X-Hello-Client. Narrow it
   # to your pod CIDR (and node CIDR when Kamailio is on the host network).
   trustedProxies: "10.0.0.0/8"
