@@ -368,6 +368,11 @@ services:
       # sip-certs at /etc/hello-tls (read by deploy/kamailio/tls.cfg).
       KAMAILIO_TLS_PORT: "5061"
       KAMAILIO_PUBLIC_TLS_PORT: ${HELLO_KAMAILIO_PUBLIC_TLS_PORT:-5081}
+      # SIP over WSS for browsers (S-8): host TCP 5083 -> 8088, the same
+      # certificate. The lab console is http://localhost:8081/8443, so those
+      # origins may open a WebSocket.
+      KAMAILIO_WSS_PORT: "8088"
+      KAMAILIO_WS_ORIGINS: "http://localhost:8081,https://localhost:8443"
     volumes:
       - ../kamailio:/etc/kamailio:ro
       - siptls:/etc/hello-tls:ro
@@ -382,7 +387,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
-    ports: ["5080:5060/udp", "5081:5061/tcp"]
+    ports: ["5080:5060/udp", "5081:5061/tcp", "5083:8088/tcp"]
     networks:
       edge: { ipv4_address: 10.89.53.10 }
     # The idle/edge services (kamailio, hello-ui, carrier-primary,

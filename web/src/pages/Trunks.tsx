@@ -105,6 +105,8 @@ interface TrunkDraft {
   faxMode: "passthrough" | "t38" | "off";
   /** RFC 4028 session timers on the trunk's calls. */
   sessionTimers: SessionTimers;
+  /** The trunk's profile; sbc-peer is the SBC of Teams Direct Routing. */
+  profile: "generic" | "sbc-peer";
   /** What the trunk may dial in the extension namespace. */
   dialingMode: DialingMode;
   /** The patterns, one per line; used only in mode "patterns". */
@@ -157,6 +159,9 @@ const TRUNK_CODECS: { name: string; label: string; hint: string }[] = [
 
 const DEFAULT_TRUNK_CODECS = ["PCMU", "PCMA"];
 
+/** What an SBC peer is offered (routing.SBCPeerCodecs): G.722 and G.711. */
+const SBC_PEER_CODECS = ["G722", "PCMU", "PCMA"];
+
 const NEW_DESTINATION: DestinationDraft = {
   host: "",
   port: "5060",
@@ -184,6 +189,7 @@ const NEW_TRUNK: TrunkDraft = {
   geolocation: false,
   faxMode: "passthrough",
   sessionTimers: "default",
+  profile: "generic",
   dialingMode: "off",
   dialingPatterns: "",
   dialingConfirm: false,
@@ -232,6 +238,7 @@ function toDraft(t: Trunk): TrunkDraft {
       t.sessionTimers === "on" || t.sessionTimers === "off"
         ? t.sessionTimers
         : "default",
+    profile: t.profile === "sbc-peer" ? "sbc-peer" : "generic",
     dialingMode:
       dialing?.mode === "patterns" || dialing?.mode === "all"
         ? dialing.mode
@@ -248,6 +255,11 @@ function toDraft(t: Trunk): TrunkDraft {
 }
 
 const isInt = (v: string) => /^-?[0-9]+$/.test(v.trim());
+
+/** The trunk's profile, for the card and the drawer. */
+function profileLabel(p: string | undefined): string {
+  return p === "sbc-peer" ? "SBC peer (Teams Direct Routing)" : "Carrier trunk";
+}
 
 /** How a fax call on the trunk is carried, for the card and the drawer. */
 function faxModeLabel(mode: string | undefined): string {
@@ -384,6 +396,7 @@ function toInput(d: TrunkDraft): TrunkInput {
     geolocation: d.geolocation,
     faxMode: d.faxMode,
     sessionTimers: d.sessionTimers,
+    profile: d.profile,
     codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
     srtp: d.srtp,
     rejectAnonymous: d.rejectAnonymous,
@@ -441,6 +454,7 @@ function knownKeys(d: TrunkDraft): string[] {
     "geolocation",
     "faxMode",
     "sessionTimers",
+    "profile",
     ...d.destinations.flatMap((_, i) => [
       `destinations[${i}]`,
       ...["host", "port", "priority", "weight"].map(
@@ -692,6 +706,7 @@ function TrunkCard({
             label: "Internal dialing",
             value: dialingLabel(t.internalDialing),
           },
+          { label: "Profile", value: profileLabel(t.profile) },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
           { label: "Media encryption", value: srtpLabel(t.srtp) },
           { label: "Caller screening", value: screeningLabel(t) },
@@ -727,6 +742,7 @@ function TrunkCard({
             label: "Internal dialing",
             value: dialingLabel(t.internalDialing),
           },
+          { label: "Profile", value: profileLabel(t.profile) },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
           { label: "Media encryption", value: srtpLabel(t.srtp) },
           { label: "Caller screening", value: screeningLabel(t) },
@@ -980,10 +996,41 @@ function TrunkDrawer({
             onChange={(e) => set("name", e.target.value)}
           />
           <Select
+            id={fid("profile")}
+            label="Profile"
+            value={draft.profile}
+            error={errors.profile}
+            hint={
+              draft.profile === "sbc-peer"
+                ? "A session border controller Hello peers with by IP, such as the certified SBC in front of Microsoft Teams Direct Routing (docs/teams.md). IP peer, G.722 and G.711 only."
+                : undefined
+            }
+            options={[
+              { value: "generic", label: "Carrier trunk" },
+              { value: "sbc-peer", label: "SBC peer (Teams Direct Routing)" },
+            ]}
+            onChange={(e) => {
+              const profile = e.target.value as TrunkDraft["profile"];
+              setDraft((d) =>
+                profile === "sbc-peer"
+                  ? {
+                      ...d,
+                      profile,
+                      mode: "ip",
+                      codecs: SBC_PEER_CODECS,
+                      identityHeader: "pai",
+                      srtp: "off",
+                    }
+                  : { ...d, profile },
+              );
+            }}
+          />
+          <Select
             id={fid("mode")}
             label="Mode"
             value={draft.mode}
             error={errors.mode}
+            disabled={draft.profile === "sbc-peer"}
             options={[
               { value: "registration", label: "Registration" },
               { value: "ip", label: "IP peer" },

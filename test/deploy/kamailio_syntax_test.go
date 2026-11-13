@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,6 +53,21 @@ func TestKamailioConfigSyntax(t *testing.T) {
 	for name, env := range kwKamailioEnvs(t) {
 		variants[name] = env
 	}
+	// WSS unset is the kw environment above. WSS set (clients item 2): the lab
+	// layout, and the kw environment with the VIP on top of it.
+	wss := map[string]string{"KAMAILIO_WSS_PORT": "8088", "KAMAILIO_WS_ORIGINS": "https://hello.example", "KAMAILIO_WSS_TRUSTED_PROXIES": "^10[.]42[.]"}
+	variants["lab with WSS"] = maps.Clone(wss)
+	withVIP := maps.Clone(variants["kw environment with the VIP"])
+	maps.Copy(withVIP, wss)
+	variants["kw environment with the VIP and WSS"] = withVIP
+	// An image without the websocket module must still start the kw
+	// environment while WSS is unset: the same check runs with websocket.so
+	// removed from the image (as root, in the throwaway container only).
+	noWS := map[string]bool{}
+	for _, n := range []string{"kw environment", "kw environment with the VIP", "kw environment without the legacy sockets"} {
+		variants[n+" without the websocket module"] = maps.Clone(variants[n])
+		noWS[n+" without the websocket module"] = true
+	}
 	names := make([]string, 0, len(variants))
 	for n := range variants {
 		names = append(names, n)
@@ -65,6 +81,11 @@ func TestKamailioConfigSyntax(t *testing.T) {
 			ctr := "kamailio-cfgcheck-" + strings.ReplaceAll(strings.ToLower(name), " ", "-")
 			_ = exec.Command(docker, "rm", "-f", ctr).Run()
 			args := []string{"create", "--name", ctr}
+			check := []string{image, "-c", "-f", "/etc/kamailio/kamailio.cfg"}
+			if noWS[name] {
+				args = append(args, "--user", "0", "--entrypoint", "sh")
+				check = []string{image, "-c", "find /usr/lib -name websocket.so -delete && ! find /usr/lib -name websocket.so | grep -q . && exec kamailio -c -f /etc/kamailio/kamailio.cfg"}
+			}
 			keys := make([]string, 0, len(env))
 			for k := range env {
 				keys = append(keys, k)
@@ -73,7 +94,7 @@ func TestKamailioConfigSyntax(t *testing.T) {
 			for _, k := range keys {
 				args = append(args, "-e", k+"="+env[k])
 			}
-			args = append(args, image, "-c", "-f", "/etc/kamailio/kamailio.cfg")
+			args = append(args, check...)
 			if out, err := exec.Command(docker, args...).CombinedOutput(); err != nil {
 				t.Fatalf("docker create: %v\n%s", err, out)
 			}

@@ -289,3 +289,81 @@ func TestTrunkSessionTimers(t *testing.T) {
 		t.Fatalf("PATCH with a bad sessionTimers: fields %v", got)
 	}
 }
+
+// TestTrunkSBCPeerProfile covers the sbc-peer profile (docs/teams.md): a new
+// trunk takes the profile's defaults (IP mode, wideband then G.711 codecs,
+// PAI), what the body sets wins, the profile's limits are enforced on create
+// and on PATCH (source CIDRs, destination, no Opus, no required SRTP), and
+// the profile list names the defaults. The trunk's calls are carried by the
+// same code as any other trunk, so the profile is stored and returned only.
+func TestTrunkSBCPeerProfile(t *testing.T) {
+	p := newP2Env(t, nil, false)
+	c := p.login()
+	sbc := func(extra map[string]any) map[string]any {
+		b := map[string]any{
+			"name": trunkName(), "profile": "sbc-peer", "mode": "ip",
+			"sourceCidrs":  []string{"192.0.2.10/32"},
+			"destinations": []map[string]any{{"host": "192.0.2.10", "port": 5060}},
+		}
+		for k, v := range extra {
+			b[k] = v
+		}
+		return b
+	}
+
+	created := c.must(http.StatusCreated, "POST", "/api/v1/trunks", sbc(nil)).json(t)
+	if created["profile"] != "sbc-peer" || created["mode"] != "ip" || created["identityHeader"] != "pai" || created["srtp"] != "off" {
+		t.Fatalf("sbc-peer defaults = profile %v mode %v identityHeader %v srtp %v", created["profile"], created["mode"], created["identityHeader"], created["srtp"])
+	}
+	if got := created["codecs"]; !reflect.DeepEqual(got, []any{"G722", "PCMU", "PCMA"}) {
+		t.Fatalf("sbc-peer codecs = %v, want G722 PCMU PCMA", got)
+	}
+	id := fmt.Sprint(created["id"])
+
+	// A plain trunk stays generic.
+	plain := c.must(http.StatusCreated, "POST", "/api/v1/trunks", map[string]any{"name": trunkName(), "mode": "ip", "destinations": []map[string]any{{"host": "10.0.0.5"}}}).json(t)
+	if plain["profile"] != "generic" {
+		t.Fatalf("a trunk without a profile has profile %v, want generic", plain["profile"])
+	}
+
+	// What the body sets wins over the profile's defaults, within the limits.
+	narrow := c.must(http.StatusCreated, "POST", "/api/v1/trunks", sbc(map[string]any{"codecs": []string{"PCMA"}, "maxCalls": 30})).json(t)
+	if got := narrow["codecs"]; !reflect.DeepEqual(got, []any{"PCMA"}) {
+		t.Fatalf("explicit codecs = %v, want PCMA", got)
+	}
+
+	for what, tc := range map[string]struct {
+		body map[string]any
+		path string
+	}{
+		"registration mode": {sbc(map[string]any{"mode": "registration", "username": "u", "password": "p"}), "mode"},
+		"no source CIDR":    {sbc(map[string]any{"sourceCidrs": []string{}}), "sourceCidrs"},
+		"opus":              {sbc(map[string]any{"codecs": []string{"G722", "opus"}}), "codecs"},
+		"unknown profile":   {sbc(map[string]any{"profile": "teams"}), "profile"},
+	} {
+		if got := fieldPaths(t, c.do("POST", "/api/v1/trunks", tc.body)); !slices.Contains(got, tc.path) {
+			t.Errorf("%s: fields %v lack %s", what, got, tc.path)
+		}
+	}
+
+	// The limits hold on PATCH too, and leaving the profile lifts them.
+	if got := fieldPaths(t, c.do("PATCH", "/api/v1/trunks/"+id, map[string]any{"codecs": []string{"PCMU", "opus"}})); !slices.Contains(got, "codecs") {
+		t.Errorf("PATCH of an SBC peer to Opus: fields %v lack codecs", got)
+	}
+	if got := fieldPaths(t, c.do("PATCH", "/api/v1/trunks/"+id, map[string]any{"sourceCidrs": []string{}})); !slices.Contains(got, "sourceCidrs") {
+		t.Errorf("PATCH of an SBC peer to no source CIDR: fields %v lack sourceCidrs", got)
+	}
+	generic := c.must(http.StatusOK, "PATCH", "/api/v1/trunks/"+id, map[string]any{"profile": "generic", "codecs": []string{"PCMU", "opus"}}).json(t)
+	if generic["profile"] != "generic" {
+		t.Fatalf("PATCH profile generic = %v", generic["profile"])
+	}
+
+	list := c.must(http.StatusOK, "GET", "/api/v1/trunk-profiles", nil).json(t)
+	names := []string{}
+	for _, it := range list["items"].([]any) {
+		names = append(names, fmt.Sprint(it.(map[string]any)["name"]))
+	}
+	if !reflect.DeepEqual(names, []string{"generic", "sbc-peer"}) {
+		t.Fatalf("profiles = %v", names)
+	}
+}

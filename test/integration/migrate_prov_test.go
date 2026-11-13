@@ -84,7 +84,7 @@ func TestMigrateProvisioningRollback(t *testing.T) {
 	if n := present(); n != 0 {
 		t.Fatalf("after rollback: %d provisioning objects left", n)
 	}
-	if n, err := migrate.Up(ctx, db); err != nil || n != 75 { // 00006 to 00017, 00019, 00026 to 00086 and 00120
+	if n, err := migrate.Up(ctx, db); err != nil || n != 76 { // 00006 to 00017, 00019, 00026 to 00086, 00110 and 00120
 		t.Fatalf("re-apply = %d, %v; want 74, nil", n, err)
 	}
 	if n := present(); n != len(tables)+1 {

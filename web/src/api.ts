@@ -424,6 +424,11 @@ export interface TrunkFields {
   /** How a fax call is carried: G.711 passthrough, T.38, or refused. */
   faxMode: "passthrough" | "t38" | "off";
   /**
+   * "generic" or "sbc-peer": a session border controller Hello peers with,
+   * such as the SBC in front of Teams Direct Routing (docs/teams.md).
+   */
+  profile?: "generic" | "sbc-peer";
+  /**
    * Anonymous calls: "honour" carries a device's privacy request (default),
    * "always" makes every call through the trunk anonymous.
    */
