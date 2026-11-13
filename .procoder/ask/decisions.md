@@ -3346,3 +3346,12 @@ Draft PR "HOLD: kw manifests (deploy when unpaused)": merging to main deploys th
 - **Image tags** of hello-fax and coturn are `sha-<the main commit these files were written at>`; ci.yaml publishes them on push to main. They must be re-pinned to the tags of the release commit when deploys resume (kw has no earlier pin for either).
 - **Test:** `TestChartEnvParityWithKw` renders the chart with fax and coturn on so kw and chart agree; `HELLO_DOOR_CAMERA_ALLOW` is listed as kw-only (the chart sets it through `control.extraEnv`). `TestKwCoturn` and `TestKwFax` pin the manifests.
 - **Validated** with `kubectl --context kw apply --dry-run=server` (the whole rendered set, server-side, field manager kuvryn-sync): every object accepted; the private render was deleted afterwards.
+
+## kw: HELLO_CLIENT_AUTH_KEY for browser softphones (decided: add)
+
+The user decided to add the web-device key to the held kw change (#334). It supersedes the earlier note that web devices stay off.
+
+- A new sops Secret `hello-client-auth` (`clientAuthKey`, `openssl rand -base64 48`, generated straight into the encrypted file and never printed) is read as `HELLO_CLIENT_AUTH_KEY` by hello-control and by hello-sip-1 and hello-sip-2, the same key on all three, because hello-control issues the derived credentials and hello-sip checks them.
+- `HELLO_CLIENT_AUTH_KEY_PREVIOUS` is not set; rotation will add it (docs/webrtc.md).
+- Web devices still need the WSS edge to register (`HELLO_WSS_URL`), which is not part of this; the key and TURN servers are ready for it.
+- #334 stays a HOLD draft; nothing here deploys until it is merged.

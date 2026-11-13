@@ -75,6 +75,12 @@ func TestKwCoturn(t *testing.T) {
 	if n, k := secretRef(ctl, "HELLO_TURN_SECRET"); n != "hello-coturn" || k != "turnSecret" {
 		t.Errorf("hello-control HELLO_TURN_SECRET comes from %s/%s", n, k)
 	}
+	for _, who := range []struct{ name, container string }{{"hello-control", "hello-control"}, {"hello-sip-1", "hello-sip"}, {"hello-sip-2", "hello-sip"}} {
+		c := containerNamed(t, kwObject(t, "Deployment", who.name), false, who.container)
+		if n, k := secretRef(c, "HELLO_CLIENT_AUTH_KEY"); n != "hello-client-auth" || k != "clientAuthKey" {
+			t.Errorf("%s: HELLO_CLIENT_AUTH_KEY comes from %s/%s", who.name, n, k)
+		}
+	}
 	if str(envOf(ctl)["HELLO_DOOR_CAMERA_ALLOW"]["value"]) == "" {
 		t.Error("hello-control has no HELLO_DOOR_CAMERA_ALLOW")
 	}

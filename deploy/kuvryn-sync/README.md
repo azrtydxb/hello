@@ -100,15 +100,16 @@ Confirmed against the cluster during the first-sync bootstrap:
 
 ## Secrets
 
-| File                                  | Secret            | Keys                                       | Consumed by                                                       |
-| ------------------------------------- | ----------------- | ------------------------------------------ | ----------------------------------------------------------------- |
-| `kw/secret-hello-store.sops.yaml`     | `hello-store`     | `username`, `password`, `dsn`              | postgres (`username`/`password`), hello-control/hello-sip (`dsn`) |
-| `kw/secret-hello-app.sops.yaml`       | `hello-app`       | `secretKey`                                | hello-control/hello-sip (`HELLO_SECRET_KEY`)                      |
-| `kw/secret-hello-nonce.sops.yaml`     | `hello-nonce`     | `nonceSecret`                              | hello-sip-1/2 (`HELLO_SIP_NONCE_SECRET`)                          |
-| `kw/secret-hello-bootstrap.sops.yaml` | `hello-bootstrap` | `password`                                 | hello-control (`HELLO_BOOTSTRAP_ADMIN_PASSWORD`)                  |
-| `kw/secret-hello-ai.sops.yaml`        | `hello-ai`        | `provider`, `base-url`, `model`, `api-key` | hello-control (`HELLO_AI_*`, optional, see docs/ai-agent.md)      |
-| `kw/secret-hello-coturn.sops.yaml`    | `hello-coturn`    | `turnSecret`                               | coturn-1/2 (`TURN_SECRET`), hello-control (`HELLO_TURN_SECRET`)   |
-| `kw/secret-hello-fax.sops.yaml`       | `hello-fax`       | `faxToken`                                 | hello-fax, hello-sip-1/2, hello-control (`HELLO_FAX_TOKEN`)       |
+| File                                    | Secret              | Keys                                       | Consumed by                                                       |
+| --------------------------------------- | ------------------- | ------------------------------------------ | ----------------------------------------------------------------- |
+| `kw/secret-hello-store.sops.yaml`       | `hello-store`       | `username`, `password`, `dsn`              | postgres (`username`/`password`), hello-control/hello-sip (`dsn`) |
+| `kw/secret-hello-app.sops.yaml`         | `hello-app`         | `secretKey`                                | hello-control/hello-sip (`HELLO_SECRET_KEY`)                      |
+| `kw/secret-hello-nonce.sops.yaml`       | `hello-nonce`       | `nonceSecret`                              | hello-sip-1/2 (`HELLO_SIP_NONCE_SECRET`)                          |
+| `kw/secret-hello-bootstrap.sops.yaml`   | `hello-bootstrap`   | `password`                                 | hello-control (`HELLO_BOOTSTRAP_ADMIN_PASSWORD`)                  |
+| `kw/secret-hello-ai.sops.yaml`          | `hello-ai`          | `provider`, `base-url`, `model`, `api-key` | hello-control (`HELLO_AI_*`, optional, see docs/ai-agent.md)      |
+| `kw/secret-hello-coturn.sops.yaml`      | `hello-coturn`      | `turnSecret`                               | coturn-1/2 (`TURN_SECRET`), hello-control (`HELLO_TURN_SECRET`)   |
+| `kw/secret-hello-fax.sops.yaml`         | `hello-fax`         | `faxToken`                                 | hello-fax, hello-sip-1/2, hello-control (`HELLO_FAX_TOKEN`)       |
+| `kw/secret-hello-client-auth.sops.yaml` | `hello-client-auth` | `clientAuthKey`                            | hello-control, hello-sip-1/2 (`HELLO_CLIENT_AUTH_KEY`)            |
 
 `turnSecret` and `faxToken` are random values (`openssl rand -base64 32`)
 encrypted to the hello age recipient. Rotating `turnSecret` needs a rolling
@@ -153,9 +154,8 @@ commit a decrypted file or put credentials in shell arguments.
   cluster-ca) and the relay range 49152-49999/UDP. `TURN_ALLOWED_PEERS` is
   192.168.10.101-192.168.10.108, every node that can run a hello-sip (they are
   not pinned). hello-control carries `HELLO_TURN_URLS` and `HELLO_TURN_SECRET`.
-  The softphone also needs `clientAuthKey` (web devices) in a Secret and
-  `HELLO_CLIENT_AUTH_KEY` on hello-control and hello-sip; that is not part of
-  this and web devices stay off without it.
+  The softphone's web devices use `clientAuthKey` (`hello-client-auth`,
+  `HELLO_CLIENT_AUTH_KEY` on hello-control and hello-sip-1/2).
 - `HELLO_DOOR_CAMERA_ALLOW=192.168.10.0/24` on hello-control: the private
   network a door station's camera picture may be fetched from (docs/door-stations.md).
 - The image tags of hello-fax and coturn are the commit these files were

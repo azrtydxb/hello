@@ -1491,6 +1491,14 @@ spec:
                 secretKeyRef:
                   name: hello-fax
                   key: faxToken
+            - name: HELLO_CLIENT_AUTH_KEY
+              # Derived credentials of the browser softphone's web devices
+              # (docs/webrtc.md): the same key on hello-control and every
+              # hello-sip, which check what the other issues.
+              valueFrom:
+                secretKeyRef:
+                  name: hello-client-auth
+                  key: clientAuthKey
           ports:
             - name: http
               containerPort: 8082
@@ -1723,6 +1731,14 @@ spec:
                 secretKeyRef:
                   name: hello-fax
                   key: faxToken
+            - name: HELLO_CLIENT_AUTH_KEY
+              # Derived credentials of the browser softphone's web devices
+              # (docs/webrtc.md): the same key on hello-control and every
+              # hello-sip, which check what the other issues.
+              valueFrom:
+                secretKeyRef:
+                  name: hello-client-auth
+                  key: clientAuthKey
           ports:
             - name: http
               containerPort: 8082
@@ -1975,6 +1991,14 @@ spec:
                 secretKeyRef:
                   name: hello-fax
                   key: faxToken
+            - name: HELLO_CLIENT_AUTH_KEY
+              # Derived credentials of the browser softphone's web devices
+              # (docs/webrtc.md): the same key on hello-control and every
+              # hello-sip, which check what the other issues.
+              valueFrom:
+                secretKeyRef:
+                  name: hello-client-auth
+                  key: clientAuthKey
             - name: HELLO_TURN_URLS
               # The coturn servers of kw/coturn.yaml (docs/webrtc.md): clients
               # are given every address, UDP, TCP and TLS.
