@@ -66,7 +66,7 @@ const msg = (over: Record<string, unknown>) => ({
 
 const STATUS = {
   "GET /api/v1/me/inbox/status": () =>
-    json({ enabled: true, unread: 0, unassigned: 1 }),
+    json({ enabled: true, unread: 0, unassigned: 1, senders: [] }),
   "GET /api/v1/me/inbox/agents": () =>
     json({ items: [{ id: 2, username: "agnes", displayName: "Agnes" }] }),
 };
@@ -339,10 +339,75 @@ describe("Inbox", () => {
     expect(FakeEventSource.instances[0]!.closed).toBe(true);
   });
 
+  it("starts a first-contact text only with an attestation", async () => {
+    const calls = inbox("operator", {
+      "GET /api/v1/me/inbox/status": () =>
+        json({
+          enabled: true,
+          unread: 0,
+          unassigned: 0,
+          senders: [
+            {
+              addressId: 9,
+              address: "+3270999000",
+              label: "",
+              channel: "Twilio",
+            },
+          ],
+        }),
+      "POST /api/v1/inbox/conversations": () =>
+        json(conv({ id: 12, peer: "+32475123456" }), 201),
+    });
+    renderApp("/inbox");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Text a customer" }),
+    );
+    fireEvent.change(await screen.findByLabelText("Customer's number"), {
+      target: { value: "+32475123456" },
+    });
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Your appointment is tomorrow" },
+    });
+    fireEvent.change(screen.getByLabelText("How did they agree?"), {
+      target: { value: "asked on the web form" },
+    });
+    // Without the attestation the send button stays off.
+    expect(screen.getByRole("button", { name: "Send text" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Send text" }));
+    await waitFor(() =>
+      expect(
+        calls.find(
+          (c) => c.method === "POST" && c.url.endsWith("/inbox/conversations"),
+        )?.body,
+      ).toEqual({
+        addressId: 9,
+        to: "+32475123456",
+        body: "Your appointment is tomorrow",
+        consentAttestation: true,
+        consentNote: "asked on the web form",
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "The text is queued and will be sent in a moment.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("offers no first-contact button when first contact is off", async () => {
+    inbox("operator");
+    renderApp("/inbox");
+    await screen.findByRole("list", { name: "Conversations" });
+    expect(
+      screen.queryByRole("button", { name: "Text a customer" }),
+    ).toBeNull();
+  });
+
   it("says so when no channel has a number", async () => {
     inbox("operator", {
       "GET /api/v1/me/inbox/status": () =>
-        json({ enabled: false, unread: 0, unassigned: 0 }),
+        json({ enabled: false, unread: 0, unassigned: 0, senders: [] }),
     });
     renderApp("/inbox");
     expect(

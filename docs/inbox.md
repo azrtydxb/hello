@@ -15,10 +15,13 @@ This is the first phase of the messaging channels. What works now:
   notes, tags, states, search, live updates and notifications;
 - Hello's own opt-out handling, retention and erasing a customer.
 
-Not yet: SMS through a carrier's web API (Twilio, Telnyx), WhatsApp, the chat
-widget, texts on desk phones, queues and automatic assignment, and AI. None of
-the providers that need an Internet-facing address is possible while Hello is
-reachable only on the LAN.
+- sending SMS through a **Twilio** account (see "Sending through Twilio"):
+  outbound only.
+
+Not yet: receiving texts from a carrier's web API (needs an Internet-facing
+address), Telnyx, WhatsApp, the chat widget, texts on desk phones, queues and
+automatic assignment, and AI. None of the providers that need an
+Internet-facing address is possible while Hello is reachable only on the LAN.
 
 ## Setting it up
 
@@ -38,6 +41,81 @@ reachable only on the LAN.
 
 A channel or a number that has conversations cannot be deleted (`409`):
 retention, or erasing the customer, removes them first.
+
+## Sending through Twilio
+
+A **Twilio** channel sends texts through your own Twilio account. Hello has no
+shared account or relay: the account, its numbers and its fees are yours.
+
+**What works, and what does not.** Hello is reachable only on the LAN, and
+Twilio delivers an inbound text by calling a public webhook. So a Twilio
+number **cannot receive** texts yet, and a customer's reply to a text from it
+does not arrive in the inbox. A conversation on a Twilio number starts with a
+**first-contact** text (below), and everything after that is Hello's outbound
+side: the agent's texts and their delivery status. Receiving needs the public
+listener, which is not built; do not plan on replies arriving.
+
+1. **Messaging > Channels > Add channel**, carrier **Twilio**: the account SID
+   (`AC` and 32 hex digits), the auth token, and optionally a Messaging Service
+   SID (`MG...`) when texts should leave through its sender pool instead of the
+   number. Hello checks the account with Twilio before it saves anything (a
+   refused token is `422`, an unreachable Twilio `502`), then seals the SID and
+   token with `HELLO_SECRET_KEY`. **The token is never shown again**, not in
+   the API, the console, a log or an audit row. To change it, enter the SID and
+   the token together; they replace the stored ones after Twilio accepts them.
+   **Test** asks Twilio whether the stored credentials work and the numbers can
+   be listed; it sends nothing. `GET /api/v1/messaging/channels/{id}/numbers`
+   lists the numbers of the account.
+2. **Add number**: the Twilio number in international format
+   (`+3270123456`). **Texts per minute** (default 60) caps how fast a number
+   sends; the rest wait queued.
+3. Before go-live, start the **A2P 10DLC** brand and campaign registration (and
+   toll-free verification if you want it) in your Twilio account. Hello only
+   sends; the registration, the carrier fees and what Twilio filters are
+   Twilio's. Unregistered US traffic is filtered or surcharged by carriers.
+
+**First contact.** Off by default. An administrator turns it on in **Messaging
+settings** ("Allowed with a consent attestation"). An operator or
+administrator then starts a conversation from the Inbox (**Text a customer**,
+or `POST /api/v1/inbox/conversations`): one customer number in international
+format, one message, the carrier number it leaves from, a confirmation that the
+customer agreed to be texted and a note saying how. The attestation and the
+note are stored on the conversation and the audit log records who sent it,
+never the number or the note. Hello refuses a number that opted out (`422`), a
+customer who already has an open conversation on that number (`409`, reply
+there), and a number that is not in international format (`400`). It is rate
+limited per agent (default 20 an hour) and per number (default 200 a day):
+`429`. There is no list, import or multi-recipient form, and there never will
+be: Hello is not a campaign tool.
+
+**How a text is sent, and what its state means.** A text is stored **queued**
+in the same transaction that checks the opt-out, then a worker claims it
+(**sending**) and calls Twilio once. It is sent **at most once**: if Twilio's
+answer is lost (a timeout, a dropped connection, a 5xx), Hello cannot know
+whether Twilio has the text, so it is never sent again; after five minutes it
+becomes **unknown** ("may have been delivered"). Otherwise it is **sent** when
+Twilio accepts it, then **delivered** or **failed** (with Twilio's error code)
+when Twilio reports it. There are no status callbacks on the LAN, so Hello
+**polls** Twilio for each text: every 5 seconds at first, backing off to every
+5 minutes, then every 30 minutes after the first hour, and it stops at the
+final state or after 48 hours. A text still queued after an hour (the channel
+is off) fails with `not_sent`. A reply can be up to 1600 characters (Twilio
+segments it); media is not sent.
+
+**Opt-out.** Twilio blocks a recipient who replied STOP and fails the send with
+error 21610. Hello records that as an opt-out on the number (source
+"carrier"), so its own list and the composer agree, and nobody can text that
+customer from that number.
+
+**When the carrier fails.** Five failed or lost sends in a row mark the channel
+**degraded** (a banner; sends continue and a good send clears it). A refused
+token (`401`) marks it **credentials invalid**: the text fails, later texts
+wait queued and are not sent, and the channel accepts no new ones until a
+working token is entered.
+
+Metrics: `hello_msg_outbound_total{provider,result}` (sent, failed, unknown).
+The send, status and settle workers run on every control replica; the store
+hands each text to one attempt, so two replicas never send the same text.
 
 ## Conversations
 
