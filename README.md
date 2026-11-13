@@ -126,6 +126,7 @@ naming the key, if one is missing or malformed.
 | `HELLO_SIP_SESSION_TIMERS_TRUNKS`                 | sip     | `false`; what a trunk set to "default" does: `true` requests and keeps a session timer on its calls                           |
 | `HELLO_MEDIA_DEAD_SECONDS`                        | sip     | `60`; an anchored call with no RTP in either direction for this long is ended unless held; `0` turns it off                   |
 | `HELLO_PAGE_MAX_SECONDS`                          | sip     | `120`; a server page ends after this many seconds                                                                             |
+| `HELLO_DOOR_HANGUP_SECONDS`                       | sip     | `3`; a door call stays up this long after the door-open code was sent, when the station hangs up after open                   |
 | `HELLO_PAGE_CONCURRENT`                           | sip     | `5`; pages one node runs at once, beyond that the caller hears busy                                                           |
 | `HELLO_PAGE_FANOUT`                               | sip     | `200`; legs of one page, beyond that the caller hears busy                                                                    |
 | `HELLO_PAGE_MULTICAST_IFACE`                      | sip     | empty (the system route); the interface a paging group's multicast packets leave on, which must be on the phones' LAN         |
