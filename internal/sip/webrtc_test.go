@@ -349,7 +349,7 @@ func TestWebRTCRefusedOnCleartextHop(t *testing.T) {
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
-	t.Run("cleartext hop", func(t *testing.T) { refused(t, startWebPBX(t, webDevices(), false), "not TLS") })
+	t.Run("cleartext hop", func(t *testing.T) { refused(t, startWebPBX(t, webDevices(), false), "cleartext signalling hop") })
 	t.Run("no WebRTC media on the node", func(t *testing.T) {
 		pbx := startWebPBX(t, webDevices(), true)
 		media.SetWebRTCNode(nil)

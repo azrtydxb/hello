@@ -2,6 +2,7 @@ package media
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -76,7 +77,7 @@ func newWebRTCCall(t *testing.T, claim *Fingerprint, codecs []string, phoneCodec
 		fp = *claim
 	}
 	offer := browserOfferSDP(fp, "brws", "browserpassword0123456789", codecs...)
-	body, err := r.AnswerWebRTC("b", node, offer, func(o AudioSDP) AudioSDP {
+	body, err := r.AnswerWebRTC("b", SignalingHop{Encrypted: true}, node, offer, func(o AudioSDP) AudioSDP {
 		chosen, ok := o.Filter(phoneCodecs).Pick(prefs...)
 		if !ok {
 			t.Fatal("the phone found no codec")
@@ -275,5 +276,50 @@ func TestDTLSFingerprintMismatch(t *testing.T) {
 	case d := <-c.browser.rtp:
 		t.Fatalf("%d bytes of media reached a browser whose handshake failed", len(d))
 	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestAnswerWebRTCRefusesCleartextHop fails if an offer that arrived over a
+// cleartext edge-to-node hop is answered while the operator has not allowed
+// it, or if an encrypted hop or an explicit allowance is refused. The refusal
+// happens before the leg is touched: the answer is empty and no handshake
+// starts.
+func TestAnswerWebRTCRefusesCleartextHop(t *testing.T) {
+	for hop, want := range map[SignalingHop]bool{
+		{}:                                      false,
+		{Encrypted: true}:                       true,
+		{AllowCleartext: true}:                  true,
+		{Encrypted: true, AllowCleartext: true}: true,
+	} {
+		if err := hop.Check(); (err == nil) != want {
+			t.Errorf("%+v.Check() = %v, want allowed=%v", hop, err, want)
+		}
+	}
+
+	mux := newTestMux(t)
+	node := &WebRTCNode{mux: mux, hosts: []string{"127.0.0.1"}}
+	r, err := NewRelay(testRelayMin+360, testRelayMin+380)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(r.Close)
+	if _, _, err := r.AddMuxLeg("b", mux); err != nil {
+		t.Fatal(err)
+	}
+	browser := newDTLSPhone(t, mux.Port())
+	offer := browserOfferSDP(browser.fingerprint(), "brws", "browserpassword0123456789", "111")
+	called := false
+	body, err := r.AnswerWebRTC("b", SignalingHop{}, node, offer, func(o AudioSDP) AudioSDP {
+		called = true
+		return AudioSDP{}
+	})
+	if !errors.Is(err, ErrCleartextHop) || body != nil {
+		t.Fatalf("an offer over a cleartext hop: body %q err %v, want ErrCleartextHop", body, err)
+	}
+	if called {
+		t.Error("the codec choice ran for an offer that was refused")
+	}
+	if !strings.Contains(err.Error(), "HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP") || !strings.Contains(err.Error(), "TLS hop") {
+		t.Errorf("the refusal does not say what to do: %v", err)
 	}
 }

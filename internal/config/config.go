@@ -398,12 +398,18 @@ type ProvRedirect struct {
 type SIP struct {
 	Common
 	// Fax is the fax feature (HELLO_FAX_*); disabled unless HELLO_FAX_ENABLED.
-	Fax               Fax
-	ValkeyAddr        string
-	ValkeySentinels   []string
-	ValkeyMaster      string
-	SIPBindAddr       string
-	SIPAdvertisedAddr string
+	Fax             Fax
+	ValkeyAddr      string
+	ValkeySentinels []string
+	ValkeyMaster    string
+	SIPBindAddr     string
+	// SIPTLSAddr (HELLO_SIP_TLS_ADDR) is where hello-sip also takes SIP over
+	// mutual TLS from the edge (Kamailio), for the traffic of browsers
+	// (clients-webrtc-mobile-video S-12); empty turns it off. SIPTLSCert and
+	// SIPTLSKey are its certificate, SIPTLSCA the CA that signs the edge's
+	// certificate too; the edge must present one.
+	SIPTLSAddr, SIPTLSCert, SIPTLSKey, SIPTLSCA string
+	SIPAdvertisedAddr                           string
 	// DatabaseURL is used read-only for the configuration snapshot and to
 	// insert CDRs.
 	DatabaseURL string
@@ -576,6 +582,7 @@ func (c SIP) LogValue() slog.Value {
 		slog.String("node_id", c.NodeID),
 		slog.String("http_addr", c.HTTPAddr),
 		slog.String("sip_bind", c.SIPBindAddr),
+		slog.String("sip_tls", c.SIPTLSAddr),
 		slog.String("sip_advertised", c.SIPAdvertisedAddr),
 		slog.String("sip_domain", c.SIPDomain),
 		slog.String("valkey_addr", c.ValkeyAddr),
@@ -1180,6 +1187,17 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.SecretKey = r.secretKey()
 	r.minio(&c.MinioEndpoint, &c.MinioAccessKey, &c.MinioSecretKey, &c.MinioSecure)
 	c.TrustedProxies = r.prefixes("HELLO_SIP_TRUSTED_PROXIES")
+	c.SIPTLSAddr = r.optional("HELLO_SIP_TLS_ADDR", "")
+	c.SIPTLSCert = r.optional("HELLO_SIP_TLS_CERT", "")
+	c.SIPTLSKey = r.optional("HELLO_SIP_TLS_KEY", "")
+	c.SIPTLSCA = r.optional("HELLO_SIP_TLS_CA", "")
+	if c.SIPTLSAddr != "" {
+		for k, v := range map[string]string{"HELLO_SIP_TLS_CERT": c.SIPTLSCert, "HELLO_SIP_TLS_KEY": c.SIPTLSKey, "HELLO_SIP_TLS_CA": c.SIPTLSCA} {
+			if v == "" {
+				r.fail(k, errors.New("is required with HELLO_SIP_TLS_ADDR"))
+			}
+		}
+	}
 	c.DrainTimeout = r.duration("HELLO_DRAIN_TIMEOUT", 2*time.Hour)
 	if c.DrainTimeout == 0 {
 		r.fail("HELLO_DRAIN_TIMEOUT", errors.New("must be positive"))

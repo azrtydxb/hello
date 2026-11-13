@@ -70,6 +70,9 @@ func (c *call) webCall() bool {
 // isWebBinding reports whether a registered contact is a browser or app: it
 // registered over a WebSocket, or its device is a web or mobile client.
 func isWebBinding(snap *snapshot.Snapshot, b livestate.Binding) bool {
+	if media.CurrentWebRTC() == nil {
+		return false // a node without WebRTC media rings every contact as a phone
+	}
 	if strings.EqualFold(b.Transport, "ws") || strings.EqualFold(b.Transport, "wss") {
 		return true
 	}
@@ -102,8 +105,9 @@ func (c *call) webrtcGate(tx sip.ServerTransaction, req *sip.Request) bool {
 	switch {
 	case media.CurrentWebRTC() == nil:
 		why = errWebRTCOff.Error()
-	case !c.s.cfg.WebRTCAllowCleartextHop && !strings.EqualFold(req.Transport(), "TLS"):
-		why = "the edge to this node is not TLS and HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP is off: a browser's DTLS fingerprint would travel in the clear"
+	case c.s.checkWebRTCHop(req) != nil:
+		// The TLS hop of S-12: counted and logged with its reason there.
+		why = media.ErrCleartextHop.Error()
 	case !media.DTLSEnabled():
 		why = "the caller offered DTLS-SRTP, which is disabled on this node"
 	}
