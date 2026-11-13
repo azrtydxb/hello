@@ -1171,6 +1171,11 @@ jobs:
           # images; the other Dockerfiles declare no COMMIT arg.
           build-args: |
             COMMIT=${{ github.sha }}
+          # The private half of the browser extension's fixed key signs the
+          # crx in the hello-ui image (web/extension); the other images
+          # ignore it. Empty (a fork) builds the zip only.
+          secrets: |
+            extension_key=${{ secrets.HELLO_EXTENSION_KEY }}
           platforms: linux/arm64
           push: true
           tags: ${{ steps.content.outputs.tags }}

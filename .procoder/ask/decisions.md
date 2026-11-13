@@ -3333,3 +3333,36 @@ Decided while building, without asking, within the spec and the brief:
 - Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
+
+## Browser extension (integrations P5, 2026-11-13)
+
+- The extension is plain JavaScript modules under `web/extension/`, with no
+  bundler, so the source loads unpacked as it is. It is packaged by
+  `web/extension/tools/build.mjs` (a deterministic zip, and a CRX3 signed with
+  `node:crypto`, no dependencies) in the web image build, and served by nginx
+  from `/downloads/`. The download card is on the Dial page (user role), not a
+  new nav item.
+- Fixed id: the manifest carries a fixed public key, so the extension id is
+  `kengpjalagamnmmkljldjhhgonmbdcph` everywhere, and the preregistered client
+  `hello-extension` has the single redirect `https://<id>.chromiumapp.org/`
+  (not derived from the deployment URL, since it cannot vary). A Go test and a
+  web test recompute the id from the manifest.
+- Signing key: the private key is never committed. The image build reads it from
+  the `extension_key` build secret (CI repo secret `HELLO_EXTENSION_KEY`); with
+  none, only the zip is built and the card says "unsigned". Docker's layer cache
+  does not key on a secret, so the first build without it must not be reused
+  once the secret exists (bump the cache or rebuild).
+- `GrantableScopes(user)` now includes `calls`, `events` and `recordings`, as
+  spec I-31 says. Without it a `user` could not grant the extension its scopes.
+  The handlers already limit a user to their own extensions (originate, events,
+  recording links), so no new access is opened; `docs/ai-access.md` and the
+  role tests are updated.
+- Tokens are kept in `chrome.storage.local` (the refresh token must survive a
+  browser restart). Refreshes are serialised, since the refresh token rotates and
+  reuse revokes the grant.
+- The page script is registered dynamically only for sites the user lists and
+  the browser has granted (`optional_host_permissions`), so there is no
+  `<all_urls>` grant and no always-on content script.
+- Not built here: `GET /api/v1/lookup/number` (I-43) is not on main, so the
+  incoming-call notification shows the name in the `call.ringing` event itself.
+  A CRM contact lookup belongs to the connectors.

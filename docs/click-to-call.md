@@ -120,7 +120,7 @@ first-party OAuth client (public, PKCE, redirect
 registers the console as the browser's handler for `tel:` links
 (`navigator.registerProtocolHandler`). The browser asks the user to allow it.
 Chrome and Edge support it; Firefox needs a setting; `callto:` is not on the
-HTML safelist and is left to the browser extension (a later phase).
+HTML safelist and is left to the [browser extension](browser-extension.md).
 
 ## How it works
 
