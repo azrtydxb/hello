@@ -370,6 +370,45 @@ BUNDLE) on top of the code below.
   and the TURN and Kamailio WebSocket pieces; they are not part of this item.
 - **Settings.** `HELLO_MEDIA_DTLS` and `HELLO_MEDIA_ICE`, both on by default.
 
+## WebRTC legs: the media foundation (clients item 1)
+
+The anchor treats a browser or app like any other leg and differs only in the
+leg's transport. Nothing here is user-visible yet: the Kamailio WSS edge, the
+devices and the softphone build on it.
+
+- **Leg profiles.** The `m=` transport picks the profile (`ProfileOf`): `plain`
+  (`RTP/AVP`), `sdes` (`RTP/SAVP`), `dtls` (`UDP/TLS/RTP/SAVP`) or `webrtc`
+  (`UDP/TLS/RTP/SAVPF`). The rewrite between the two legs does not change.
+- **SDP model.** `ParseSDPSession` reads any number of audio and video
+  sections with BUNDLE, `mid`, `rtcp-mux`, `rtcp-fb`, `extmap`, `fmtp`, ICE,
+  DTLS and SDES attributes (pion/sdp) and writes them back in order, so a parse
+  and a build lose nothing. `ParseAudioSDP` and `BuildAudioSDP` stay the
+  tolerant audio-only reader and writer for Hello-terminated media;
+  `AudioSection` hands a section to them. `ValidateWebRTC` refuses an offer
+  without DTLS-SRTP, `rtcp-mux`, ICE credentials, a fingerprint, a setup role, a
+  `mid` or a shared BUNDLE group.
+- **Answer.** `AnswerWebRTC` writes ICE-lite with host candidates only (the node
+  address, then `HELLO_MEDIA_WEBRTC_PUBLIC_IP`), the node fingerprint, `rtcp-mux`
+  and one BUNDLE group. It lists exactly the codecs the other leg chose
+  (`AnswerFor`), in the browser's payload numbers: no transcoding, nothing the
+  browser did not offer. Only the first audio section is accepted; video is
+  rejected (port 0) until the video phases.
+- **One port per node.** Every WebRTC leg shares the UDP port
+  `HELLO_MEDIA_WEBRTC_PORT` (default 21100, outside the RTP range). The mux
+  routes a STUN check by the ufrag in its USERNAME, binds the source address to
+  that leg (at most 8 per leg) and routes the DTLS and SRTP from that address
+  to it. The leg's own ICE-lite agent authenticates; a check for an unknown
+  ufrag, and media from an unbound address, are dropped and counted. The relay
+  reaches it through `Relay.AddMuxLeg`; a leg reads and writes a `LegConn`, which
+  a UDP socket and a mux endpoint both are.
+- **Settings.** `HELLO_MEDIA_WEBRTC_ENABLED` (default false; needs
+  `HELLO_MEDIA_ANCHOR_HOST`), `HELLO_MEDIA_WEBRTC_PORT`,
+  `HELLO_MEDIA_WEBRTC_PUBLIC_IP`, `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP`
+  (read; enforced by the WSS edge item). Metrics: `hello_webrtc_mux_legs`,
+  `hello_webrtc_mux_unrouted_total`, `hello_webrtc_mux_queue_drops_total`.
+- **Firewall.** Open one UDP port per node, and list it as the one port in the
+  TURN `allowed-peer-ip` rules.
+
 ## Metrics
 
 `hello_sip_session_teardowns_total{reason}` counts the calls ended for a dead

@@ -108,7 +108,7 @@ type Relay struct {
 type relayLeg struct {
 	name string
 	r    *Relay
-	conn *net.UDPConn
+	conn LegConn
 	port int
 
 	remoteMu sync.Mutex
@@ -277,6 +277,28 @@ func (r *Relay) addLegAt(name string, port int) (int, error) {
 	r.legs = append(r.legs, l)
 	r.used[port] = true
 	return port, nil
+}
+
+// AddMuxLeg adds the next leg on a shared WebRTC port instead of a socket of
+// its own (S-4): the leg reads and writes through ep, an endpoint of mux, and
+// the SDP names the mux's port. The caller names the leg's ICE ufrag with
+// ep.SetUfrag once the leg's ICE-lite credentials exist. Closing the relay
+// closes the endpoint, not the shared socket.
+func (r *Relay) AddMuxLeg(name string, mux *Mux) (port int, ep *MuxEndpoint, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || len(r.legs) >= 2 {
+		return 0, nil, errors.New("media: relay takes exactly two legs")
+	}
+	ep, err = mux.NewEndpoint()
+	if err != nil {
+		return 0, nil, fmt.Errorf("media: leg %q on the WebRTC port: %w", name, err)
+	}
+	r.legs = append(r.legs, &relayLeg{
+		name: name, r: r, conn: ep, port: mux.Port(),
+		q: make(chan relayMsg, relayQueue),
+	})
+	return mux.Port(), ep, nil
 }
 
 // SetTarget aims leg at addr: the address from the remote SDP until the
