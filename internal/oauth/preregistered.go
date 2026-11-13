@@ -14,6 +14,11 @@ const (
 	DynamicsClientID   = "hello-dynamics"
 )
 
+// HubSpotClientID is the OAuth client of the HubSpot calling iframe (spec
+// integrations I-50): the iframe signs the user in through a popup and holds
+// a calls and events token of its own.
+const HubSpotClientID = "hello-hubspot"
+
 // PreregisteredClients are Hello's own first-party apps as public clients
 // with PKCE and fixed redirect URIs derived from the deployment's public URL.
 // Each phase that ships an app adds its client here (P3 the dialer, P13 Salesforce and
@@ -30,5 +35,8 @@ func PreregisteredClients(publicURL string) []Client {
 	}, {
 		ID: DynamicsClientID, Kind: ClientPreregistered, Name: "Hello for Dynamics 365", ClientURI: base,
 		RedirectURIs: []string{base + "/integrations/dynamics/callback"},
+	}, {
+		ID: HubSpotClientID, Kind: ClientPreregistered, Name: "Hello for HubSpot", ClientURI: base,
+		RedirectURIs: []string{base + "/integrations/hubspot/callback"},
 	}}
 }

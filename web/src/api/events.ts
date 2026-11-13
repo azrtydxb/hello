@@ -109,7 +109,7 @@ export interface StreamHandlers {
  * aborts.
  */
 export async function streamEvents(
-  opts: EventFilter & { lastEventId?: string },
+  opts: EventFilter & { lastEventId?: string; bearer?: string },
   h: StreamHandlers,
   signal: AbortSignal,
 ): Promise<void> {
@@ -118,6 +118,8 @@ export async function streamEvents(
   const path = `/api/v1/events/stream${qs ? `?${qs}` : ""}`;
   const headers: Record<string, string> = { Accept: "text/event-stream" };
   if (opts.lastEventId) headers["Last-Event-ID"] = opts.lastEventId;
+  // A bearer token is for pages with no console session (the HubSpot iframe).
+  if (opts.bearer) headers.Authorization = `Bearer ${opts.bearer}`;
   const res = await fetch(path, {
     method: "GET",
     headers,
