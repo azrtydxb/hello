@@ -8,33 +8,34 @@ import (
 )
 
 // Wi-Fi profiles and roaming (migration 00074, spec phone-feature-parity S-23
-// and S-24). A profile's pre-shared key and 802.1X password are write-only:
-// the API shows pskSet and passwordSet, never the secret. Reads are open to a
-// viewer; changes need the admin scope, as the phone groups they apply to do.
+// and S-24). A profile's pre-shared key is write-only: the API shows pskSet,
+// never the secret. An enterprise profile names an 802.1X profile
+// (dot1xProfileId, S-25) for its EAP method and credentials, so a network and
+// a wired port share one model. Reads are open to a viewer; changes need the
+// admin scope, as the phone groups they apply to do.
 
 type wifiProfileBody struct {
-	Name              *string `json:"name"`
-	SSID              *string `json:"ssid"`
-	Security          *string `json:"security"`
-	PSK               *string `json:"psk"`
-	EAPMethod         *string `json:"eapMethod"`
-	Identity          *string `json:"identity"`
-	AnonymousIdentity *string `json:"anonymousIdentity"`
-	Password          *string `json:"password"`
-	CACert            *string `json:"caCert"`
-	Priority          *int    `json:"priority"`
-	Hidden            *bool   `json:"hidden"`
-	PreferAccount     *int    `json:"preferAccount"`
-	Verified          *bool   `json:"verified"`
+	Name           *string `json:"name"`
+	SSID           *string `json:"ssid"`
+	Security       *string `json:"security"`
+	PSK            *string `json:"psk"`
+	Dot1XProfileID *int64  `json:"dot1xProfileId"`
+	Priority       *int    `json:"priority"`
+	Hidden         *bool   `json:"hidden"`
+	PreferAccount  *int    `json:"preferAccount"`
+	Verified       *bool   `json:"verified"`
 }
 
 // input merges the body over the stored profile (base) and validates the
-// result. A secret the new security mode does not use is cleared.
+// result. A secret or 802.1X profile the new security mode does not use is
+// cleared.
 func (b wifiProfileBody) input(base store.WifiProfile) (store.WifiProfileInput, fieldErrs) {
 	in := store.WifiProfileInput{
-		Name: base.Name, SSID: base.SSID, Security: base.Security, EAPMethod: base.EAPMethod, Identity: base.Identity,
-		AnonymousIdentity: base.AnonymousIdentity, CACert: base.CACert, Priority: base.Priority, Hidden: base.Hidden,
-		PreferAccount: base.PreferAccount, Verified: base.Verified, PSK: b.PSK, Password: b.Password,
+		Name: base.Name, SSID: base.SSID, Security: base.Security, Priority: base.Priority, Hidden: base.Hidden,
+		PreferAccount: base.PreferAccount, Verified: base.Verified, PSK: b.PSK,
+	}
+	if base.Dot1XID != nil {
+		in.Dot1XID = *base.Dot1XID
 	}
 	set := func(dst *string, v *string) {
 		if v != nil {
@@ -44,10 +45,9 @@ func (b wifiProfileBody) input(base store.WifiProfile) (store.WifiProfileInput, 
 	set(&in.Name, b.Name)
 	set(&in.SSID, b.SSID)
 	set(&in.Security, b.Security)
-	set(&in.EAPMethod, b.EAPMethod)
-	set(&in.Identity, b.Identity)
-	set(&in.AnonymousIdentity, b.AnonymousIdentity)
-	set(&in.CACert, b.CACert)
+	if b.Dot1XProfileID != nil {
+		in.Dot1XID = *b.Dot1XProfileID
+	}
 	if b.Priority != nil {
 		in.Priority = *b.Priority
 	}
@@ -62,21 +62,11 @@ func (b wifiProfileBody) input(base store.WifiProfile) (store.WifiProfileInput, 
 	}
 	var f fieldErrs
 	empty := ""
-	if prov.WifiEnterprise(in.Security) {
-		if in.EAPMethod == "" {
-			in.EAPMethod = prov.EAPPEAP
+	if !prov.WifiEnterprise(in.Security) {
+		if b.Dot1XProfileID != nil && *b.Dot1XProfileID != 0 {
+			f.add("dot1xProfileId", "is used by an enterprise profile only")
 		}
-		if in.CACert == "" {
-			in.CACert = prov.CAServerSystem
-		}
-	} else {
-		if b.Password != nil && *b.Password != "" {
-			f.add("password", "is used by an enterprise profile only")
-		}
-		in.EAPMethod, in.Identity, in.AnonymousIdentity, in.Password = "", "", "", &empty
-		if in.CACert == "" || b.CACert == nil {
-			in.CACert = prov.CAServerSystem
-		}
+		in.Dot1XID = 0
 	}
 	if !prov.WifiUsesPSK(in.Security) {
 		if b.PSK != nil && *b.PSK != "" {
@@ -85,13 +75,12 @@ func (b wifiProfileBody) input(base store.WifiProfile) (store.WifiProfileInput, 
 		in.PSK = &empty
 	}
 	hasPSK := (in.PSK != nil && *in.PSK != "") || (in.PSK == nil && base.PSKSet)
-	hasPass := (in.Password != nil && *in.Password != "") || (in.Password == nil && base.PasswordSet)
-	p := prov.WifiProfile{Name: in.Name, SSID: in.SSID, Security: in.Security, EAPMethod: in.EAPMethod, Identity: in.Identity,
-		AnonymousIdentity: in.AnonymousIdentity, CACert: in.CACert, Priority: in.Priority, PreferAccount: in.PreferAccount}
+	p := prov.WifiProfile{Name: in.Name, SSID: in.SSID, Security: in.Security, Dot1XID: in.Dot1XID, Priority: in.Priority,
+		PreferAccount: in.PreferAccount}
 	if in.PSK != nil {
 		p.PSK = *in.PSK
 	}
-	for _, e := range prov.CheckWifiProfile(p, hasPSK, hasPass) {
+	for _, e := range prov.CheckWifiProfile(p, hasPSK) {
 		f.add(e.Path, "%s", e.Message)
 	}
 	return in, f
@@ -137,7 +126,7 @@ func (s *server) createWifiProfile(w http.ResponseWriter, r *http.Request) {
 		writeFields(w, f)
 		return
 	}
-	in, f := b.input(store.WifiProfile{CACert: prov.CAServerSystem})
+	in, f := b.input(store.WifiProfile{})
 	if len(f) > 0 {
 		writeFields(w, f)
 		return

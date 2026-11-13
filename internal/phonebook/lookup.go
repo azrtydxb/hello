@@ -44,3 +44,39 @@ func (in EntryInput) DisplayName() string {
 	}
 	return in.Company
 }
+
+// PersonalMatch finds the entry of a user's personal book that names key:
+// an exact match on a number's key wins; otherwise the last 9 digits match
+// when exactly one entry has them. It reports how many entries share the
+// suffix when that is more than one (ambiguous: found is false, matches
+// above 1). Entries without keys (none are stored that way) never match.
+func PersonalMatch(entries []Entry, key string) (e Entry, via string, matches int, found bool) {
+	if key == "" {
+		return Entry{}, "", 0, false
+	}
+	for _, en := range entries {
+		for _, n := range en.Numbers {
+			if n.Key == key {
+				return en, "exact", 1, true
+			}
+		}
+	}
+	suffix, ok := Suffix(key)
+	if !ok {
+		return Entry{}, "", 0, false
+	}
+	var hit Entry
+	for _, en := range entries {
+		for _, n := range en.Numbers {
+			if s, ok := Suffix(n.Key); ok && s == suffix {
+				matches++
+				hit = en
+				break
+			}
+		}
+	}
+	if matches == 1 {
+		return hit, "suffix", 1, true
+	}
+	return Entry{}, "", matches, false
+}

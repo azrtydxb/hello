@@ -25,11 +25,15 @@ import (
 	_ "github.com/azrtydxb/hello/internal/crm/bitrix24"    // registers the Bitrix24 connector
 	_ "github.com/azrtydxb/hello/internal/crm/clio"        // registers the clio connector
 	_ "github.com/azrtydxb/hello/internal/crm/connectwise" // registers the connectwise connector
+	_ "github.com/azrtydxb/hello/internal/crm/dynamics"    // registers the Dynamics 365 connector
 	_ "github.com/azrtydxb/hello/internal/crm/freshdesk"   // registers the freshdesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/google"      // registers the Google contacts connector
 	_ "github.com/azrtydxb/hello/internal/crm/halopsa"     // registers the halopsa connector
 	_ "github.com/azrtydxb/hello/internal/crm/hubspot"     // registers the HubSpot connector
 	_ "github.com/azrtydxb/hello/internal/crm/odoo"        // registers the Odoo connector
+	_ "github.com/azrtydxb/hello/internal/crm/outlook"     // registers the Outlook contacts connector
 	_ "github.com/azrtydxb/hello/internal/crm/pipedrive"   // registers the Pipedrive connector
+	_ "github.com/azrtydxb/hello/internal/crm/salesforce"  // registers the Salesforce connector
 	_ "github.com/azrtydxb/hello/internal/crm/zendesk"     // registers the zendesk connector
 	_ "github.com/azrtydxb/hello/internal/crm/zoho"        // registers the Zoho CRM connector
 	"github.com/azrtydxb/hello/internal/events"

@@ -28,6 +28,8 @@ function connector(extra: Partial<CRMConnector> = {}): CRMConnector {
       clickToCall: true,
       screenPop: true,
       ticket: false,
+      userScope: false,
+      calendar: false,
     },
     connection: {
       status: "connected",
@@ -105,6 +107,12 @@ describe("CRM connectors (spec integrations P6)", () => {
     ).toBeGreaterThan(0);
     expect(
       within(panel).getByText(/crm\.objects\.owners\.read/),
+    ).toBeInTheDocument();
+    // The calling extension's values: Hello's iframe URL.
+    expect(
+      within(panel).getByText(
+        /https:\/\/hello\.example\/integrations\/hubspot\/iframe/,
+      ),
     ).toBeInTheDocument();
   });
 
@@ -627,5 +635,194 @@ describe("CRM connectors (spec integrations P6)", () => {
       target: { value: "other.halopsa.com" },
     });
     expect(within(form).getByLabelText("Client secret")).toBeRequired();
+  });
+
+  it("adds a Salesforce connector without credentials and shows its call center", async () => {
+    let created = false;
+    const calls = mockApi({
+      ...me("admin"),
+      "GET /api/v1/integrations/crm": () =>
+        json({
+          items: created
+            ? [
+                connector({
+                  id: 2,
+                  kind: "salesforce",
+                  auth: "direct",
+                  name: "Salesforce",
+                  hasClientSecret: false,
+                  connection: null,
+                  config: {
+                    serverLogging: "false",
+                    apiVersion: "62.0",
+                    domain: "",
+                  },
+                }),
+              ]
+            : [],
+        }),
+      "POST /api/v1/integrations/crm": () => {
+        created = true;
+        return json({}, 201);
+      },
+      "GET /api/v1/integrations/crm/2/setup": () =>
+        json({
+          items: [
+            {
+              name: "callCenterXml",
+              label: "Call Center definition",
+              kind: "file",
+              value: "<callCenter/>",
+              filename: "HelloSoftphone.xml",
+              hint: "Setup, Call Centers, Import.",
+            },
+            {
+              name: "trustedSite",
+              label: "CSP Trusted Site",
+              kind: "url",
+              value: "https://hello.example",
+            },
+          ],
+        }),
+    });
+    renderApp("/integrations/crm");
+    fireEvent.click(await screen.findByRole("button", { name: "Add a CRM" }));
+    const form = await screen.findByRole("form", { name: "New CRM connector" });
+    fireEvent.change(within(form).getByLabelText("CRM"), {
+      target: { value: "salesforce" },
+    });
+    expect(within(form).getByLabelText("Name")).toHaveValue("Salesforce");
+    // Without server-side logging nothing needs a credential.
+    expect(within(form).getByLabelText("Client ID")).not.toBeRequired();
+    expect(within(form).getByLabelText("Client secret")).not.toBeRequired();
+    fireEvent.click(
+      within(form).getByRole("switch", { name: /Also log calls/ }),
+    );
+    expect(within(form).getByLabelText("Client ID")).toBeRequired();
+    fireEvent.click(
+      within(form).getByRole("switch", { name: /Also log calls/ }),
+    );
+    fireEvent.click(
+      within(form).getByRole("button", { name: "Add connector" }),
+    );
+    await waitFor(() => expect(created).toBe(true));
+    expect(calls.find((c) => c.method === "POST")!.body).toEqual({
+      kind: "salesforce",
+      name: "Salesforce",
+      config: {
+        serverLogging: "false",
+        apiVersion: "62.0",
+        domain: "",
+        clientId: "",
+      },
+    });
+    expect(await screen.findByText("Set up Salesforce")).toBeVisible();
+    expect(screen.getByText("https://hello.example")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /Download Call Center definition/ }),
+    ).toBeVisible();
+    // No sign-in to start for the softphone alone.
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+  });
+
+  it("connects a client-credentials connector without leaving the page", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    let connectCalls = 0;
+    mockApi({
+      ...me("admin"),
+      "GET /api/v1/integrations/crm": () =>
+        json({
+          items: [
+            connector({
+              id: 3,
+              kind: "dynamics",
+              auth: "direct",
+              name: "Dynamics 365",
+              connection: null,
+              config: {
+                clientId: "app",
+                orgUrl: "https://contoso.crm4.dynamics.com",
+                tenantId: "11111111-2222-3333-4444-555555555555",
+              },
+            }),
+          ],
+        }),
+      "GET /api/v1/integrations/crm/3/setup": () => json({ items: [] }),
+      "POST /api/v1/integrations/crm/3/connect": () => {
+        connectCalls++;
+        return json({ authorizeUrl: "", connected: true });
+      },
+    });
+    renderApp("/integrations/crm");
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+    await waitFor(() => expect(connectCalls).toBe(1));
+    expect(assign).not.toHaveBeenCalled();
+    const form = await screen.findByRole("form", {
+      name: "Dynamics 365 settings",
+    });
+    expect(within(form).getByLabelText("Environment URL")).toHaveValue(
+      "https://contoso.crm4.dynamics.com",
+    );
+  });
+
+  it("sets up an Outlook connector for per-user sign-in: no organisation sign-in, a feature choice and the permissions to grant", async () => {
+    const calls = mockApi({
+      ...me("admin"),
+      "GET /api/v1/integrations/crm": () =>
+        json({
+          items: [
+            connector({
+              id: 2,
+              kind: "outlook",
+              name: "Outlook",
+              config: {
+                clientId: "cid-2",
+                tenant: "contoso.com",
+                features: "contacts",
+              },
+              recordings: false,
+              capabilities: {
+                lookup: true,
+                logCalls: false,
+                recordings: false,
+                clickToCall: false,
+                screenPop: false,
+                ticket: false,
+                userScope: true,
+                calendar: true,
+              },
+              connection: null,
+            }),
+          ],
+        }),
+      "PATCH /api/v1/integrations/crm/2": () => json(connector({ id: 2 })),
+    });
+    renderApp("/integrations/crm");
+    const panel = await screen.findByRole("article", {
+      name: "Outlook connector",
+    });
+    expect(within(panel).getByText("Per user")).toBeVisible();
+    expect(within(panel).queryByRole("button", { name: "Connect" })).toBeNull();
+    expect(within(panel).queryByRole("tab", { name: "Users" })).toBeNull();
+    expect(within(panel).getByText(/Contacts\.Read/)).toBeInTheDocument();
+    expect(within(panel).queryByText(/Calendars\.Read/)).toBeNull();
+    const form = within(panel).getByRole("form", { name: "Outlook settings" });
+    fireEvent.click(
+      within(form).getByRole("checkbox", { name: "Calendar sets DND" }),
+    );
+    fireEvent.click(
+      within(form).getByRole("button", { name: "Save settings" }),
+    );
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PATCH")).toBe(true),
+    );
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      config: {
+        clientId: "cid-2",
+        tenant: "contoso.com",
+        features: "contacts,calendar",
+      },
+    });
   });
 });

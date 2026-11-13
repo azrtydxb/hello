@@ -4,7 +4,12 @@ import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "node_modules"] },
+  {
+    // public/integrations are classic browser scripts served as they are (the
+    // Salesforce and Dynamics frames, no build step); src/integrations tests
+    // them.
+    ignores: ["dist", "node_modules", "public/integrations"],
+  },
   {
     files: ["**/*.{ts,tsx,js}"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],

@@ -531,3 +531,102 @@ func TestPGCascadeOnConnectorDelete(t *testing.T) {
 		}
 	}
 }
+
+// TestPGUserConnections: per-user connections against the real schema. It
+// fails if one user's tokens open under another user's row, if the org and
+// user connections of a connector mix, if a user connection is not removed
+// with its user, or if the calendar state is not kept.
+func TestPGUserConnections(t *testing.T) {
+	p, db := scratchPG(t)
+	ctx := context.Background()
+	c := pgConnector(t, p, "outlook")
+	var a, b int64
+	for i, name := range []string{"anna", "bob"} {
+		var id int64
+		if err := db.QueryRowContext(ctx, `INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'user') RETURNING id`, name).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			a = id
+		} else {
+			b = id
+		}
+	}
+	exp := time.Now().Add(time.Hour).Truncate(time.Second)
+	if _, err := p.SaveUserConnection(ctx, c.ID, a, Tokens{Access: "A-ACCESS", Refresh: "A-REFRESH", ExpiresAt: exp, Account: "anna@x", Scopes: []string{"Calendars.Read"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.SaveUserConnection(ctx, c.ID, b, Tokens{Access: "B-ACCESS", Refresh: "B-REFRESH", ExpiresAt: exp}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.SaveOrgConnection(ctx, c.ID, Tokens{Access: "ORG", Refresh: "ORG-R"}); err != nil {
+		t.Fatal(err)
+	}
+	for user, want := range map[int64]string{a: "A-ACCESS", b: "B-ACCESS"} {
+		_, tk, err := p.UserConnection(ctx, c.ID, user)
+		if err != nil || tk.Access != want {
+			t.Fatalf("user %d: %+v %v", user, tk, err)
+		}
+	}
+	if _, tk, _ := p.OrgConnection(ctx, c.ID); tk.Access != "ORG" {
+		t.Fatalf("org tokens = %+v", tk)
+	}
+	// A refresh without a new refresh token keeps the stored one.
+	if _, err := p.SaveUserConnection(ctx, c.ID, a, Tokens{Access: "A2", ExpiresAt: exp}); err != nil {
+		t.Fatal(err)
+	}
+	if row, tk, _ := p.UserConnection(ctx, c.ID, a); tk.Access != "A2" || tk.Refresh != "A-REFRESH" || row.ExternalAccount != "anna@x" || row.GrantedScopes != "Calendars.Read" {
+		t.Fatalf("after refresh: %+v %+v", row, tk)
+	}
+	// Swap the sealed tokens of two rows: the AAD names the user, so neither
+	// opens.
+	if _, err := db.ExecContext(ctx, `UPDATE crm_connections SET access_enc = (SELECT access_enc FROM crm_connections WHERE scope = 'user' AND user_id = $1) WHERE scope = 'user' AND user_id = $2`, a, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := p.UserConnection(ctx, c.ID, b); err == nil {
+		t.Fatal("a token sealed for one user opened under another")
+	}
+	if _, err := p.SaveUserConnection(ctx, c.ID, b, Tokens{Access: "B3", ExpiresAt: exp}); err != nil {
+		t.Fatal(err)
+	}
+	// Calendar settings and state.
+	row, _, _ := p.UserConnection(ctx, c.ID, a)
+	if err := p.SetCalendarSettings(ctx, row.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	busy := time.Now().Add(30 * time.Minute).Truncate(time.Second)
+	if err := p.SetCalendarState(ctx, row.ID, true, busy, time.Now(), "oops"); err != nil {
+		t.Fatal(err)
+	}
+	if row, _, _ = p.UserConnection(ctx, c.ID, a); !row.CalendarDND || !row.CalendarActive || !row.CalendarBusyUntil.Equal(busy) || row.CalendarError != "oops" {
+		t.Fatalf("calendar state = %+v", row)
+	}
+	if err := p.SetCalendarSettings(ctx, row.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if row, _, _ = p.UserConnection(ctx, c.ID, a); row.CalendarDND || row.CalendarActive || !row.CalendarBusyUntil.IsZero() || row.CalendarError != "" {
+		t.Fatalf("calendar state after off = %+v", row)
+	}
+	if rows, _ := p.UserConnections(ctx, c.ID); len(rows) != 2 {
+		t.Fatalf("UserConnections = %d rows", len(rows))
+	}
+	if rows, _ := p.UserConnectionsOf(ctx, b); len(rows) != 1 || rows[0].UserID != b {
+		t.Fatalf("UserConnectionsOf = %+v", rows)
+	}
+	// Deleting the user removes the connection.
+	if _, err := db.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := p.UserConnection(ctx, c.ID, b); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("connection of a deleted user: %v", err)
+	}
+	if err := p.DeleteUserConnection(ctx, c.ID, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.DeleteUserConnection(ctx, c.ID, a); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second delete: %v", err)
+	}
+	if _, _, err := p.OrgConnection(ctx, c.ID); err != nil {
+		t.Fatal("the org connection went with a user's")
+	}
+}

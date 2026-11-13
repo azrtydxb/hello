@@ -203,6 +203,10 @@ Books: the computed extensions book (read-only), the company book and up to
 - `lookupPhonebook` (admin) with a `number` (and optionally `callee`) shows
   which entry would name that caller, in the order extensions, named books,
   company. Use it to explain why a name shows or does not.
+- `lookupNumber` (read, any role) with a `number` gives the one best name for
+  it, for an integration: extensions, then company, then the caller's own
+  personal contacts (only when the credential belongs to a user). `result` is
+  `match`, `ambiguous`, `none` or `unresolvable`; no match is still a 200.
 - Deliver a named book by adding it to a group with `setPhoneGroupBooks`,
   then resync.
 - `getPhoneDirectory` (path `id` of the phone) says how many contacts the
@@ -261,7 +265,7 @@ certificate for 802.1X (EAP-TLS) without anyone copying keys around.
   `createDot1XProfile` (name, method, identity such as `phone-{mac}`,
   password, and the RADIUS server's CA as `caCertPem`),
   `updateDot1XProfile` (leave `password` out to keep it),
-  `deleteDot1XProfile` (refused while a group uses it). Methods: `eap-tls`
+  `deleteDot1XProfile` (refused while a group or a Wi-Fi profile uses it). Methods: `eap-tls`
   (the SCEP certificate; written only where SCEP is on), `peap`, `eap-md5`
   (wired only). A wrong profile can take a phone off the network: try it on
   one phone's group first.
@@ -273,10 +277,12 @@ joins the networks Hello gives it. Other models and vendors get no Wi-Fi keys.
 
 - A profile is a named network: `createWifiProfile` with `name`, `ssid` and
   `security` (`open`, `wpa2-psk`, `wpa3-sae`, `owe`, `wpa2-enterprise`,
-  `wpa3-enterprise`), `psk` for a pre-shared key or `identity` and `password`
-  for 802.1X (PEAP), plus `priority` (0 to 10), `hidden` and `preferAccount`.
-  The key and password are write-only: `listWifiProfiles` and
-  `getWifiProfile` show only `pskSet` and `passwordSet`. Never ask for or
+  `wpa3-enterprise`), `psk` for a pre-shared key or, for an enterprise
+  network, `dot1xProfileId`: the 802.1X profile (`createDot1XProfile`, PEAP or
+  EAP-TLS, shared with wired ports) that holds the identity and password;
+  plus `priority` (0 to 10), `hidden` and `preferAccount`.
+  The key is write-only: `listWifiProfiles` and `getWifiProfile` show only
+  `pskSet` and the `dot1xProfileId`. Never ask for or
   repeat them in chat; tell the administrator to type them in the console if
   they cannot pass them as tool arguments.
 - `updateWifiProfile` (PATCH) keeps a secret that is left out and clears one

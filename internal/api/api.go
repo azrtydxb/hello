@@ -346,6 +346,9 @@ type Config struct {
 	// CRM is the CRM connector administration (spec integrations I-47); nil
 	// answers 503 on the CRM routes.
 	CRM CRMService
+	// Slack is the Slack notification administration (spec integrations
+	// P17); nil answers 503 on the Slack routes.
+	Slack SlackService
 	// Events is the call-event pipeline (stream, history, tickets); nil
 	// answers 503 on the event routes.
 	Events EventService

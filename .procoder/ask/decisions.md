@@ -3587,6 +3587,161 @@ Decided while building, without asking, within the spec and the brief:
   #326 and #338 at merge (NEED_TLS defined in both, the hello-socket checks, the
   TLS opt-in test).
 
+## Integrations P17: Slack, n8n and Make (2026-11-13)
+
+- **Slack is its own small queue, not a webhook endpoint format.** The webhook
+  dispatcher signs Hello's own JSON and counts health per endpoint; Slack needs a
+  different body, no signature, an `Authorization` header for a bot and an
+  answer to parse (`{"ok":false,"error":...}` comes with HTTP 200). Bending
+  `webhook_endpoints` for that would touch P2 code other builders and P7 use, so
+  `internal/slack` has its own two tables (`slack_destinations`, `slack_posts`,
+  migration 00089) and reuses the exported pieces of P2: `webhook.RetryDelay`
+  (the same eight-attempt schedule) and the retry and dead-letter rules.
+- **Posts are queued in the event ingest transaction** (a `TxHook`, like webhooks
+  and the CRM), with the event stored in the row, so a post never waits on
+  `integration_events` retention and a repeated event posts once
+  (`UNIQUE (destination_id, event_id)`).
+- **Both Slack credentials are supported** (spec table): an incoming webhook URL
+  (host pinned to `hooks.slack.com` / `hooks.slack-gov.com`, https, path
+  `/services/`) and a bot token with a channel (`xoxb-` only, fixed API address).
+  The secret is write-only and sealed under the AAD `slack:<id>`; the MCP
+  decision is exclude, category credentials.
+- **Slack failures decide the destination's state.** `invalid_auth`,
+  `token_revoked`, 401 and 403 switch the destination off (`auth_failed`), a 404
+  or 410 from a webhook switches it off (`destination_gone`), 50 failures in a
+  row too; a new credential switches it back on. Channel errors
+  (`not_in_channel`, `channel_not_found`) only kill the post. Names and numbers
+  of callers are untrusted: `<`, `>`, `&` and mrkdwn characters are neutralised
+  (no `<!channel>` or links from a caller name) and each field is cut to 80
+  characters.
+- **`voicemail.received` is a new event type** (spec: "voicemail posted to a
+  channel" needed one). hello-sip emits it after the message row is stored, once
+  per box for a voicemail group, with the caller, the box extension and
+  `durationMs`; never the audio. An endpoint that subscribes to every event now
+  receives it too (the envelope is additive).
+- **n8n and Make reuse the generic surface, no new routes.** The trigger
+  subscribes through `POST /webhooks` and deletes through `DELETE`; the actions
+  are originate, `cdrs` and the lookup route. The n8n trigger verifies
+  `Hello-Signature` itself (Hello's signing secret is returned once at
+  subscription and kept in the workflow's static data; a subscription that
+  already existed has no secret, so it is replaced). Make cannot compute an HMAC
+  in IML, so its hook URL is the secret, as decided for Zapier (P7). The Find
+  Contact operation uses `GET /api/v1/lookup/number`, which comes with P7 (#304):
+  it is not duplicated here, so those two operations work once #304 is merged.
+- **No build step for n8n.** The node is plain CommonJS (no TypeScript, no
+  `n8n-workflow` dependency) so `node --test` runs it in CI with a fake n8n
+  context and the tests read `openapi.json` to prove every request is a
+  documented route.
+
+## Integrations P18: Outlook and Google contacts, calendar DND (2026-11-13)
+
+- **Per-user connectors in the existing framework.** `crm_connections` already
+  had `scope = 'user'`; the framework now uses it: `Capabilities.UserScope`,
+  `Repo.{UserConnection,SaveUserConnection,DeleteUserConnection,UserConnections,UserConnectionsOf}`,
+  `TokenManager.ConnFor` and `RefreshFor`. Per-user tokens are sealed under
+  `crm:<connector>:user:<user>:<access|refresh>` so a blob copied to another user's
+  row does not open. The administrator creates one connector (the customer's own
+  Microsoft or Google app) and each user connects; the org-level connect and test
+  refuse a per-user connector. A re-authorisation need of a personal connection
+  is shown to that user, not e-mailed to the administrators.
+- **The OAuth state carries who started it** (`user:<id>:<actor>` in the existing
+  actor column, no schema change), so the shared callback finishes a personal
+  sign-in for the right user and redirects to `/me/connections`; a state of the
+  wrong scope is refused.
+- **Caller names from the called user's contacts, after the organisation's
+  CRM.** `Lookup.NameFor(extension, number)` resolves the extension to its user
+  (cached 60 s) and asks only that user's connected connectors; hello-sip tries
+  it when the route sends the call straight to an extension (`dec.Extension`),
+  within what is left of the same 250 ms budget. A ring group, queue or IVR is
+  named from nobody's contacts: choosing whose address book would be a guess.
+  The carrier's real name still wins. Cache keys are per user.
+- **Contacts are matched locally on an in-memory index.** Graph has no phone
+  search on contacts and People's `searchContacts` is prefix-based and a
+  warm-up-dependent, so the connectors read the address book (20 pages of up to
+  1000, 20,000 contacts) into `crm.ContactIndex` kept 10 minutes per account. The
+  key is the **last eight digits** (nine would miss the trunk `0`: `050 12 34 56`
+  vs `+32 50 12 34 56`); two contacts with one key are ambiguous and name nobody.
+  The read outlives the 1.5 s lookup (`WithoutCancel`, one minute) so the first
+  call after a quiet spell misses and the next ones hit.
+- **Features choose the scopes.** Per-user connectors take `features`
+  (`contacts`, `calendar`); the sign-in asks only for what is on. Google asks for
+  `calendar.freebusy` only, never event content; Outlook asks `Calendars.Read`
+  but selects only `showAs`, `isCancelled`, `isAllDay`, `start`, `end` and
+  `responseStatus`.
+- **Calendar DND is polled every two minutes** by one replica (`TryLock`), eight
+  calendars at a time. Change notifications are not used (public callback plus
+  renewal for a 2-minute gain). `extensions.dnd_source` (`manual`, `calendar`,
+  migration 00090) records who set DND; the two manual writers (extension update
+  and the feature-code path) set it to `manual` whenever they set `dnd`, the
+  poller writes `calendar` only where DND was off and clears only `calendar`
+  ones, in a config transaction (audit, revision bump, hello-sip reload) that is
+  skipped when nothing would change. A user who turns DND on by hand during a
+  meeting therefore takes it over; one who turns it off is not fought until the
+  next stretch. With several connected calendars DND stays while any is busy; an
+  unreadable calendar keeps it until the last known end plus 5 minutes.
+- **`dndSource` joins the extension in the API** (`Extension`, `SelfExtension`),
+  so the console and agents can tell a calendar DND from a manual one.
+- **Pre-existing behaviour changed:** `ActiveConnectors` now means "has any
+  non-revoked connection" (org or user) instead of "has an org connection", so a
+  per-user connector is listed once someone connects; the org lookup and the
+  logging hook skip it (`Capabilities.UserScope`, `LogCalls` false).
+
+## Integrations P7: Zapier private integration (2026-11-10)
+
+Built per spec `integrations.md` I-52 and the P7 phase line. Choices the spec left
+open; each was chosen by default (the conservative option), not by the user.
+
+- **`GET /api/v1/lookup/number` (I-43) is built here.** The Find Contact search
+  needs it, and neither main nor the P4 PR (#281, which carries only the call
+  and recording lookups) has it. It is a thin wrapper over the existing
+  caller-name lookup (extensions, then company, no callee) and adds the
+  credential's own personal contacts only when nothing there names the number.
+  Chosen by default: no `extension`/`callee` parameter (the named books of a
+  phone group need a callee; a connector has none), the personal book is the
+  last resort (so the answer for a number does not depend on who asks when the
+  company already names it), and a service account never reads a personal book.
+  Scope `read`, role `user` (listed as self-service in `TestRoutesTable`).
+  `PhonebookLookup.source` gains `personal`.
+- **Webhooks API unchanged.** I-42 already made `POST /api/v1/webhooks`
+  idempotent on `(url, events)` and `DELETE` by id, which is all a Zapier REST
+  hook needs. Subscribing therefore keeps the existing requirement: an
+  administrator credential with the `secrets` scope. Chosen by default over
+  letting a user subscribe to their own events; widening webhook access to
+  non-admins is a separate product decision. Actions and searches need no admin.
+- **Zapier does not store the signing secret and Hello's signature is not checked
+  on this route.** Zapier hook URLs are unguessable and cannot verify an HMAC;
+  the docs say so.
+- **Find Call has no server-side number filter.** `GET /cdrs` has no number
+  parameter, and adding one is not in the P7 text. The search takes a CDR ID
+  (exact, `GET /cdrs/{id}`) or a number, matched in the app against the latest
+  200 calls (caller, called and original destination, as written or on the last
+  nine digits). `lookup/calls` of P4 is not used because it is unmerged.
+- **Place Call input**: destination, optional extension, optional idempotency
+  key; nothing else (no caller ID, no auto-answer), so the originate limits and
+  the emergency refusal are the only policy.
+- **The app is plain JavaScript with no installed dependencies** and its tests
+  run with `node --test` against a fake Zapier runtime (CI job `zapier`). The
+  `zapier-platform-core` version in `package.json` is the current release at the
+  time of writing and is only needed by `zapier push`. Not tested here: a real
+  Zapier account (invite, a Zap run end to end).
+
+## 2026-11-13: per-line Grandstream keys (feat/prov-perline-keys)
+
+- Lines 2 and up now get SRTP mode and key exchange, presence, RTCP-XR collector and backup server keys, at the account offsets found in the official templates (wp8x6 1.0.3.39, wp810_822_825 1.0.11.83, wp820 1.0.7.90, wp856 1.0.3.16).
+- Correction to #262: the WP820 template does have a Secondary SIP Server, at P50602 (account 1) and P51102 (account 2); line 1 now writes it.
+- Send Anonymous (P421, P521, ...) for further lines stays unwritten, as decided before.
+
+## HubSpot calling iframe and recording links (2026-11-13, feat/hubspot-iframe)
+
+Completes the part of P6 (#289) that waited for the originate API and the first-party clients (decisions of 2026-11-10).
+
+- **The iframe is a console route**, `/integrations/hubspot/iframe`, built on HubSpot's own `@hubspot/calling-extensions-sdk` (0.9.7) rather than a hand-written postMessage protocol. The SDK is loaded on demand, so the console bundle does not carry it.
+- **First-party client `hello-hubspot`** (public, PKCE, redirect `/integrations/hubspot/callback`, scopes `calls events`), registered with the dialer at start-up. Sign-in is a popup, because a framed page gets no Strict session cookie. The popup hands the code to the iframe with `postMessage` to its own origin; the state value and the PKCE verifier stay in the iframe. Tokens live in the iframe's localStorage (HubSpot's frame gives it partitioned storage); a refused refresh drops them.
+- **The click-to-call id is HubSpot's call id.** `externalCallId` is the originate id; events carry `originateId` and `callId`, so the first event of the call gives the SIP call id, which goes with the engagement id to the existing handshake route. An inbound call on a user's extension uses its SIP call id.
+- **Recording links in engagements need no new code in the connector:** HubSpot already writes `hs_call_recording_url` and the worker patches the adopted engagement; a test now covers it. The link store is the one #328 wires in `cmd/hello-control/crmlinks.go`; this change wires no second minter.
+- **Framing.** nginx answers the iframe route with `frame-ancestors https://app.hubspot.com https://*.hubspot.com` and every other console page with `frame-ancestors 'none'` and `X-Frame-Options: DENY` (spec T-12; only the consent page had it). A deploy test checks the template.
+- **Not done, needs a HubSpot account:** whether `incomingCall` reaches an unlisted app, the exact calling-settings fields (the connector panel shows name, url, width, height, isReady, supportsCustomObjects), and the framing hosts per region (all are `*.hubspot.com`). They are on the lab checklist in docs/crm.md.
+
 ## Integrations P14, P15, P21: Pipedrive, Zoho CRM, Odoo, Bitrix24 (2026-11-13)
 
 Decided while building, without asking, within the spec and the brief:
@@ -3732,6 +3887,7 @@ Follow-up to "Clients item 1: media foundation on pion". Choices:
   browser leg before the keys are in, that nothing on it is in the clear after,
   and that a cleartext packet from the browser is not relayed.
 
+<<<<<<< HEAD
 ## WebRTC offers need the TLS hop (2026-11-13)
 
 - `media.Relay.AnswerWebRTC` takes a `SignalingHop`; an offer that arrived over a
@@ -3745,3 +3901,79 @@ Follow-up to "Clients item 1: media foundation on pion". Choices:
   `hello_sip_webrtc_refused_total{reason="cleartext_hop"}`; the softphone call
   path (not built yet) answers 488.
 
+=======
+## Integrations P13 and P19: Salesforce Open CTI and Dynamics 365 CIF (2026-11-13)
+
+Decided while building, without asking, within the spec and the brief:
+
+- **Two halves per CRM.** The interactive half is a static page Hello serves
+  (`web/public/integrations/{salesforce,dynamics}`), served by the UI's nginx with a
+  per-page Content-Security-Policy (`frame-ancestors` only the CRM's hosts, no inline
+  script, `connect-src 'self'`); the server half is a `internal/crm` connector. The
+  pages need no CRM token: Open CTI and CIF run in the user's own CRM session.
+- **No Hello cookie in the frame.** A third-party frame does not get Hello's session
+  cookie, so the pages sign in through a popup (authorization code with PKCE) against two
+  new pre-registered public clients, `hello-salesforce` and `hello-dynamics` (spec I-32),
+  with scopes `calls events`; the callback pages postMessage the code to their own opener
+  (origin and state checked) and the token stays in the frame's session storage.
+- **Client credentials use the framework's `crm.Direct`** (introduced by #328). `Authenticate`
+  signs in with the customer's client id and secret and no browser. `Connect` connects at once
+  (empty `authorizeUrl`), and the token manager signs in again at expiry or on a 401 instead of
+  refreshing. Refused credentials are the same `needs_reauth` once as a refused refresh token;
+  an outage is not. Salesforce and Dynamics both use it (spec: connected app / org service
+  principal). JWT bearer for Salesforce is not built: client credentials is the simpler flow
+  Salesforce offers for an integration user and needs no certificate handling.
+- **Salesforce interactive-only mode.** `config.serverLogging` (default `false`): with it
+  off the connector is only the softphone's settings. It needs no credentials, the hook
+  queues no job, the lookup skips it and the engagement handshake is a no-op
+  (`adopted: true`), so nothing waits for a connection that will never exist. `crm.ServerSide`
+  is the framework switch for it. The softphone then also logs missed calls for its user
+  (`?missed=1` in the adapter URL the call center definition carries).
+- **No duplicate Tasks.** The softphone saves the Task at answer (`saveLog`), then tells the
+  server (`POST /api/v1/integrations/salesforce/engagements`, `callId` and `recordId`);
+  the server patches that Task with the duration, outcome and recording link. A server
+  Task that exists first wins (`adopted: false`). This is the HubSpot handshake
+  generalised: `Service.Engagement` validates the record id through the optional
+  `crm.RefValidator` of the connector.
+- **Dynamics logs only on the server.** The CIF widget does click-to-act and the screen pop;
+  it does not write activities, so there is no Dynamics handshake route.
+- **Dynamics channel provider is entered, not imported.** The spec says "customer-imported
+  solution". A CIF v2 channel provider is a data record (Customer Service admin center,
+  Channel Providers), not a solution component, so Hello shows the exact values to enter
+  (`GET /api/v1/integrations/crm/{id}/setup`, also an MCP read `getCRMSetup`) instead of
+  generating a solution zip nobody could verify here. The channel URL carries
+  `?org=<environment URL>` so the page knows where to load the CIF library from; it loads
+  that library only from `https://*.dynamics.com`. The same endpoint gives Salesforce its
+  Call Center definition XML and adapter URL.
+- **Dynamics phone call states.** Created open, then closed (Made for outbound, Received for
+  inbound; a missed call is Received with "Missed call from" and "No answer", Dynamics has
+  no missed reason). A closed activity is read-only, so an update reopens, patches and
+  closes. A failed close after a successful create is retried once and never repeats the
+  create. Sovereign clouds (`.us`, `.cn`) are not supported: only `*.dynamics.com`.
+- **Phone matching.** Salesforce: SOSL `IN PHONE FIELDS` on the last nine digits. Dynamics:
+  Dataverse has no normalised phone column, so the lookup queries a bounded list of
+  spellings (the last eight digits run together, and grouped with a space, dash, dot or
+  slash) with `contains`, and the server verifies the digits of each candidate (last eight,
+  which national and international spellings share). The widget's screen pop uses the same
+  list unverified. Mixed or unusual separators can still be missed (documented).
+- **Shared HTTP client is `kit.Do`** (#328's kit), which gained an optional `Classify`
+  (the CRM's own error message, and a retry for a failure such as Salesforce's 403
+  `REQUEST_LIMIT_EXCEEDED`). `crm.RecordingLine` (replace-not-repeat of the `Recording:`
+  description line, never touching what a person wrote) stays Salesforce and Dynamics
+  specific. HubSpot keeps its own client; it is not touched.
+- **Frames' lint.** `web/public/integrations` are classic scripts without a build and are
+  excluded from eslint; `web/src/integrations/embedded.test.ts` runs them against fakes.
+- **No migration.** The connector kind column has no CHECK; the placeholder 00102 is
+  unused.
+
+## One 802.1X model for Wi-Fi and wired ports (2026-11-13, feat/prov-wifi-8021x)
+
+Reconciles the Wi-Fi profiles (#278, migration 00074) with the 802.1X and SCEP profiles (#279, migration 00076). Migration 00088.
+
+- **An enterprise Wi-Fi profile names an 802.1X profile** (`wifi_profiles.dot1x_id`, `dot1xProfileId` in the API, `ON DELETE RESTRICT`). The EAP method, identity, anonymous identity, password and the RADIUS CA live in the 802.1X profile only. The Wi-Fi profile keeps SSID, security, PSK, priority, hidden, preferred account and the verified mark. The API fields `eapMethod`, `identity`, `anonymousIdentity`, `password`, `caCert` and `passwordSet` are gone (a request carrying them is refused as an unknown field).
+- **Old columns stay, unread** (`eap_method`, `identity`, `anonymous_identity`, `password_enc`, `ca_cert`), because the repo's migrations are additive for rolling upgrades; a later migration drops them.
+- **Existing enterprise profiles are adopted by hello-control at start-up** (`Store.AdoptWifiEAP`), not in SQL, because the sealed password has to be re-sealed under the 802.1X profile's context (`dot1x:<id>`, read from `wifi-password:<id>`). Each becomes an 802.1X PEAP profile "Wi-Fi <name> #<id>". A profile whose identity has spaces or exceeds 64 characters (the 802.1X rule) stays unadopted, is logged and writes no network until an 802.1X profile is named.
+- **Server certificate check is the 802.1X profile's:** the system certificates, or its uploaded CA (P83016 = 3, CA in P83011) with the optional server name (P83018 = 1, P83019). "Trust on first use" (2) and "skip verification" (0) are no longer offered; an adopted profile that had either becomes the system certificates. Reason: #279 decided Hello never writes 0, and one check per profile is what a shared model means.
+- **EAP-TLS on Wi-Fi** is now possible (P83004 = 1, P83007 CA, P83009 identity) where the phone has a SCEP certificate; the client certificate (P83008) is not written, as P8440 is not on the wired port (verify on a handset). EAP-MD5 is refused for a Wi-Fi profile (the API, and a 802.1X profile in use cannot be changed to it); a network whose 802.1X profile is missing, EAP-MD5 or EAP-TLS without SCEP is skipped at render, and its slot goes to the next profile.
+- **Template re-check of #278** against config-template-10212026.zip: WP8x6 slots 1 to 10 at P83000 + 100 (n - 1) (SSID +0, security +2, key +3, EAP +4, priority +49, preferred account +85), security codes 0, 4, 5, 11, 12, 14, EAP codes 1 TLS and 2 PEAP, CA type 0 skip / 1 system / 2 TOFU / 3 uploaded, phase 2 0 MSCHAPv2, and the network-5 EAP key at P83304: all confirmed. WP810/822/825: SSID +0, enabled +1, security +2, key +3, 802.11r +48, hidden +50 per slot for 17 slots; slots 18 to 20 have security at +72: confirmed. WP856: P7812, P7814 (0, 1 WEP, 2 WPA/WPA2 PSK; the template calls it "Security Mode for Hidden SSID"), P7830: confirmed. Radio keys P25438, P82332, P22232, P22231, P82334 (WP8x6), P84992 (WP810), P25420, P25421, P22443, P22230, P25315, P82333 (WP856): confirmed. No mismatch found. Not written because #278 did not know them: P83018 and P83019 (domain validation, now written), P83086 and P83087 (management frame protection and transition mode), P83051 and P83052 (IP mode, IPv4 mode).
+>>>>>>> origin/main

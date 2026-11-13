@@ -1,0 +1,15 @@
+{
+  "url": "/webhooks",
+  "method": "POST",
+  "body": {
+    "name": "Make: {{scenario.name}}",
+    "url": "{{webhook.url}}",
+    "events": "{{parameters.events}}",
+    "extensions": "{{ifempty(parameters.extensions; emptyarray)}}"
+  },
+  "response": {
+    "temp": {
+      "id": "{{body.id}}"
+    }
+  }
+}

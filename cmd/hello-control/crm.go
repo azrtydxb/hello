@@ -18,13 +18,17 @@ import (
 	_ "github.com/azrtydxb/hello/internal/crm/bitrix24"    // registers the Bitrix24 connector
 	_ "github.com/azrtydxb/hello/internal/crm/clio"        // registers the clio connector
 	_ "github.com/azrtydxb/hello/internal/crm/connectwise" // registers the connectwise connector
+	_ "github.com/azrtydxb/hello/internal/crm/dynamics"    // registers the Dynamics 365 connector
 	_ "github.com/azrtydxb/hello/internal/crm/freshdesk"   // registers the freshdesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/google"      // registers the Google contacts and calendar connector
 	_ "github.com/azrtydxb/hello/internal/crm/halopsa"     // registers the halopsa connector
 	_ "github.com/azrtydxb/hello/internal/crm/hubspot"     // registers the HubSpot connector
 	_ "github.com/azrtydxb/hello/internal/crm/odoo"        // registers the Odoo connector
+	_ "github.com/azrtydxb/hello/internal/crm/outlook"     // registers the Outlook contacts and calendar connector
 	"github.com/azrtydxb/hello/internal/crm/pipedrive"
-	_ "github.com/azrtydxb/hello/internal/crm/zendesk" // registers the zendesk connector
-	_ "github.com/azrtydxb/hello/internal/crm/zoho"    // registers the Zoho CRM connector
+	_ "github.com/azrtydxb/hello/internal/crm/salesforce" // registers the Salesforce connector
+	_ "github.com/azrtydxb/hello/internal/crm/zendesk"    // registers the zendesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/zoho"       // registers the Zoho CRM connector
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/safehttp"
@@ -40,6 +44,9 @@ type crmWiring struct {
 	Hook    events.TxHook
 	worker  *crm.Worker
 	renewer *crm.Renewer
+	// calendar polls the calendars of users who turned calendar DND on
+	// (spec I-56).
+	calendar *crm.CalendarWorker
 }
 
 // newCRM builds the CRM services. Recording links (spec I-33, I-53) come
@@ -59,16 +66,18 @@ func newCRM(cfg config.Control, st *store.Store, db *sql.DB, box *secret.Box, vk
 	lookup := &crm.Lookup{Repo: repo, Tokens: tokens, Cache: crm.ValkeyCache{Client: vk.Client}, Log: clog}
 	hook := &crm.Hook{Repo: repo, Providers: providers}
 	return &crmWiring{
-		Service: &crm.Service{Repo: repo, Tokens: tokens, Lookup: lookup, Links: links, PublicURL: cfg.AI.PublicURL, Log: clog},
-		Hook:    hook.Handle,
-		worker:  &crm.Worker{Repo: repo, Tokens: tokens, Links: links, Audio: audio, Metrics: metrics, Log: clog},
-		renewer: &crm.Renewer{Repo: repo, Log: clog},
+		Service:  &crm.Service{Repo: repo, Tokens: tokens, Lookup: lookup, Links: links, PublicURL: cfg.AI.PublicURL, DND: st, Log: clog},
+		Hook:     hook.Handle,
+		worker:   &crm.Worker{Repo: repo, Tokens: tokens, Links: links, Audio: audio, Metrics: metrics, Log: clog},
+		renewer:  &crm.Renewer{Repo: repo, Log: clog},
+		calendar: &crm.CalendarWorker{Repo: repo, Tokens: tokens, DND: st, Locker: st, Log: clog},
 	}
 }
 
 // Run starts the worker and the renewer; it returns when ctx ends.
 func (w *crmWiring) Run(ctx context.Context) {
 	go w.renewer.Run(ctx)
+	go w.calendar.Run(ctx)
 	w.worker.Run(ctx)
 }
 
