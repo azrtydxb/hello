@@ -241,7 +241,13 @@ func (e *wpEnv) setup(t *testing.T, hc *http.Client) {
 	prof := map[string]any{"name": "lab " + suffix, "ssid": e.wifiSSID, "verified": true}
 	if e.transp == "tls" {
 		e.wifiUser, e.wifiPass = "wp-"+suffix, "Pw-"+randHex(6)
-		prof["security"], prof["eapMethod"], prof["identity"], prof["password"] = "wpa2-enterprise", "peap", e.wifiUser, e.wifiPass
+		var d1x struct {
+			ID int64 `json:"id"`
+		}
+		lc.must("POST", "/api/v1/dot1x-profiles", map[string]any{
+			"name": "lab " + suffix, "method": "peap", "identity": e.wifiUser, "password": e.wifiPass,
+		}, &d1x, 201)
+		prof["security"], prof["dot1xProfileId"] = "wpa2-enterprise", d1x.ID
 		remember(e.wifiPass)
 	} else {
 		e.wifiPSK = "psk-" + randHex(6)

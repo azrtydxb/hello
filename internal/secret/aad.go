@@ -41,3 +41,10 @@ func CRMTokenAAD(connectorID int64, which string) string {
 func CRMUserTokenAAD(connectorID, userID int64, which string) string {
 	return fmt.Sprintf("crm:%d:user:%d:%s", connectorID, userID, which)
 }
+
+// MsgChannelAAD is the additional data a messaging channel's carrier
+// credentials are sealed under, so a value copied to another channel's row
+// does not open.
+func MsgChannelAAD(channelID int64) string {
+	return fmt.Sprintf("msg_channel:%d:credentials", channelID)
+}
