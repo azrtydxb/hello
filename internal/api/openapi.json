@@ -38526,6 +38526,24 @@
             "type": "string",
             "description": "The name the callee's phone would show."
           },
+          "company": {
+            "type": "string",
+            "description": "The matching entry's company, when it has one."
+          },
+          "crm": {
+            "type": "object",
+            "description": "The contact a CRM connector knows for the number (GET /lookup/number only; absent when no connector knows it). Independent of result: a number can be none in the books and known to the CRM.",
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "company": { "type": "string" },
+              "url": {
+                "type": "string",
+                "description": "Link to the contact in the CRM."
+              }
+            }
+          },
           "matches": {
             "type": "integer",
             "description": "How many entries share the last 9 digits when ambiguous."

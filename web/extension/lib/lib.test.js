@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   applyProgress,
   describe as describeCall,
@@ -10,6 +10,13 @@ import {
   originPatterns,
   serverOrigin,
 } from "./hosts.js";
+import {
+  contactOf,
+  createLookup,
+  safeLink,
+  NEGATIVE_TTL_MS,
+  POSITIVE_TTL_MS,
+} from "./lookup.js";
 import { dialable, findNumbers, isPhoneHref } from "./numbers.js";
 import { challengeOf, randomToken } from "./pkce.js";
 import { createSseParser } from "./sse.js";
@@ -163,6 +170,159 @@ describe("calls", () => {
       ringingPop({ id: "e2", type: "call.ringing", data: { from: {} } }).title,
     ).toBe("Call from Unknown caller");
     expect(ringingPop({ id: "e3", type: "call.ended", data: {} })).toBeNull();
+  });
+});
+
+describe("ringingPop with a contact", () => {
+  const ev = {
+    id: "e1",
+    type: "call.ringing",
+    data: { extension: "101", from: { name: "Event Name", number: "+3211" } },
+  };
+  it("shows the contact's name, company and link, and falls back to the event name", () => {
+    const pop = ringingPop(ev, {
+      name: "Grace Hopper",
+      company: "Navy",
+      url: "https://crm.example/c9",
+    });
+    expect(pop.title).toBe("Call from Grace Hopper");
+    expect(pop.message.split("\n")).toEqual([
+      "+3211",
+      "Navy",
+      "Ringing extension 101",
+    ]);
+    expect(pop.url).toBe("https://crm.example/c9");
+    const plain = ringingPop(ev, null);
+    expect(plain.title).toBe("Call from Event Name");
+    expect(plain.url).toBe("");
+    expect(
+      ringingPop({ ...ev, data: { from: { number: "+3211" } } }, null).title,
+    ).toBe("Call from +3211");
+  });
+});
+
+describe("contactOf", () => {
+  it("prefers the CRM contact, then a book match, and ignores the rest", () => {
+    expect(
+      contactOf({
+        result: "match",
+        name: "Book Name",
+        company: "Book Co",
+        crm: {
+          id: "1",
+          name: "Crm Name",
+          company: "Crm Co",
+          url: "https://c/1",
+        },
+      }),
+    ).toEqual({ name: "Crm Name", company: "Crm Co", url: "https://c/1" });
+    expect(
+      contactOf({ result: "match", name: "Ada", company: "Corp" }),
+    ).toEqual({ name: "Ada", company: "Corp", url: "" });
+    // A company-only entry names the caller by its company, once.
+    expect(
+      contactOf({ result: "match", name: "Corp", company: "Corp" }),
+    ).toEqual({ name: "Corp", company: "", url: "" });
+    // A CRM hit stands on its own when the books know nothing.
+    expect(
+      contactOf({ result: "none", crm: { id: "1", name: "Zed" } }),
+    ).toMatchObject({ name: "Zed" });
+    expect(contactOf({ result: "none" })).toBeNull();
+    expect(
+      contactOf({ result: "ambiguous", name: "X", matches: 2 }),
+    ).toBeNull();
+    expect(contactOf(null)).toBeNull();
+  });
+  it("offers only http and https links", () => {
+    expect(safeLink("https://crm.example/c?id=1")).toBe(
+      "https://crm.example/c?id=1",
+    );
+    expect(safeLink("javascript:alert(1)")).toBe("");
+    expect(safeLink("chrome://settings")).toBe("");
+    expect(safeLink("not a url")).toBe("");
+    expect(
+      contactOf({
+        result: "none",
+        crm: { id: "1", name: "Z", url: "javascript:x" },
+      }).url,
+    ).toBe("");
+  });
+});
+
+describe("createLookup", () => {
+  const hit = { result: "match", name: "Ada", company: "Corp", searched: [] };
+  function fakeSession(answer) {
+    return {
+      json: vi.fn(async () =>
+        typeof answer === "function" ? answer() : answer,
+      ),
+    };
+  }
+
+  it("asks the lookup API for the number, as given", async () => {
+    const s = fakeSession(hit);
+    const l = createLookup(s);
+    expect(await l.find("+32 11/22")).toEqual({
+      name: "Ada",
+      company: "Corp",
+      url: "",
+    });
+    expect(s.json.mock.calls[0][0]).toBe(
+      "/api/v1/lookup/number?number=%2B32%2011%2F22",
+    );
+  });
+
+  it("caches a hit for five minutes and a miss for one", async () => {
+    let t = 1000;
+    const s = fakeSession(hit);
+    const l = createLookup(s, { now: () => t });
+    await l.find("+3211");
+    await l.find("+3211");
+    expect(s.json).toHaveBeenCalledTimes(1);
+    t += POSITIVE_TTL_MS + 1;
+    await l.find("+3211");
+    expect(s.json).toHaveBeenCalledTimes(2);
+
+    const m = fakeSession({ result: "none" });
+    const l2 = createLookup(m, { now: () => t });
+    expect(await l2.find("+3299")).toBeNull();
+    expect(await l2.find("+3299")).toBeNull();
+    expect(m.json).toHaveBeenCalledTimes(1);
+    t += NEGATIVE_TTL_MS + 1;
+    await l2.find("+3299");
+    expect(m.json).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats a 404 and any failure as no match without throwing", async () => {
+    const notFound = Object.assign(new Error("nope"), { status: 404 });
+    const l = createLookup(
+      fakeSession(() => {
+        throw notFound;
+      }),
+    );
+    expect(await l.find("+3211")).toBeNull();
+    const down = createLookup(
+      fakeSession(() => {
+        throw new Error("offline");
+      }),
+    );
+    expect(await down.find("+3211")).toBeNull();
+  });
+
+  it("does not look up an empty number, and gives up on a slow server", async () => {
+    const s = fakeSession(hit);
+    expect(await createLookup(s).find("")).toBeNull();
+    expect(await createLookup(s).find(undefined)).toBeNull();
+    expect(s.json).not.toHaveBeenCalled();
+    const slow = {
+      json: (_p, init) =>
+        new Promise((_, rej) =>
+          init.signal.addEventListener("abort", () =>
+            rej(new Error("aborted")),
+          ),
+        ),
+    };
+    expect(await createLookup(slow, { timeout: 5 }).find("+3211")).toBeNull();
   });
 });
 
