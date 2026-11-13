@@ -1481,6 +1481,16 @@ spec:
             - name: HELLO_MEDIA_RECORDING_NOTICE
               # The spoken notice plays before a recording starts.
               value: "true"
+            - name: HELLO_FAX_ENABLED
+              # The fax engine (kw/fax.yaml, docs/fax.md).
+              value: "true"
+            - name: HELLO_FAX_ADDR
+              value: hello-fax.hello.svc.cluster.local:8083
+            - name: HELLO_FAX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hello-fax
+                  key: faxToken
           ports:
             - name: http
               containerPort: 8082
@@ -1703,6 +1713,16 @@ spec:
             - name: HELLO_MEDIA_RECORDING_NOTICE
               # The spoken notice plays before a recording starts.
               value: "true"
+            - name: HELLO_FAX_ENABLED
+              # The fax engine (kw/fax.yaml, docs/fax.md).
+              value: "true"
+            - name: HELLO_FAX_ADDR
+              value: hello-fax.hello.svc.cluster.local:8083
+            - name: HELLO_FAX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hello-fax
+                  key: faxToken
           ports:
             - name: http
               containerPort: 8082
@@ -1945,6 +1965,32 @@ spec:
               value: https://hello.kw.watteel.lab
             - name: HELLO_OAUTH_DCR
               value: "true"
+            - name: HELLO_FAX_ENABLED
+              # The fax engine (kw/fax.yaml, docs/fax.md).
+              value: "true"
+            - name: HELLO_FAX_ADDR
+              value: hello-fax.hello.svc.cluster.local:8083
+            - name: HELLO_FAX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hello-fax
+                  key: faxToken
+            - name: HELLO_TURN_URLS
+              # The coturn servers of kw/coturn.yaml (docs/webrtc.md): clients
+              # are given every address, UDP, TCP and TLS.
+              value: >-
+                turn:192.168.10.101:3478?transport=udp,turn:192.168.10.101:3478?transport=tcp,turns:192.168.10.101:5349?transport=tcp,turn:192.168.10.102:3478?transport=udp,turn:192.168.10.102:3478?transport=tcp,turns:192.168.10.102:5349?transport=tcp
+            - name: HELLO_TURN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hello-coturn
+                  key: turnSecret
+            - name: HELLO_DOOR_CAMERA_ALLOW
+              # Door video (docs/door-stations.md, S-49): hello-control fetches
+              # a door station's camera picture itself and may only reach
+              # public addresses plus these private networks: the LAN the door
+              # stations and their cameras are on.
+              value: 192.168.10.0/24
             # Phone provisioning (.procoder/specs/phone-auto-provisioning-service.md):
             # the listener on :8083 (HELLO_PROV_ADDR's default) behind the
             # hello-prov Ingress, which terminates TLS with hello-prov-tls.

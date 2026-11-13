@@ -107,6 +107,12 @@ Confirmed against the cluster during the first-sync bootstrap:
 | `kw/secret-hello-nonce.sops.yaml`     | `hello-nonce`     | `nonceSecret`                              | hello-sip-1/2 (`HELLO_SIP_NONCE_SECRET`)                          |
 | `kw/secret-hello-bootstrap.sops.yaml` | `hello-bootstrap` | `password`                                 | hello-control (`HELLO_BOOTSTRAP_ADMIN_PASSWORD`)                  |
 | `kw/secret-hello-ai.sops.yaml`        | `hello-ai`        | `provider`, `base-url`, `model`, `api-key` | hello-control (`HELLO_AI_*`, optional, see docs/ai-agent.md)      |
+| `kw/secret-hello-coturn.sops.yaml`    | `hello-coturn`    | `turnSecret`                               | coturn-1/2 (`TURN_SECRET`), hello-control (`HELLO_TURN_SECRET`)   |
+| `kw/secret-hello-fax.sops.yaml`       | `hello-fax`       | `faxToken`                                 | hello-fax, hello-sip-1/2, hello-control (`HELLO_FAX_TOKEN`)       |
+
+`turnSecret` and `faxToken` are random values (`openssl rand -base64 32`)
+encrypted to the hello age recipient. Rotating `turnSecret` needs a rolling
+restart of hello-control and both coturn pods together (docs/webrtc.md).
 
 Optional, not yet supplied: `kw/secret-hello-prov-redirect.sops.yaml`
 (`hello-prov-redirect`), the phone vendors' redirect-service credentials.
@@ -135,6 +141,26 @@ a `hello-smtp` secret and `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/
 Until encrypted, each file is a comment-only skeleton; `render-private.py`
 fails on it (SOPS decryption failed) rather than rendering plaintext. Never
 commit a decrypted file or put credentials in shell arguments.
+
+## Fax, coturn and door cameras
+
+- `kw/fax.yaml`: the fax engine (`hello-fax`, a ClusterIP Service on 8083;
+  media goes to the pod IP on UDP 40000-40999). hello-sip-1/2 and hello-control
+  carry `HELLO_FAX_ENABLED`, `HELLO_FAX_ADDR` and `HELLO_FAX_TOKEN`.
+- `kw/coturn.yaml`: STUN/TURN for the browser softphone, `coturn-1` on
+  master-11 (192.168.10.101) and `coturn-2` on master-12 (192.168.10.102), both
+  host-networked: UDP and TCP 3478, TLS 5349 (`hello-coturn-tls` from
+  cluster-ca) and the relay range 49152-49999/UDP. `TURN_ALLOWED_PEERS` is
+  192.168.10.101-192.168.10.108, every node that can run a hello-sip (they are
+  not pinned). hello-control carries `HELLO_TURN_URLS` and `HELLO_TURN_SECRET`.
+  The softphone also needs `clientAuthKey` (web devices) in a Secret and
+  `HELLO_CLIENT_AUTH_KEY` on hello-control and hello-sip; that is not part of
+  this and web devices stay off without it.
+- `HELLO_DOOR_CAMERA_ALLOW=192.168.10.0/24` on hello-control: the private
+  network a door station's camera picture may be fetched from (docs/door-stations.md).
+- The image tags of hello-fax and coturn are the commit these files were
+  written at; pin both to the tags ci.yaml publishes for the release (kw has no
+  other pin for them).
 
 ## Kamailio HA: extra grants for the deployer
 

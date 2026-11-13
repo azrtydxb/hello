@@ -3333,3 +3333,16 @@ Decided while building, without asking, within the spec and the brief:
 - Why: the semgrep `dangerous-exec-command` gate blocks any exec of a
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
+
+## kw manifests for fax, coturn and the door camera allow-list (2026-11-13, deploy/kw-fax-coturn-door)
+
+Draft PR "HOLD: kw manifests (deploy when unpaused)": merging to main deploys through Sync, and deploys are paused (registry 503), so it stays a draft until the operator resumes them.
+
+- **hello-fax (#273)**: `kw/fax.yaml`, a Deployment and a ClusterIP Service on 8083, no Ingress. hello-sip-1/2 and hello-control get `HELLO_FAX_ENABLED`, `HELLO_FAX_ADDR=hello-fax.hello.svc.cluster.local:8083` and `HELLO_FAX_TOKEN`. The token is a new sops Secret `hello-fax` (`faxToken`, random), shared by the three callers and the engine.
+- **coturn (#282)**: `kw/coturn.yaml`, `coturn-1` on master-11 (192.168.10.101) and `coturn-2` on master-12 (192.168.10.102), host-networked, Recreate, one replica each, UDP/TCP 3478, TLS 5349 and relay 49152-49999/UDP, the chart's own settings. TLS is a cert-manager Certificate `hello-coturn-tls` from cluster-ca with both addresses as IP SANs. The secret is a new sops Secret `hello-coturn` (`turnSecret`, random), read by both coturn pods and hello-control, so `hello-app` (whose private key would be needed to edit it) is untouched. hello-control gets `HELLO_TURN_URLS` for both servers (UDP, TCP, TLS) and `HELLO_TURN_SECRET`.
+- **`TURN_ALLOWED_PEERS` is 192.168.10.101-192.168.10.108**, every node that can run a hello-sip (master-11 to master-13, worker-21 to worker-25): the two hello-sip Deployments are host-networked but not pinned, and their media address is the node's. Wider than today's two nodes; pinning hello-sip would narrow it. Earlier draft values (scratchpad coturn-values.yaml) were lost with the scratchpad, so these follow the chart's defaults and the cluster's node list.
+- **Not enabled here:** web devices themselves. They need `clientAuthKey` (`HELLO_CLIENT_AUTH_KEY` on hello-control and hello-sip), which the brief did not ask for; coturn and the ICE-server route are deployed without it.
+- **`HELLO_DOOR_CAMERA_ALLOW=192.168.10.0/24`** on hello-control (#285, still open: its config reads the variable and an older binary ignores it). 192.168.10.0/24 is the LAN of the nodes and the phones; narrow it if the cameras sit on a smaller network.
+- **Image tags** of hello-fax and coturn are `sha-<the main commit these files were written at>`; ci.yaml publishes them on push to main. They must be re-pinned to the tags of the release commit when deploys resume (kw has no earlier pin for either).
+- **Test:** `TestChartEnvParityWithKw` renders the chart with fax and coturn on so kw and chart agree; `HELLO_DOOR_CAMERA_ALLOW` is listed as kw-only (the chart sets it through `control.extraEnv`). `TestKwCoturn` and `TestKwFax` pin the manifests.
+- **Validated** with `kubectl --context kw apply --dry-run=server` (the whole rendered set, server-side, field manager kuvryn-sync): every object accepted; the private render was deleted afterwards.
