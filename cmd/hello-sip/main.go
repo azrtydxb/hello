@@ -20,7 +20,13 @@ import (
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/crm"
-	_ "github.com/azrtydxb/hello/internal/crm/hubspot" // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/autotask"    // registers the autotask connector
+	_ "github.com/azrtydxb/hello/internal/crm/clio"        // registers the clio connector
+	_ "github.com/azrtydxb/hello/internal/crm/connectwise" // registers the connectwise connector
+	_ "github.com/azrtydxb/hello/internal/crm/freshdesk"   // registers the freshdesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/halopsa"     // registers the halopsa connector
+	_ "github.com/azrtydxb/hello/internal/crm/hubspot"     // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/zendesk"     // registers the zendesk connector
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/lifecycle"
