@@ -72,9 +72,12 @@ type LogRow struct {
 	EventType      string          `json:"eventType"`
 	OwnerExtension string          `json:"ownerExtension"`
 	RecordingID    int64           `json:"recordingId,omitempty"`
-	LinkExpiresAt  *time.Time      `json:"linkExpiresAt,omitempty"`
-	CreatedAt      time.Time       `json:"createdAt"`
-	UpdatedAt      time.Time       `json:"updatedAt"`
+	// State is what a multi-step connector already did for this call (see
+	// PartialError); never shown in the API.
+	State         string     `json:"-"`
+	LinkExpiresAt *time.Time `json:"linkExpiresAt,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 // LogJob is a call to log, as the event hook enqueues it.
@@ -96,6 +99,9 @@ type LogResult struct {
 	LinkExpiresAt *time.Time
 	// ClearLink drops link_expires_at (a recording that no longer applies).
 	ClearLink bool
+	// State replaces the job's saved connector state when not nil (an empty
+	// string clears it).
+	State *string
 	// RecordingSeen is the recording id the attempt worked from: a recording
 	// that arrived meanwhile turns a logged job into an update.
 	RecordingSeen int64

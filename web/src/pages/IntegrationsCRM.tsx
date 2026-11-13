@@ -562,22 +562,34 @@ function ConnectionTab({
           onChange={(e) => setLogMissed(e.target.checked)}
         />
         <Switch
-          label="Attach recording links"
-          hint="Off by default. A link to the recording is written into the CRM record; anyone with the link can play it until it expires."
+          label={
+            c.capabilities.recordingUpload
+              ? "Attach recordings"
+              : "Attach recording links"
+          }
+          hint={
+            c.capabilities.recordingUpload
+              ? "Off by default. The CRM stores an audio file, not a link: the recording is uploaded to the call log."
+              : c.capabilities.recordingCopy
+                ? "Off by default. The CRM fetches the recording once from a one-day link and keeps its own copy."
+                : "Off by default. A link to the recording is written into the CRM record; anyone with the link can play it until it expires."
+          }
           checked={recordings}
           onChange={(e) => setRecordings(e.target.checked)}
         />
-        {recordings && (
-          <Input
-            label="Recording link lifetime (days)"
-            type="number"
-            min={1}
-            max={365}
-            value={ttlDays}
-            onChange={(e) => setTtlDays(e.target.value)}
-            hint="Links of recent calls are renewed before they expire."
-          />
-        )}
+        {recordings &&
+          !c.capabilities.recordingUpload &&
+          !c.capabilities.recordingCopy && (
+            <Input
+              label="Recording link lifetime (days)"
+              type="number"
+              min={1}
+              max={365}
+              value={ttlDays}
+              onChange={(e) => setTtlDays(e.target.value)}
+              hint="Links of recent calls are renewed before they expire."
+            />
+          )}
         <Input
           label={spec.ownerLabel}
           value={fallback}

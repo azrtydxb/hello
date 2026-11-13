@@ -3555,6 +3555,58 @@ Decided while building, without asking, within the spec and the brief:
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
 
+## Integrations P14, P15, P21: Pipedrive, Zoho CRM, Odoo, Bitrix24 (2026-11-13)
+
+Decided while building, without asking, within the spec and the brief:
+
+- **One migration, 00087.** `crm_call_logs.state TEXT NOT NULL DEFAULT ''`
+  (additive). The connector settings live in the existing `config` JSON and `kind` has no CHECK.
+  The migrate counts in `test/integration/migrate_{prov,ai,ai_agent}_test.go` are main's plus one.
+- **Sign-in follows #328's names.** Odoo (API key) and Bitrix24 (inbound webhook) are `crm.Direct`
+  connectors (`auth` is `direct`; Connect verifies the stored secret and returns an empty
+  `authorizeUrl`; a refused one is a field error on `clientSecret`) and use `crm.SecretBound`
+  (Zoho: `region`; Odoo: `url`, `db`; Bitrix24: none, its webhook address is the secret), the
+  shared `internal/crm/kit` helper and `crm.ErrNoTarget` (Odoo, a call with neither a contact
+  nor an owner). Odoo's access token is the API key, Bitrix24's the webhook address.
+- **Multi-step writes survive a restart.** A connector returns `crm.PartialError{State, Err}`
+  from `LogCall` when it fails after a step that cannot be repeated; the worker saves State on
+  the job and hands it back as `CallLog.State` on the retry, clearing it on success. Bitrix24
+  uses it for register then finish then attachRecord, so a retry (also after a `hello-control`
+  restart) never registers the call twice. This replaces an in-memory record.
+- **Pipedrive: one org-level connection, not one per user.** The spec's table says tokens are
+  per user "for attribution"; the call log's `user_id` gives the same attribution from one
+  administrator's connection, so per-user sign-in (and its console flow) is not built. The
+  user is matched by email (`users/find`), manual mapping as for every connector. Pipedrive's
+  `api_domain` is kept as the connection account and used as the REST base only when it is an
+  https `*.pipedrive.com` host.
+- **Pipedrive recording is an upload.** `Capabilities.RecordingUpload`: the worker keeps the
+  call log's reference first (status `update`), then opens the audio from MinIO through
+  `crm.AudioSource` (wired in `cmd/hello-control/crmaudio.go`) and the connector uploads it
+  once. A failed upload is retried as an update, never as a second create. Over
+  `HELLO_CRM_UPLOAD_MAX_MB` (default 50) or a deleted recording: the call stays logged and the
+  job's `lastError` says why. No link is minted, so nothing is renewed.
+- **Bitrix24 copies its recording.** `Capabilities.RecordingCopy`: a link of at most one day
+  (`CopyLinkTTL`) is minted, Bitrix24 fetches it once, and `link_expires_at` stays empty so
+  the renewal job never re-attaches a duplicate file.
+- **Zoho** sends the recording link in the call's description, as the spec says; a renewal
+  rewrites the description. Leads are looked up after contacts and attached as `Who_Id`.
+  Zoho's refused-code answer is HTTP 200 with an `error` member and is treated as permanent.
+  PhoneBridge click-to-call is not built (marketplace only, decision 1).
+- **Odoo logs a note in the chatter** (spec: "chatter/log, verify"): no call model is shared
+  by all editions. Unknown caller: the note goes to the call owner's own partner so the call
+  is not lost. It speaks `/jsonrpc` (Odoo 14 to 19); `/json/2` is on the lab list, since
+  `/jsonrpc` is deprecated for removal in Odoo 20. `author_id` is not set (the note is the API
+  user's), so the later body update is always allowed; the owner's name is in the body.
+- **Bitrix24 register is not idempotent** on the Bitrix side; see the state above. No lead is
+  created for an unknown number (`CRM_CREATE = 0`), `SHOW = 0` (no screen-pop in the portal).
+- **Private-network CRMs.** The CRM HTTP client now allows `HELLO_INTEGRATIONS_ALLOWED_CIDRS`
+  (RFC 1918 by default) in `hello-control` and, via a new config field, `hello-sip`, so a
+  self-hosted Odoo or Bitrix24 is reachable. Loopback, link-local and metadata stay blocked.
+- **Recording links** come from #328's `cmd/hello-control/crmlinks.go` minter (no second
+  wiring here); `newCRM` gains only the audio source for Pipedrive's upload.
+- **MCP:** unchanged. The four read tools list the new kinds; the `hello-crm` skill and its
+  failures table were taught the new kinds.
+
 ## Integrations P16 and P20: helpdesks, PSA tools and Clio (2026-11-13)
 
 Decided while building, without asking, within the spec and the brief:

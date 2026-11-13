@@ -265,6 +265,7 @@ certificate for 802.1X (EAP-TLS) without anyone copying keys around.
   (the SCEP certificate; written only where SCEP is on), `peap`, `eap-md5`
   (wired only). A wrong profile can take a phone off the network: try it on
   one phone's group first.
+
 ## Wi-Fi handsets
 
 A Grandstream Wi-Fi handset (WP810, WP822, WP825, WP816, WP826, WP836, WP856)

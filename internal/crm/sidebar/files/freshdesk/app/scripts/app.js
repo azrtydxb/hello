@@ -16,7 +16,8 @@ app.initialized().then(function (client) {
 
   function callLink(number) {
     var a = el("a", "Call", "call");
-    a.href = HELLO_URL.replace(/\/+$/, "") + "/dial?n=" + encodeURIComponent(number);
+    a.href =
+      HELLO_URL.replace(/\/+$/, "") + "/dial?n=" + encodeURIComponent(number);
     a.target = "_blank";
     a.rel = "noopener noreferrer";
     a.setAttribute("aria-label", "Call " + number + " with Hello");
@@ -33,12 +34,15 @@ app.initialized().then(function (client) {
       li.appendChild(callLink(n));
       ul.appendChild(li);
     });
-    if (!numbers.length) ul.appendChild(el("li", "No phone number on file.", "muted"));
+    if (!numbers.length)
+      ul.appendChild(el("li", "No phone number on file.", "muted"));
     root.appendChild(ul);
     root.appendChild(el("h2", "Recent tickets"));
     var tl = el("ul");
     tickets.forEach(function (t) {
-      tl.appendChild(el("li", "#" + t.id + " " + (t.subject || "(no subject)")));
+      tl.appendChild(
+        el("li", "#" + t.id + " " + (t.subject || "(no subject)")),
+      );
     });
     if (!tickets.length) tl.appendChild(el("li", "No other tickets.", "muted"));
     root.appendChild(tl);
@@ -49,10 +53,16 @@ app.initialized().then(function (client) {
     .then(function (d) {
       var contact = d.contact;
       return client.request
-        .invokeTemplate("listTickets", { context: { requesterId: String(contact.id) } })
+        .invokeTemplate("listTickets", {
+          context: { requesterId: String(contact.id) },
+        })
         .then(function (r) {
           var tickets = [];
-          try { tickets = JSON.parse(r.response); } catch (e) { /* none */ }
+          try {
+            tickets = JSON.parse(r.response);
+          } catch (e) {
+            /* none */
+          }
           render(contact, tickets);
           client.instance.resize({ height: "260px" });
         });

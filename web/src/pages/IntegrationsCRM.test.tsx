@@ -361,6 +361,145 @@ describe("CRM connectors (spec integrations P6)", () => {
     });
   });
 
+  it("adds an Odoo connector with its server, database, login and key", async () => {
+    const calls = mockApi({
+      ...me("admin"),
+      "GET /api/v1/integrations/crm": () => json({ items: [] }),
+      "POST /api/v1/integrations/crm": () =>
+        json({ ...connector({ kind: "odoo", auth: "direct" }) }, 201),
+    });
+    renderApp("/integrations/crm");
+    fireEvent.click(await screen.findByRole("button", { name: "Add a CRM" }));
+    const form = screen.getByRole("form", { name: "New CRM connector" });
+    fireEvent.change(within(form).getByLabelText("CRM"), {
+      target: { value: "odoo" },
+    });
+    expect(within(form).getByLabelText("Name")).toHaveValue("Odoo");
+    fireEvent.change(
+      within(form).getByLabelText("Login of the API key's user"),
+      { target: { value: "me@x.com" } },
+    );
+    fireEvent.change(within(form).getByLabelText("API key"), {
+      target: { value: "k" },
+    });
+    fireEvent.change(within(form).getByLabelText("Odoo address"), {
+      target: { value: "https://odoo.example.com" },
+    });
+    fireEvent.change(within(form).getByLabelText("Database"), {
+      target: { value: "prod" },
+    });
+    fireEvent.click(
+      within(form).getByRole("button", { name: "Add connector" }),
+    );
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "POST")).toBeTruthy(),
+    );
+    expect(calls.find((c) => c.method === "POST")!.body).toEqual({
+      kind: "odoo",
+      name: "Odoo",
+      clientSecret: "k",
+      config: {
+        clientId: "me@x.com",
+        url: "https://odoo.example.com",
+        db: "prod",
+      },
+    });
+  });
+
+  it("a Bitrix24 connector asks for the webhook only and sends no client id", async () => {
+    const calls = mockApi({
+      ...me("admin"),
+      "GET /api/v1/integrations/crm": () => json({ items: [] }),
+      "POST /api/v1/integrations/crm": () =>
+        json({ ...connector({ kind: "bitrix24", auth: "direct" }) }, 201),
+    });
+    renderApp("/integrations/crm");
+    fireEvent.click(await screen.findByRole("button", { name: "Add a CRM" }));
+    const form = screen.getByRole("form", { name: "New CRM connector" });
+    fireEvent.change(within(form).getByLabelText("CRM"), {
+      target: { value: "bitrix24" },
+    });
+    expect(within(form).queryByLabelText("Client ID")).toBeNull();
+    fireEvent.change(within(form).getByLabelText("Inbound webhook address"), {
+      target: { value: "https://p.bitrix24.com/rest/1/abc/" },
+    });
+    fireEvent.click(
+      within(form).getByRole("button", { name: "Add connector" }),
+    );
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "POST")).toBeTruthy(),
+    );
+    expect(calls.find((c) => c.method === "POST")!.body).toEqual({
+      kind: "bitrix24",
+      name: "Bitrix24",
+      clientSecret: "https://p.bitrix24.com/rest/1/abc/",
+      config: {},
+    });
+  });
+
+  it("a credential connector connects on the spot, without leaving the page", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    const calls = mockApi({
+      ...me("admin"),
+      "GET /api/v1/integrations/crm": () =>
+        json({
+          items: [
+            connector({
+              kind: "odoo",
+              auth: "direct",
+              config: {
+                clientId: "me@x.com",
+                url: "https://o.example",
+                db: "d",
+              },
+              connection: null,
+              redirectUri: undefined,
+            }),
+          ],
+        }),
+      "POST /api/v1/integrations/crm/1/connect": () =>
+        json({ authorizeUrl: "" }),
+    });
+    renderApp("/integrations/crm");
+    expect(screen.queryByText("Redirect URI")).toBeNull();
+    const btn = await screen.findByRole("button", { name: "Connect" });
+    expect(btn).toBeEnabled();
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.method === "POST" && c.url.endsWith("/connect")),
+      ).toBe(true),
+    );
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("changing the Odoo address asks for the key again", async () => {
+    mockApi({
+      ...me("admin"),
+      "GET /api/v1/integrations/crm": () =>
+        json({
+          items: [
+            connector({
+              kind: "odoo",
+              auth: "direct",
+              config: {
+                clientId: "me@x.com",
+                url: "https://o.example",
+                db: "d",
+              },
+            }),
+          ],
+        }),
+    });
+    renderApp("/integrations/crm");
+    const url = await screen.findByLabelText("Odoo address");
+    const key = screen.getByLabelText("API key");
+    expect(key).not.toBeRequired();
+    fireEvent.change(url, { target: { value: "https://other.example" } });
+    expect(key).toBeRequired();
+  });
+
   it("disconnects after a confirmation", async () => {
     const calls = mockApi({
       ...me("admin"),

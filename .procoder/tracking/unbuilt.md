@@ -86,14 +86,14 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P11 | OIDC SSO, LDAP bind login                      | todo        |
 | P12 | Auto-provisioning extensions from a range      | todo        |
 | P13 | Salesforce Open CTI                            | todo        |
-| P14 | Pipedrive                                      | todo        |
-| P15 | Zoho CRM                                       | todo        |
+| P14 | Pipedrive                                      | wip (#329)  |
+| P15 | Zoho CRM                                       | wip (#329)  |
 | P16 | Zendesk, Freshdesk                             | wip (#328)  |
 | P17 | Slack, n8n, Make                               | todo        |
 | P18 | Outlook/Google contacts lookup, calendar DND   | todo        |
 | P19 | Dynamics 365 CIF                               | todo        |
 | P20 | ConnectWise, Autotask, HaloPSA, Clio           | wip (#328)  |
-| P21 | Odoo, Bitrix24                                 | todo        |
+| P21 | Odoo, Bitrix24                                 | wip (#329)  |
 | P22 | Teams Direct Routing guide (shared with WR 13) | todo        |
 | #   | Item                                           | Status      |
 | --- | ---------------------------------------------- | ----------- |
@@ -110,14 +110,14 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P11 | OIDC SSO, LDAP bind login                      | todo        |
 | P12 | Auto-provisioning extensions from a range      | todo        |
 | P13 | Salesforce Open CTI                            | todo        |
-| P14 | Pipedrive                                      | todo        |
-| P15 | Zoho CRM                                       | todo        |
+| P14 | Pipedrive                                      | wip (#329)  |
+| P15 | Zoho CRM                                       | wip (#329)  |
 | P16 | Zendesk, Freshdesk                             | wip (#328)  |
 | P17 | Slack, n8n, Make                               | todo        |
 | P18 | Outlook/Google contacts lookup, calendar DND   | todo        |
 | P19 | Dynamics 365 CIF                               | todo        |
 | P20 | ConnectWise, Autotask, HaloPSA, Clio           | wip (#328)  |
-| P21 | Odoo, Bitrix24                                 | todo        |
+| P21 | Odoo, Bitrix24                                 | wip (#329)  |
 | P22 | Teams Direct Routing guide (shared with WR 13) | todo        |
 
 ## messaging-channels
@@ -222,3 +222,4 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - Parity lab items 1-7 and 14
 - Hello MCP "Connected apps" end-to-end (after #189)
 - Real-account lab lists for integrations, messaging, clients (after those phases)
+- CRM connector live checks on real accounts: Pipedrive, Zoho CRM, Odoo, Bitrix24 (docs/crm.md lab checklists)

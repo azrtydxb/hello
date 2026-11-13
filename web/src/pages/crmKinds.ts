@@ -300,6 +300,110 @@ export const KINDS: KindSpec[] = [
       ],
     },
   },
+  {
+    value: "pipedrive",
+    label: "Pipedrive",
+    auth: "oauth",
+    idLabel: "Client ID",
+    secretLabel: "Client secret",
+    secretHint: "Kept sealed; it is never shown again.",
+    fields: [],
+    bound: [],
+    ownerLabel: "Fallback owner (Pipedrive user id)",
+    guide: {
+      summary: "Pipedrive app settings",
+      text: "In the Pipedrive developer hub create a private app and set the callback URL below. Calls are logged for each user by their Pipedrive user id, so one connection by an administrator serves everyone. Pipedrive stores an audio file, not a link: with recordings on, the audio is uploaded to the call log (up to HELLO_CRM_UPLOAD_MAX_MB, 50 MB by default).",
+      scopes: [
+        "Contacts: read",
+        "Calls (activities): full access",
+        "Users: read",
+      ],
+    },
+  },
+  {
+    value: "zoho",
+    label: "Zoho CRM",
+    auth: "oauth",
+    idLabel: "Client ID",
+    secretLabel: "Client secret",
+    secretHint: "Kept sealed; it is never shown again.",
+    fields: [
+      {
+        key: "region",
+        label: "Zoho data centre",
+        initial: "us",
+        options: [
+          { value: "us", label: "United States (zoho.com)" },
+          { value: "eu", label: "Europe (zoho.eu)" },
+          { value: "in", label: "India (zoho.in)" },
+          { value: "au", label: "Australia (zoho.com.au)" },
+          { value: "jp", label: "Japan (zoho.jp)" },
+          { value: "ca", label: "Canada (zohocloud.ca)" },
+          { value: "sa", label: "Saudi Arabia (zoho.sa)" },
+          { value: "cn", label: "China (zoho.com.cn)" },
+        ],
+      },
+    ],
+    bound: ["region"],
+    ownerLabel: "Fallback owner (Zoho user id)",
+    guide: {
+      summary: "Zoho API console client",
+      text: "In the Zoho API console (the data centre of your account) add a Server-based Application and set the redirect URI below. Zoho's own PhoneBridge dialling is not used: call from Zoho with the browser extension.",
+      scopes: [
+        "ZohoCRM.modules.calls.CREATE",
+        "ZohoCRM.modules.calls.UPDATE",
+        "ZohoCRM.modules.contacts.READ",
+        "ZohoCRM.modules.leads.READ",
+        "ZohoCRM.users.READ",
+      ],
+    },
+  },
+  {
+    value: "odoo",
+    label: "Odoo",
+    auth: "direct",
+    idLabel: "Login of the API key's user",
+    secretLabel: "API key",
+    secretHint: "Kept sealed; it is never shown again.",
+    fields: [
+      {
+        key: "url",
+        label: "Odoo address",
+        hint: "https://odoo.example.com",
+        required: true,
+      },
+      { key: "db", label: "Database", required: true },
+    ],
+    bound: ["url", "db"],
+    ownerLabel: "Fallback owner (Odoo user id)",
+    guide: {
+      summary: "Odoo API key",
+      text: "Hello logs a call as a note in the contact's chatter, or in the call owner's own when the caller is unknown. Hello checks the key when you press Connect. Odoo 14 or later.",
+      steps: [
+        "In Odoo open the user's preferences, Account Security, New API Key.",
+        "The user needs access to Contacts and the right to post notes.",
+      ],
+    },
+  },
+  {
+    value: "bitrix24",
+    label: "Bitrix24",
+    auth: "direct",
+    secretLabel: "Inbound webhook address",
+    secretHint:
+      "https://your-portal.bitrix24.com/rest/1/xxxxxxxx/ . The address contains the secret; it is kept sealed and never shown again.",
+    fields: [],
+    bound: [],
+    ownerLabel: "Fallback owner (Bitrix24 user id)",
+    guide: {
+      summary: "Bitrix24 inbound webhook",
+      text: "Calls appear in the CRM entity found by phone. The recording is fetched by Bitrix24 from a one-day link and kept as its own copy.",
+      steps: [
+        "Developer resources, Other, Inbound webhook: give it the permissions CRM, Telephony and Users.",
+        "Paste its address here as the secret; Hello checks it when you press Connect.",
+      ],
+    },
+  },
 ];
 
 export function kindSpec(kind: string): KindSpec {
