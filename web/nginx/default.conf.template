@@ -170,6 +170,34 @@ server {
         try_files /index.html =404;
     }
 
+    # Hello inside another product's frame (docs/crm.md): the Salesforce Open
+    # CTI softphone and the Dynamics 365 CIF widget are static pages that only
+    # the named CRM hosts may frame. They run no inline script and talk only to
+    # this origin; the CRM's own library is the one third-party script, loaded
+    # from the host that framed the page.
+    location = /integrations/salesforce/softphone {
+        add_header Cache-Control "no-cache" always;
+        add_header Content-Security-Policy "frame-ancestors https://*.force.com https://*.salesforce.com https://*.cloudforce.com https://*.salesforce-setup.com; default-src 'none'; script-src 'self' https://*.force.com https://*.salesforce.com https://*.cloudforce.com https://*.salesforce-setup.com; connect-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'" always;
+        add_header Referrer-Policy "no-referrer" always;
+        try_files /integrations/salesforce/softphone.html =404;
+    }
+
+    location = /integrations/dynamics/cif {
+        add_header Cache-Control "no-cache" always;
+        add_header Content-Security-Policy "frame-ancestors https://*.dynamics.com; default-src 'none'; script-src 'self' https://*.dynamics.com; connect-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'" always;
+        add_header Referrer-Policy "no-referrer" always;
+        try_files /integrations/dynamics/cif.html =404;
+    }
+
+    # The sign-in popup's landing pages are never framed.
+    location ~ ^/integrations/(salesforce|dynamics)/callback$ {
+        add_header Cache-Control "no-cache" always;
+        add_header Content-Security-Policy "frame-ancestors 'none'; default-src 'none'; script-src 'self'; base-uri 'none'" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        try_files /integrations/$1/callback.html =404;
+    }
+
     # The HubSpot calling iframe (docs/crm.md, "The HubSpot calling iframe"):
     # HubSpot frames this one page as its phone widget, so it
     # is the one page that may be framed, and only by HubSpot's own hosts (every

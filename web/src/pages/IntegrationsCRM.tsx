@@ -8,6 +8,7 @@ import {
   CRM_LOG_STATUSES,
   deleteCRMConnector,
   disconnectCRMConnector,
+  getCRMSetup,
   listCRMConnectors,
   listCRMLogs,
   listCRMUsers,
@@ -18,6 +19,7 @@ import {
   type CRMConnector,
   type CRMLog,
   type CRMLogStatus,
+  type CRMSetupItem,
   type CRMUserMapping,
 } from "../api/crm";
 import {
@@ -146,7 +148,7 @@ export function IntegrationsCRM() {
           <EmptyState
             icon="plug"
             title="No CRM connected"
-            description="Add HubSpot, Zendesk, Freshdesk, ConnectWise, Autotask, HaloPSA or Clio with the credentials you created in your own account."
+            description="Add HubSpot, Salesforce, Dynamics 365, Zendesk, Freshdesk, ConnectWise, Autotask, HaloPSA or Clio with the credentials you created in your own account."
           />
         )}
         {items?.map((c) => (
@@ -174,6 +176,15 @@ function KindFieldInput({
   value: string;
   onChange: (v: string) => void;
 }) {
+  if (field.switch)
+    return (
+      <Switch
+        label={field.label}
+        hint={field.hint}
+        checked={value === "true"}
+        onChange={(e) => onChange(e.target.checked ? "true" : "false")}
+      />
+    );
   if (field.options)
     return (
       <Select
@@ -188,9 +199,67 @@ function KindFieldInput({
       label={field.label}
       value={value}
       required={field.required}
+      placeholder={field.placeholder}
       hint={field.hint}
       onChange={(e) => onChange(e.target.value)}
     />
+  );
+}
+
+/** What the customer sets up in the CRM: values to copy, files to import. */
+function SetupPanel({ connector: c }: { connector: CRMConnector }) {
+  const load = useCallback(
+    (sig: AbortSignal) => getCRMSetup(c.id, sig),
+    [c.id],
+  );
+  const setup = usePolling(load, 60_000);
+  if (setup.status === "loading") return <Spinner label="Loading setup…" />;
+  if (setup.status === "error")
+    return (
+      <Alert tone="warn" title="Setup values are not available">
+        {setup.message}
+      </Alert>
+    );
+  if (setup.data.length === 0) return null;
+  return (
+    <details open>
+      <summary>Set up {kindSpec(c.kind).label}</summary>
+      {setup.data.map((it) => (
+        <SetupRow key={it.name} item={it} />
+      ))}
+    </details>
+  );
+}
+
+function SetupRow({ item }: { item: CRMSetupItem }) {
+  if (item.kind === "file") {
+    const download = () => {
+      const url = URL.createObjectURL(
+        new Blob([item.value], { type: "application/xml" }),
+      );
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = item.filename ?? "hello.xml";
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+    return (
+      <div>
+        <p>
+          <Button icon="download" variant="secondary" onClick={download}>
+            Download {item.label}
+          </Button>{" "}
+          {item.hint}
+        </p>
+        <CodeBlock title={item.filename ?? item.label} code={item.value} />
+      </div>
+    );
+  }
+  return (
+    <div>
+      <CodeBlock title={item.label} code={item.value} />
+      {item.hint && <p>{item.hint}</p>}
+    </div>
   );
 }
 
@@ -210,6 +279,8 @@ function NewConnector({
   const [values, setValues] = useState(() => initialValues(spec));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const cfgNow = buildConfig(spec, clientId, values);
+  const creds = spec.needsCredentials?.(cfgNow) ?? true;
 
   function pick(next: string) {
     const sp = kindSpec(next);
@@ -227,13 +298,17 @@ function NewConnector({
       const created = await createCRMConnector({
         kind,
         name,
-        clientSecret: secret,
-        config: buildConfig(spec, clientId, values),
+        ...(secret !== "" ? { clientSecret: secret } : {}),
+        config: cfgNow,
       });
       setOpen(false);
       setSecret("");
       reload();
       if (spec.auth === "direct") {
+        if (!(spec.canConnect?.(cfgNow) ?? true)) {
+          say("Connector added.");
+          return;
+        }
         // No browser step: sign in with the typed credentials now.
         try {
           await connectCRMConnector(created.id);
@@ -270,6 +345,7 @@ function NewConnector({
         options={KINDS.map((k) => ({ value: k.value, label: k.label }))}
         onChange={(e) => pick(e.target.value)}
       />
+      {spec.intro && <p>{spec.intro}</p>}
       <Input
         label="Name"
         value={name}
@@ -281,7 +357,7 @@ function NewConnector({
         <Input
           label={spec.idLabel}
           value={clientId}
-          required
+          required={creds}
           hint={spec.idHint}
           onChange={(e) => setClientId(e.target.value)}
         />
@@ -291,7 +367,7 @@ function NewConnector({
         type="password"
         autoComplete="off"
         value={secret}
-        required
+        required={creds}
         onChange={(e) => setSecret(e.target.value)}
         hint={spec.secretHint}
       />
@@ -390,6 +466,9 @@ function ConnectionTab({
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<"disconnect" | "delete" | null>(null);
+  const credsNow =
+    spec.needsCredentials?.(buildConfig(spec, clientId, values)) ?? true;
+  const canConnect = spec.canConnect?.(c.config) ?? true;
   // Changing the identity or where the secret goes asks for the secret again.
   const idChanged =
     (spec.idLabel !== undefined && clientId !== (c.config.clientId ?? "")) ||
@@ -423,9 +502,9 @@ function ConnectionTab({
   async function connect() {
     setErr(null);
     try {
-      const url = await connectCRMConnector(c.id);
-      if (url) {
-        window.location.assign(url);
+      const r = await connectCRMConnector(c.id);
+      if (r.authorizeUrl) {
+        window.location.assign(r.authorizeUrl);
       } else {
         reload();
         say("Connected.");
@@ -497,8 +576,8 @@ function ConnectionTab({
               <strong>Calling from HubSpot.</strong> For HubSpot&apos;s phone
               icon to place a call with the user&apos;s Hello phone, add a
               calling extension to the same app (Calling, in the app&apos;s
-              settings) with these values. Each user opens the phone widget
-              once and signs in to Hello in the window that appears.
+              settings) with these values. Each user opens the phone widget once
+              and signs in to Hello in the window that appears.
             </p>
             <CodeBlock
               title="Calling settings"
@@ -516,18 +595,25 @@ function ConnectionTab({
           </p>
         )}
       </details>
+      {spec.setup && (
+        <SetupPanel key={JSON.stringify(c.config)} connector={c} />
+      )}
       <p>
-        <Button
-          icon="link"
-          onClick={() => void connect()}
-          disabled={
-            c.auth === "oauth"
-              ? !c.redirectUri || !c.hasClientSecret || !c.config.clientId
-              : !c.hasClientSecret
-          }
-        >
-          {conn ? "Connect again" : "Connect"}
-        </Button>{" "}
+        {canConnect && (
+          <>
+            <Button
+              icon="link"
+              onClick={() => void connect()}
+              disabled={
+                c.auth === "oauth"
+                  ? !c.redirectUri || !c.hasClientSecret || !c.config.clientId
+                  : !c.hasClientSecret
+              }
+            >
+              {conn ? "Connect again" : "Connect"}
+            </Button>{" "}
+          </>
+        )}
         <Button
           variant="secondary"
           icon="activity"
@@ -563,7 +649,7 @@ function ConnectionTab({
           <Input
             label={spec.idLabel}
             value={clientId}
-            required
+            required={credsNow}
             hint={spec.idHint}
             onChange={(e) => setClientId(e.target.value)}
           />

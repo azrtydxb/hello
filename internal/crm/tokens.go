@@ -157,18 +157,19 @@ func (m *TokenManager) refresh(ctx context.Context, row ConnectorRow, conn Conne
 		return t, nil
 	}
 	var nt Tokens
+	// Connect treats a connector that is both as direct; so does this.
 	switch c := conn.(type) {
+	case Direct:
+		// A client-credentials token is requested again; a static
+		// credential comes back unchanged, so a second refusal marks the
+		// connection needs_reauth in the caller.
+		nt, err = c.Authenticate(ctx, cfg)
 	case OAuth:
 		if t.Refresh == "" {
 			m.needsReauth(ctx, row, cr.ID, "no refresh token")
 			return Tokens{}, ErrNeedsReauth
 		}
 		nt, err = c.Refresh(ctx, cfg, t.Refresh)
-	case Direct:
-		// A client-credentials token is requested again; a static
-		// credential comes back unchanged, so a second refusal marks the
-		// connection needs_reauth in the caller.
-		nt, err = c.Authenticate(ctx, cfg)
 	default:
 		m.needsReauth(ctx, row, cr.ID, "no refresh token")
 		return Tokens{}, ErrNeedsReauth

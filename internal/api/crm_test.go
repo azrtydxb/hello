@@ -400,6 +400,7 @@ func TestCRMRoutesAnswer503WithoutService(t *testing.T) {
 		{"GET", "/api/v1/integrations/crm/1/logs"}, {"POST", "/api/v1/integrations/crm/logs/1/retry"},
 		{"GET", "/api/v1/integrations/crm/1/users"}, {"PUT", "/api/v1/integrations/crm/1/users/1"},
 		{"POST", "/api/v1/integrations/hubspot/engagements"}, {"GET", "/api/v1/integrations/crm/oauth/callback"},
+		{"POST", "/api/v1/integrations/salesforce/engagements"}, {"GET", "/api/v1/integrations/crm/1/setup"},
 	} {
 		who := "carol"
 		if strings.HasSuffix(rt.p, "engagements") {
@@ -411,6 +412,83 @@ func TestCRMRoutesAnswer503WithoutService(t *testing.T) {
 		if code, b, _ := e.do(t, who, rt.m, rt.p, map[string]any{}); code != 503 {
 			t.Errorf("%s %s = %d %s, want 503", rt.m, rt.p, code, b)
 		}
+	}
+}
+
+// sfFake is a connector that signs in with client credentials, describes its
+// own setup and checks record ids, as the Salesforce connector does.
+type sfFake struct {
+	crmFake
+	authErr error
+}
+
+func (f *sfFake) Kind() string { return "salesforce" }
+func (f *sfFake) Authenticate(context.Context, crm.Config) (crm.Tokens, error) {
+	if f.authErr != nil {
+		return crm.Tokens{}, f.authErr
+	}
+	return crm.Tokens{Access: "ACCESS-SECRET", ExpiresAt: time.Now().Add(time.Hour), Account: "acme.my.salesforce.com"}, nil
+}
+func (f *sfFake) ServerSide(cfg map[string]string) bool { return cfg["serverLogging"] == "true" }
+func (f *sfFake) ValidRef(r string) bool                { return strings.HasPrefix(r, "00T") }
+func (f *sfFake) Setup(_ crm.Config, public string) []crm.SetupItem {
+	return []crm.SetupItem{{Name: "adapterUrl", Label: "CTI adapter URL", Kind: "url", Value: public + "/integrations/salesforce/softphone"}}
+}
+
+// TestSalesforceClientCredentialsAndSetup: a client-credentials connector is
+// connected by the Connect call itself, a refusal is a 400 on the secret, the setup values need the admin, and the softphone's record
+// handshake checks the record id and the caller's ownership. It fails if
+// Connect answers an authorize URL for it, a secret or token leaks, a
+// non-admin reads the setup, or a malformed record id is stored.
+func TestSalesforceClientCredentialsAndSetup(t *testing.T) {
+	e := newCRMEnv(t, "https://hello.example")
+	sf := &sfFake{}
+	e.svc.Tokens.Providers = func(k string) (crm.Connector, bool) { return sf, k == "salesforce" }
+	e.want(t, 404, "alice", "POST", "/api/v1/integrations/salesforce/engagements", map[string]any{"callId": "c1", "recordId": "00T000000000001"}) // no connector yet
+	c := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "salesforce", "name": "Salesforce",
+		"clientSecret": "CLIENT-SECRET", "config": map[string]string{"clientId": "cid", "serverLogging": "true"}})
+	p := connPath(c["id"])
+
+	setup := e.want(t, 200, "carol", "GET", p+"/setup", nil)
+	it := setup["items"].([]any)[0].(map[string]any)
+	if it["name"] != "adapterUrl" || it["value"] != "https://hello.example/integrations/salesforce/softphone" {
+		t.Fatalf("setup = %v", setup)
+	}
+	e.want(t, 403, "alice", "GET", p+"/setup", nil)
+	e.want(t, 404, "carol", "GET", connPath(int64(99))+"/setup", nil)
+
+	sf.authErr = &crm.APIError{Status: 400, Msg: "invalid_client: invalid client credentials"}
+	code, body, _ := e.do(t, "carol", "POST", p+"/connect", nil)
+	if code != 400 || !strings.Contains(string(body), "invalid_client") {
+		t.Fatalf("refused connect = %d %s", code, body)
+	}
+	sf.authErr = nil
+	r := e.want(t, 200, "carol", "POST", p+"/connect", nil)
+	if r["connected"] != true || r["authorizeUrl"] != "" {
+		t.Fatalf("connect = %v", r)
+	}
+	got := e.want(t, 200, "carol", "GET", p, nil)
+	if conn, _ := got["connection"].(map[string]any); conn["status"] != "connected" || conn["externalAccount"] != "acme.my.salesforce.com" {
+		t.Fatalf("connection = %v", got["connection"])
+	}
+	raw, _ := json.Marshal(got)
+	for _, secret := range []string{"ACCESS-SECRET", "CLIENT-SECRET"} {
+		if strings.Contains(string(raw), secret) {
+			t.Fatalf("the connector leaks %q", secret)
+		}
+	}
+
+	hs := "/api/v1/integrations/salesforce/engagements"
+	e.repo.Events = [][2]string{{"c1", "101"}, {"c2", "102"}}
+	e.want(t, 400, "alice", "POST", hs, map[string]any{"callId": "c1"})
+	e.want(t, 400, "alice", "POST", hs, map[string]any{"callId": "c1", "recordId": strings.Repeat("0", 19)})
+	e.want(t, 400, "alice", "POST", hs, map[string]any{"callId": "c1", "recordId": "003AAAAAAAAAAAA"})
+	e.want(t, 403, "alice", "POST", hs, map[string]any{"callId": "c2", "recordId": "00T000000000001"})
+	if r := e.want(t, 200, "alice", "POST", hs, map[string]any{"callId": "c1", "recordId": "00T000000000001"}); r["adopted"] != true {
+		t.Fatalf("own call = %v", r)
+	}
+	if row, ok := e.repo.Log(int64(c["id"].(float64)), "c1"); !ok || row.ExternalID != "00T000000000001" {
+		t.Fatalf("row = %+v", row)
 	}
 }
 

@@ -23446,7 +23446,7 @@
       "post": {
         "operationId": "connectCRMConnector",
         "summary": "Start the CRM sign-in",
-        "description": "Starts the OAuth authorization of the connector and returns the CRM address to send the browser to. The CRM returns to /api/v1/integrations/crm/oauth/callback, which finishes the connection and redirects to the console. Needs HELLO_PUBLIC_URL and the client id and secret. A connector with auth \"direct\" (Zendesk, Freshdesk, ConnectWise, Autotask, HaloPSA, Odoo, Bitrix24) has no browser step: Connect signs in with the stored credentials, stores the connection and returns an empty authorizeUrl; refused credentials are a 400 field error on clientSecret.",
+        "description": "Starts the sign-in of the connector. For an OAuth connector (HubSpot) it returns the CRM address to send the browser to; the CRM returns to /api/v1/integrations/crm/oauth/callback, which finishes the connection and redirects to the console, and HELLO_PUBLIC_URL is needed. A connector with auth \"direct\" has no browser step: Connect signs in with the stored credentials (Zendesk, Freshdesk, ConnectWise, Autotask, HaloPSA, Odoo and Bitrix24 with their typed credentials; Salesforce and Dynamics 365 with the OAuth client-credentials grant), stores the connection and returns an empty authorizeUrl with connected true. Needs the client id and secret. A refused client id or secret is a 400 on clientSecret.",
         "tags": ["integrations"],
         "parameters": [
           {
@@ -25724,6 +25724,103 @@
         "x-hello-mcp": {
           "exclude": "door camera credentials and pictures are handled in the console",
           "category": "binary-download"
+        }
+      }
+    },
+    "/api/v1/integrations/crm/{id}/setup": {
+      "get": {
+        "operationId": "getCRMSetup",
+        "summary": "What to configure in the CRM",
+        "description": "Lists what the customer configures in the CRM for the connector: for Salesforce the Call Center definition file to import and the CTI adapter URL, for Dynamics 365 the values of the Channel Integration Framework channel provider. Needs HELLO_PUBLIC_URL. None of it is secret. A connector with nothing to configure has an empty list.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The setup items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMSetupList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/integrations/salesforce/engagements": {
+      "post": {
+        "operationId": "recordSalesforceTask",
+        "summary": "Record the Salesforce Task of a call",
+        "description": "The Open CTI softphone tells the server which Task its saveLog created for a call, so the server patches that Task (duration, outcome, recording link) instead of creating a second one. If the server already logged the call, its Task is kept and adopted is false. When the connector does not log server side there is nothing to deduplicate and adopted is true. A user may only record calls of their own extensions.",
+        "tags": ["integrations"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CRMRecordInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Whether the engagement was adopted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMEngagementResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "calls",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "called by the Salesforce softphone, not by an agent",
+          "category": "credentials"
         }
       }
     }
@@ -42203,12 +42300,12 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "The connector's settings. clientId is the OAuth client id or, for direct connectors, the identity the secret belongs to (Zendesk agent email, ConnectWise integrator clientId, Autotask API user, Halo client id). hubspot: region (na or eu). zendesk: subdomain, createContacts (true or false), answeredStatus (open, pending, hold, solved). freshdesk: subdomain, answeredStatus (open, pending, resolved). connectwise: host, companyId, publicKey, codebase, activityType. autotask: integrationCode, host (zone, found when empty), actionType. halopsa: host, tenant, ticketTypeId, fallbackClientId. clio: region (us, eu, ca, au). zoho: region (us, eu, in, au, jp, ca, sa or cn). odoo: url and db, clientId is the login. bitrix24: no settings; the secret is the inbound webhook address."
+            "description": "The connector's settings. clientId is the OAuth client id or, for direct connectors, the identity the secret belongs to (Zendesk agent email, ConnectWise integrator clientId, Autotask API user, Halo client id). hubspot: region (na or eu). zendesk: subdomain, createContacts (true or false), answeredStatus (open, pending, hold, solved). freshdesk: subdomain, answeredStatus (open, pending, resolved). connectwise: host, companyId, publicKey, codebase, activityType. autotask: integrationCode, host (zone, found when empty), actionType. halopsa: host, tenant, ticketTypeId, fallbackClientId. clio: region (us, eu, ca, au). zoho: region (us, eu, in, au, jp, ca, sa or cn). odoo: url and db, clientId is the login. bitrix24: no settings; the secret is the inbound webhook address. salesforce: domain (My Domain host), apiVersion, serverLogging (true or false). dynamics: tenantId, orgUrl."
           },
           "auth": {
             "type": "string",
             "enum": ["oauth", "direct"],
-            "description": "How the connector signs in: oauth sends the administrator to the CRM to approve the app; direct signs in with the credentials the administrator typed (no browser step)."
+            "description": "How the connector signs in: oauth sends the administrator to the CRM to approve the app; direct signs in with the credentials the administrator typed (no browser step): an API token or key, or the OAuth client-credentials grant."
           },
           "hasClientSecret": {
             "type": "boolean",
@@ -42273,7 +42370,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "description": "The connector kind (hubspot, pipedrive, zoho, odoo, bitrix24, zendesk, freshdesk, connectwise, autotask, halopsa, clio); required on create, immutable afterwards."
+            "description": "The connector kind (hubspot, salesforce, dynamics, pipedrive, zoho, odoo, bitrix24, zendesk, freshdesk, connectwise, autotask, halopsa, clio); required on create, immutable afterwards."
           },
           "name": {
             "type": "string",
@@ -42290,7 +42387,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "The connector's own settings (see CRMConnector.config); keys you leave out are kept. Changing the clientId or a setting that decides where the secret is sent (host, subdomain, company, region) needs the clientSecret again."
+            "description": "The connector's own settings (see CRMConnector.config); keys you leave out are kept. Changing the clientId or a setting that decides where the secret is sent (host, subdomain, company, region) needs the clientSecret again. Salesforce: clientId, domain (My Domain host), apiVersion, serverLogging (true or false). Dynamics 365: clientId, tenantId, orgUrl."
           },
           "clientSecret": {
             "type": "string",
@@ -42320,11 +42417,15 @@
       },
       "CRMAuthorize": {
         "type": "object",
-        "required": ["authorizeUrl"],
+        "required": ["authorizeUrl", "connected"],
         "properties": {
           "authorizeUrl": {
             "type": "string",
-            "description": "The CRM address that asks the administrator to approve the app. Empty for a direct connector, which has no browser step."
+            "description": "The CRM address that asks the administrator to approve the app. Empty for a direct connector, which has no browser step and is connected by the call itself."
+          },
+          "connected": {
+            "type": "boolean",
+            "description": "True when the sign-in finished without a browser (client credentials)."
           }
         }
       },
@@ -43437,6 +43538,60 @@
             "maxLength": 256,
             "x-hello-secret": true,
             "description": "The camera's password, stored sealed and never returned. Absent keeps the stored one, an empty string clears it."
+          }
+        }
+      },
+      "CRMSetupItem": {
+        "type": "object",
+        "required": ["name", "label", "kind", "value"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["text", "url", "file"]
+          },
+          "value": {
+            "type": "string",
+            "description": "The value to paste, or the content of the file."
+          },
+          "filename": {
+            "type": "string",
+            "description": "The name to save a file as."
+          },
+          "hint": {
+            "type": "string"
+          }
+        }
+      },
+      "CRMSetupList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CRMSetupItem"
+            }
+          }
+        }
+      },
+      "CRMRecordInput": {
+        "type": "object",
+        "required": ["callId", "recordId"],
+        "properties": {
+          "callId": {
+            "type": "string",
+            "description": "The call's correlation id from the call events."
+          },
+          "recordId": {
+            "type": "string",
+            "maxLength": 18,
+            "description": "The id of the Salesforce Task the softphone created."
           }
         }
       }

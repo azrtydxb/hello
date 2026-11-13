@@ -3,16 +3,18 @@
 Hello can write every external call into a CRM, show the caller's name from
 the CRM on an incoming call, and attach a link to the recording. This page
 covers the connector framework (`internal/crm`) and its connectors: HubSpot
-(spec `.procoder/specs/integrations.md`, phase P6), Pipedrive (P14), Zoho CRM
+(spec `.procoder/specs/integrations.md`, phase P6), Salesforce (P13), Dynamics 365 (P19), Pipedrive (P14), Zoho CRM
 (P15), Odoo and Bitrix24 (P21), the helpdesks Zendesk and Freshdesk (P16) and the PSA and legal tools ConnectWise, Autotask, HaloPSA and Clio (P20). Later connectors plug into the same framework.
 
-| Connector | Sign-in                                  | Lookup by phone                        | A call is written as                         | Recording                                     |
-| --------- | ---------------------------------------- | -------------------------------------- | -------------------------------------------- | --------------------------------------------- |
-| HubSpot   | OAuth, the customer's app                | Contacts search                        | Call engagement                              | Link in `hs_call_recording_url`               |
-| Pipedrive | OAuth, the customer's private app        | Persons search                         | Call log                                     | The audio file, uploaded to the call log      |
-| Zoho CRM  | OAuth, the customer's API console client | Contacts, then Leads                   | Record in the Calls module                   | Link in the call's description                |
-| Odoo      | API key of a user (no browser step)      | Partners (`phone_mobile_search`)       | Note in the partner's chatter                | Link in the note                              |
-| Bitrix24  | Inbound webhook (no browser step)        | Contacts, companies and leads by phone | `telephony.externalcall` register and finish | Bitrix24 fetches a one-day link, keeps a copy |
+| Connector    | Sign-in                                                                          | Lookup by phone                        | A call is written as                         | Recording                                     |
+| ------------ | -------------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------------- | --------------------------------------------- |
+| HubSpot      | OAuth, the customer's app                                                        | Contacts search                        | Call engagement                              | Link in `hs_call_recording_url`               |
+| Pipedrive    | OAuth, the customer's private app                                                | Persons search                         | Call log                                     | The audio file, uploaded to the call log      |
+| Zoho CRM     | OAuth, the customer's API console client                                         | Contacts, then Leads                   | Record in the Calls module                   | Link in the call's description                |
+| Odoo         | API key of a user (no browser step)                                              | Partners (`phone_mobile_search`)       | Note in the partner's chatter                | Link in the note                              |
+| Bitrix24     | Inbound webhook (no browser step)                                                | Contacts, companies and leads by phone | `telephony.externalcall` register and finish | Bitrix24 fetches a one-day link, keeps a copy |
+| Salesforce   | Client credentials of a connected app (optional: the softphone alone needs none) | SOSL phone search, contacts then leads | Task of subtype Call                         | `Recording:` line in the Task's description   |
+| Dynamics 365 | Client credentials of an Entra app                                               | Contacts and leads, phone spellings    | Phone Call activity                          | `Recording:` line in the description          |
 
 ## What it does
 
@@ -53,6 +55,147 @@ sign-in returns to it).
 The secret is write-only: it is never returned by the API, shown in the
 console, logged or sent over MCP. Changing the client ID asks for the secret
 again, so a secret is never sent to another app.
+
+## Set up Salesforce
+
+Salesforce has two halves that you can use together or apart. Both need
+`HELLO_PUBLIC_URL`.
+
+**The softphone (no Salesforce credentials).** Hello serves an Open CTI
+softphone at `/integrations/salesforce/softphone`, which Salesforce shows in
+the utility bar of Lightning. It runs in the user's own Salesforce session, so
+Hello holds no Salesforce token for it. A user clicks a phone number in
+Salesforce (or types one) and the call is placed through Hello: the user's own
+desk phone rings first, then the number is dialled. An incoming call pops the
+caller's contact or lead (`searchAndScreenPop`), and every answered call is
+written as a Task (`saveLog`) that Hello later patches with the final duration
+and the recording link.
+
+1. In Hello open **Integrations, CRM, Add a CRM**, pick **Salesforce** and
+   save (nothing else is needed).
+2. On the connector, **Set up Salesforce** shows the **Call Center
+   definition**. Download it. In Salesforce open **Setup, Call Centers,
+   Import** and import the file, then **Manage Call Center Users** and add the
+   people who dial through Hello.
+3. In **Setup, CSP Trusted Sites** add the Hello address shown (the
+   **CSP Trusted Site** value) so Salesforce may frame and call it.
+4. Add the softphone to the Lightning app's **utility bar** (App Manager, edit
+   the app, Utility Items, Open CTI Softphone).
+5. Each person opens the softphone once and presses **Sign in to Hello**. A
+   popup asks them to approve "Hello for Salesforce" (scopes: place calls,
+   read call events). The token stays in the softphone's own session storage;
+   signing out forgets it.
+
+Without server-side logging the softphone also logs **missed** calls for the
+user whose softphone is open.
+
+**Server-side logging (a connected app).** Turn on **Also log calls from the
+server** to log what no browser was open for: missed calls, calls made on a
+desk phone, and to look callers up by phone number for the caller name on the
+phone. It also lets Hello add recording links to the Tasks.
+
+1. In Salesforce create an **External Client App** or Connected App with the
+   OAuth scope `api` and **Enable Client Credentials Flow**, and set its
+   **Run As** user to an integration user that may read Contacts, Leads and
+   Users, and create and edit Tasks.
+2. In Hello set **My Domain** (for example `acme.my.salesforce.com`), the
+   **Client ID** and **Client secret** of that app, and save.
+3. Press **Connect**. Hello signs in with the client credentials at once (no
+   browser step) and shows the org.
+4. Open **Users**: a Hello user is matched to the Salesforce user with the same
+   email address (active users only; an address that two users share is
+   skipped, never guessed). Set an id by hand or a **fallback owner** as for
+   HubSpot.
+
+### Salesforce specifics
+
+- A call becomes a **Task** of subtype Call: `Subject`, `Status = Completed`,
+  `CallType` (Inbound/Outbound), `CallDurationInSeconds`, `CallDisposition`
+  (Connected, No answer, Busy, ...), `CallObject` (Hello's call id),
+  `ActivityDate`, the `OwnerId`, the `WhoId` (a contact or lead) and a
+  `Description` with the numbers and, when switched on, a `Recording: <link>`
+  line.
+- The contact is found with a SOSL phone-field search on the last nine digits
+  (contacts first, then unconverted leads).
+- Updates rewrite only the duration, the outcome and the `Recording:` line; a
+  description a person edited keeps their text, and a renewed link replaces
+  the old line.
+- The softphone and the server never log a call twice: when the softphone
+  saves a Task it tells Hello (`POST /api/v1/integrations/salesforce/engagements`)
+  and the server patches that Task instead of creating its own. If the server
+  logged first, its Task is kept (`adopted: false`).
+- The client-credentials token has no refresh token: Hello signs in again when
+  it expires (15 minutes are assumed, Salesforce does not say) or when
+  Salesforce refuses it. When Salesforce refuses the credentials themselves
+  (secret rotated, app disabled) the connection becomes `needs_reauth` once,
+  with a banner and an email, exactly as for HubSpot.
+- A 403 `REQUEST_LIMIT_EXCEEDED` (the org's API limit) is retried like a 429.
+
+## Set up Dynamics 365
+
+You need a Dynamics 365 environment (Customer Service or Sales), the right to
+register an app in Microsoft Entra, and `HELLO_PUBLIC_URL`. Dynamics 365 in
+sovereign clouds (US Government DoD, China) is not supported; the commercial
+and GCC environments on `*.dynamics.com` are.
+
+1. In **Microsoft Entra** register an application, create a **client secret**,
+   and note the **Application (client) ID** and the **Directory (tenant) ID**.
+2. In the **Power Platform admin center** add the app as an **application
+   user** of your environment and give it a security role that can read
+   Contacts, Leads and Users and create and write Phone Calls (a copy of
+   _Salesforce / Sales Person_ with Activity create rights is enough).
+3. In Hello add a **Dynamics 365** connector: the **Environment URL** (for
+   example `https://contoso.crm4.dynamics.com`), the **Directory (tenant)
+   ID**, the **Client ID** and the **Client secret**. Press **Connect**: Hello
+   signs in with the client credentials and shows the environment.
+4. Open **Users**: a Hello user is matched to the enabled Dynamics user whose
+   primary email is the same (an address two users share is skipped).
+5. For the in-Dynamics widget, **Set up Dynamics 365** shows the values of a
+   **Channel Integration Framework** channel provider. In the **Customer
+   Service admin center** open **Channel Providers**, **New**, and enter the
+   name, the **Channel URL** (it carries your environment address), the
+   **Trusted domain**, **Channel provider API version 2.0** and **Enable
+   outbound communication**. Add the provider to the app profile of the apps
+   your users dial from.
+6. Each person opens the Hello panel once and presses **Sign in to Hello**
+   (popup, scopes: place calls, read call events; the app is "Hello for
+   Dynamics 365").
+
+With the widget open, a click on any phone number in Dynamics (click-to-act)
+rings the user's own phone and then dials the number, and an incoming call
+expands the panel and opens the caller's contact, or lead.
+
+### Dynamics specifics
+
+- A call becomes a **Phone Call** activity: `subject`, `phonenumber`,
+  `directioncode` (outgoing or not), `actualstart`, `actualend`,
+  `actualdurationminutes` (whole minutes, at least one for a talked call), the
+  owner, the activity parties (sender and recipient: the Dynamics user and the
+  contact or lead), the regarding record and a `description` with the numbers,
+  the outcome and the `Recording: <link>` line. It is created and then closed
+  as **Made** (outbound) or **Received** (inbound). A missed call is a
+  **Received** call whose subject says "Missed call from" and whose description
+  says "No answer": Dynamics has no "missed" status reason.
+- A closed activity is read-only in Dynamics, so an update (a recording link,
+  its renewal) reopens it, patches it and closes it again. If closing the new
+  call fails, Hello does not create it a second time: the next update closes
+  it.
+- Dataverse stores phone numbers as typed and has no normalised phone column,
+  so the lookup queries the spellings a stored number is likely to have in
+  `telephone1`, `mobilephone` and `telephone2` (leads: the first two): the last
+  eight digits run together, and grouped as pairs, 2-3-3, 3-3-2, 4-4, the last
+  six in pairs and the last seven as 3-4, each with a space, dash, dot or slash
+  between the groups. The national and the international spelling of a line
+  share their last eight digits, so `011 22 33 44` and `+32 11 22 33 44` find
+  each other. The server then compares the digits of every candidate (the same
+  last eight), so a different number that shares a fragment is never returned.
+  A number written with mixed separators (`011/22.33 44`) or grouped in an
+  unusual way is found only when its last six digits happen to be grouped
+  alike; the widget's screen pop uses the same list but cannot verify the
+  candidates.
+- As for Salesforce there is no refresh token: Hello signs in again when the
+  token expires, and `needs_reauth` follows refused credentials (an expired
+  client secret is the usual cause).
 
 ## Set up Pipedrive
 
@@ -288,6 +431,13 @@ in the console, the administrators with an email address are e-mailed (when
 SMTP is configured), and no job of that connector runs or loses an attempt
 until an administrator connects again. Then the waiting jobs are written.
 
+### Connectors without a browser sign-in
+
+Salesforce and Dynamics 365 sign in with the OAuth client-credentials grant of
+the customer's own app, so **Connect** connects at once and there is no
+redirect. Their jobs, owner mapping, caller names and recording links work
+exactly as HubSpot's.
+
 ### HubSpot specifics
 
 - A call becomes a **call engagement** (`POST /crm/v3/objects/calls`) with
@@ -392,7 +542,9 @@ Autotask and Clio accept any `https` link in a note or comment.
 `admin` scope and role; the job list and retry need `operator`. The reads
 (`listCRMConnectors`, `getCRMConnector`, `listCRMUsers`, `listCRMLogs`) are MCP
 tools taught by the `hello-crm` skill; everything that handles credentials is
-console only. Every change is audited (`create`, `update`, `delete`, `connect`,
+console only. `GET .../{id}/setup` lists what to configure in the CRM (the Salesforce call
+center definition, the Dynamics channel provider values; administrator only, no
+secrets, also an MCP read as `getCRMSetup`). Every change is audited (`create`, `update`, `delete`, `connect`,
 `disconnect`, `test`, `retry`, `map_user`, `needs_reauth`), never with a
 secret.
 
@@ -422,7 +574,8 @@ pressed Connect is its only credential, and it always redirects to
 Implement `crm.Connector` (`Lookup`, `LogCall`, `UpdateCallLog`,
 `ResolveUser`, `Capabilities`), optionally `crm.OAuth` (browser consent) or
 `crm.Direct` (`Authenticate` with the typed credentials: a static token or a
-client-credentials grant), `crm.SecretBound` (settings that choose where the
+client-credentials grant, as Salesforce and Dynamics 365 use), `crm.ServerSide` (settings that turn server-side
+work off), `crm.RefValidator` and `crm.SetupProvider` (what the customer configures in the CRM), `crm.SecretBound` (settings that choose where the
 secret goes), `crm.ConfigValidator`, `crm.Pinger` and `crm.Revoker`. A
 connector with no place for a call returns `crm.ErrNoTarget` and the job is
 skipped, not dead (Odoo does this for a call with no contact and no owner). `Capabilities.RecordingUpload` asks the worker for the audio (`CallLog.Recording`) instead of a link; `RecordingCopy` gives a one-day link that is never renewed. A connector that writes a call in several steps returns `crm.PartialError` with the state to keep; it is saved on the job (`crm_call_logs.state`) and handed back as `CallLog.State` on the retry, also after a restart. `internal/crm/kit` has the shared request helper, the phone
@@ -472,6 +625,68 @@ test account is enough) and are not blocking the merge:
       (`frame-ancestors`); the sign-in popup opens from inside HubSpot's frame
       and its token survives a reload; the engagement handshake adopts the
       iframe's engagement; and the recording link appears in that engagement.
+
+## Lab checklist: Salesforce (needs a real org, a Developer Edition is enough)
+
+The tests fake Salesforce. These are not blocking the merge:
+
+- [ ] The call center definition imports; the softphone appears in the
+      utility bar; adding the Hello address as a CSP Trusted Site is enough
+      for it to load and to call Hello.
+- [ ] `https://<org>/support/api/62.0/lightning/opencti_min.js` is the right
+      path for the `sfdcIFrameOrigin` Salesforce passes (it is `*.lightning.force.com`
+      in Lightning; check Experience Cloud and sandboxes), and the page's frame
+      and script allow-lists in the web server's configuration cover the
+      origins in use.
+- [ ] The popup sign-in completes inside the utility bar (Safari and Chrome
+      with third-party storage blocked), and the token survives a page reload
+      of the softphone.
+- [ ] `onClickToDial` fires for a phone field and passes `number`,
+      `recordId` and `recordName`; the call rings the desk phone and dials.
+- [ ] An inbound call pops the single matching contact; several matches show
+      Salesforce's result list; `saveLog` creates the Task with the contact as
+      `WhoId` and a second `saveLog` with the `Id` updates it.
+- [ ] The Task `TaskSubtype = Call` and `CallType`, `CallDisposition` and
+      `CallObject` are accepted by the org's fields and picklists (a
+      restricted picklist would reject a value).
+- [ ] The SOSL `FIND {*<last nine digits>} IN PHONE FIELDS` finds a contact
+      stored as `+32 11 22 33 44`, `011/22.33.44` and `0032...`, and does not
+      match another number. A leading wildcard may not be allowed in SOSL: if
+      Salesforce rejects it, drop the `*` and search the full normalised number.
+- [ ] The client-credentials flow works against the My Domain host with the
+      integration user; the token's real lifetime is not shorter than the 15
+      minutes Hello assumes.
+- [ ] A missed call with the softphone closed appears as "No answer" on the
+      right owner; the user with a shared email is skipped.
+- [ ] With recording links on, the Task description gets one `Recording:` line
+      that is replaced, not repeated, by a renewal.
+- [ ] Rotating the client secret makes the connection `needs_reauth` once.
+
+## Lab checklist: Dynamics 365 (needs a real environment, a trial is enough)
+
+The tests fake Entra and Dataverse. These are not blocking the merge:
+
+- [ ] The application user with the security role can read Contacts, Leads,
+      Users and create Phone Calls; **Connect** shows the environment.
+- [ ] The channel provider accepts the channel URL with the `?org=` query, the
+      page is allowed to be framed by the environment (`*.dynamics.com`), and
+      `/webresources/Widget/msdyn_ciLibrary.js` loads from the environment
+      address.
+- [ ] `Microsoft.CIFramework.setClickToAct(true)` and the `onclicktoact`
+      handler receive the number (the shape of the event data may differ from
+      `{ "value": ... }`; the widget also accepts a bare string).
+- [ ] `setMode(1)` expands the panel (the mode numbers are the ones to
+      verify), and `searchAndOpenRecords("contact", ..., false)` opens a single
+      match and lists several.
+- [ ] A Phone Call is created with the activity parties, owner and regarding
+      contact or lead; closing it as Made (outbound) or Received (inbound) is
+      accepted; reopening a closed call to add the recording link works with
+      the role's privileges.
+- [ ] The `contains` filter with about 75 clauses is accepted (URL length) by
+      Dataverse and the CIF `searchAndOpenRecords` call, and finds a contact
+      stored as `+32 11 22 33 44`, `011/22.33.44` and `0032 11-22-33-44`.
+- [ ] Letting the client secret expire makes the connection `needs_reauth`
+      once, with the banner and the email.
 
 ## Lab checklists for Pipedrive, Zoho, Odoo and Bitrix24
 

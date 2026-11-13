@@ -15,6 +15,9 @@ export interface KindField {
   required?: boolean;
   /** A fixed list; the field is a select. */
   options?: KindOption[];
+  /** A true/false setting shown as a switch (stored as "true" or "false"). */
+  switch?: boolean;
+  placeholder?: string;
   /** The value a new connector starts with. */
   initial?: string;
 }
@@ -34,6 +37,14 @@ export interface KindSpec {
   bound: string[];
   /** Ticket kinds can download a sidebar app. */
   sidebarApp?: boolean;
+  /** What the customer needs, shown when the connector is added. */
+  intro?: string;
+  /** The kind shows what the customer configures in the CRM (GET .../setup). */
+  setup?: boolean;
+  /** Whether the client id and secret are needed for these settings (default: always). */
+  needsCredentials?: (cfg: Record<string, string>) => boolean;
+  /** Whether Connect does anything for these settings (default: always). */
+  canConnect?: (cfg: Record<string, string>) => boolean;
   guide: { summary: string; text: string; scopes?: string[]; steps?: string[] };
   /** Label of the fallback owner field. */
   ownerLabel: string;
@@ -402,6 +413,77 @@ export const KINDS: KindSpec[] = [
         "Developer resources, Other, Inbound webhook: give it the permissions CRM, Telephony and Users.",
         "Paste its address here as the secret; Hello checks it when you press Connect.",
       ],
+    },
+  },
+  {
+    value: "salesforce",
+    label: "Salesforce",
+    auth: "direct",
+    idLabel: "Client ID",
+    secretLabel: "Client secret",
+    secretHint: "Kept sealed; it is never shown again.",
+    intro:
+      "The Open CTI softphone needs no sign-in: import the call center from the Connection tab. Add a connected app only to let Hello also log calls nobody had a browser open for.",
+    fields: [
+      {
+        key: "serverLogging",
+        label: "Also log calls from the server",
+        switch: true,
+        initial: "false",
+        hint: "Needs a connected app with the client credentials flow and an integration user. Logs missed calls and calls made on a desk phone, looks callers up by phone and adds recording links.",
+      },
+      {
+        key: "domain",
+        label: "My Domain",
+        placeholder: "acme.my.salesforce.com",
+        hint: "The host of your org, without https://. Needed for server-side logging.",
+      },
+      {
+        key: "apiVersion",
+        label: "API version",
+        initial: "62.0",
+        placeholder: "62.0",
+      },
+    ],
+    bound: ["domain"],
+    setup: true,
+    needsCredentials: (c) => c.serverLogging === "true",
+    canConnect: (c) => c.serverLogging === "true",
+    ownerLabel: "Fallback owner (Salesforce user id)",
+    guide: {
+      summary: "Salesforce setup",
+      text: "The softphone runs in each user's own Salesforce session. Server-side logging signs in with the client credentials flow of a connected app, so no browser step is needed.",
+    },
+  },
+  {
+    value: "dynamics",
+    label: "Dynamics 365",
+    auth: "direct",
+    idLabel: "Client ID",
+    secretLabel: "Client secret",
+    secretHint: "Kept sealed; it is never shown again.",
+    intro:
+      "Register an app in Microsoft Entra, add it to your environment as an application user, and enter its tenant, environment address and credentials.",
+    fields: [
+      {
+        key: "orgUrl",
+        label: "Environment URL",
+        placeholder: "https://contoso.crm4.dynamics.com",
+        required: true,
+      },
+      {
+        key: "tenantId",
+        label: "Directory (tenant) ID",
+        required: true,
+        hint: "A GUID, from the app registration.",
+      },
+    ],
+    bound: ["orgUrl", "tenantId"],
+    setup: true,
+    ownerLabel: "Fallback owner (Dynamics user id)",
+    guide: {
+      summary: "Dynamics 365 setup",
+      text: "Hello signs in with the client credentials of an Entra app registered as an application user of the environment, so no browser step is needed.",
     },
   },
 ];

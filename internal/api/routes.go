@@ -230,6 +230,8 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/integrations/crm/logs/{id}/retry", auth.ScopeWrite, auth.RoleOperator, false, s.retryCRMLog},
 		{"GET", "/api/v1/integrations/crm/{id}/users", auth.ScopeAdmin, auth.RoleAdmin, false, s.listCRMUsers},
 		{"PUT", "/api/v1/integrations/crm/{id}/users/{userId}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putCRMUser},
+		{"GET", "/api/v1/integrations/crm/{id}/setup", auth.ScopeAdmin, auth.RoleAdmin, false, s.getCRMSetup},
+		{"POST", "/api/v1/integrations/salesforce/engagements", auth.ScopeCalls, auth.RoleUser, false, s.salesforceEngagement},
 		{"POST", "/api/v1/integrations/hubspot/engagements", auth.ScopeCalls, auth.RoleUser, false, s.hubspotEngagement},
 
 		{"GET", "/api/v1/conferences", auth.ScopeRead, auth.RoleViewer, false, s.listConferences},
