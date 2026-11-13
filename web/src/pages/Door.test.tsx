@@ -52,9 +52,10 @@ describe("Door webhooks", () => {
   it("shows a validation error at its field and sends nothing", async () => {
     const calls = setup();
     renderApp("/door");
-    fireEvent.click(
-      (await screen.findAllByRole("button", { name: "New webhook" }))[0]!,
-    );
+    // New webhook opens once the list has loaded, or the load wipes the
+    // webhook the page adds.
+    await screen.findByText("Gate bell");
+    fireEvent.click(screen.getAllByRole("button", { name: "New webhook" })[0]!);
     const drawer = screen.getByRole("dialog", { name: "New webhook" });
     fireEvent.change(within(drawer).getByLabelText("Name"), {
       target: { value: "a/b" },
@@ -95,9 +96,10 @@ describe("Door webhooks", () => {
         json({ ...HOOK, id: 7, name: "Back gate", secret: SECRET }, 201),
     });
     renderApp("/door");
-    fireEvent.click(
-      (await screen.findAllByRole("button", { name: "New webhook" }))[0]!,
-    );
+    // New webhook opens once the list has loaded, or the load wipes the
+    // webhook the page adds.
+    await screen.findByText("Gate bell");
+    fireEvent.click(screen.getAllByRole("button", { name: "New webhook" })[0]!);
     const drawer = screen.getByRole("dialog", { name: "New webhook" });
     fireEvent.change(within(drawer).getByLabelText("Name"), {
       target: { value: "Back gate" },
@@ -151,9 +153,10 @@ describe("Door webhooks", () => {
         ),
     });
     renderApp("/door");
-    fireEvent.click(
-      (await screen.findAllByRole("button", { name: "New webhook" }))[0]!,
-    );
+    // New webhook opens once the list has loaded, or the load wipes the
+    // webhook the page adds.
+    await screen.findByText("Gate bell");
+    fireEvent.click(screen.getAllByRole("button", { name: "New webhook" })[0]!);
     const drawer = screen.getByRole("dialog", { name: "New webhook" });
     fireEvent.change(within(drawer).getByLabelText("Name"), {
       target: { value: "Back gate" },
