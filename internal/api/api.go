@@ -356,6 +356,9 @@ type Config struct {
 	// Webhooks is the outbound webhook service (endpoints, deliveries,
 	// dead letters); nil answers 503 on the webhook routes.
 	Webhooks WebhookService
+	// Directory is the directory engine (AD/LDAP sync); nil answers 503 on
+	// the directory routes.
+	Directory DirectoryService
 	// Originate and OriginateLive carry click-to-call (spec integrations
 	// I-37): its requests and policy in PostgreSQL, its queue, live state
 	// and limit counters in Valkey; nil answers 503. OriginateLimits

@@ -49,6 +49,12 @@ type User struct {
 	TOTPEnabled  bool      `json:"totpEnabled"`
 	TOTPRequired bool      `json:"totpRequired"`
 	CreatedAt    time.Time `json:"createdAt"`
+	// ManagedBy names the directory connector that owns this user and the
+	// fields it owns (read-only for administrators); nil for a local user
+	// (spec integrations I-5).
+	ManagedBy *ManagedBy `json:"managedBy"`
+	// DisabledAt is when directory sync disabled the user, nil otherwise.
+	DisabledAt *time.Time `json:"disabledAt"`
 	// DeskphoneDelivery sends the customer texts of conversations assigned to
 	// the user to the phones of their extension (spec messaging-channels
 	// M-26); it also needs the number's own switch.
@@ -60,19 +66,45 @@ type User struct {
 	RingMobile bool `json:"-"`
 }
 
+// ManagedBy is the directory ownership of a user.
+type ManagedBy struct {
+	ConnectorID int64    `json:"connectorId"`
+	Connector   string   `json:"connector"`
+	Fields      []string `json:"fields"`
+}
+
 const userCols = `id, username, display_name, email, auth_method, role, enabled, must_change_password, extension_id,
 	coalesce((SELECT json_agg(extension_id ORDER BY position, extension_id) FROM user_extensions WHERE user_id = users.id), '[]'::json)::text,
-	vm_email_notify, vm_email_attach, vm_email_after, totp_enabled_at IS NOT NULL, totp_required, created_at, ring_web, ring_mobile, deskphone_delivery`
+	vm_email_notify, vm_email_attach, vm_email_after, totp_enabled_at IS NOT NULL, totp_required, created_at, ring_web, ring_mobile, deskphone_delivery,
+	source_connector_id, coalesce((SELECT name FROM directory_connectors WHERE id = users.source_connector_id), ''),
+	to_json(managed_fields)::text, disabled_at`
 
 func scanUser(r interface{ Scan(...any) error }) (User, error) {
 	var (
-		u    User
-		exts string
+		u         User
+		exts      string
+		connector sql.NullInt64
+		cname     string
+		managed   string
+		disabled  sql.NullTime
 	)
 	err := r.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.AuthMethod, &u.Role, &u.Enabled, &u.MustChangePassword,
-		&u.ExtensionID, &exts, &u.VoicemailEmail.Notify, &u.VoicemailEmail.Attach, &u.VoicemailEmail.After, &u.TOTPEnabled, &u.TOTPRequired, &u.CreatedAt, &u.RingWeb, &u.RingMobile, &u.DeskphoneDelivery)
+		&u.ExtensionID, &exts, &u.VoicemailEmail.Notify, &u.VoicemailEmail.Attach, &u.VoicemailEmail.After, &u.TOTPEnabled, &u.TOTPRequired, &u.CreatedAt, &u.RingWeb, &u.RingMobile, &u.DeskphoneDelivery,
+		&connector, &cname, &managed, &disabled)
 	if err != nil {
 		return u, err
+	}
+	if disabled.Valid {
+		u.DisabledAt = &disabled.Time
+	}
+	if connector.Valid {
+		u.ManagedBy = &ManagedBy{ConnectorID: connector.Int64, Connector: cname, Fields: []string{}}
+		if err := json.Unmarshal([]byte(managed), &u.ManagedBy.Fields); err != nil {
+			return u, err
+		}
+		if u.ManagedBy.Fields == nil {
+			u.ManagedBy.Fields = []string{}
+		}
 	}
 	if err := json.Unmarshal([]byte(exts), &u.ExtensionIDs); err != nil {
 		return u, err

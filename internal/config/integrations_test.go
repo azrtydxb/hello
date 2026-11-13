@@ -39,6 +39,22 @@ func TestIntegrationsAllowedCIDRs(t *testing.T) {
 	}
 }
 
+// TestDirectoryAllowPlaintextLDAP fails if plaintext LDAP is on by default or
+// the switch accepts anything but true and false.
+func TestDirectoryAllowPlaintextLDAP(t *testing.T) {
+	c, err := LoadControl(env(nil))
+	if err != nil || c.DirectoryAllowPlaintextLDAP {
+		t.Fatalf("default = %v, %v", c.DirectoryAllowPlaintextLDAP, err)
+	}
+	if c, err = LoadControl(env(map[string]string{"HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP": "true"})); err != nil || !c.DirectoryAllowPlaintextLDAP {
+		t.Fatalf("true = %v, %v", c.DirectoryAllowPlaintextLDAP, err)
+	}
+	if _, err = LoadControl(env(map[string]string{"HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP": "yes"})); err == nil ||
+		!strings.Contains(err.Error(), "HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP") {
+		t.Fatalf("yes accepted: %v", err)
+	}
+}
+
 // TestCRMUploadAndSIPAllowList fails if the CRM upload limit is not 50 MB by
 // default, accepts a bad value, or if hello-sip does not read the same
 // private-range allow-list as hello-control (a self-hosted Odoo or Bitrix24

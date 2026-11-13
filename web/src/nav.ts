@@ -319,6 +319,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "admin",
       },
       {
+        label: "Directory",
+        path: "/integrations/directory",
+        phase: 5,
+        icon: "users",
+        minRole: "admin",
+      },
+      {
         label: "Webhooks",
         path: "/integrations/webhooks",
         phase: 5,
