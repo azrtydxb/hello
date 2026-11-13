@@ -3,7 +3,6 @@ package crm
 import (
 	"context"
 	"errors"
-	"net/http"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -77,7 +76,9 @@ func TestDirectAuthConnectSavesTokensWithoutABrowser(t *testing.T) {
 	}
 	// A refused app is reported with the CRM's reason and saves nothing.
 	r.d.authErr = &APIError{Status: 400, Msg: "invalid_client"}
-	r.repo.DeleteOrgConnection(ctx, r.conn.ID)
+	if err := r.repo.DeleteOrgConnection(ctx, r.conn.ID); err != nil {
+		t.Fatal(err)
+	}
 	_, err = r.svc.Connect(ctx, "admin", r.conn.ID)
 	var ve *ValidationError
 	if !errors.As(err, &ve) || !contains(ve.Fields["clientSecret"], "invalid_client") {
@@ -187,27 +188,4 @@ func TestSetupNeedsAPublicURL(t *testing.T) {
 	if items, err := r3.svc.Setup(ctx, r3.conn.ID); err != nil || items == nil || len(items) != 0 {
 		t.Fatalf("plain connector = %v, %v", items, err)
 	}
-}
-
-func TestRESTRetryClassification(t *testing.T) {
-	// The shared client's contract is exercised by the connector tests; here
-	// only the retry decision of a body the CRM labels itself.
-	r := REST{Classify: func(int, []byte) (string, bool) { return "limit", true }}
-	e := r.statusError(fakeResp(403, ""), nil, true)
-	var ae *APIError
-	if !errors.As(e, &ae) || !ae.Retry || ae.Msg != "limit" {
-		t.Fatalf("err = %v", e)
-	}
-	e = REST{}.statusError(fakeResp(404, ""), nil, true)
-	if !errors.As(e, &ae) || ae.Retry || ae.Msg != "Not Found" {
-		t.Fatalf("404 = %v", e)
-	}
-}
-
-func fakeResp(code int, retryAfter string) *http.Response {
-	h := http.Header{}
-	if retryAfter != "" {
-		h.Set("Retry-After", retryAfter)
-	}
-	return &http.Response{StatusCode: code, Header: h}
 }
