@@ -398,6 +398,25 @@ func TestLoadMediaAnchorHost(t *testing.T) {
 	}
 }
 
+// TestLoadMediaDTLSICE fails if DTLS-SRTP and ICE-lite are not on by default
+// or HELLO_MEDIA_DTLS and HELLO_MEDIA_ICE do not switch them off.
+func TestLoadMediaDTLSICE(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.MediaDTLS || !c.MediaICE {
+		t.Fatalf("defaults dtls %v ice %v, want both on", c.MediaDTLS, c.MediaICE)
+	}
+	c, err = LoadSIP(env(map[string]string{"HELLO_MEDIA_DTLS": "false", "HELLO_MEDIA_ICE": "false"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MediaDTLS || c.MediaICE {
+		t.Fatalf("dtls %v ice %v, want both off", c.MediaDTLS, c.MediaICE)
+	}
+}
+
 // TestLoadMediaWebRTC fails if WebRTC is on by default, the port default moves,
 // or WebRTC is accepted without a node address, with a port inside the RTP
 // range, or with a public address that is not IPv4.
@@ -507,6 +526,43 @@ func TestLoadVoicemailVoice(t *testing.T) {
 	ctl, err := LoadControl(env(map[string]string{"HELLO_VOICEMAIL_LANGUAGE": "nl"}))
 	if err != nil || ctl.VoicePromptLanguage != "nl" {
 		t.Fatalf("control language = %q %v", ctl.VoicePromptLanguage, err)
+	}
+}
+
+// TestLoadDoorCameraAllow fails if HELLO_DOOR_CAMERA_ALLOW does not default
+// to nothing, read private CIDRs, or refuse loopback, link-local, public and
+// malformed entries by naming the key without echoing the value.
+func TestLoadDoorCameraAllow(t *testing.T) {
+	c, err := LoadControl(env(nil))
+	if err != nil || len(c.DoorCameraAllow) != 0 {
+		t.Fatalf("default = %v, %v; want none", c.DoorCameraAllow, err)
+	}
+	c, err = LoadControl(env(map[string]string{"HELLO_DOOR_CAMERA_ALLOW": "192.168.10.0/24, 10.1.2.3"}))
+	if err != nil || len(c.DoorCameraAllow) != 2 || c.DoorCameraAllow[0].String() != "192.168.10.0/24" || c.DoorCameraAllow[1].String() != "10.1.2.3/32" {
+		t.Fatalf("two entries = %v, %v", c.DoorCameraAllow, err)
+	}
+	for _, bad := range []string{"127.0.0.0/8", "169.254.169.254", "8.8.8.0/24", "camera.local", "192.168.0.0/33"} {
+		_, err := LoadControl(env(map[string]string{"HELLO_DOOR_CAMERA_ALLOW": bad}))
+		if err == nil || !strings.Contains(err.Error(), "HELLO_DOOR_CAMERA_ALLOW") || strings.Contains(err.Error(), bad) {
+			t.Errorf("%q: err = %v, want the key named and the value not echoed", bad, err)
+		}
+	}
+}
+
+// TestLoadDoorHangup fails if HELLO_DOOR_HANGUP_SECONDS does not default to
+// 3 s, parse, or reject zero, negative and junk values.
+func TestLoadDoorHangup(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil || c.DoorHangup != 3*time.Second {
+		t.Fatalf("default = %v, %v; want 3s", c.DoorHangup, err)
+	}
+	if c, err := LoadSIP(env(map[string]string{"HELLO_DOOR_HANGUP_SECONDS": "10"})); err != nil || c.DoorHangup != 10*time.Second {
+		t.Fatalf("10 = %v, %v", c.DoorHangup, err)
+	}
+	for _, bad := range []string{"0", "-2", "soon"} {
+		if _, err := LoadSIP(env(map[string]string{"HELLO_DOOR_HANGUP_SECONDS": bad})); err == nil || !strings.Contains(err.Error(), "HELLO_DOOR_HANGUP_SECONDS") {
+			t.Fatalf("%q accepted: %v", bad, err)
+		}
 	}
 }
 

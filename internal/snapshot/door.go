@@ -3,7 +3,10 @@ package snapshot
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
+
+	"github.com/azrtydxb/hello/internal/secret"
 )
 
 // Door stations (migration 00053, spec phone-feature-parity S-45 and S-46).
@@ -77,4 +80,84 @@ FROM extensions e WHERE e.kind = 'door'`)
 		return fmt.Errorf("snapshot: door targets: %w", err)
 	}
 	return nil
+}
+
+// doorOpen is a door station's door-open settings (migration 00054, spec
+// S-47). The code is opened at load time; it is unexported and the type
+// prints as redacted, so it cannot reach a log through a snapshot dump.
+type doorOpen struct {
+	code   string
+	hangup bool
+}
+
+// String redacts the code.
+func (doorOpen) String() string { return "doorOpen{redacted}" }
+
+// GoString redacts the code.
+func (doorOpen) GoString() string { return "doorOpen{redacted}" }
+
+// DoorOpen returns the door-open code of the door station number and whether
+// the call is to hang up after the code was sent. ok is false when number is
+// no door station or has no usable code.
+func (s *Snapshot) DoorOpen(number string) (code string, hangup, ok bool) {
+	d, found := s.doorOpens[number]
+	if !found || d.code == "" || !s.IsDoor(number) {
+		return "", false, false
+	}
+	return d.code, d.hangup, true
+}
+
+// WithDoorOpen installs the door-open settings by station number.
+func (s *Snapshot) WithDoorOpen(codes map[string]DoorOpenSetting) *Snapshot {
+	s.doorOpens = make(map[string]doorOpen, len(codes))
+	for n, c := range codes {
+		s.doorOpens[n] = doorOpen{code: c.Code, hangup: c.Hangup}
+	}
+	return s
+}
+
+// DoorOpenSetting is the input of WithDoorOpen.
+type DoorOpenSetting struct {
+	Code   string
+	Hangup bool
+}
+
+// loadDoorOpen reads and opens the door-open codes of the door stations. A
+// code that does not open is skipped and logged without its value.
+func loadDoorOpen(ctx context.Context, db Querier, box *secret.Box, log *slog.Logger) (map[string]DoorOpenSetting, error) {
+	if log == nil {
+		log = slog.Default()
+	}
+	rows, err := db.Query(ctx, `SELECT d.extension_id, e.number, d.code_enc, d.hangup_after_open
+FROM door_open d JOIN extensions e ON e.id = d.extension_id WHERE e.kind = 'door'`)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot: door-open codes: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]DoorOpenSetting{}
+	for rows.Next() {
+		var (
+			id     int64
+			number string
+			enc    []byte
+			hangup bool
+		)
+		if err := rows.Scan(&id, &number, &enc, &hangup); err != nil {
+			return nil, fmt.Errorf("snapshot: scan door-open code: %w", err)
+		}
+		if len(enc) == 0 {
+			continue
+		}
+		if box == nil {
+			log.Error("door-open code cannot be opened: no secret key", "extension", number)
+			continue
+		}
+		code, err := box.Open(enc, secret.DoorOpenAAD(id))
+		if err != nil {
+			log.Error("door-open code does not open", "extension", number)
+			continue
+		}
+		out[number] = DoorOpenSetting{Code: code, Hangup: hangup}
+	}
+	return out, rows.Err()
 }

@@ -272,10 +272,19 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/door/webhooks/{id}/rotate-secret", auth.ScopeAdmin, auth.RoleAdmin, false, s.rotateDoorWebhookSecret},
 		{"POST", "/api/v1/door/webhooks/{id}/trigger", "", "", true, s.triggerDoorWebhook},
 
+		{"GET", "/api/v1/extensions/{id}/camera", auth.ScopeRead, auth.RoleViewer, false, s.getDoorCamera},
+		{"PUT", "/api/v1/extensions/{id}/camera", auth.ScopeAdmin, auth.RoleAdmin, false, s.putDoorCamera},
+		{"DELETE", "/api/v1/extensions/{id}/camera", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteDoorCamera},
+		{"GET", "/api/v1/extensions/{id}/camera/view", auth.ScopeRead, auth.RoleViewer, false, s.viewDoorCamera},
+
 		{"GET", "/api/v1/presence", auth.ScopeRead, auth.RoleViewer, false, s.presence},
 
 		{"GET", "/api/v1/registrations", auth.ScopeRead, auth.RoleViewer, false, s.registrations},
 		{"GET", "/api/v1/calls", auth.ScopeRead, auth.RoleViewer, false, s.calls},
+		{"POST", "/api/v1/calls/{id}/door-open", auth.ScopeWrite, auth.RoleUser, false, s.doorOpenCall},
+		{"GET", "/api/v1/me/door-calls", auth.ScopeRead, auth.RoleUser, false, s.listMyDoorCalls},
+		{"GET", "/api/v1/extensions/{id}/door-open", auth.ScopeRead, auth.RoleViewer, false, s.getDoorOpen},
+		{"PUT", "/api/v1/extensions/{id}/door-open", auth.ScopeAdmin, auth.RoleAdmin, false, s.putDoorOpen},
 		{"GET", "/api/v1/cdrs", auth.ScopeRead, auth.RoleViewer, false, s.cdrs},
 		{"GET", "/api/v1/cdrs/counts", auth.ScopeRead, auth.RoleViewer, false, s.cdrCounts},
 		{"GET", "/api/v1/cdrs/concurrency", auth.ScopeRead, auth.RoleViewer, false, s.cdrConcurrency},
