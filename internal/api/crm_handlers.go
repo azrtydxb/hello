@@ -26,7 +26,12 @@ type CRMService interface {
 	Update(ctx context.Context, actor string, id int64, in crm.Settings) (crm.ConnectorView, error)
 	Delete(ctx context.Context, actor string, id int64) error
 	Connect(ctx context.Context, actor string, id int64) (string, error)
-	Callback(ctx context.Context, state, code string) (int64, error)
+	Callback(ctx context.Context, state, code string) (int64, bool, error)
+	Cancel(ctx context.Context, state string) bool
+	UserConnectors(ctx context.Context, userID int64) ([]crm.UserConnector, error)
+	ConnectUser(ctx context.Context, actor string, userID, id int64) (string, error)
+	DisconnectUser(ctx context.Context, actor string, userID, id int64) error
+	SetCalendarDND(ctx context.Context, actor string, userID, id int64, on bool) (crm.UserConnection, error)
 	Disconnect(ctx context.Context, actor string, id int64) error
 	Test(ctx context.Context, actor string, id int64) (crm.TestResult, error)
 	Logs(ctx context.Context, id int64, status string, limit int, before int64) ([]crm.LogRow, error)
@@ -71,6 +76,12 @@ func (s *server) crmError(w http.ResponseWriter, what string, err error) {
 		writeError(w, http.StatusConflict, "conflict", "this connector does not sign in with OAuth")
 	case errors.Is(err, crm.ErrNoCredentials):
 		writeError(w, http.StatusConflict, "conflict", "set the client id and client secret first")
+	case errors.Is(err, crm.ErrUserScope):
+		writeError(w, http.StatusConflict, "conflict", "this connector signs in per user: each user connects it under My connections")
+	case errors.Is(err, crm.ErrNotUserScope):
+		writeError(w, http.StatusConflict, "conflict", "this connector is not a personal one")
+	case errors.Is(err, crm.ErrNoCalendar):
+		writeError(w, http.StatusConflict, "conflict", "the connector has no calendar access (the administrator turns on the calendar feature, then you connect again), or calendar DND is not available")
 	case errors.Is(err, crm.ErrNoApp):
 		writeError(w, http.StatusConflict, "conflict", "this connector has no sidebar app")
 	case errors.Is(err, crm.ErrNotConnected):
@@ -286,9 +297,15 @@ func (s *server) crmCallback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	target := "/integrations/crm?"
 	if q.Get("error") != "" {
+		if s.CRM.Cancel(r.Context(), q.Get("state")) {
+			target = "/me/connections?"
+		}
 		target += "error=denied"
 	} else {
-		id, err := s.CRM.Callback(r.Context(), q.Get("state"), q.Get("code"))
+		id, personal, err := s.CRM.Callback(r.Context(), q.Get("state"), q.Get("code"))
+		if personal {
+			target = "/me/connections?"
+		}
 		switch {
 		case err == nil:
 			target += "connected=" + strconv.FormatInt(id, 10)
@@ -473,4 +490,93 @@ func digitsOnly(s string) bool {
 		}
 	}
 	return true
+}
+
+// Personal connections (spec integrations P18): a user signs in to an
+// Outlook or Google connector with their own account, to have their contacts
+// name callers and their calendar switch DND on.
+
+func (s *server) listMyConnections(w http.ResponseWriter, r *http.Request) {
+	if !s.crmReady(w) {
+		return
+	}
+	uid, ok := s.selfUser(w, r)
+	if !ok {
+		return
+	}
+	cs, err := s.CRM.UserConnectors(r.Context(), uid)
+	if err != nil {
+		s.crmError(w, "connections", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items(cs))
+}
+
+func (s *server) connectMyConnection(w http.ResponseWriter, r *http.Request) {
+	if !s.crmReady(w) {
+		return
+	}
+	uid, ok := s.selfUser(w, r)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	u, err := s.CRM.ConnectUser(r.Context(), actor(r).String(), uid, id)
+	if err != nil {
+		s.crmError(w, "connection", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"authorizeUrl": u, "connected": false})
+}
+
+func (s *server) disconnectMyConnection(w http.ResponseWriter, r *http.Request) {
+	if !s.crmReady(w) {
+		return
+	}
+	uid, ok := s.selfUser(w, r)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := s.CRM.DisconnectUser(r.Context(), actor(r).String(), uid, id); err != nil {
+		s.crmError(w, "connection", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) putMyCalendarDND(w http.ResponseWriter, r *http.Request) {
+	if !s.crmReady(w) {
+		return
+	}
+	uid, ok := s.selfUser(w, r)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var b struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if !decode(w, r, &b) {
+		return
+	}
+	if b.Enabled == nil {
+		badRequest(w, "enabled is required")
+		return
+	}
+	c, err := s.CRM.SetCalendarDND(r.Context(), actor(r).String(), uid, id, *b.Enabled)
+	if err != nil {
+		s.crmError(w, "connection", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
 }

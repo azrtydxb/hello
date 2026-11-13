@@ -50,7 +50,7 @@ type TokenManager struct {
 	Skew time.Duration
 
 	mu    sync.Mutex
-	locks map[int64]*sync.Mutex
+	locks map[string]*sync.Mutex
 }
 
 func (m *TokenManager) now() time.Time {
@@ -67,18 +67,37 @@ func (m *TokenManager) log() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
-func (m *TokenManager) lock(id int64) *sync.Mutex {
+func (m *TokenManager) lock(id, userID int64) *sync.Mutex {
+	key := strconv.FormatInt(id, 10) + ":" + strconv.FormatInt(userID, 10)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.locks == nil {
-		m.locks = map[int64]*sync.Mutex{}
+		m.locks = map[string]*sync.Mutex{}
 	}
-	l, ok := m.locks[id]
+	l, ok := m.locks[key]
 	if !ok {
 		l = &sync.Mutex{}
-		m.locks[id] = l
+		m.locks[key] = l
 	}
 	return l
+}
+
+// connection reads the org connection (userID 0) or a user's.
+func (m *TokenManager) connection(ctx context.Context, id, userID int64) (ConnectionRow, Tokens, error) {
+	if userID == 0 {
+		return m.Repo.OrgConnection(ctx, id)
+	}
+	return m.Repo.UserConnection(ctx, id, userID)
+}
+
+func (m *TokenManager) save(ctx context.Context, id, userID int64, t Tokens) error {
+	var err error
+	if userID == 0 {
+		_, err = m.Repo.SaveOrgConnection(ctx, id, t)
+	} else {
+		_, err = m.Repo.SaveUserConnection(ctx, id, userID, t)
+	}
+	return err
 }
 
 func (m *TokenManager) skew() time.Duration {
@@ -101,6 +120,12 @@ func (m *TokenManager) Config(ctx context.Context, row ConnectorRow) (Config, er
 // org connection. ErrNeedsReauth means the connection is not usable until an
 // administrator connects again.
 func (m *TokenManager) Conn(ctx context.Context, row ConnectorRow) (Connector, Conn, error) {
+	return m.ConnFor(ctx, row, 0)
+}
+
+// ConnFor is Conn for the connection of one user (userID 0 is the
+// organisation's): the Outlook and Google connectors sign in per user.
+func (m *TokenManager) ConnFor(ctx context.Context, row ConnectorRow, userID int64) (Connector, Conn, error) {
 	conn, ok := m.Providers(row.Kind)
 	if !ok {
 		return nil, Conn{}, fmt.Errorf("crm: unknown connector kind %q", row.Kind)
@@ -109,7 +134,7 @@ func (m *TokenManager) Conn(ctx context.Context, row ConnectorRow) (Connector, C
 	if err != nil {
 		return nil, Conn{}, err
 	}
-	cr, t, err := m.Repo.OrgConnection(ctx, row.ID)
+	cr, t, err := m.connection(ctx, row.ID, userID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, Conn{}, ErrNeedsReauth
@@ -120,7 +145,7 @@ func (m *TokenManager) Conn(ctx context.Context, row ConnectorRow) (Connector, C
 		return nil, Conn{}, ErrNeedsReauth
 	}
 	if !t.ExpiresAt.IsZero() && !t.ExpiresAt.After(m.now().Add(m.skew())) {
-		if t, err = m.refresh(ctx, row, conn, cfg, false); err != nil {
+		if t, err = m.refresh(ctx, row, conn, cfg, userID, false); err != nil {
 			return nil, Conn{}, err
 		}
 	}
@@ -129,6 +154,11 @@ func (m *TokenManager) Conn(ctx context.Context, row ConnectorRow) (Connector, C
 
 // Refresh forces a refresh after the CRM refused the access token.
 func (m *TokenManager) Refresh(ctx context.Context, row ConnectorRow) (Conn, error) {
+	return m.RefreshFor(ctx, row, 0)
+}
+
+// RefreshFor is Refresh for one user's connection.
+func (m *TokenManager) RefreshFor(ctx context.Context, row ConnectorRow, userID int64) (Conn, error) {
 	conn, ok := m.Providers(row.Kind)
 	if !ok {
 		return Conn{}, fmt.Errorf("crm: unknown connector kind %q", row.Kind)
@@ -137,18 +167,18 @@ func (m *TokenManager) Refresh(ctx context.Context, row ConnectorRow) (Conn, err
 	if err != nil {
 		return Conn{}, err
 	}
-	t, err := m.refresh(ctx, row, conn, cfg, true)
+	t, err := m.refresh(ctx, row, conn, cfg, userID, true)
 	if err != nil {
 		return Conn{}, err
 	}
 	return Conn{Config: cfg, AccessToken: t.Access, ExternalAcct: t.Account}, nil
 }
 
-func (m *TokenManager) refresh(ctx context.Context, row ConnectorRow, conn Connector, cfg Config, force bool) (Tokens, error) {
-	l := m.lock(row.ID)
+func (m *TokenManager) refresh(ctx context.Context, row ConnectorRow, conn Connector, cfg Config, userID int64, force bool) (Tokens, error) {
+	l := m.lock(row.ID, userID)
 	l.Lock()
 	defer l.Unlock()
-	cr, t, err := m.Repo.OrgConnection(ctx, row.ID)
+	cr, t, err := m.connection(ctx, row.ID, userID)
 	if err != nil {
 		return Tokens{}, err
 	}
@@ -166,18 +196,18 @@ func (m *TokenManager) refresh(ctx context.Context, row ConnectorRow, conn Conne
 		nt, err = c.Authenticate(ctx, cfg)
 	case OAuth:
 		if t.Refresh == "" {
-			m.needsReauth(ctx, row, cr.ID, "no refresh token")
+			m.needsReauth(ctx, row, cr.ID, userID, "no refresh token")
 			return Tokens{}, ErrNeedsReauth
 		}
 		nt, err = c.Refresh(ctx, cfg, t.Refresh)
 	default:
-		m.needsReauth(ctx, row, cr.ID, "no refresh token")
+		m.needsReauth(ctx, row, cr.ID, userID, "no refresh token")
 		return Tokens{}, ErrNeedsReauth
 	}
 	if err != nil {
 		var ae *APIError
 		if errors.As(err, &ae) && !ae.Retry {
-			m.needsReauth(ctx, row, cr.ID, "the CRM refused the credentials")
+			m.needsReauth(ctx, row, cr.ID, userID, "the CRM refused the credentials")
 			return Tokens{}, ErrNeedsReauth
 		}
 		return Tokens{}, err
@@ -191,7 +221,7 @@ func (m *TokenManager) refresh(ctx context.Context, row ConnectorRow, conn Conne
 	if len(nt.Scopes) == 0 {
 		nt.Scopes = t.Scopes
 	}
-	if _, err := m.Repo.SaveOrgConnection(ctx, row.ID, nt); err != nil {
+	if err := m.save(ctx, row.ID, userID, nt); err != nil {
 		return Tokens{}, err
 	}
 	return nt, nil
@@ -203,17 +233,19 @@ func (m *TokenManager) MarkNeedsReauth(ctx context.Context, row ConnectorRow, re
 	if err != nil {
 		return
 	}
-	m.needsReauth(ctx, row, cr.ID, reason)
+	m.needsReauth(ctx, row, cr.ID, 0, reason)
 }
 
-func (m *TokenManager) needsReauth(ctx context.Context, row ConnectorRow, connID int64, reason string) {
+func (m *TokenManager) needsReauth(ctx context.Context, row ConnectorRow, connID, userID int64, reason string) {
 	m.log().Warn("crm: connection needs re-authorisation", "connector", row.ID, "kind", row.Kind, "reason", reason)
 	if err := m.Repo.SetConnectionStatus(ctx, connID, StatusNeedsReauth, reason); err != nil {
 		m.log().Error("crm: marking the connection", "connector", row.ID, "error", err)
 		return
 	}
 	_ = m.Repo.Audit(ctx, "system", "needs_reauth", "crm_connector", strconv.FormatInt(row.ID, 10))
-	if m.Notify != nil {
+	// A user's own connection is shown to that user in the console; the
+	// administrators are told only about the organisation's.
+	if m.Notify != nil && userID == 0 {
 		m.Notify(ctx, row, reason)
 	}
 }

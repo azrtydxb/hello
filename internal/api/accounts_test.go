@@ -1451,7 +1451,7 @@ func TestAccountRoutesDocumentedStatuses(t *testing.T) {
 			match = match || strings.HasPrefix(op.Path, p)
 		}
 		if !match || strings.Contains(op.Path, "/me/contacts") || strings.Contains(op.Path, "/me/messages") ||
-			strings.Contains(op.Path, "/me/inbox") {
+			strings.Contains(op.Path, "/me/inbox") || strings.Contains(op.Path, "/me/connections") {
 			continue
 		}
 		for status := range conf.spec.Responses(op.ID) {

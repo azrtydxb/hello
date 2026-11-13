@@ -28,6 +28,8 @@ function connector(extra: Partial<CRMConnector> = {}): CRMConnector {
       clickToCall: true,
       screenPop: true,
       ticket: false,
+      userScope: false,
+      calendar: false,
     },
     connection: {
       status: "connected",
@@ -762,5 +764,65 @@ describe("CRM connectors (spec integrations P6)", () => {
     expect(within(form).getByLabelText("Environment URL")).toHaveValue(
       "https://contoso.crm4.dynamics.com",
     );
+  });
+
+  it("sets up an Outlook connector for per-user sign-in: no organisation sign-in, a feature choice and the permissions to grant", async () => {
+    const calls = mockApi({
+      ...me("admin"),
+      "GET /api/v1/integrations/crm": () =>
+        json({
+          items: [
+            connector({
+              id: 2,
+              kind: "outlook",
+              name: "Outlook",
+              config: {
+                clientId: "cid-2",
+                tenant: "contoso.com",
+                features: "contacts",
+              },
+              recordings: false,
+              capabilities: {
+                lookup: true,
+                logCalls: false,
+                recordings: false,
+                clickToCall: false,
+                screenPop: false,
+                ticket: false,
+                userScope: true,
+                calendar: true,
+              },
+              connection: null,
+            }),
+          ],
+        }),
+      "PATCH /api/v1/integrations/crm/2": () => json(connector({ id: 2 })),
+    });
+    renderApp("/integrations/crm");
+    const panel = await screen.findByRole("article", {
+      name: "Outlook connector",
+    });
+    expect(within(panel).getByText("Per user")).toBeVisible();
+    expect(within(panel).queryByRole("button", { name: "Connect" })).toBeNull();
+    expect(within(panel).queryByRole("tab", { name: "Users" })).toBeNull();
+    expect(within(panel).getByText(/Contacts\.Read/)).toBeInTheDocument();
+    expect(within(panel).queryByText(/Calendars\.Read/)).toBeNull();
+    const form = within(panel).getByRole("form", { name: "Outlook settings" });
+    fireEvent.click(
+      within(form).getByRole("checkbox", { name: "Calendar sets DND" }),
+    );
+    fireEvent.click(
+      within(form).getByRole("button", { name: "Save settings" }),
+    );
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PATCH")).toBe(true),
+    );
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      config: {
+        clientId: "cid-2",
+        tenant: "contoso.com",
+        features: "contacts,calendar",
+      },
+    });
   });
 });

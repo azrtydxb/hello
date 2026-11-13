@@ -26,6 +26,7 @@ import {
   Alert,
   Badge,
   Button,
+  Checkbox,
   CodeBlock,
   ConfirmDialog,
   EmptyState,
@@ -94,6 +95,14 @@ function callingSettings(redirectUri?: string): string {
     null,
     2,
   );
+}
+
+/** The values of a comma-separated multi-choice config entry. */
+function listOf(v: string): string[] {
+  return v
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
 }
 
 function statusLabel(c: CRMConnector): { text: string; tone: BadgeTone } {
@@ -184,6 +193,33 @@ function KindFieldInput({
         checked={value === "true"}
         onChange={(e) => onChange(e.target.checked ? "true" : "false")}
       />
+    );
+  if (field.multi)
+    return (
+      <fieldset>
+        <legend>{field.label}</legend>
+        {field.multi.map((o) => {
+          const on = listOf(value);
+          return (
+            <Checkbox
+              key={o.value}
+              label={o.label}
+              checked={on.includes(o.value)}
+              onChange={(e) =>
+                onChange(
+                  (e.target.checked
+                    ? [...on, o.value]
+                    : on.filter((x) => x !== o.value)
+                  ).join(","),
+                )
+              }
+            />
+          );
+        })}
+        {listOf(value).length === 0 && (
+          <p role="alert">Pick at least one; contacts is used when none is.</p>
+        )}
+      </fieldset>
     );
   if (field.options)
     return (
@@ -406,7 +442,10 @@ function ConnectorPanel({
   say: (m: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("connection");
-  const st = statusLabel(c);
+  const personal = c.capabilities.userScope;
+  const st = personal
+    ? { text: "Per user", tone: "info" as BadgeTone }
+    : statusLabel(c);
   return (
     <article aria-label={`${c.name} connector`}>
       <h2>
@@ -421,11 +460,15 @@ function ConnectorPanel({
       )}
       <Tabs
         aria-label={`${c.name} sections`}
-        items={[
-          { id: "connection", label: "Connection" },
-          { id: "users", label: "Users" },
-          { id: "calls", label: "Calls" },
-        ]}
+        items={
+          personal
+            ? [{ id: "connection", label: "Connection" }]
+            : [
+                { id: "connection", label: "Connection" },
+                { id: "users", label: "Users" },
+                { id: "calls", label: "Calls" },
+              ]
+        }
         value={tab}
         onChange={setTab}
       />
@@ -468,7 +511,8 @@ function ConnectionTab({
   const [confirm, setConfirm] = useState<"disconnect" | "delete" | null>(null);
   const credsNow =
     spec.needsCredentials?.(buildConfig(spec, clientId, values)) ?? true;
-  const canConnect = spec.canConnect?.(c.config) ?? true;
+  const personal = c.capabilities.userScope;
+  const canConnect = !personal && (spec.canConnect?.(c.config) ?? true);
   // Changing the identity or where the secret goes asks for the secret again.
   const idChanged =
     (spec.idLabel !== undefined && clientId !== (c.config.clientId ?? "")) ||
@@ -528,28 +572,46 @@ function ConnectionTab({
   return (
     <div>
       <PropertyList
-        items={[
-          { label: "Account", value: conn?.externalAccount || "—", mono: true },
-          {
-            label: "Granted scopes",
-            value: conn?.grantedScopes.length
-              ? conn.grantedScopes.join(", ")
-              : "—",
-          },
-          {
-            label: "Last change",
-            value: conn ? formatTime(conn.updatedAt) : "—",
-          },
-          ...(c.auth === "oauth"
+        items={
+          personal
             ? [
                 {
                   label: "Redirect URI",
                   value: c.redirectUri ?? "needs HELLO_PUBLIC_URL",
                   mono: true,
                 },
+                {
+                  label: "Connected users",
+                  value: "Each user connects under My connections.",
+                },
               ]
-            : []),
-        ]}
+            : [
+                {
+                  label: "Account",
+                  value: conn?.externalAccount || "—",
+                  mono: true,
+                },
+                {
+                  label: "Granted scopes",
+                  value: conn?.grantedScopes.length
+                    ? conn.grantedScopes.join(", ")
+                    : "—",
+                },
+                {
+                  label: "Last change",
+                  value: conn ? formatTime(conn.updatedAt) : "—",
+                },
+                ...(c.auth === "oauth"
+                  ? [
+                      {
+                        label: "Redirect URI",
+                        value: c.redirectUri ?? "needs HELLO_PUBLIC_URL",
+                        mono: true,
+                      },
+                    ]
+                  : []),
+              ]
+        }
       />
       <details>
         <summary>{spec.guide.summary}</summary>
@@ -569,6 +631,15 @@ function ConnectionTab({
         )}
         {spec.guide.scopes && (
           <CodeBlock title="Scopes" code={spec.guide.scopes.join("\n")} />
+        )}
+        {spec.featureScopes && (
+          <CodeBlock
+            title="Permissions"
+            code={listOf(values.features ?? "")
+              .map((f) => spec.featureScopes?.[f])
+              .filter(Boolean)
+              .join("\n")}
+          />
         )}
         {c.kind === "hubspot" && (
           <>
@@ -614,21 +685,25 @@ function ConnectionTab({
             </Button>{" "}
           </>
         )}
-        <Button
-          variant="secondary"
-          icon="activity"
-          onClick={() => void test()}
-          disabled={!conn}
-        >
-          Test
-        </Button>{" "}
-        <Button
-          variant="secondary"
-          disabled={!conn}
-          onClick={() => setConfirm("disconnect")}
-        >
-          Disconnect
-        </Button>{" "}
+        {!personal && (
+          <>
+            <Button
+              variant="secondary"
+              icon="activity"
+              onClick={() => void test()}
+              disabled={!conn}
+            >
+              Test
+            </Button>{" "}
+            <Button
+              variant="secondary"
+              disabled={!conn}
+              onClick={() => setConfirm("disconnect")}
+            >
+              Disconnect
+            </Button>{" "}
+          </>
+        )}
         <Button
           variant="danger"
           icon="trash-2"
@@ -681,47 +756,51 @@ function ConnectionTab({
           checked={enabled}
           onChange={(e) => setEnabled(e.target.checked)}
         />
-        <Switch
-          label="Log missed calls"
-          checked={logMissed}
-          onChange={(e) => setLogMissed(e.target.checked)}
-        />
-        <Switch
-          label={
-            c.capabilities.recordingUpload
-              ? "Attach recordings"
-              : "Attach recording links"
-          }
-          hint={
-            c.capabilities.recordingUpload
-              ? "Off by default. The CRM stores an audio file, not a link: the recording is uploaded to the call log."
-              : c.capabilities.recordingCopy
-                ? "Off by default. The CRM fetches the recording once from a one-day link and keeps its own copy."
-                : "Off by default. A link to the recording is written into the CRM record; anyone with the link can play it until it expires."
-          }
-          checked={recordings}
-          onChange={(e) => setRecordings(e.target.checked)}
-        />
-        {recordings &&
-          !c.capabilities.recordingUpload &&
-          !c.capabilities.recordingCopy && (
-            <Input
-              label="Recording link lifetime (days)"
-              type="number"
-              min={1}
-              max={365}
-              value={ttlDays}
-              onChange={(e) => setTtlDays(e.target.value)}
-              hint="Links of recent calls are renewed before they expire."
+        {!personal && (
+          <>
+            <Switch
+              label="Log missed calls"
+              checked={logMissed}
+              onChange={(e) => setLogMissed(e.target.checked)}
             />
-          )}
-        <Input
-          label={spec.ownerLabel}
-          value={fallback}
-          maxLength={64}
-          onChange={(e) => setFallback(e.target.value)}
-          hint="Owns the calls of users with no CRM user. Empty skips those calls."
-        />
+            <Switch
+              label={
+                c.capabilities.recordingUpload
+                  ? "Attach recordings"
+                  : "Attach recording links"
+              }
+              hint={
+                c.capabilities.recordingUpload
+                  ? "Off by default. The CRM stores an audio file, not a link: the recording is uploaded to the call log."
+                  : c.capabilities.recordingCopy
+                    ? "Off by default. The CRM fetches the recording once from a one-day link and keeps its own copy."
+                    : "Off by default. A link to the recording is written into the CRM record; anyone with the link can play it until it expires."
+              }
+              checked={recordings}
+              onChange={(e) => setRecordings(e.target.checked)}
+            />
+            {recordings &&
+              !c.capabilities.recordingUpload &&
+              !c.capabilities.recordingCopy && (
+                <Input
+                  label="Recording link lifetime (days)"
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={ttlDays}
+                  onChange={(e) => setTtlDays(e.target.value)}
+                  hint="Links of recent calls are renewed before they expire."
+                />
+              )}
+            <Input
+              label={spec.ownerLabel}
+              value={fallback}
+              maxLength={64}
+              onChange={(e) => setFallback(e.target.value)}
+              hint="Owns the calls of users with no CRM user. Empty skips those calls."
+            />
+          </>
+        )}
         {err && (
           <Alert tone="bad" title="Not saved">
             {err}

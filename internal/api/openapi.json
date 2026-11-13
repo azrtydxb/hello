@@ -23639,7 +23639,7 @@
       "get": {
         "operationId": "crmOAuthCallback",
         "summary": "CRM sign-in callback",
-        "description": "Where the CRM returns the browser after the sign-in. It needs no credential: the single-use state in the query, minted for an administrator who started the sign-in, is the only credential. It always redirects to /integrations/crm with connected=<id> or error=<denied|state|failed>.",
+        "description": "Where the CRM returns the browser after the sign-in. It needs no credential: the single-use state in the query, minted for the person who started the sign-in, is the only credential. It redirects to /integrations/crm (an administrator's sign-in) or, for a user's own Outlook or Google connection, to /me/connections, with connected=<id> or error=<denied|state|failed>.",
         "tags": ["integrations"],
         "parameters": [
           {
@@ -25559,6 +25559,597 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": true
+      }
+    },
+    "/api/v1/integrations/slack": {
+      "get": {
+        "operationId": "listSlackDestinations",
+        "summary": "List Slack destinations",
+        "description": "Lists the Slack destinations that receive missed calls and voicemail messages. The incoming webhook URL and the bot token are never returned.",
+        "tags": ["integrations"],
+        "responses": {
+          "200": {
+            "description": "The destinations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackDestinationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Slack credentials (an incoming webhook URL or a bot token) are managed in the console; an agent does not change them.",
+          "category": "credentials"
+        }
+      },
+      "post": {
+        "operationId": "createSlackDestination",
+        "summary": "Create a Slack destination",
+        "description": "Adds a Slack incoming webhook (mode webhook, secret is the https://hooks.slack.com/services/... URL) or a bot (mode bot, secret is the xoxb- token and channel is required). The secret is sealed and never shown again. Without events both missed calls and voicemail messages are posted.",
+        "tags": ["integrations"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlackDestinationCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The destination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackDestination"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Slack credentials (an incoming webhook URL or a bot token) are managed in the console; an agent does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/slack/{id}": {
+      "get": {
+        "operationId": "getSlackDestination",
+        "summary": "Get a Slack destination",
+        "description": "One destination with its health and the count of pending and dead posts.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The destination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackDestination"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "patch": {
+        "operationId": "updateSlackDestination",
+        "summary": "Change a Slack destination",
+        "description": "Changes the name, channel, event types, extension filter or enabled state, or replaces the credential (the mode cannot change). A new credential re-enables a destination Slack refused. Enabling clears the failure count.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlackDestinationUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The destination",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackDestination"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Slack credentials (an incoming webhook URL or a bot token) are managed in the console; an agent does not change them.",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteSlackDestination",
+        "summary": "Delete a Slack destination",
+        "description": "Removes the destination and its queued posts.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Slack credentials (an incoming webhook URL or a bot token) are managed in the console; an agent does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/slack/{id}/test": {
+      "post": {
+        "operationId": "testSlackDestination",
+        "summary": "Send a Slack test message",
+        "description": "Posts a short test message to the destination now, without queueing a post or counting against its health. At most 6 tests per minute per destination.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackTestResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Slack credentials (an incoming webhook URL or a bot token) are managed in the console; an agent does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/integrations/slack/{id}/posts": {
+      "get": {
+        "operationId": "listSlackPosts",
+        "summary": "List Slack posts",
+        "description": "The posts of a destination, newest first: pending, retrying, succeeded and dead (the dead letters, with the last error). Names and numbers of callers are not part of a post row.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["pending", "retrying", "succeeded", "dead"]
+            },
+            "description": "Only posts in this state."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "description": "Page size, 1 to 200 (default 50)."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Return posts older than this id; pass nextBefore of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of posts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackPostPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/integrations/slack/posts/{id}/retry": {
+      "post": {
+        "operationId": "retrySlackPost",
+        "summary": "Retry a dead Slack post",
+        "description": "Makes a dead post due now with a fresh retry series.",
+        "tags": ["integrations"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The post",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackPost"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Slack credentials (an incoming webhook URL or a bot token) are managed in the console; an agent does not change them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/me/connections": {
+      "get": {
+        "operationId": "listMyConnections",
+        "summary": "List my connected accounts",
+        "description": "The Outlook and Google connectors the administrator set up, with the caller's own connection to each: its status, the account, the granted scopes and the calendar DND state. Tokens are never returned.",
+        "tags": ["me"],
+        "responses": {
+          "200": {
+            "description": "The connectors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyConnectionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/me/connections/{id}/connect": {
+      "post": {
+        "operationId": "connectMyConnection",
+        "summary": "Connect my account",
+        "description": "Starts the caller's own OAuth sign-in to an Outlook or Google connector and returns the address to send the browser to. The provider returns to /api/v1/integrations/crm/oauth/callback, which stores the tokens for the caller alone and redirects to /me/connections.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Where to send the browser",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CRMAuthorize"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "Connecting or disconnecting a personal account, and the calendar DND choice, are made by the user in the console (a browser sign-in); an agent does not do them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/me/connections/{id}": {
+      "delete": {
+        "operationId": "disconnectMyConnection",
+        "summary": "Disconnect my account",
+        "description": "Removes the caller's connection to the connector, revokes the token at the provider when it can and clears a DND the calendar set.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Disconnected"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "Connecting or disconnecting a personal account, and the calendar DND choice, are made by the user in the console (a browser sign-in); an agent does not do them.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/me/connections/{id}/calendar-dnd": {
+      "put": {
+        "operationId": "putMyCalendarDND",
+        "summary": "Turn calendar DND on or off",
+        "description": "With enabled true, a busy or out-of-office stretch in the caller's calendar sets DND on their extensions and its end clears it; a DND the caller set by hand is never overridden or cleared. It needs a connection with calendar access (the administrator enables the calendar feature, then the user connects). Turning it off clears a DND the calendar set.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MyCalendarDND"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The connection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyConnection"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "Connecting or disconnecting a personal account, and the calendar DND choice, are made by the user in the console (a browser sign-in); an agent does not do them.",
+          "category": "credentials"
+        }
       }
     },
     "/api/v1/extensions/{id}/camera": {
@@ -30525,6 +31116,10 @@
           "dnd": {
             "type": "boolean"
           },
+          "dndSource": {
+            "type": "string",
+            "description": "Who set DND: manual, or the calendar of a connected Outlook or Google account (cleared when the event ends)."
+          },
           "forwardAlways": {
             "type": "string"
           },
@@ -31247,6 +31842,10 @@
           "dnd": {
             "type": "boolean",
             "description": "Do not disturb: incoming calls reject with 603 or go to voicemail."
+          },
+          "dndSource": {
+            "type": "string",
+            "description": "Who set DND: manual, or the calendar of a connected Outlook or Google account (cleared when the event ends)."
           },
           "forwardAlways": {
             "type": "string",
@@ -38966,7 +39565,8 @@
               "call.ended",
               "call.missed",
               "call.recording.ready",
-              "call.completed"
+              "call.completed",
+              "voicemail.received"
             ]
           },
           "createdAt": {
@@ -42247,7 +42847,9 @@
           "recordings",
           "clickToCall",
           "screenPop",
-          "ticket"
+          "ticket",
+          "userScope",
+          "calendar"
         ],
         "properties": {
           "lookup": {
@@ -42273,6 +42875,14 @@
           "ticket": {
             "type": "boolean",
             "description": "The connector can open a ticket from a call."
+          },
+          "userScope": {
+            "type": "boolean",
+            "description": "Every user signs in with their own account (Outlook, Google); the lookup searches the called user's own contacts."
+          },
+          "calendar": {
+            "type": "boolean",
+            "description": "The connector can read whether the user is busy (calendar-driven DND)."
           },
           "recordingUpload": {
             "type": "boolean",
@@ -42359,7 +42969,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "The connector's settings. clientId is the OAuth client id or, for direct connectors, the identity the secret belongs to (Zendesk agent email, ConnectWise integrator clientId, Autotask API user, Halo client id). hubspot: region (na or eu). zendesk: subdomain, createContacts (true or false), answeredStatus (open, pending, hold, solved). freshdesk: subdomain, answeredStatus (open, pending, resolved). connectwise: host, companyId, publicKey, codebase, activityType. autotask: integrationCode, host (zone, found when empty), actionType. halopsa: host, tenant, ticketTypeId, fallbackClientId. clio: region (us, eu, ca, au). zoho: region (us, eu, in, au, jp, ca, sa or cn). odoo: url and db, clientId is the login. bitrix24: no settings; the secret is the inbound webhook address. salesforce: domain (My Domain host), apiVersion, serverLogging (true or false). dynamics: tenantId, orgUrl."
+            "description": "The connector's settings. clientId is the OAuth client id or, for direct connectors, the identity the secret belongs to (Zendesk agent email, ConnectWise integrator clientId, Autotask API user, Halo client id). hubspot: region (na or eu). outlook: tenant (organizations, a tenant id or a domain), features (contacts, calendar or both). google: features (contacts, calendar or both). zendesk: subdomain, createContacts (true or false), answeredStatus (open, pending, hold, solved). freshdesk: subdomain, answeredStatus (open, pending, resolved). connectwise: host, companyId, publicKey, codebase, activityType. autotask: integrationCode, host (zone, found when empty), actionType. halopsa: host, tenant, ticketTypeId, fallbackClientId. clio: region (us, eu, ca, au). zoho: region (us, eu, in, au, jp, ca, sa or cn). odoo: url and db, clientId is the login. bitrix24: no settings; the secret is the inbound webhook address. salesforce: domain (My Domain host), apiVersion, serverLogging (true or false). dynamics: tenantId, orgUrl."
           },
           "auth": {
             "type": "string",
@@ -43515,6 +44125,412 @@
             "type": "string",
             "pattern": "^[0-9A-Za-z._-]{0,64}$",
             "description": "The ring group told of every emergency call; empty for none."
+          }
+        }
+      },
+      "SlackDestination": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "mode",
+          "channel",
+          "events",
+          "extensions",
+          "enabled",
+          "disabledReason",
+          "consecutiveFailures",
+          "lastError",
+          "hasSecret",
+          "pending",
+          "dead",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["webhook", "bot"]
+          },
+          "channel": {
+            "type": "string",
+            "description": "The channel of a bot; an incoming webhook is bound to its own."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["call.missed", "voicemail.received"]
+            }
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only events about these extensions; empty is all."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "disabledReason": {
+            "type": "string",
+            "description": "manual, consecutive_failures, auth_failed or destination_gone; empty while enabled."
+          },
+          "consecutiveFailures": {
+            "type": "integer"
+          },
+          "lastSuccessAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastFailureAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastError": {
+            "type": "string",
+            "description": "A short description of the last failure, never a secret."
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "dead": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "hasSecret": {
+            "type": "boolean",
+            "description": "Always true; the credential itself is never returned."
+          }
+        }
+      },
+      "SlackDestinationCreate": {
+        "type": "object",
+        "required": ["name", "mode", "secret"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "A unique label, 1 to 64 characters."
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["webhook", "bot"],
+            "description": "webhook for an incoming webhook, bot for chat.postMessage with a bot token."
+          },
+          "secret": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The incoming webhook URL (mode webhook) or the bot token (mode bot). Write-only."
+          },
+          "channel": {
+            "type": "string",
+            "description": "Required for a bot: a channel name or id."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["call.missed", "voicemail.received"]
+            },
+            "description": "Default: both."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only events about these extensions; empty is all."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Default true."
+          }
+        }
+      },
+      "SlackDestinationUpdate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "A unique label, 1 to 64 characters."
+          },
+          "secret": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The incoming webhook URL (mode webhook) or the bot token (mode bot). Write-only."
+          },
+          "channel": {
+            "type": "string",
+            "description": "Required for a bot: a channel name or id."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["call.missed", "voicemail.received"]
+            },
+            "description": "Default: both."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only events about these extensions; empty is all."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Default true."
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["webhook", "bot"],
+            "description": "Accepted only when unchanged."
+          }
+        }
+      },
+      "SlackDestinationList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SlackDestination"
+            }
+          }
+        }
+      },
+      "SlackTestResult": {
+        "type": "object",
+        "required": ["delivered", "status", "error"],
+        "properties": {
+          "delivered": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "integer",
+            "description": "Slack's HTTP status, 0 when no response came."
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "SlackPost": {
+        "type": "object",
+        "required": [
+          "id",
+          "destinationId",
+          "eventId",
+          "eventType",
+          "status",
+          "attempts",
+          "lastError",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "destinationId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "eventId": {
+            "type": "string"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "retrying", "succeeded", "dead"]
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "nextAttemptAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "deliveredAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SlackPostPage": {
+        "type": "object",
+        "required": ["items", "nextBefore"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SlackPost"
+            }
+          },
+          "nextBefore": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Pass as before for the next page; 0 when this was the last."
+          }
+        }
+      },
+      "MyConnection": {
+        "type": "object",
+        "required": [
+          "status",
+          "grantedScopes",
+          "updatedAt",
+          "calendarDnd",
+          "calendarActive"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["connected", "needs_reauth", "revoked"]
+          },
+          "externalAccount": {
+            "type": "string",
+            "description": "The account that signed in, for example the mailbox address."
+          },
+          "grantedScopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "calendarDnd": {
+            "type": "boolean",
+            "description": "The user's choice: the calendar may set DND."
+          },
+          "calendarActive": {
+            "type": "boolean",
+            "description": "The calendar holds the user's DND on right now."
+          },
+          "calendarBusyUntil": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "calendarCheckedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "calendarError": {
+            "type": "string"
+          }
+        }
+      },
+      "MyConnector": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "features",
+          "capabilities",
+          "connection"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "description": "The connector kind: outlook or google."
+          },
+          "name": {
+            "type": "string"
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["contacts", "calendar"]
+            },
+            "description": "What the administrator enabled."
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/CRMCapabilities"
+          },
+          "connection": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MyConnection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The caller's own connection; null until they connect."
+          }
+        }
+      },
+      "MyConnectionList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MyConnector"
+            }
+          }
+        }
+      },
+      "MyCalendarDND": {
+        "type": "object",
+        "required": ["enabled"],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the calendar may set DND."
           }
         }
       },

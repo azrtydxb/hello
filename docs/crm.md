@@ -4,7 +4,7 @@ Hello can write every external call into a CRM, show the caller's name from
 the CRM on an incoming call, and attach a link to the recording. This page
 covers the connector framework (`internal/crm`) and its connectors: HubSpot
 (spec `.procoder/specs/integrations.md`, phase P6), Salesforce (P13), Dynamics 365 (P19), Pipedrive (P14), Zoho CRM
-(P15), Odoo and Bitrix24 (P21), the helpdesks Zendesk and Freshdesk (P16) and the PSA and legal tools ConnectWise, Autotask, HaloPSA and Clio (P20). Later connectors plug into the same framework.
+(P15), Odoo and Bitrix24 (P21), the helpdesks Zendesk and Freshdesk (P16) and the PSA and legal tools ConnectWise, Autotask, HaloPSA and Clio (P20). The Outlook and Google connectors (P18), which every user signs in to with their own account for contacts and calendar, are described in [Outlook and Google](contacts-calendar.md). Later connectors plug into the same framework.
 
 | Connector    | Sign-in                                                                          | Lookup by phone                        | A call is written as                         | Recording                                     |
 | ------------ | -------------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------------- | --------------------------------------------- |

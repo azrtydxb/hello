@@ -15,6 +15,8 @@ export interface KindField {
   required?: boolean;
   /** A fixed list; the field is a select. */
   options?: KindOption[];
+  /** Several choices from a fixed list, stored comma-separated. */
+  multi?: KindOption[];
   /** A true/false setting shown as a switch (stored as "true" or "false"). */
   switch?: boolean;
   placeholder?: string;
@@ -48,6 +50,10 @@ export interface KindSpec {
   guide: { summary: string; text: string; scopes?: string[]; steps?: string[] };
   /** Label of the fallback owner field. */
   ownerLabel: string;
+  /** Every user signs in with their own account (Outlook, Google): no organisation sign-in, call logging or user mapping. */
+  personal?: boolean;
+  /** The scopes a personal connector asks for, by feature (the features field). */
+  featureScopes?: Record<string, string>;
 }
 
 const HUBSPOT_SCOPES = [
@@ -484,6 +490,76 @@ export const KINDS: KindSpec[] = [
     guide: {
       summary: "Dynamics 365 setup",
       text: "Hello signs in with the client credentials of an Entra app registered as an application user of the environment, so no browser step is needed.",
+    },
+  },
+  {
+    value: "outlook",
+    label: "Outlook",
+    auth: "oauth",
+    personal: true,
+    intro:
+      "Microsoft 365: each user signs in with their own account under My connections; their contacts name callers and their calendar can set Do Not Disturb.",
+    idLabel: "Client ID",
+    secretLabel: "Client secret",
+    secretHint: "Kept sealed; it is never shown again.",
+    fields: [
+      {
+        key: "tenant",
+        label: "Tenant",
+        initial: "organizations",
+        hint: "organizations (any work or school account), a tenant id or your domain.",
+      },
+      {
+        key: "features",
+        label: "What users may connect",
+        initial: "contacts",
+        multi: [
+          { value: "contacts", label: "Contacts name callers" },
+          { value: "calendar", label: "Calendar sets DND" },
+        ],
+      },
+    ],
+    bound: [],
+    ownerLabel: "Fallback owner",
+    featureScopes: {
+      contacts: "Contacts.Read",
+      calendar: "Calendars.Read",
+    },
+    guide: {
+      summary: "Microsoft Entra app settings",
+      text: "In the Microsoft Entra admin center register an application (a web platform), add this redirect URI, create a client secret and add these delegated Microsoft Graph permissions. They are read-only and need no administrator consent.",
+    },
+  },
+  {
+    value: "google",
+    label: "Google",
+    auth: "oauth",
+    personal: true,
+    intro:
+      "Google Workspace: each user signs in with their own account under My connections; their contacts name callers and their calendar can set Do Not Disturb.",
+    idLabel: "Client ID",
+    secretLabel: "Client secret",
+    secretHint: "Kept sealed; it is never shown again.",
+    fields: [
+      {
+        key: "features",
+        label: "What users may connect",
+        initial: "contacts",
+        multi: [
+          { value: "contacts", label: "Contacts name callers" },
+          { value: "calendar", label: "Calendar sets DND" },
+        ],
+      },
+    ],
+    bound: [],
+    ownerLabel: "Fallback owner",
+    featureScopes: {
+      contacts: "https://www.googleapis.com/auth/contacts.readonly",
+      calendar: "https://www.googleapis.com/auth/calendar.freebusy",
+    },
+    guide: {
+      summary: "Google Cloud app settings",
+      text: "In the Google Cloud console create an OAuth client (web application), add this redirect URI, enable the People API and the Calendar API, and add these scopes to the consent screen. Keep the app in Testing for your own domain, or publish it internal.",
     },
   },
 ];

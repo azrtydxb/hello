@@ -3555,6 +3555,105 @@ Decided while building, without asking, within the spec and the brief:
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
 
+## Integrations P17: Slack, n8n and Make (2026-11-13)
+
+- **Slack is its own small queue, not a webhook endpoint format.** The webhook
+  dispatcher signs Hello's own JSON and counts health per endpoint; Slack needs a
+  different body, no signature, an `Authorization` header for a bot and an
+  answer to parse (`{"ok":false,"error":...}` comes with HTTP 200). Bending
+  `webhook_endpoints` for that would touch P2 code other builders and P7 use, so
+  `internal/slack` has its own two tables (`slack_destinations`, `slack_posts`,
+  migration 00089) and reuses the exported pieces of P2: `webhook.RetryDelay`
+  (the same eight-attempt schedule) and the retry and dead-letter rules.
+- **Posts are queued in the event ingest transaction** (a `TxHook`, like webhooks
+  and the CRM), with the event stored in the row, so a post never waits on
+  `integration_events` retention and a repeated event posts once
+  (`UNIQUE (destination_id, event_id)`).
+- **Both Slack credentials are supported** (spec table): an incoming webhook URL
+  (host pinned to `hooks.slack.com` / `hooks.slack-gov.com`, https, path
+  `/services/`) and a bot token with a channel (`xoxb-` only, fixed API address).
+  The secret is write-only and sealed under the AAD `slack:<id>`; the MCP
+  decision is exclude, category credentials.
+- **Slack failures decide the destination's state.** `invalid_auth`,
+  `token_revoked`, 401 and 403 switch the destination off (`auth_failed`), a 404
+  or 410 from a webhook switches it off (`destination_gone`), 50 failures in a
+  row too; a new credential switches it back on. Channel errors
+  (`not_in_channel`, `channel_not_found`) only kill the post. Names and numbers
+  of callers are untrusted: `<`, `>`, `&` and mrkdwn characters are neutralised
+  (no `<!channel>` or links from a caller name) and each field is cut to 80
+  characters.
+- **`voicemail.received` is a new event type** (spec: "voicemail posted to a
+  channel" needed one). hello-sip emits it after the message row is stored, once
+  per box for a voicemail group, with the caller, the box extension and
+  `durationMs`; never the audio. An endpoint that subscribes to every event now
+  receives it too (the envelope is additive).
+- **n8n and Make reuse the generic surface, no new routes.** The trigger
+  subscribes through `POST /webhooks` and deletes through `DELETE`; the actions
+  are originate, `cdrs` and the lookup route. The n8n trigger verifies
+  `Hello-Signature` itself (Hello's signing secret is returned once at
+  subscription and kept in the workflow's static data; a subscription that
+  already existed has no secret, so it is replaced). Make cannot compute an HMAC
+  in IML, so its hook URL is the secret, as decided for Zapier (P7). The Find
+  Contact operation uses `GET /api/v1/lookup/number`, which comes with P7 (#304):
+  it is not duplicated here, so those two operations work once #304 is merged.
+- **No build step for n8n.** The node is plain CommonJS (no TypeScript, no
+  `n8n-workflow` dependency) so `node --test` runs it in CI with a fake n8n
+  context and the tests read `openapi.json` to prove every request is a
+  documented route.
+
+## Integrations P18: Outlook and Google contacts, calendar DND (2026-11-13)
+
+- **Per-user connectors in the existing framework.** `crm_connections` already
+  had `scope = 'user'`; the framework now uses it: `Capabilities.UserScope`,
+  `Repo.{UserConnection,SaveUserConnection,DeleteUserConnection,UserConnections,UserConnectionsOf}`,
+  `TokenManager.ConnFor` and `RefreshFor`. Per-user tokens are sealed under
+  `crm:<connector>:user:<user>:<access|refresh>` so a blob copied to another user's
+  row does not open. The administrator creates one connector (the customer's own
+  Microsoft or Google app) and each user connects; the org-level connect and test
+  refuse a per-user connector. A re-authorisation need of a personal connection
+  is shown to that user, not e-mailed to the administrators.
+- **The OAuth state carries who started it** (`user:<id>:<actor>` in the existing
+  actor column, no schema change), so the shared callback finishes a personal
+  sign-in for the right user and redirects to `/me/connections`; a state of the
+  wrong scope is refused.
+- **Caller names from the called user's contacts, after the organisation's
+  CRM.** `Lookup.NameFor(extension, number)` resolves the extension to its user
+  (cached 60 s) and asks only that user's connected connectors; hello-sip tries
+  it when the route sends the call straight to an extension (`dec.Extension`),
+  within what is left of the same 250 ms budget. A ring group, queue or IVR is
+  named from nobody's contacts: choosing whose address book would be a guess.
+  The carrier's real name still wins. Cache keys are per user.
+- **Contacts are matched locally on an in-memory index.** Graph has no phone
+  search on contacts and People's `searchContacts` is prefix-based and a
+  warm-up-dependent, so the connectors read the address book (20 pages of up to
+  1000, 20,000 contacts) into `crm.ContactIndex` kept 10 minutes per account. The
+  key is the **last eight digits** (nine would miss the trunk `0`: `050 12 34 56`
+  vs `+32 50 12 34 56`); two contacts with one key are ambiguous and name nobody.
+  The read outlives the 1.5 s lookup (`WithoutCancel`, one minute) so the first
+  call after a quiet spell misses and the next ones hit.
+- **Features choose the scopes.** Per-user connectors take `features`
+  (`contacts`, `calendar`); the sign-in asks only for what is on. Google asks for
+  `calendar.freebusy` only, never event content; Outlook asks `Calendars.Read`
+  but selects only `showAs`, `isCancelled`, `isAllDay`, `start`, `end` and
+  `responseStatus`.
+- **Calendar DND is polled every two minutes** by one replica (`TryLock`), eight
+  calendars at a time. Change notifications are not used (public callback plus
+  renewal for a 2-minute gain). `extensions.dnd_source` (`manual`, `calendar`,
+  migration 00090) records who set DND; the two manual writers (extension update
+  and the feature-code path) set it to `manual` whenever they set `dnd`, the
+  poller writes `calendar` only where DND was off and clears only `calendar`
+  ones, in a config transaction (audit, revision bump, hello-sip reload) that is
+  skipped when nothing would change. A user who turns DND on by hand during a
+  meeting therefore takes it over; one who turns it off is not fought until the
+  next stretch. With several connected calendars DND stays while any is busy; an
+  unreadable calendar keeps it until the last known end plus 5 minutes.
+- **`dndSource` joins the extension in the API** (`Extension`, `SelfExtension`),
+  so the console and agents can tell a calendar DND from a manual one.
+- **Pre-existing behaviour changed:** `ActiveConnectors` now means "has any
+  non-revoked connection" (org or user) instead of "has an org connection", so a
+  per-user connector is listed once someone connects; the org lookup and the
+  logging hook skip it (`Capabilities.UserScope`, `LogCalls` false).
+
 ## Integrations P7: Zapier private integration (2026-11-10)
 
 Built per spec `integrations.md` I-52 and the P7 phase line. Choices the spec left

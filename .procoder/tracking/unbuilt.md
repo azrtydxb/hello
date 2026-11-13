@@ -89,8 +89,8 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P14 | Pipedrive                                      | wip (#329)  |
 | P15 | Zoho CRM                                       | wip (#329)  |
 | P16 | Zendesk, Freshdesk                             | wip (#328)  |
-| P17 | Slack, n8n, Make                               | todo        |
-| P18 | Outlook/Google contacts lookup, calendar DND   | todo        |
+| P17 | Slack, n8n, Make                               | wip (#335)  |
+| P18 | Outlook/Google contacts lookup, calendar DND   | wip (#335)  |
 | P19 | Dynamics 365 CIF                               | wip (#331)  |
 | P20 | ConnectWise, Autotask, HaloPSA, Clio           | wip (#328)  |
 | P21 | Odoo, Bitrix24                                 | wip (#329)  |
@@ -113,8 +113,8 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P14 | Pipedrive                                      | wip (#329)  |
 | P15 | Zoho CRM                                       | wip (#329)  |
 | P16 | Zendesk, Freshdesk                             | wip (#328)  |
-| P17 | Slack, n8n, Make                               | todo        |
-| P18 | Outlook/Google contacts lookup, calendar DND   | todo        |
+| P17 | Slack, n8n, Make                               | wip (#335)  |
+| P18 | Outlook/Google contacts lookup, calendar DND   | wip (#335)  |
 | P19 | Dynamics 365 CIF                               | wip (#331)  |
 | P20 | ConnectWise, Autotask, HaloPSA, Clio           | wip (#328)  |
 | P21 | Odoo, Bitrix24                                 | wip (#329)  |

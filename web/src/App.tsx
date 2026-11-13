@@ -38,6 +38,8 @@ import {
 } from "./pages/Integrations";
 import { IntegrationEvents } from "./pages/IntegrationEvents";
 import { IntegrationsCRM } from "./pages/IntegrationsCRM";
+import { IntegrationsSlack } from "./pages/IntegrationsSlack";
+import { MyConnections } from "./pages/MyConnections";
 import { Webhooks } from "./pages/Webhooks";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
@@ -186,6 +188,8 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/integrations/api-access": IntegrationsApiAccess,
   "/integrations/events": IntegrationEvents,
   "/integrations/crm": IntegrationsCRM,
+  "/integrations/slack": IntegrationsSlack,
+  "/me/connections": MyConnections,
   "/integrations/webhooks": Webhooks,
 };
 

@@ -13,6 +13,7 @@ export const EVENT_TYPES = [
   "call.recording.ready",
   "call.completed",
   "call.originate.progress",
+  "voicemail.received",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
