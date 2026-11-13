@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/crm"
 )
 
 // TestLookupNumber (spec integrations I-43) fails if the number lookup does
@@ -101,4 +103,45 @@ func searched(r map[string]any) []string {
 		out = append(out, v.(string))
 	}
 	return out
+}
+
+// fakeContacts is a CRM service that knows one number; only FindContact is
+// used by the lookup.
+type fakeContacts struct {
+	CRMService
+	gotUser int64
+}
+
+func (f *fakeContacts) FindContact(_ context.Context, userID int64, number string) *crm.Contact {
+	f.gotUser = userID
+	if strings.ReplaceAll(number, " ", "") != "+41795550100" {
+		return nil
+	}
+	return &crm.Contact{ID: "c9", Name: "Grace Hopper", Company: "Navy", URL: "https://crm.example/c9"}
+}
+
+// TestLookupNumberCRM fails if the lookup leaves out the company of an
+// address-book match, hides the CRM contact (name, company and link) next to
+// the book result, or invents a CRM contact for a number the CRM does not know.
+func TestLookupNumberCRM(t *testing.T) {
+	f := &fakeContacts{}
+	e := newEnvConfig(t, Config{Live: noLive{}, CRM: f}, nil)
+	alice := e.login()
+	company := bookID(t, alice, "company")
+	body := entryBody("Corp", "+41791234567")
+	body["company"] = "Corp AG"
+	alice.must(http.StatusCreated, "POST", "/api/v1/phonebooks/"+company+"/entries", body)
+
+	r := alice.must(http.StatusOK, "GET", "/api/v1/lookup/number?number="+url2("+41 79 555 01 00"), nil).json(t)
+	crmc, _ := r["crm"].(map[string]any)
+	if r["result"] != "none" || crmc["name"] != "Grace Hopper" || crmc["company"] != "Navy" || crmc["url"] != "https://crm.example/c9" {
+		t.Errorf("crm contact: %v", r)
+	}
+	if f.gotUser == 0 {
+		t.Error("the CRM was not asked for the caller's own user")
+	}
+	r = alice.must(http.StatusOK, "GET", "/api/v1/lookup/number?number="+url2("+41791234567"), nil).json(t)
+	if r["company"] != "Corp AG" || r["crm"] != nil {
+		t.Errorf("book match: %v", r)
+	}
 }

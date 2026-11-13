@@ -163,6 +163,10 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, msgMetrics, log)
 	go runCarrierWorkers(ctx, st, msgMetrics, log)
 	go runInboxNotifier(ctx, envSMTP(cfg), st, log)
+	if _, err := startChat(ctx, cfg, st, box, vk, effectiveSMTP(st, envSMTP(cfg)), metrics.Registry, log); err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("HELLO_MSG_CHAT_LAN_ADDR: %w", err)
+	}
 
 	// Scheduled and manual backups, and restore (spec pbx-gaps S-2 to S-4).
 	// Every replica runs the scheduler; the run itself is taken under an

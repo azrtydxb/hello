@@ -69,6 +69,7 @@ import { Inbox, MyInbox } from "./pages/Inbox";
 import { MessagingChannels } from "./pages/MessagingChannels";
 import { MessagingOptOuts } from "./pages/MessagingOptOuts";
 import { MessagingSettings } from "./pages/MessagingSettings";
+import { MessagingWebchat } from "./pages/MessagingWebchat";
 import { getInboxStatus } from "./api/inbox";
 import { Messages } from "./pages/Messages";
 import { Phonebooks } from "./pages/Phonebooks";
@@ -139,6 +140,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/me/inbox": MyInbox,
   "/inbox": Inbox,
   "/messaging/channels": MessagingChannels,
+  "/messaging/chat": MessagingWebchat,
   "/messaging/optouts": MessagingOptOuts,
   "/messaging/settings": MessagingSettings,
   "/me/voicemail": MyVoicemail,

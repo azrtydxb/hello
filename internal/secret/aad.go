@@ -13,6 +13,10 @@ func ConferencePINAAD(roomID int64, which string) string {
 // secret copied to another user's row does not open.
 func TOTPAAD(userID int64) string { return fmt.Sprintf("user:%d:totp", userID) }
 
+// ChatTurnstileAAD is the additional data a chat site's Turnstile secret key
+// is sealed under, so a value copied to another site's row does not open.
+func ChatTurnstileAAD(siteID int64) string { return fmt.Sprintf("chat_site:%d:turnstile", siteID) }
+
 // DoorOpenAAD is the additional data a door station's door-open code is
 // sealed under, so a code copied to another extension's row does not open.
 func DoorOpenAAD(extensionID int64) string { return fmt.Sprintf("door-open:%d", extensionID) }

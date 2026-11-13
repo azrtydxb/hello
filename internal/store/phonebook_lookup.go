@@ -116,6 +116,7 @@ func matched(res phonebook.LookupResult, src lookupSource, id int64, in phoneboo
 	res.Result, res.Via = phonebook.LookupMatch, via
 	res.Source, res.Book, res.BookID = string(src.kind), src.name, src.id
 	res.EntryID, res.Name = id, in.DisplayName()
+	res.Company = in.Company
 	return res
 }
 

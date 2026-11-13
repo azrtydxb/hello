@@ -3555,6 +3555,73 @@ Decided while building, without asking, within the spec and the brief:
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
 
+## Messaging 4, LAN chat widget: defaults chosen (2026-11-11)
+
+Built from `.procoder/specs/messaging-channels.md` M-28, M-29, M-29a to M-29c.
+Where the spec left a product decision open, the conservative option was chosen
+and is listed here as chosen by default; change one by editing this entry and
+the code it names.
+
+- **Routing.** A chat conversation goes to the unassigned inbox pool, which is
+  what `route_kind = 'inbox'` is today. Queue routing and ACD assignment are
+  item 5, so the "default route (queue)" site setting is not offered yet.
+- **Who is available.** Agent staffing (M-13) is not on main, so a site is
+  online when it is inside its opening hours, a supervisor (operator or admin)
+  has an inbox stream open (seen in the last two minutes, `inbox_presence`), and
+  the unassigned live chats are under the site's cap. Otherwise the widget goes
+  offline: it collects a name, an email address and a message, and the chat is
+  flagged offline.
+- **Opening hours.** The M-14 schedule and the time-conditions engine are not
+  on main, so a site keeps its own weekly schedule (an IANA zone and windows per
+  weekday); empty means always open. A bad schedule counts as open, so a typo
+  never silences the widget.
+- **Agents are anonymous to visitors.** A visitor sees "Support", never an
+  agent's username or display name.
+- **Visitor events** are in `chat_events`, not `conversation_events`: that
+  table is per user and its user id is a required key. Same design (ids in
+  commit order, 7 days, `Last-Event-ID` resume on any pod).
+- **A challenge endpoint.** `GET /chat/v1/challenge?site=` returns the site's
+  public look and the nonce to solve; the spec lists the session call but a
+  proof of work needs its nonce first. Nonces are signed, expire in three
+  minutes, are bound to the client address and the site, are accepted once per
+  pod, and may never carry less difficulty than the site's setting.
+- **Turnstile and the frame's policy.** Turnstile cannot render under
+  `script-src 'self'`, so only a Turnstile site's frame also allows
+  `https://challenges.cloudflare.com` for scripts and frames. Every other site
+  keeps the spec's policy exactly. The admin page warns that Turnstile needs
+  the browser and the server to reach Cloudflare.
+- **Blocks.** A block holds the visitor for the hours chosen (24 by default, at
+  most 720) and the day's address hash until 00:00 UTC at most. A blocked
+  visitor gets a normal 200 with a closed state and a worthless token; nothing is
+  stored. Unblocking is on the sites page.
+- **Daily address salt.** The hash is HMAC-SHA256 under a key derived from
+  `HELLO_SECRET_KEY` and the UTC date, so there is no salt table and the salt
+  rotates at 00:00 UTC on every pod.
+- **One stream per visitor** is enforced per pod (a second stream is refused
+  with 429 after waiting up to a second for the old one to close, so a page
+  reload is not refused); there is no cross-pod stream registry.
+- **Adaptive difficulty** is tracked per pod in memory (this minute against
+  three times the median of the last hour, at least 10 sessions): only a
+  hardening, nothing depends on it.
+- **Email replies** are allowed only for chats the visitor left while nobody was
+  available and gave an address for; a live chat is answered in the widget. The
+  email holds the reply and no link, and the failure is kept as a failed message.
+- **A resolved chat reopens** when the same visitor writes again within
+  `reopen_days` (M-12); after a visitor ends a chat and returns later, a new
+  conversation starts. A chat an agent marked spam stays closed to that visitor.
+- **A site collecting nothing still takes an email address while offline**, so
+  the reply has somewhere to go.
+- **Defaults.** The listener is off until `HELLO_MSG_CHAT_LAN_ADDR` is set; the
+  global switch `HELLO_MSG_CHAT_ENABLED` defaults to true; a new site has the
+  proof-of-work challenge at 16 bits, no contact collection, no transcripts,
+  links kept, and no allowed origins until some are listed (the frame is then
+  not embeddable by any page).
+- **Not built, and why.** Chat attachments (`POST /chat/v1/attachments`, the
+  site's attachment switch) and the site logo from MinIO are not built: the
+  media pipeline and its tables (M-18) are not on main, and the spec has
+  attachments off by default. The route does not exist (404), so nothing is
+  half-wired. They join the media work.
+
 ## Integrations P8: directory engine and AD/LDAP sync (2026-11-10)
 
 Built from spec `integrations.md` I-1 to I-10 and I-12 to I-19 (range
@@ -3714,9 +3781,8 @@ default; each is a one-line change if the user decides otherwise.
 - The page script is registered dynamically only for sites the user lists and
   the browser has granted (`optional_host_permissions`), so there is no
   `<all_urls>` grant and no always-on content script.
-- Not built here: `GET /api/v1/lookup/number` (I-43) is not on main, so the
-  incoming-call notification shows the name in the `call.ringing` event itself.
-  A CRM contact lookup belongs to the connectors.
+- The incoming-call notification looks the caller up through
+  `GET /api/v1/lookup/number` (I-43, #304); see "Extension caller lookup" below.
 
 ## Integrations P17: Slack, n8n and Make (2026-11-13)
 
@@ -4183,3 +4249,24 @@ Not testable without a Twilio account (hardware/accounts list in the PR): a real
 send and delivery receipt, error code mapping against live Twilio, 10DLC and
 toll-free registration state, Messaging Service sends, what carriers do to an
 unregistered sender.
+
+## Extension caller lookup (2026-11-13, feat/extension-lookup)
+
+- **No new scope.** The lookup route needs `read` and the `hello-extension`
+  client already asks for `calls events read`; the preregistered client and the
+  scope rules are unchanged.
+- **The route gains the fields the notification needs.** It returned only a
+  name, so it now also returns `company` (the matching book entry's company)
+  and `crm`: `{id, name, company, url}` from the CRM connectors (organisation
+  connectors first, then the caller's own Outlook/Google), via
+  `crm.Service.FindContact` and the 1.5 s budget and 5 min/60 s cache of the
+  existing CRM lookup. `crm` is independent of `result`: a number can be `none`
+  in the books and known to the CRM. A service account gets only organisation
+  connectors. Additive; no other consumer changes.
+- **Name precedence:** CRM contact, then an address-book match, then the name in
+  the event. An ambiguous or unresolvable answer names nobody.
+- **Quiet failure:** 404, no match, errors and a 2 s timeout all fall back to the
+  event name. Cache in the worker's memory (5 min hit, 60 s miss and 404, 10 s
+  failure); it is not persisted, and sign-out clears it.
+- **CRM link** is an "Open in CRM" notification button (only http and https
+  links), not a click on the body, which still just dismisses.

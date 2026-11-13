@@ -2,12 +2,15 @@
 // registration of the page script on the sites the user allowed.
 import { applyProgress, FINISHED, describe, ringingPop } from "./lib/calls.js";
 import { originPatterns, serverOrigin } from "./lib/hosts.js";
+import { createLookup } from "./lib/lookup.js";
 import { dialable } from "./lib/numbers.js";
 import { createSession, ApiError, NotSignedIn } from "./lib/session.js";
 import { loadSettings, saveSettings } from "./lib/settings.js";
 import { backoff, readStream } from "./lib/stream.js";
 
 const session = createSession(chrome.storage.local, chrome.identity);
+const lookup = createLookup(session);
+const LINKS_KEY = "hello.ringlinks";
 const CALL_KEY = "hello.call";
 const CURSOR_KEY = "hello.cursor";
 const SCRIPT_ID = "hello-pages";
@@ -104,15 +107,37 @@ async function handleEvent(ev, cursor) {
     if (next !== call) await setCall(next);
     return;
   }
-  const pop = ringingPop(ev);
-  if (!pop || !(await loadSettings(chrome.storage.local)).notify) return;
-  await chrome.notifications.create(`ring-${pop.id}`, {
+  const base = ringingPop(ev);
+  if (!base || !(await loadSettings(chrome.storage.local)).notify) return;
+  // The caller's contact (address books, own contacts, CRM) when Hello knows
+  // it; a miss or a slow server leaves the event's own name.
+  const pop = ringingPop(ev, await lookup.find(ev.data?.from?.number));
+  const options = {
     type: "basic",
     iconUrl: chrome.runtime.getURL("icons/128.png"),
     title: pop.title,
     message: pop.message || "Incoming call",
     priority: 2,
-  });
+  };
+  if (pop.url) options.buttons = [{ title: "Open in CRM" }];
+  await chrome.notifications.create(`ring-${pop.id}`, options);
+  if (pop.url) await rememberLink(`ring-${pop.id}`, pop.url);
+}
+
+// The CRM link of a notification, kept in session storage because the worker
+// may sleep before the button is pressed.
+async function rememberLink(id, url) {
+  const links = (await chrome.storage.session.get(LINKS_KEY))[LINKS_KEY] ?? {};
+  const ids = Object.keys(links).slice(-19);
+  const next = Object.fromEntries(ids.map((k) => [k, links[k]]));
+  next[id] = url;
+  await chrome.storage.session.set({ [LINKS_KEY]: next });
+}
+
+async function openLink(id) {
+  const links = (await chrome.storage.session.get(LINKS_KEY))[LINKS_KEY] ?? {};
+  if (links[id]) await chrome.tabs.create({ url: links[id] });
+  await chrome.notifications.clear(id);
 }
 
 // ---- actions ----
@@ -199,7 +224,8 @@ const handlers = {
   async signOut() {
     stopStream();
     await session.signOut();
-    await chrome.storage.session.remove([CALL_KEY, CURSOR_KEY]);
+    await chrome.storage.session.remove([CALL_KEY, CURSOR_KEY, LINKS_KEY]);
+    lookup.clear();
     await badge(null);
     return status();
   },
@@ -292,3 +318,4 @@ chrome.permissions.onRemoved.addListener(() => void syncContentScript());
 chrome.notifications.onClicked.addListener(
   (id) => void chrome.notifications.clear(id),
 );
+chrome.notifications.onButtonClicked.addListener((id) => void openLink(id));

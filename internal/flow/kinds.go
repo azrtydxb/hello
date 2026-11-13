@@ -169,6 +169,7 @@ var NonFlowResources = map[string]string{
 	"integrations/slack":            "Slack channels that receive missed-call and voicemail notifications; they never change where a call goes",
 	"messaging/channels":            "customer text channels of the messaging inbox, not call routing",
 	"messaging/addresses":           "numbers customers text in the messaging inbox, not call routing",
+	"messaging/chat/sites":          "website chat widgets of the messaging inbox, not call routing",
 	"inbox/conversations":           "customer text conversations of the messaging inbox, not call routing",
 }
 

@@ -127,7 +127,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 1     | Inbox core                                                   | done (#211) |
 | 2     | Twilio sending                                               | todo        |
 | 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | in review   |
-| 4     | LAN chat widget                                              | todo        |
+| 4     | LAN chat widget                                              | in PR       |
 | 5     | Message routing and ACD                                      | todo        |
 | 6     | Telnyx, sender registration                                  | todo        |
 | 7     | AI triage, drafts, auto-reply                                | todo        |
@@ -193,7 +193,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                                                                                      | Status                |
 | --------------------------------------------------------------------------------------------------------- | --------------------- |
-| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-f1d7e1e)    |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-3514782)    |
 | MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
 | Transfer-to-voicemail phone key                                                                           | done (#200)           |

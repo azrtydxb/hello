@@ -13,15 +13,17 @@ This is the first phase of the messaging channels. What works now:
   carrier as supported);
 - the inbox for supervisors and agents, with assignment by hand and claiming,
   notes, tags, states, search, live updates and notifications;
-- Hello's own opt-out handling, retention and erasing a customer.
-
+- Hello's own opt-out handling, retention and erasing a customer;
 - sending SMS through a **Twilio** account (see "Sending through Twilio"):
-  outbound only.
+  outbound only;
+- a website chat widget for intranet pages and VPN users, served on the LAN only
+  (see "Website chat" below).
 
 Not yet: receiving texts from a carrier's web API (needs an Internet-facing
-address), Telnyx, WhatsApp, the chat widget, texts on desk phones, queues and
-automatic assignment, and AI. None of the providers that need an
-Internet-facing address is possible while Hello is reachable only on the LAN.
+address), Telnyx, WhatsApp, texts on desk phones, queues and automatic
+assignment, and AI. None of the providers that need an Internet-facing address
+is possible while Hello is reachable only on the LAN, and neither is a widget on
+a public website.
 
 ## Setting it up
 
@@ -276,19 +278,124 @@ The page also:
   number**. It needs SMTP ([user-accounts.md](user-accounts.md)); the switch is
   in the settings.
 
+## Website chat
+
+A chat site is a widget an administrator embeds on **intranet pages** (or pages
+reached over a VPN). Visitors are anonymous; their chat arrives in the inbox as
+a conversation, and agents answer it there. It is **LAN only**: the public
+widget needs the public listener, which is not built.
+
+### Turning it on
+
+1. Set `HELLO_MSG_CHAT_LAN_ADDR` (for example `:8087`) on hello-control. Unset,
+   nothing listens and there is no extra port. Helm: `control.chat.lanAddr`.
+   `HELLO_MSG_CHAT_ENABLED=false` is the global kill switch (every `/chat`
+   request answers 503); `HELLO_MSG_CHAT_TRUSTED_PROXIES` lists the proxies whose
+   `X-Forwarded-For` is believed (the UI pods and the ingress controller; without
+   them every visitor shares one address and one set of limits);
+   `HELLO_MSG_CHAT_MAX_INFLIGHT` (500) and `HELLO_MSG_CHAT_MAX_STREAMS` (2000) bound
+   a pod.
+2. The listener has its own `http.Server` and serves only `/chat/*` and
+   `/healthz`; the admin API, the UI, OAuth and MCP are not routed on it. The
+   UI container proxies `/chat/` to it (`HELLO_CHAT_UPSTREAM`), so the widget is
+   on the same LAN host as the console; the Helm chart sets this when the
+   listener is on.
+3. **Messaging, Chat sites**: add a site, list the intranet origins that may
+   embed it (`scheme://host[:port]`), and copy the embed code:
+
+   ```html
+   <script
+     async
+     src="https://hello.lan/chat/v1/widget.js"
+     data-site="SITE_KEY"
+   ></script>
+   ```
+
+   The loader injects a sandboxed iframe on Hello's own origin, so the page's
+   scripts and styles can neither read nor break the chat. The frame is served
+   with `frame-ancestors` set to the site's allowed origins (`'none'` until
+   some are listed) and `default-src 'none'; script-src 'self'; style-src
+'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none';
+form-action 'none'`. A Turnstile site also allows Cloudflare's host for
+   scripts and frames, which its widget needs.
+
+### What a visitor sees
+
+A launcher bubble, an optional pre-chat form (name and email: off, optional or
+required; the retention period and a privacy policy link are shown, and
+consent is recorded), the conversation, a typing indicator and "Support"
+as the agents' name. Outside the site's opening hours, with no supervisor
+holding the inbox open, or with the live queue full, the widget offers to leave
+a message and an email address (or hides itself, per site). A visitor may end
+the chat and, when the site allows it, email themselves a transcript (three a
+day). Messages are plain text everywhere; a link in a visitor's message is
+clickable only in the inbox, with `rel="noopener noreferrer nofollow"` and one
+confirmation per host before it leaves Hello.
+
+### What an agent does
+
+The conversation is an ordinary inbox conversation (peer kind visitor) with the
+visitor's name, email, the page the chat started on and a coarse browser
+family. An agent can **block the visitor** (24 hours by default, 30 days at
+most; the day's network address too), **answer an offline chat by email** (the
+reply and no link are emailed to the address the visitor gave and kept in the
+conversation; the visitor sees it in the widget when they return; needs SMTP),
+and the visitor sees when an agent is typing and when their messages were read.
+
+### Abuse controls
+
+All of them are server-side and none trusts the `Origin` header (anyone can run
+`curl`):
+
+- **Challenge** at session creation: a stateless proof of work (default, 14 to
+  22 bits, no third party), Cloudflare Turnstile with the customer's own keys, or
+  none (the page warns). A solved nonce works once, only for the address it was
+  issued to, and expires in three minutes. The difficulty rises one level for 15
+  minutes while a site gets more than three times its usual session rate
+  (`hello_chat_challenge_raised_total`).
+- **Limits** (Valkey, with the same windows per pod in memory when Valkey does
+  not answer; never open): sessions 5 a minute and 30 an hour per address and 200
+  a minute per site; messages 20 a minute and 300 a day per visitor and 10,000 a
+  day per site; typing, history, event streams and transcripts have their own.
+  Over a limit the answer is `429` with `Retry-After` and no body.
+- **Caps**: 2000 characters a message (valid UTF-8, control and invisible
+  formatting characters removed, normalised), 16 KiB a request, one open
+  conversation per visitor, 200 messages before any agent reply, and the live
+  queue cap per site. A pod answers 503 beyond 500 requests in flight; each
+  request has a 10 second deadline; a pod holds at most 2000 event streams.
+- **Blocklist**: a blocked visitor gets a normal-looking `200` with a closed
+  state and reaches nobody. Addresses are only ever kept as an HMAC under a salt
+  that changes at 00:00 UTC.
+- **Content**: honeypot field, optional link stripping, no cookies, no
+  fingerprinting, the user agent reduced to a browser family, the page to host
+  and path.
+- **Not built**: attachments and the site logo (they need the media pipeline,
+  which is not on main).
+
+Visitors' names, emails, tokens, addresses and text never reach a log, a metric
+label or an audit row. Retention for finished chats is 90 days by default (a
+site can set its own); visitors with no chat left are removed after 30 days;
+erasing `visitor:<id>` removes the visitor's whole record.
+
+Metrics: `hello_chat_sessions_total{result}`, `hello_chat_messages_total{result}`,
+`hello_chat_rate_limited_total{rule}`, `hello_chat_challenge_raised_total`,
+`hello_chat_rejected_total{reason}` and `hello_chat_streams`.
+
 ## API
 
-| Route                                                                | Role and scope        |
-| -------------------------------------------------------------------- | --------------------- |
-| `/api/v1/messaging/channels` (+ `/{id}`, `/{id}/test`)               | admin, `admin`        |
-| `/api/v1/messaging/addresses` (+ `/{id}`)                            | admin, `admin`        |
-| `/api/v1/messaging/settings`                                         | admin, `admin`        |
-| `/api/v1/messaging/optouts` (+ `/{id}/reconsent`)                    | admin, `admin`        |
-| `POST /api/v1/inbox/erase`                                           | admin, `admin`        |
-| `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`              | operator, `messages`  |
-| `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream` | any agent, `messages` |
-| `POST .../conversations/{id}/contact` (add to contacts)              | as the area it is in  |
-| `GET .../conversations/{id}/calls` (the number's recent calls)       | as the area it is in  |
+| Route                                                                                     | Role and scope                |
+| ----------------------------------------------------------------------------------------- | ----------------------------- |
+| `/api/v1/messaging/channels` (+ `/{id}`, `/{id}/test`)                                    | admin, `admin`                |
+| `/api/v1/messaging/addresses` (+ `/{id}`)                                                 | admin, `admin`                |
+| `/api/v1/messaging/settings`                                                              | admin, `admin`                |
+| `/api/v1/messaging/optouts` (+ `/{id}/reconsent`)                                         | admin, `admin`                |
+| `POST /api/v1/inbox/erase`                                                                | admin, `admin`                |
+| `/api/v1/messaging/chat/sites` (+ `/{id}`, `/{id}/blocks`), `/chat/blocks/{id}`           | admin, `admin`                |
+| `/api/v1/inbox/conversations/{id}/block`, `/email-reply`, `/typing` (and `/me/inbox/...`) | operator or agent, `messages` |
+| `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`                                   | operator, `messages`          |
+| `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream`                      | any agent, `messages`         |
+| `POST .../conversations/{id}/contact` (add to contacts)                                   | as the area it is in          |
+| `GET .../conversations/{id}/calls` (the number's recent calls)                            | as the area it is in          |
 
 Conversations list with `view` (`all`, `mine`, `unassigned`), `status`, `q`
 (number, name or text), `channelId`, and a cursor. Every operation is in
