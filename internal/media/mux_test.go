@@ -1,6 +1,7 @@
 package media
 
 import (
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -149,7 +150,7 @@ func TestMuxUfragUniqueAndFreedOnClose(t *testing.T) {
 	if err := a.SetUfrag("aaaa1111"); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.SetUfrag("aaaa1111"); err != ErrMuxUfragInUse {
+	if err := b.SetUfrag("aaaa1111"); !errors.Is(err, ErrMuxUfragInUse) {
 		t.Errorf("second holder of a ufrag: %v", err)
 	}
 	if err := a.SetUfrag(""); err == nil {
@@ -227,7 +228,7 @@ func TestMuxEndpointLimitAndClose(t *testing.T) {
 		}
 		eps = append(eps, e)
 	}
-	if _, err := m.NewEndpoint(); err != ErrMuxFull {
+	if _, err := m.NewEndpoint(); !errors.Is(err, ErrMuxFull) {
 		t.Errorf("past the limit: %v", err)
 	}
 	_ = eps[0].Close()
