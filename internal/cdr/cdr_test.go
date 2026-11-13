@@ -264,11 +264,11 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 37 {
-		t.Fatalf("insert takes %d arguments, want 37", len(db.args))
+	if len(db.args) != 39 {
+		t.Fatalf("insert takes %d arguments, want 39", len(db.args))
 	}
-	if db.args[33] != SRTPNone {
-		t.Fatalf("srtp = %v, want the default %q", db.args[33], SRTPNone)
+	if db.args[33] != SRTPNone || db.args[34] != KeyExNone || db.args[35] != false {
+		t.Fatalf("srtp, key exchange, ice = %v, %v, %v, want the defaults %q, %q, false", db.args[33], db.args[34], db.args[35], SRTPNone, KeyExNone)
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
@@ -311,7 +311,7 @@ func TestFollowMeLegsCDR(t *testing.T) {
 	if err := w.write(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if got := db.args[36]; got != "[]" {
+	if got := db.args[38]; got != "[]" {
 		t.Fatalf("follow-me legs = %v, want [] for a call with none", got)
 	}
 	r.FollowMeLegs = []FollowMeLeg{
@@ -322,8 +322,8 @@ func TestFollowMeLegsCDR(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got []FollowMeLeg
-	if err := json.Unmarshal([]byte(db.args[36].(string)), &got); err != nil || len(got) != 2 || got[1] != r.FollowMeLegs[1] {
-		t.Fatalf("follow-me legs argument = %v (%v), want %+v", db.args[36], err, r.FollowMeLegs)
+	if err := json.Unmarshal([]byte(db.args[38].(string)), &got); err != nil || len(got) != 2 || got[1] != r.FollowMeLegs[1] {
+		t.Fatalf("follow-me legs argument = %v (%v), want %+v", db.args[38], err, r.FollowMeLegs)
 	}
 	if !strings.Contains(insert, "INTO cdr_legs") || !strings.Contains(insert, "'follow_me'") {
 		t.Fatal("the insert does not write cdr_legs with the role follow_me")
@@ -382,8 +382,8 @@ func TestCDRCodecColumns(t *testing.T) {
 	if err := w.write(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 37 || db.args[27] != nil || db.args[28] != nil {
-		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 37", db.args[27], db.args[28], len(db.args))
+	if len(db.args) != 39 || db.args[27] != nil || db.args[28] != nil {
+		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 39", db.args[27], db.args[28], len(db.args))
 	}
 	r.CallerCodec, r.CalleeCodec = "opus/48000", "PCMU/8000"
 	if err := w.write(context.Background(), r); err != nil {
@@ -392,7 +392,7 @@ func TestCDRCodecColumns(t *testing.T) {
 	if db.args[27] != "opus/48000" || db.args[28] != "PCMU/8000" {
 		t.Fatalf("codecs = %#v, %#v", db.args[27], db.args[28])
 	}
-	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client, peer_call_id, answered_by, srtp)") || !strings.Contains(insert, "$33, $34)") {
-		t.Fatal("the insert does not name the codec, origin, peer call id, answered_by and srtp columns with $28 to $34")
+	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client, peer_call_id, answered_by, srtp, srtp_keyex, ice)") || !strings.Contains(insert, "$35, $36)") {
+		t.Fatal("the insert does not name the codec, origin, peer call id, answered_by, srtp, key exchange and ice columns with $28 to $36")
 	}
 }
