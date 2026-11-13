@@ -222,6 +222,18 @@ func run(args []string) error {
 	if cfg.MediaAnchorHost != "" {
 		srv.SetMediaAnchor(media.NewAnchor(cfg.MediaAnchorHost, log.With("component", "media")))
 	}
+	// The WebRTC side of the anchor (clients S-4): one shared UDP port for
+	// browser and app legs, off unless HELLO_MEDIA_WEBRTC_ENABLED.
+	if cfg.MediaWebRTCEnabled {
+		node, err := media.StartWebRTC(cfg.MediaWebRTCPort, cfg.MediaAnchorHost, cfg.MediaWebRTCPublicIP)
+		if err != nil {
+			return err
+		}
+		node.Register(metrics.Registry)
+		media.SetWebRTCNode(node)
+		defer func() { media.SetWebRTCNode(nil); _ = node.Close() }()
+		log.Info("webrtc media enabled", "port", node.Mux().Port(), "candidates", node.Hosts())
+	}
 	watcher.OnReload = srv.SnapshotChanged
 
 	rollout := &lifecycle.RolloutGate{
