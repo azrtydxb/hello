@@ -142,8 +142,8 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 2   | WSS on Kamailio                             | blocked (parity 23)          |
 | 3   | Web devices and credentials                 | wip (#282)                   |
 | 4   | coturn, ICE servers                         | wip (#282)                   |
-| 5   | Web softphone, audio                        | wip (feat/clients-5-6)       |
-| 6   | Web video                                   | wip (feat/clients-5-6)       |
+| 5   | Web softphone, audio                        | wip (#343)                   |
+| 6   | Web video                                   | wip (#343)                   |
 | 6b  | Video recording                             | blocked (6)                  |
 | 10  | Video phones and door stations              | todo (code), hw (test)       |
 | 11  | Conference-room video                       | blocked (6)                  |
