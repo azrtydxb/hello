@@ -170,13 +170,27 @@ server {
         try_files /index.html =404;
     }
 
+    # The HubSpot calling iframe (docs/crm.md, "The HubSpot calling iframe"):
+    # HubSpot frames this one page as its phone widget, so it
+    # is the one page that may be framed, and only by HubSpot's own hosts (every
+    # region is a subdomain of hubspot.com). The sign-in popup's callback
+    # page is a top-level window and is never framed.
+    location = /integrations/hubspot/iframe {
+        add_header Cache-Control "no-cache" always;
+        add_header Content-Security-Policy "frame-ancestors https://app.hubspot.com https://*.hubspot.com" always;
+        try_files /index.html =404;
+    }
+
     location /assets/ {
         add_header Cache-Control "public, max-age=31536000, immutable";
         try_files $uri =404;
     }
 
+    # Every other page refuses to be framed (clickjacking, spec T-12).
     location / {
         add_header Cache-Control "no-cache";
+        add_header Content-Security-Policy "frame-ancestors 'none'" always;
+        add_header X-Frame-Options "DENY" always;
         try_files $uri $uri/ /index.html;
     }
 }
