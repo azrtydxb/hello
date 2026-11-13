@@ -30,13 +30,13 @@ func PreregisteredClients(publicURL string) []Client {
 		ID: DialerClientID, Kind: ClientPreregistered, Name: "Hello dialer", ClientURI: base,
 		RedirectURIs: []string{base + "/integrations/dialer/callback"},
 	}, {
+		ID: HubSpotClientID, Kind: ClientPreregistered, Name: "Hello for HubSpot", ClientURI: base,
+		RedirectURIs: []string{base + "/integrations/hubspot/callback"},
+	}, {
 		ID: SalesforceClientID, Kind: ClientPreregistered, Name: "Hello for Salesforce", ClientURI: base,
 		RedirectURIs: []string{base + "/integrations/salesforce/callback"},
 	}, {
 		ID: DynamicsClientID, Kind: ClientPreregistered, Name: "Hello for Dynamics 365", ClientURI: base,
 		RedirectURIs: []string{base + "/integrations/dynamics/callback"},
-	}, {
-		ID: HubSpotClientID, Kind: ClientPreregistered, Name: "Hello for HubSpot", ClientURI: base,
-		RedirectURIs: []string{base + "/integrations/hubspot/callback"},
 	}}
 }
