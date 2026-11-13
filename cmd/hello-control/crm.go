@@ -14,7 +14,13 @@ import (
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/crm"
-	_ "github.com/azrtydxb/hello/internal/crm/hubspot" // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/autotask"    // registers the autotask connector
+	_ "github.com/azrtydxb/hello/internal/crm/clio"        // registers the clio connector
+	_ "github.com/azrtydxb/hello/internal/crm/connectwise" // registers the connectwise connector
+	_ "github.com/azrtydxb/hello/internal/crm/freshdesk"   // registers the freshdesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/halopsa"     // registers the halopsa connector
+	_ "github.com/azrtydxb/hello/internal/crm/hubspot"     // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/zendesk"     // registers the zendesk connector
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/safehttp"
@@ -33,8 +39,7 @@ type crmWiring struct {
 }
 
 // newCRM builds the CRM services. Recording links (spec I-33, I-53) come
-// from the recording-link service of integrations phase P4; until it is
-// wired as Links, connectors never send a recording to a CRM.
+// from the recording-link store of integrations phase P4 (crmLinks).
 func newCRM(cfg config.Control, st *store.Store, db *sql.DB, box *secret.Box, vk *api.LazyValkey, reg prometheus.Registerer, links crm.LinkMinter, log *slog.Logger) *crmWiring {
 	repo := &crm.PG{DB: db, Box: box}
 	hc := safehttp.NewClient(safehttp.Options{Timeout: 15 * time.Second})

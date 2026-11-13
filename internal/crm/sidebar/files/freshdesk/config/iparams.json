@@ -1,0 +1,4 @@
+{
+  "domain": { "display_name": "Freshdesk subdomain", "description": "acme for acme.freshdesk.com", "type": "text", "required": true },
+  "apiKey": { "display_name": "Freshdesk API key", "description": "Used only to list the requester's tickets", "type": "text", "required": true, "secure": true }
+}

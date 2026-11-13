@@ -235,6 +235,12 @@ func (w *Worker) handle(ctx context.Context, row LogRow) {
 		w.Metrics.request(cr.Kind, "update", err)
 	}
 	if err != nil {
+		if errors.Is(err, ErrNoTarget) {
+			// The CRM has no record to put this call on: leave it out, with the
+			// reason in the console and a retry for when the contact exists.
+			w.settle(ctx, row, LogResult{Status: LogSkipped, Attempts: row.Attempts, NextAttemptAt: w.now(), LastError: scrub(err.Error())})
+			return
+		}
 		if errors.Is(err, ErrNeedsReauth) {
 			w.settle(ctx, row, LogResult{Status: row.Status, Attempts: row.Attempts, NextAttemptAt: w.now().Add(5 * time.Minute), LastError: "the connection needs re-authorisation"})
 			return

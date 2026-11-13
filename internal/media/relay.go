@@ -972,7 +972,7 @@ func (o *rewriteState) reset() error {
 		return fmt.Errorf("media: generate rewrite state: %w", err)
 	}
 	o.ssrc = binary.BigEndian.Uint32(b[0:4])
-	o.seq = binary.BigEndian.Uint16(b[4:6])
+	o.seq = startSeq(b[4:6])
 	o.ts = binary.BigEndian.Uint32(b[6:10])
 	o.started = true
 	o.haveIn = false
@@ -1131,7 +1131,7 @@ func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate 
 	if _, err := rand.Read(b[:]); err != nil {
 		return fmt.Errorf("media: announcement stream: %w", err)
 	}
-	seq := binary.BigEndian.Uint16(b[0:2])
+	seq := startSeq(b[0:2])
 	ts := binary.BigEndian.Uint32(b[2:6])
 	ssrc := binary.BigEndian.Uint32(b[6:10])
 	frame := 2 * codec.PlaybackFrameSamples()
@@ -1220,7 +1220,7 @@ func (r *Relay) SendDTMF(ctx context.Context, legName, digits string) error {
 	if _, err := rand.Read(b[:]); err != nil {
 		return fmt.Errorf("media: dtmf stream: %w", err)
 	}
-	seq := binary.BigEndian.Uint16(b[0:2])
+	seq := startSeq(b[0:2])
 	ts := binary.BigEndian.Uint32(b[2:6])
 	ssrc := binary.BigEndian.Uint32(b[6:10])
 	frameTicks := uint16(dtmfClockRate * frameDur / time.Second)

@@ -187,7 +187,7 @@ func NewPartySecure(host string, minPort, maxPort int, offer []byte, pol SecureP
 	}
 	p = &Party{
 		conn: conn, codec: codec, offer: off, target: target,
-		seq: binary.BigEndian.Uint16(b[0:2]), ts: binary.BigEndian.Uint32(b[2:6]), ssrc: binary.BigEndian.Uint32(b[6:10]),
+		seq: startSeq(b[0:2]), ts: binary.BigEndian.Uint32(b[2:6]), ssrc: binary.BigEndian.Uint32(b[6:10]),
 		marker: true, sec: sec,
 		dtmf: make(chan byte, partyDTMFQueue), done: make(chan struct{}),
 	}
@@ -375,6 +375,16 @@ func (p *Party) pop() []int16 {
 	p.buf = append(p.buf[:0], p.buf[MixFrame:]...)
 	return f
 }
+
+// startSeq draws the first sequence number of an outbound stream from two
+// random bytes. SRTP keys the packet index on a rollover counter that a
+// receiver assumes is 0 for the first packet it sees (RFC 3711 3.3.1), so a
+// stream that begins close to the 16-bit wrap and whose first packets are
+// lost, or are not yet being listened to, authenticates nothing after the
+// wrap: the receiver's index is one rollover behind the sender's and every
+// packet fails. Starting in the lower half leaves a late or lossy receiver
+// 32768 packets (over ten minutes of audio) to catch the first one.
+func startSeq(b []byte) uint16 { return binary.BigEndian.Uint16(b) & 0x7fff }
 
 var errPartyClosed = errors.New("media: party closed")
 

@@ -34,6 +34,7 @@ type CRMService interface {
 	Mappings(ctx context.Context, id int64) ([]crm.UserMapping, error)
 	SetMapping(ctx context.Context, actor string, id, userID int64, externalID string) error
 	Engagement(ctx context.Context, actor, kind, callID, ref string, exts []string, restricted bool) (bool, error)
+	SidebarApp(ctx context.Context, actor string, id int64) (name string, data []byte, err error)
 }
 
 func (s *server) crmReady(w http.ResponseWriter) bool {
@@ -69,6 +70,8 @@ func (s *server) crmError(w http.ResponseWriter, what string, err error) {
 		writeError(w, http.StatusConflict, "conflict", "this connector does not sign in with OAuth")
 	case errors.Is(err, crm.ErrNoCredentials):
 		writeError(w, http.StatusConflict, "conflict", "set the client id and client secret first")
+	case errors.Is(err, crm.ErrNoApp):
+		writeError(w, http.StatusConflict, "conflict", "this connector has no sidebar app")
 	case errors.Is(err, crm.ErrNotConnected):
 		writeError(w, http.StatusConflict, "conflict", "the connector is not connected")
 	case errors.Is(err, crm.ErrRateLimited):
@@ -180,6 +183,27 @@ func (s *server) deleteCRMConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// downloadCRMApp is GET /integrations/crm/{id}/app: the ticket-sidebar app of
+// a helpdesk connector, as a zip the customer uploads to their own account.
+func (s *server) downloadCRMApp(w http.ResponseWriter, r *http.Request) {
+	if !s.crmReady(w) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	name, data, err := s.CRM.SidebarApp(r.Context(), actor(r).String(), id)
+	if err != nil {
+		s.crmError(w, "CRM sidebar app", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
 }
 
 func (s *server) connectCRMConnector(w http.ResponseWriter, r *http.Request) {
