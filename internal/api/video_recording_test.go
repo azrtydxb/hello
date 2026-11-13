@@ -140,6 +140,11 @@ func TestRecordingVideoAPI(t *testing.T) {
 	if !strings.Contains(dl.header.Get("Content-Disposition"), "attachment") {
 		t.Errorf("download header = %v", dl.header)
 	}
+	c.must(http.StatusBadRequest, "GET", fmt.Sprintf("/api/v1/recordings/%d/video/%d?download=maybe", vid, done), nil)
+	// A finalized stream whose file the object store cannot open is a bad gateway,
+	// not a missing recording.
+	lost := seedVideoStream(t, e, "corr-v", 2, "caller", "finalized", "rec/1-v/v2-caller-in.parts", "rec/1-v/v2-caller-in.mp4", nil)
+	c.must(http.StatusBadGateway, "GET", fmt.Sprintf("/api/v1/recordings/%d/video/%d", vid, lost), nil)
 	c.must(http.StatusNotFound, "GET", fmt.Sprintf("/api/v1/recordings/%d/video/99999", vid), nil)
 	c.must(http.StatusNotFound, "GET", fmt.Sprintf("/api/v1/recordings/%d/video/%d", aud, done), nil) // another call's stream
 	var audits int
