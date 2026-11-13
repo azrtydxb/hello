@@ -82,6 +82,10 @@ type Control struct {
 	// RFC 1918 ranges by default, "none" for no private target at all).
 	// Loopback, link-local and metadata addresses are never allowed.
 	IntegrationsAllowedCIDRs []netip.Prefix
+	// DirectoryAllowPlaintextLDAP lets an LDAP directory connector use ldap://
+	// without StartTLS (HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP, lab only, off by
+	// default; every use logs a warning). Certificate verification stays on.
+	DirectoryAllowPlaintextLDAP bool
 	// CRMUploadMaxMB (HELLO_CRM_UPLOAD_MAX_MB, default 50) is the largest
 	// recording uploaded to a CRM that stores the file itself (Pipedrive);
 	// a larger one is not sent.
@@ -600,6 +604,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
 	}
 	c.IntegrationsAllowedCIDRs = r.allowedCIDRs("HELLO_INTEGRATIONS_ALLOWED_CIDRS")
+	c.DirectoryAllowPlaintextLDAP = r.boolean("HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP")
 	c.CRMUploadMaxMB = r.positiveInt("HELLO_CRM_UPLOAD_MAX_MB", 50)
 	c.Database = r.database(c.DatabaseURL)
 	c.DoorCameraAllow = r.cameraAllow()
