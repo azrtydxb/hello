@@ -41,7 +41,7 @@ func (c *call) involvesDoor() bool {
 // startVideo sets up the video relay for a door call whose caller offered
 // H.264 video. It runs when the audio anchor is created.
 func (c *call) startVideo(offerBody []byte) {
-	if !c.involvesDoor() {
+	if !c.involvesDoor() || c.webCaller() {
 		return
 	}
 	v, ok := media.ParseVideoSDP(offerBody)
@@ -116,7 +116,9 @@ func (c *call) videoFacing(side string) string {
 
 // withVideo appends the video section facing side to an audio SDP.
 func (c *call) withVideo(sdp []byte, side string) []byte {
-	if sdp == nil {
+	if sdp == nil || c.isWebLeg(side) {
+		// A browser leg's video section is written by the relay with the
+		// rest of its SDP (webrtc.go).
 		return sdp
 	}
 	if s := c.videoFacing(side); s != "" {

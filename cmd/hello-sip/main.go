@@ -191,6 +191,7 @@ func run(args []string) error {
 		PageMulticastIface: cfg.PageMulticastIface, PageMulticastTTL: cfg.PageMulticastTTL,
 		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax, Dialing: cfg.Dial,
 		MediaForceAnchor: cfg.MediaForceAnchor, MediaRecordingNotice: cfg.MediaRecordingNotice,
+		WebRTCAllowCleartextHop: cfg.MediaWebRTCAllowCleartextHop, VideoEnabled: cfg.VideoEnabled, VideoMaxKbps: cfg.VideoMaxKbps, VideoMaxSessions: cfg.VideoMaxSessions,
 		PromptLanguage: cfg.VoicePromptLanguage, Timezone: cfg.Timezone,
 		HADialogHeartbeat: cfg.MemberHeartbeat, HATakeoverEnabled: cfg.HATakeoverEnabled,
 		HATakeoverPoll: cfg.HATakeoverPoll, HATakeoverJitter: cfg.HATakeoverJitter, PushRate: cfg.PushRate,
@@ -219,6 +220,7 @@ func run(args []string) error {
 	// node address instead of mirroring the offer's own c= line. Empty
 	// keeps the tests'/lab's offer-mirroring behaviour.
 	media.SetFeatures(cfg.MediaDTLS, cfg.MediaICE)
+	media.SetVideoMaxSessions(cfg.VideoMaxSessions)
 	if cfg.MediaAnchorHost != "" {
 		srv.SetMediaAnchor(media.NewAnchor(cfg.MediaAnchorHost, log.With("component", "media")))
 	}

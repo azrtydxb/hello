@@ -254,6 +254,45 @@ describe("CallDetail", () => {
     ).toBeVisible();
   });
 
+  it("shows that a call carried video and what the web clients reported", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/90": () =>
+        json({
+          ...BASE,
+          id: 90,
+          finalStatus: 200,
+          mediaMode: "anchored",
+          video: true,
+          clientQuality: [
+            {
+              device: "w7",
+              extension: "100",
+              codec: "opus",
+              lossPct: 1.25,
+              jitterMs: 9.5,
+              rttMs: 42,
+              candidateLocal: "host",
+              candidateRemote: "relay",
+              video: { width: 1280, height: 720, fps: 30, codec: "H264" },
+              durationMs: 61000,
+            },
+          ],
+          trace: [],
+        }),
+    });
+    renderApp("/history/90");
+    expect(
+      await screen.findByText("Carried (relayed, not transcoded)"),
+    ).toBeVisible();
+    expect(screen.getByText("Web client report (100)")).toBeVisible();
+    expect(
+      screen.getByText(
+        "opus · 1.3% loss · 9.5 ms jitter · 42 ms round trip · host to relay · video 1280x720 30 fps H264",
+      ),
+    ).toBeVisible();
+  });
+
   it("shows the codec of each leg, or a dash when none was recorded", async () => {
     mockApi({
       ...ME,

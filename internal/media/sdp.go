@@ -80,6 +80,11 @@ type AudioSDP struct {
 type webSDP struct {
 	mid   string
 	hosts []string
+	// finish, when set, post-processes the built SDP: it appends the leg's
+	// video section (or the rejected one that keeps the m= line count of the
+	// dialog), so every SDP Hello writes for a browser leg carries it, whatever
+	// code built the audio part.
+	finish func([]byte) []byte
 }
 
 // withWeb returns the SDP with the webrtc extras for its Build.
@@ -609,9 +614,13 @@ func AnswerFor(callerOffer, calleeAnswer AudioSDP) AudioSDP {
 // ("sendrecv" when empty or unknown). Lines use CRLF and the session is
 // valid forever (t=0 0), the shape every SIP endpoint accepts.
 func (a AudioSDP) Build(ip string, port int, dir string) []byte {
-	return buildSDP(ip, port, a.Codecs, a.Events, dir, localSec{
+	out := buildSDP(ip, port, a.Codecs, a.Events, dir, localSec{
 		srtpOnly: a.localSRTP, keys: a.localCrypto, proto: a.localProto,
 		dtls: a.localDTLS, ice: a.localICE, mux: a.localMux, web: a.localWeb})
+	if a.localWeb != nil && a.localWeb.finish != nil {
+		return a.localWeb.finish(out)
+	}
+	return out
 }
 
 // BuildSDP writes an SDP body for codecs followed by events.

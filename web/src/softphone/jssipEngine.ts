@@ -311,13 +311,11 @@ export class JsSipEngine implements PhoneEngine {
   }
 
   dtmf(id: string, tones: string): void {
-    this.lines
-      .get(id)
-      ?.session.sendDTMF(tones, {
-        transportType: DTMF_TRANSPORT.RFC2833,
-        duration: 100,
-        interToneGap: 70,
-      });
+    this.lines.get(id)?.session.sendDTMF(tones, {
+      transportType: DTMF_TRANSPORT.RFC2833,
+      duration: 100,
+      interToneGap: 70,
+    });
   }
 
   transfer(id: string, target: string): void {

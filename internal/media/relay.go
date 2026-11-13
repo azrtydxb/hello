@@ -344,6 +344,13 @@ func (r *Relay) SetTarget(name string, addr *net.UDPAddr) {
 	if l == nil {
 		return
 	}
+	if _, mux := l.conn.(*MuxEndpoint); mux && (addr == nil || addr.IP.IsUnspecified() || addr.Port == 9) {
+		// A browser leg's media address is what ICE verifies, not what an
+		// SDP that names none says (c=0.0.0.0, port 9, or a hold's nothing): a
+		// target like that would only undo the address the first
+		// authenticated check selected.
+		return
+	}
 	l.remoteMu.Lock()
 	l.remote = addr
 	// A new target is a new negotiation (first INVITE, answer, re-INVITE,

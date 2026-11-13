@@ -229,7 +229,14 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 		c.anchorFailed("port range", err)
 		return
 	}
-	portA, err := relay.AddLeg(legCaller)
+	var portA int
+	if c.webCaller() {
+		// A browser's leg is on the shared WebRTC port, keyed by ICE and DTLS.
+		err = c.webAnchorCaller(relay, offer)
+		portA = relay.LegPort(legCaller)
+	} else {
+		portA, err = relay.AddLeg(legCaller)
+	}
 	if err != nil {
 		relay.Close()
 		c.anchorFailed("bind leg a", err)
@@ -240,7 +247,9 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	offered := off.Filter(nil)
 	relay.SetCodecs(legCaller, offered.Codecs, offered.DTMFPayloadType)
 	relay.SetTarget(legCaller, udpAddr(off.Address, off.Port))
-	allowSignalSource(relay, legCaller, c.inv.Source())
+	if !c.webCaller() {
+		allowSignalSource(relay, legCaller, c.inv.Source())
+	}
 	portB, err := relay.AddLeg(legCallee)
 	if err != nil {
 		relay.Close()
@@ -251,6 +260,9 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
 	c.startVideo(offer)
+	if c.webCaller() {
+		c.noteWebVideoOffer(offer)
+	}
 	c.mu.Lock()
 	c.anchored = true
 	c.anchorReason = reason
@@ -512,6 +524,9 @@ func (c *call) anchoredOfferB(offer media.AudioSDP, allow []string, l *leg) []by
 	if r == nil {
 		return nil
 	}
+	if c.legIsWeb(l) {
+		return c.webOfferB(offer, allow, l)
+	}
 	return c.withVideo(c.cryptoOffer(filteredOffer(offer, allow).PlainOffer(), l).Build(c.anchorHost, r.LegPort(legCallee), "sendrecv"), legCallee)
 }
 
@@ -610,6 +625,7 @@ func (c *call) closeMedia() {
 	c.mu.Unlock()
 	c.confLeave()
 	c.closeVideo()
+	c.releaseVideoSlot()
 	if rec != nil {
 		if r, by := rec.stop(); r != nil {
 			c.storeRecording(r, by)
@@ -776,6 +792,11 @@ func (c *call) startRecordingFlow(by string) {
 		return // already recording (spec: one recording per call)
 	}
 	c.addTrace("Recording started")
+	if c.webVideoCarried() {
+		// Video recording is a later piece (clients 6b); the relay forwards
+		// the video, it does not keep it.
+		c.addTrace("Video not recorded: the recording is audio only")
+	}
 	c.noteHAState(haPhaseRecording, "")
 	// The notice announcement plays before the capture becomes a kept
 	// recording, matching the voicemail beep discipline.
@@ -969,6 +990,7 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	// A new media address after a roam (a handset on another AP or subnet)
 	// re-learns the leg's address before anything is relayed (S-9).
 	c.relearnMedia(fromCaller, req.Source(), off)
+	c.webInDialog(fromCaller, body, dir)
 	c.setHADirs(fromCaller, dir)
 	// An inactive hold stays inactive toward the holder, but the held peer
 	// is offered sendonly so it can hear the music (S-33).

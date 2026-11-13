@@ -32,10 +32,9 @@ var secureWebPolicy = SecurePolicy{Allow: true, Require: true, DTLS: true, ICE: 
 // WebPolicy is the SecurePolicy of a webrtc leg.
 func WebPolicy() SecurePolicy { return secureWebPolicy }
 
-// legWeb is the browser-profile state of a mux leg.
-type legWeb struct {
-	mu   sync.Mutex
-	node *WebRTCNode
+// sectionSpec is what decides the m= lines Hello writes for a browser leg
+// beyond its audio (copied out of the leg under its lock to render an SDP).
+type sectionSpec struct {
 	// audioMid and videoMid are the section ids Hello writes. When answering
 	// they are the remote's; when offering Hello picks 0 and 1.
 	audioMid string
@@ -52,6 +51,16 @@ type legWeb struct {
 	vDir   string
 	// kbps is written as b=AS on the video section when positive.
 	kbps int
+}
+
+// legWeb is the browser-profile state of a mux leg.
+type legWeb struct {
+	mu   sync.Mutex
+	node *WebRTCNode
+	// sentVideo is true once an SDP Hello wrote for the leg carried a video
+	// section.
+	sentVideo bool
+	sectionSpec
 }
 
 type remoteSection struct {
@@ -246,6 +255,7 @@ func (r *Relay) PrepareWebRTC(leg string, node *WebRTCNode, offerBody []byte) er
 	if prev := l.web; prev != nil {
 		prev.mu.Lock()
 		w.vSel, w.vDir, w.kbps = prev.vSel, prev.vDir, prev.kbps
+		w.sentVideo, w.videoMid = prev.sentVideo, prev.videoMid
 		prev.mu.Unlock()
 	}
 	for _, m := range sess.Media() {
@@ -260,7 +270,7 @@ func (r *Relay) PrepareWebRTC(leg string, node *WebRTCNode, offerBody []byte) er
 		switch {
 		case m.Kind() == "audio" && w.audioMid == "":
 			w.audioMid = m.Mid()
-		case m.Kind() == "video" && w.videoMid == "":
+		case m.Kind() == "video" && (w.videoMid == "" || !hadVideoMid(w, m.Mid())):
 			w.videoMid = m.Mid()
 		}
 	}
@@ -290,7 +300,7 @@ func (r *Relay) PrepareWebRTCOffer(leg string, node *WebRTCNode) error {
 		return err
 	}
 	if l.web == nil {
-		l.web = &legWeb{node: node, audioMid: "0", videoMid: "1", offerer: true}
+		l.web = &legWeb{node: node, sectionSpec: sectionSpec{audioMid: "0", videoMid: "1", offerer: true}}
 	}
 	return nil
 }
@@ -366,34 +376,70 @@ func (l *relayLeg) webAudio(a AudioSDP) AudioSDP {
 	if a.localDTLS != nil {
 		a.localProto = ProtoDTLSFB
 	}
-	return a.withWeb(mid, l.web.node.Hosts())
+	a = a.withWeb(mid, l.web.node.Hosts())
+	a.localWeb.finish = func(sdp []byte) []byte {
+		out, err := l.appendVideo(sdp)
+		if err != nil {
+			return sdp
+		}
+		return out
+	}
+	return a
 }
 
 // AppendVideo adds the leg's video section to an audio SDP that Build wrote
-// for the leg, and rewrites the BUNDLE group to match. A leg that is not a
-// browser's, or that has nothing to say about video (it never offered or was
-// offered it), gets sdp back unchanged.
+// for the leg, and rewrites the BUNDLE group to match. Build already does this
+// for every SDP of a browser leg; the method is for callers that hold audio SDP
+// built some other way. A leg that is not a browser's, or that has nothing to
+// say about video, gets sdp back unchanged.
 func (r *Relay) AppendVideo(leg string, sdp []byte) ([]byte, error) {
 	l := r.webLeg(leg)
 	if l == nil || sdp == nil {
 		return sdp, nil
 	}
+	return l.appendVideo(sdp)
+}
+
+func (l *relayLeg) appendVideo(sdp []byte) ([]byte, error) {
 	l.web.mu.Lock()
-	w := legWeb{audioMid: l.web.audioMid, videoMid: l.web.videoMid, remote: l.web.remote, offerer: l.web.offerer,
-		vOffer: l.web.vOffer, vSel: l.web.vSel, vDir: l.web.vDir, kbps: l.web.kbps}
+	w := l.web.sectionSpec
+	sentVideo := l.web.sentVideo
 	l.web.mu.Unlock()
+	out, sent, mid, err := renderSections(w, sentVideo, sdp)
+	if err == nil && (sent != sentVideo || mid != w.videoMid) {
+		l.web.mu.Lock()
+		l.web.sentVideo, l.web.videoMid = sent, mid
+		l.web.mu.Unlock()
+	}
+	return out, err
+}
+
+// renderSections adds to an audio SDP the sections a browser's dialog needs
+// beyond it (see appendVideo) and returns the new "a video section was written"
+// and video mid for the leg to remember.
+func renderSections(w sectionSpec, sentVideo bool, sdp []byte) (out []byte, sent bool, videoMid string, err error) {
+	sent, videoMid = sentVideo, w.videoMid
 	hasVideo := w.vSel != nil || len(w.vOffer) > 0
 	rejects := !w.offerer && hasRemoteVideo(w.remote)
-	if !hasVideo && !rejects && !hasOtherSection(w.remote) {
-		return sdp, nil
+	// A video section the remote's offer did not have (an upgrade Hello offers
+	// in a re-INVITE, or the plain audio-only call a browser began) is added
+	// at the end; once written it stays, rejected when the video is gone, so
+	// the dialog's m= lines never shrink (RFC 3264 section 8.3).
+	extra := !w.offerer && !hasRemoteVideo(w.remote) && (w.vSel != nil || sentVideo)
+	keeps := (w.offerer || extra) && sentVideo
+	// Whatever else the remote's offer listed (a rejected video line, a data
+	// channel) is answered in place, so the answer has the offer's m= lines.
+	mirrors := !w.offerer && len(w.remote) > 1
+	if !hasVideo && !rejects && !keeps && !extra && !mirrors {
+		return sdp, sent, videoMid, nil
 	}
 	sess, err := ParseSDPSession(sdp)
 	if err != nil {
-		return sdp, err
+		return sdp, sent, videoMid, err
 	}
 	ms := sess.Media()
 	if len(ms) == 0 {
-		return sdp, nil
+		return sdp, sent, videoMid, nil
 	}
 	audio := ms[0]
 	mids := []string{audio.Mid()}
@@ -434,6 +480,11 @@ func (r *Relay) AppendVideo(leg string, sdp []byte) ([]byte, error) {
 		case len(w.vOffer) > 0:
 			add("video", w.videoMid, w.vOffer, orDir(w.vDir))
 			mids = append(mids, w.videoMid)
+		case keeps:
+			reject("video", w.videoMid, ProtoDTLSFB, "0")
+		}
+		if hasVideo || keeps {
+			sent = true
 		}
 	default:
 		// Mirror the remote's offer: its audio section is our first (Build
@@ -451,14 +502,28 @@ func (r *Relay) AppendVideo(leg string, sdp []byte) ([]byte, error) {
 			}
 		}
 		if !hasRemoteSection(w.remote, "audio") {
-			return sdp, nil
+			return sdp, sent, videoMid, nil
+		}
+		if extra {
+			mid := w.videoMid
+			if mid == "" {
+				mid = "v" + w.audioMid
+			}
+			if w.vSel != nil {
+				add("video", mid, []SDPCodec{*w.vSel}, orDir(w.vDir))
+				mids = append(mids, mid)
+			} else {
+				reject("video", mid, ProtoDTLSFB, "0")
+			}
+			sent, videoMid = true, mid
 		}
 		// The answer lists its sections in the offer's order, whichever
 		// kind the offer began with.
 		sess.orderLike(w.remote)
 	}
 	sess.SetBundle(mids...)
-	return sess.Build()
+	out, err = sess.Build()
+	return out, sent, videoMid, err
 }
 
 func orDir(d string) string {
@@ -646,3 +711,7 @@ func (l *relayLeg) copyCodecsTo(dst *relayLeg) {
 	dst.codecMu.Unlock()
 	dst.dtmfPT, dst.audioPT = l.dtmfPT, l.audioPT
 }
+
+// hadVideoMid reports whether the leg already uses mid for video (so a prior
+// value carried over from an earlier offer is replaced by the remote's own).
+func hadVideoMid(w *legWeb, mid string) bool { return w.videoMid == mid }

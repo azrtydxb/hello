@@ -325,6 +325,12 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 		deny(sip.StatusForbidden, "extension "+c.callerNum+" may not page "+g.Name, "denied", ResultFailed)
 		return
 	}
+	if c.webCaller() {
+		// A page is a one-way multicast fan-out from the caller's own socket;
+		// a browser's media is on the shared WebRTC port (clients S-3).
+		deny(sip.StatusNotAcceptableHere, "paging is for phones: a browser cannot page a group", "failed", ResultFailed)
+		return
+	}
 	full, err := media.ParseAudioSDP(req.Body())
 	if err != nil {
 		deny(sip.StatusNotAcceptableHere, "page needs a G.711 or G.722 offer: "+err.Error(), "failed", ResultFailed)

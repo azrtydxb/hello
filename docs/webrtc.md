@@ -47,7 +47,7 @@ credentials that are derived, not stored.
   default on) choose whether a kind of client is forked to. Do not disturb,
   forwarding and schedules still apply first. The first branch to answer
   cancels the others with `Reason: SIP;cause=200;text="Call completed
-  elsewhere"`, so clients show "answered elsewhere".
+elsewhere"`, so clients show "answered elsewhere".
 
 ## coturn
 
@@ -56,7 +56,7 @@ LAN, calls normally connect directly (host candidates) and never touch it.
 
 - Image: `docker/coturn/Dockerfile`, Debian trixie's `coturn` (native arm64),
   published by CI as `coturn:sha-<commit>` and `coturn:ct-<hash of
-  docker/coturn>`. Its entrypoint writes the configuration from the
+docker/coturn>`. Its entrypoint writes the configuration from the
   environment, so the shared secret comes from a Secret and is in no image or
   ConfigMap.
 - Mode: `use-auth-secret` (the TURN REST API). Credentials are
@@ -114,3 +114,167 @@ builds them from `coturn.servers`), `HELLO_STUN_URLS` (default: the plain
 `turn:` hosts as `stun:`), `HELLO_TURN_SECRET` and `HELLO_TURN_TTL` (default
 1h) configure it. With no server configured it answers 503. Issuing is
 counted in `hello_ice_credentials_issued_total`, not logged per credential.
+
+## The web softphone
+
+The console has a phone in it. A **dock** (bottom left of every page of a user
+who has an extension) shows a status chip and opens into the dialer, the call
+lines and their controls. It is off until the user switches **Use this browser
+as a phone** on; that is stored for this browser profile only, so a second
+browser or computer is switched on separately.
+
+- **Switching on.** The browser asks for the microphone first, with its own
+  explanation (a blocked or missing microphone is named, and nothing registers).
+  The first time it enrols a [web device](#web-devices) for the browser
+  (`POST /api/v1/me/devices`, labelled "Chrome on macOS" and so on); later it
+  refreshes that device's credentials. It then fetches the
+  [ICE servers](#ice-servers), opens `wss://<console host>/sip` and registers.
+  The derived SIP password lives 12 hours; the dock refreshes it five minutes
+  before it expires, between calls (the username carries the expiry, so a new
+  credential is a new registration), and enrols again if the device was revoked.
+- **One phone per browser.** The tab that holds a Web Lock is the phone. The
+  other tabs show "Phone active in another tab" and a button to take it over,
+  so one browser never registers twice or rings twice.
+- **Incoming calls.** A toast shows the caller's number and name, the extension
+  that was dialled, the ring tag and a video badge, with **Answer**, **Answer
+  with video** and **Decline** (Alt+A answers, Alt+H hangs up, Alt+M mutes).
+  The ringtone plays only once the user has interacted with the page (browser
+  autoplay policy); with the tab hidden, a notification brings it forward. When
+  another device answers, the banner says so ("Call completed elsewhere"); a
+  caller who gives up leaves a missed call. A second call rings as call waiting.
+- **In a call.** Mute, hold and resume, a keypad (RFC 4733 digits that the relay
+  carries and detects, as for any phone), blind transfer to a number and attended
+  transfer to another line, video on and off, a call-quality indicator, and a
+  picker for the microphone, camera and speaker. A second call puts the first
+  on hold; the lines are tabs.
+- **Dialing.** A number or name box, with the user's own contacts and recent
+  calls as suggestions. **Call** buttons on the Extensions and Phonebooks pages
+  place the call from the softphone, or open the dock to ask when it is off.
+- **Voicemail.** The dock subscribes to the extension's message-waiting state
+  (RFC 3842) and shows the count, linking to My voicemail.
+- **Failures are visible.** No or blocked microphone, the WebSocket closed
+  (reconnecting with backoff and jitter), registration refused (the credentials
+  are refreshed once, then it says so), a call whose media failed (and whether
+  a relay server was available).
+- **Call quality.** While a call is active the dock samples `getStats()` every
+  five seconds; at the end it posts the worst loss, jitter and round trip, the
+  codec, the candidate types of the selected pair and the video it received to
+  `POST /api/v1/me/calls/{callId}/quality`. The call's detail page shows it
+  under "Web client report". It is numbers only, never media.
+- **Code.** `web/src/softphone/`. Everything that touches the SIP library is in
+  `jssipEngine.ts` (JsSIP); the rest talks to the `PhoneEngine` interface in
+  `types.ts`, so the library can change locally and a mobile client can reuse the
+  state machine, quality and backoff code unchanged. `phoneState.ts` is a pure
+  reducer with the unit tests.
+
+### How a browser call goes through Hello
+
+The call path treats a browser as a phone that registers through the edge. What
+differs is the media leg, and Hello builds it per leg:
+
+- **A browser calls.** An INVITE whose audio section is `UDP/TLS/RTP/SAVPF` with
+  ICE is a browser's. The node must run WebRTC media
+  (`HELLO_MEDIA_WEBRTC_ENABLED`) and the hop from the edge must be TLS unless
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP` is on (the DTLS fingerprint in the SDP
+  is only as trustworthy as the path that carries it); otherwise the call is
+  refused with 488 and the reason in the trace and the CDR. The caller's leg is
+  made on the shared WebRTC port and answered with ICE-lite, the node's
+  fingerprint and the codec the callee chose.
+- **A browser is called.** A fork to a web or mobile device (or any contact that
+  registered over WS or WSS) is offered the **alternate callee leg**: a second
+  endpoint on the shared port, parked (its media is dropped) until a fork answers.
+  Every browser of the ring is offered the same leg; a ring across a desk phone
+  and a browser is one call with two kinds of fork. When a browser answers, its
+  leg is promoted and the plain leg is closed; when a desk phone answers first,
+  the alternate leg is dropped. The first to answer cancels the others as always.
+- **Hold, resume, ICE restart.** A re-INVITE from a browser re-reads its sections
+  (ids, ICE credentials) and is answered with the leg's own fingerprint,
+  credentials and role, so the browser never re-handshakes. Every SDP written for
+  a browser keeps its `m=` lines (a removed video line stays, rejected), which is
+  what a browser requires of a dialog.
+- **Not replicated.** A call with a browser leg is not replicated for in-call HA:
+  its ICE and DTLS state belongs to the node. If the node dies the call ends (the
+  browser's ICE failure ends it cleanly on its side) and a new call works at once
+  through the survivor. Re-homing a browser call by ICE restart is a lab item.
+- **Apps that Hello answers itself.** Voicemail, announcements, queues and IVRs
+  play through the browser leg like any other. Conference rooms take browser
+  callers too (the participant's media is a mux endpoint). Paging and fax are for
+  phones: a browser caller is refused with 488.
+
+## Video
+
+A call between two web clients can carry video. Hello **relays** it: it never
+decodes, repacketizes or transcodes it.
+
+- **Codecs.** H.264 Constrained Baseline (packetization mode 1) first, then VP8,
+  from what the caller's offer lists. H.265, AV1, high-profile H.264, mode 0, and
+  the RTX, RED and FEC payload types are not offered: they need machinery the
+  relay does not have. The callee is offered the supported codecs in the
+  caller's payload numbering, answers with one, and the caller is answered with
+  that one (its fmtp as the callee sent it). No common codec means `m=video 0`
+  and the call goes on as audio.
+- **Never to a desk phone or a trunk.** Only a web client on both legs gets video.
+  A call to a desk phone, a trunk or anything else answers the caller's video
+  line with port 0; the trace says why and
+  `hello_video_negotiation_failures_total{reason}` counts it. (Video phones and
+  door stations are a later piece built on the same relay.)
+- **Policy.** `extensions.video_allowed` (Extensions page, "Video allowed", on by
+  default) for either extension of the call, `HELLO_VIDEO_ENABLED` (default
+  true), and the node's session limit `HELLO_VIDEO_MAX_SESSIONS` (default 20): a
+  video line past it is answered with port 0 and counted.
+- **Relay.** Audio and video share the browser's one transport (BUNDLE), told
+  apart by payload type. Each leg gets its own SSRC and a constant sequence and
+  timestamp offset from the other leg's stream, so a retransmission request on one
+  leg maps to a sequence number on the other by subtraction (RFC 7667
+  translator). RTCP is terminated per leg: Hello sends sender and reception
+  reports from the leg's own statistics, forwards picture loss (PLI), full intra
+  requests (as a PLI) and NACKs (mapped by the offset), carries the receiver's
+  bandwidth estimate (REMB) held at the ceiling, and asks a stream's sender for a
+  keyframe when it starts and when a hold ends. Transport-wide congestion control
+  and `abs-send-time` are not negotiated (their sequence space is per hop), so a
+  sender falls back to REMB and receiver reports.
+- **Ceiling.** `HELLO_VIDEO_MAX_KBPS` (default 1500) is written into `b=AS` and
+  enforced as a token-bucket rate cap per direction on the relay: packets above
+  it are dropped and counted (`hello_video_dropped_packets_total{reason="cap"}`)
+  and the senders are told the ceiling in REMB.
+- **Mid-call.** A browser adds video by re-INVITE: if the other leg is a browser
+  too, the codec the first browser listed is offered to it as the only one. If the
+  other side refuses, the video ends again and the trace says so. Removing video
+  returns the slot. A hold stops audio and video together; resuming asks both
+  senders for a keyframe.
+- **In the console.** A video button in the call controls, remote video large
+  with the self-view picture-in-picture, the received resolution, frame rate and
+  codec, camera selection, and the end-of-call report. The call's detail page says
+  the call carried video.
+- **Not yet.** Recording of video calls (they record audio only and the trace
+  says so), video in conference rooms, and video phones and door stations are
+  later pieces; the relay's two-leg pairing and the per-leg video configuration
+  (`Relay.SetVideo`, `VideoLeg`) are the seams they plug into. A browser's
+  per-codec behaviour (Safari, Firefox, hardware encoders), the REMB fallback's
+  quality in each browser, and real-world capacity are lab items.
+
+### Settings and series
+
+| Setting                    | Default | Meaning                                   |
+| -------------------------- | ------- | ----------------------------------------- |
+| `HELLO_VIDEO_ENABLED`      | true    | Calls between web clients may carry video |
+| `HELLO_VIDEO_MAX_KBPS`     | 1500    | Per-direction ceiling of a call's video   |
+| `HELLO_VIDEO_MAX_SESSIONS` | 20      | Calls one node carries video for          |
+
+`hello_video_sessions`, `hello_video_keyframe_requests_total`,
+`hello_video_dropped_packets_total{reason}` and
+`hello_video_negotiation_failures_total{reason}` (`no_common_codec`,
+`not_allowed`, `over_limit`, `peer_cannot`, `disabled`).
+
+### Tests
+
+`TestWebRTCCallToDeskPhone`, `TestPhoneCallsBrowser`,
+`TestWebRTCRefusedOnCleartextHop`, `TestWebRTCFeaturesOnCall`, `TestWebVideoCall`,
+`TestVideoRefusals` and `TestVideoUpgradeDowngrade` (internal/sip) place calls
+with a headless pion DTLS-SRTP client as the browser through the whole call path;
+`TestVideoCodecChoice`, `TestVideoNegotiation`, `TestVideoRelayForwarding`,
+`TestVideoSSRCSwitchContinues`, `TestVideoCapEnforced`, `TestVideoReports` and
+`TestAlternateLeg` (internal/media) test the SDP and relay with two browsers on
+the shared port. The web suite (`vitest`) covers the softphone state machine, the
+Web Lock rule, the failure states and the dock. A real browser (Chrome, Edge,
+Firefox, Safari) on the LAN is on the hardware list.

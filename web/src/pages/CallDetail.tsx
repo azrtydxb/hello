@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
-import { errorMessage, listTrunks, type RtcpxrQuality } from "../api";
+import {
+  errorMessage,
+  listTrunks,
+  type ClientQualityReport,
+  type RtcpxrQuality,
+} from "../api";
 import { getCallRecord, type CallRecord } from "../api/calls";
 import {
   Alert,
@@ -237,6 +242,23 @@ function qualityText(cdr: CallRecord): string {
   return `${loss.toFixed(2)}% loss · ${jitter.toFixed(1)} ms jitter`;
 }
 
+/** One web client's end-of-call report: codec, loss, jitter, round trip, the path and any video. */
+function clientQualityText(q: ClientQualityReport): string {
+  const parts = [
+    q.codec,
+    `${q.lossPct.toFixed(1)}% loss`,
+    `${q.jitterMs.toFixed(1)} ms jitter`,
+    `${q.rttMs.toFixed(0)} ms round trip`,
+  ];
+  if (q.candidateLocal || q.candidateRemote)
+    parts.push(`${q.candidateLocal || "?"} to ${q.candidateRemote || "?"}`);
+  if (q.video && q.video.width > 0)
+    parts.push(
+      `video ${q.video.width}x${q.video.height} ${q.video.fps} fps ${q.video.codec}`,
+    );
+  return parts.filter(Boolean).join(" · ");
+}
+
 /** One phone's reported figures, e.g. "ext 200: MOS 4.1 · 0.50% loss · 6.0 ms jitter". */
 function phoneQualityText(q: RtcpxrQuality): string {
   const parts: string[] = [];
@@ -296,6 +318,14 @@ function Detail({ cdr }: { cdr: CallRecord }) {
     ...(cdr.rtcpxr ?? []).map((q) => ({
       label: `Phone report (${q.final ? "call end" : "interval"})`,
       value: phoneQualityText(q),
+    })),
+    {
+      label: "Video",
+      value: cdr.video ? "Carried (relayed, not transcoded)" : "—",
+    },
+    ...(cdr.clientQuality ?? []).map((q) => ({
+      label: `Web client report (${q.extension || q.device})`,
+      value: clientQualityText(q),
     })),
     { label: "SIP Call-ID", value: cdr.sipCallId || "—", mono: true },
     { label: "Correlation ID", value: cdr.correlationId || "—", mono: true },

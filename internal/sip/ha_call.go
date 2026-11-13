@@ -117,7 +117,10 @@ type haLegSnap struct {
 // haRefresh rebuilds the replicated-dialog snapshot from the live dialogs.
 // It runs only where the dialogs are quiescent.
 func (c *call) haRefresh() {
-	if c.s.deps.HAState == nil {
+	if c.s.deps.HAState == nil || c.webCall() {
+		// A browser leg's ICE and DTLS state belongs to this node: the call
+		// is not replicated, and ends with the node (the browser's ICE
+		// failure ends it cleanly on its side).
 		return
 	}
 	c.mu.Lock()

@@ -9,6 +9,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { json, mockApi } from "../test/api";
 import { createPhoneLock } from "./lock";
+import { CallButton } from "./CallButton";
 import { SoftphoneDock } from "./SoftphoneDock";
 import { SoftphoneProvider } from "./SoftphoneProvider";
 import type {
@@ -373,5 +374,39 @@ describe("softphone dock", () => {
     await screen.findByRole("alertdialog");
     fireEvent.keyDown(window, { key: "a", altKey: true });
     expect(engine.log).toContain("answer c1");
+  });
+
+  it("places a call from a Call button when the phone is on, and opens the dock to ask when it is off", async () => {
+    mockApi(routes);
+    const engine = new FakeEngine();
+    render(
+      <MemoryRouter>
+        <SoftphoneProvider
+          displayName="u"
+          engineFactory={() => engine}
+          platform={platform()}
+          lock={createPhoneLock(undefined)}
+          ringer={{ start: vi.fn(), stop: vi.fn() }}
+        >
+          <CallButton number="201" label="Bob" />
+          <SoftphoneDock />
+        </SoftphoneProvider>
+      </MemoryRouter>,
+    );
+    const call = screen.getByRole("button", {
+      name: "Call Bob from this browser",
+    });
+    fireEvent.click(call);
+    expect(engine.log).not.toContain("call 201");
+    expect(
+      await screen.findByRole("region", { name: "Softphone" }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("switch", { name: /use this browser as a phone/i }),
+    );
+    await waitFor(() => expect(engine.registered).not.toBeNull());
+    engine.emit({ type: "registration", state: "registered" });
+    fireEvent.click(call);
+    expect(engine.log).toContain("call 201");
   });
 });

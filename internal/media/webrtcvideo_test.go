@@ -168,10 +168,6 @@ func newVideoCall(t *testing.T, calleeVideo bool) *videoCall {
 	}
 	r.SetVideoOffer("b", cands, "sendrecv", 1500)
 	body := bOffer.Build("127.0.0.1", mux.Port(), "sendrecv")
-	body, err = r.AppendVideo("b", body)
-	if err != nil {
-		t.Fatal(err)
-	}
 	c.offerB = parse(t, body)
 	if err := ValidateWebRTC(c.offerB); err != nil {
 		t.Fatalf("offer to the callee: %v\n%s", err, body)
@@ -237,10 +233,6 @@ func newVideoCall(t *testing.T, calleeVideo bool) *videoCall {
 		r.SetVideoSection("a", nil, "sendrecv", 0)
 	}
 	ansBody := ans.Build("127.0.0.1", mux.Port(), "sendrecv")
-	ansBody, err = r.AppendVideo("a", ansBody)
-	if err != nil {
-		t.Fatal(err)
-	}
 	c.ansA = parse(t, ansBody)
 	if err := ValidateWebRTC(c.ansA); err != nil {
 		t.Fatalf("answer to the caller: %v\n%s", err, ansBody)
@@ -461,6 +453,20 @@ func TestVideoNegotiation(t *testing.T) {
 			t.Errorf("candidates %v", got)
 		}
 	})
+	t.Run("a later offer keeps the video line, rejected, once video is gone", func(t *testing.T) {
+		c := newVideoCall(t, true)
+		c.r.SetVideoSection("b", nil, "sendrecv", 0)
+		a := ParseAudioSDPMust(t, c.offerB)
+		a = c.r.KeepSDP("b", a)
+		got := parse(t, a.Build("127.0.0.1", c.node.mux.Port(), "sendrecv"))
+		ms := got.Media()
+		if len(ms) != 2 || ms[1].Kind() != "video" || ms[1].Port() != 0 || ms[1].Mid() != "1" {
+			t.Fatalf("offer after the video ended has %d sections, want audio and a rejected video line", len(ms))
+		}
+		if c.r.VideoOn() {
+			t.Error("the relay still carries video")
+		}
+	})
 	t.Run("a callee without video", func(t *testing.T) {
 		c := newVideoCall(t, false)
 		am := c.ansA.Media()
@@ -493,10 +499,7 @@ func TestVideoNegotiation(t *testing.T) {
 		vo, _ := ParseVideoOffer(offer)
 		vc := SupportedVideo(vo.Codecs)[0]
 		r.SetVideoSection("a", &vc, "sendrecv", 0)
-		body, err := r.AppendVideo("a", ans.Build("127.0.0.1", mux.Port(), "sendrecv"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		body := ans.Build("127.0.0.1", mux.Port(), "sendrecv")
 		s := parse(t, body)
 		ms := s.Media()
 		if len(ms) != 2 || ms[0].Kind() != "video" || ms[0].Mid() != "1" || ms[1].Kind() != "audio" || ms[1].Mid() != "0" {
@@ -729,5 +732,73 @@ func TestAlternateLeg(t *testing.T) {
 	r2.DropAlt()
 	if r2.HasAlt() || r2.LegPort("callee") != port {
 		t.Error("dropping the alternate leg touched the callee leg")
+	}
+}
+
+// ParseAudioSDPMust parses an audio SDP or fails the test.
+func ParseAudioSDPMust(t *testing.T, s *SDPSession) AudioSDP {
+	t.Helper()
+	a, err := ParseAudioSDP(mustBuild(t, s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+// TestPartyWebRTC fails if a browser cannot join a conference participant on
+// the shared port: the answer is a browser SDP with audio only (a video line is
+// rejected in place), its ICE check and DTLS handshake key the endpoint, its
+// audio reaches the party (received and counted), a packet in the clear is not
+// accepted, and what the party sends is encrypted.
+func TestPartyWebRTC(t *testing.T) {
+	mux := newTestMux(t)
+	node := &WebRTCNode{mux: mux, hosts: []string{"127.0.0.1"}}
+	b := newDTLSPhone(t, mux.Port())
+	offer := chromeVideoOffer(b.fingerprint(), "abcd", "browserpassword0123456789", false)
+	answer, party, err := NewPartyWebRTC(node, offer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(party.Close)
+	sess := parse(t, answer)
+	if err := ValidateWebRTC(sess); err != nil {
+		t.Fatalf("answer: %v\n%s", err, answer)
+	}
+	ms := sess.Media()
+	if len(ms) != 2 || ms[0].Kind() != "audio" || ms[0].Port() == 0 || ms[1].Kind() != "video" || ms[1].Port() != 0 || ms[1].Mid() != "1" {
+		t.Fatalf("the answer is not audio plus the video line rejected in place:\n%s", answer)
+	}
+	if got := sess.Bundle(); len(got) != 1 || got[0] != "0" {
+		t.Errorf("bundle %v", got)
+	}
+	ice := ms[0].ICE(sess)
+	m := stunCheck(t, ice.Ufrag+":abcd", ice.Pwd, false, true)
+	if _, err := b.conn.WriteToUDP(m.Raw, loopback(mux.Port())); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-b.stun:
+	case <-time.After(3 * time.Second):
+		t.Fatal("no ICE answer")
+	}
+	if err := b.handshake(false, mustFP(t, ms[0].DTLS(sess).Fingerprints[0])); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+	// Opus is first in the offer; the party takes it when the build has it.
+	pt := party.Offer().PayloadType
+	for i := 0; i < 20; i++ {
+		b.sendMedia(pt, make([]byte, 160))
+		time.Sleep(5 * time.Millisecond)
+	}
+	waitFor(t, "audio at the party", func() bool { rx, _, _ := party.Stats(); return rx > 0 })
+	rx, _, _ := party.Stats()
+	plain := BuildRTP(pt, 5000, 5000, 77, false, bytes.Repeat([]byte{0xEE}, 40))
+	_, _ = b.conn.WriteToUDP(plain, loopback(mux.Port()))
+	time.Sleep(100 * time.Millisecond)
+	if after, _, _ := party.Stats(); after > rx+25 {
+		t.Errorf("a packet in the clear was counted")
+	}
+	if party.Secure().KeyExchange() != "dtls" {
+		t.Errorf("party key exchange %q, want dtls", party.Secure().KeyExchange())
 	}
 }

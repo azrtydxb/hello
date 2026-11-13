@@ -3647,3 +3647,74 @@ Follow-up to "Clients item 1: media foundation on pion". Choices:
   client as the browser. They check that nothing but STUN and DTLS crosses the
   browser leg before the keys are in, that nothing on it is in the clear after,
   and that a cleartext packet from the browser is not relayed.
+
+## Clients items 5 and 6: web softphone and web video (2026-11-13)
+
+Builds on #324, #276, #341 and the devices and ICE servers of #282. Choices:
+
+- **The softphone core lives in `web/src/softphone/`, not in a `clients/*`
+  workspace package.** The spec names a pnpm workspace so the mobile app can
+  share the core. A workspace would move the `hello-ui` image build context from
+  `web/` to the repository root, which touches the image build in CI and the kw
+  manifests for no gain while the apps are "not now". The seam is kept instead:
+  everything that touches JsSIP is in `jssipEngine.ts`; the rest uses the
+  `PhoneEngine` and `Platform` interfaces in `types.ts` and has no DOM or React
+  in it (`phoneState.ts`, `quality.ts`, `backoff.ts`, `lock.ts`), so moving the
+  folder into a workspace package when the apps start is a mechanical change.
+- **No Playwright run in this change.** The spec asks for a Chromium test through
+  the lab compose stack; that needs a browser and the lab, so it is on the
+  hardware list. In its place: a headless pion DTLS-SRTP client places calls
+  through the whole SIP path (`internal/sip/webrtc_test.go`) and the relay
+  (`internal/media/webrtcvideo_test.go`), and `vitest` covers the state machine,
+  the Web Lock rule, the failure states and the dock with a fake engine.
+- **Message waiting uses the SUBSCRIBE the server already answers.** JsSIP's
+  `Subscriber` sends `Event: message-summary`; no REST poll.
+- **A browser is a leg by its SDP, a browser callee by its binding.** An INVITE is
+  a browser's when its audio section is `UDP/TLS/RTP/SAVPF` with ICE; a contact is
+  a browser when it registered over WS or WSS or its device is a web or mobile
+  client (`isWebBinding`). This works with or without the WSS edge's `wss`
+  transport value (#326), so this change does not depend on it.
+- **Mixed rings need a leg of each kind: the alternate callee leg.** One relay
+  has two legs, and a ring across a desk phone and a browser has two kinds of
+  callee. Instead of a relay per fork, a third endpoint (parked until a fork
+  answers) is offered to every browser fork and promoted by the winner. All
+  browser forks of one call share its ICE credentials and fingerprint; only the
+  one that answers sends checks, and a simultaneous second answer is hung up by
+  the existing first-answer-wins rule.
+- **Every SDP for a browser leg carries its video line.** `AudioSDP.Build` appends
+  the video section (or the rejected one that keeps the dialog's `m=` count) for a
+  browser leg, so transfer, park, pickup and hold code that builds SDP the old way
+  cannot drop an `m=` line, which a browser refuses. `SetTarget` ignores browser
+  legs for the same reason: their address is what ICE verified.
+- **The cleartext-hop gate is real.** A WebRTC offer is refused with 488 unless the
+  edge-to-node hop is TLS or `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP` is on. Until
+  #340 (the TLS hop) deploys, kw sets the flag, as the spec says.
+- **Browser calls are not replicated.** The ICE and DTLS state is the node's own;
+  a taker cannot be given it. A dead node ends the call (the browser's ICE failure
+  hangs up in about five seconds) and a new call works at once. Re-homing by ICE
+  restart (S-7) is a lab item. This is stated in `docs/ha.md`.
+- **Video is relayed, per leg pair, never decoded.** Constant sequence and
+  timestamp offsets (so NACKs map by subtraction), one SSRC per leg, payload type
+  per leg, RTCP terminated and regenerated with PLI, FIR, NACK and REMB carried
+  across, a token-bucket ceiling at `HELLO_VIDEO_MAX_KBPS`, a node limit
+  `HELLO_VIDEO_MAX_SESSIONS`. RTX, RED, FEC, transport-cc and header extensions
+  are not negotiated. Video is for a web client on both legs; every other callee
+  (desk phone, trunk, IVR) gets `m=video 0`. The existing door-station video
+  relay (plain RTP) is untouched and is skipped for a browser caller.
+- **Mid-call video is accepted optimistically on the browser that asks.** The
+  re-INVITE is answered before the peer is asked (the existing hold path answers
+  first), so the peer is offered the one codec the browser listed first and, if it
+  refuses, the video ends again and the trace says so. The cost is a moment of
+  one-way video in that case; the benefit is that hold, resume and video changes
+  share one path.
+- **`extensions.video_allowed` and `cdrs.video`, and a client-quality table
+  matched to the CDR like RTCP-XR.** `POST /me/calls/{callId}/quality` files a
+  report under the dialog's SIP Call-ID and the device (it must be the caller's
+  own); the CDR detail reads reports whose Call-ID is the CDR's `sip_call_id` or
+  `peer_call_id`, so a report that arrives before the CDR is not lost. Retention
+  90 days, like the phones' reports. The route is `session`-scoped like the other
+  device routes; the scope `softphone` of the spec is introduced with the mobile
+  OAuth work.
+- **Out of this change, by the plan:** video recording (6b: a recorded video call
+  records audio only and the trace says so), conference-room video (11), video
+  phones and door stations (10).

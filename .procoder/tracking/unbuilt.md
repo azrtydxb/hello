@@ -142,8 +142,8 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 2   | WSS on Kamailio                             | blocked (parity 23)          |
 | 3   | Web devices and credentials                 | wip (#282)                   |
 | 4   | coturn, ICE servers                         | wip (#282)                   |
-| 5   | Web softphone, audio                        | blocked (1-4)                |
-| 6   | Web video                                   | blocked (5)                  |
+| 5   | Web softphone, audio                        | wip (feat/clients-5-6)       |
+| 6   | Web video                                   | wip (feat/clients-5-6)       |
 | 6b  | Video recording                             | blocked (6)                  |
 | 10  | Video phones and door stations              | todo (code), hw (test)       |
 | 11  | Conference-room video                       | blocked (6)                  |
@@ -222,3 +222,4 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - Parity lab items 1-7 and 14
 - Hello MCP "Connected apps" end-to-end (after #189)
 - Real-account lab lists for integrations, messaging, clients (after those phases)
+- Clients 5 and 6: a real browser (Chrome, Edge, Firefox, Safari) calling a G.711 desk phone, a G.722 phone and another browser on the LAN; H.264 and VP8 between browsers with and without hardware encoding and the REMB fallback's quality; DTLS re-handshake and ICE restart on a re-INVITE; a Playwright run with Chromium fake media devices through the lab stack; video capacity per node (the number behind `HELLO_VIDEO_MAX_SESSIONS`)
