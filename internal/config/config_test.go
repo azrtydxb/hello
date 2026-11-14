@@ -428,6 +428,13 @@ func TestLoadMediaWebRTC(t *testing.T) {
 	if c.MediaWebRTCEnabled || c.MediaWebRTCPort != 21100 || c.MediaWebRTCPublicIP != "" || c.MediaWebRTCAllowCleartextHop {
 		t.Fatalf("defaults: %+v", c)
 	}
+	if !c.VideoEnabled || c.VideoMaxKbps != 1500 || c.VideoMaxSessions != 20 {
+		t.Fatalf("video defaults: %v %d %d", c.VideoEnabled, c.VideoMaxKbps, c.VideoMaxSessions)
+	}
+	v, err := LoadSIP(env(map[string]string{"HELLO_VIDEO_ENABLED": "false", "HELLO_VIDEO_MAX_KBPS": "800", "HELLO_VIDEO_MAX_SESSIONS": "5"}))
+	if err != nil || v.VideoEnabled || v.VideoMaxKbps != 800 || v.VideoMaxSessions != 5 {
+		t.Fatalf("video settings: %+v %v", v, err)
+	}
 	on := map[string]string{"HELLO_MEDIA_WEBRTC_ENABLED": "true", "HELLO_MEDIA_ANCHOR_HOST": "192.0.2.10", "HELLO_MEDIA_WEBRTC_PUBLIC_IP": "203.0.113.9"}
 	c, err = LoadSIP(env(on))
 	if err != nil {

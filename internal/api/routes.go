@@ -415,6 +415,7 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/me/devices/{id}", auth.ScopeSession, auth.RoleUser, false, s.deleteMyDevice},
 		{"POST", "/api/v1/me/devices/{id}/credentials", auth.ScopeSession, auth.RoleUser, false, s.refreshMyDevice},
 		{"GET", "/api/v1/me/ice-servers", auth.ScopeSession, auth.RoleUser, false, s.getICEServers},
+		{"POST", "/api/v1/me/calls/{callId}/quality", auth.ScopeSession, auth.RoleUser, false, s.postCallQuality},
 		{"PATCH", "/api/v1/me/profile", auth.ScopeWrite, auth.RoleUser, false, s.updateProfile},
 		{"GET", "/api/v1/me/connections", auth.ScopeRead, auth.RoleUser, false, s.listMyConnections},
 		{"POST", "/api/v1/me/connections/{id}/connect", auth.ScopeWrite, auth.RoleUser, false, s.connectMyConnection},

@@ -140,11 +140,11 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | --- | ------------------------------------------- | ---------------------------- |
 | 1   | Media foundation (pion)                     | done (#324, #341)            |
 | 2   | WSS on Kamailio                             | done (#326)                  |
-| 2b  | Kamailio to hello-sip TLS hop (S-12)        | wip (#340)                   |
+| 2b  | Kamailio to hello-sip TLS hop (S-12)        | done (#340)                  |
 | 3   | Web devices and credentials                 | wip (#282)                   |
 | 4   | coturn, ICE servers                         | wip (#282)                   |
-| 5   | Web softphone, audio                        | blocked (1-4)                |
-| 6   | Web video                                   | blocked (5)                  |
+| 5   | Web softphone, audio                        | wip (#343)                   |
+| 6   | Web video                                   | wip (#343)                   |
 | 6b  | Video recording                             | blocked (6)                  |
 | 10  | Video phones and door stations              | todo (code), hw (test)       |
 | 11  | Conference-room video                       | blocked (6)                  |
@@ -226,5 +226,6 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - Salesforce (Developer Edition) and Dynamics 365 (trial) live checks: docs/crm.md, "Lab checklist: Salesforce" and "Lab checklist: Dynamics 365"
 - CRM connector live checks on real accounts: Pipedrive, Zoho CRM, Odoo, Bitrix24 (docs/crm.md lab checklists)
 - Telnyx and Twilio accounts, messaging item 6 (docs/inbox.md, "Sending through Telnyx", "Sender registration"): a real Telnyx send, delivery receipt and the 40300 STOP block; the field names of Telnyx's 10DLC, campaign-assignment and toll-free reads and of Twilio's UsAppToPerson and Tollfree reads; what a limited key answers for each registration read; a Twilio account with several Messaging Services; a US long code and a toll-free number in each state (approved, pending, rejected, unregistered)
+- Clients 5 and 6: a real browser (Chrome, Edge, Firefox, Safari) calling a G.711 desk phone, a G.722 phone and another browser on the LAN; H.264 and VP8 between browsers with and without hardware encoding and the REMB fallback's quality; DTLS re-handshake and ICE restart on a re-INVITE; a Playwright run with Chromium fake media devices through the lab stack; video capacity per node (the number behind `HELLO_VIDEO_MAX_SESSIONS`)
 - Teams Direct Routing run (item 13, P22): a Microsoft 365 tenant with Teams Phone, a certified SBC or DRaaS contract, and a public SBC name and certificate; the cmdlet steps in docs/teams.md are unverified until then
 - WSS in a browser through the kw Ingress (item 2): needs the kw manifests, the image with the websocket module and a real browser

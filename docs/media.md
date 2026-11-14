@@ -426,6 +426,22 @@ devices and the softphone build on it.
   `hello_sip_webrtc_refused_total{reason="cleartext_hop"}`; the call is answered
   with 488. Set the flag only on a network whose edge-to-node path you trust
   (for example Cilium transparent encryption).
+- **Beyond the first answer.** A browser leg's SDP is the leg's own audio SDP
+  (`AudioSDP.Build`, whose `Secure` already writes DTLS, ICE-lite and rtcp-mux)
+  plus `a=mid`, one BUNDLE group, every node address as a candidate and, for
+  video, a video section on the same transport (`webrtcrelay.go`). `Build` adds
+  the video section itself, so every SDP Hello writes for a browser leg carries
+  it and no code path can drop an `m=` line. `SetTarget` ignores browser legs:
+  their media address is what ICE verifies, not the SDP's `c=0.0.0.0`.
+- **Alternate callee leg.** A relay has two legs, and a ring across a desk phone
+  and a browser needs a callee that is both. `AddAltMuxLeg` adds a third,
+  parked endpoint on the shared port (media dropped, ICE and DTLS running);
+  `PromoteAlt` makes it the callee leg when its fork answers, `DropAlt` closes it
+  when another fork does.
+- **Video.** See [docs/webrtc.md](webrtc.md#video). `relayvideo.go`: per-leg
+  `VideoLeg` (payload type, codec, feedback), constant-offset rewrite, per-leg
+  RTCP reports, PLI/FIR/NACK/REMB carried across, a token-bucket ceiling, and a
+  node limit of calls with video.
 - **Firewall.** Open one UDP port per node, and list it as the one port in the
   TURN `allowed-peer-ip` rules.
 
