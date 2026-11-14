@@ -31,6 +31,11 @@ In the UI, open **Trunks** and create the trunk:
   from any other address with 403.
 - **Password:** entered once. Hello encrypts it with `HELLO_SECRET_KEY` and
   never shows it again; the trunk only reports whether one is set.
+- **Profile:** `generic` (a carrier) or `sbc-peer`, a session border
+  controller Hello peers with by IP, such as the SBC in front of Microsoft
+  Teams Direct Routing. A new SBC peer takes IP mode, G.722 and G.711 codecs
+  and P-Asserted-Identity as defaults, and the API requires source CIDRs, a
+  destination, no Opus and no required SRTP. See [teams.md](teams.md).
 - **Fax mode:** how a fax call on the trunk is carried: `passthrough` (G.711,
   the default), `t38` (move to T.38 when the carrier offers it or the fax tone
   is heard; a carrier that answers 488 leaves the call on G.711) or `off`

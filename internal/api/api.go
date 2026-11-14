@@ -63,6 +63,7 @@ type Store interface {
 	UpdateAccount(ctx context.Context, actor string, id int64, c store.AccountChange) (store.User, error)
 	DeleteUser(ctx context.Context, actor string, id int64) error
 	UserExtensions(ctx context.Context, userID int64) ([]store.Extension, error)
+	UserPhoneVendors(ctx context.Context, userID int64) ([]prov.Vendor, error)
 	UserExtension(ctx context.Context, userID, id int64) (store.Extension, error)
 	UserVoicemailMessage(ctx context.Context, userID, id int64) (store.VoicemailMessage, error)
 	UserCDRs(ctx context.Context, userID, before int64, limit int) ([]store.CDR, string, error)
@@ -79,7 +80,13 @@ type Store interface {
 	CreateExtensionKind(ctx context.Context, actor, number, name, externalNumber, kind string, targets store.DoorTargets, check store.Check) (store.Extension, error)
 	UpdateExtension(ctx context.Context, actor string, id int64, c store.ExtensionChange, check store.Check) (store.Extension, error)
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
+	GetDoorOpen(ctx context.Context, id int64) (store.DoorOpen, error)
+	SetDoorOpen(ctx context.Context, actor string, id int64, c store.DoorOpenChange, check store.Check) (store.DoorOpen, error)
 
+	GetDoorCamera(ctx context.Context, id int64) (store.DoorCamera, error)
+	SetDoorCamera(ctx context.Context, actor string, id int64, in store.DoorCameraInput) (store.DoorCamera, error)
+	DeleteDoorCamera(ctx context.Context, actor string, id int64) error
+	DoorCameraForView(ctx context.Context, id int64) (store.DoorCameraAccess, bool, error)
 	ListDoorWebhooks(ctx context.Context) ([]store.DoorWebhook, error)
 	GetDoorWebhook(ctx context.Context, id int64) (store.DoorWebhook, error)
 	CreateDoorWebhook(ctx context.Context, actor string, in store.DoorWebhookInput) (store.DoorWebhook, string, error)
@@ -215,7 +222,7 @@ type Store interface {
 	ListDevices(ctx context.Context, kind string) ([]store.Device, error)
 	GetDevice(ctx context.Context, id int64) (store.Device, error)
 	CreateDevice(ctx context.Context, actor string, in store.NewDevice) (store.Device, error)
-	UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, srtp *string) (store.Device, error)
+	UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, m store.DeviceMedia) (store.Device, error)
 	RotateDeviceSecret(ctx context.Context, actor string, id int64, realm, secret string) (store.Device, error)
 	DeleteDevice(ctx context.Context, actor string, id int64) error
 
@@ -340,12 +347,18 @@ type Config struct {
 	// CRM is the CRM connector administration (spec integrations I-47); nil
 	// answers 503 on the CRM routes.
 	CRM CRMService
+	// Slack is the Slack notification administration (spec integrations
+	// P17); nil answers 503 on the Slack routes.
+	Slack SlackService
 	// Events is the call-event pipeline (stream, history, tickets); nil
 	// answers 503 on the event routes.
 	Events EventService
 	// Webhooks is the outbound webhook service (endpoints, deliveries,
 	// dead letters); nil answers 503 on the webhook routes.
 	Webhooks WebhookService
+	// Directory is the directory engine (AD/LDAP sync); nil answers 503 on
+	// the directory routes.
+	Directory DirectoryService
 	// Originate and OriginateLive carry click-to-call (spec integrations
 	// I-37): its requests and policy in PostgreSQL, its queue, live state
 	// and limit counters in Valkey; nil answers 503. OriginateLimits
@@ -357,6 +370,13 @@ type Config struct {
 	OriginateMetrics *OriginateMetrics
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
+	// DoorCalls carries door-open requests to the hello-sip node holding a
+	// call; nil answers 503. DoorOpenWait bounds the wait (0 means 5 s).
+	DoorCalls    DoorControl
+	DoorOpenWait time.Duration
+	// CameraHTTP fetches door station camera pictures; it should be built on
+	// the SSRF-guarded safehttp transport. nil answers 503.
+	CameraHTTP *http.Client
 	// DoorTriggers carries doorbell webhook triggers to hello-sip and keeps
 	// their rate and duplicate windows; nil answers 503.
 	DoorTriggers DoorTriggers

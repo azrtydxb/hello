@@ -14,13 +14,19 @@ import {
   Input,
   Modal,
   PageHeader,
+  Select,
   Spinner,
   Switch,
   useToast,
 } from "../design/azrty/components";
 
 const FIELDS: ReadonlyArray<{
-  key: "retentionSmsDays" | "retentionChatDays" | "reopenDays";
+  key:
+    | "retentionSmsDays"
+    | "retentionChatDays"
+    | "reopenDays"
+    | "firstContactPerUserHour"
+    | "firstContactPerAddressDay";
   label: string;
   hint: string;
   min: number;
@@ -47,6 +53,20 @@ const FIELDS: ReadonlyArray<{
     min: 0,
     max: 365,
   },
+  {
+    key: "firstContactPerUserHour",
+    label: "First-contact texts per agent per hour",
+    hint: "Applies only when first contact is allowed.",
+    min: 1,
+    max: 1000,
+  },
+  {
+    key: "firstContactPerAddressDay",
+    label: "First-contact texts per number per day",
+    hint: "Applies only when first contact is allowed.",
+    min: 1,
+    max: 10000,
+  },
 ];
 
 /**
@@ -57,6 +77,8 @@ export function MessagingSettings() {
   const [loaded, setLoaded] = useState<Settings | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [emailNotify, setEmailNotify] = useState(true);
+  const [firstContact, setFirstContact] =
+    useState<Settings["firstContact"]>("off");
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -71,7 +93,10 @@ export function MessagingSettings() {
       .then((s) => {
         setLoaded(s);
         setEmailNotify(s.emailNotify);
+        setFirstContact(s.firstContact);
         setDraft({
+          firstContactPerUserHour: String(s.firstContactPerUserHour),
+          firstContactPerAddressDay: String(s.firstContactPerAddressDay),
           retentionSmsDays: String(s.retentionSmsDays),
           retentionChatDays: String(s.retentionChatDays),
           reopenDays: String(s.reopenDays),
@@ -102,6 +127,9 @@ export function MessagingSettings() {
         retentionChatDays: Number(draft.retentionChatDays),
         reopenDays: Number(draft.reopenDays),
         emailNotify,
+        firstContact,
+        firstContactPerUserHour: Number(draft.firstContactPerUserHour),
+        firstContactPerAddressDay: Number(draft.firstContactPerAddressDay),
       });
       toast.show("Messaging settings saved.");
     } catch (err: unknown) {
@@ -129,6 +157,21 @@ export function MessagingSettings() {
       )}
       {loaded && (
         <form className="cf-stack" onSubmit={save}>
+          <Select
+            label="Texting a customer who has not texted first"
+            hint="Off by default. When allowed, an agent starts one conversation at a time through a carrier number and must confirm the customer agreed to be texted. There is no bulk sending."
+            value={firstContact}
+            options={[
+              { value: "off", label: "Not allowed" },
+              {
+                value: "attested",
+                label: "Allowed with a consent attestation",
+              },
+            ]}
+            onChange={(e) =>
+              setFirstContact(e.target.value as Settings["firstContact"])
+            }
+          />
           {FIELDS.map((f) => (
             <Input
               key={f.key}

@@ -175,7 +175,7 @@ from the start of the playlist toward the same leg (`TestMusicOnHoldTakeover`).
 
 API: `GET/POST /api/v1/moh-classes`, `GET/PUT/DELETE /api/v1/moh-classes/{id}`;
 `mohClassId` on extensions, ring groups and inbound routes, and `mohRingback`
-on the last two. Migration `00021_music_on_hold`.
+on the last two. Migration `00029_music_on_hold`.
 
 The one exception is a [conference room](conference.md): it decodes every
 participant to a common 8 kHz mixing rate, mixes, and encodes each
@@ -274,7 +274,146 @@ phone never learns the other phone's key.
   hung up. A page's multicast group is always plain RTP (the stream is
   one-to-many by design). An HA takeover of voicemail or a conference call
   offers the caller fresh keys and ends the call if it does not answer with
-  them. DTLS-SRTP and ICE are the next item (S-16).
+  them.
+
+## DTLS-SRTP and ICE-lite
+
+The same per-leg SRTP state can also be keyed by a DTLS handshake instead of
+SDES keys in the SDP (phone-feature-parity S-16, RFC 5763 and 5764), and a
+leg can run ICE-lite (RFC 8445). They are the media foundation of the later
+WebRTC softphone: a browser leg is one more leg profile (`UDP/TLS/RTP/SAVPF`,
+BUNDLE) on top of the code below.
+
+- **What is told apart on the media port.** A leg's UDP socket carries STUN,
+  DTLS and RTP/RTCP, told apart by the first byte (RFC 7983). STUN goes to the
+  leg's ICE-lite agent, DTLS records to the handshake, the rest is media. A
+  DTLS leg whose keys are not in yet carries nothing in either direction
+  (never plain RTP). `a=rtcp-mux` is answered on DTLS and ICE legs; RTCP on the
+  RTP port is consumed.
+- **Answering.** An offer on `UDP/TLS/RTP/SAVP` (or `SAVPF`) with
+  `a=fingerprint` and `a=setup` is answered on the same transport with Hello's
+  fingerprint and role, and the handshake starts on the leg's socket. Hello
+  answers `active` (it is the DTLS client) to `actpass` and `passive`, and
+  `passive` to `active`; a client waits until it knows where the peer is (and,
+  with ICE, until a check has authenticated that address). A phone that offers
+  `RTP/AVP` with `a=crypto` is answered with SDES as before; the answer
+  follows the offer.
+- **Offering.** When Hello is the offerer (the callee leg of a call, a
+  parked party's return, a transfer target) the device's **Key exchange**
+  decides: `sdes` (the default) offers `a=crypto`, `dtls` offers
+  `UDP/TLS/RTP/SAVP` with Hello's fingerprint, `a=setup:actpass` and
+  `a=rtcp-mux`. The policy keeps its meaning: `off` offers nothing, `optional`
+  and `required` offer the chosen exchange, `required` refuses a call whose
+  answer does not carry it (488). A DTLS transport cannot fall back to plain
+  RTP inside the same offer, so a device set to `dtls` must be a phone that
+  does DTLS-SRTP.
+- **TLS only, as SDES.** DTLS keeps no key in the signalling, but the
+  fingerprint is the only thing that authenticates the peer's certificate, so
+  it is trusted only when it arrived over a protected signalling leg: DTLS is
+  offered or accepted on a leg whose signalling is TLS and whose policy is not
+  `off`, exactly as SDES is. A DTLS offer on any other leg is refused with 488,
+  as is a DTLS offer with no usable fingerprint, and one on a node that has
+  `HELLO_MEDIA_DTLS=false`.
+- **Certificate.** Each hello-sip process makes a self-signed ECDSA P-256
+  certificate when it first needs one (renewed for new sessions after 30
+  days). It is never stored or shared, carries no identity, and is trusted by
+  the peer only through its SHA-256 fingerprint in the SDP. Hello accepts the
+  peer's certificate only if it matches a fingerprint in the peer's SDP
+  (`sha-1`, `sha-256`, `sha-384`, `sha-512`); a mismatch fails the handshake.
+  After a restart or a takeover the fingerprint changes, and the taker's
+  re-INVITE carries the new one.
+- **SRTP profiles.** `SRTP_AEAD_AES_128_GCM`, `SRTP_AES128_CM_HMAC_SHA1_80`,
+  `SRTP_AES128_CM_HMAC_SHA1_32` are offered in the handshake, in that order.
+  The extended master secret (RFC 7627) is requested but not required, for
+  phones on an old TLS stack; the peer's certificate is pinned by fingerprint
+  either way.
+- **A failed handshake** (timeout after 8 s, a certificate that does not match,
+  a protocol error) ends the call: the leg's offer was DTLS only, so there is
+  nothing to fall back to. The trace says which leg and why, and
+  `hello_srtp_negotiations_total{result="dtls_failed"}` counts it.
+- **Re-INVITE.** A re-INVITE that repeats the peer's fingerprint keeps the
+  session; one with a new fingerprint (the phone rebooted, a transfer) drops the
+  keys and handshakes again. Hello's own answers repeat its fingerprint and
+  role.
+- **ICE-lite.** An offer with `a=ice-ufrag` and `a=ice-pwd` is answered with
+  `a=ice-lite`, Hello's own credentials for that leg, one host candidate (the
+  relay address and port, never a server-reflexive or relay one) and
+  `a=rtcp-mux`. Hello answers binding requests whose USERNAME is
+  `<its ufrag>:<the phone's ufrag>` and whose MESSAGE-INTEGRITY verifies with
+  its password, with the sender's address; anything else is dropped silently. A
+  valid check makes its source address an address the leg accepts media from
+  and, for the first or the nominated pair, the address media is sent to. Hello
+  is always the controlled side (a peer that is also controlled gets 487).
+  `a=candidate` lines of the phone are parsed and kept for the trace; as the lite
+  side Hello never checks them. A device with **ICE** on is offered ICE-lite by
+  Hello too. ICE is not tied to TLS (it carries no secret). ICE alone does not
+  encrypt anything.
+- **Voicemail, conference rooms and the page caller** use the same code on
+  their own sockets (a greeting waits for the handshake to finish). A page's
+  members are offered SDES, never DTLS. A call retrieved or picked up from
+  another node with a DTLS leg is refused with 488, like a required SDES one:
+  the command through the shared store does not carry the retriever's policy
+  and transport.
+- **HA.** The replicated mode of a leg is `dtls`; a taker offers DTLS with its
+  own fresh certificate and ends the call if the phone does not complete the
+  handshake. The far end's ICE password is not replicated.
+- **CDR and metrics.** `cdrs.srtp_keyex` is `none`, `sdes`, `dtls` or `mixed`
+  (one of each) and `cdrs.ice` says a leg ran ICE-lite (the call detail card,
+  the CSV export). `hello_dtls_handshakes_total{result}` (`ok`, `timeout`,
+  `fingerprint`, `failed`), `hello_dtls_handshake_seconds`,
+  `hello_ice_checks_total{result}` (`ok`, `bad_credentials`, `role_conflict`);
+  a DTLS leg counts as `dtls` in `hello_srtp_negotiations_total` and in
+  `hello_srtp_legs`.
+- **Ports.** No new port: DTLS and STUN use the leg's RTP port (the existing
+  `HELLO_RTP_PORT_MIN`-`MAX` range). Nothing in Kamailio or the chart changes
+  for phones. The WebRTC phase adds the one shared port per node, its public IP
+  and the TURN and Kamailio WebSocket pieces; they are not part of this item.
+- **Settings.** `HELLO_MEDIA_DTLS` and `HELLO_MEDIA_ICE`, both on by default.
+
+## WebRTC legs: the media foundation (clients item 1)
+
+The anchor treats a browser or app like any other leg and differs only in the
+leg's transport. Nothing here is user-visible yet: the Kamailio WSS edge, the
+devices and the softphone build on it.
+
+- **Leg profiles.** The `m=` transport picks the profile (`ProfileOf`): `plain`
+  (`RTP/AVP`), `sdes` (`RTP/SAVP`), `dtls` (`UDP/TLS/RTP/SAVP`) or `webrtc`
+  (`UDP/TLS/RTP/SAVPF`). The rewrite between the two legs does not change.
+- **SDP model.** `ParseSDPSession` reads any number of audio and video
+  sections with BUNDLE, `mid`, `rtcp-mux`, `rtcp-fb`, `extmap`, `fmtp`, ICE,
+  DTLS and SDES attributes (pion/sdp) and writes them back in order, so a parse
+  and a build lose nothing. `ParseAudioSDP` and `BuildAudioSDP` stay the
+  tolerant audio-only reader and writer for Hello-terminated media;
+  `AudioSection` hands a section to them. `ValidateWebRTC` refuses an offer
+  without DTLS-SRTP, `rtcp-mux`, ICE credentials, a fingerprint, a setup role, a
+  `mid` or a shared BUNDLE group.
+- **Answer.** `AnswerWebRTC` writes ICE-lite with host candidates only (the node
+  address, then `HELLO_MEDIA_WEBRTC_PUBLIC_IP`), the node fingerprint, `rtcp-mux`
+  and one BUNDLE group. It lists exactly the codecs the other leg chose
+  (`AnswerFor`), in the browser's payload numbers: no transcoding, nothing the
+  browser did not offer. Only the first audio section is accepted; video is
+  rejected (port 0) until the video phases.
+- **One port per node.** Every WebRTC leg shares the UDP port
+  `HELLO_MEDIA_WEBRTC_PORT` (default 21100, outside the RTP range). The mux
+  routes a STUN check by the ufrag in its USERNAME, binds the source address to
+  that leg (at most 8 per leg) and routes the DTLS and SRTP from that address
+  to it. The leg's own ICE-lite agent authenticates; a check for an unknown
+  ufrag, and media from an unbound address, are dropped and counted. The relay
+  reaches it through `Relay.AddMuxLeg`; a leg reads and writes a `LegConn`, which
+  a UDP socket and a mux endpoint both are.
+- **Answering.** `Relay.AnswerWebRTC` answers a browser offer on a mux leg: it
+  routes the leg's ICE ufrag to its endpoint, starts the DTLS-SRTP handshake
+  (Hello is the DTLS client to an `actpass` offer) and writes the answer with
+  Hello's fingerprint. The leg carries only STUN and DTLS until the keys are in,
+  and a certificate that does not match the offered fingerprint ends the call
+  (`reason: fingerprint`).
+- **Settings.** `HELLO_MEDIA_WEBRTC_ENABLED` (default false; needs
+  `HELLO_MEDIA_ANCHOR_HOST`), `HELLO_MEDIA_WEBRTC_PORT`,
+  `HELLO_MEDIA_WEBRTC_PUBLIC_IP`, `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP`
+  (read; enforced by the WSS edge item). Metrics: `hello_webrtc_mux_legs`,
+  `hello_webrtc_mux_unrouted_total`, `hello_webrtc_mux_queue_drops_total`.
+- **Firewall.** Open one UDP port per node, and list it as the one port in the
+  TURN `allowed-peer-ip` rules.
 
 ## Metrics
 
@@ -288,7 +427,8 @@ The anchor's own series:
 `hello_rtp_jitter_ms{direction}`, `hello_media_anchored_calls`,
 `hello_media_anchor_failures_total`, `hello_recording_storage_bytes`, and for
 SRTP `hello_srtp_legs` (legs encrypted now) and
-`hello_srtp_negotiations_total{result}` (`srtp`, `plain`, `refused`).
+`hello_srtp_negotiations_total{result}` (`srtp`, `dtls`, `plain`, `refused`,
+`dtls_failed`); the DTLS and ICE series are listed in the section above.
 
 ## RTP port range
 

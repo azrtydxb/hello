@@ -329,6 +329,13 @@ func validateTrunk(in *store.TrunkInput, hasPassword bool) fieldErrs {
 			f.add(p+".weight", "must be 1-65535")
 		}
 	}
+	if !routing.ValidProfile(in.Profile) {
+		f.add("profile", `must be "generic" or "sbc-peer"`)
+	} else if in.Profile == routing.ProfileSBCPeer {
+		for _, e := range routing.SBCPeerProblems(in.Mode, in.SourceCIDRs, len(in.Destinations), in.Codecs, in.SRTP) {
+			f.add(e.Path, "%s", e.Message)
+		}
+	}
 	return f
 }
 

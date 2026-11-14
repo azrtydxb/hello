@@ -22,7 +22,7 @@ type Binding struct {
 	Device       string    `json:"device"`     // device SIP username
 	ContactURI   string    `json:"contactUri"` // as sent in Contact
 	Source       string    `json:"source"`     // ip:port the REGISTER came from
-	Transport    string    `json:"transport"`  // udp, tcp or tls: the phone leg of the REGISTER
+	Transport    string    `json:"transport"`  // udp, tcp, tls, ws or wss: the phone leg of the REGISTER
 	UserAgent    string    `json:"userAgent"`
 	Path         []string  `json:"path,omitempty"`
 	ReceivedNode string    `json:"receivedNode"` // node ID that handled the REGISTER
@@ -46,9 +46,12 @@ type Call struct {
 	// the dialled number (a ring group member, a forward target); it makes
 	// the extension count as busy. Empty from older nodes and before answer.
 	Callee string `json:"callee,omitempty"`
-	State  string `json:"state"` // ringing | connected
-	Node   string `json:"node"`
-	Media  string `json:"media"` // direct
+	// Door is the number of the door station on the call (spec S-45), empty
+	// when no door station takes part. Records from older nodes read "".
+	Door  string `json:"door,omitempty"`
+	State string `json:"state"` // ringing | connected
+	Node  string `json:"node"`
+	Media string `json:"media"` // direct
 	// Direction is internal, inbound or outbound, as the call's CDR will
 	// record it. Records written by nodes predating the field read as "".
 	Direction  string    `json:"direction,omitempty"`

@@ -111,7 +111,7 @@ type haLegSnap struct {
 	remoteTarget, endpoint      string
 	source, sdp                 string
 	remoteSDP                   string // the endpoint's own SDP (its a=crypto lines removed)
-	srtp                        string // "", "savp" or "avp": the leg is encrypted (livestate.DialogLeg.SRTP)
+	srtp                        string // "", "savp", "avp" or "dtls": the leg is encrypted (livestate.DialogLeg.SRTP)
 }
 
 // haRefresh rebuilds the replicated-dialog snapshot from the live dialogs.
@@ -669,7 +669,7 @@ func userOf(raw string) string {
 
 // handoffPoll is how often a draining node checks whether a survivor has
 // taken over the calls it handed off; a var so tests can shrink it.
-var handoffPoll = 100 * time.Millisecond
+var handoffPoll = newTunable(100 * time.Millisecond)
 
 // HandOffCalls hands every recoverable live call to a surviving node,
 // for as long as the node drains: the call's record is marked for handoff
@@ -729,7 +729,7 @@ func (s *Server) liveCalls() []*call {
 // marks calls that became recoverable, until the node stops or the drain
 // is cancelled.
 func (s *Server) handoffLoop() {
-	t := time.NewTicker(handoffPoll)
+	t := time.NewTicker(handoffPoll.Get())
 	defer t.Stop()
 	for s.handoff.Load() {
 		select {

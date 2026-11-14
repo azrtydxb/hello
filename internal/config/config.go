@@ -49,6 +49,10 @@ type Backup struct {
 // Control is hello-control's configuration.
 type Control struct {
 	Common
+	// DoorCameraAllow are the private networks the door camera proxy may
+	// reach (HELLO_DOOR_CAMERA_ALLOW, CIDRs); public addresses need no entry
+	// and loopback and link-local ones are never reachable.
+	DoorCameraAllow []netip.Prefix
 	// Fax is the fax feature (HELLO_FAX_*); disabled unless HELLO_FAX_ENABLED.
 	Fax         Fax
 	DatabaseURL string
@@ -78,6 +82,14 @@ type Control struct {
 	// RFC 1918 ranges by default, "none" for no private target at all).
 	// Loopback, link-local and metadata addresses are never allowed.
 	IntegrationsAllowedCIDRs []netip.Prefix
+	// DirectoryAllowPlaintextLDAP lets an LDAP directory connector use ldap://
+	// without StartTLS (HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP, lab only, off by
+	// default; every use logs a warning). Certificate verification stays on.
+	DirectoryAllowPlaintextLDAP bool
+	// CRMUploadMaxMB (HELLO_CRM_UPLOAD_MAX_MB, default 50) is the largest
+	// recording uploaded to a CRM that stores the file itself (Pipedrive);
+	// a larger one is not sent.
+	CRMUploadMaxMB int
 	// MinIO (voicemail audio) and SMTP (voicemail email). SMTP is optional:
 	// an empty SmtpHost disables the mailer.
 	MinioEndpoint      string
@@ -112,6 +124,30 @@ type Control struct {
 	AIAgent AIAgent
 	// Syslog is the phone syslog sink (HELLO_SYSLOG_*).
 	Syslog Syslog
+	// Chat is the LAN chat widget listener (HELLO_MSG_CHAT_*).
+	Chat Chat
+}
+
+// Chat configures the LAN chat widget (spec messaging-channels M-28). The
+// listener serves only /chat/* and /healthz, and starts only when LANAddr is
+// set.
+type Chat struct {
+	// LANAddr (HELLO_MSG_CHAT_LAN_ADDR, default off) is where the listener
+	// binds, for example :8087.
+	LANAddr string
+	// Enabled (HELLO_MSG_CHAT_ENABLED, default true) is the global kill
+	// switch: false answers every /chat request with 503.
+	Enabled bool
+	// TrustedProxies (HELLO_MSG_CHAT_TRUSTED_PROXIES) may set
+	// X-Forwarded-For; without them every visitor behind the ingress shares
+	// its address and its limits.
+	TrustedProxies []netip.Prefix
+	// MaxInFlight (HELLO_MSG_CHAT_MAX_INFLIGHT, default 500) is the requests
+	// in flight per pod before the listener answers 503.
+	MaxInFlight int
+	// MaxStreams (HELLO_MSG_CHAT_MAX_STREAMS, default 2000) is the open
+	// visitor event streams per pod.
+	MaxStreams int
 }
 
 // Syslog configures the phone syslog sink (phone-feature-parity S-27). It is
@@ -416,6 +452,10 @@ type SIP struct {
 	// PushRate (HELLO_PROV_PUSH_RATE, default 20) is how many check-sync
 	// pushes the cluster sends per minute.
 	PushRate int
+	// IntegrationsAllowedCIDRs are the private ranges the CRM caller-name
+	// lookup may reach (a self-hosted Odoo or Bitrix24); the same setting
+	// as hello-control's.
+	IntegrationsAllowedCIDRs []netip.Prefix
 	// VoicePromptLanguage (HELLO_VOICEMAIL_LANGUAGE, default en) is the
 	// language of the spoken voicemail prompts. Timezone (HELLO_TIMEZONE,
 	// else HELLO_PROV_TIMEZONE, else UTC) is the zone message times are
@@ -478,6 +518,10 @@ type SIP struct {
 	PageMaxDuration time.Duration
 	PageConcurrent  int
 	PageFanout      int
+	// DoorHangup is how long a call with a door station stays up after the
+	// door-open code was sent, when the station is set to hang up after
+	// open (HELLO_DOOR_HANGUP_SECONDS, 3 s; spec phone-feature-parity S-47).
+	DoorHangup time.Duration
 	// A paging group with a multicast channel also sends the page there:
 	// PageMulticastIface (HELLO_PAGE_MULTICAST_IFACE, default the system's
 	// choice) is the network interface the packets leave on, which must be on
@@ -507,6 +551,27 @@ type SIP struct {
 	// keeps the old behaviour of mirroring the offer's own c= address,
 	// which only carries audio when the peer can reach the pod directly.
 	MediaAnchorHost string
+	// MediaWebRTCEnabled (HELLO_MEDIA_WEBRTC_ENABLED, default false) lets
+	// the anchor accept webrtc-profile legs (clients S-3, S-4): ICE-lite
+	// and DTLS-SRTP from browsers and apps on one shared UDP port.
+	MediaWebRTCEnabled bool
+	// MediaWebRTCPort (HELLO_MEDIA_WEBRTC_PORT, default 21100) is that
+	// port; it lies outside the RTP range.
+	MediaWebRTCPort int
+	// MediaWebRTCPublicIP (HELLO_MEDIA_WEBRTC_PUBLIC_IP, default empty) is
+	// an extra candidate address for clients outside the LAN.
+	MediaWebRTCPublicIP string
+	// MediaWebRTCAllowCleartextHop (HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP,
+	// default false) permits WebRTC calls while the Kamailio to hello-sip
+	// hop is not TLS: the fingerprint then travels in the clear on that hop.
+	MediaWebRTCAllowCleartextHop bool
+	// MediaDTLS (HELLO_MEDIA_DTLS, default true) lets the anchor terminate
+	// DTLS-SRTP (phone-feature-parity S-16); off, an offer that carries only
+	// DTLS is refused with 488 and no device is offered it. MediaICE
+	// (HELLO_MEDIA_ICE, default true) lets the anchor answer ICE offers as
+	// ICE-lite; off, ICE attributes are ignored.
+	MediaDTLS bool
+	MediaICE  bool
 	// HATakeoverEnabled (HELLO_HA_TAKEOVER_ENABLED, default true) lets the
 	// node poll for orphaned dialogs and take calls over; disabling it
 	// leaves the node replication-only.
@@ -563,7 +628,10 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
 	}
 	c.IntegrationsAllowedCIDRs = r.allowedCIDRs("HELLO_INTEGRATIONS_ALLOWED_CIDRS")
+	c.DirectoryAllowPlaintextLDAP = r.boolean("HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP")
+	c.CRMUploadMaxMB = r.positiveInt("HELLO_CRM_UPLOAD_MAX_MB", 50)
 	c.Database = r.database(c.DatabaseURL)
+	c.DoorCameraAllow = r.cameraAllow()
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
 	c.SecretKey = r.secretKey()
 	r.minio(&c.MinioEndpoint, &c.MinioAccessKey, &c.MinioSecretKey, &c.MinioSecure)
@@ -586,7 +654,43 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	c.AIAgent = r.aiAgent()
 	c.Clients = r.clients()
 	c.Syslog = r.syslog()
+	c.Chat = r.chat()
 	return c, r.err()
+}
+
+// chat reads the HELLO_MSG_CHAT_* settings.
+func (r *reader) chat() Chat {
+	c := Chat{
+		LANAddr:        r.getenv("HELLO_MSG_CHAT_LAN_ADDR"),
+		Enabled:        true,
+		TrustedProxies: r.prefixes("HELLO_MSG_CHAT_TRUSTED_PROXIES"),
+		MaxInFlight:    r.positiveInt("HELLO_MSG_CHAT_MAX_INFLIGHT", 500),
+		MaxStreams:     r.positiveInt("HELLO_MSG_CHAT_MAX_STREAMS", 2000),
+	}
+	switch r.getenv("HELLO_MSG_CHAT_ENABLED") {
+	case "", "true":
+	case "false":
+		c.Enabled = false
+	default:
+		r.fail("HELLO_MSG_CHAT_ENABLED", errors.New("must be true or false"))
+	}
+	r.hostPort("HELLO_MSG_CHAT_LAN_ADDR", c.LANAddr)
+	return c
+}
+
+// cameraAllow reads HELLO_DOOR_CAMERA_ALLOW. The error names the key and
+// never echoes the value.
+func (r *reader) cameraAllow() []netip.Prefix {
+	v := r.getenv("HELLO_DOOR_CAMERA_ALLOW")
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	p, err := safehttp.ParseAllow(v)
+	if err != nil {
+		r.fail("HELLO_DOOR_CAMERA_ALLOW", errors.New("must list private CIDR prefixes such as 192.168.10.0/24 (not loopback or link-local)"))
+		return nil
+	}
+	return p
 }
 
 // Clients is the browser softphone's settings on hello-control.
@@ -654,8 +758,9 @@ func (r *reader) clients() Clients {
 	if c.AuthKeyPrevious != "" && c.AuthKey == "" {
 		r.fail("HELLO_CLIENT_AUTH_KEY_PREVIOUS", errors.New("needs HELLO_CLIENT_AUTH_KEY"))
 	}
-	if c.WSSURL != "" && !strings.HasPrefix(c.WSSURL, "wss://") && !strings.HasPrefix(c.WSSURL, "ws://") {
-		r.fail("HELLO_WSS_URL", errors.New("must be a wss:// (or ws://) URL"))
+	// A plain ws scheme is accepted on purpose, for a lab without TLS.
+	if u, err := url.Parse(c.WSSURL); c.WSSURL != "" && (err != nil || (u.Scheme != "wss" && u.Scheme != "ws")) {
+		r.fail("HELLO_WSS_URL", errors.New("must be a wss (or ws) URL"))
 	}
 	if len(c.TURNURLs) > 0 && len(c.TURNSecret) < 16 {
 		r.fail("HELLO_TURN_SECRET", errors.New("is required with HELLO_TURN_URLS and must be at least 16 bytes"))
@@ -1058,6 +1163,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 		MaxCallDuration:    r.duration("HELLO_SIP_MAX_CALL_DURATION", 4*time.Hour),
 		PushRate:           r.positiveInt("HELLO_PROV_PUSH_RATE", 20),
 	}
+	c.IntegrationsAllowedCIDRs = r.allowedCIDRs("HELLO_INTEGRATIONS_ALLOWED_CIDRS")
 	c.VoicePromptLanguage = r.optional("HELLO_VOICEMAIL_LANGUAGE", "en")
 	c.Timezone = r.optional("HELLO_TIMEZONE", r.optional("HELLO_PROV_TIMEZONE", "UTC"))
 	if _, err := time.LoadLocation(c.Timezone); err != nil {
@@ -1065,6 +1171,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	}
 	c.Dial = r.dialing()
 	c.PageMaxDuration = time.Duration(r.positiveInt("HELLO_PAGE_MAX_SECONDS", 120)) * time.Second
+	c.DoorHangup = time.Duration(r.positiveInt("HELLO_DOOR_HANGUP_SECONDS", 3)) * time.Second
 	c.SessionExpires = time.Duration(r.seconds("HELLO_SIP_SESSION_EXPIRES_SECONDS", 1800)) * time.Second
 	c.SessionMinSE = time.Duration(r.seconds("HELLO_SIP_SESSION_MIN_SE_SECONDS", 90)) * time.Second
 	c.MediaDeadAfter = time.Duration(r.seconds("HELLO_MEDIA_DEAD_SECONDS", 60)) * time.Second
@@ -1083,10 +1190,29 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.DSCPRTP = r.dscp("HELLO_DSCP_RTP", DefaultDSCPRTP)
 	c.MediaForceAnchor = r.getenv("HELLO_MEDIA_FORCE_ANCHOR") == "true"
 	c.MediaRecordingNotice = r.getenv("HELLO_MEDIA_RECORDING_NOTICE") != "false"
+	c.MediaDTLS = r.getenv("HELLO_MEDIA_DTLS") != "false"
+	c.MediaICE = r.getenv("HELLO_MEDIA_ICE") != "false"
 	c.MediaAnchorHost = r.optional("HELLO_MEDIA_ANCHOR_HOST", "")
 	if c.MediaAnchorHost != "" {
 		if ip := net.ParseIP(c.MediaAnchorHost); ip == nil || ip.To4() == nil {
 			r.fail("HELLO_MEDIA_ANCHOR_HOST", fmt.Errorf("%q is not an IPv4 address", c.MediaAnchorHost))
+		}
+	}
+	c.MediaWebRTCEnabled = r.boolean("HELLO_MEDIA_WEBRTC_ENABLED")
+	c.MediaWebRTCPort = r.port("HELLO_MEDIA_WEBRTC_PORT", 21100)
+	c.MediaWebRTCPublicIP = r.optional("HELLO_MEDIA_WEBRTC_PUBLIC_IP", "")
+	c.MediaWebRTCAllowCleartextHop = r.boolean("HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP")
+	if c.MediaWebRTCPublicIP != "" {
+		if ip := net.ParseIP(c.MediaWebRTCPublicIP); ip == nil || ip.To4() == nil {
+			r.fail("HELLO_MEDIA_WEBRTC_PUBLIC_IP", fmt.Errorf("%q is not an IPv4 address", c.MediaWebRTCPublicIP))
+		}
+	}
+	if c.MediaWebRTCEnabled {
+		if c.MediaAnchorHost == "" {
+			r.fail("HELLO_MEDIA_WEBRTC_ENABLED", errors.New("needs HELLO_MEDIA_ANCHOR_HOST, the address clients send media to"))
+		}
+		if c.MediaWebRTCPort >= c.RTPPortMin && c.MediaWebRTCPort <= c.RTPPortMax {
+			r.fail("HELLO_MEDIA_WEBRTC_PORT", errors.New("must lie outside HELLO_RTP_PORT_MIN to HELLO_RTP_PORT_MAX"))
 		}
 	}
 	if c.MaxCallDuration == 0 {

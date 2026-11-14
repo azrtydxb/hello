@@ -83,7 +83,7 @@ type Metrics struct {
 
 	// Transports (phone-feature-parity S-14). RegistrationsByTransport is
 	// this node's bindings by the transport the phone registered over
-	// (udp, tcp, tls); SecureRefused counts sips: requests refused for want
+	// (udp, tcp, tls, ws, wss); SecureRefused counts sips: requests refused for want
 	// of a TLS path, by reason (caller_not_tls, no_tls_binding, no_tls_route).
 	RegistrationsByTransport *prometheus.GaugeVec   // transport
 	SecureRefused            *prometheus.CounterVec // reason
@@ -296,7 +296,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Help: "Stored message deliveries by route (phone, trunk) and result (delivered, not_registered, retry, failed).",
 	}, []string{"via", "result"})
 	m.RegistrationsByTransport = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "hello_sip_registrations_by_transport", Help: "Bindings last registered through this node, by the phone's transport (udp, tcp, tls).",
+		Name: "hello_sip_registrations_by_transport", Help: "Bindings last registered through this node, by the phone's transport (udp, tcp, tls, ws, wss).",
 	}, []string{"transport"})
 	m.SecureRefused = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_sip_sips_refused_total", Help: "sips: requests refused because no TLS path exists, by reason.",

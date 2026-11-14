@@ -53,6 +53,17 @@ control:
     # An announcement upload (up to 64 MiB) is held in memory while it is
     # converted, about 1.5x its size.
     limits: { memory: 512Mi }
+  # LAN chat widget listener (docs/inbox.md, "Website chat"): its own port
+  # serving only /chat/*, reached through the UI's /chat/ on the LAN host.
+  # Off until lanAddr is set (for example ":8087").
+  chat:
+    lanAddr: ""
+    # The global kill switch: false makes every /chat request answer 503.
+    enabled: true
+    # Proxies whose X-Forwarded-For is believed: the UI pods and the ingress
+    # controller's pods (comma separated CIDRs). Without them every visitor
+    # shares one address and one set of limits.
+    trustedProxies: ""
   # Phone provisioning listener (:8083). Enabled when provisioning.publicUrl is set.
   provisioning:
     publicUrl: ""
@@ -271,6 +282,30 @@ kamailio:
     publicPort: 5061
     nodePort: null
     secretName: ""
+  # SIP over WSS for browsers (docs/webrtc.md; clients-webrtc-mobile-video
+  # S-8 to S-12). Kamailio ends TLS and the WebSocket on its pod address and
+  # speaks UDP to the hello-sip nodes. Needs a kamailio image with the
+  # websocket and tls modules (docker/kamailio) and a certificate Secret.
+  wss:
+    enabled: false
+    # The port Kamailio binds on its pod address (with hostNetwork, the node
+    # port). Only the ingress controller should reach it (docs/webrtc.md).
+    port: 8088
+    # A kubernetes.io/tls Secret issued by the Hello CA; default
+    # kamailio.tls.secretName. The ingress does not verify it.
+    secretName: ""
+    # Browser origins allowed to open a WebSocket, exact. Default: the origin
+    # of global.publicUrl.
+    origins: []
+    # A regular expression the ingress controller's pod address must match
+    # for its X-Forwarded-For to be believed (the browser's own address for
+    # Hello's throttles). Empty: the ingress's address stands for every
+    # browser.
+    trustedProxies: ""
+    # Publish wss://<ui.ingress.host>/sip through ui.ingress (needs
+    # ui.ingress.enabled).
+    ingress: true
+    ingressAnnotations: {}
   # Phones' Service when hostNetwork is off.
   service:
     type: LoadBalancer

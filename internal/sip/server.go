@@ -59,6 +59,9 @@ type Config struct {
 	RecountInterval time.Duration
 	// MaxCallDuration ends a connected call with BYE to both legs (4h).
 	MaxCallDuration time.Duration
+	// DoorHangup is how long a door call stays up after the door-open code
+	// was sent, when the station hangs up after open (3s; spec S-47).
+	DoorHangup time.Duration
 	// SessionExpires is the RFC 4028 interval Hello requests on legs to
 	// phones and applies when a phone's call names none (30m); 0 turns
 	// session timers off. SessionMinSE is the smallest interval accepted
@@ -145,6 +148,12 @@ type Config struct {
 	// CallbackInterval is how often this node sweeps the queues' callback
 	// requests; zero means every 3 s.
 	CallbackInterval time.Duration
+	// CallbackOfferCheck is how often a waiting caller's estimated wait is
+	// compared with the callback offer threshold (zero: 3 s), and
+	// CallbackWatchEvery how often a ringing callback attempt, or a caller on
+	// the line, checks that the request was not cancelled (zero: 2 s).
+	CallbackOfferCheck time.Duration
+	CallbackWatchEvery time.Duration
 	// FaxInterval is how often this node looks for queued faxes to send; zero
 	// means every 5 s.
 	FaxInterval time.Duration
@@ -314,6 +323,11 @@ type Server struct {
 	// a test can inject the fork failure that races the abort.
 	abortHook atomic.Pointer[func(*call)]
 
+	// takeoverMu serializes takeover passes: a pass reads the membership
+	// once and acts on that snapshot, so a pass holding an older snapshot
+	// must not run after a newer one (it would forget an OFFLINE node the
+	// newer pass already counted, and the next pass would count it again).
+	takeoverMu sync.Mutex
 	// haOffline tracks OFFLINE nodes for the zombie reaper (guarded by
 	// haOfflineMu).
 	haOfflineMu sync.Mutex
@@ -450,6 +464,7 @@ func New(cfg Config, deps Deps) (*Server, error) {
 	setDefault(&cfg.RingTimeout, 30*time.Second)
 	setDefault(&cfg.MaxCallDuration, 4*time.Hour)
 	setDefault(&cfg.PageMaxDuration, 120*time.Second)
+	setDefault(&cfg.DoorHangup, 3*time.Second)
 	setDefault(&cfg.PageAnswerTimeout, 10*time.Second)
 	if cfg.PageFanout <= 0 {
 		cfg.PageFanout = 200
@@ -1009,7 +1024,7 @@ func (s *Server) recountRegistrations(ctx context.Context) {
 		return
 	}
 	n := 0
-	byTransport := map[string]int{"udp": 0, "tcp": 0, "tls": 0}
+	byTransport := map[string]int{"udp": 0, "tcp": 0, "tls": 0, "ws": 0, "wss": 0}
 	for _, b := range bs {
 		if b.ReceivedNode == s.cfg.NodeID {
 			n++

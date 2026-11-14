@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+
+	"github.com/azrtydxb/hello/internal/prov"
 )
 
 // Door stations (migration 00053, spec phone-feature-parity S-45 and S-46).
@@ -160,6 +162,10 @@ func afterKindChange(ctx context.Context, tx *sql.Tx, e Extension) error {
 	if e.Kind != ExtensionUser {
 		return nil
 	}
+	// A user has no door-open code (migration 00054).
+	if _, err := tx.ExecContext(ctx, `DELETE FROM door_open WHERE extension_id = $1`, e.ID); err != nil {
+		return err
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO voicemail_boxes (extension_id) VALUES ($1) ON CONFLICT (extension_id) DO NOTHING`, e.ID)
 	return err
 }
@@ -201,4 +207,36 @@ func checkNoDoor(ctx context.Context, tx *sql.Tx, path string, ids []int64) erro
 		return fieldError(path, "extension "+number+" is a door station and cannot be a member")
 	}
 	return nil
+}
+
+// DoorStationsFor lists the door stations that can call extension number, at
+// most prov.MaxDoorStations by number: those that name the extension as a
+// target, name a ring group it is a member of, or can call a Door group it is
+// a member of (every station can). A phone shows them as its door systems.
+func (s *Store) DoorStationsFor(ctx context.Context, number string) ([]prov.DoorStation, error) {
+	if number == "" {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT s.number, s.name FROM extensions s, extensions p
+		WHERE p.number = $1 AND s.kind = 'door' AND (
+			EXISTS (SELECT 1 FROM ring_group_members m JOIN ring_groups g ON g.id = m.group_id
+			        WHERE m.extension_id = p.id AND g.is_door)
+			OR s.door_targets->'extensions' @> to_jsonb(p.id)
+			OR EXISTS (SELECT 1 FROM ring_group_members m
+			           WHERE m.extension_id = p.id AND s.door_targets->'ringGroups' @> to_jsonb(m.group_id)))
+		ORDER BY s.number LIMIT $2`, number, prov.MaxDoorStations)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []prov.DoorStation
+	for rows.Next() {
+		var d prov.DoorStation
+		if err := rows.Scan(&d.Number, &d.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }

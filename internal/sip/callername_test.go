@@ -111,12 +111,51 @@ func TestCRMCallerNameKeepsARealCarrierName(t *testing.T) {
 		{"+3211223344", "ACME NV", "ACME NV"},
 		{"", "", ""},
 	} {
-		if got := s.crmCallerName(tc.num, tc.carrier); got != tc.want {
+		if got := s.crmCallerName(tc.num, tc.carrier, ""); got != tc.want {
 			t.Errorf("crmCallerName(%q, %q) = %q, want %q", tc.num, tc.carrier, got, tc.want)
 		}
 	}
 	s = &Server{}
-	if got := s.crmCallerName("+3211223344", "x"); got != "x" {
+	if got := s.crmCallerName("+3211223344", "x", ""); got != "x" {
 		t.Fatalf("without a namer the name changed to %q", got)
+	}
+}
+
+// userNamer answers only for the contacts of one callee extension.
+type userNamer struct {
+	fakeNamer
+	ext, userName string
+	asked         []string
+}
+
+func (u *userNamer) NameFor(_ context.Context, ext, number string, _ time.Duration) (string, bool) {
+	u.mu.Lock()
+	u.asked = append(u.asked, ext+"/"+number)
+	u.mu.Unlock()
+	if ext == u.ext {
+		return u.userName, true
+	}
+	return "", false
+}
+
+// TestCallerNameFromCalleeContacts fails if the organisation's CRM does not
+// win over the callee's own contacts, if the callee's contacts are not
+// searched with the called extension when the CRM knows nothing, or if they
+// are used for a carrier that sent a real name.
+func TestCallerNameFromCalleeContacts(t *testing.T) {
+	n := &userNamer{ext: "100", userName: "Bob from Outlook"}
+	s := &Server{deps: Deps{CallerNames: n}}
+	if got := s.crmCallerName("+3211223344", "", "100"); got != "Bob from Outlook" {
+		t.Fatalf("got %q, want the callee's contact", got)
+	}
+	if got := s.crmCallerName("+3211223344", "", "200"); got != "" {
+		t.Fatalf("another extension's contact leaked: %q", got)
+	}
+	if got := s.crmCallerName("+3211223344", "ACME NV", "100"); got != "ACME NV" {
+		t.Fatalf("a real carrier name was replaced: %q", got)
+	}
+	n.name = "CRM Name"
+	if got := s.crmCallerName("+3211223344", "", "100"); got != "CRM Name" {
+		t.Fatalf("got %q, the organisation's CRM must win", got)
 	}
 }

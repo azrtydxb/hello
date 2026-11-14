@@ -37,16 +37,6 @@ func WifiEnterprise(sec string) bool {
 // WifiUsesPSK reports whether the security mode takes a pre-shared key.
 func WifiUsesPSK(sec string) bool { return sec == WifiWPA2PSK || sec == WifiWPA3SAE }
 
-// The EAP method and the CA verification of an enterprise profile. Only PEAP
-// with MSCHAPv2 is offered: EAP-TLS needs a device certificate (S-25).
-const (
-	EAPPEAP = "peap"
-
-	CAServerSystem = "system" // P83016 = 1, System Certificates
-	CAServerTOFU   = "tofu"   // P83016 = 2, Trust on First Use
-	CAServerSkip   = "skip"   // P83016 = 0, Skip Verification
-)
-
 // MaxWifiPerScope is the most profiles one phone group, or one phone, carries.
 const MaxWifiPerScope = 10
 
@@ -65,13 +55,11 @@ type WifiProfile struct {
 	SSID     string
 	Security string
 	PSK      string // the opened pre-shared key; masked in previews
-	// EAPMethod, Identity, AnonymousIdentity, Password and CACert are the
-	// 802.1X settings of an enterprise profile; Password is masked in previews.
-	EAPMethod         string
-	Identity          string
-	AnonymousIdentity string
-	Password          string
-	CACert            string
+	// Dot1XID names the 802.1X profile (S-25) an enterprise profile
+	// authenticates with: the EAP method, identity, password and the RADIUS
+	// server's CA live there, once, whether the profile serves a wired port
+	// or a network. 0 for a profile that is not an enterprise one.
+	Dot1XID int64
 	// Priority is 0 to 10 (WP8x6 P83049); a higher number is listed first.
 	Priority int
 	Hidden   bool
@@ -190,8 +178,11 @@ func sortWifi(ps []WifiProfile) []WifiProfile {
 
 // WifiKeys returns the P-values of the Wi-Fi setup for a family. Nothing is
 // written for profiles until one is verified; the radio settings do not wait
-// for it. A profile whose security the family cannot take is skipped.
-func WifiKeys(family string, w WifiInfo) []WifiKey {
+// for it. A profile whose security the family cannot take is skipped, and so
+// is an enterprise profile whose 802.1X profile (dot1x, RenderData.Dot1X)
+// is missing, uses EAP-MD5 (not offered on Wi-Fi) or is EAP-TLS on a phone
+// with no SCEP certificate.
+func WifiKeys(family string, w WifiInfo, dot1x []Dot1XProfile) []WifiKey {
 	if WifiSlots(family) == 0 {
 		return nil
 	}
@@ -200,7 +191,7 @@ func WifiKeys(family string, w WifiInfo) []WifiKey {
 	if len(w.Profiles) > 0 && w.Verified {
 		switch family {
 		case FamilyWP8x6:
-			keys = append(keys, wifiKeys8x6(w)...)
+			keys = append(keys, wifiKeys8x6(w, dot1x)...)
 		case FamilyWP8xx:
 			keys = append(keys, wifiKeys8xx(w)...)
 		case FamilyWP856:
@@ -213,21 +204,39 @@ func WifiKeys(family string, w WifiInfo) []WifiKey {
 	return keys
 }
 
+// dot1xFor returns the 802.1X profile an enterprise Wi-Fi profile uses, if the
+// phone can use it on Wi-Fi: PEAP, or EAP-TLS where the phone has a SCEP
+// certificate (Usable). EAP-MD5 is a wired method only.
+func dot1xFor(p WifiProfile, dot1x []Dot1XProfile) (Dot1XProfile, bool) {
+	for _, d := range dot1x {
+		if d.ID == p.Dot1XID {
+			return d, d.GSWifiEAP != 0 && d.Usable
+		}
+	}
+	return Dot1XProfile{}, false
+}
+
 // usable lists the profiles the family can take, in slot order.
-func usable(family string, ps []WifiProfile) []WifiProfile {
+func usable(family string, ps []WifiProfile, dot1x []Dot1XProfile) []WifiProfile {
 	var out []WifiProfile
 	for _, p := range sortWifi(ps) {
-		if WifiSupports(family, p.Security) {
-			out = append(out, p)
+		if !WifiSupports(family, p.Security) {
+			continue
 		}
+		if WifiEnterprise(p.Security) {
+			if _, ok := dot1xFor(p, dot1x); !ok {
+				continue
+			}
+		}
+		out = append(out, p)
 	}
 	return out
 }
 
-func wifiKeys8x6(w WifiInfo) []WifiKey {
+func wifiKeys8x6(w WifiInfo, dot1x []Dot1XProfile) []WifiKey {
 	var keys []WifiKey
 	add := func(p int, v string) { keys = append(keys, WifiKey{P: itoa(p), V: v}) }
-	ps := usable(FamilyWP8x6, w.Profiles)
+	ps := usable(FamilyWP8x6, w.Profiles, dot1x)
 	next := 0
 	for slot := 1; slot <= wifiSlots[FamilyWP8x6]; slot++ {
 		base := 83000 + 100*(slot-1)
@@ -253,16 +262,35 @@ func wifiKeys8x6(w WifiInfo) []WifiKey {
 		case WifiUsesPSK(p.Security):
 			add(base+3, p.PSK)
 		case WifiEnterprise(p.Security):
-			ca := map[string]string{CAServerSkip: "0", CAServerSystem: "1", CAServerTOFU: "2"}[p.CACert]
-			if ca == "" {
-				ca = "1"
+			// The 802.1X profile (S-25) holds the method and the credentials,
+			// keys per wp8x6_config_1.0.3.39 "Available Wi-Fi": P83004 EAP
+			// method (1 TLS, 2 PEAP). PEAP: P83016 CA certificate type (1
+			// system, 3 uploaded), P83011 the uploaded CA, P83018 domain
+			// validation (1 exact) with P83019 the domain, P83013 phase 2 (0
+			// MSCHAPv2), P83012 anonymous identity, P83014 identity, P83015
+			// password. EAP-TLS: P83007 CA certificate, P83009 identity; the
+			// client certificate (P83008) is not written, as on the wired port.
+			d, _ := dot1xFor(p, dot1x)
+			add(base+4, itoa(d.GSWifiEAP))
+			if d.Method == Dot1XEAPTLS {
+				if d.CACertPEM != "" {
+					add(base+7, d.CACertPEM)
+				}
+				add(base+9, d.Identity)
+				break
 			}
-			add(base+4, "2") // EAP-PEAP
-			add(base+16, ca)
+			add(base+16, itoa(d.GSWifiCAType))
+			if d.CACertPEM != "" {
+				add(base+11, d.CACertPEM)
+			}
+			if d.ServerDomain != "" {
+				add(base+18, "1")
+				add(base+19, d.ServerDomain)
+			}
 			add(base+13, "0") // phase 2: MSCHAPv2
-			add(base+12, p.AnonymousIdentity)
-			add(base+14, p.Identity)
-			add(base+15, p.Password)
+			add(base+12, d.AnonymousIdentity)
+			add(base+14, d.Identity)
+			add(base+15, d.Password)
 		}
 	}
 	return keys
@@ -271,7 +299,7 @@ func wifiKeys8x6(w WifiInfo) []WifiKey {
 func wifiKeys8xx(w WifiInfo) []WifiKey {
 	var keys []WifiKey
 	add := func(p int, v string) { keys = append(keys, WifiKey{P: itoa(p), V: v}) }
-	ps := usable(FamilyWP8xx, w.Profiles)
+	ps := usable(FamilyWP8xx, w.Profiles, nil)
 	var dot11r *bool
 	if w.Radio != nil {
 		dot11r = w.Radio.Dot11r
@@ -300,7 +328,7 @@ func wifiKeys8xx(w WifiInfo) []WifiKey {
 }
 
 func wifiKeys856(w WifiInfo) []WifiKey {
-	ps := usable(FamilyWP856, w.Profiles)
+	ps := usable(FamilyWP856, w.Profiles, nil)
 	if len(ps) == 0 {
 		return nil
 	}
@@ -397,7 +425,7 @@ var hex64 = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 // CheckWifiProfile validates a profile as it would be stored. hasPSK and
 // hasPassword say whether a sealed secret exists (or comes with the request),
 // since the profile itself does not carry them.
-func CheckWifiProfile(p WifiProfile, hasPSK, hasPassword bool) []WifiFieldError {
+func CheckWifiProfile(p WifiProfile, hasPSK bool) []WifiFieldError {
 	var errs []WifiFieldError
 	bad := func(path, msg string) { errs = append(errs, WifiFieldError{path, msg}) }
 	if n := len(strings.TrimSpace(p.Name)); n == 0 || len(p.Name) > MaxWifiName || !ssidChars.MatchString(p.Name) {
@@ -424,24 +452,11 @@ func CheckWifiProfile(p WifiProfile, hasPSK, hasPassword bool) []WifiFieldError 
 			bad("psk", "must be 8 to 63 printable ASCII characters")
 		}
 	}
-	if WifiEnterprise(p.Security) {
-		if p.EAPMethod != EAPPEAP {
-			bad("eapMethod", "must be peap")
-		}
-		if p.Identity == "" || len(p.Identity) > 128 || !ssidChars.MatchString(p.Identity) {
-			bad("identity", "is required (at most 128 printable characters)")
-		}
-		if !hasPassword {
-			bad("password", "is required for "+p.Security)
-		}
-		if len(p.AnonymousIdentity) > 128 || (p.AnonymousIdentity != "" && !ssidChars.MatchString(p.AnonymousIdentity)) {
-			bad("anonymousIdentity", "must be at most 128 printable characters")
-		}
-		if !slices.Contains([]string{CAServerSystem, CAServerTOFU, CAServerSkip}, p.CACert) {
-			bad("caCert", "must be system, tofu or skip")
-		}
-	} else if p.EAPMethod != "" || p.Identity != "" || p.AnonymousIdentity != "" {
-		bad("eapMethod", "802.1X settings belong to an enterprise profile")
+	switch {
+	case WifiEnterprise(p.Security) && p.Dot1XID <= 0:
+		bad("dot1xProfileId", "is required for "+p.Security+": name the 802.1X profile (PEAP or EAP-TLS) the network authenticates with")
+	case !WifiEnterprise(p.Security) && p.Dot1XID != 0:
+		bad("dot1xProfileId", "belongs to an enterprise profile")
 	}
 	return errs
 }
@@ -471,8 +486,10 @@ func CheckWifiRadio(r WifiRadio) []WifiFieldError {
 // WifiPSKAAD is the sealing context of a profile's pre-shared key.
 func WifiPSKAAD(id int64) string { return "wifi-psk:" + strconv.FormatInt(id, 10) }
 
-// WifiPasswordAAD is the sealing context of a profile's 802.1X password.
-func WifiPasswordAAD(id int64) string { return "wifi-password:" + strconv.FormatInt(id, 10) }
+// WifiLegacyPasswordAAD is the sealing context the 802.1X password of a Wi-Fi
+// profile had before Wi-Fi profiles named an 802.1X profile; it is read only
+// to move such a password into one (store.AdoptWifiEAP).
+func WifiLegacyPasswordAAD(id int64) string { return "wifi-password:" + strconv.FormatInt(id, 10) }
 
 // MergeWifi lists the profiles that reach a phone: its group's, then its own,
 // where a phone's profile replaces a group's with the same SSID.

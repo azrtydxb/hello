@@ -51,16 +51,29 @@ func TestKamailioTLSIsOptIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := string(b)
-	for _, want := range []string{"loadmodule \"tls.so\"", "listen=tls:", "enable_tls=yes", "modparam(\"tls\", \"config\""} {
+	// The module and its parameters are needed by SIP over TLS and by WSS, so
+	// they sit under NEED_TLS (defined by either port); the phones' TLS
+	// listener is TLS_PORT's alone.
+	for want, guard := range map[string]string{
+		"loadmodule \"tls.so\"":        "#!ifdef NEED_TLS",
+		"listen=tls:":                  "#!ifdef TLS_PORT",
+		"enable_tls=yes":               "#!ifdef NEED_TLS",
+		"modparam(\"tls\", \"config\"": "#!ifdef NEED_TLS",
+	} {
 		i := strings.Index(cfg, want)
 		if i < 0 {
 			t.Fatalf("kamailio.cfg has no %q", want)
 		}
 		before := cfg[:i]
-		open := strings.LastIndex(before, "#!ifdef TLS_PORT")
+		open := strings.LastIndex(before, guard)
 		closed := strings.LastIndex(before, "#!endif")
 		if open < 0 || closed > open {
-			t.Errorf("%q is not inside #!ifdef TLS_PORT", want)
+			t.Errorf("%q is not inside %s", want, guard)
+		}
+	}
+	for _, want := range []string{"#!ifdef TLS_PORT\n#!define NEED_TLS", "#!ifdef WSS_PORT\n#!define NEED_TLS"} {
+		if !strings.Contains(cfg, want) {
+			t.Errorf("kamailio.cfg does not define NEED_TLS under %q", strings.SplitN(want, "\n", 2)[0])
 		}
 	}
 	if !strings.Contains(cfg, `remove_hf("X-Hello-Transport")`) {

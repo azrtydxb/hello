@@ -1,0 +1,8 @@
+{
+  "app": {
+    "name": "Hello",
+    "short_description": "Call the requester through Hello and see their recent tickets.",
+    "long_description": "Shows the requester's phone numbers with a Call button that opens Hello's dialer, and the requester's latest tickets.",
+    "installation_instructions": "Install the app. It needs no settings."
+  }
+}

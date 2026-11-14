@@ -35,6 +35,9 @@ const (
 	CallMissed         = "call.missed"
 	CallRecordingReady = "call.recording.ready"
 	CallCompleted      = "call.completed"
+	// VoicemailReceived is a voicemail message stored in a box (spec I-52,
+	// the Slack notification of P17).
+	VoicemailReceived = "voicemail.received"
 	// CallOriginateProgress is a state change of a click-to-call (spec I-37).
 	CallOriginateProgress = "call.originate.progress"
 )
@@ -55,6 +58,7 @@ var Registry = []TypeInfo{
 	{CallMissed, "A call reached an extension and nobody answered (reason: no_answer, busy, dnd, cancelled or unreachable)."},
 	{CallRecordingReady, "A recording of the call was stored; carries recordingId and durationMs."},
 	{CallCompleted, "The call detail record was stored; carries cdrId."},
+	{VoicemailReceived, "A caller left a voicemail message in the box of an extension; carries the caller, the box extension and durationMs. The audio is never part of an event."},
 	{CallOriginateProgress, "A click-to-call changed state (queued, ringing_agent, agent_answered, dialing_target, connected, ended or failed); carries originateId, state and, for a failure, reason."},
 }
 
