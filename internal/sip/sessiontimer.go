@@ -605,7 +605,7 @@ func (c *call) sendRefresh(idx int, method sip.RequestMethod, interval time.Dura
 		if ct := w.InviteResponse.Contact(); ct != nil {
 			target = *ct.Address.Clone()
 		}
-		res, err := requireResponse(w.Do(ctx, build(target)))
+		res, err := s.dialogDo(ctx, build(target), w.Do) // a phone may challenge it (S-22)
 		if err == nil && method == sip.INVITE && res.IsSuccess() {
 			ack := sip.NewRequest(sip.ACK, target)
 			if werr := w.WriteRequest(ack); werr != nil {
@@ -624,7 +624,7 @@ func (c *call) sendRefresh(idx int, method sip.RequestMethod, interval time.Dura
 	if ct := dss.InviteRequest.Contact(); ct != nil {
 		target = *ct.Address.Clone()
 	}
-	res, err := requireResponse(dss.Do(ctx, build(target)))
+	res, err := s.dialogDo(ctx, build(target), dss.Do)
 	if err == nil && method == sip.INVITE && res.IsSuccess() {
 		if werr := dss.WriteRequest(sip.NewRequest(sip.ACK, target)); werr != nil {
 			s.log.Debug("session refresh ACK to the caller failed", "correlation_id", c.id, "error", werr)
@@ -829,7 +829,7 @@ func (c *call) sendHomedRefresh(ctx context.Context, l *haLeg, method sip.Reques
 	req.AppendHeader(sip.NewHeader("Session-Expires", secondsOf(interval)+";refresher=uac"))
 	req.AppendHeader(sip.NewHeader("Min-SE", secondsOf(s.cfg.SessionMinSE)))
 	l.useCSeq()
-	res, err := s.do(ctx, req)
+	res, err := s.doOn(ctx, l, req)
 	if err == nil && method == sip.INVITE {
 		s.haAck(l, req, res)
 	}

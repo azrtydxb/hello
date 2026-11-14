@@ -892,9 +892,9 @@ func (c *call) parkVoicemail(ctx context.Context, pk *parkState, relay *media.Re
 			ansBody = res.Body()
 		}
 	case pk.parkedIsCaller:
-		ansBody, ok = reinviteA(c.dss, answer)
+		ansBody, ok = reinviteA(c.s, c.dss, answer)
 	default:
-		ansBody, ok = reinvite(w.session(), answer)
+		ansBody, ok = reinvite(c.s, w.session(), answer)
 		if ok {
 			ackLate(w.session(), nil)
 		}
@@ -1070,9 +1070,9 @@ func (c *call) holdParty(dir string) {
 	case hom != nil:
 		_, ok = s.haReinvite(hom.leg(false), body)
 	case lk.selfSide == cdr.SideCaller:
-		_, ok = reinviteA(dss, body)
+		_, ok = reinviteA(c.s, dss, body)
 	case w != nil:
-		_, ok = reinvite(w.session(), body)
+		_, ok = reinvite(c.s, w.session(), body)
 		if ok {
 			ackLate(w.session(), nil)
 		}

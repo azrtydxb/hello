@@ -225,6 +225,11 @@ type Deps struct {
 	// Pushes is the check-sync push queue hello-control fills; nil
 	// disables pushes.
 	Pushes PushQueue
+	// DeviceSecrets opens a device's sealed SIP password, so Hello can answer
+	// a phone that challenges an INVITE or NOTIFY in its own realm (S-5,
+	// S-22); nil falls back to Pushes when it implements DeviceSecrets, and
+	// then to the stored HA1 alone.
+	DeviceSecrets DeviceSecrets
 	// Settings applies feature-code mutations (DND, forwarding) by queueing
 	// them to PostgreSQL and bumping the configuration revision; nil makes
 	// the mutating feature codes answer 503.
@@ -314,15 +319,18 @@ type Server struct {
 	// rtcpxrRate bounds the quality reports per device (S-36).
 	rtcpxrRate reportWindow
 	digest     *Digest
-	contact    sip.ContactHeader
-	advHost    string
-	advPort    int
-	recount    chan struct{}
-	ua         *sipgo.UserAgent
-	client     *sipgo.Client
-	uas        *sipgo.DialogUA // A legs: callers
-	uac        *sipgo.DialogUA // B legs: forks
-	bg         sync.WaitGroup
+	// realms caches the HA1 of a device's password for the realms its
+	// phone challenges Hello's requests in (phoneauth.go).
+	realms  phoneRealms
+	contact sip.ContactHeader
+	advHost string
+	advPort int
+	recount chan struct{}
+	ua      *sipgo.UserAgent
+	client  *sipgo.Client
+	uas     *sipgo.DialogUA // A legs: callers
+	uac     *sipgo.DialogUA // B legs: forks
+	bg      sync.WaitGroup
 	// emMarks is the node-local record of emergency calls (emergency.go).
 	emMarks emergencyMarks
 	// bgMu guards bgClosed: once shutdown waits for bg, a late call event

@@ -717,7 +717,7 @@ func (c *call) reanchorLive(reason AnchorReason) bool {
 	c.applyNegotiated(cur, "", "") // logged with the answer below
 	var calleeAns media.AudioSDP
 	wl := c.winnerLeg()
-	if ansB, ok := reinvite(w, c.cryptoOffer(cur.PlainOffer(), wl).Build(host, relay.LegPort(legCallee), "sendrecv")); ok {
+	if ansB, ok := reinvite(c.s, w, c.cryptoOffer(cur.PlainOffer(), wl).Build(host, relay.LegPort(legCallee), "sendrecv")); ok {
 		if a, err := media.ParseAudioSDP(ansB); err == nil {
 			if !c.learnCalleeCrypto(wl, a) {
 				relay.Close()
@@ -732,7 +732,7 @@ func (c *call) reanchorLive(reason AnchorReason) bool {
 		c.anchorFailed("re-anchor re-INVITE to the callee", errors.New("no answer"))
 		return false
 	}
-	if ansA, ok := reinviteA(dss, c.anchoredAnswerA(cur, calleeAns)); ok {
+	if ansA, ok := reinviteA(c.s, dss, c.anchoredAnswerA(cur, calleeAns)); ok {
 		if a, err := media.ParseAudioSDP(ansA); err == nil {
 			learnCrypto(relay, legCaller, a)
 			relay.SetTarget(legCaller, udpAddr(a.Address, a.Port))
@@ -1048,7 +1048,7 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	c.mu.Unlock()
 	if fromCaller {
 		if w != nil {
-			if body, ok := reinvite(w.session(), peer); ok {
+			if body, ok := reinvite(c.s, w.session(), peer); ok {
 				c.learnPeerAnswer(relay, legCallee, body)
 			}
 		}
@@ -1059,7 +1059,7 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	dss := c.dss
 	c.mu.Unlock()
 	if dss != nil {
-		if body, ok := reinviteA(dss, peer); ok {
+		if body, ok := reinviteA(c.s, dss, peer); ok {
 			c.learnPeerAnswer(relay, legCaller, body)
 		}
 	}

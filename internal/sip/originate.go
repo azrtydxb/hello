@@ -567,7 +567,11 @@ func (o *originated) dialAgent(ctx context.Context, a *agentLeg) (ok bool, code 
 	a.l.mu.Lock()
 	a.l.dcs = dcs
 	a.l.mu.Unlock()
-	err = dcs.WaitAnswer(ctx, sipgo.AnswerOptions{})
+	dcs, err = s.waitAnswerPhone(ctx, dcs, a.l.binding.Device, sipgo.AnswerOptions{}, func(next *sipgo.DialogClientSession) {
+		a.l.mu.Lock()
+		a.l.dcs = next
+		a.l.mu.Unlock()
+	})
 	if res := dcs.InviteResponse; err == nil || (res != nil && res.IsSuccess()) {
 		return true, 0
 	}

@@ -517,9 +517,16 @@ type phone struct {
 	notifyPass   string
 	notifyRealm  string
 	notifyStatus int
-	byeAt        time.Time
-	servers      map[string]*sipgo.DialogServerSession
-	clients      map[string]*sipgo.DialogClientSession
+	// invitePass, when set, makes the phone challenge every INVITE it
+	// receives, initial or in dialog, in inviteRealm and accept only that
+	// password ("Authenticate Incoming INVITE", P2346, S-22); each request
+	// it challenged is reported on challenged.
+	invitePass  string
+	inviteRealm string
+	challenged  chan *sip.Request
+	byeAt       time.Time
+	servers     map[string]*sipgo.DialogServerSession
+	clients     map[string]*sipgo.DialogClientSession
 	// pending holds a dialing INVITE's Call-ID until its answer is
 	// confirmed (closed then), so onBye never reads a session WaitAnswer
 	// is still writing.
@@ -606,7 +613,7 @@ func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketCo
 		acks: make(chan *sip.Request, 16), byes: make(chan *sip.Request, 16), rings: make(chan int, 16),
 		infos: make(chan *sip.Request, 16), messages: make(chan *sip.Request, 16),
 		subscribes: make(chan *sip.Request, 16), notifies: make(chan *sip.Request, 16),
-		pracks: make(chan *sip.Request, 16),
+		pracks: make(chan *sip.Request, 16), challenged: make(chan *sip.Request, 16),
 		callee: answerAfter(nil),
 	}
 	p.dua = &sipgo.DialogUA{Client: cli, ContactHDR: p.contact, RewriteContact: true}
@@ -659,6 +666,9 @@ func (p *phone) setCallee(f calleeFn) {
 }
 
 func (p *phone) onInvite(req *sip.Request, tx sip.ServerTransaction) {
+	if p.challengeInvite(req, tx) {
+		return
+	}
 	if _, ok := req.To().Params.Get("tag"); ok {
 		p.onReinvite(req, tx)
 		return
@@ -686,7 +696,32 @@ func (p *phone) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 	f(p, req, tx, dss)
 }
 
+// challengeInvite answers an INVITE without the phone's credentials with a
+// 401 when the phone authenticates incoming INVITEs; true when it did.
+func (p *phone) challengeInvite(req *sip.Request, tx sip.ServerTransaction) bool {
+	p.mu.Lock()
+	pass, realm := p.invitePass, p.inviteRealm
+	p.mu.Unlock()
+	if pass == "" {
+		return false
+	}
+	if h := req.GetHeader("Authorization"); h != nil && p.digestOK(h.Value(), req, pass) {
+		return false
+	}
+	push(p.challenged, req)
+	res := sip.NewResponseFromRequest(req, 401, "Unauthorized", nil)
+	for _, alg := range []string{AlgSHA256, AlgMD5} {
+		c := digest.Challenge{Realm: realm, Nonce: "nonce-1", Algorithm: alg, QOP: []string{"auth"}}
+		res.AppendHeader(sip.NewHeader("WWW-Authenticate", c.String()))
+	}
+	_ = tx.Respond(res)
+	return true
+}
+
 func (p *phone) onReinvite(req *sip.Request, tx sip.ServerTransaction) {
+	if req.Method == sip.INVITE && p.challengeInvite(req, tx) {
+		return
+	}
 	push(p.reinvites, req)
 	p.mu.Lock()
 	status := p.reinviteStatus

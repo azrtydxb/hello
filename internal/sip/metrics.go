@@ -75,6 +75,13 @@ type Metrics struct {
 	RTCPXR *RTCPXRMetrics
 	// CheckSync counts check-sync NOTIFYs by event and result (S-5).
 	CheckSync *prometheus.CounterVec // event, result
+	// PhoneChallenges counts the digest challenges phones answered Hello's
+	// requests with (S-22: Authenticate Incoming INVITE), by method and
+	// whether Hello could answer them.
+	PhoneChallenges *prometheus.CounterVec // method, result
+	// Replaces counts INVITEs with Replaces (RFC 3891, S-17) by the state
+	// of the dialog they named (early, confirmed) and the outcome.
+	Replaces *prometheus.CounterVec // dialog, result
 	// MessagesIn counts SIP MESSAGE requests by source (phone, trunk) and
 	// outcome; MessageDeliveries counts each stored message's delivery by
 	// route (phone, trunk) and result. Bodies are never labels or logged.
@@ -293,6 +300,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.CheckSync = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_checksync_total", Help: "Check-sync pushes by event and result (ok, not_registered, timeout, auth_failed, failed).",
 	}, []string{"event", "result"})
+	m.PhoneChallenges = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_phone_challenges_total", Help: "Digest challenges phones answered Hello's requests with, by method and result (answered, unanswerable).",
+	}, []string{"method", "result"})
+	m.Replaces = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_replaces_total", Help: "INVITEs with Replaces by the named dialog's state (early, confirmed) and result (ok, not_found, forbidden, busy, refused).",
+	}, []string{"dialog", "result"})
 	m.MessagesIn = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_sip_messages_total",
 		Help: "SIP MESSAGE requests by source (phone, trunk) and outcome (accepted, delivered, relayed, rejected_*, unavailable).",
@@ -377,7 +390,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailGroupDeliveries, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Originates, m.OriginateSetup, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags, m.Emergency,
-		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.RequestsByWire, m.WebRTCRefused, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.BossDivert, m.DirectoryTotal, m.TimeConditionTotal, m.BlockedCalls,
+		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.PhoneChallenges, m.Replaces, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.RequestsByWire, m.WebRTCRefused, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.BossDivert, m.DirectoryTotal, m.TimeConditionTotal, m.BlockedCalls,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal, m.FaxTotal, m.FollowMeLegs,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	m.Conf = newConfMetrics(reg)
