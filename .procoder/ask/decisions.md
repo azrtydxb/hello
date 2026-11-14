@@ -4819,3 +4819,67 @@ entry and the code it names).
   stay unbuilt (the route is 404, nothing half-wired).
 - **MCP:** no new operation; chat sites and routing stay excluded, so the
   doctable is unchanged.
+
+## Integrations P12: range auto-provisioning for directory users (2026-11-14)
+
+Built from spec `integrations.md` I-11 on the P8 directory engine. The spec
+left the points below open; each was **chosen by default (the conservative
+option)**, not by the user.
+
+- **Who gets a number.** A user the connector creates, adopts or manages whose
+  mapped extension is empty, or names no extension, when provisioning is on and
+  the user is in the optional source-group filter (`autoProvision.groups`,
+  empty = everyone). A value that is invalid, duplicated or linked elsewhere
+  stays the conflict it was. A user that already has its synced extension keeps
+  it even when the directory value names a missing one. In `create_only` mode a
+  user is provisioned once (Hello owns the extension afterwards, so a deleted
+  one is not recreated); `link_only` users are provisioned like
+  `authoritative` ones.
+- **A full range is a conflict, not a user without a number.**
+  `range_exhausted` leaves that user unchanged (not created, not linked), like
+  every other conflict, so nobody appears half set up; the administrator widens
+  the range. Not overridable.
+- **Stable numbers need state.** Migration 00101 keeps the allocated number on
+  the user (`users.provisioned_number`) and marks the extension
+  (`extensions.provisioned_by`, set null when the connector is deleted). A
+  re-run prefers that number even outside a changed range, relinks its
+  extension when it still exists unlinked, and recreates it with the same
+  number when it was deleted (at the next full run: an incremental run reads
+  only changed users).
+- **Preview predicts, apply allocates.** The preview shows the number the
+  planner predicts from the current dial space; the apply allocates in the
+  user's own transaction under the `hellocfg` lock through the configuration
+  store (the same dial-space rules and whole-configuration check as a console
+  create). A number taken in between is replaced by the next free one and the
+  run row shows the number actually given; a full range at that point is an
+  `error` row with reason `range_exhausted`. Enabling or changing provisioning
+  changes the sync fingerprint, so the next scheduled run is a full one.
+- **"Free" and "reserved prefix".** Free = no extension, ring group, IVR menu,
+  conference room, queue or voicemail group number, no park slot, and no
+  feature or paging code that is a prefix of it or it of one (feature and paging
+  codes start with `*`, so today that never matches a digit number; kept as a
+  guard). Hello has no other reserved-prefix setting; outbound route patterns
+  are not numbers an extension can take, and the whole-configuration check runs
+  anyway.
+- **What is created.** The extension (named from the display name, else the
+  username, trimmed to 100 printable characters), its voicemail box (on, mailed
+  to the user's email; with `voicemail: false` the box exists switched off, as
+  for every extension) and, unless `device: false`, one desk device named
+  after the number (`2000`, else `2000-2`, ...) whose secret is generated and
+  dropped. Ranges hold 2 to 10 digit numbers of equal width (zero-padded ones
+  allowed) and at most 100,000 numbers. Overlapping ranges of two connectors are
+  allowed: the lock keeps them apart.
+- **Following the user.** While provisioning is on, a display-name or email
+  change renames the provisioned extension and updates its voicemail email, but
+  only while each still holds the value provisioning gave it (an administrator's
+  own edit wins).
+- **Deprovisioning is unchanged (I-7).** A disabled user keeps the extension,
+  the voicemail box and its messages; its devices are switched off with the
+  existing `disableDevices` option and come back when the user does. Deleting a
+  connector keeps the extensions and clears their mark.
+- **Audit and metrics.** Each provisioning writes `provision user`, `create
+extension` and `create device` rows with the actor `directory:<connector>`;
+  `hello_directory_provisioned_total{connector_kind}` counts them.
+- **New read route** `GET /api/v1/directory/connectors/{id}/range` (admin,
+  exposed over MCP as `getDirectoryRange` like the other directory reads):
+  size, numbers used, next free and the users holding a number.

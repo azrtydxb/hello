@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"net"
 	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,8 +56,9 @@ type Store interface {
 	SaveSyncState(ctx context.Context, connectorID int64, s SyncState) error
 
 	LoadState(ctx context.Context, connectorID int64) (State, error)
-	// Apply performs one operation, audited with actor.
-	Apply(ctx context.Context, actor string, c Connector, op Op) error
+	// Apply performs one operation, audited with actor. An operation that
+	// auto-provisions reports the number it allocated.
+	Apply(ctx context.Context, actor string, c Connector, op Op) (Applied, error)
 	PruneChanges(ctx context.Context, before time.Time) (int64, error)
 	TryLock(ctx context.Context, key string) (unlock func(), ok bool, err error)
 }
@@ -145,7 +148,7 @@ type ConnectorInput struct {
 	Mappings        *Mappings
 	GroupRules      *GroupRules
 	Options         *Options
-	AutoProvision   json.RawMessage
+	AutoProvision   *AutoProvision
 	// Secret is the bind password: write-only, sealed by the store.
 	Secret *string
 }
@@ -157,7 +160,7 @@ func (e *Engine) Create(ctx context.Context, actor string, in ConnectorInput) (C
 		return Connector{}, err
 	}
 	c := Connector{Kind: in.Kind, Mode: ModeAuthoritative, ScheduleMinutes: 60, Mappings: d.DefaultMappings(),
-		GroupRules: GroupRules{Roles: []RoleRule{}, RingGroups: []RingGroupRule{}}, AutoProvision: json.RawMessage(`{}`)}
+		GroupRules: GroupRules{Roles: []RoleRule{}, RingGroups: []RingGroupRule{}}, AutoProvision: DefaultAutoProvision()}
 	return e.save(ctx, actor, d, c, in)
 }
 
@@ -244,20 +247,19 @@ func (e *Engine) save(ctx context.Context, actor string, d Driver, c Connector, 
 	if o.RunTimeoutMinutes < 0 || o.RunTimeoutMinutes > 240 {
 		v.Fields = append(v.Fields, FieldError{"options.runTimeoutMinutes", "must be 1 to 240"})
 	}
-	if len(in.AutoProvision) > 0 {
-		var ap struct {
-			Enabled bool `json:"enabled"`
-		}
-		if err := json.Unmarshal(in.AutoProvision, &ap); err != nil && string(in.AutoProvision) != "null" {
-			v.Fields = append(v.Fields, FieldError{"autoProvision", "must be an object"})
-		} else if ap.Enabled {
-			v.Fields = append(v.Fields, FieldError{"autoProvision.enabled", "range auto-provisioning is not available yet"})
-		}
+	if in.AutoProvision != nil {
+		c.AutoProvision = *in.AutoProvision
+	}
+	if c.AutoProvision.Groups == nil {
+		c.AutoProvision.Groups = []string{}
+	}
+	if av := c.AutoProvision.Validate(); av != nil {
+		v.Fields = append(v.Fields, av.Fields...)
 	}
 	if in.Config != nil {
 		c.Config = in.Config
 	}
-	cfg, cerr := d.Validate(c.Config, ValidateOptions{AllowPlaintext: e.AllowPlaintext, GroupRules: len(c.GroupRules.RingGroups)+len(c.GroupRules.Roles) > 0})
+	cfg, cerr := d.Validate(c.Config, ValidateOptions{AllowPlaintext: e.AllowPlaintext, GroupRules: len(c.GroupRules.RingGroups)+len(c.GroupRules.Roles)+len(c.AutoProvision.Groups) > 0})
 	if cerr != nil {
 		var ve *ValidationError
 		if errors.As(cerr, &ve) {
@@ -286,9 +288,6 @@ func (e *Engine) save(ctx context.Context, actor string, d Driver, c Connector, 
 	if len(v.Fields) > 0 {
 		return Connector{}, &v
 	}
-	if len(c.AutoProvision) == 0 {
-		c.AutoProvision = json.RawMessage(`{}`)
-	}
 	return e.Store.SaveConnector(ctx, actor, c, in.Secret, fp)
 }
 
@@ -303,6 +302,18 @@ func (e *Engine) List(ctx context.Context) ([]Connector, error) { return e.Store
 // Delete removes a connector; release turns its users into local ones.
 func (e *Engine) Delete(ctx context.Context, actor string, id int64, release bool) error {
 	return e.Store.DeleteConnector(ctx, actor, id, release)
+}
+
+// needGroups are the source groups the rules and the auto-provisioning
+// filter name: the ones whose membership a fetch resolves.
+func (c Connector) needGroups() []string {
+	out := c.GroupRules.GroupIDs()
+	for _, g := range c.AutoProvision.Groups {
+		if !slices.Contains(out, g) {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 // Attributes are the source attributes the mappings read.
@@ -326,7 +337,7 @@ func (m Mappings) Attributes() []string {
 }
 
 func (e *Engine) fetchOptions(c Connector) FetchOptions {
-	return FetchOptions{Limit: c.Options.userCap(), NeedGroups: c.GroupRules.GroupIDs(), Attributes: c.Mappings.Attributes(), Allow: e.Allow, Dial: e.Dial,
+	return FetchOptions{Limit: c.Options.userCap(), NeedGroups: c.needGroups(), Attributes: c.Mappings.Attributes(), Allow: e.Allow, Dial: e.Dial,
 		AllowPlaintext: e.AllowPlaintext, Now: e.now()}
 }
 
@@ -602,7 +613,8 @@ func syncFingerprint(c Connector) string {
 		Mappings Mappings
 		Rules    GroupRules
 		Mode     string
-	}{cfg, c.Mappings.Normalize(), c.GroupRules, c.Mode})
+		Auto     AutoProvision
+	}{cfg, c.Mappings.Normalize(), c.GroupRules, c.Mode, c.AutoProvision})
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:12])
 }
@@ -762,17 +774,29 @@ func (e *Engine) applyPlan(ctx context.Context, c Connector, run Run, plan Plan,
 			rows = append(rows, ch)
 			continue
 		}
-		if err := e.Store.Apply(ctx, actor, c, *ch.op); err != nil {
+		got, err := e.Store.Apply(ctx, actor, c, *ch.op)
+		if err != nil {
 			errs++
 			rows = append(rows, Change{Action: ActionError, UserID: ch.UserID, ExternalID: ch.ExternalID, Username: ch.Username,
 				FieldDiffs: ch.FieldDiffs, Reason: applyReason(err)})
 			e.log().Warn("directory: apply change", "connector", c.ID, "reason", applyReason(err))
 			continue
 		}
+		if got.Extension != "" {
+			// The number actually allocated: another one than the preview's
+			// when that was taken in between (I-11).
+			d := ch.FieldDiffs["extension"]
+			if d.After != got.Extension {
+				ch.FieldDiffs = maps.Clone(ch.FieldDiffs)
+				d.After = got.Extension
+				ch.FieldDiffs["extension"] = d
+			}
+			e.Metrics.provisioned(c.Kind)
+		}
 		rows = append(rows, ch)
 	}
 	for _, q := range plan.Quiet {
-		if err := e.Store.Apply(ctx, actor, c, q); err != nil {
+		if _, err := e.Store.Apply(ctx, actor, c, q); err != nil {
 			e.log().Warn("directory: apply quiet", "connector", c.ID, "err", applyReason(err))
 		}
 	}
@@ -805,6 +829,8 @@ func applyReason(err error) string {
 		return ReasonLastAdmin
 	case errors.Is(err, ErrNotFound):
 		return "not_found"
+	case errors.Is(err, ErrRangeExhausted):
+		return ReasonRangeExhausted
 	}
 	var ve *ValidationError
 	if errors.As(err, &ve) {

@@ -50,7 +50,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P9  | Google Workspace and Entra connectors          | todo              |
 | P10 | SCIM 2.0                                       | todo              |
 | P11 | OIDC SSO, LDAP bind login                      | todo              |
-| P12 | Auto-provisioning extensions from a range      | todo              |
+| P12 | Auto-provisioning extensions from a range      | wip (#353)        |
 | P13 | Salesforce Open CTI                            | done (#331)       |
 | P14 | Pipedrive                                      | done (#329)       |
 | P15 | Zoho CRM                                       | done (#329)       |
