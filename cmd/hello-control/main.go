@@ -33,6 +33,7 @@ import (
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/prov/redirect"
 	"github.com/azrtydxb/hello/internal/safehttp"
+	"github.com/azrtydxb/hello/internal/scim"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/slack"
 	"github.com/azrtydxb/hello/internal/store"
@@ -250,9 +251,15 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	go dispatcher.Run(ctx)
 	// Directory sync (spec integrations P8): connectors read their source and
 	// sync users; one replica runs a connector, the one holding its lock.
+	// SCIM (spec integrations P10): identity providers push to /scim/v2; the
+	// pushed resources are the source of the scim connector kind.
+	scimStore := &scim.PG{DB: db}
 	dirEngine := &directory.Engine{
-		Store:          &directory.PG{DB: db, Box: box},
-		Drivers:        map[string]directory.Driver{directory.KindLDAP: directory.LDAP{}},
+		Store: &directory.PG{DB: db, Box: box},
+		Drivers: map[string]directory.Driver{
+			directory.KindLDAP: directory.LDAP{},
+			directory.KindSCIM: scim.Driver{Store: scimStore},
+		},
 		Metrics:        directory.NewMetrics(metrics.Registry),
 		Log:            log.With("component", "directory"),
 		Replica:        cfg.NodeID,
@@ -267,6 +274,11 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		}, nil, log.With("component", "directory")),
 	}
 	go dirEngine.Run(ctx)
+	var scimSvc api.SCIMService
+	if cfg.AI.PublicURL != "" {
+		scimSvc = &scim.Service{Store: scimStore, Engine: dirEngine, PublicURL: cfg.AI.PublicURL,
+			Metrics: scim.NewMetrics(metrics.Registry), Log: log.With("component", "scim")}
+	}
 	go evSvc.Run(ctx)
 	go crmSvc.Run(ctx)
 	if err := startSyslog(ctx, cfg.Syslog, st, vk, metrics.Registry, log); err != nil {
@@ -281,6 +293,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		CRM:          crmSvc.Service,
 		Slack:        slackSvc,
 		Directory:    dirEngine,
+		SCIM:         scimSvc,
 		Events:       evSvc,
 		Webhooks:     hooks,
 		AIAgent:      agent,

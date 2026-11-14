@@ -364,6 +364,10 @@ type Config struct {
 	// Directory is the directory engine (AD/LDAP sync); nil answers 503 on
 	// the directory routes.
 	Directory DirectoryService
+	// SCIM is the SCIM 2.0 service provider (spec integrations I-23 to
+	// I-25): /scim/v2 and its token administration; nil answers 404 on
+	// /scim/v2 and 503 on the token routes.
+	SCIM SCIMService
 	// Originate and OriginateLive carry click-to-call (spec integrations
 	// I-37): its requests and policy in PostgreSQL, its queue, live state
 	// and limit counters in Valkey; nil answers 503. OriginateLimits
@@ -529,6 +533,14 @@ func Handler(c Config) http.Handler {
 	// The recording link route is public (the token is the credential) and
 	// outside /api/v1, so it is not in the route table or the OpenAPI document.
 	mux.HandleFunc("GET /r/{token}", s.publicRecording)
+	// SCIM (spec integrations I-23) is outside /api/v1 too: its bearer token
+	// is a SCIM token, valid there only, and the protocol is RFC 7644's.
+	if c.SCIM != nil {
+		mux.Handle("/scim/v2/", c.SCIM)
+		mux.Handle("/scim/v2", c.SCIM)
+	} else {
+		mux.HandleFunc("/scim/", scimNotConfigured)
+	}
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.

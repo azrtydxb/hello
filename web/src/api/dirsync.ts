@@ -1,5 +1,6 @@
-// Directory sync (docs/integrations.md, "Directory sync"): AD/LDAP
-// connectors, their runs, previews and changes. Administrators only.
+// Directory sync (docs/integrations.md, "Directory sync"): AD/LDAP and SCIM
+// connectors, their runs, previews and changes, and the SCIM tokens and
+// status (docs/scim.md). Administrators only.
 import { request } from "../api";
 
 export type ConnectorMode = "authoritative" | "create_only" | "link_only";
@@ -69,18 +70,28 @@ export interface LdapConfig {
   nestedGroups?: boolean;
 }
 
+/** Config of a scim connector; it has no credential (SCIM tokens instead). */
+export interface ScimConfig {
+  /** A pushed user may take over a local (non-admin) user with the same
+   * e-mail or username; off, such a push is refused (409). */
+  adoptExisting?: boolean;
+}
+
+export type ConnectorKind = "ldap" | "scim";
+
 export interface Connector {
   id: number;
-  kind: "ldap";
+  kind: ConnectorKind;
   name: string;
   enabled: boolean;
   mode: ConnectorMode;
   scheduleMinutes: number;
-  config: LdapConfig;
+  /** LdapConfig for kind ldap, ScimConfig for kind scim. */
+  config: LdapConfig & ScimConfig;
   mappings: Mappings;
   groupRules: GroupRules;
   options: Options;
-  /** A bind password is stored. It is write-only. */
+  /** A bind password is stored. It is write-only. Always false for scim. */
   hasCredential: boolean;
   status: "new" | "ok" | "failing";
   lastRunAt: string | null;
@@ -91,18 +102,20 @@ export interface Connector {
   linkedUsers: number;
   /** When the last full run finished (a full run is forced every 24 h). */
   lastFullRunAt: string | null;
+  /** scim: set while the mass-deprovision guard pauses SCIM writes. */
+  pausedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 /** POST and PATCH /directory/connectors body (every field optional on PATCH). */
 export interface ConnectorInput {
-  kind?: "ldap";
+  kind?: ConnectorKind;
   name?: string;
   enabled?: boolean;
   mode?: ConnectorMode;
   scheduleMinutes?: number;
-  config?: LdapConfig;
+  config?: LdapConfig | ScimConfig;
   mappings?: Mappings;
   groupRules?: GroupRules;
   options?: Partial<Options>;
@@ -255,3 +268,59 @@ export const applyRun = (id: number, decisions: Decisions) =>
 
 export const confirmRun = (id: number) =>
   request<Run>("POST", `${run(id)}/confirm`, { body: {} });
+
+/** A SCIM bearer token's metadata; the token itself is shown once. */
+export interface ScimToken {
+  id: number;
+  connectorId: number;
+  hint: string;
+  createdBy: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+/** The answer to an issue: the token, shown this once, and the base URL. */
+export interface ScimTokenCreated extends ScimToken {
+  token: string;
+  baseUrl: string;
+}
+
+export interface ScimStatus {
+  connectorId: number;
+  baseUrl: string;
+  enabled: boolean;
+  pausedAt: string | null;
+  pausedRunId: number | null;
+  guard: { disables: number; limit: number; linked: number };
+  resources: {
+    users: number;
+    activeUsers: number;
+    deletedUsers: number;
+    groups: number;
+  };
+  lastRequestAt: string | null;
+  activeTokens: number;
+  adoptExisting: boolean;
+}
+
+export const issueScimToken = (id: number) =>
+  request<ScimTokenCreated>("POST", `${conn(id)}/scim-token`);
+
+export async function listScimTokens(
+  id: number,
+  signal?: AbortSignal,
+): Promise<ScimToken[]> {
+  const res = await request<{ items: ScimToken[] }>(
+    "GET",
+    `${conn(id)}/scim-tokens`,
+    { signal },
+  );
+  return res.items;
+}
+
+export const revokeScimToken = (tokenId: number) =>
+  request<void>("DELETE", `/api/v1/directory/scim-tokens/${String(tokenId)}`);
+
+export const getScimStatus = (id: number, signal?: AbortSignal) =>
+  request<ScimStatus>("GET", `${conn(id)}/scim`, { signal });

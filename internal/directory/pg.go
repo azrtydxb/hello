@@ -65,18 +65,21 @@ func (p *PG) Audit(ctx context.Context, actor, action, resource, id string) erro
 const connectorCols = `c.id, c.kind, c.name, c.enabled, c.mode, c.schedule_minutes, c.config::text, c.mappings::text, c.group_rules::text,
 	c.options::text, c.auto_provision::text, c.credential_enc IS NOT NULL, c.credential_fp, c.status, c.last_run_at, c.last_success_at,
 	c.last_error_code, c.last_error_detail, c.consecutive_failures, c.created_at, c.updated_at,
-	(SELECT count(*) FROM users u WHERE u.source_connector_id = c.id), c.sync_mark::text, c.sync_fingerprint, c.last_full_run_at`
+	(SELECT count(*) FROM users u WHERE u.source_connector_id = c.id), c.sync_mark::text, c.sync_fingerprint, c.last_full_run_at,
+	c.paused_at, c.guard_since`
 
 func scanConnector(r interface{ Scan(...any) error }) (Connector, error) {
 	var (
 		c                             Connector
 		cfg, maps, rules, opts, autoP string
 		lastRun, lastOK, lastFull     sql.NullTime
+		paused, guard                 sql.NullTime
 		mark                          string
 	)
 	if err := r.Scan(&c.ID, &c.Kind, &c.Name, &c.Enabled, &c.Mode, &c.ScheduleMinutes, &cfg, &maps, &rules, &opts, &autoP,
 		&c.HasCredential, &c.CredentialFP, &c.Status, &lastRun, &lastOK, &c.LastErrorCode, &c.LastErrorDetail,
-		&c.ConsecutiveFailure, &c.CreatedAt, &c.UpdatedAt, &c.LinkedUsers, &mark, &c.Sync.Fingerprint, &lastFull); err != nil {
+		&c.ConsecutiveFailure, &c.CreatedAt, &c.UpdatedAt, &c.LinkedUsers, &mark, &c.Sync.Fingerprint, &lastFull,
+		&paused, &guard); err != nil {
 		return c, err
 	}
 	if mark != "" && mark != "{}" && mark != "null" {
@@ -87,6 +90,12 @@ func scanConnector(r interface{ Scan(...any) error }) (Connector, error) {
 	}
 	if lastFull.Valid {
 		c.LastFullRunAt, c.Sync.LastFullAt = &lastFull.Time, &lastFull.Time
+	}
+	if paused.Valid {
+		c.PausedAt = &paused.Time
+	}
+	if guard.Valid {
+		c.GuardSince = &guard.Time
 	}
 	c.Config, c.AutoProvision = json.RawMessage(cfg), json.RawMessage(autoP)
 	for _, d := range []struct {
@@ -928,4 +937,75 @@ func (p *PG) enable(ctx context.Context, tx *sql.Tx, actor string, op Op) (bool,
 		bump = n > 0
 	}
 	return bump, audit(ctx, tx, actor, "enable", "user", itoa64(op.UserID))
+}
+
+// RecordPush implements Store: the changes go on the connector's SCIM run of
+// the hour, made when missing; its counts grow by the changes.
+func (p *PG) RecordPush(ctx context.Context, connectorID int64, cs []Change, at time.Time) error {
+	if len(cs) == 0 {
+		return nil
+	}
+	return p.tx(ctx, func(tx *sql.Tx) error {
+		var (
+			runID  int64
+			counts string
+		)
+		err := tx.QueryRowContext(ctx, `
+			SELECT id, counts::text FROM directory_sync_runs
+			WHERE connector_id = $1 AND kind = 'scim' AND status = 'succeeded' AND created_at >= date_trunc('hour', $2::timestamptz)
+			ORDER BY id DESC LIMIT 1 FOR UPDATE`, connectorID, at).Scan(&runID, &counts)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			counts = "{}"
+			if err := tx.QueryRowContext(ctx, `
+				INSERT INTO directory_sync_runs (connector_id, kind, status, requested_by, created_at, started_at, finished_at, counts)
+				VALUES ($1, 'scim', 'succeeded', 'scim', $2, $2, $2, '{}') RETURNING id`, connectorID, at).Scan(&runID); err != nil {
+				return err
+			}
+		case err != nil:
+			return err
+		}
+		n := map[string]int{}
+		_ = json.Unmarshal([]byte(counts), &n)
+		st, err := tx.PrepareContext(ctx, `INSERT INTO directory_sync_changes (run_id, action, user_id, external_id, username, field_diffs, reason)
+			VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = st.Close() }()
+		for _, c := range cs {
+			if _, err := st.ExecContext(ctx, runID, c.Action, c.UserID, c.ExternalID, c.Username, jsonOf(nonNilDiffs(c.FieldDiffs)), c.Reason); err != nil {
+				return err
+			}
+			n[c.Action]++
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE directory_sync_runs SET counts = $2::jsonb, finished_at = $3 WHERE id = $1`, runID, jsonOf(n), at)
+		return err
+	})
+}
+
+// PushDisables implements Store.
+func (p *PG) PushDisables(ctx context.Context, connectorID int64, since time.Time) (int, error) {
+	var n int
+	err := p.DB.QueryRowContext(ctx, `
+		SELECT count(*) FROM directory_sync_changes ch JOIN directory_sync_runs r ON r.id = ch.run_id
+		WHERE r.connector_id = $1 AND r.kind = 'scim' AND r.status = 'succeeded' AND ch.action = 'disable' AND ch.created_at >= $2`,
+		connectorID, since).Scan(&n)
+	return n, err
+}
+
+// SetPaused implements Store.
+func (p *PG) SetPaused(ctx context.Context, connectorID int64, paused bool, at time.Time) error {
+	q := `UPDATE directory_connectors SET paused_at = NULL, guard_since = $2, updated_at = now() WHERE id = $1`
+	if paused {
+		q = `UPDATE directory_connectors SET paused_at = $2, updated_at = now() WHERE id = $1`
+	}
+	res, err := p.DB.ExecContext(ctx, q, connectorID, at)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

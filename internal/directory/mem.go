@@ -617,3 +617,69 @@ func (s *Static) Test(context.Context, json.RawMessage, string, FetchOptions) (*
 	}
 	return &TestResult{OK: true, Sample: []SampleRow{}, Groups: []SourceGroup{}}, nil
 }
+
+// RecordPush implements Store.
+func (m *Mem) RecordPush(_ context.Context, connectorID int64, cs []Change, at time.Time) error {
+	if len(cs) == 0 {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var run *Run
+	hour := at.Truncate(time.Hour)
+	for _, r := range m.Runs {
+		if r.ConnectorID == connectorID && r.Kind == RunSCIM && r.Status == StatusSucceeded && !r.CreatedAt.Before(hour) &&
+			(run == nil || r.ID > run.ID) {
+			run = r
+		}
+	}
+	if run == nil {
+		m.nextRun++
+		t := at
+		run = &Run{ID: m.nextRun, ConnectorID: connectorID, Kind: RunSCIM, Status: StatusSucceeded, RequestedBy: "scim",
+			CreatedAt: at, StartedAt: &t, FinishedAt: &t, Counts: map[string]int{}}
+		m.Runs[run.ID] = run
+	}
+	for _, c := range cs {
+		m.nextChange++
+		c.ID, c.RunID, c.CreatedAt, c.op = m.nextChange, run.ID, at, nil
+		m.Changes[run.ID] = append(m.Changes[run.ID], c)
+		run.Counts[c.Action]++
+	}
+	return nil
+}
+
+// PushDisables implements Store.
+func (m *Mem) PushDisables(_ context.Context, connectorID int64, since time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for id, r := range m.Runs {
+		if r.ConnectorID != connectorID || r.Kind != RunSCIM || r.Status != StatusSucceeded {
+			continue
+		}
+		for _, c := range m.Changes[id] {
+			if c.Action == ActionDisable && !c.CreatedAt.Before(since) {
+				n++
+			}
+		}
+	}
+	return n, nil
+}
+
+// SetPaused implements Store.
+func (m *Mem) SetPaused(_ context.Context, connectorID int64, paused bool, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.Connectors[connectorID]
+	if !ok {
+		return ErrNotFound
+	}
+	t := at
+	if paused {
+		c.PausedAt = &t
+	} else {
+		c.PausedAt, c.GuardSince = nil, &t
+	}
+	return nil
+}
