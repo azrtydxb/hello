@@ -21,6 +21,7 @@ type PG struct{ DB *sql.DB }
 const claimLock = 0x68656c6c6f776864 // "hellowhd"
 
 const endpointCols = `e.id, e.name, e.url, to_json(e.events)::text, to_json(e.extensions)::text, e.enabled, e.allow_private,
+	e.include_peer, e.include_message_body,
 	e.disabled_reason, e.consecutive_failures, e.previous_secret_expires, e.last_success_at, e.last_failure_at, e.last_status,
 	e.created_by, e.created_at, e.updated_at, e.secret_enc, e.previous_secret_enc,
 	(SELECT count(*) FROM webhook_deliveries d WHERE d.endpoint_id = e.id AND d.status IN ('pending', 'retrying')),
@@ -35,7 +36,7 @@ func scanEndpoint(r rowScanner) (Endpoint, error) {
 		prevExp, lastOK, lastBad sql.NullTime
 		lastStatus               sql.NullInt64
 	)
-	if err := r.Scan(&e.ID, &e.Name, &e.URL, &evs, &exts, &e.Enabled, &e.AllowPrivate, &e.DisabledReason, &e.ConsecutiveFailures,
+	if err := r.Scan(&e.ID, &e.Name, &e.URL, &evs, &exts, &e.Enabled, &e.AllowPrivate, &e.IncludePeer, &e.IncludeMessageBody, &e.DisabledReason, &e.ConsecutiveFailures,
 		&prevExp, &lastOK, &lastBad, &lastStatus, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.SecretEnc, &e.PreviousSecretEnc,
 		&e.Pending, &e.Dead); err != nil {
 		return Endpoint{}, err
@@ -115,6 +116,22 @@ func audit(ctx context.Context, tx *sql.Tx, actor, action, resource, id string) 
 	return err
 }
 
+// auditInclude records each change of an endpoint's inbox options with its
+// own audit row: sending customers' numbers or texts to a receiver is a
+// privacy decision (spec messaging-channels M-23).
+func auditInclude(ctx context.Context, tx *sql.Tx, actor string, id int64, wasPeer, peer, wasBody, body bool) error {
+	rid := strconv.FormatInt(id, 10)
+	if peer != wasPeer {
+		if err := audit(ctx, tx, actor, "include_peer "+strconv.FormatBool(peer), "webhook_endpoint", rid); err != nil {
+			return err
+		}
+	}
+	if body != wasBody {
+		return audit(ctx, tx, actor, "include_message_body "+strconv.FormatBool(body), "webhook_endpoint", rid)
+	}
+	return nil
+}
+
 func (p *PG) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	tx, err := p.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -155,12 +172,17 @@ func (p *PG) CreateEndpoint(ctx context.Context, actor string, e Endpoint) (Endp
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO webhook_endpoints (id, name, url, secret_enc, events, extensions, enabled, allow_private, created_by)
-			VALUES ($1, $2, $3, $4, $5::text[], $6::text[], $7, $8, $9)`,
-			e.ID, e.Name, e.URL, e.SecretEnc, pgArray(e.Events), pgArray(e.Extensions), e.Enabled, e.AllowPrivate, actor); err != nil {
+			INSERT INTO webhook_endpoints (id, name, url, secret_enc, events, extensions, enabled, allow_private, created_by,
+				include_peer, include_message_body)
+			VALUES ($1, $2, $3, $4, $5::text[], $6::text[], $7, $8, $9, $10, $11)`,
+			e.ID, e.Name, e.URL, e.SecretEnc, pgArray(e.Events), pgArray(e.Extensions), e.Enabled, e.AllowPrivate, actor,
+			e.IncludePeer, e.IncludeMessageBody); err != nil {
 			return err
 		}
 		if err := audit(ctx, tx, actor, "create", "webhook_endpoint", strconv.FormatInt(e.ID, 10)); err != nil {
+			return err
+		}
+		if err := auditInclude(ctx, tx, actor, e.ID, false, e.IncludePeer, false, e.IncludeMessageBody); err != nil {
 			return err
 		}
 		got, err := scanEndpoint(tx.QueryRowContext(ctx, `SELECT `+endpointCols+` FROM webhook_endpoints e WHERE e.id = $1`, e.ID))
@@ -198,12 +220,19 @@ func (p *PG) ListEndpoints(ctx context.Context) ([]Endpoint, error) {
 func (p *PG) UpdateEndpoint(ctx context.Context, actor string, e Endpoint, resetHealth bool) (Endpoint, error) {
 	var out Endpoint
 	err := p.tx(ctx, func(tx *sql.Tx) error {
+		var wasPeer, wasBody bool
+		if err := tx.QueryRowContext(ctx, `SELECT include_peer, include_message_body FROM webhook_endpoints WHERE id = $1 FOR UPDATE`,
+			e.ID).Scan(&wasPeer, &wasBody); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx, `
 			UPDATE webhook_endpoints SET name = $2, url = $3, events = $4::text[], extensions = $5::text[], enabled = $6,
 				allow_private = $7, disabled_reason = $8,
-				consecutive_failures = CASE WHEN $9::boolean THEN 0 ELSE consecutive_failures END, updated_at = now()
+				consecutive_failures = CASE WHEN $9::boolean THEN 0 ELSE consecutive_failures END, updated_at = now(),
+				include_peer = $10, include_message_body = $11
 			WHERE id = $1`,
-			e.ID, e.Name, e.URL, pgArray(e.Events), pgArray(e.Extensions), e.Enabled, e.AllowPrivate, e.DisabledReason, resetHealth)
+			e.ID, e.Name, e.URL, pgArray(e.Events), pgArray(e.Extensions), e.Enabled, e.AllowPrivate, e.DisabledReason, resetHealth,
+			e.IncludePeer, e.IncludeMessageBody)
 		if err != nil {
 			return err
 		}
@@ -211,6 +240,9 @@ func (p *PG) UpdateEndpoint(ctx context.Context, actor string, e Endpoint, reset
 			return sql.ErrNoRows
 		}
 		if err := audit(ctx, tx, actor, "update", "webhook_endpoint", strconv.FormatInt(e.ID, 10)); err != nil {
+			return err
+		}
+		if err := auditInclude(ctx, tx, actor, e.ID, wasPeer, e.IncludePeer, wasBody, e.IncludeMessageBody); err != nil {
 			return err
 		}
 		out, err = scanEndpoint(tx.QueryRowContext(ctx, `SELECT `+endpointCols+` FROM webhook_endpoints e WHERE e.id = $1`, e.ID))
@@ -364,7 +396,8 @@ func (p *PG) Claim(ctx context.Context, now time.Time, limit, perEndpoint int, l
 		}
 		rows, err = tx.QueryContext(ctx, `
 			SELECT d.id, d.endpoint_id, d.event_id, d.event_type, d.status, d.attempt, d.series_attempt,
-				e.url, e.allow_private, e.secret_enc, e.previous_secret_enc, e.previous_secret_expires, ev.payload::text
+				e.url, e.allow_private, e.include_peer, e.include_message_body, e.secret_enc, e.previous_secret_enc,
+				e.previous_secret_expires, ev.payload::text
 			FROM webhook_deliveries d
 			JOIN webhook_endpoints e ON e.id = d.endpoint_id
 			LEFT JOIN integration_events ev ON ev.id = d.event_id
@@ -380,7 +413,7 @@ func (p *PG) Claim(ctx context.Context, now time.Time, limit, perEndpoint int, l
 				payload sql.NullString
 			)
 			if err := rows.Scan(&c.ID, &c.EndpointID, &c.EventID, &c.EventType, &c.Status, &c.Attempts, &c.SeriesAttempt,
-				&c.URL, &c.AllowPrivate, &c.SecretEnc, &c.PreviousSecretEnc, &prevExp, &payload); err != nil {
+				&c.URL, &c.AllowPrivate, &c.IncludePeer, &c.IncludeMessageBody, &c.SecretEnc, &c.PreviousSecretEnc, &prevExp, &payload); err != nil {
 				return err
 			}
 			c.PreviousSecretExpires = timePtr(prevExp)

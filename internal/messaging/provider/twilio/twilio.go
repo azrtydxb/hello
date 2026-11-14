@@ -311,6 +311,42 @@ func (c *Client) Status(ctx context.Context, providerID string) (provider.State,
 	return st, nil
 }
 
+// Redact implements provider.Redactor: DELETE removes the message record
+// and its media from the account. Twilio refuses to delete a message that is
+// still on its way; its text is then blanked with POST Body="" (Twilio's
+// documented redaction), and the record goes when the account's own
+// retention ends. A message Twilio no longer has is done.
+func (c *Client) Redact(ctx context.Context, providerID string) (provider.Redaction, error) {
+	if !validMessageSID(providerID) {
+		return provider.Redaction{Gone: true}, nil
+	}
+	path := "/Accounts/" + c.cfg.AccountSID + "/Messages/" + providerID + ".json"
+	status, b, err := c.do(ctx, http.MethodDelete, path, nil)
+	if err != nil {
+		return provider.Redaction{}, err
+	}
+	switch {
+	case status >= 200 && status < 300:
+		return provider.Redaction{Deleted: true}, nil
+	case status == http.StatusNotFound:
+		return provider.Redaction{Gone: true}, nil
+	case status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusTooManyRequests || status >= 500:
+		return provider.Redaction{}, refusal(status, b)
+	}
+	// Not deletable now (still being sent): blank the text instead.
+	status, b, err = c.do(ctx, http.MethodPost, path, url.Values{"Body": {""}})
+	if err != nil {
+		return provider.Redaction{}, err
+	}
+	switch {
+	case status >= 200 && status < 300:
+		return provider.Redaction{}, nil
+	case status == http.StatusNotFound:
+		return provider.Redaction{Gone: true}, nil
+	}
+	return provider.Redaction{}, refusal(status, b)
+}
+
 func validMessageSID(s string) bool {
 	if len(s) != 34 || (!strings.HasPrefix(s, "SM") && !strings.HasPrefix(s, "MM")) {
 		return false

@@ -464,7 +464,8 @@ func (s *Store) chatSend(ctx context.Context, tx *sql.Tx, in ChatSendInput, res 
 	if err := emitConversationEvent(ctx, tx, conv, msgID, "message.in", nil); err != nil {
 		return err
 	}
-	*ev = &messaging.Event{Type: "message.received", ConversationID: conv, MessageID: msgID, ChannelKind: messaging.KindWebchat, Direction: messaging.DirIn}
+	*ev = &messaging.Event{Type: "message.received", ConversationID: conv, MessageID: msgID, ChannelKind: messaging.KindWebchat,
+		Direction: messaging.DirIn, NewConversation: newConv}
 	return nil
 }
 

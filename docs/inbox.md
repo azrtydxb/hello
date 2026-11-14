@@ -411,15 +411,21 @@ conversation is never deleted by age. Snoozed conversations come back when
 their time passes.
 
 **Erase a customer** (Messaging settings, or `POST /api/v1/inbox/erase`)
-deletes every conversation, message and note with a number on every channel in
-one transaction, keeps only the opt-out hash, and returns a report of counts.
-The carrier keeps its own logs and database backups keep the rows until they
-expire: keep backups no longer than your longest erasure deadline.
+deletes every conversation, message and note with a number on every channel,
+and the copies of those texts in the SIP text queue, in one transaction; keeps
+only the opt-out hash; asks the carriers to delete what Hello sent through
+their API ([carrier deletion](#deletion-at-the-carrier)); and returns a report
+of counts per carrier. Database backups keep the rows until they expire: keep
+backups no longer than your longest erasure deadline.
+
+**Export a customer**, **redact a message**, follow the **deletions at the
+carriers** and review **supervisor views** under Messaging → Privacy
+([privacy tools](#privacy-tools)).
 
 Message text and customer numbers never appear in logs, metric labels or audit
 rows; logs and audit rows carry conversation ids and counts. Message text is
 not exposed to MCP or the AI assistant: every inbox operation is excluded
-except the counts (`getInboxStats`).
+except the counts (`getInboxStats`) and the report (`getInboxReport`).
 
 ## Live updates and notifications
 
@@ -443,6 +449,100 @@ The page also:
   at most once per conversation per 15 minutes, **without the text or the
   number**. It needs SMTP ([user-accounts.md](user-accounts.md)); the switch is
   in the settings.
+
+## Events and webhooks
+
+The inbox publishes `conversation.created`, `conversation.assigned`,
+`conversation.resolved`, `message.received`, `message.sent`, `message.status`
+and `message.optout` into Hello's event pipeline: the event stream and
+history, [webhooks](integrations.md#webhooks) with their signing, retries and
+dead letters, and the Zapier, n8n and Make triggers. The payload and its rules
+are in [integrations.md](integrations.md#messaging-inbox-events). In short:
+
+- An event has ids, the channel, the business's number, direction, state,
+  assignee and queue, and the customer as `peerKey`, a keyed hash (stable per
+  customer, not reversible). It is stored that way, with no number or text.
+- A webhook endpoint may add the customer's number (`includePeer`) and the
+  text of received and sent messages (`includeMessageBody`). Both are off by
+  default, for administrators only, and each change is in the audit log. They
+  are read from the inbox when the delivery is attempted, so a message redacted
+  or a customer erased before then goes out without them.
+- The event stream and history show inbox events only to credentials with the
+  `messages` scope and the operator or administrator role.
+
+The console's own stream (`/api/v1/me/inbox/stream`, below) is separate.
+
+## Reports and service levels
+
+**Inbox reports** (operators and administrators, `messages` scope) show, for
+a period of up to 366 days, the conversations (started by a customer or by
+the business), the resolved ones, the messages in and out, the **first
+response time** (from the customer's first message to the first reply by an
+agent, for conversations a customer started), the
+**resolution time** (from start to resolution), and the conversations past
+the targets. Each comes in total and by channel, queue, agent (the assignee) or
+day (in the system time zone, or `timeZone`). Durations are given as count,
+average, median and 90th percentile. Spam is left out; conversations deleted by
+retention or an erase are no longer counted. Export the same table as CSV.
+
+The **service-level targets** default to a first response within 15 minutes
+and a resolution within 24 hours; 0 turns one off. Administrators set them on
+the report page (`PUT /api/v1/messaging/sla`, audited). A conversation still
+open and already over a target counts as past it.
+
+The report carries counts and durations only, so it is also available to the
+AI assistant (`getInboxReport`).
+
+## Privacy tools
+
+Messaging → Privacy, for administrators (`admin` scope).
+
+### Export of a customer
+
+`GET /api/v1/inbox/export?peer=<number or visitor:id>` downloads a zip: a
+`README.txt`, `conversations.json` (every conversation with that number or chat
+visitor on every channel, with its channel, states and times, and the
+customer's opt-out records) and `messages/<conversation>/<message>.json` (each
+message with its times, direction, sender, delivery state and error). Agents'
+internal notes are left out unless `notes=true`. One export holds at most
+50,000 messages. The export is in the audit log (counts, never the content).
+Media files are not part of the export yet: they arrive with media messages.
+
+### Redacting one message
+
+An administrator can **redact** a message in the conversation view (Redact,
+then confirm), or with
+`POST /api/v1/inbox/conversations/{id}/messages/{messageId}/redact`. The text
+is removed for good and the message shows "Redacted" with the time; its copy in
+the SIP text queue is deleted, and a text sent through a carrier API is deleted
+at the carrier too. System lines cannot be redacted. The audit log records who
+redacted which message.
+
+### Deletion at the carrier
+
+An erase or a redaction queues a deletion for each text Hello **sent through a
+carrier API**; the request tries them for up to 20 seconds and returns the
+counts, and a background worker on every control replica retries the rest
+(back-off from one minute doubling to six hours, 12 tries, about a day; a
+refused one fails at once). The page lists the last 30 days by carrier.
+
+| Carrier   | What happens                                                                                                                                                                                                   |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Twilio    | The message is deleted (`DELETE /Messages/{sid}`), with its media. A message Twilio no longer has counts as deleted. When Twilio will not delete it yet (it is still being sent), its text is blanked instead. |
+| Telnyx    | Telnyx has no deletion of one message. The report says whether the messaging profile has **redaction** turned on (Telnyx then masks numbers and text in its own records); turn it on in the Telnyx portal.     |
+| SIP trunk | Texts sent as SIP MESSAGE are only in Hello and the carrier's own logs; there is nothing to delete through an API.                                                                                             |
+
+Texts a customer sent to the business are in the carrier's records too; the
+carriers keep them under their own terms.
+
+### Supervisor views
+
+Each time an operator or administrator opens a conversation that is not
+assigned to them, an audit row is written (once per person and conversation an
+hour). The report lists them for a period, per person (views and distinct
+conversations) and one by one, newest first, with paging: who, which
+conversation, when, never the content. It is not available to the AI
+assistant.
 
 ## Website chat
 
@@ -581,6 +681,10 @@ Metrics: `hello_chat_sessions_total{result}`, `hello_chat_messages_total{result}
 | `/api/v1/messaging/settings`                                                              | admin, `admin`                |
 | `/api/v1/messaging/optouts` (+ `/{id}/reconsent`)                                         | admin, `admin`                |
 | `POST /api/v1/inbox/erase`                                                                | admin, `admin`                |
+| `GET /api/v1/inbox/export`, `/api/v1/inbox/audit/supervisor-views`                        | admin, `admin`                |
+| `POST /api/v1/inbox/conversations/{id}/messages/{messageId}/redact`                       | admin, `admin`                |
+| `/api/v1/messaging/sla`, `GET /api/v1/messaging/redactions`                               | admin, `admin`                |
+| `GET /api/v1/inbox/reports` (+ `/export`, CSV)                                            | operator, `messages`          |
 | `/api/v1/messaging/chat/sites` (+ `/{id}`, `/{id}/blocks`), `/chat/blocks/{id}`           | admin, `admin`                |
 | `/api/v1/inbox/conversations/{id}/block`, `/email-reply`, `/typing` (and `/me/inbox/...`) | operator or agent, `messages` |
 | `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`, `/api/v1/inbox/queues`           | operator, `messages`          |
@@ -604,7 +708,9 @@ a desk phone), `hello_msg_optout_total{source}`, `hello_msg_purged_total{kind}`,
 `hello_msg_unassigned` and `hello_msg_unassigned_oldest_seconds`, and for
 routing `hello_msg_assign_total{result}` (placed, assigned, full, lost,
 returned, after_hours_reply), `hello_msg_first_response_seconds`,
-`hello_msg_queue_text_waiting{queue}` and `hello_msg_assign_live_down_total`.
+`hello_msg_queue_text_waiting{queue}` and `hello_msg_assign_live_down_total`,
+and `hello_msg_provider_redactions_total{provider,result}` (done, pending,
+failed, unsupported) for the deletions at the carriers.
 No label carries a number, a name or text.
 
 ## HA
@@ -632,3 +738,9 @@ phone; a long text arrives as numbered parts; reply from the phone and see it
 in the conversation and at the customer; a reply to an opted-out customer is
 refused with the reason shown on the phone; the contact name shows as the
 sender.
+
+With a real Twilio account: erase a customer Hello texted and see the report
+count the texts deleted, and the messages gone from Twilio's console and API;
+redact a message just sent; redact one Twilio is still sending (expect the
+blanked text). With a real Telnyx profile: an erase reports "not possible" and
+whether the profile's redaction is on; turn it on and see the report change.

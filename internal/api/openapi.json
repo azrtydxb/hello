@@ -28844,6 +28844,498 @@
           "category": "credentials"
         }
       }
+    },
+    "/api/v1/inbox/reports": {
+      "get": {
+        "operationId": "getInboxReport",
+        "summary": "Inbox report",
+        "description": "Volumes, first response and resolution times (average, median, 90th percentile) and service-level breaches of the messaging inbox for a period, in total and by channel, queue, agent or day. Counts and durations only: no customer text or number. Spam is left out, and conversations past their retention are no longer counted.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Start of the period (RFC 3339); default 7 days before to. Conversations count by when they started, messages by when they were written.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "End of the period, exclusive (RFC 3339); default now. The period is at most 366 days.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "groupBy",
+            "in": "query",
+            "description": "Split the report by channel, queue, agent (the assignee; a reply counts for its writer) or day; absent gives the totals only.",
+            "schema": {
+              "type": "string",
+              "enum": ["channel", "queue", "agent", "day"]
+            }
+          },
+          {
+            "name": "timeZone",
+            "in": "query",
+            "description": "IANA zone the days are counted in (groupBy=day); default the system's zone.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/inbox/reports/export": {
+      "get": {
+        "operationId": "exportInboxReport",
+        "summary": "Inbox report as CSV",
+        "description": "The inbox report as a CSV download: a totals line, then one line per group. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Start of the period (RFC 3339); default 7 days before to. Conversations count by when they started, messages by when they were written.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "End of the period, exclusive (RFC 3339); default now. The period is at most 366 days.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "groupBy",
+            "in": "query",
+            "description": "Split the report by channel, queue, agent (the assignee; a reply counts for its writer) or day; absent gives the totals only.",
+            "schema": {
+              "type": "string",
+              "enum": ["channel", "queue", "agent", "day"]
+            }
+          },
+          {
+            "name": "timeZone",
+            "in": "query",
+            "description": "IANA zone the days are counted in (groupBy=day); default the system's zone.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV with a header row",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "CSV download",
+          "category": "binary-download"
+        }
+      }
+    },
+    "/api/v1/messaging/sla": {
+      "get": {
+        "operationId": "getMessagingSLA",
+        "summary": "Inbox service-level targets",
+        "description": "The first-response and resolution targets the inbox report counts breaches against, in seconds after a conversation started; 0 is off.",
+        "tags": ["messaging"],
+        "responses": {
+          "200": {
+            "description": "The targets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxSLA"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "put": {
+        "operationId": "putMessagingSLA",
+        "summary": "Set the inbox service-level targets",
+        "description": "Replaces the first-response and resolution targets. Audited.",
+        "tags": ["messaging"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxSLAInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The targets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxSLA"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/export": {
+      "get": {
+        "operationId": "exportMessagingPeer",
+        "summary": "Export a customer's conversations (DSAR)",
+        "description": "Streams a zip of everything the messaging inbox holds of one customer across every channel, for a data subject access request. The archive holds README.txt, conversations.json (the conversations and the opt-out records) and messages/<conversation>/<message>.json with each message's text, times and delivery state. Internal notes are included only with notes=true. The audit row records who exported and the counts, never content.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "name": "peer",
+            "in": "query",
+            "description": "The customer's phone number, or a chat visitor (visitor:<id>).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "notes",
+            "in": "query",
+            "description": "Include the agents' internal notes about the customer.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The zip archive",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/messages/{messageId}/redact": {
+      "post": {
+        "operationId": "redactInboxMessage",
+        "summary": "Redact a message",
+        "description": "Removes the text of one message or internal note: the body is emptied and marked redacted, its copies in the SIP text queue are deleted, and a message sent through a carrier API (Twilio) is deleted at the carrier too, best effort; the carrier keeps its own logs. Redacting a message twice changes nothing. Audited without content.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Id of the message, as the message list returns it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The redacted message and the provider-side result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxRedactReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/messaging/redactions": {
+      "get": {
+        "operationId": "listMessagingRedactions",
+        "summary": "Provider-side deletions",
+        "description": "Counts the deletions at carriers that erases and redactions queued in the last 30 days, and every one still being retried, by provider and state. Ids only are kept, never text or numbers.",
+        "tags": ["messaging"],
+        "responses": {
+          "200": {
+            "description": "The counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingRedactionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/audit/supervisor-views": {
+      "get": {
+        "operationId": "listSupervisorViews",
+        "summary": "Supervisor-view audit report",
+        "description": "Who opened conversations that were not assigned to them (one audit row per person and conversation per hour), newest first, with the totals per person for the period. Ids and names only, never content.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Start of the period (RFC 3339); default 30 days ago.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "End of the period, exclusive (RFC 3339); default now.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "description": "Only this person (user:<username>, as in the audit log).",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Return rows older than this id (the nextBefore of the previous page).",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 500 (default 100).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of views and the totals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupervisorViewReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "the supervision of staff is reviewed by an administrator in the console",
+          "category": "private-data"
+        }
+      }
     }
   },
   "components": {
@@ -42373,7 +42865,7 @@
       },
       "Event": {
         "type": "object",
-        "description": "A call event. Delivery is at least once: the id identifies an event and receivers dedupe on it.",
+        "description": "A call or messaging inbox event. Delivery is at least once: the id identifies an event and receivers dedupe on it.",
         "required": ["apiVersion", "id", "type", "createdAt", "data"],
         "properties": {
           "apiVersion": {
@@ -42394,7 +42886,14 @@
               "call.missed",
               "call.recording.ready",
               "call.completed",
-              "voicemail.received"
+              "voicemail.received",
+              "conversation.created",
+              "conversation.assigned",
+              "conversation.resolved",
+              "message.received",
+              "message.sent",
+              "message.status",
+              "message.optout"
             ]
           },
           "createdAt": {
@@ -42402,7 +42901,15 @@
             "format": "date-time"
           },
           "data": {
-            "$ref": "#/components/schemas/EventData"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventData"
+              },
+              {
+                "$ref": "#/components/schemas/InboxEventData"
+              }
+            ],
+            "description": "EventData for call.* and voicemail.* events, InboxEventData for conversation.* and message.* events."
           }
         }
       },
@@ -43175,7 +43682,13 @@
       },
       "MessagingEraseReport": {
         "type": "object",
-        "required": ["conversations", "messages", "optOutsKept", "providers"],
+        "required": [
+          "conversations",
+          "messages",
+          "sipMessages",
+          "optOutsKept",
+          "providers"
+        ],
         "properties": {
           "conversations": {
             "type": "integer"
@@ -43190,20 +43703,13 @@
           "providers": {
             "type": "array",
             "items": {
-              "type": "object",
-              "required": ["provider", "redacted", "detail"],
-              "properties": {
-                "provider": {
-                  "type": "string"
-                },
-                "redacted": {
-                  "type": "boolean"
-                },
-                "detail": {
-                  "type": "string"
-                }
-              }
-            }
+              "$ref": "#/components/schemas/MessagingProviderRedaction"
+            },
+            "description": "Per provider, what the provider-side deletion did. The carrier keeps its own logs under its own terms."
+          },
+          "sipMessages": {
+            "type": "integer",
+            "description": "Copies in the SIP text queue (desk-phone and SIP-trunk parts) that went too."
           }
         }
       },
@@ -43379,7 +43885,8 @@
           "createdAt",
           "sentAt",
           "deliveredAt",
-          "readAt"
+          "readAt",
+          "redactedAt"
         ],
         "properties": {
           "id": {
@@ -43447,6 +43954,11 @@
           "readAt": {
             "type": ["string", "null"],
             "format": "date-time"
+          },
+          "redactedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When an administrator redacted the line; its body is empty."
           }
         }
       },
@@ -44511,7 +45023,9 @@
           "createdAt",
           "updatedAt",
           "pending",
-          "dead"
+          "dead",
+          "includePeer",
+          "includeMessageBody"
         ],
         "properties": {
           "id": {
@@ -44592,6 +45106,14 @@
           "dead": {
             "type": "integer",
             "description": "Dead letters."
+          },
+          "includePeer": {
+            "type": "boolean",
+            "description": "Messaging inbox events carry the customer's number (peer); otherwise only a keyed hash (peerKey). Default false; audited."
+          },
+          "includeMessageBody": {
+            "type": "boolean",
+            "description": "message.received and message.sent carry the message text (body). Default false; administrators only, audited."
           }
         }
       },
@@ -44628,7 +45150,9 @@
           "updatedAt",
           "pending",
           "dead",
-          "secret"
+          "secret",
+          "includePeer",
+          "includeMessageBody"
         ],
         "properties": {
           "id": {
@@ -44714,6 +45238,14 @@
             "type": ["string", "null"],
             "description": "The signing secret (whsec_...). Shown once, at creation and at rotation; null when the endpoint already existed.",
             "x-hello-secret": true
+          },
+          "includePeer": {
+            "type": "boolean",
+            "description": "Messaging inbox events carry the customer's number (peer); otherwise only a keyed hash (peerKey). Default false; audited."
+          },
+          "includeMessageBody": {
+            "type": "boolean",
+            "description": "message.received and message.sent carry the message text (body). Default false; administrators only, audited."
           }
         }
       },
@@ -44754,6 +45286,14 @@
           "allowPrivate": {
             "type": "boolean",
             "description": "Default false."
+          },
+          "includePeer": {
+            "type": "boolean",
+            "description": "Messaging inbox events carry the customer's number (peer); otherwise only a keyed hash (peerKey). Default false; audited."
+          },
+          "includeMessageBody": {
+            "type": "boolean",
+            "description": "message.received and message.sent carry the message text (body). Default false; administrators only, audited."
           }
         }
       },
@@ -44793,6 +45333,14 @@
           "allowPrivate": {
             "type": "boolean",
             "description": "Whether the endpoint may use http and a private address inside HELLO_INTEGRATIONS_ALLOWED_CIDRS."
+          },
+          "includePeer": {
+            "type": "boolean",
+            "description": "Messaging inbox events carry the customer's number (peer); otherwise only a keyed hash (peerKey). Default false; audited."
+          },
+          "includeMessageBody": {
+            "type": "boolean",
+            "description": "message.received and message.sent carry the message text (body). Default false; administrators only, audited."
           }
         }
       },
@@ -49361,6 +49909,411 @@
             "type": "string",
             "maxLength": 18,
             "description": "The id of the Salesforce Task the softphone created."
+          }
+        }
+      },
+      "InboxDurations": {
+        "type": "object",
+        "required": ["count", "avgSeconds", "p50Seconds", "p90Seconds"],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "How many durations the figures are over."
+          },
+          "avgSeconds": {
+            "type": "number"
+          },
+          "p50Seconds": {
+            "type": "number"
+          },
+          "p90Seconds": {
+            "type": "number"
+          }
+        }
+      },
+      "InboxReportRow": {
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "conversations",
+          "inboundConversations",
+          "outboundConversations",
+          "resolved",
+          "messagesIn",
+          "messagesOut",
+          "firstResponse",
+          "resolution",
+          "slaFirstResponseBreaches",
+          "slaResolutionBreaches"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The group: a channel, queue or user id, or a day (YYYY-MM-DD); empty for the totals, no queue or nobody."
+          },
+          "label": {
+            "type": "string"
+          },
+          "conversations": {
+            "type": "integer",
+            "description": "Conversations started in the period."
+          },
+          "inboundConversations": {
+            "type": "integer",
+            "description": "Started by a customer."
+          },
+          "outboundConversations": {
+            "type": "integer",
+            "description": "Started by an agent (first contact)."
+          },
+          "resolved": {
+            "type": "integer",
+            "description": "Of those, resolved now."
+          },
+          "messagesIn": {
+            "type": "integer",
+            "description": "Customer messages written in the period."
+          },
+          "messagesOut": {
+            "type": "integer",
+            "description": "Replies written in the period."
+          },
+          "firstResponse": {
+            "$ref": "#/components/schemas/InboxDurations",
+            "description": "Time from a customer's first text to the first answer."
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/InboxDurations",
+            "description": "Time from the start to the resolution."
+          },
+          "slaFirstResponseBreaches": {
+            "type": "integer",
+            "description": "Customer conversations answered after the target, or still unanswered past it."
+          },
+          "slaResolutionBreaches": {
+            "type": "integer",
+            "description": "Conversations resolved after the target, or still open past it."
+          }
+        }
+      },
+      "InboxSLA": {
+        "type": "object",
+        "required": ["firstResponseSeconds", "resolutionSeconds"],
+        "properties": {
+          "firstResponseSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 604800,
+            "description": "First-response target; 0 is off. Default 900."
+          },
+          "resolutionSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2592000,
+            "description": "Resolution target; 0 is off. Default 86400."
+          }
+        }
+      },
+      "InboxSLAInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["firstResponseSeconds", "resolutionSeconds"],
+        "properties": {
+          "firstResponseSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 604800,
+            "description": "First-response target; 0 is off. Default 900."
+          },
+          "resolutionSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2592000,
+            "description": "Resolution target; 0 is off. Default 86400."
+          }
+        }
+      },
+      "InboxReport": {
+        "type": "object",
+        "required": [
+          "from",
+          "to",
+          "groupBy",
+          "timeZone",
+          "sla",
+          "totals",
+          "rows"
+        ],
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "groupBy": {
+            "type": "string",
+            "enum": ["", "channel", "queue", "agent", "day"]
+          },
+          "timeZone": {
+            "type": "string"
+          },
+          "sla": {
+            "$ref": "#/components/schemas/InboxSLA"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/InboxReportRow"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxReportRow"
+            }
+          }
+        }
+      },
+      "MessagingProviderRedaction": {
+        "type": "object",
+        "required": [
+          "provider",
+          "redacted",
+          "messages",
+          "done",
+          "pending",
+          "failed",
+          "detail"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "redacted": {
+            "type": "boolean",
+            "description": "Every message sent through the provider is gone from it."
+          },
+          "messages": {
+            "type": "integer",
+            "description": "Messages queued for deletion at the provider."
+          },
+          "done": {
+            "type": "integer"
+          },
+          "pending": {
+            "type": "integer",
+            "description": "Still being retried in the background, for up to a day."
+          },
+          "failed": {
+            "type": "integer",
+            "description": "Refused, or the provider cannot delete a single message."
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "InboxRedactReport": {
+        "type": "object",
+        "required": ["message", "providers"],
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/InboxMessage"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessagingProviderRedaction"
+            },
+            "description": "Empty when the message never went through a carrier API."
+          }
+        }
+      },
+      "MessagingRedactionCount": {
+        "type": "object",
+        "required": ["provider", "pending", "done", "failed", "unsupported"],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "pending": {
+            "type": "integer"
+          },
+          "done": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "unsupported": {
+            "type": "integer",
+            "description": "The provider has no API to delete one message (Telnyx: turn on the messaging profile's redaction)."
+          }
+        }
+      },
+      "MessagingRedactionList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessagingRedactionCount"
+            }
+          }
+        }
+      },
+      "SupervisorView": {
+        "type": "object",
+        "required": [
+          "id",
+          "at",
+          "actor",
+          "userId",
+          "userName",
+          "conversationId",
+          "via"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actor": {
+            "type": "string",
+            "description": "user:<username>, or the token or client that read it."
+          },
+          "userId": {
+            "type": ["integer", "null"],
+            "format": "int64"
+          },
+          "userName": {
+            "type": "string"
+          },
+          "conversationId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "via": {
+            "type": "string",
+            "description": "The OAuth client or tool, when not the console."
+          }
+        }
+      },
+      "SupervisorViewTotal": {
+        "type": "object",
+        "required": ["actor", "userName", "views", "conversations"],
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "userName": {
+            "type": "string"
+          },
+          "views": {
+            "type": "integer"
+          },
+          "conversations": {
+            "type": "integer",
+            "description": "Distinct conversations."
+          }
+        }
+      },
+      "SupervisorViewReport": {
+        "type": "object",
+        "required": ["items", "nextBefore", "totals"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupervisorView"
+            }
+          },
+          "nextBefore": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Pass as before for the next page; 0 on the last."
+          },
+          "totals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupervisorViewTotal"
+            }
+          }
+        }
+      },
+      "InboxEventData": {
+        "type": "object",
+        "description": "The payload of a messaging inbox event: ids, states and times, never text or numbers unless the webhook endpoint asked for them.",
+        "required": ["conversationId"],
+        "properties": {
+          "conversationId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "messageId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "channelId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "channelKind": {
+            "type": "string",
+            "enum": ["sms", "whatsapp", "webchat"]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "addressId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "address": {
+            "type": "string",
+            "description": "The business's own number or chat site the conversation is on."
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["in", "out"]
+          },
+          "status": {
+            "type": "string",
+            "description": "The message's delivery state (message events) or the conversation's state (conversation events)."
+          },
+          "errorCode": {
+            "type": "string"
+          },
+          "assigneeUserId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Absent when unassigned (conversation.assigned back to the pool)."
+          },
+          "queueId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "peerKind": {
+            "type": "string",
+            "enum": ["phone", "visitor"]
+          },
+          "peerKey": {
+            "type": "string",
+            "description": "A keyed hash of the customer: stable on this deployment, meaningless elsewhere."
+          },
+          "peer": {
+            "type": "string",
+            "description": "The customer's number or visitor:<id>; only in a webhook delivery to an endpoint with includePeer."
+          },
+          "body": {
+            "type": "string",
+            "description": "The message text; only in a webhook delivery of message.received or message.sent to an endpoint with includeMessageBody."
           }
         }
       }

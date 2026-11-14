@@ -4819,3 +4819,77 @@ entry and the code it names).
   stay unbuilt (the route is 404, nothing half-wired).
 - **MCP:** no new operation; chat sites and routing stay excluded, so the
   doctable is unchanged.
+
+## Messaging item 8: events, reports, export, redaction (2026-11-15, feat/messaging-8-reporting)
+
+- **Events carry a hash, delivery adds the content.** The inbox's `EventSink`
+  writes `conversation.created`, `conversation.assigned`,
+  `conversation.resolved`, `message.received`, `message.sent`,
+  `message.status` and `message.optout` into the integrations pipeline
+  (`integration_events`, the stream, webhooks, CRM and Slack hooks). A stored
+  event has ids, channel, direction, state, assignee, queue and `peerKey`, a
+  keyed MAC of the number (`HELLO_SECRET_KEY`, purpose
+  `messaging-event-peer`, 16 bytes hex), never a number or a text. An
+  endpoint's `includePeer` and `includeMessageBody` (migration 00220, admin,
+  audited per change, off by default) are applied at delivery by reading the
+  inbox, so an erase or a redaction between the event and the delivery is
+  honoured and the history and stream never hold content. The body is only
+  added to `message.received` and `message.sent`. A failed read retries the
+  delivery as an internal failure (`enrich_failed`, no strike against the
+  endpoint).
+- **Inbox events are not for every event reader.** The stream, the history
+  and tickets hide `conversation.*` and `message.*` from credentials without
+  the `messages` scope or below the operator role, the inbox's own access
+  rule. An endpoint with an extension list gets none (they are about no
+  extension).
+- **Emit points fixed while wiring.** `conversation.created` is emitted before
+  the first message event of a new conversation (ingest, chat, first contact);
+  claims, routing placements and assignments, a reply that claims, and returns
+  to the queue (stale or orphaned) emit `conversation.assigned` (no assignee
+  for a return); `FinishPoll` emits the real final status.
+- **Reports.** Totals and groups by channel, queue, agent (assignee) or day
+  (system zone or `timeZone`), at most 366 days. First response counts only
+  conversations a customer started (`origin` inbound), measured to the first
+  agent reply (`first_response_at`); automatic texts do not count. Resolution is start to `resolved_at`.
+  Spam is excluded. Durations are count, average, p50, p90. An open
+  conversation already over a target counts as a breach. CSV export, csv-safe
+  cells. `getInboxReport` is exposed to MCP (counts only); the CSV is not.
+- **SLA targets on their own endpoint.** `GET/PUT /api/v1/messaging/sla`
+  (`messaging_settings.sla_first_response_seconds` default 900,
+  `sla_resolution_seconds` default 86400, 0 off), not in
+  `/messaging/settings`, so item 7's settings changes do not collide.
+- **DSAR export.** `GET /api/v1/inbox/export?peer=` (admin), a zip of
+  README, `conversations.json` (with opt-outs) and one JSON per message.
+  Notes are excluded unless `notes=true`. At most 50,000 messages (422
+  `too_large`). Audited with counts. Media is not exported: M-18 is not on
+  main; when it merges, the export adds the files.
+- **Redaction.** `POST .../messages/{messageId}/redact` (admin) blanks the
+  body, sets `redacted_at`, deletes the SIP text-queue copies, queues the
+  carrier deletion, emits `conversation.updated` and audits. System lines are
+  refused (409 `not_redactable`); a second redaction is a no-op.
+- **Erase also deletes the SIP text-queue copies** (`messages` rows linked to
+  the conversation's messages or to the number), which it left behind.
+- **Carrier deletion is a durable queue.** `msg_provider_redactions` (unique
+  per channel and carrier id); the request works its batch for 20 s and
+  reports counts; `messaging.Redactor.Run` retries on every control replica
+  (row leases), back-off one minute doubling to six hours, 12 tries (about a
+  day); refusals fail at once; finished rows are kept 30 days.
+  `hello_msg_provider_redactions_total{provider,result}`.
+- **Twilio deletes, Telnyx cannot.** Twilio: `DELETE Messages/{sid}`; 404 is
+  done; a refusal to delete a message still in flight falls back to blanking
+  the body (`POST Body=""`). Telnyx's API has no per-message delete
+  (`DELETE /messages/{id}` only cancels a scheduled send), so its rows are
+  `unsupported` and the report reads the messaging profile's
+  `redaction_enabled` to say whether Telnyx masks its own records. Both wait
+  for a real-account check.
+- **Supervisor-view report.** `GET /api/v1/inbox/audit/supervisor-views`
+  (admin) reads the existing `supervisor_view` audit rows: per-person totals
+  and the rows newest first, paged by id. Excluded from MCP: staff supervision
+  is reviewed by an administrator in the console.
+- **UI.** Inbox reports page (operators; targets form for admins), Messaging →
+  Privacy page (export, carrier deletions, supervisor views), a Redact action
+  in the conversation view (admins), webhook inbox options, inbox events on
+  the integration events page. Zapier gets seven inbox triggers with the two
+  options as Zap inputs; n8n and Make get the events and both options.
+- **Migration 00220** (placeholder number): the webhook options, the SLA
+  targets, `redacted_at`, the redaction queue and three report indexes.

@@ -34,6 +34,7 @@ import {
   Switch,
   useToast,
 } from "../design/azrty/components";
+import { redactMessage } from "../api/inboxReports";
 import { formatTime } from "../format";
 import { AgentAvailability } from "./inbox/AgentAvailability";
 import { Can } from "../role";
@@ -178,6 +179,7 @@ function Thread({
   const trusted = useRef(new Set<string>());
   const [leaving, setLeaving] = useState<URL | null>(null);
   const [blocking, setBlocking] = useState(false);
+  const [redacting, setRedacting] = useState<InboxMessage | null>(null);
   const toast = useToast();
 
   const apply = useCallback(
@@ -398,17 +400,35 @@ function Thread({
                         {deliveryText(m, chat)}
                       </Badge>
                     )}
+                    {supervisor && !m.redactedAt && (
+                      <Can min="admin">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          icon="eraser"
+                          onClick={() => setRedacting(m)}
+                        >
+                          Redact
+                        </Button>
+                      </Can>
+                    )}
                   </div>
                 )}
                 {/* Customer text is shown as text, never as markup; in a chat
                     its links are made clickable, asking before one leaves Hello. */}
-                <p className="inbox-msg__body">
-                  {chat && m.kind === "message" && m.direction === "in" ? (
-                    <LinkedText text={m.body} onOpen={openLink} />
-                  ) : (
-                    m.body
-                  )}
-                </p>
+                {m.redactedAt ? (
+                  <p className="inbox-msg__body inbox-msg__body--redacted">
+                    Redacted {formatTime(m.redactedAt)}
+                  </p>
+                ) : (
+                  <p className="inbox-msg__body">
+                    {chat && m.kind === "message" && m.direction === "in" ? (
+                      <LinkedText text={m.body} onOpen={openLink} />
+                    ) : (
+                      m.body
+                    )}
+                  </p>
+                )}
               </li>
             );
           })}
@@ -725,6 +745,27 @@ function Thread({
             {leaving.href}
           </p>
         </ConfirmDialog>
+      )}
+      {redacting && (
+        <ConfirmDialog
+          title="Redact this message?"
+          description="Its text is deleted from Hello for good, including the copies queued for desk phones, and a text sent through Twilio is deleted at Twilio too. The thread shows that it was redacted. This is recorded in the audit log."
+          confirmLabel="Redact message"
+          confirmIcon="eraser"
+          errorTitle="Could not redact the message"
+          onClose={() => setRedacting(null)}
+          onConfirm={async () => {
+            const rep = await redactMessage(id, redacting.id);
+            setRedacting(null);
+            const left = rep.providers.some((p) => !p.redacted);
+            toast.show(
+              left
+                ? "Message redacted. The carrier part is not complete; see Messaging, Privacy."
+                : "Message redacted.",
+            );
+            await load();
+          }}
+        />
       )}
       {blocking && (
         <ConfirmDialog

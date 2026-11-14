@@ -79,6 +79,8 @@ export interface InboxMessage {
   sentAt: string | null;
   deliveredAt: string | null;
   readAt: string | null;
+  /** When an administrator redacted the line; its body is empty then. */
+  redactedAt: string | null;
 }
 
 export interface ConversationQuery {
@@ -408,8 +410,19 @@ export interface OptOut {
 export interface EraseReport {
   conversations: number;
   messages: number;
+  /** Copies in the SIP text queue (desk-phone and SIP-trunk parts). */
+  sipMessages: number;
   optOutsKept: number;
-  providers: { provider: string; redacted: boolean; detail: string }[];
+  /** What the provider-side deletion did, per provider. */
+  providers: {
+    provider: string;
+    redacted: boolean;
+    messages: number;
+    done: number;
+    pending: number;
+    failed: number;
+    detail: string;
+  }[];
 }
 
 const MESSAGING = "/api/v1/messaging";

@@ -447,15 +447,21 @@ func (s *Store) systemText(ctx context.Context, tx *sql.Tx, c convRow, body, wha
 func (rs routerStore) RouteNew(ctx context.Context, now time.Time, limit int) (router.RouteResult, error) {
 	var res router.RouteResult
 	for i := 0; i < limit; i++ {
-		var more, replied bool
+		var (
+			more, replied bool
+			placed        messaging.Event
+		)
 		err := rs.s.tx(ctx, func(tx *sql.Tx) error {
-			more, replied = false, false
+			more, replied, placed = false, false, messaging.Event{}
 			var err error
-			more, replied, err = rs.s.routeOne(ctx, tx, now)
+			more, replied, err = rs.s.routeOne(ctx, tx, now, &placed)
 			return err
 		})
 		if err != nil {
 			return res, err
+		}
+		if placed.Type != "" {
+			rs.s.emit(ctx, placed)
 		}
 		if !more {
 			break
@@ -468,7 +474,9 @@ func (rs routerStore) RouteNew(ctx context.Context, now time.Time, limit int) (r
 	return res, nil
 }
 
-func (s *Store) routeOne(ctx context.Context, tx *sql.Tx, now time.Time) (more, replied bool, err error) {
+// routeOne places one conversation; placed is set to the
+// conversation.assigned event when the route gave it to a user.
+func (s *Store) routeOne(ctx context.Context, tx *sql.Tx, now time.Time, placed *messaging.Event) (more, replied bool, err error) {
 	var (
 		c                                 convRow
 		status                            string
@@ -554,6 +562,7 @@ func (s *Store) routeOne(ctx context.Context, tx *sql.Tx, now time.Time) (more, 
 		if err := s.afterAssign(ctx, tx, c.ID, p.user); err != nil {
 			return true, replied, err
 		}
+		*placed = messaging.Event{Type: "conversation.assigned", ConversationID: c.ID, AssigneeUserID: p.user}
 	}
 	return true, replied, announceRouted(ctx, tx, c.ID, p.user)
 }
@@ -730,6 +739,9 @@ func (rs routerStore) Assign(ctx context.Context, convID, userID int64, q router
 		out = messaging.AssignDone
 		return nil
 	})
+	if err == nil && out == messaging.AssignDone {
+		rs.s.emit(ctx, messaging.Event{Type: "conversation.assigned", ConversationID: convID, AssigneeUserID: userID})
+	}
 	return out, err
 }
 
@@ -781,8 +793,9 @@ const latestRouterAssignment = `(SELECT a.reason FROM conversation_assignments a
 // customer's last text unanswered for longer than the queue's reassign time.
 func (rs routerStore) ReturnStale(ctx context.Context, now time.Time) (int, error) {
 	n := 0
+	var returned []int64
 	err := rs.s.tx(ctx, func(tx *sql.Tx) error {
-		n = 0
+		n, returned = 0, nil
 		rows, err := tx.QueryContext(ctx, `
 			SELECT c.id, c.channel_id, c.address_id, c.peer_key, c.status, c.assignee_user_id, q.text_reassign_seconds
 			FROM conversations c JOIN queues q ON q.id = c.queue_id AND q.text_enabled AND q.text_reassign_seconds > 0
@@ -820,11 +833,23 @@ func (rs routerStore) ReturnStale(ctx context.Context, now time.Time) (int, erro
 			if err := rs.s.pool(ctx, tx, x.row, x.row.Assignee.Int64, assignTimeout, line); err != nil {
 				return err
 			}
+			returned = append(returned, x.row.ID)
 			n++
 		}
 		return nil
 	})
+	if err == nil {
+		rs.s.emitReturned(ctx, returned)
+	}
 	return n, err
+}
+
+// emitReturned tells the event pipeline that conversations went back to the
+// waiting list: conversation.assigned without an assignee.
+func (s *Store) emitReturned(ctx context.Context, ids []int64) {
+	for _, id := range ids {
+		s.emit(ctx, messaging.Event{Type: "conversation.assigned", ConversationID: id})
+	}
 }
 
 // ReleaseOrphans moves what no longer fits its queue: an unassigned
@@ -834,8 +859,9 @@ func (rs routerStore) ReturnStale(ctx context.Context, now time.Time) (int, erro
 // disabled, they left the queue) returns to the waiting list.
 func (rs routerStore) ReleaseOrphans(ctx context.Context) (int, error) {
 	n := 0
+	var returned []int64
 	err := rs.s.tx(ctx, func(tx *sql.Tx) error {
-		n = 0
+		n, returned = 0, nil
 		rows, err := tx.QueryContext(ctx, `
 			UPDATE conversations c SET queue_id = NULL FROM queues q
 			WHERE q.id = c.queue_id AND NOT (q.enabled AND q.text_enabled)
@@ -900,10 +926,14 @@ func (rs routerStore) ReleaseOrphans(ctx context.Context) (int, error) {
 			if err := rs.s.pool(ctx, tx, c, c.Assignee.Int64, assignUnlinked, "The agent is no longer in the queue: returned to the queue"); err != nil {
 				return err
 			}
+			returned = append(returned, c.ID)
 			n++
 		}
 		return nil
 	})
+	if err == nil {
+		rs.s.emitReturned(ctx, returned)
+	}
 	return n, err
 }
 

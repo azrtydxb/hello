@@ -211,3 +211,9 @@
   flex-direction: column;
   gap: 12px;
 }
+
+/* A redacted message: its text is gone. */
+.inbox-msg__body--redacted {
+  font-style: italic;
+  color: var(--az-text-muted, inherit);
+}

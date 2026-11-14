@@ -3,6 +3,8 @@
   "method": "PATCH",
   "body": {
     "events": "{{parameters.events}}",
-    "extensions": "{{ifempty(parameters.extensions; emptyarray)}}"
+    "extensions": "{{ifempty(parameters.extensions; emptyarray)}}",
+    "includePeer": "{{ifempty(parameters.includePeer; false)}}",
+    "includeMessageBody": "{{ifempty(parameters.includeMessageBody; false)}}"
   }
 }

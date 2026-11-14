@@ -4,7 +4,7 @@
 // told apart from a quiet one) and a refusal (429, 503) reads as an error.
 import { request, responseJson } from "../api";
 
-/** The event types hello-sip emits. */
+/** The event types: hello-sip's call events and the messaging inbox's. */
 export const EVENT_TYPES = [
   "call.ringing",
   "call.answered",
@@ -14,6 +14,13 @@ export const EVENT_TYPES = [
   "call.completed",
   "call.originate.progress",
   "voicemail.received",
+  "conversation.created",
+  "conversation.assigned",
+  "conversation.resolved",
+  "message.received",
+  "message.sent",
+  "message.status",
+  "message.optout",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -24,14 +31,19 @@ export interface EventParty {
   extension?: string;
 }
 
-/** The payload of a call event; fields that do not apply are absent. */
+/**
+ * The payload of an event; fields that do not apply are absent. A call event
+ * has callId, from and to; a messaging inbox event (conversation.*,
+ * message.*) has conversationId and the inbox fields instead.
+ */
 export interface EventData {
-  callId: string;
-  direction?: "internal" | "inbound" | "outbound";
+  callId?: string;
+  /** internal, inbound or outbound for a call; in or out for a message. */
+  direction?: "internal" | "inbound" | "outbound" | "in" | "out";
   /** The extension the event is about. */
   extension?: string;
-  from: EventParty;
-  to: EventParty;
+  from?: EventParty;
+  to?: EventParty;
   trunk?: string;
   startedAt?: string;
   answeredAt?: string;
@@ -45,6 +57,21 @@ export interface EventData {
   state?: string;
   cdrId?: number;
   recordingId?: number;
+  // The messaging inbox's fields: ids and states, never text; the
+  // customer only as a keyed hash.
+  conversationId?: number;
+  messageId?: number;
+  channelId?: number;
+  channelKind?: string;
+  provider?: string;
+  addressId?: number;
+  address?: string;
+  status?: string;
+  errorCode?: string;
+  assigneeUserId?: number;
+  queueId?: number;
+  peerKind?: string;
+  peerKey?: string;
 }
 
 /** A call event as delivered (the id is the dedupe key). */

@@ -437,6 +437,10 @@ type Config struct {
 	// Inbox is the messaging inbox persistence (spec messaging-channels);
 	// nil answers 503 on the inbox and messaging routes.
 	Inbox InboxStore
+	// MsgRedactor deletes an erased customer's or a redacted message's
+	// texts at the carrier while the request waits; nil leaves them to the
+	// background worker.
+	MsgRedactor MsgRedactor
 	// AI is the OAuth authorization server (spec ai-external-access); nil
 	// without HELLO_PUBLIC_URL, when the consent, grant and service-account
 	// routes answer 404 and bearer tokens get no audience check.

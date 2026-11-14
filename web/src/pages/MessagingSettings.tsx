@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router";
 import { errorMessage, fieldErrors } from "../api";
 import {
   erasePeer,
@@ -205,8 +206,11 @@ export function MessagingSettings() {
       <p>
         Deletes every conversation, message and note with a phone number, on
         every channel, and keeps only a hash of the number on the opt-out list
-        so the customer is not texted again. The carrier keeps its own logs, and
-        database backups keep the rows until they expire.
+        so the customer is not texted again. Texts sent through a carrier API
+        are deleted at the carrier too, where it allows it. The carrier keeps
+        its own logs, and database backups keep the rows until they expire. To
+        give a customer a copy of their data first, use{" "}
+        <Link to="/messaging/privacy">Privacy</Link>.
       </p>
       <form
         className="msg-toolbar"
@@ -251,12 +255,16 @@ export function MessagingSettings() {
         >
           <p>
             Deleted {report.conversations} conversations and {report.messages}{" "}
-            messages. {report.optOutsKept} opt-outs were kept as a hash.
+            messages ({report.sipMessages} copies in the desk-phone and SIP
+            trunk queue). {report.optOutsKept} opt-outs were kept as a hash.
           </p>
           <ul>
             {report.providers.map((p) => (
               <li key={p.provider}>
-                {p.provider}: {p.detail}
+                {p.provider}:{" "}
+                {p.messages > 0 &&
+                  `${String(p.done)} of ${String(p.messages)} deleted at the carrier${p.pending > 0 ? `, ${String(p.pending)} being retried` : ""}. `}
+                {p.detail}
               </li>
             ))}
           </ul>

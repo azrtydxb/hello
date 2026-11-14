@@ -76,13 +76,27 @@ describe("Messaging settings", () => {
         json({
           conversations: 2,
           messages: 9,
+          sipMessages: 3,
           optOutsKept: 1,
           providers: [
             {
               provider: "sip_trunk",
               redacted: false,
+              messages: 0,
+              done: 0,
+              pending: 0,
+              failed: 0,
               detail:
                 "the carrier keeps its own logs; Hello cannot delete them",
+            },
+            {
+              provider: "twilio",
+              redacted: false,
+              messages: 4,
+              done: 3,
+              pending: 1,
+              failed: 0,
+              detail: "some deletions are still being retried",
             },
           ],
         }),
@@ -103,6 +117,9 @@ describe("Messaging settings", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(/the carrier keeps its own logs/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/3 of 4 deleted at the carrier, 1 being retried/),
     ).toBeInTheDocument();
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
       peer: "+32475123456",
