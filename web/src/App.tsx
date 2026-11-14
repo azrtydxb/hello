@@ -66,6 +66,7 @@ import { PhoneGroups } from "./pages/PhoneGroups";
 import { MyContacts } from "./pages/MyContacts";
 import { MyMessages } from "./pages/MyMessages";
 import { Inbox, MyInbox } from "./pages/Inbox";
+import { InboxQueues } from "./pages/InboxQueues";
 import { MessagingChannels } from "./pages/MessagingChannels";
 import { MessagingOptOuts } from "./pages/MessagingOptOuts";
 import { MessagingSettings } from "./pages/MessagingSettings";
@@ -139,6 +140,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/messages": Messages,
   "/me/inbox": MyInbox,
   "/inbox": Inbox,
+  "/inbox/queues": InboxQueues,
   "/messaging/channels": MessagingChannels,
   "/messaging/chat": MessagingWebchat,
   "/messaging/optouts": MessagingOptOuts,

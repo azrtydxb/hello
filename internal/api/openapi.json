@@ -15108,6 +15108,109 @@
         }
       }
     },
+    "/api/v1/messaging/addresses/{id}/routing": {
+      "get": {
+        "operationId": "getMessagingRouting",
+        "summary": "How a messaging number routes",
+        "description": "Returns where the number's new conversations go (the supervisors' pool, a queue, a user, an extension's user or a ring group's users), its weekly schedule and what it does outside it.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The routing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingRouting"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "put": {
+        "operationId": "updateMessagingRouting",
+        "summary": "Change how a messaging number routes",
+        "description": "Sets where new conversations of the number go and when it is open. A queue must take texts (turn on texting on the queue first), a user must be able to take conversations, an extension must be linked to a user. A target that is deleted or stops being usable later sends new conversations to the pool instead. Fields left out keep their value; a new routeKind needs its routeTarget.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingRoutingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The routing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingRouting"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
     "/api/v1/messaging/settings": {
       "get": {
         "operationId": "getMessagingSettings",
@@ -15465,6 +15568,15 @@
               "format": "int64"
             },
             "description": "Only conversations of this channel."
+          },
+          {
+            "name": "queueId",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Only conversations placed in this text queue."
           },
           {
             "name": "cursor",
@@ -16086,6 +16198,44 @@
         "x-hello-role": "operator",
         "x-hello-mcp": {
           "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/queues": {
+      "get": {
+        "operationId": "listInboxQueues",
+        "summary": "The text queues: who waits and who answers",
+        "description": "Lists the queues that take customer texts with the conversations waiting in each (oldest first, ids and waiting times only), the agents with their open conversations and live state, and how long the longest has waited. It carries no customer text and no number.",
+        "tags": ["inbox"],
+        "responses": {
+          "200": {
+            "description": "The queues",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxQueueList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer messaging is private: the waiting list belongs to the inbox, not to an agent",
           "category": "private-data"
         }
       }
@@ -16848,6 +16998,15 @@
             "description": "Only conversations of this channel."
           },
           {
+            "name": "queueId",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Only conversations placed in this text queue."
+          },
+          {
             "name": "cursor",
             "in": "query",
             "schema": {
@@ -17512,6 +17671,96 @@
         "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/agent": {
+      "get": {
+        "operationId": "getMyInboxAgent",
+        "summary": "The caller's availability for the text queues",
+        "description": "Reads whether the caller answers a text queue (one of their extensions is a member) and their login and pause state, which is the call queues' own: one login and one pause per extension. Someone who answers no text queue gets member false.",
+        "tags": ["inbox"],
+        "responses": {
+          "200": {
+            "description": "The availability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxAgentState"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer messaging is private: availability for texts is set from the inbox",
+          "category": "private-data"
+        }
+      },
+      "post": {
+        "operationId": "setMyInboxAgent",
+        "summary": "Log in, log out, pause or resume for the text queues",
+        "description": "Logs the caller's extensions in or out and pauses or resumes them (a pause takes an optional reason). The state is shared with the call queues: pausing for texts pauses calls too. 404 when none of the caller's extensions answers a text queue.",
+        "tags": ["inbox"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxAgentInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The availability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxAgentState"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer messaging is private: availability for texts is set from the inbox",
           "category": "private-data"
         }
       }
@@ -38535,9 +38784,15 @@
             "description": "The contact a CRM connector knows for the number (GET /lookup/number only; absent when no connector knows it). Independent of result: a number can be none in the books and known to the CRM.",
             "required": ["id"],
             "properties": {
-              "id": { "type": "string" },
-              "name": { "type": "string" },
-              "company": { "type": "string" },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "company": {
+                "type": "string"
+              },
               "url": {
                 "type": "string",
                 "description": "Link to the contact in the CRM."
@@ -40820,6 +41075,26 @@
             "type": "string",
             "description": "Language of the queue's spoken prompts (callback offer and confirmation). Empty inherits the deployment language, then English. One of the languages with a complete prompt table (en, nl)."
           },
+          "textEnabled": {
+            "type": "boolean",
+            "description": "Whether the queue takes customer texts (the messaging inbox); default false."
+          },
+          "textCapacity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "How many open conversations each agent holds at once; default 3."
+          },
+          "textReassignSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 86400,
+            "description": "How long an assigned conversation may wait for a reply before it returns to the queue; 0 never; default 300."
+          },
+          "textRequiresIdleVoice": {
+            "type": "boolean",
+            "description": "Whether an agent who is on a call is offered no conversation; default false."
+          },
           "members": {
             "type": "array",
             "maxItems": 200,
@@ -40869,6 +41144,10 @@
           "waitPromptName",
           "minutesPromptName",
           "breakoutPromptName",
+          "textEnabled",
+          "textCapacity",
+          "textReassignSeconds",
+          "textRequiresIdleVoice",
           "members",
           "createdAt",
           "updatedAt"
@@ -41034,6 +41313,26 @@
           },
           "breakoutPromptName": {
             "type": "string"
+          },
+          "textEnabled": {
+            "type": "boolean",
+            "description": "Whether the queue takes customer texts (the messaging inbox); default false."
+          },
+          "textCapacity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "How many open conversations each agent holds at once; default 3."
+          },
+          "textReassignSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 86400,
+            "description": "How long an assigned conversation may wait for a reply before it returns to the queue; 0 never; default 300."
+          },
+          "textRequiresIdleVoice": {
+            "type": "boolean",
+            "description": "Whether an agent who is on a call is offered no conversation; default false."
           },
           "members": {
             "type": "array",
@@ -41906,8 +42205,8 @@
           },
           "routeKind": {
             "type": "string",
-            "enum": ["inbox"],
-            "description": "Where a new conversation goes; inbox is the pool every operator sees."
+            "enum": ["inbox", "queue", "user", "extension", "ring_group"],
+            "description": "Where a new conversation goes: inbox is the pool every operator sees. Change it with the number's routing."
           },
           "enabled": {
             "type": "boolean"
@@ -42199,6 +42498,8 @@
           "snoozedUntil",
           "assigneeUserId",
           "assigneeName",
+          "queueId",
+          "queueName",
           "priority",
           "tags",
           "preview",
@@ -42262,6 +42563,14 @@
             "format": "int64"
           },
           "assigneeName": {
+            "type": "string"
+          },
+          "queueId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The text queue the conversation is placed in; null in the pool or once it went to a person."
+          },
+          "queueName": {
             "type": "string"
           },
           "priority": {
@@ -42546,6 +42855,385 @@
           "failed": {
             "type": "integer",
             "description": "Conversations the action did not fit, such as resolving one that is resolved already."
+          }
+        }
+      },
+      "MessagingSchedule": {
+        "type": "object",
+        "required": ["zone", "days"],
+        "description": "A weekly opening schedule. No windows means always open.",
+        "properties": {
+          "zone": {
+            "type": "string",
+            "description": "An IANA time zone such as Europe/Brussels; required with windows."
+          },
+          "days": {
+            "type": "array",
+            "maxItems": 28,
+            "items": {
+              "type": "object",
+              "required": ["day", "from", "to"],
+              "properties": {
+                "day": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 6,
+                  "description": "0 is Sunday."
+                },
+                "from": {
+                  "type": "string",
+                  "description": "HH:MM."
+                },
+                "to": {
+                  "type": "string",
+                  "description": "HH:MM, after from; the number is closed from this minute."
+                }
+              }
+            }
+          }
+        }
+      },
+      "MessagingAfterHours": {
+        "type": "object",
+        "required": ["action", "text", "routeKind", "routeTarget", "routeName"],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["none", "reply", "route"],
+            "description": "none routes as usual; reply sends the text and then routes as usual; route sends the conversation to the after-hours target instead."
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 480,
+            "description": "The text a reply sends. Only a SIP trunk channel can send it today."
+          },
+          "routeKind": {
+            "type": "string",
+            "enum": ["inbox", "queue", "user", "extension", "ring_group"]
+          },
+          "routeTarget": {
+            "type": "string",
+            "description": "The id of the queue, user, extension or ring group; empty for the pool."
+          },
+          "routeName": {
+            "type": "string",
+            "description": "The target's name; empty when it is gone."
+          }
+        }
+      },
+      "MessagingRouting": {
+        "type": "object",
+        "required": [
+          "addressId",
+          "routeKind",
+          "routeTarget",
+          "routeName",
+          "schedule",
+          "afterHours",
+          "firstContactText"
+        ],
+        "properties": {
+          "addressId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "routeKind": {
+            "type": "string",
+            "enum": ["inbox", "queue", "user", "extension", "ring_group"],
+            "description": "inbox is the supervisors' pool; queue assigns by the queue's strategy; user and extension assign to one person; ring_group is a shared pool of the users of the group's extensions."
+          },
+          "routeTarget": {
+            "type": "string",
+            "description": "The id of the queue, user, extension or ring group; empty for the pool."
+          },
+          "routeName": {
+            "type": "string",
+            "description": "The target's name; empty when it is gone, in which case new conversations go to the pool."
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/MessagingSchedule"
+          },
+          "afterHours": {
+            "$ref": "#/components/schemas/MessagingAfterHours"
+          },
+          "firstContactText": {
+            "type": "string",
+            "maxLength": 480,
+            "description": "Sent once to a customer who texts the number for the first time (not when the closed-hours reply already went); empty sends nothing. Only a SIP trunk channel can send it today."
+          }
+        }
+      },
+      "MessagingRoutingInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "routeKind": {
+            "type": "string",
+            "enum": ["inbox", "queue", "user", "extension", "ring_group"],
+            "description": "Where new conversations go: inbox (the supervisors' pool), queue, user, extension (its linked user) or ring_group (a shared pool of its users). Changing it needs a routeTarget."
+          },
+          "routeTarget": {
+            "type": "string",
+            "description": "The id of the queue, user, extension or ring group as text; empty for the pool."
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/MessagingSchedule"
+          },
+          "firstContactText": {
+            "type": "string",
+            "maxLength": 480,
+            "description": "Sent once to a customer who texts the number for the first time; empty sends nothing."
+          },
+          "afterHours": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "What the number does with a conversation that starts outside its schedule; fields left out keep their value.",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": ["none", "reply", "route"]
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 480
+              },
+              "routeKind": {
+                "type": "string",
+                "enum": ["inbox", "queue", "user", "extension", "ring_group"]
+              },
+              "routeTarget": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "InboxQueueWaiting": {
+        "type": "object",
+        "required": ["conversationId", "channel", "position", "waitSeconds"],
+        "properties": {
+          "conversationId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "channel": {
+            "type": "string",
+            "description": "The channel kind."
+          },
+          "position": {
+            "type": "integer",
+            "description": "1 is next."
+          },
+          "waitSeconds": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "InboxQueueAgent": {
+        "type": "object",
+        "required": [
+          "userId",
+          "name",
+          "extension",
+          "dynamic",
+          "open",
+          "answered",
+          "state"
+        ],
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "extension": {
+            "type": "string"
+          },
+          "dynamic": {
+            "type": "boolean"
+          },
+          "open": {
+            "type": "integer",
+            "description": "Open conversations the user holds in all."
+          },
+          "answered": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Conversations the queue has given the user."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "available",
+              "paused",
+              "logged_out",
+              "on_call",
+              "at_capacity",
+              "unknown"
+            ],
+            "description": "unknown when the live agent state cannot be read."
+          }
+        }
+      },
+      "InboxQueue": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "strategy",
+          "capacity",
+          "waiting",
+          "waitingTotal",
+          "assigned",
+          "oldestWaitSeconds",
+          "agents"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "strategy": {
+            "type": "string"
+          },
+          "capacity": {
+            "type": "integer",
+            "description": "Open conversations an agent holds at once."
+          },
+          "waiting": {
+            "type": "array",
+            "description": "The unassigned conversations, longest waiting first, at most 200. With ring_all they are the shared pool.",
+            "items": {
+              "$ref": "#/components/schemas/InboxQueueWaiting"
+            }
+          },
+          "waitingTotal": {
+            "type": "integer"
+          },
+          "assigned": {
+            "type": "integer",
+            "description": "Open conversations agents hold from this queue."
+          },
+          "oldestWaitSeconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxQueueAgent"
+            }
+          }
+        }
+      },
+      "InboxQueueList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxQueue"
+            }
+          }
+        }
+      },
+      "InboxAgentExtension": {
+        "type": "object",
+        "required": [
+          "number",
+          "name",
+          "queues",
+          "dynamic",
+          "loggedIn",
+          "paused"
+        ],
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "queues": {
+            "type": "array",
+            "description": "The text queues the extension is a member of.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dynamic": {
+            "type": "boolean",
+            "description": "Whether a queue needs this extension to log in."
+          },
+          "loggedIn": {
+            "type": "boolean"
+          },
+          "paused": {
+            "type": "boolean"
+          }
+        }
+      },
+      "InboxAgentState": {
+        "type": "object",
+        "required": [
+          "member",
+          "needsLogin",
+          "loggedIn",
+          "paused",
+          "reason",
+          "extensions"
+        ],
+        "properties": {
+          "member": {
+            "type": "boolean",
+            "description": "Whether any of the caller's extensions is a member of a text queue."
+          },
+          "needsLogin": {
+            "type": "boolean",
+            "description": "Whether a queue needs the agent to log in; a static member is always logged in."
+          },
+          "loggedIn": {
+            "type": "boolean"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the agent paused, empty when not paused."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxAgentExtension"
+            }
+          }
+        }
+      },
+      "InboxAgentInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Give loggedIn, paused or both; what is left out keeps its value. Logging out also clears a pause.",
+        "properties": {
+          "loggedIn": {
+            "type": "boolean",
+            "description": "Log in (true) or out (false); logging out also clears a pause."
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "Pause (true) or resume (false)."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "Why the agent pauses; A-Z a-z 0-9 space . _ - only."
           }
         }
       },

@@ -13,6 +13,10 @@ This is the first phase of the messaging channels. What works now:
   carrier as supported);
 - the inbox for supervisors and agents, with assignment by hand and claiming,
   notes, tags, states, search, live updates and notifications;
+- routing: a number sends its conversations to a queue, a user, an extension's
+  user, a ring group's users or the pool, with opening hours, and a text queue
+  hands them to its agents by the queue's strategy (see
+  [Routing and queues](#routing-and-queues));
 - Hello's own opt-out handling, retention and erasing a customer;
 - sending SMS through a **Twilio** account (see "Sending through Twilio"):
   outbound only;
@@ -20,10 +24,9 @@ This is the first phase of the messaging channels. What works now:
   (see "Website chat" below).
 
 Not yet: receiving texts from a carrier's web API (needs an Internet-facing
-address), Telnyx, WhatsApp, texts on desk phones, queues and automatic
-assignment, and AI. None of the providers that need an Internet-facing address
-is possible while Hello is reachable only on the LAN, and neither is a widget on
-a public website.
+address), Telnyx, WhatsApp, and AI. None of the providers that need an
+Internet-facing address is possible while Hello is reachable only on the LAN,
+and neither is a widget on a public website.
 
 ## Setting it up
 
@@ -127,8 +130,8 @@ text on a **resolved** conversation reopens it if it was resolved less than
 are open, pending (waiting on the customer), snoozed (until a time), resolved
 and spam.
 
-New conversations arrive **unassigned**: every operator and administrator sees
-them in the pool. Anyone who may see one can **take** it (claim). A claim is a
+New conversations arrive **unassigned** unless the number routes them
+elsewhere (below): every operator and administrator sees them in the pool. Anyone who may see one can **take** it (claim). A claim is a
 compare-and-set in PostgreSQL, so two agents, or two control pods, cannot both
 win: the second gets `409`. **Replying** to an unassigned conversation takes it,
 and replying to a resolved one reopens it. A supervisor can assign any
@@ -212,6 +215,75 @@ through the inbox**. Only text is accepted from a phone.
 Only Grandstream is known to show SIP MESSAGE on the handset (P22650 in the
 built-in template); other vendors are off until a lab check. A user whose phones
 are all of such vendors does not see the profile switch.
+
+## Routing and queues
+
+**Where a number's new conversations go** is set per number (Messaging >
+Channels > Routing, or `PUT /api/v1/messaging/addresses/{id}/routing`):
+
+| Route        | What happens                                                                                               |
+| ------------ | ---------------------------------------------------------------------------------------------------------- |
+| Pool (inbox) | Unassigned; every operator and administrator sees it. The default.                                         |
+| Queue        | The queue's strategy picks an agent (below).                                                               |
+| User         | Assigned to that user.                                                                                     |
+| Extension    | Assigned to the user the extension is linked to.                                                           |
+| Ring group   | A shared pool of the users of the group's extensions: it stays unassigned and the first to reply takes it. |
+
+A target that is deleted, disabled or cannot take conversations (a queue that
+stopped taking texts, an extension nobody is linked to) sends the conversation
+to the pool instead; nothing is lost. Routing is by the number, not the channel:
+every channel that merges later is routed the same way. A conversation is placed
+once, when it starts; a reopened one keeps where it was.
+
+**First contact.** A number may have a first-contact text, sent once to a
+customer who texts it for the first time (never again to the same customer on
+that number, never to one who opted out, and not in addition to the
+closed-hours reply). Like the closed-hours reply it is sent by a SIP trunk
+channel only today.
+
+**Opening hours.** A number may have a weekly schedule (a time zone and
+windows). A conversation that starts outside it gets the **after-hours action**:
+route as usual (the default), send a reply text and then route as usual, or go
+to another target. The reply is sent once, never to a customer who opted out,
+and only a SIP trunk channel can send it today (another channel's conversation
+gets a line in the thread saying it was not sent). The time-conditions engine
+is not used for texts; the number's own schedule is.
+
+**Text queues.** On a queue (Queues > the queue), **Texts** turns it on and sets
+how many open conversations each agent holds (default 3, 1 to 50), after how
+many seconds an unanswered conversation returns (default 300, 0 never) and
+whether an agent on a call is offered none. Existing call queues are unchanged.
+The queue's members are its agents: a member whose extension is linked to a
+user. An agent is offered a conversation when they are **staffed** (a static
+member always; a dynamic member when logged in), not paused, under their limit
+and, if the queue says so, not on a call. This is the call queues' own login
+and pause state, in Valkey: an agent logs in and pauses in the inbox (or with
+the feature codes), and it counts for calls and texts alike. The strategies
+are `queue.Plan`'s (`longest_idle`, `fewest_calls`, `round_robin`, `random`,
+`linear`, with penalties), fed with the number of text conversations the queue
+gave each agent and when; `ring_all` means a shared pool, as above.
+
+A conversation nobody can take waits in the queue, oldest first, and is given
+to an agent as one becomes free (logs in, resumes, resolves one). One an agent
+leaves unanswered for the queue's time returns to the queue and is offered to
+the next agent, not the one who let it lapse; if nobody else can take it, it
+waits and the members can still claim it. A conversation a person assigned or
+took is never taken back. If an agent's extension is unlinked or they leave the
+queue, their conversations return to the queue. Turning a queue's texting off
+sends its unassigned conversations to the pool; a queue that a number routes to
+or that holds an open conversation cannot be deleted (`409`).
+
+Who sees what: a queue's members (and a ring group's users) see the unassigned
+conversations waiting in it and can claim them; nobody else sees them. Operators
+and administrators open **Messaging > Text queues** (`GET /api/v1/inbox/queues`)
+to see each queue's waiting list (position and waiting time, no text or number),
+its agents with their state and open conversations.
+
+The router runs on every control replica every 2 seconds. It claims rows with
+`SKIP LOCKED`, assigns by compare-and-set while counting the agent's open
+conversations under a per-agent advisory lock, and keeps nothing in memory, so
+two pods never assign a conversation twice or give an agent more than the
+limit. If Valkey cannot be read it assigns to static members only.
 
 ## Opt-out (STOP)
 
@@ -386,19 +458,23 @@ Metrics: `hello_chat_sessions_total{result}`, `hello_chat_messages_total{result}
 | Route                                                                                     | Role and scope                |
 | ----------------------------------------------------------------------------------------- | ----------------------------- |
 | `/api/v1/messaging/channels` (+ `/{id}`, `/{id}/test`)                                    | admin, `admin`                |
-| `/api/v1/messaging/addresses` (+ `/{id}`)                                                 | admin, `admin`                |
+| `/api/v1/messaging/addresses` (+ `/{id}`, `/{id}/routing`)                                | admin, `admin`                |
 | `/api/v1/messaging/settings`                                                              | admin, `admin`                |
 | `/api/v1/messaging/optouts` (+ `/{id}/reconsent`)                                         | admin, `admin`                |
 | `POST /api/v1/inbox/erase`                                                                | admin, `admin`                |
 | `/api/v1/messaging/chat/sites` (+ `/{id}`, `/{id}/blocks`), `/chat/blocks/{id}`           | admin, `admin`                |
 | `/api/v1/inbox/conversations/{id}/block`, `/email-reply`, `/typing` (and `/me/inbox/...`) | operator or agent, `messages` |
-| `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`                                   | operator, `messages`          |
+| `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`, `/api/v1/inbox/queues`           | operator, `messages`          |
 | `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream`                      | any agent, `messages`         |
+| `/api/v1/me/inbox/agent` (GET, POST: log in, pause)                                       | any agent, `messages`         |
 | `POST .../conversations/{id}/contact` (add to contacts)                                   | as the area it is in          |
 | `GET .../conversations/{id}/calls` (the number's recent calls)                            | as the area it is in          |
 
+Queues take `textEnabled`, `textCapacity`, `textReassignSeconds` and
+`textRequiresIdleVoice`.
+
 Conversations list with `view` (`all`, `mine`, `unassigned`), `status`, `q`
-(number, name or text), `channelId`, and a cursor. Every operation is in
+(number, name or text), `channelId`, `queueId`, and a cursor. Every operation is in
 [the OpenAPI document](../internal/api/openapi.json).
 
 ## Metrics
@@ -406,8 +482,11 @@ Conversations list with `view` (`all`, `mine`, `unassigned`), `status`, `q`
 `hello_msg_inbound_total{provider,result}` (stored, duplicate, not_text,
 failed), `hello_msg_device_replies_total{result}` (sent, refused, failed: texts typed on
 a desk phone), `hello_msg_optout_total{source}`, `hello_msg_purged_total{kind}`,
-`hello_msg_unassigned` and `hello_msg_unassigned_oldest_seconds`. No label
-carries a number, a name or text.
+`hello_msg_unassigned` and `hello_msg_unassigned_oldest_seconds`, and for
+routing `hello_msg_assign_total{result}` (placed, assigned, full, lost,
+returned, after_hours_reply), `hello_msg_first_response_seconds`,
+`hello_msg_queue_text_waiting{queue}` and `hello_msg_assign_live_down_total`.
+No label carries a number, a name or text.
 
 ## HA
 
@@ -416,7 +495,9 @@ one transaction (an event ledger makes a delivery seen once, on any pod; one ope
 conversation per number and customer is made under a unique index), claims and
 assignments are compare-and-set, retention and notification claims use
 `SKIP LOCKED` or a Valkey lease. Nothing is held only in memory, so a pod
-restart loses nothing. Valkey is not needed for the inbox.
+restart loses nothing. Valkey is not needed to receive and answer texts; it
+holds the agents' login and pause, and without it assignment falls back to
+static queue members.
 
 ## Lab checklist (real carrier)
 

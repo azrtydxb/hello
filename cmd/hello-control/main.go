@@ -26,6 +26,7 @@ import (
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/router"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/oauth"
 	"github.com/azrtydxb/hello/internal/originate"
@@ -163,6 +164,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, msgMetrics, log)
 	go runCarrierWorkers(ctx, st, msgMetrics, log)
 	go runInboxNotifier(ctx, envSMTP(cfg), st, log)
+	go runMessageRouter(ctx, st, routerLive{vk}, router.NewMetrics(metrics.Registry), log)
 	if _, err := startChat(ctx, cfg, st, box, vk, effectiveSMTP(st, envSMTP(cfg)), metrics.Registry, log); err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("HELLO_MSG_CHAT_LAN_ADDR: %w", err)

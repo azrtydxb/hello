@@ -35,6 +35,7 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
+import { AgentAvailability } from "./inbox/AgentAvailability";
 import { Can } from "../role";
 import { usePolling } from "../usePolling";
 import { LinkedText } from "./inbox/Linkified";
@@ -1099,6 +1100,7 @@ function InboxView({
                   {c.assigneeUserId === null && c.status !== "resolved" && (
                     <Badge tone="warn">Unassigned</Badge>
                   )}
+                  {c.queueName && <Badge tone="neutral">{c.queueName}</Badge>}
                   {c.optedOut && <Badge tone="bad">Opted out</Badge>}
                   {c.channelKind === "webchat" && (
                     <Badge tone="neutral">Chat</Badge>
@@ -1149,6 +1151,13 @@ function Shell({ api, supervisor }: ViewProps) {
             ? "Every customer text conversation. Reading one that is not yours is recorded in the audit log."
             : "The customer text conversations assigned to you, and those you answered."
         }
+        actions={
+          supervisor ? (
+            <LinkButton to="/inbox/queues" variant="secondary">
+              Text queues
+            </LinkButton>
+          ) : undefined
+        }
       />
       {status.status === "ready" && !status.data.enabled ? (
         <EmptyState
@@ -1163,6 +1172,7 @@ function Shell({ api, supervisor }: ViewProps) {
         />
       ) : (
         <>
+          <AgentAvailability />
           {supervisor && senders.length > 0 && (
             <div className="msg-toolbar">
               <Button icon="send" onClick={() => setStarting(true)}>

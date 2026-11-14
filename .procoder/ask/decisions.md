@@ -4270,3 +4270,69 @@ unregistered sender.
   failure); it is not persisted, and sign-out clears it.
 - **CRM link** is an "Open in CRM" notification button (only http and https
   links), not a click on the body, which still just dismisses.
+
+## Messaging item 5: routing and ACD (2026-11-11)
+
+Built on origin/main so that routing does not depend on which channel created
+the conversation: the router places any conversation whose `routed_at` is NULL,
+so the Twilio (item 2), desk-phone (item 3) and chat (item 4) channels are
+routed once they merge, with no change of their own. Where the spec left a
+product choice open, the conservative one was taken and is listed here as
+chosen by default; change one by editing this entry and the code it names.
+
+- **Wake-up.** The router sweeps every 2 s on every control replica instead of
+  waiting on `pg_notify` plus a 10 s tick (the repo has no LISTEN
+  infrastructure, and the sweep is a few indexed queries). Returning
+  unanswered conversations and releasing orphans run every 10 s
+  (`router.DefaultSlowEvery`). Agent login lives in Valkey, which PostgreSQL
+  cannot wake on either way.
+- **Routing config is a sub-resource.** `GET|PUT /api/v1/messaging/addresses/{id}/routing`
+  carries the route, schedule, after-hours action and first-contact text,
+  rather than more fields on the address PUT, so the address contract of the
+  other open messaging PRs stays as it is. `route_target` is the id of the
+  queue, user, extension or ring group as text; a queue target must take texts
+  when it is set.
+- **Fallback is the supervisors' pool.** A route whose target is deleted,
+  disabled, unlinked or (for a queue) off for texts sends the conversation to
+  the pool. The spec's "the address's fallback route" is read as that pool.
+  Turning a queue's texting off moves its unassigned conversations to the pool;
+  assigned ones stay with their agent.
+- **After-hours.** `none` routes as usual, `reply` sends the text and then
+  routes as usual, `route` goes to the other target. Evaluated by the number's
+  own weekly schedule (the time-conditions engine is not used for texts); an
+  empty schedule is always open and an invalid stored one reads as open. The
+  reply is sent once per conversation, never to an opted-out customer, and only
+  a SIP trunk channel can send it today: another provider gets a system line
+  saying the text was not sent, until its channel adds a send path.
+- **First contact.** The first-contact text (M-14) goes once to a peer with no
+  earlier conversation on that number, not together with the closed-hours
+  reply, never to an opted-out peer.
+- **Capacity.** An agent's open conversations are those assigned to them that
+  are open or pending (snoozed does not count), across every queue and direct
+  assignment. Only the router enforces it; a person who claims or replies is
+  not blocked.
+- **Statistics for the strategies.** Calls and last end come from
+  `msg_agent_stats` in PostgreSQL (answered = conversations the queue gave the
+  user; last end = when it last did), the round robin counter from
+  `msg_queue_rr`, both separate from the voice statistics. A user linked to
+  several member extensions counts once, by their best extension.
+- **Reassign.** Only conversations the router assigned (the latest assignment
+  row is `acd`) and only while open with the customer's last text unanswered
+  by any user reply. The agent who let it lapse is not offered it again; with
+  nobody else eligible it waits in the queue (its members can claim it). A
+  conversation a person assigned, took or answered, or a direct user or
+  extension route, is never taken back. An agent whose extension is unlinked
+  or who leaves the queue loses their router-assigned conversations to the
+  queue.
+- **Shared pool visibility.** The members of a text queue and the users of a
+  ring group see the unassigned conversations waiting there (and are told by
+  the live stream and, with an address, by email); nobody else does.
+- **Availability is the call queues' state.** One login and one pause per
+  extension, so pausing for texts pauses calls too; the inbox sets it on every
+  extension of the user that is a member of a text queue (`/me/inbox/agent`).
+  With Valkey unreadable the router assigns to static members only.
+- **Not offered.** The `ai_triage` route kind waits for the AI item; `desk_phone_delivery`
+  and the owner extension wait for item 3 (the router calls `Store.afterAssign`,
+  where that item's delivery on assignment belongs).
+- **Deleting a queue** is refused (409) while a number routes to it or an open
+  conversation is placed in it.

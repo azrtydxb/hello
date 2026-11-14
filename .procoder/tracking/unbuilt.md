@@ -122,17 +122,17 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 ## messaging-channels
 
-| #     | Item                                                         | Status      |
-| ----- | ------------------------------------------------------------ | ----------- |
-| 1     | Inbox core                                                   | done (#211) |
-| 2     | Twilio sending                                               | todo        |
-| 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | in review   |
-| 4     | LAN chat widget                                              | in PR       |
-| 5     | Message routing and ACD                                      | todo        |
-| 6     | Telnyx, sender registration                                  | todo        |
-| 7     | AI triage, drafts, auto-reply                                | todo        |
-| 8     | Integrations, reporting, DSAR export, redact                 | todo        |
-| N1-N3 | Public listener, WhatsApp, polling                           | not now     |
+| #     | Item                                                         | Status       |
+| ----- | ------------------------------------------------------------ | ------------ |
+| 1     | Inbox core                                                   | done (#211)  |
+| 2     | Twilio sending                                               | todo         |
+| 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | in review    |
+| 4     | LAN chat widget                                              | in PR        |
+| 5     | Message routing and ACD                                      | in PR (#311) |
+| 6     | Telnyx, sender registration                                  | todo         |
+| 7     | AI triage, drafts, auto-reply                                | todo         |
+| 8     | Integrations, reporting, DSAR export, redact                 | todo         |
+| N1-N3 | Public listener, WhatsApp, polling                           | not now      |
 
 ## clients-webrtc-mobile-video
 
