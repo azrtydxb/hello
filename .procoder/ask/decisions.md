@@ -3555,6 +3555,48 @@ Decided while building, without asking, within the spec and the brief:
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
 
+## TLS hop from Kamailio to hello-sip (2026-11-13)
+
+- S-12 is opt-in at both ends: `KAMAILIO_HELLO_TLS_PORT` on Kamailio and
+  `HELLO_SIP_TLS_ADDR` on hello-sip (chart `kamailio.helloTLS`, `sip.tls`). Off,
+  kamailio.cfg and hello-sip behave as before; kw does not set either, so its
+  ConfigMap only gains the unused `tls-hop.cfg` key and the new defines.
+- It carries every encrypted phone leg (tls, ws, wss), not only WebSocket, so
+  it is testable in the lab with the existing TLS phone. (A first draft kept
+  one dispatcher set and converted the chosen destination to its TLS address;
+  it was replaced by the second set below, probed over TLS from hello_tls.)
+- Hello's requests come back to `hello_tls` on the instance's own address (as
+  `hello_ws` does for WSS), mutual TLS with one certificate of the Hello CA.
+  Kamailio verifies the node's certificate only on connections it opens
+  (`tls-hop.cfg` client section); what arrives on hello_tls is vetted by source
+  address like the UDP socket, because the tls module's server section cannot be
+  set per socket from a static file.
+- hello-sip needs the edge to present a client certificate (RequireAndVerify).
+  The certificate is re-read when it changes (cert-manager renewals).
+- The dispatcher has a second set (the same nodes by TLS address, `sockname`
+  attributes naming hello_tls) probed over TLS; an encrypted leg is balanced
+  over it, so a node whose TLS listener is down is skipped for those legs only.
+  The lab proves it by stopping a node and checking set 2 follows. hello-sip
+  counts `hello_sip_requests_by_wire_total{transport}` so the lab can assert a
+  REGISTER arrived on the TLS listener; Kamailio's `edge_requests_total` shows
+  Hello's requests on hello_tls.
+- The cleartext-hop refusal is built here, after #324 merged: a WebRTC leg
+  whose signalling did not arrive over the TLS hop is refused unless
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP` is set (internal/sip/tlshop.go).
+- Merged with SIP over WSS (#326), both opt-in and independent. With the hop
+  on, every encrypted leg (tls, ws, wss) goes over `hello_tls` and dispatcher
+  set 2: the hop supersedes `hello_ws` for WSS legs (both are this instance's
+  own address, and the hop is the encrypted one). With the hop off, WSS keeps
+  #326's behaviour (`hello_ws` under EDGE_VIP, else `hello`). Requests arriving
+  on `hello`, `hello_legacy`, `hello_ws` and `hello_tls` are all vetted against
+  the dispatcher and flagged as from Hello. NEED_TLS is defined by
+  KAMAILIO_TLS_PORT, KAMAILIO_WSS_PORT or KAMAILIO_HELLO_TLS_PORT; the tls
+  module reads `tls-hop.cfg` with the hop on, else `tls.cfg`. Because
+  `tls-hop.cfg` presents one certificate on every TLS socket, the chart refuses
+  `kamailio.helloTLS.enabled` with `kamailio.wss.enabled` when
+  `kamailio.wss.secretName` names a different Secret than
+  `kamailio.tls.secretName`. kw keeps both off.
+
 ## Messaging 4, LAN chat widget: defaults chosen (2026-11-11)
 
 Built from `.procoder/specs/messaging-channels.md` M-28, M-29, M-29a to M-29c.
@@ -4083,6 +4125,19 @@ Follow-up to "Clients item 1: media foundation on pion". Choices:
   client as the browser. They check that nothing but STUN and DTLS crosses the
   browser leg before the keys are in, that nothing on it is in the clear after,
   and that a cleartext packet from the browser is not relayed.
+
+## WebRTC offers need the TLS hop (2026-11-13)
+
+- `media.Relay.AnswerWebRTC` takes a `SignalingHop`; an offer that arrived over a
+  cleartext edge-to-node hop is refused with `ErrCleartextHop` unless
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP=true` (default false). The check runs
+  first, before the leg is routed or a handshake starts.
+- hello-sip decides "encrypted" from the transport sipgo read the message on
+  (its TLS listener) from a trusted edge, never from the Via the sender wrote;
+  `wireLabel` (and so `hello_sip_requests_by_wire_total`) uses the same source.
+  `Server.checkWebRTCHop` logs the refusal at warn with the fix and counts
+  `hello_sip_webrtc_refused_total{reason="cleartext_hop"}`; the softphone call
+  path (not built yet) answers 488.
 
 ## Integrations P13 and P19: Salesforce Open CTI and Dynamics 365 CIF (2026-11-13)
 

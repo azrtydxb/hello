@@ -173,6 +173,14 @@ sip:
   # Kamailio's addresses: only these may set Path/X-Hello-Client. Narrow it
   # to your pod CIDR (and node CIDR when Kamailio is on the host network).
   trustedProxies: "10.0.0.0/8"
+  # SIP over mutual TLS from Kamailio, for the encrypted phone legs
+  # (kamailio.helloTLS; docs/webrtc.md, "TLS hop"). The Secret is issued by
+  # the Hello CA, carries ca.crt, names every address Kamailio dials hello-sip
+  # at (the pod DNS names) and is usable as a server and a client certificate.
+  tls:
+    enabled: false
+    port: 5061
+    secretName: ""
   ringTimeout: 30s
   # A drain gives its calls to a ready survivor before the node exits. It
   # must stay below terminationGracePeriodSeconds.
@@ -284,7 +292,7 @@ kamailio:
     secretName: ""
   # SIP over WSS for browsers (docs/webrtc.md; clients-webrtc-mobile-video
   # S-8 to S-12). Kamailio ends TLS and the WebSocket on its pod address and
-  # speaks UDP to the hello-sip nodes. Needs a kamailio image with the
+  # speaks UDP to the hello-sip nodes (mutual TLS with helloTLS on). Needs a kamailio image with the
   # websocket and tls modules (docker/kamailio) and a certificate Secret.
   wss:
     enabled: false
@@ -306,6 +314,18 @@ kamailio:
     # ui.ingress.enabled).
     ingress: true
     ingressAnnotations: {}
+  # The TLS hop to Hello for encrypted phone legs (tls, ws, wss;
+  # clients-webrtc-mobile-video S-12): those requests go to hello-sip over
+  # mutual TLS and Hello's requests for them return to a TLS socket of the
+  # instance on port. Needs sip.tls.enabled, a certificate Secret
+  # (kamailio.tls.secretName, with its ca.crt, whose names include the
+  # address Hello dials: every Kamailio node address) and an image with the
+  # tls module. Off: kamailio.cfg behaves exactly as before.
+  helloTLS:
+    enabled: false
+    port: 5073
+    # hello-sip's TLS port (sip.tls.port).
+    sipPort: 5061
   # Phones' Service when hostNetwork is off.
   service:
     type: LoadBalancer

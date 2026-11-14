@@ -120,7 +120,9 @@ counted in `hello_ice_credentials_issued_total`, not logged per credential.
 
 Browsers register and call over SIP on a WebSocket (RFC 7118). Kamailio, the
 SIP edge, ends the WebSocket and TLS and talks plain UDP to the hello-sip
-nodes, as for any phone: hello-sip has no WebSocket code. A browser is
+nodes, as for any phone (or mutual TLS with the
+[TLS hop](#tls-hop-from-kamailio-to-hello-sip) on): hello-sip has no
+WebSocket code. A browser is
 therefore a phone that registers through the edge, with the credentials of a
 [web device](#web-devices). Off by default.
 
@@ -163,7 +165,8 @@ therefore a phone that registers through the edge, with the credentials of a
   the instance dies the socket closes, the client reconnects through the
   Ingress to the survivor and registers again; until then Hello forks to the
   user's other devices. nathelper's OPTIONS keep-alive is not sent to these
-  contacts.
+  contacts. With the TLS hop on, `hello_tls` (also this instance's own
+  address) takes that role for WebSocket clients instead of `hello_ws`.
 - **Transport.** The binding records `wss` (`transport` in
   `/api/v1/registrations`, `hello_sip_registrations_by_transport{transport="wss"}`).
   A `sips:` call may ring a `wss` binding (encrypted to the edge); a plain
@@ -183,6 +186,71 @@ therefore a phone that registers through the edge, with the credentials of a
   that a foreign origin is refused.
 - **Not covered.** A browser call needs the media path (DTLS-SRTP and ICE) and
   the softphone, which are separate pieces. Kamailio-to-hello-sip stays UDP
-  inside the edge network; the spec's TLS hop for it waits for the DTLS-SRTP
-  media work, which must not carry a fingerprint over a cleartext hop in
-  production.
+  inside the edge network unless the TLS hop below is on; a DTLS-SRTP
+  fingerprint must not travel over a cleartext hop in production.
+
+## TLS hop from Kamailio to hello-sip
+
+The signalling of a browser carries the fingerprint of its media (DTLS-SRTP),
+which is only as trustworthy as the path that carries it. Browsers reach
+Kamailio over WSS; the hop from Kamailio to hello-sip must be encrypted too
+before a WebRTC call is accepted in production. It is off by default, and
+with it off Kamailio and hello-sip behave exactly as before.
+
+- **What uses it.** A request that arrives over an encrypted phone leg (`tls`,
+  `ws` or `wss`) goes to the hello-sip node over mutual TLS. Hello's requests
+  for that phone come back to a TLS socket of the same Kamailio instance,
+  `hello_tls`, on its own address and `kamailio.helloTLS.port` (5073), which
+  the Path and Record-Route name. Everything else (UDP and TCP phones, the
+  dispatcher's OPTIONS probes) stays UDP on the `hello` socket.
+- **Mutual.** hello-sip listens on `sip.tls.port` (5061) and requires a client
+  certificate signed by the Hello CA (`HELLO_SIP_TLS_ADDR`, `_CERT`, `_KEY`,
+  `_CA`; TLS 1.2 minimum). Kamailio presents its certificate and verifies the
+  node's against the same CA (`tls-hop.cfg`, which is `tls.cfg` plus the CA, a
+  client certificate and `verify_certificate = yes` for the connections
+  Kamailio opens). Hello verifies Kamailio's certificate on its own
+  connections. What arrives on `hello_tls` is still vetted by source address,
+  like the UDP socket: only a dispatcher node's address is a Hello node.
+- **Certificates.** One certificate of the Hello CA with its `ca.crt`, usable as
+  a server and a client certificate (`serverAuth` and `clientAuth`), whose
+  names include the addresses Hello dials (the Kamailio node addresses) and
+  the pod DNS names of the hello-sip nodes. hello-sip re-reads it when the
+  file changes, at most once a minute, so cert-manager renewals need no
+  restart. Kamailio reads it at start.
+- **Chart.** `sip.tls.enabled` and `sip.tls.secretName` (hello-sip), and
+  `kamailio.helloTLS.enabled` (with `port`, `sipPort`), which needs
+  `kamailio.tls.secretName` for Kamailio's own certificate. Both are off by
+  default; the chart refuses one without the other's prerequisites. In
+  Kamailio it is `KAMAILIO_HELLO_TLS_PORT` and `KAMAILIO_HELLO_SIP_TLS_PORT`.
+  The kw manifests do not set them: turning the hop on there is a manifest
+  change together with the certificate. With `kamailio.wss.enabled` too, WSS
+  presents the same certificate (`tls-hop.cfg` serves one on every TLS
+  socket), so `kamailio.wss.secretName` must be empty or equal to
+  `kamailio.tls.secretName`; the chart refuses anything else.
+- **Health.** The dispatcher holds a second set: the same nodes by their TLS
+  address (`sip:<node>:5061;transport=tls`, `sockname=hello_tls`), probed with
+  OPTIONS over TLS from the `hello_tls` socket like set 1 is over UDP. An
+  encrypted phone leg is balanced over set 2, so a node whose TLS listener is
+  down (or whose certificate no longer verifies) is marked down for those legs
+  only, and its UDP entry stays up for everything else. The chart writes set 2
+  into the dispatcher list when `kamailio.helloTLS.enabled`. A retry on
+  another node and an in-dialog request aimed at a dead node stay in the same
+  set (a message flag carries the choice into the failure routes); a request
+  that follows a Route to a node (the node that owns the dialog) is converted
+  to that node's TLS address without a health check.
+- **Metrics.** hello-sip counts requests by the transport they arrived on,
+  `hello_sip_requests_by_wire_total{transport="udp|tcp|tls"}`, and Kamailio
+  counts those on the hop socket in `kamailio_edge_requests_total{socket="hello_tls"}`.
+- **Cleartext refusal.** With the hop off, a WebRTC offer is refused unless
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP=true` (default false), because its
+  DTLS fingerprint would travel in the clear between Kamailio and the node; see
+  [media.md](media.md). The offer must have arrived on the node's TLS listener
+  from a trusted edge. Hello's trunk legs and Hello to SBC connections are not
+  part of this hop.
+- **Lab.** The compose lab turns it on at both ends (the lab SIP certificate is
+  both ends' certificate), so every TLS phone of the lab suite travels it:
+  `TestLabSIPTLS` registers over TLS and the node answers on the hop, and
+  `TestLabTLSHop` asserts it: the nodes count the REGISTERs as arrived over
+  TLS, Kamailio counts Hello's INVITE to the phone on `hello_tls` and the
+  phone's connection receives it, and stopping a node marks only its TLS
+  destination down through the TLS probes.

@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -119,6 +120,16 @@ type Config struct {
 	// TrustedProxies are the edge proxies (Kamailio) whose X-Hello-Client
 	// and Path headers are believed (plan contract 7).
 	TrustedProxies []netip.Prefix
+	// TLSListener, when set, also takes SIP over TLS (already wrapped with the
+	// server TLS configuration, see ListenTLS), next to the UDP socket; and
+	// TLSClient is how requests Hello sends over TLS verify the far side and
+	// present Hello's own certificate. The edge uses this hop for browsers.
+	TLSListener net.Listener
+	TLSClient   *tls.Config
+	// WebRTCAllowCleartextHop (HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP, default
+	// false) lets a WebRTC offer be answered although it did not arrive over
+	// the TLS hop: its DTLS fingerprint then travelled in the clear.
+	WebRTCAllowCleartextHop bool
 	// Dialing is the numbering context (HELLO_DIAL_INTL_PREFIX and
 	// HELLO_DIAL_COUNTRY_CODE) caller numbers are normalised in for the
 	// blocklist and the country restriction (pbx-gaps S-7, S-8).
@@ -526,7 +537,7 @@ func setDefault(d *time.Duration, v time.Duration) {
 // Serve handles SIP on conn until ctx is cancelled or conn fails; it closes
 // conn and the transaction layer before returning.
 func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
-	ua, err := sipgo.NewUA(
+	uaOpts := []sipgo.UserAgentOption{
 		sipgo.WithUserAgent("Hello"),
 		sipgo.WithUserAgentHostname(s.cfg.Domain),
 		sipgo.WithUserAgentTransactionLayerOptions(
@@ -536,7 +547,14 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 			}),
 		),
 		sipgo.WithUserAgentTransportLayerOptions(sip.WithTransportLayerLogger(s.log)),
-	)
+	}
+	if s.cfg.TLSClient != nil {
+		// Requests Hello sends over TLS (to the edge's TLS socket named in a
+		// Path or Record-Route) verify the edge and present Hello's own
+		// certificate; without it sipgo would dial with its defaults.
+		uaOpts = append(uaOpts, sipgo.WithUserAgenTLSConfig(s.cfg.TLSClient))
+	}
+	ua, err := sipgo.NewUA(uaOpts...)
 	if err != nil {
 		return err
 	}
@@ -633,6 +651,17 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	errc := make(chan error, 1)
 	s.serving.Store(true)
 	go func() { errc <- srv.ServeUDP(conn) }()
+	if s.cfg.TLSListener != nil {
+		go func() {
+			// ServeTLS returns only when the listener stops. During shutdown that
+			// is expected; otherwise the TLS hop is down while UDP still serves
+			// everything else.
+			err := srv.ServeTLS(s.cfg.TLSListener)
+			if ctx.Err() == nil && s.serving.Load() {
+				s.log.Error("SIP over TLS stopped", "error", err)
+			}
+		}()
+	}
 	go func() {
 		defer close(trunksDone)
 		// Requests we originate leave from the listening socket, which
@@ -648,12 +677,14 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 		stopTrunks()
 		<-trunksDone
 		_ = conn.Close()
+		s.closeTLS()
 		if serr := <-errc; serr != nil {
 			s.log.Debug("serve ended during shutdown", "err", serr)
 		}
 		err = nil
 	case err = <-errc:
 		_ = conn.Close()
+		s.closeTLS()
 	}
 	s.serving.Store(false)
 	stop()
@@ -703,6 +734,7 @@ func (s *Server) handle(srv *sipgo.Server, m sip.RequestMethod, h sipgo.RequestH
 func (s *Server) wrap(h sipgo.RequestHandler) sipgo.RequestHandler {
 	return func(req *sip.Request, tx sip.ServerTransaction) {
 		s.m.request(req.Method.String())
+		s.m.RequestsByWire.WithLabelValues(wireLabel(req)).Inc()
 		if req.IsAck() {
 			s.noteAck(req)
 		}
