@@ -38,7 +38,7 @@ spec:
     spec:
       containers:
         - name: hello-fax
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-fax:sha-2e6afd26e970e8f76d1f44f574e2d16322e5130b
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-fax:sha-cb5b6da6f7a705e381227870d3133ea566382e42
           imagePullPolicy: Always
           args:
             - serve

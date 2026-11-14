@@ -1252,9 +1252,9 @@ data:
     method = TLSv1.2+
     verify_certificate = no
     require_certificate = no
-  # Verbatim copy of deploy/kamailio/tls-hop.cfg (test/deploy). Read only when
+  # Verbatim copy of deploy/kamailio/tls-hop.cfg (test/deploy). Read when
   # KAMAILIO_HELLO_TLS_PORT is set on the pod (the TLS hop to hello-sip,
-  # S-12); not set on kw today.
+  # S-12), which kw does; tls.cfg is then unused.
   tls-hop.cfg: |
     # Kamailio tls module configuration when the TLS hop to Hello is on
     # (KAMAILIO_HELLO_TLS_PORT, see kamailio.cfg; clients-webrtc-mobile-video
@@ -1297,6 +1297,11 @@ data:
     # hello-sip pod that returns on another node keeps its entry.
     1 sip:hello-sip-1.hello.svc.cluster.local:5060 0 0 duid=hello-sip-1
     1 sip:hello-sip-2.hello.svc.cluster.local:5060 0 0 duid=hello-sip-2
+    # Set 2 (the TLS hop, KAMAILIO_HELLO_TLS_PORT): the same nodes by their
+    # TLS address (HELLO_SIP_TLS_ADDR), probed over TLS from the hello_tls
+    # socket, for the encrypted phone legs (wss, and tls once phones use it).
+    2 sip:hello-sip-1.hello.svc.cluster.local:5061;transport=tls 0 0 duid=hello-sip-1-tls;sockname=hello_tls
+    2 sip:hello-sip-2.hello.svc.cluster.local:5061;transport=tls 0 0 duid=hello-sip-2-tls;sockname=hello_tls
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -1397,7 +1402,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: 5e7af10f65c86419532f5fb777dcb5ddbd2ffbba59722f65d9bf5aac376b90a1
+        hello.watteel.com/kamailio-config-sha256: dbc61113f5e1e14d2579fe1bf775587a5348139202ae2847612ed2c406c6bd1e
     spec:
       # Phones must reach Kamailio with no NAT in between: through a NodePort
       # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's
@@ -1527,13 +1532,39 @@ spec:
             - name: KAMAILIO_INVITE_TIMEOUT
               # Above HELLO_SIP_RING_TIMEOUT (10s), as in the lab.
               value: "25000"
-            # SIP over TLS (phone-feature-parity S-14) is switched on by
-            # adding KAMAILIO_TLS_PORT="30509" (and KAMAILIO_PUBLIC_TLS_PORT
-            # "30509") here and the phones-tls port below, in the same change
-            # that pins a kamailio image built with kamailio-tls-modules
-            # (docker/kamailio): an image without tls.so exits on loading it.
-            # The certificate (Certificate hello-sip-tls below) is already
-            # issued and mounted at /etc/hello-tls.
+            # SIP over TLS for phones (phone-feature-parity S-14) is switched
+            # on by adding KAMAILIO_TLS_PORT="30509" (and
+            # KAMAILIO_PUBLIC_TLS_PORT "30509") here and the phones-tls port
+            # below. The pinned image has the tls and websocket modules, and
+            # the certificate (Certificate hello-edge-tls below) is mounted
+            # at /etc/hello-tls for WSS and the TLS hop already.
+            - name: KAMAILIO_HELLO_TLS_PORT
+              # The TLS hop to hello-sip (docs/webrtc.md, "TLS hop"): the
+              # encrypted phone legs (wss here) go to the node over mutual
+              # TLS (dispatcher set 2) and Hello's requests for them come
+              # back to this instance's hello_tls socket, on its own node
+              # address and this port. tls-hop.cfg is read instead of
+              # tls.cfg.
+              value: "5073"
+            - name: KAMAILIO_HELLO_SIP_TLS_PORT
+              # hello-sip's HELLO_SIP_TLS_ADDR port.
+              value: "5061"
+            - name: KAMAILIO_WSS_PORT
+              # SIP over WSS for browsers (docs/webrtc.md): the console's
+              # Ingress forwards wss://hello.kw.watteel.lab/sip here (Service
+              # and Ingress kamailio-ws below). Bound on the node address;
+              # only the ingress controller should reach it.
+              value: "8088"
+            - name: KAMAILIO_WS_ORIGINS
+              # The console's origin: a WebSocket handshake from any other
+              # page is refused (403).
+              value: https://hello.kw.watteel.lab
+            - name: KAMAILIO_WSS_TRUSTED_PROXIES
+              # ingress-nginx's pod address (kw's pod CIDR 10.42.0.0/16; the
+              # controller is not host-networked and reaches the node over
+              # the Cilium tunnel): its X-Forwarded-For is believed, so
+              # Hello's throttles count per browser.
+              value: ^10[.]42[.]
           ports:
             - name: phones
               containerPort: 30508
@@ -1544,6 +1575,12 @@ spec:
             - name: hello
               containerPort: 5070
               protocol: UDP
+            - name: hello-tls
+              containerPort: 5073
+              protocol: TCP
+            - name: wss
+              containerPort: 8088
+              protocol: TCP
             - name: metrics
               containerPort: 9071
               protocol: TCP
@@ -1585,16 +1622,15 @@ spec:
           emptyDir: {}
         - name: tls
           secret:
-            secretName: hello-sip-tls
+            secretName: hello-edge-tls
             defaultMode: 288
-            # Absent until cert-manager has issued it; only read when TLS is
-            # on, so the pod starts either way.
-            optional: true
+            # Not optional: WSS and the TLS hop read it at start, so the pod
+            # waits for cert-manager to issue it rather than start without.
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: hello-sip-tls
+  name: hello-edge-tls
   namespace: hello
   labels:
     app.kubernetes.io/name: hello
@@ -1602,14 +1638,30 @@ metadata:
     app.kubernetes.io/component: edge
     app.kubernetes.io/managed-by: kuvryn-sync
 spec:
-  # The SIP-over-TLS certificate Kamailio presents to phones (S-14), issued
-  # by the Hello CA (cluster-ca) that phones already trust through the CA
-  # push of provisioning. Phones connect to the node address, so it is an IP
-  # SAN; the DNS names serve a phone provisioned with a name. RSA, because
-  # the older phone TLS stacks handle it everywhere. Renewed 30 days before
-  # expiry: cert-manager keeps serving the old certificate if a renewal
-  # fails, and the alert in docs/tls.md fires 14 days before it runs out.
-  secretName: hello-sip-tls
+  # Kamailio's certificate, mounted with its ca.crt at /etc/hello-tls, on
+  # every TLS socket it has (tls-hop.cfg presents one): the WSS listener the
+  # console's Ingress forwards browsers to, the hello_tls socket hello-sip
+  # dials, its client certificate on the TLS hop to hello-sip, and SIP over
+  # TLS for phones once that is on (S-14). Issued by the Hello CA
+  # (cluster-ca), which hello-sip trusts (HELLO_SIP_TLS_CA) and phones
+  # already trust through the CA push of provisioning.
+  #
+  # - IP SANs: hello-sip verifies the address it dials, which is the node
+  #   address of the instance (master-11 192.168.10.101, master-12
+  #   192.168.10.102); phones on TLS will use 192.168.10.101 or, after the
+  #   VIP go-live, the VIP 192.168.10.109. The DNS names serve a phone
+  #   provisioned with a name.
+  # - server auth and client auth: hello-sip requires a client certificate
+  #   of the CA on its TLS listener.
+  # - RSA, because the older phone TLS stacks handle it everywhere.
+  # - Renewed 30 days before expiry. Kamailio reads it only at start, so a
+  #   renewal reaches it with the next Kamailio restart (any deploy that
+  #   touches the edge); the old certificate stays valid for those 30 days.
+  #
+  # It replaces hello-sip-tls (server auth and 192.168.10.101 only): a new
+  # Secret name lets the pod wait for the new certificate instead of racing
+  # cert-manager's reissue of the old one.
+  secretName: hello-edge-tls
   issuerRef:
     name: cluster-ca
     kind: ClusterIssuer
@@ -1619,6 +1671,8 @@ spec:
     - sip.hello.kw.watteel.lab
   ipAddresses:
     - 192.168.10.101
+    - 192.168.10.102
+    - 192.168.10.109
   duration: 2160h
   renewBefore: 720h
   privateKey:
@@ -1629,6 +1683,51 @@ spec:
     - digital signature
     - key encipherment
     - server auth
+    - client auth
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: hello-sip-node-tls
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: sip
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  # hello-sip's certificate on the TLS hop (HELLO_SIP_TLS_*, mounted at
+  # /etc/hello-sip-tls on hello-sip-1 and hello-sip-2): its TLS listener's
+  # server certificate, which Kamailio verifies against the same CA
+  # (tls-hop.cfg), and the client certificate of hello-sip's own connections
+  # to Kamailio's hello_tls socket. The names are the ones Kamailio's
+  # dispatcher dials (set 2: hello-sip-N.hello.svc.cluster.local:5061) and
+  # their shorter forms. Both nodes share it, as the chart's StatefulSet
+  # does. hello-sip re-reads it when the files change, so renewals need no
+  # restart.
+  secretName: hello-sip-node-tls
+  issuerRef:
+    name: cluster-ca
+    kind: ClusterIssuer
+  commonName: hello-sip.hello.svc.cluster.local
+  dnsNames:
+    - hello-sip-1
+    - hello-sip-1.hello.svc
+    - hello-sip-1.hello.svc.cluster.local
+    - hello-sip-2
+    - hello-sip-2.hello.svc
+    - hello-sip-2.hello.svc.cluster.local
+  duration: 2160h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+    - client auth
 ---
 apiVersion: v1
 kind: Service
@@ -1654,6 +1753,71 @@ spec:
       port: 9090
       protocol: TCP
       targetPort: metrics
+---
+# The browsers' WebSocket edge (docs/webrtc.md): the Ingress below forwards
+# wss://hello.kw.watteel.lab/sip here. The Kamailio pods are host-networked,
+# so the endpoints are the nodes' own addresses (192.168.10.101:8088 and
+# 192.168.10.102:8088); a connection lands on one instance and stays there.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kamailio-ws
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+  ports:
+    - name: wss
+      port: 8088
+      protocol: TCP
+      targetPort: wss
+---
+# /sip on the console's host, so the browser reuses the console's certificate
+# (hello-tls, issued for the Ingress "hello" by cert-manager's ingress-shim)
+# and origin: no second DNS name and no CORS. ingress-nginx ends the
+# browser's TLS, speaks TLS to Kamailio's WSS listener (hello-edge-tls; not
+# verified by the ingress) and keeps the upgraded connection open for the
+# long timeouts. No cluster-issuer annotation here: the Ingress "hello" owns
+# hello-tls.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kamailio-ws
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - hello.kw.watteel.lab
+      secretName: hello-tls
+  rules:
+    - host: hello.kw.watteel.lab
+      http:
+        paths:
+          - path: /sip
+            pathType: Exact
+            backend:
+              service:
+                name: kamailio-ws
+                port:
+                  name: wss
 ---
 # At most one Kamailio is voluntarily disrupted at a time (a node drain by
 # kured, an eviction): the other is the survivor that carries the phones. The
@@ -1730,6 +1894,10 @@ spec:
       # restart token and a READY hello-sip-2) plus the 90s drain (lab: 2h,
       # capped here) plus margin.
       terminationGracePeriodSeconds: 270
+      securityContext:
+        # The image's user (65532) reads the TLS hop's key: the Secret's
+        # files are 0440, group-owned by fsGroup.
+        fsGroup: 65532
       containers:
         - name: hello-sip
           image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-68e9658fa8769db82e9ec7be1a950b71c7e0adbe
@@ -1850,12 +2018,43 @@ spec:
                 secretKeyRef:
                   name: hello-client-auth
                   key: clientAuthKey
+            - name: HELLO_SIP_TLS_ADDR
+              # SIP over mutual TLS from Kamailio for the encrypted phone legs
+              # (docs/webrtc.md, "TLS hop"; dispatcher set 2). On the host
+              # network, so TCP 5061 on the node. The certificate is
+              # hello-sip-node-tls; Kamailio must present one of the same CA
+              # (cluster-ca, hello-edge-tls).
+              value: ":5061"
+            - name: HELLO_SIP_TLS_CERT
+              value: /etc/hello-sip-tls/tls.crt
+            - name: HELLO_SIP_TLS_KEY
+              value: /etc/hello-sip-tls/tls.key
+            - name: HELLO_SIP_TLS_CA
+              value: /etc/hello-sip-tls/ca.crt
+            - name: HELLO_MEDIA_WEBRTC_ENABLED
+              # Browser legs (ICE-lite, DTLS-SRTP) on one shared UDP port of
+              # the node, beside the RTP range; candidate address
+              # HELLO_MEDIA_ANCHOR_HOST (docs/webrtc.md, docs/media.md).
+              value: "true"
+            - name: HELLO_MEDIA_WEBRTC_PORT
+              value: "21100"
+            - name: HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP
+              # The hop is TLS (above): a WebRTC offer that did not arrive
+              # over it is refused.
+              value: "false"
           ports:
             - name: http
               containerPort: 8082
             - name: sip
               containerPort: 5060
               protocol: UDP
+            - name: sip-tls
+              containerPort: 5061
+              protocol: TCP
+          volumeMounts:
+            - name: sip-tls
+              mountPath: /etc/hello-sip-tls
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /readyz
@@ -1879,6 +2078,13 @@ spec:
             capabilities:
               drop:
                 - ALL
+      volumes:
+        - name: sip-tls
+          secret:
+            secretName: hello-sip-node-tls
+            defaultMode: 288
+            # Not optional: the node exits if HELLO_SIP_TLS_CERT is missing,
+            # so the pod waits for cert-manager to issue it.
 ---
 # No RTP Service here, and none is needed: the relay binds its UDP
 # 20000-21000 legs on the host network, so anchored RTP lands on the node
@@ -1923,6 +2129,10 @@ spec:
       port: 8082
       protocol: TCP
       targetPort: http
+    - name: sip-tls
+      port: 5061
+      protocol: TCP
+      targetPort: sip-tls
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -1970,6 +2180,10 @@ spec:
               topologyKey: kubernetes.io/hostname
       # Same budget as hello-sip-1: the rollout gate wait plus the drain.
       terminationGracePeriodSeconds: 270
+      securityContext:
+        # The image's user (65532) reads the TLS hop's key: the Secret's
+        # files are 0440, group-owned by fsGroup.
+        fsGroup: 65532
       containers:
         - name: hello-sip
           image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-68e9658fa8769db82e9ec7be1a950b71c7e0adbe
@@ -2090,12 +2304,43 @@ spec:
                 secretKeyRef:
                   name: hello-client-auth
                   key: clientAuthKey
+            - name: HELLO_SIP_TLS_ADDR
+              # SIP over mutual TLS from Kamailio for the encrypted phone legs
+              # (docs/webrtc.md, "TLS hop"; dispatcher set 2). On the host
+              # network, so TCP 5061 on the node. The certificate is
+              # hello-sip-node-tls; Kamailio must present one of the same CA
+              # (cluster-ca, hello-edge-tls).
+              value: ":5061"
+            - name: HELLO_SIP_TLS_CERT
+              value: /etc/hello-sip-tls/tls.crt
+            - name: HELLO_SIP_TLS_KEY
+              value: /etc/hello-sip-tls/tls.key
+            - name: HELLO_SIP_TLS_CA
+              value: /etc/hello-sip-tls/ca.crt
+            - name: HELLO_MEDIA_WEBRTC_ENABLED
+              # Browser legs (ICE-lite, DTLS-SRTP) on one shared UDP port of
+              # the node, beside the RTP range; candidate address
+              # HELLO_MEDIA_ANCHOR_HOST (docs/webrtc.md, docs/media.md).
+              value: "true"
+            - name: HELLO_MEDIA_WEBRTC_PORT
+              value: "21100"
+            - name: HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP
+              # The hop is TLS (above): a WebRTC offer that did not arrive
+              # over it is refused.
+              value: "false"
           ports:
             - name: http
               containerPort: 8082
             - name: sip
               containerPort: 5060
               protocol: UDP
+            - name: sip-tls
+              containerPort: 5061
+              protocol: TCP
+          volumeMounts:
+            - name: sip-tls
+              mountPath: /etc/hello-sip-tls
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /readyz
@@ -2119,6 +2364,13 @@ spec:
             capabilities:
               drop:
                 - ALL
+      volumes:
+        - name: sip-tls
+          secret:
+            secretName: hello-sip-node-tls
+            defaultMode: 288
+            # Not optional: the node exits if HELLO_SIP_TLS_CERT is missing,
+            # so the pod waits for cert-manager to issue it.
 ---
 # See the hello-sip-1 Service above: no RTP Service, by the same
 # host-network argument (docs/media.md).
@@ -2149,6 +2401,10 @@ spec:
       port: 8082
       protocol: TCP
       targetPort: http
+    - name: sip-tls
+      port: 5061
+      protocol: TCP
+      targetPort: sip-tls
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -2350,6 +2606,10 @@ spec:
                 secretKeyRef:
                   name: hello-client-auth
                   key: clientAuthKey
+            - name: HELLO_WSS_URL
+              # Where the softphone registers: Kamailio's WSS listener behind
+              # the console's Ingress (Ingress kamailio-ws).
+              value: wss://hello.kw.watteel.lab/sip
             - name: HELLO_TURN_URLS
               # The coturn servers of kw/coturn.yaml (docs/webrtc.md): clients
               # are given every address, UDP, TCP and TLS.

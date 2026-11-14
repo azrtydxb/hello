@@ -388,6 +388,13 @@ func TestChartEnvParityWithKw(t *testing.T) {
 		"--set", "coturn.servers[1].name=2", "--set", "coturn.servers[1].externalIP=192.168.10.102",
 		"--set", "coturn.allowedPeers[0]=192.168.10.101-192.168.10.108",
 		"--set", "coturn.tls.enabled=true", "--set", "coturn.tls.secretName=hello-coturn-tls",
+		// Browsers on kw: WSS on Kamailio behind the console's Ingress, the
+		// TLS hop to hello-sip and WebRTC media (docs/webrtc.md).
+		"--set", "kamailio.tls.secretName=hello-edge-tls",
+		"--set", "kamailio.wss.enabled=true", "--set", "kamailio.wss.trustedProxies=^10[.]42[.]",
+		"--set", "kamailio.helloTLS.enabled=true",
+		"--set", "sip.tls.enabled=true", "--set", "sip.tls.secretName=hello-sip-node-tls",
+		"--set", "sip.webrtc.enabled=true",
 	)
 	// The chart option renders the VIP form, so it is compared with kw as it
 	// is after the VIP go-live patch.

@@ -3589,6 +3589,48 @@ The user decided to add the web-device key to the held kw change (#334). It supe
   kw LAN).
 - The user chose WSS + the TLS hop (2026-11-14). #334 turns on both for kw,
   with a Hello-CA certificate for Kamailio and hello-sip.
+- Implementation (#334, kw manifests; docs/webrtc.md, "Browsers on kw"):
+  - Kamailio: `KAMAILIO_WSS_PORT=8088`, `KAMAILIO_WS_ORIGINS=https://hello.kw.watteel.lab`,
+    `KAMAILIO_WSS_TRUSTED_PROXIES=^10[.]42[.]`, `KAMAILIO_HELLO_TLS_PORT=5073`,
+    `KAMAILIO_HELLO_SIP_TLS_PORT=5061`; ports `wss` and `hello-tls`; dispatcher
+    set 2 for hello-sip-1 and hello-sip-2; checksum annotation updated.
+    kamailio.cfg, tls-hop.cfg and the kamailio image (kc-5f94d2b0d090316a
+    already has the websocket and tls modules) are unchanged.
+  - Trusted proxies: ingress-nginx is one pod in kw's pod network (not
+    host-networked; Cilium tunnel mode), so the regular expression is the pod
+    CIDR 10.42.0.0/16. If Kamailio sees a node address instead, X-Forwarded-For
+    is not believed and every browser shares the ingress's throttle key (safe;
+    checked after deploy, tracker hardware list).
+  - Browser path: Service and Ingress `kamailio-ws`, `/sip` (Exact) on
+    hello.kw.watteel.lab, the console's `hello-tls`, backend HTTPS, one-hour
+    timeouts, no cluster-issuer annotation (the Ingress `hello` owns
+    hello-tls). `HELLO_WSS_URL=wss://hello.kw.watteel.lab/sip` on hello-control.
+  - hello-sip-1/-2: `HELLO_SIP_TLS_ADDR=:5061` and `_CERT/_KEY/_CA` at
+    /etc/hello-sip-tls, port `sip-tls` (also on the headless Services),
+    `fsGroup: 65532`, and WebRTC media on (`HELLO_MEDIA_WEBRTC_ENABLED`, port
+    21100, `ALLOW_CLEARTEXT_HOP=false`): without it the anchor would refuse
+    browser legs.
+  - Certificates from the existing `cluster-ca` ClusterIssuer (the Hello CA
+    phones and the console's browsers already trust; its Secrets carry
+    ca.crt), no new issuer. `hello-edge-tls` (Kamailio, on every TLS socket as
+    tls-hop.cfg requires, so WSS and the hop share it): IP SANs
+    192.168.10.101, .102 and the VIP .109, the two DNS names, server and
+    client auth. `hello-sip-node-tls` (both nodes): hello-sip-N,
+    hello-sip-N.hello.svc and hello-sip-N.hello.svc.cluster.local, server and
+    client auth. It replaces `hello-sip-tls` (server auth, .101 only) under a
+    new name, and Kamailio's volume is no longer optional, so a new Kamailio
+    pod waits for the new certificate instead of racing cert-manager's
+    reissue of the old Secret. The go-live patch is regenerated for it.
+  - Chart bug fixed: the hello-sip StatefulSet mounted its TLS Secret 0440
+    with no fsGroup, so the image's user 65532 could not read the key; it now
+    gets `fsGroup: 65532` with `sip.tls.enabled` (TestChartTLSHop).
+  - Tests: TestKwBrowsers; TestChartEnvParityWithKw renders WSS, the hop and
+    WebRTC media.
+  - Renewal: Kamailio reads its certificate at start, so it must restart
+    within 30 days of a renewal (docs/tls.md); hello-sip re-reads its own.
+  - hello-fax and coturn are re-pinned to sha-cb5b6da6f7a705e381227870d3133ea566382e42
+    (main's #343 merge, whose publish built both); the other images keep
+    main's pins.
 
 ## TLS hop from Kamailio to hello-sip (2026-11-13)
 

@@ -2,7 +2,7 @@ diff --git a/deploy/kuvryn-sync/kw/resources.yaml b/deploy/kuvryn-sync/kw/resour
 index d4840ac..3f6ea05 100644
 --- a/deploy/kuvryn-sync/kw/resources.yaml
 +++ b/deploy/kuvryn-sync/kw/resources.yaml
-@@ -1055,6 +1055,15 @@ spec:
+@@ -1411,6 +1411,15 @@ spec:
        hostNetwork: true
        # Keep cluster DNS (the dispatcher's hello-sip-N Service names).
        dnsPolicy: ClusterFirstWithHostNet
@@ -18,7 +18,7 @@ index d4840ac..3f6ea05 100644
        affinity:
          # Only the two nodes phones may reach Kamailio on: master-11
          # (192.168.10.101, the address every phone is provisioned with) and
-@@ -1151,17 +1160,24 @@ spec:
+@@ -1507,17 +1516,24 @@ spec:
            env:
              - name: KAMAILIO_LISTEN_IP
                # The pod IP, i.e. its node's address (hostNetwork): the
@@ -50,7 +50,7 @@ index d4840ac..3f6ea05 100644
                valueFrom:
                  fieldRef:
                    fieldPath: status.podIP
-@@ -1196,6 +1212,16 @@ spec:
+@@ -1584,6 +1600,16 @@ spec:
              - name: metrics
                containerPort: 9071
                protocol: TCP
@@ -67,7 +67,7 @@ index d4840ac..3f6ea05 100644
            readinessProbe:
              httpGet:
                path: /healthz
-@@ -1225,6 +1251,92 @@ spec:
+@@ -1613,6 +1639,92 @@ spec:
                memory: 32Mi
              limits:
                memory: 128Mi
@@ -160,7 +160,7 @@ index d4840ac..3f6ea05 100644
        volumes:
          - name: config
            configMap:
-@@ -1232,6 +1344,25 @@ spec:
+@@ -1620,6 +1732,25 @@ spec:
              defaultMode: 420
          - name: run
            emptyDir: {}
@@ -185,8 +185,8 @@ index d4840ac..3f6ea05 100644
 +                        fieldPath: metadata.namespace
          - name: tls
            secret:
-             secretName: hello-sip-tls
-@@ -1290,9 +1421,9 @@ metadata:
+             secretName: hello-edge-tls
+@@ -1740,9 +1871,9 @@ metadata:
      app.kubernetes.io/component: edge
      app.kubernetes.io/managed-by: kuvryn-sync
  spec:
@@ -199,7 +199,7 @@ index d4840ac..3f6ea05 100644
    type: ClusterIP
    selector:
      app.kubernetes.io/name: hello
-@@ -1327,6 +1458,55 @@ spec:
+@@ -1842,6 +1973,55 @@ spec:
        app.kubernetes.io/instance: hello
        app.kubernetes.io/component: edge
  ---
@@ -255,7 +255,7 @@ index d4840ac..3f6ea05 100644
  apiVersion: apps/v1
  kind: Deployment
  metadata:
-@@ -1951,10 +2131,13 @@ spec:
+@@ -2632,10 +2812,13 @@ spec:
              - name: HELLO_PROV_PUBLIC_URL
                value: https://prov.hello.kw.watteel.lab
              - name: HELLO_PROV_SIP_SERVER
