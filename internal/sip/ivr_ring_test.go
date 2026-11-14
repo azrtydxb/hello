@@ -13,9 +13,7 @@ import (
 func TestIVRHuntAnswerAtMemberTimeout(t *testing.T) {
 	s := &Server{dialogs: map[string]dialogRef{}, calls: map[*call]struct{}{}}
 	c := &call{s: s, events: make(chan legEvent, 16), setupDone: make(chan struct{})}
-	prev := ivrLaunch
-	t.Cleanup(func() { ivrLaunch = prev })
-	ivrLaunch = func(l *leg) {
+	s.ivrLaunchHook = func(l *leg) {
 		// The member's 200 is claimed now; its report is delivered only after
 		// the member's turn (20 ms) has run out.
 		if !c.claim(l) {

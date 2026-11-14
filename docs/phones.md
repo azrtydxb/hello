@@ -119,7 +119,13 @@ are provisioned from Hello: see
   `Session-Expires`. `HELLO_SIP_MAX_CALL_DURATION` is still the backstop.
   IVR menus and queues time the caller (Hello refreshes, or answers the caller's
   own refreshes) and the destination once connected. After a node
-  takeover the timers resume with the negotiated interval and refresher.
+  takeover the timers resume with the negotiated interval and refresher, and
+  the takeover re-INVITE of a dialog that has a timer restates it
+  (`Supported: timer`, `Session-Expires: <interval>;refresher=uac`, or
+  `uas` where the phone refreshes, and `Min-SE`), so the phone never reads
+  the re-INVITE as turning the timer off; a `422` raises the interval to the
+  phone's `Min-SE` and the re-INVITE is sent again. A dialog without a timer
+  gets none of these headers.
 - **Dead media.** An anchored call with no RTP either way for
   `HELLO_MEDIA_DEAD_SECONDS` (60) is ended unless it is on hold
   ([media.md](media.md#roaming-and-dead-media)).
