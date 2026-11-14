@@ -3,6 +3,7 @@ package sip
 import (
 	"net"
 	"net/netip"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,17 +25,61 @@ func refreshWithin(t *testing.T, ch chan *sip.Request, d time.Duration, what str
 	t.Helper()
 	select {
 	case r := <-ch:
-		if got := headerOfReq(r, "Session-Expires"); got != "2;refresher=uac" {
-			// Name the request: a stray one (not a refresh) is otherwise
-			// indistinguishable from a refresh that lost its header.
-			t.Fatalf("%s: Session-Expires = %q, want 2;refresher=uac (got %s CSeq %q Call-ID %q, %d-byte body, From tag %q)",
-				what, got, r.Method, r.CSeq().Value(), r.CallID().Value(), len(r.Body()), fromTagOf(r))
-		}
+		checkRefresh(t, r, what)
 		return r
 	case <-time.After(d):
 		t.Fatalf("no session refresh for %s within %v", what, d)
 		return nil
 	}
+}
+
+// refreshFrom is refreshWithin for the requests node sent: a request from
+// another node (a dead owner's refresh still in flight) is skipped.
+func refreshFrom(t *testing.T, ch chan *sip.Request, node *testPBX, d time.Duration, what string) *sip.Request {
+	t.Helper()
+	r := reqFromWithin(t, ch, node, d, "session refresh for "+what)
+	checkRefresh(t, r, what)
+	return r
+}
+
+// checkRefresh fails unless r carries the refresher's Session-Expires.
+func checkRefresh(t *testing.T, r *sip.Request, what string) {
+	t.Helper()
+	if got := headerOfReq(r, "Session-Expires"); got != "2;refresher=uac" {
+		// Name the request: a stray one (not a refresh) is otherwise
+		// indistinguishable from a refresh that lost its header.
+		t.Fatalf("%s: Session-Expires = %q, want 2;refresher=uac (got %s CSeq %q Call-ID %q, %d-byte body, From tag %q, Via %s)",
+			what, got, r.Method, r.CSeq().Value(), r.CallID().Value(), len(r.Body()), fromTagOf(r), viaSentBy(r))
+	}
+}
+
+// reqFromWithin waits up to d for the next request on ch that node sent (its
+// top Via names node's address), skipping the requests of any other node.
+// After a takeover the dead owner's last refresh and its ACK can still reach
+// the phone; taken for the survivor's, they shift every later wait by one.
+func reqFromWithin(t *testing.T, ch chan *sip.Request, node *testPBX, d time.Duration, what string) *sip.Request {
+	t.Helper()
+	deadline := time.After(d)
+	for {
+		select {
+		case r := <-ch:
+			if viaSentBy(r) == node.addr {
+				return r
+			}
+		case <-deadline:
+			t.Fatalf("no %s from %s within %v", what, node.addr, d)
+			return nil
+		}
+	}
+}
+
+// viaSentBy is the host:port of the request's top Via.
+func viaSentBy(r *sip.Request) string {
+	v := r.Via()
+	if v == nil {
+		return ""
+	}
+	return net.JoinHostPort(v.Host, strconv.Itoa(v.Port))
 }
 
 // TestSessionTimersAfterPark fails if the party a parked call keeps is not
