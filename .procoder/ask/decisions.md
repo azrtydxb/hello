@@ -4774,6 +4774,34 @@ Stacked on #343 (items 5 and 6); merges after it. Choices:
   Regression guard: TestKamailioInvite100AfterRelay; the kamailio-ha job
   (KINDHA_GRACEFUL_REPEAT=n repeats the graceful loss) shows it end to end.
 
+## Takeover re-INVITE restates the session timer (2026-11-15)
+
+- Context: #348 follow-up. `haReinvite` sent no `Session-Expires`, so a phone
+  could read the takeover re-INVITE (a session refresh in RFC 4028 terms) as
+  turning the dialog's timer off until the survivor's next refresh.
+- Decision: a homed leg is bound to its dialog's slot in the call's session
+  timers (`haLeg.bindSession`: caller/callee by `haNewCall`, the party's side
+  for a parked call, the callee for an IVR dial-out, the caller for a queue
+  callback). Every re-INVITE `haReinvite` sends on a leg whose dialog has a
+  timer carries `Supported: timer`, `Session-Expires: <interval>;refresher=`
+  `uac` (Hello refreshes) or `uas` (the phone does), and `Min-SE`; a leg
+  without one carries none. The call's live timer is the single source of
+  truth, so the mid-call homed re-INVITEs (hold mirroring, park retrieve on a
+  taken-over call) restate it too.
+- 422: the interval is raised to the answer's `Min-SE` and the re-INVITE is
+  resent with the next CSeq, up to `sessionMaxRetries`, inside the same
+  `haReinviteTimeout` budget; the survivor then refreshes at the raised
+  interval.
+- A 2xx with `Session-Expires` sets the granted interval (never below the
+  current one or `Min-SE`) and the refresher it names (RFC 4028 7.2). A 2xx
+  without one leaves the timer as it was, like the refresh path: Hello covers
+  phones without RFC 4028 support anyway.
+- Test globals (#347/#348 follow-up): `bossAssistantLead`,
+  `checkSyncTimeout`, `pushPollInterval`, `mwiPollInterval` and
+  `presencePollInterval` are atomic tunables; `ivrLaunch` became a Server
+  method with a per-server `ivrLaunchHook`, since its one test builds its own
+  Server.
+
 ## Messaging wiring between items 2 to 6 (2026-11-14, feat/messaging-wiring)
 
 What the merged messaging items left between them, and the choices made where

@@ -322,7 +322,10 @@ type Server struct {
 	client     *sipgo.Client
 	uas        *sipgo.DialogUA // A legs: callers
 	uac        *sipgo.DialogUA // B legs: forks
-	bg         sync.WaitGroup
+	// ivrLaunchHook, when set, replaces how an IVR fork's INVITE starts
+	// (ivrLaunch); a test sets it on its own Server to script a fork.
+	ivrLaunchHook func(*leg)
+	bg            sync.WaitGroup
 	// emMarks is the node-local record of emergency calls (emergency.go).
 	emMarks emergencyMarks
 	// bgMu guards bgClosed: once shutdown waits for bg, a late call event

@@ -270,7 +270,11 @@ A slow owner that reappears mid-takeover finds the taker's claim or record
 on its next heartbeat and yields. Either re-INVITE
 failing (an endpoint that died too, or rejects with 488/603) closes the call
 one-sidedly — the surviving leg gets a normal BYE and CDR — and the zombie
-is counted.
+is counted. A leg whose replicated dialog has an RFC 4028 session timer gets
+it restated on the takeover re-INVITE (`Supported: timer`, `Session-Expires`
+with the negotiated interval and refresher, `Min-SE`); a `422` answer raises
+the interval to the phone's `Min-SE` and the re-INVITE is retried, as a
+refresh is (see [phones.md](phones.md)).
 
 Calls Hello answered itself — a caller in voicemail, or an announcement
 destination — have one dialog, the caller's. The taker re-INVITEs the

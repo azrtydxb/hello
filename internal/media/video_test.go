@@ -159,9 +159,9 @@ func TestPlainVideoLegs(t *testing.T) {
 	if len(rtcpRaw) < 12 || rtcpRaw[1] != 206 {
 		t.Errorf("A got RTCP %x, want a picture loss indication", rtcpRaw)
 	}
-	if s := r.VideoStats(); s.Packets < 10 {
-		t.Errorf("stats = %+v", s)
-	}
+	// B read only the first packet: the relay may still be forwarding the
+	// rest, so wait for its count rather than read it at once.
+	waitFor(t, "the relay to count the ten video packets", func() bool { return r.VideoStats().Packets >= 10 })
 	// Taking the section off makes both legs refuse again.
 	r.SetVideoSection("a", nil, "", 0)
 	r.SetVideoSection("b", nil, "", 0)
