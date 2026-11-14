@@ -35,22 +35,24 @@ type ChatSite struct {
 	// Enabled is the site's kill switch: the channel and its address are on.
 	Enabled bool `json:"enabled"`
 	// Key is the public site key the embed code names.
-	Key                string          `json:"siteKey"`
-	AllowedOrigins     []string        `json:"allowedOrigins"`
-	Greeting           string          `json:"greeting"`
-	Accent             string          `json:"accent"`
-	Position           string          `json:"position"`
-	Collect            string          `json:"collect"`
-	Hours              messaging.Hours `json:"hours"`
-	OfflineMode        string          `json:"offlineMode"`
-	PrivacyURL         string          `json:"privacyUrl"`
-	Challenge          string          `json:"challenge"`
-	PowBits            int             `json:"powBits"`
-	TurnstileSiteKey   string          `json:"turnstileSiteKey"`
-	HasTurnstileSecret bool            `json:"hasTurnstileSecret"`
-	StripLinks         bool            `json:"stripLinks"`
-	MaxOpenUnassigned  int             `json:"maxOpenUnassigned"`
-	Transcripts        bool            `json:"transcripts"`
+	Key            string   `json:"siteKey"`
+	AllowedOrigins []string `json:"allowedOrigins"`
+	Greeting       string   `json:"greeting"`
+	Accent         string   `json:"accent"`
+	Position       string   `json:"position"`
+	Collect        string   `json:"collect"`
+	// Hours is the schedule of the site's address (the one its routing
+	// shows): the widget is offline outside it.
+	Hours              messaging.Schedule `json:"hours"`
+	OfflineMode        string             `json:"offlineMode"`
+	PrivacyURL         string             `json:"privacyUrl"`
+	Challenge          string             `json:"challenge"`
+	PowBits            int                `json:"powBits"`
+	TurnstileSiteKey   string             `json:"turnstileSiteKey"`
+	HasTurnstileSecret bool               `json:"hasTurnstileSecret"`
+	StripLinks         bool               `json:"stripLinks"`
+	MaxOpenUnassigned  int                `json:"maxOpenUnassigned"`
+	Transcripts        bool               `json:"transcripts"`
 	// RetentionDays is the site's own retention for finished chats; nil
 	// follows the messaging settings.
 	RetentionDays *int      `json:"retentionDays"`
@@ -68,7 +70,7 @@ type ChatSiteInput struct {
 	Accent            string
 	Position          string
 	Collect           string
-	Hours             messaging.Hours
+	Hours             messaging.Schedule
 	OfflineMode       string
 	PrivacyURL        string
 	Challenge         string
@@ -82,7 +84,7 @@ type ChatSiteInput struct {
 }
 
 const chatSiteCols = `s.id, s.channel_id, s.address_id, c.name, c.enabled AND a.enabled, s.site_key,
-	to_json(s.allowed_origins)::text, s.greeting, s.accent, s.position, s.collect, s.hours::text, s.offline_mode,
+	to_json(s.allowed_origins)::text, s.greeting, s.accent, s.position, s.collect, a.schedule::text, s.offline_mode,
 	s.privacy_url, s.challenge, s.pow_bits, s.turnstile_site_key, s.turnstile_secret_enc IS NOT NULL, s.strip_links,
 	s.max_open_unassigned, s.transcripts, s.retention_days,
 	(SELECT count(*) FROM conversations v WHERE v.channel_id = s.channel_id), s.created_at, s.updated_at`
@@ -111,7 +113,7 @@ func scanChatSite(r interface{ Scan(...any) error }) (ChatSite, error) {
 		return c, err
 	}
 	if c.Hours.Days == nil {
-		c.Hours.Days = []messaging.HoursDay{}
+		c.Hours.Days = []messaging.ScheduleDay{}
 	}
 	if retentionDays.Valid {
 		n := int(retentionDays.Int64)
@@ -249,17 +251,17 @@ func (s *Store) CreateChatSite(ctx context.Context, actor string, in ChatSiteInp
 			return err
 		}
 		if err := tx.QueryRowContext(ctx, `
-			INSERT INTO msg_addresses (channel_id, address, address_key, label, enabled, route_kind)
-			VALUES ($1, $2, $2, $3, $4, 'inbox') RETURNING id`, channelID, key, in.Name, in.Enabled).Scan(&addressID); err != nil {
+			INSERT INTO msg_addresses (channel_id, address, address_key, label, enabled, route_kind, schedule)
+			VALUES ($1, $2, $2, $3, $4, 'inbox', $5::jsonb) RETURNING id`, channelID, key, in.Name, in.Enabled, string(hours)).Scan(&addressID); err != nil {
 			return err
 		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO chat_sites (channel_id, address_id, site_key, allowed_origins, greeting, accent, position, collect,
-				hours, offline_mode, privacy_url, challenge, pow_bits, turnstile_site_key, strip_links, max_open_unassigned,
+				offline_mode, privacy_url, challenge, pow_bits, turnstile_site_key, strip_links, max_open_unassigned,
 				transcripts, retention_days)
-			VALUES ($1, $2, $3, $4::text[], $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id`,
+			VALUES ($1, $2, $3, $4::text[], $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
 			channelID, addressID, key, originsArg(in.AllowedOrigins), in.Greeting, in.Accent, in.Position, in.Collect,
-			string(hours), in.OfflineMode, in.PrivacyURL, in.Challenge, in.PowBits, in.TurnstileSiteKey, in.StripLinks,
+			in.OfflineMode, in.PrivacyURL, in.Challenge, in.PowBits, in.TurnstileSiteKey, in.StripLinks,
 			in.MaxOpenUnassigned, in.Transcripts, in.RetentionDays).Scan(&id); err != nil {
 			return err
 		}
@@ -294,17 +296,17 @@ func (s *Store) UpdateChatSite(ctx context.Context, actor string, id int64, in C
 			channelID, in.Name, in.Enabled); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE msg_addresses SET label = $2, enabled = $3 WHERE id = $1`,
-			addressID, in.Name, in.Enabled); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE msg_addresses SET label = $2, enabled = $3, schedule = $4::jsonb WHERE id = $1`,
+			addressID, in.Name, in.Enabled, string(hours)); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE chat_sites SET allowed_origins = $2::text[], greeting = $3, accent = $4, position = $5, collect = $6,
-				hours = $7::jsonb, offline_mode = $8, privacy_url = $9, challenge = $10, pow_bits = $11,
-				turnstile_site_key = $12, strip_links = $13, max_open_unassigned = $14, transcripts = $15,
-				retention_days = $16, updated_at = now()
+				offline_mode = $7, privacy_url = $8, challenge = $9, pow_bits = $10,
+				turnstile_site_key = $11, strip_links = $12, max_open_unassigned = $13, transcripts = $14,
+				retention_days = $15, updated_at = now()
 			WHERE id = $1`,
-			id, originsArg(in.AllowedOrigins), in.Greeting, in.Accent, in.Position, in.Collect, string(hours),
+			id, originsArg(in.AllowedOrigins), in.Greeting, in.Accent, in.Position, in.Collect,
 			in.OfflineMode, in.PrivacyURL, in.Challenge, in.PowBits, in.TurnstileSiteKey, in.StripLinks,
 			in.MaxOpenUnassigned, in.Transcripts, in.RetentionDays); err != nil {
 			return err

@@ -20,6 +20,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -37,6 +38,7 @@ type ChatStore interface {
 	PrepareChatEmailReply(ctx context.Context, acc store.InboxAccess, in store.SendInput) (store.ChatEmailReply, bool, error)
 	FinishChatEmailReply(ctx context.Context, msgID int64, sent bool) error
 	ChatAgentTyping(ctx context.Context, acc store.InboxAccess, convID int64) error
+	ChatAvailability(ctx context.Context, site store.ChatSite, now time.Time, states map[string]queue.AgentState) (bool, string, error)
 }
 
 var _ ChatStore = (*store.Store)(nil)
@@ -48,6 +50,41 @@ type chatSiteView struct {
 	store.ChatSite
 	// Warnings are settings that work but deserve a second look.
 	Warnings []string `json:"warnings"`
+	// Availability is what the widget shows right now; only reads carry it.
+	Availability *chatAvailability `json:"availability,omitempty"`
+}
+
+// chatAvailability is whether a site's widget takes live chats now and, when
+// not, why: hours (closed, no after-hours route), no_agent (nobody staffs
+// where a chat would go) or full (the site's cap of unassigned live chats).
+type chatAvailability struct {
+	Online bool   `json:"online"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// chatAgentStates is the call queues' agent state for the availability of
+// the sites, nil when it cannot be read (only static members count then).
+func (s *server) chatAgentStates(ctx context.Context) map[string]queue.AgentState {
+	if s.Queues == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, liveTimeout)
+	defer cancel()
+	states, err := s.Queues.Agents(ctx)
+	if err != nil {
+		return nil
+	}
+	return states
+}
+
+// withAvailability adds the site's availability now to its view.
+func withAvailability(ctx context.Context, cs ChatStore, v chatSiteView, states map[string]queue.AgentState) (chatSiteView, error) {
+	on, reason, err := cs.ChatAvailability(ctx, v.ChatSite, time.Now(), states)
+	if err != nil {
+		return v, err
+	}
+	v.Availability = &chatAvailability{Online: on, Reason: reason}
+	return v, nil
 }
 
 func viewChatSite(c store.ChatSite) chatSiteView {
@@ -79,24 +116,24 @@ func (s *server) chatStore(w http.ResponseWriter) (ChatStore, bool) {
 }
 
 type chatSiteBody struct {
-	Name              *string          `json:"name"`
-	Enabled           *bool            `json:"enabled"`
-	AllowedOrigins    *[]string        `json:"allowedOrigins"`
-	Greeting          *string          `json:"greeting"`
-	Accent            *string          `json:"accent"`
-	Position          *string          `json:"position"`
-	Collect           *string          `json:"collect"`
-	Hours             *messaging.Hours `json:"hours"`
-	OfflineMode       *string          `json:"offlineMode"`
-	PrivacyURL        *string          `json:"privacyUrl"`
-	Challenge         *string          `json:"challenge"`
-	PowBits           *int             `json:"powBits"`
-	TurnstileSiteKey  *string          `json:"turnstileSiteKey"`
-	TurnstileSecret   *string          `json:"turnstileSecret"`
-	StripLinks        *bool            `json:"stripLinks"`
-	MaxOpenUnassigned *int             `json:"maxOpenUnassigned"`
-	Transcripts       *bool            `json:"transcripts"`
-	RetentionDays     *int             `json:"retentionDays"`
+	Name              *string             `json:"name"`
+	Enabled           *bool               `json:"enabled"`
+	AllowedOrigins    *[]string           `json:"allowedOrigins"`
+	Greeting          *string             `json:"greeting"`
+	Accent            *string             `json:"accent"`
+	Position          *string             `json:"position"`
+	Collect           *string             `json:"collect"`
+	Hours             *messaging.Schedule `json:"hours"`
+	OfflineMode       *string             `json:"offlineMode"`
+	PrivacyURL        *string             `json:"privacyUrl"`
+	Challenge         *string             `json:"challenge"`
+	PowBits           *int                `json:"powBits"`
+	TurnstileSiteKey  *string             `json:"turnstileSiteKey"`
+	TurnstileSecret   *string             `json:"turnstileSecret"`
+	StripLinks        *bool               `json:"stripLinks"`
+	MaxOpenUnassigned *int                `json:"maxOpenUnassigned"`
+	Transcripts       *bool               `json:"transcripts"`
+	RetentionDays     *int                `json:"retentionDays"`
 }
 
 func oneOf(v string, set ...string) bool {
@@ -262,9 +299,15 @@ func (s *server) listChatSites(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "list chat sites", err)
 		return
 	}
+	states := s.chatAgentStates(r.Context())
 	out := make([]chatSiteView, 0, len(sites))
 	for _, c := range sites {
-		out = append(out, viewChatSite(c))
+		v, err := withAvailability(r.Context(), cs, viewChatSite(c), states)
+		if err != nil {
+			s.internal(w, "chat site availability", err)
+			return
+		}
+		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, items(out))
 }
@@ -305,7 +348,12 @@ func (s *server) getChatSite(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "chat site", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, viewChatSite(c))
+	v, err := withAvailability(r.Context(), cs, viewChatSite(c), s.chatAgentStates(r.Context()))
+	if err != nil {
+		s.internal(w, "chat site availability", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
 }
 
 func (s *server) putChatSite(w http.ResponseWriter, r *http.Request) {

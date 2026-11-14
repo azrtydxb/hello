@@ -3,6 +3,7 @@
 // agents and supervisors answer: the HTTP JSON of internal/api/inbox.go.
 
 import { request, type Id } from "../api";
+import type { Schedule } from "./inboxRouting";
 
 export type ConversationStatus =
   "open" | "pending" | "snoozed" | "resolved" | "spam";
@@ -486,10 +487,16 @@ export const erasePeer = (peer: string) =>
 
 // --- website chat ------------------------------------------------------------
 
-export interface ChatHours {
-  zone: string;
-  /** 0 is Sunday. */
-  days: { day: number; from: string; to: string }[];
+/**
+ * Why a chat site's widget is offline: outside the hours with no after-hours
+ * route, nobody staffs where a chat would go, or the cap of unassigned live
+ * chats is reached.
+ */
+export type ChatOfflineReason = "hours" | "no_agent" | "full";
+
+export interface ChatAvailability {
+  online: boolean;
+  reason?: ChatOfflineReason;
 }
 
 export interface ChatSite {
@@ -504,7 +511,8 @@ export interface ChatSite {
   accent: string;
   position: "left" | "right";
   collect: "off" | "optional" | "required";
-  hours: ChatHours;
+  /** The schedule of the site's address: its routing shows the same. */
+  hours: Schedule;
   offlineMode: "collect" | "hidden";
   privacyUrl: string;
   challenge: "pow" | "turnstile" | "none";
@@ -519,6 +527,8 @@ export interface ChatSite {
   createdAt: string;
   updatedAt: string;
   warnings: string[];
+  /** Whether the widget takes live chats now; only reads carry it. */
+  availability?: ChatAvailability;
 }
 
 /** What a create or replace sends; a field left out keeps its value. */
@@ -534,6 +544,7 @@ export type ChatSiteInput = Partial<
     | "createdAt"
     | "updatedAt"
     | "warnings"
+    | "availability"
     | "retentionDays"
   >
 > & {
