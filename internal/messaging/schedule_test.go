@@ -42,6 +42,7 @@ func TestScheduleValidate(t *testing.T) {
 		"unknown zone": {Zone: "Nowhere/Land", Days: []ScheduleDay{good}},
 		"bad day":      {Zone: "UTC", Days: []ScheduleDay{{Day: 7, From: "09:00", To: "17:00"}}},
 		"bad clock":    {Zone: "UTC", Days: []ScheduleDay{{Day: 1, From: "9am", To: "17:00"}}},
+		"short clock":  {Zone: "UTC", Days: []ScheduleDay{{Day: 1, From: "9:00", To: "17:00"}}},
 		"backwards":    {Zone: "UTC", Days: []ScheduleDay{{Day: 1, From: "17:00", To: "09:00"}}},
 		"too many":     {Zone: "UTC", Days: make([]ScheduleDay, 29)},
 	} {

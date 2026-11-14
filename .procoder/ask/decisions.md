@@ -4774,6 +4774,52 @@ Stacked on #343 (items 5 and 6); merges after it. Choices:
   Regression guard: TestKamailioInvite100AfterRelay; the kamailio-ha job
   (KINDHA_GRACEFUL_REPEAT=n repeats the graceful loss) shows it end to end.
 
+## Messaging wiring between items 2 to 6 (2026-11-14, feat/messaging-wiring)
+
+What the merged messaging items left between them, and the choices made where
+the spec left them open (each chosen by default; change one by editing this
+entry and the code it names).
+
+- **Router to desk phone was already wired.** Item 5's `Store.afterAssign`
+  calls item 3's `deliverLastToDeskPhone` for both a direct user or extension
+  route and a text queue's assignment, in the assigning transaction. Nothing
+  changed; `TestRouterDeliversToDeskPhone` now proves it (direct route, queue
+  strategy, and no delivery for a `ring_all` shared pool).
+- **Automatic texts on every channel.** `systemText` (the first-contact text
+  and the closed-hours reply) had a SIP trunk branch only. A chat site now
+  stores it sent and puts it on the visitor's stream (shown from "Support"); a
+  Twilio or Telnyx number queues it for the send worker (opt-out checked again
+  at claim). A carrier with refused credentials, a peer that is not E.164, an
+  unregistered adapter or a trunk channel without a trunk write a line naming
+  the text and the reason. An automatic text is not an agent's answer: it does
+  not reset a visitor's 200-message cap. The inbox labels it "Automatic reply".
+- **Chat availability follows the route.** A site is live when whoever its
+  address routes to is there: a text queue while a member is staffed (the call
+  queues' login and pause; capacity and the idle-voice flag are ignored, so a
+  chat waits in the queue rather than going offline), a user or extension's
+  user or a ring group's users while one has the inbox open, the supervisors'
+  pool (also the fallback for a target that is gone) while an operator or
+  administrator has. Outside the hours the site is closed unless the
+  after-hours action routes elsewhere, in which case that target decides.
+  Valkey unreadable counts static members only, as the router does. The site
+  cap still applies. Chat sites gain a read-only `availability` on list and get.
+- **One schedule.** `messaging.Hours` was a copy of `messaging.Schedule` (same
+  fields and JSON), and a chat site stored its own hours next to its address's
+  routing schedule, so the widget and the router could disagree. `Hours` is
+  removed; the site's `hours` field reads and writes its address's `schedule`.
+  Migration `00100_messaging_one_schedule` copies a site's non-empty hours to
+  its address (a site's hours win over a schedule set through routing) and
+  drops `chat_sites.hours`; down restores it from the schedule. The API keeps
+  `hours` on chat sites (same JSON); OpenAPI's `ChatHours` is folded into
+  `MessagingSchedule`. The chat sites page edits hours and the route in one
+  "Routing and hours" dialog (the routing dialog), not in the site dialog.
+- **M-18 is not on main.** The media pipeline (`message_media`, MinIO under
+  `msg/`, sniffing and allowlist, `GET /api/v1/inbox/media/{id}`) belongs to no
+  delivered phase and no PR has built it, so chat attachments and the site logo
+  stay unbuilt (the route is 404, nothing half-wired).
+- **MCP:** no new operation; chat sites and routing stay excluded, so the
+  doctable is unchanged.
+
 ## Items 26 and 27: Replaces of confirmed dialogs, authenticated INVITEs to phones (2026-11-14)
 
 - Who may replace a confirmed dialog (S-17 leaves it open): only a phone of the

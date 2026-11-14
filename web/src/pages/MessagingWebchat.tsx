@@ -8,7 +8,7 @@ import {
   listChatSites,
   updateChatSite,
   type ChatBlock,
-  type ChatHours,
+  type ChatOfflineReason,
   type ChatSite,
   type ChatSiteInput,
 } from "../api/inbox";
@@ -30,35 +30,26 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
+import { RoutingDialog } from "./inbox/RoutingDialog";
 
-const DAYS = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-];
 const ADDRESS_KEY = "hello.chat.embedAddress";
 
-/** One weekday's opening window as the form edits it: blank means closed. */
-type Window = { from: string; to: string };
+const OFFLINE_REASON: Record<ChatOfflineReason, string> = {
+  hours: "Closed (outside the hours)",
+  no_agent: "Offline (nobody available)",
+  full: "Offline (too many waiting)",
+};
 
-function windowsOf(h: ChatHours | undefined): Window[] {
-  const w: Window[] = DAYS.map(() => ({ from: "", to: "" }));
-  for (const d of h?.days ?? []) w[d.day] = { from: d.from, to: d.to };
-  return w;
-}
-
-function hoursOf(always: boolean, zone: string, w: Window[]): ChatHours {
-  if (always) return { zone: "", days: [] };
-  return {
-    zone: zone.trim(),
-    days: w.flatMap((x, day) =>
-      x.from && x.to ? [{ day, from: x.from, to: x.to }] : [],
-    ),
-  };
+/** What a site's widget shows now: live chat, or why it takes messages. */
+function availabilityBadge(s: ChatSite) {
+  if (!s.enabled) return <Badge tone="neutral">Off</Badge>;
+  if (!s.availability) return <Badge tone="neutral">Unknown</Badge>;
+  if (s.availability.online) return <Badge tone="good">Live</Badge>;
+  return (
+    <Badge tone="warn">
+      {OFFLINE_REASON[s.availability.reason ?? "no_agent"]}
+    </Badge>
+  );
 }
 
 function SiteDialog({
@@ -92,13 +83,6 @@ function SiteDialog({
   const [retention, setRetention] = useState(
     site?.retentionDays ? String(site.retentionDays) : "",
   );
-  const [always, setAlways] = useState((site?.hours.days.length ?? 0) === 0);
-  const [zone, setZone] = useState(
-    site?.hours.zone ||
-      Intl.DateTimeFormat().resolvedOptions().timeZone ||
-      "UTC",
-  );
-  const [windows, setWindows] = useState(windowsOf(site?.hours));
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -128,7 +112,6 @@ function SiteDialog({
       transcripts,
       maxOpenUnassigned: Number(cap),
       retentionDays: retention.trim() === "" ? 0 : Number(retention),
-      hours: hoursOf(always, zone, windows),
     };
     // The secret is only ever sent when typed: leaving it empty keeps the
     // stored one.
@@ -230,53 +213,11 @@ function SiteDialog({
           error={fields.privacyUrl}
           onChange={(e) => setPrivacy(e.target.value)}
         />
-        <Switch
-          label="Always open"
-          hint="Off lets you set opening hours; outside them visitors can leave a message."
-          labelPosition="end"
-          checked={always}
-          onChange={(e) => setAlways(e.target.checked)}
-        />
-        {!always && (
-          <fieldset className="cf-stack">
-            <legend className="az-caption">Opening hours</legend>
-            <Input
-              label="Time zone"
-              hint="For example Europe/Brussels."
-              value={zone}
-              error={fields.hours}
-              onChange={(e) => setZone(e.target.value)}
-            />
-            {DAYS.map((d, i) => (
-              <div key={d} className="inbox-actions">
-                <Input
-                  label={`${d} from`}
-                  type="time"
-                  value={windows[i]?.from ?? ""}
-                  onChange={(e) =>
-                    setWindows((w) =>
-                      w.map((x, j) =>
-                        j === i ? { ...x, from: e.target.value } : x,
-                      ),
-                    )
-                  }
-                />
-                <Input
-                  label={`${d} to`}
-                  type="time"
-                  value={windows[i]?.to ?? ""}
-                  onChange={(e) =>
-                    setWindows((w) =>
-                      w.map((x, j) =>
-                        j === i ? { ...x, to: e.target.value } : x,
-                      ),
-                    )
-                  }
-                />
-              </div>
-            ))}
-          </fieldset>
-        )}
+        <p className="az-caption">
+          Opening hours and where this site's chats go (a queue, a user, a ring
+          group or the supervisors' pool) are set in the site's routing. The
+          widget takes live chats while someone staffs that target.
+        </p>
         <Select
           label="When nobody is available"
           value={offlineMode}
@@ -506,6 +447,7 @@ export function MessagingWebchat() {
   const [edit, setEdit] = useState<ChatSite | "new" | null>(null);
   const [embed, setEmbed] = useState<ChatSite | null>(null);
   const [blocks, setBlocks] = useState<ChatSite | null>(null);
+  const [route, setRoute] = useState<ChatSite | null>(null);
   const [del, setDel] = useState<ChatSite | null>(null);
   const [reload, setReload] = useState(0);
   const toast = useToast();
@@ -570,13 +512,8 @@ export function MessagingWebchat() {
             { key: "name", label: "Site", render: (s) => s.name },
             {
               key: "state",
-              label: "State",
-              render: (s) =>
-                s.enabled ? (
-                  <Badge tone="good">On</Badge>
-                ) : (
-                  <Badge tone="neutral">Off</Badge>
-                ),
+              label: "Now",
+              render: (s) => availabilityBadge(s),
             },
             {
               key: "origins",
@@ -625,6 +562,13 @@ export function MessagingWebchat() {
                   <Button
                     size="sm"
                     variant="secondary"
+                    onClick={() => setRoute(s)}
+                  >
+                    Routing and hours of {s.name}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
                     onClick={() => setEdit(s)}
                   >
                     Edit {s.name}
@@ -651,6 +595,19 @@ export function MessagingWebchat() {
       )}
       {embed && <EmbedDialog site={embed} onClose={() => setEmbed(null)} />}
       {blocks && <BlocksDialog site={blocks} onClose={() => setBlocks(null)} />}
+      {route && (
+        <RoutingDialog
+          address={{ id: route.addressId, address: route.name }}
+          title={`Routing and hours of ${route.name}`}
+          chat
+          onClose={() => setRoute(null)}
+          onSaved={() => {
+            setRoute(null);
+            toast.show(`Routing of ${route.name} saved.`);
+            refresh();
+          }}
+        />
+      )}
       {del && (
         <ConfirmDialog
           title={`Delete chat site ${del.name}?`}

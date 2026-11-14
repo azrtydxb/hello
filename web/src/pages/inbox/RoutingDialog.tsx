@@ -132,10 +132,16 @@ function RoutePicker({
  */
 export function RoutingDialog({
   address,
+  title,
+  chat = false,
   onClose,
   onSaved,
 }: {
-  address: MessagingAddress;
+  address: Pick<MessagingAddress, "id" | "address">;
+  /** The dialog's title; "Routing of <number>" by default. */
+  title?: string;
+  /** A chat site's address: its schedule is also the widget's hours. */
+  chat?: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -227,8 +233,12 @@ export function RoutingDialog({
 
   return (
     <Modal
-      title={`Routing of ${address.address}`}
-      description="Where new conversations of this number go. A target that is gone or cannot take conversations sends them to the supervisors' pool instead."
+      title={title ?? `Routing of ${address.address}`}
+      description={
+        chat
+          ? "Where the site's new chats go and when it is open. The widget takes live chats while someone staffs that target: a queue member who is logged in and not paused, or a user who has the inbox open; otherwise it takes a message. A target that is gone sends chats to the supervisors' pool."
+          : "Where new conversations of this number go. A target that is gone or cannot take conversations sends them to the supervisors' pool instead."
+      }
       onClose={onClose}
       actions={
         <>
@@ -274,7 +284,11 @@ export function RoutingDialog({
           <Input
             id="routing-first"
             label="First-contact text"
-            hint="Sent once to a customer who texts this number for the first time. Empty sends nothing. Only a SIP trunk channel can send it today."
+            hint={
+              chat
+                ? "Shown once in the widget to a visitor's first chat. Empty sends nothing."
+                : "Sent once to a customer who texts this number for the first time. Empty sends nothing. A carrier channel whose credentials were refused cannot send it; the conversation then says so."
+            }
             value={first}
             maxLength={480}
             error={fields.firstContactText}
@@ -283,8 +297,9 @@ export function RoutingDialog({
           <fieldset className="cf-form__section">
             <legend className="az-eyebrow">Opening hours</legend>
             <p className="az-caption">
-              No windows means always open. Outside the windows the after-hours
-              action applies.
+              {chat
+                ? "No windows means always open. Outside the windows the widget is offline, unless the after-hours action sends chats somewhere else."
+                : "No windows means always open. Outside the windows the after-hours action applies."}
             </p>
             {days.length > 0 && (
               <Input
@@ -358,7 +373,11 @@ export function RoutingDialog({
                 <Input
                   id="routing-text"
                   label="Reply"
-                  hint="Sent once, to a customer who has not opted out. Only a SIP trunk channel can send it today."
+                  hint={
+                    chat
+                      ? "Shown once in the widget to a visitor who writes outside the hours."
+                      : "Sent once, to a customer who has not opted out. A carrier channel whose credentials were refused cannot send it; the conversation then says so."
+                  }
                   value={text}
                   maxLength={480}
                   error={fields["afterHours.text"]}
