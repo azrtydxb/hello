@@ -564,6 +564,47 @@ connector; it removes only those and never touches a manual member. Nested
 membership uses the AD in-chain matching rule and is off by default (slow on
 large forests).
 
+### Auto-provisioning from a number range
+
+A connector can give a user an extension of its own (off by default; the
+**Auto-provisioning** part of the connector form, or `autoProvision` in the
+API). Set the first and the last number of a range, for example 2000 and 2999
+(the same number of digits, at most 100,000 numbers). A user whose extension
+attribute is empty, or names an extension that does not exist, then gets the
+next free number of the range, and with it:
+
+- an extension named after the user's display name (or username);
+- a voicemail box, switched on, that mails messages to the user's email
+  (switch **voicemail** off to create the box switched off);
+- one SIP device named after the number (switch **device** off to skip it). Its
+  secret is generated and shown nowhere: rotate it from the device page when
+  you set up a phone, or provision the phone, which binds the device.
+
+A number is free when nothing in the dial space has it: no extension, ring
+group, IVR menu, conference room, queue or voicemail group number, no park
+slot, and no feature or paging code that overlaps it. The whole configuration
+is checked as for an extension created by hand. **Only members of these
+groups** limits provisioning to source groups (stable ids, as in the group
+rules; needs the group base DN); other users are created without an extension
+as before. The preview lists such users with the reason `auto_provisioned` and
+the `extension`, `device` and `voicemail` it would create.
+
+The number is allocated when the change is applied, in the same transaction as
+the user and under the configuration lock, so two runs and an administrator's
+own edits never take the same number. When the number the preview showed was
+taken in between, the next free one is used and the run's row shows the number
+actually given. A full range is the conflict `range_exhausted`: that user is
+left unchanged and the others go on; widen the range and the next run creates
+it. A number stays with its user: re-runs never renumber, a deleted extension
+comes back with the same number at the next full run (in `create_only` mode a
+user is provisioned once and Hello owns the extension afterwards), and a
+disabled user keeps its extension and voicemail like any other. While
+provisioning is on, the extension's name and the voicemail email follow the
+user's display name and email, unless an administrator changed them. Hello
+never writes the number back to the directory. The connector's runs page shows
+how full the range is, the next number and who has a number from it
+(`GET /api/v1/directory/connectors/{id}/range`).
+
 ### What a run never does
 
 - It never deletes a user. A user that is inactive in the directory is disabled
@@ -581,8 +622,8 @@ large forests).
   are `extension_linked` (the administrator may override it on apply, which
   moves the extension), `duplicate_extension`, `extension_missing`,
   `extension_invalid`, `extension_kind` (a door station), `email_in_use`,
-  `username_collision`, `username_invalid`, `claimed_by_other_connector` and
-  `last_admin`.
+  `username_collision`, `username_invalid`, `claimed_by_other_connector`,
+  `range_exhausted` (auto-provisioning) and `last_admin`.
 - It halts as `needs_confirmation`, applying nothing, when it would disable more
   than 20 percent of the linked users (and more than 5), or when the source
   returns no users although users are linked. A person reviews the changes and
@@ -618,8 +659,9 @@ administrator.
 | `hello_directory_changes_total{kind,action}`                | changes by action                              |
 | `hello_directory_conflicts{connector_kind}`                 | conflicts of the latest run                    |
 | `hello_directory_last_success_timestamp_seconds{connector}` | alert when older than three schedule intervals |
+| `hello_directory_provisioned_total{connector_kind}`         | extensions created by auto-provisioning        |
 
-Tables are in migration `00093`.
+Tables are in migrations `00093` and `00170` (auto-provisioning).
 
 ## What comes next
 

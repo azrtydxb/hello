@@ -298,8 +298,8 @@ type Connector struct {
 	Mappings        Mappings        `json:"mappings"`
 	GroupRules      GroupRules      `json:"groupRules"`
 	Options         Options         `json:"options"`
-	// AutoProvision is reserved for range auto-provisioning; it must be off.
-	AutoProvision json.RawMessage `json:"autoProvision"`
+	// AutoProvision is range auto-provisioning (I-11), off by default.
+	AutoProvision AutoProvision `json:"autoProvision"`
 
 	HasCredential      bool       `json:"hasCredential"`
 	CredentialFP       string     `json:"-"`

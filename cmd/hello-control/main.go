@@ -22,6 +22,7 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/directory"
+	"github.com/azrtydxb/hello/internal/directory/dirstore"
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/mailer"
@@ -251,7 +252,9 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// Directory sync (spec integrations P8): connectors read their source and
 	// sync users; one replica runs a connector, the one holding its lock.
 	dirEngine := &directory.Engine{
-		Store:          &directory.PG{DB: db, Box: box},
+		// Range auto-provisioning (P12) creates extensions through the
+		// configuration store, with its numbering rules and routing check.
+		Store:          &directory.PG{DB: db, Box: box, Provisioner: &dirstore.Provisioner{Store: st, Realm: cfg.SIPDomain}},
 		Drivers:        map[string]directory.Driver{directory.KindLDAP: directory.LDAP{}},
 		Metrics:        directory.NewMetrics(metrics.Registry),
 		Log:            log.With("component", "directory"),

@@ -69,6 +69,44 @@ export interface LdapConfig {
   nestedGroups?: boolean;
 }
 
+/**
+ * Range auto-provisioning (off by default): a user with no extension, or one
+ * that names no extension, gets the next free number of the range with an
+ * extension, a voicemail box and a SIP device. A number is never renumbered.
+ */
+export interface AutoProvision {
+  enabled: boolean;
+  /** First and last number, inclusive, with the same number of digits. */
+  rangeStart: string;
+  rangeEnd: string;
+  /** Create one SIP device (its secret is generated and shown nowhere). */
+  device: boolean;
+  /** Turn voicemail on and mail it to the user's email. */
+  voicemail: boolean;
+  /** Only members of these source groups (stable ids); empty: everyone. */
+  groups: string[];
+}
+
+/** GET /directory/connectors/{id}/range: how full the range is. */
+export interface RangeUsage {
+  enabled: boolean;
+  rangeStart: string;
+  rangeEnd: string;
+  size: number;
+  used: number;
+  free: number;
+  /** The number the next allocation takes; "" when the range is full. */
+  nextFree: string;
+  provisioned: {
+    userId: number;
+    username: string;
+    number: string;
+    /** 0 when the extension was deleted (the next full run recreates it). */
+    extensionId: number;
+    enabled: boolean;
+  }[];
+}
+
 export interface Connector {
   id: number;
   kind: "ldap";
@@ -80,6 +118,7 @@ export interface Connector {
   mappings: Mappings;
   groupRules: GroupRules;
   options: Options;
+  autoProvision: AutoProvision;
   /** A bind password is stored. It is write-only. */
   hasCredential: boolean;
   status: "new" | "ok" | "failing";
@@ -106,6 +145,7 @@ export interface ConnectorInput {
   mappings?: Mappings;
   groupRules?: GroupRules;
   options?: Partial<Options>;
+  autoProvision?: AutoProvision;
   bindPassword?: string;
 }
 
@@ -220,6 +260,9 @@ export const testConnector = (id: number, mappings?: Mappings) =>
   request<TestResult>("POST", `${conn(id)}/test`, {
     body: mappings ? { mappings } : {},
   });
+
+export const getRange = (id: number, signal?: AbortSignal) =>
+  request<RangeUsage>("GET", `${conn(id)}/range`, { signal });
 
 export const startRun = (id: number, dryRun: boolean) =>
   request<Run>("POST", `${conn(id)}/sync`, { body: { dryRun } });
