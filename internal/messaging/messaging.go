@@ -16,7 +16,7 @@ import (
 )
 
 // Channel kinds and the providers a channel can have. Only sip_trunk exists
-// in the first phase; the carrier adapters of later phases add theirs.
+// in the first phase; the carrier adapters (Twilio, Telnyx) add theirs.
 const (
 	KindSMS     = "sms"
 	KindWhats   = "whatsapp"
@@ -24,6 +24,7 @@ const (
 
 	ProviderSIPTrunk = "sip_trunk"
 	ProviderTwilio   = "twilio"
+	ProviderTelnyx   = "telnyx"
 
 	// FirstContactOff and FirstContactAttested are the values of the
 	// first-contact setting (M-17).

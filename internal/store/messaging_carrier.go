@@ -115,16 +115,13 @@ func (s *Store) sealChannelCredentials(ctx context.Context, tx *sql.Tx, channelI
 	if err != nil {
 		return err
 	}
-	hint := cfg.AccountSID
-	if len(hint) > 4 {
-		hint = hint[len(hint)-4:]
-	}
-	fp := hex.EncodeToString(s.box.MAC("messaging-credential", cfg.AuthToken))[:12]
+	hint := cfg.Hint()
+	fp := hex.EncodeToString(s.box.MAC("messaging-credential", cfg.Secret()))[:12]
 	_, err = tx.ExecContext(ctx, `
 		UPDATE msg_channels SET credentials_enc = $2, credential_fp = $3,
 			config = config || jsonb_build_object('accountHint', $4::text, 'messagingService', $5::boolean),
 			status = 'ok', status_detail = '', fail_streak = 0, updated_at = now()
-		WHERE id = $1`, channelID, sealed, fp, hint, cfg.MessagingServiceSID != "")
+		WHERE id = $1`, channelID, sealed, fp, hint, cfg.Pooled())
 	return err
 }
 

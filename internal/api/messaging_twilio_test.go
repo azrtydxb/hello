@@ -51,6 +51,8 @@ type fakeTwilio struct {
 	// msgStatus and msgError are what a status read answers.
 	msgStatus string
 	msgError  int
+	// regStatus, when not 0, is the status every registration read answers.
+	regStatus int
 	sends     []url.Values
 	reads     int
 	seq       int
@@ -61,7 +63,7 @@ func newFakeTwilio(t *testing.T) *fakeTwilio {
 	f := &fakeTwilio{sendMode: "ok", msgStatus: "delivered"}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
-	provider.Register(twilio.Kind, twilio.Factory(twilio.WithBaseURL(f.srv.URL), twilio.WithHTTPClient(f.srv.Client())))
+	provider.Register(twilio.Kind, twilio.Factory(twilio.WithBaseURL(f.srv.URL), twilio.WithMessagingURL(f.srv.URL+"/v1"), twilio.WithHTTPClient(f.srv.Client())))
 	t.Cleanup(func() { provider.Register(twilio.Kind, twilio.Factory()) })
 	return f
 }
@@ -76,8 +78,10 @@ func (f *fakeTwilio) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	p := r.URL.Path
 	switch {
+	case strings.HasPrefix(p, "/v1/"):
+		f.serveRegistration(w, p)
 	case r.Method == http.MethodGet && strings.HasSuffix(p, "/IncomingPhoneNumbers.json"):
-		_, _ = io.WriteString(w, `{"incoming_phone_numbers":[{"phone_number":"`+twilioDID+`","friendly_name":"Main","capabilities":{"sms":true,"mms":true,"voice":true}}]}`)
+		_, _ = io.WriteString(w, `{"incoming_phone_numbers":[{"sid":"PN1","phone_number":"`+twilioDID+`","friendly_name":"Main","capabilities":{"sms":true,"mms":true,"voice":true}}]}`)
 	case r.Method == http.MethodGet && strings.HasSuffix(p, fakeSID+".json"):
 		if f.accountStatus != 0 {
 			w.WriteHeader(f.accountStatus)
@@ -115,6 +119,30 @@ func (f *fakeTwilio) serve(w http.ResponseWriter, r *http.Request) {
 			ec = strconv.Itoa(f.msgError)
 		}
 		_, _ = io.WriteString(w, `{"status":"`+f.msgStatus+`","error_code":`+ec+`}`)
+	default:
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+// serveRegistration answers the Messaging API reads of the registration
+// route: one approved brand, a Messaging Service whose campaign is verified,
+// and no toll-free verification. regStatus, when set, refuses all of them.
+func (f *fakeTwilio) serveRegistration(w http.ResponseWriter, p string) {
+	if f.regStatus != 0 {
+		w.WriteHeader(f.regStatus)
+		return
+	}
+	switch p {
+	case "/v1/a2p/BrandRegistrations":
+		_, _ = io.WriteString(w, `{"data":[{"sid":"BN1","status":"APPROVED","brand_type":"STANDARD"}]}`)
+	case "/v1/Services":
+		_, _ = io.WriteString(w, `{"services":[{"sid":"`+fakeSvc+`"}]}`)
+	case "/v1/Services/" + fakeSvc + "/UsAppToPerson":
+		_, _ = io.WriteString(w, `{"compliance":[{"sid":"QE1","brand_registration_sid":"BN1","us_app_to_person_usecase":"CUSTOMER_CARE","campaign_status":"VERIFIED"}]}`)
+	case "/v1/Services/" + fakeSvc + "/PhoneNumbers":
+		_, _ = io.WriteString(w, `{"phone_numbers":[{"phone_number":"`+twilioDID+`"}]}`)
+	case "/v1/Tollfree/Verifications":
+		_, _ = io.WriteString(w, `{"verifications":[]}`)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}

@@ -263,7 +263,7 @@ export interface MessagingChannel {
 
 export interface ChannelInput {
   kind?: "sms";
-  provider?: "sip_trunk" | "twilio";
+  provider?: "sip_trunk" | "twilio" | "telnyx";
   name?: string;
   enabled?: boolean;
   trunkId?: number;
@@ -271,6 +271,10 @@ export interface ChannelInput {
   accountSid?: string;
   authToken?: string;
   messagingServiceSid?: string;
+  /** A Telnyx channel's v2 API key; write-only. */
+  apiKey?: string;
+  /** A Telnyx messaging profile (a UUID); optional. */
+  messagingProfileId?: string;
 }
 
 /** A number a carrier account owns. */
@@ -280,6 +284,55 @@ export interface CarrierNumber {
   sms: boolean;
   mms: boolean;
   voice: boolean;
+}
+
+export type RegistrationState =
+  "approved" | "pending" | "rejected" | "unregistered" | "unknown";
+
+export type ChecklistState =
+  | "done"
+  | "pending"
+  | "todo"
+  | "attention"
+  | "unknown"
+  | "manual"
+  | "not_applicable";
+
+/** A carrier account's sender registration, read from the carrier. */
+export interface ChannelRegistration {
+  provider: string;
+  supported: boolean;
+  readAt: string;
+  brands: {
+    id: string;
+    name: string;
+    type: string;
+    state: RegistrationState;
+    detail: string;
+  }[];
+  campaigns: {
+    id: string;
+    brandId: string;
+    useCase: string;
+    state: RegistrationState;
+    detail: string;
+  }[];
+  numbers: {
+    number: string;
+    kind: "10dlc" | "toll_free" | "other";
+    state: RegistrationState;
+    detail: string;
+    added: boolean;
+  }[];
+  /** Sections the carrier would not answer: brands, campaigns, tollfree. */
+  unavailable: string[];
+  checklist: {
+    id: string;
+    title: string;
+    state: ChecklistState;
+    detail: string;
+    link: string;
+  }[];
 }
 
 export interface ChannelTest {
@@ -375,6 +428,12 @@ export const deleteChannel = (id: Id) =>
   request<void>("DELETE", `${MESSAGING}/channels/${id}`);
 export const testChannel = (id: Id) =>
   request<ChannelTest>("POST", `${MESSAGING}/channels/${id}/test`);
+export const getChannelRegistration = (id: Id, signal?: AbortSignal) =>
+  request<ChannelRegistration>(
+    "GET",
+    `${MESSAGING}/channels/${id}/registration`,
+    { signal },
+  );
 export const listChannelNumbers = (id: Id) =>
   request<{ items: CarrierNumber[] }>(
     "GET",

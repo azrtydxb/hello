@@ -122,17 +122,17 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 ## messaging-channels
 
-| #     | Item                                                         | Status       |
-| ----- | ------------------------------------------------------------ | ------------ |
-| 1     | Inbox core                                                   | done (#211)  |
-| 2     | Twilio sending                                               | todo         |
-| 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | in review    |
-| 4     | LAN chat widget                                              | in PR        |
-| 5     | Message routing and ACD                                      | in PR (#311) |
-| 6     | Telnyx, sender registration                                  | todo         |
-| 7     | AI triage, drafts, auto-reply                                | todo         |
-| 8     | Integrations, reporting, DSAR export, redact                 | todo         |
-| N1-N3 | Public listener, WhatsApp, polling                           | not now      |
+| #     | Item                                                         | Status      |
+| ----- | ------------------------------------------------------------ | ----------- |
+| 1     | Inbox core                                                   | done (#211) |
+| 2     | Twilio sending                                               | done (#305) |
+| 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | done (#307) |
+| 4     | LAN chat widget                                              | done (#309) |
+| 5     | Message routing and ACD                                      | done (#311) |
+| 6     | Telnyx, sender registration                                  | wip (#346)  |
+| 7     | AI triage, drafts, auto-reply                                | todo        |
+| 8     | Integrations, reporting, DSAR export, redact                 | todo        |
+| N1-N3 | Public listener, WhatsApp, polling                           | not now     |
 
 ## clients-webrtc-mobile-video
 
@@ -224,3 +224,4 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - Real-account lab lists for integrations, messaging, clients (after those phases)
 - Salesforce (Developer Edition) and Dynamics 365 (trial) live checks: docs/crm.md, "Lab checklist: Salesforce" and "Lab checklist: Dynamics 365"
 - CRM connector live checks on real accounts: Pipedrive, Zoho CRM, Odoo, Bitrix24 (docs/crm.md lab checklists)
+- Telnyx and Twilio accounts, messaging item 6 (docs/inbox.md, "Sending through Telnyx", "Sender registration"): a real Telnyx send, delivery receipt and the 40300 STOP block; the field names of Telnyx's 10DLC, campaign-assignment and toll-free reads and of Twilio's UsAppToPerson and Tollfree reads; what a limited key answers for each registration read; a Twilio account with several Messaging Services; a US long code and a toll-free number in each state (approved, pending, rejected, unregistered)

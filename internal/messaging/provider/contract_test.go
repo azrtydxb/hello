@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/azrtydxb/hello/internal/messaging/provider"
+	"github.com/azrtydxb/hello/internal/messaging/provider/telnyx"
 	"github.com/azrtydxb/hello/internal/messaging/provider/twilio"
 )
 
@@ -17,7 +18,12 @@ import (
 func TestSMSProviderContract(t *testing.T) {
 	// Built at run time: a literal looks like a real SID to secret scanners.
 	sid, msgSID, token := "AC"+strings.Repeat("ab", 16), "SM"+strings.Repeat("cd", 16), "tok-contract-secret"
+	telnyxMsg := "40385f64-5717-4562-b3fc-2c963f66afa6"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/v2/messages") {
+			_, _ = w.Write([]byte(`{"data":{"id":"` + telnyxMsg + `","to":[{"status":"queued"}]}}`))
+			return
+		}
 		if r.Method == http.MethodPost {
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"sid":"` + msgSID + `","status":"queued"}`))
@@ -28,12 +34,14 @@ func TestSMSProviderContract(t *testing.T) {
 	defer srv.Close()
 	provider.Register(twilio.Kind, twilio.Factory(twilio.WithBaseURL(srv.URL), twilio.WithHTTPClient(srv.Client())))
 	defer provider.Register(twilio.Kind, twilio.Factory())
+	provider.Register(telnyx.Kind, telnyx.Factory(telnyx.WithBaseURL(srv.URL+"/v2"), telnyx.WithHTTPClient(srv.Client())))
+	defer provider.Register(telnyx.Kind, telnyx.Factory())
 
-	if len(provider.Kinds()) == 0 {
+	if len(provider.Kinds()) < 2 {
 		t.Fatal("no adapter is registered")
 	}
 	for _, kind := range provider.Kinds() {
-		p, err := provider.New(kind, provider.Config{AccountSID: sid, AuthToken: token})
+		p, err := provider.New(kind, provider.Config{AccountSID: sid, AuthToken: token, APIKey: token})
 		if err != nil {
 			t.Fatalf("%s: %v", kind, err)
 		}
@@ -44,7 +52,7 @@ func TestSMSProviderContract(t *testing.T) {
 		if err != nil || s.ProviderID == "" {
 			t.Errorf("%s: send = %+v, %v", kind, s, err)
 		}
-		_, err = p.Status(context.Background(), msgSID)
+		_, err = p.Status(context.Background(), map[string]string{"twilio": msgSID, "telnyx": telnyxMsg}[kind])
 		if err == nil {
 			t.Fatalf("%s: a 401 status read succeeded", kind)
 		}

@@ -14,6 +14,7 @@ import (
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
+	_ "github.com/azrtydxb/hello/internal/messaging/provider/telnyx" // registers the Telnyx adapter
 	_ "github.com/azrtydxb/hello/internal/messaging/provider/twilio" // registers the Twilio adapter
 	"github.com/azrtydxb/hello/internal/messaging/router"
 	acdqueue "github.com/azrtydxb/hello/internal/queue"

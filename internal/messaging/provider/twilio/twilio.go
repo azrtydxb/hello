@@ -27,6 +27,11 @@ const Kind = "twilio"
 // DefaultBaseURL is Twilio's REST API.
 const DefaultBaseURL = "https://api.twilio.com/2010-04-01"
 
+// DefaultMessagingURL is Twilio's Messaging API, which holds the Messaging
+// Services, the A2P 10DLC brands and campaigns and the toll-free
+// verifications.
+const DefaultMessagingURL = "https://messaging.twilio.com/v1"
+
 // maxBody bounds what is read from an answer.
 const maxBody = 1 << 20
 
@@ -46,6 +51,12 @@ type Option func(*Client)
 // administrator: only Go code (tests) can set it.
 func WithBaseURL(u string) Option { return func(c *Client) { c.base = strings.TrimRight(u, "/") } }
 
+// WithMessagingURL replaces the root of the Messaging API (registrations).
+// Only Go code (tests) can set it.
+func WithMessagingURL(u string) Option {
+	return func(c *Client) { c.messaging = strings.TrimRight(u, "/") }
+}
+
 // WithHTTPClient replaces the HTTP client.
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h } }
 
@@ -57,9 +68,10 @@ func Factory(opts ...Option) provider.Factory {
 
 // Client is a Twilio account.
 type Client struct {
-	cfg  provider.Config
-	base string
-	http *http.Client
+	cfg       provider.Config
+	base      string
+	messaging string
+	http      *http.Client
 }
 
 // New builds an adapter. The account SID and the token are required.
@@ -72,7 +84,7 @@ func New(cfg provider.Config, opts ...Option) (*Client, error) {
 	if cfg.AuthToken == "" {
 		return nil, errors.New("twilio: the auth token is required")
 	}
-	c := &Client{cfg: cfg, base: DefaultBaseURL, http: safehttp.NewClient(safehttp.Options{Timeout: 15 * time.Second})}
+	c := &Client{cfg: cfg, base: DefaultBaseURL, messaging: DefaultMessagingURL, http: safehttp.NewClient(safehttp.Options{Timeout: 15 * time.Second})}
 	for _, o := range opts {
 		o(c)
 	}
@@ -110,11 +122,16 @@ func (c *Client) Caps() provider.Caps {
 // do sends one request and returns the status and the (bounded) body. A
 // transport failure is ErrAmbiguous: the request may have reached Twilio.
 func (c *Client) do(ctx context.Context, method, path string, form url.Values) (int, []byte, error) {
+	return c.doAt(ctx, c.base, method, path, form)
+}
+
+// doAt is do against another API root.
+func (c *Client) doAt(ctx context.Context, root, method, path string, form url.Values) (int, []byte, error) {
 	var body io.Reader
 	if form != nil {
 		body = strings.NewReader(form.Encode())
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, root+path, body)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -213,6 +230,7 @@ func (c *Client) Numbers(ctx context.Context) ([]provider.Number, error) {
 	}
 	var r struct {
 		Numbers []struct {
+			SID          string `json:"sid"`
 			PhoneNumber  string `json:"phone_number"`
 			FriendlyName string `json:"friendly_name"`
 			Capabilities struct {
@@ -227,7 +245,7 @@ func (c *Client) Numbers(ctx context.Context) ([]provider.Number, error) {
 	}
 	out := make([]provider.Number, 0, len(r.Numbers))
 	for _, n := range r.Numbers {
-		out = append(out, provider.Number{E164: n.PhoneNumber, Label: n.FriendlyName,
+		out = append(out, provider.Number{ID: n.SID, E164: n.PhoneNumber, Label: n.FriendlyName,
 			SMS: n.Capabilities.SMS, MMS: n.Capabilities.MMS, Voice: n.Capabilities.Voice})
 	}
 	return out, nil

@@ -462,6 +462,7 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/messaging/channels/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteMessagingChannel},
 		{"POST", "/api/v1/messaging/channels/{id}/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testMessagingChannel},
 		{"GET", "/api/v1/messaging/channels/{id}/numbers", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessagingChannelNumbers},
+		{"GET", "/api/v1/messaging/channels/{id}/registration", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessagingChannelRegistration},
 		{"GET", "/api/v1/messaging/addresses", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessagingAddresses},
 		{"POST", "/api/v1/messaging/addresses", auth.ScopeAdmin, auth.RoleAdmin, false, s.createMessagingAddress},
 		{"GET", "/api/v1/messaging/addresses/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessagingAddress},

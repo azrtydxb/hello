@@ -12,13 +12,16 @@ import {
   createChannel,
   deleteAddress,
   deleteChannel,
+  getChannelRegistration,
   listAddresses,
   listChannels,
   testChannel,
   updateAddress,
   updateChannel,
   type ChannelInput,
+  type ChannelRegistration,
   type ChannelTest,
+  type RegistrationState,
   type MessagingAddress,
   type MessagingChannel,
 } from "../api/inbox";
@@ -42,6 +45,59 @@ import { formatTime } from "../format";
 import { ROUTE_KIND_LABEL } from "../api/inboxRouting";
 import { RoutingDialog } from "./inbox/RoutingDialog";
 
+/** Registration reads by channel id; "error" when the carrier did not answer. */
+type Registrations = Record<number, ChannelRegistration | "error">;
+
+type Carrier = "sip_trunk" | "twilio" | "telnyx";
+
+const isCarrier = (c: MessagingChannel) => c.provider !== "sip_trunk";
+
+const carrierName = (provider: string) =>
+  provider === "twilio"
+    ? "Twilio"
+    : provider === "telnyx"
+      ? "Telnyx"
+      : provider;
+
+const stateTone = (s: RegistrationState) =>
+  s === "approved"
+    ? "good"
+    : s === "rejected"
+      ? "bad"
+      : s === "unknown"
+        ? "neutral"
+        : "warn";
+
+const stateLabel: Record<string, string> = {
+  approved: "Approved",
+  pending: "Pending",
+  rejected: "Rejected",
+  unregistered: "Not registered",
+  unknown: "Unknown",
+};
+
+const kindLabel = (k: string) =>
+  k === "10dlc" ? "10DLC" : k === "toll_free" ? "Toll-free" : "Other";
+
+const checkTone = (s: string) =>
+  s === "done"
+    ? "good"
+    : s === "attention"
+      ? "bad"
+      : s === "pending" || s === "todo"
+        ? "warn"
+        : "neutral";
+
+const checkLabel: Record<string, string> = {
+  done: "Done",
+  pending: "Waiting",
+  todo: "To do",
+  attention: "Needs attention",
+  unknown: "Unknown",
+  manual: "Check yourself",
+  not_applicable: "Not needed",
+};
+
 type Data = {
   channels: MessagingChannel[];
   addresses: MessagingAddress[];
@@ -61,8 +117,10 @@ function ChannelDialog({
 }) {
   useRestoreFocus();
   const [name, setName] = useState(channel?.name ?? "");
-  const [carrier, setCarrier] = useState<"sip_trunk" | "twilio">(
-    channel?.provider === "twilio" ? "twilio" : "sip_trunk",
+  const [carrier, setCarrier] = useState<Carrier>(
+    channel?.provider === "twilio" || channel?.provider === "telnyx"
+      ? channel.provider
+      : "sip_trunk",
   );
   const [trunkId, setTrunkId] = useState(
     channel?.trunkId ? String(channel.trunkId) : "",
@@ -70,6 +128,8 @@ function ChannelDialog({
   const [accountSid, setAccountSid] = useState("");
   const [authToken, setAuthToken] = useState("");
   const [serviceSid, setServiceSid] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [profileId, setProfileId] = useState("");
   const [enabled, setEnabled] = useState(channel?.enabled ?? true);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -90,6 +150,10 @@ function ChannelDialog({
         body.accountSid = accountSid.trim();
         body.authToken = authToken.trim();
         body.messagingServiceSid = serviceSid.trim();
+      } else if (carrier === "telnyx" && (apiKey.trim() || profileId.trim())) {
+        // The key and profile are sent together and replace the stored ones.
+        body.apiKey = apiKey.trim();
+        body.messagingProfileId = profileId.trim();
       }
       onSaved(
         channel
@@ -111,7 +175,9 @@ function ChannelDialog({
       description={
         carrier === "twilio"
           ? "A Twilio channel sends texts through your own Twilio account. A Twilio number cannot receive texts while Hello has no public address, so conversations on it start with a first-contact text."
-          : "A channel reads customer texts from a SIP trunk that carries SMS as SIP MESSAGE, and sends replies through it. It works only where your carrier supports that."
+          : carrier === "telnyx"
+            ? "A Telnyx channel sends texts through your own Telnyx account. A Telnyx number cannot receive texts while Hello has no public address, so conversations on it start with a first-contact text."
+            : "A channel reads customer texts from a SIP trunk that carries SMS as SIP MESSAGE, and sends replies through it. It works only where your carrier supports that."
       }
       onClose={onClose}
       actions={
@@ -145,8 +211,9 @@ function ChannelDialog({
             options={[
               { value: "sip_trunk", label: "A SIP trunk (SMS over SIP)" },
               { value: "twilio", label: "Twilio" },
+              { value: "telnyx", label: "Telnyx" },
             ]}
-            onChange={(e) => setCarrier(e.target.value as typeof carrier)}
+            onChange={(e) => setCarrier(e.target.value as Carrier)}
           />
         )}
         {carrier === "twilio" && (
@@ -182,6 +249,35 @@ function ChannelDialog({
             />
           </>
         )}
+        {carrier === "telnyx" && (
+          <>
+            <Input
+              label="API key"
+              type="password"
+              hint={
+                channel
+                  ? "Leave the key empty to keep the stored one. Checked with Telnyx, then stored sealed; it is never shown again."
+                  : "A Telnyx v2 API key from the Telnyx portal. Checked with Telnyx, then stored sealed; it is never shown again."
+              }
+              value={apiKey}
+              error={fields.apiKey}
+              autoComplete="new-password"
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+            <Input
+              label="Messaging profile ID (optional)"
+              hint={
+                channel?.messagingService
+                  ? `A profile ending in ${channel.accountHint} is stored. Enter the key and the profile together to change them.`
+                  : "Send through a Telnyx messaging profile's sender pool and settings instead of the number alone."
+              }
+              value={profileId}
+              error={fields.messagingProfileId}
+              autoComplete="off"
+              onChange={(e) => setProfileId(e.target.value)}
+            />
+          </>
+        )}
         {carrier === "sip_trunk" && (
           <Select
             label="SIP trunk"
@@ -210,6 +306,177 @@ function ChannelDialog({
           onChange={(e) => setEnabled(e.target.checked)}
         />
       </form>
+    </Modal>
+  );
+}
+
+/** One carrier account's sender registration and what is left to do. */
+function RegistrationDialog({
+  channel,
+  onClose,
+  onRead,
+}: {
+  channel: MessagingChannel;
+  onClose: () => void;
+  onRead: (id: number, r: ChannelRegistration | "error") => void;
+}) {
+  const [reg, setReg] = useState<ChannelRegistration | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    getChannelRegistration(channel.id, controller.signal).then(
+      (r) => {
+        if (controller.signal.aborted) return;
+        setReg(r);
+        onRead(channel.id, r);
+      },
+      (err: unknown) => {
+        if (controller.signal.aborted) return;
+        setError(errorMessage(err));
+        onRead(channel.id, "error");
+      },
+    );
+    return () => controller.abort();
+    // The read is made once per opening.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channel.id]);
+
+  return (
+    <Modal
+      title={`Sender registration of ${channel.name}`}
+      description={`What ${carrierName(channel.provider)} reports about your US sender registration. Hello only reads it; you register in the carrier's own console. Unregistered US traffic is filtered or surcharged by carriers.`}
+      onClose={onClose}
+      actions={<Button onClick={onClose}>Close</Button>}
+    >
+      {error && (
+        <Alert tone="bad" title="Could not read the registration">
+          {error}
+        </Alert>
+      )}
+      {!reg && !error && <Spinner label="Reading the registration…" />}
+      {reg && (
+        <div className="cf-stack">
+          {reg.unavailable.length > 0 && (
+            <Alert tone="warn" title="Part of the registration cannot be read">
+              {carrierName(channel.provider)} did not answer for:{" "}
+              {reg.unavailable.join(", ")}. The numbers that depend on it show
+              as unknown.
+            </Alert>
+          )}
+          <Table
+            caption="Checklist"
+            rows={reg.checklist}
+            rowKey={(c) => c.id}
+            columns={[
+              {
+                key: "state",
+                label: "State",
+                render: (c) => (
+                  <Badge tone={checkTone(c.state)}>{checkLabel[c.state]}</Badge>
+                ),
+              },
+              { key: "title", label: "Step", render: (c) => c.title },
+              { key: "detail", label: "Detail", render: (c) => c.detail },
+              {
+                key: "link",
+                label: "",
+                render: (c) => (
+                  <a href={c.link} target="_blank" rel="noopener noreferrer">
+                    Guide<span className="sr-only"> for {c.title}</span>
+                  </a>
+                ),
+              },
+            ]}
+          />
+          {reg.brands.length > 0 && (
+            <Table
+              caption="Brands"
+              rows={reg.brands}
+              rowKey={(b) => b.id}
+              columns={[
+                { key: "name", label: "Brand", render: (b) => b.name },
+                { key: "type", label: "Type", render: (b) => b.type || "—" },
+                {
+                  key: "state",
+                  label: "State",
+                  render: (b) => (
+                    <Badge tone={stateTone(b.state)}>
+                      {stateLabel[b.state]}
+                    </Badge>
+                  ),
+                },
+                { key: "detail", label: "Detail", render: (b) => b.detail },
+              ]}
+            />
+          )}
+          {reg.campaigns.length > 0 && (
+            <Table
+              caption="Campaigns"
+              rows={reg.campaigns}
+              rowKey={(c) => c.id}
+              columns={[
+                {
+                  key: "id",
+                  label: "Campaign",
+                  mono: true,
+                  render: (c) => c.id,
+                },
+                {
+                  key: "use",
+                  label: "Use case",
+                  render: (c) => c.useCase || "—",
+                },
+                {
+                  key: "state",
+                  label: "State",
+                  render: (c) => (
+                    <Badge tone={stateTone(c.state)}>
+                      {stateLabel[c.state]}
+                    </Badge>
+                  ),
+                },
+                { key: "detail", label: "Detail", render: (c) => c.detail },
+              ]}
+            />
+          )}
+          {reg.numbers.length > 0 && (
+            <Table
+              caption="Carrier numbers"
+              rows={reg.numbers}
+              rowKey={(n) => n.number}
+              columns={[
+                {
+                  key: "number",
+                  label: "Number",
+                  mono: true,
+                  render: (n) => n.number,
+                },
+                {
+                  key: "kind",
+                  label: "Registration",
+                  render: (n) => kindLabel(n.kind),
+                },
+                {
+                  key: "state",
+                  label: "State",
+                  render: (n) => (
+                    <Badge tone={stateTone(n.state)}>
+                      {stateLabel[n.state]}
+                    </Badge>
+                  ),
+                },
+                {
+                  key: "added",
+                  label: "In Hello",
+                  render: (n) => (n.added ? "Yes" : "No"),
+                },
+                { key: "detail", label: "Detail", render: (n) => n.detail },
+              ]}
+            />
+          )}
+        </div>
+      )}
     </Modal>
   );
 }
@@ -247,7 +514,9 @@ function AddressDialog({
   const [fields, setFields] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const chosenChannel = channels.find((c) => String(c.id) === channelId);
-  const carrierNumber = chosenChannel?.provider === "twilio";
+  const carrierNumber =
+    chosenChannel?.provider === "twilio" ||
+    chosenChannel?.provider === "telnyx";
 
   useEffect(() => {
     const controller = new AbortController();
@@ -335,7 +604,7 @@ function AddressDialog({
               label="Number"
               hint={
                 carrierNumber
-                  ? "The Twilio number in international format, such as +3270123456."
+                  ? `The ${carrierName(chosenChannel?.provider ?? "")} number in international format, such as +3270123456.`
                   : "The number customers text, as the carrier dials it to you, such as +3270123456."
               }
               value={number}
@@ -438,6 +707,8 @@ export function MessagingChannels() {
     result: ChannelTest;
   } | null>(null);
   const [reload, setReload] = useState(0);
+  const [regs, setRegs] = useState<Registrations>({});
+  const [regOf, setRegOf] = useState<MessagingChannel | null>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -466,6 +737,51 @@ export function MessagingChannels() {
   }, [reload]);
   const refresh = () => setReload((n) => n + 1);
 
+  // The registration state of each carrier channel, for the numbers table. A
+  // carrier that does not answer leaves its numbers "Unknown".
+  useEffect(() => {
+    if (!data) return;
+    const controller = new AbortController();
+    for (const c of data.channels) {
+      if (!isCarrier(c) || !c.enabled || c.status === "credentials_invalid") {
+        continue;
+      }
+      getChannelRegistration(c.id, controller.signal).then(
+        (r) => {
+          if (!controller.signal.aborted) setRegs((m) => ({ ...m, [c.id]: r }));
+        },
+        () => {
+          if (!controller.signal.aborted) {
+            setRegs((m) => ({ ...m, [c.id]: "error" }));
+          }
+        },
+      );
+    }
+    return () => controller.abort();
+  }, [data]);
+
+  /** A number's registration, as a short label for the numbers table. */
+  function registrationOf(a: MessagingAddress) {
+    const ch = data?.channels.find((c) => c.id === a.channelId);
+    if (!ch || !isCarrier(ch)) return "—";
+    const r = regs[a.channelId];
+    if (!r) {
+      return !ch.enabled || ch.status === "credentials_invalid" ? (
+        <Badge tone="neutral">Unknown</Badge>
+      ) : (
+        "Checking…"
+      );
+    }
+    const n =
+      r === "error" ? undefined : r.numbers.find((x) => x.number === a.address);
+    if (!n) return <Badge tone="neutral">Unknown</Badge>;
+    return (
+      <Badge tone={stateTone(n.state)}>
+        {kindLabel(n.kind)} {(stateLabel[n.state] ?? n.state).toLowerCase()}
+      </Badge>
+    );
+  }
+
   async function runTest(c: MessagingChannel) {
     try {
       setTest({ channel: c, result: await testChannel(c.id) });
@@ -479,7 +795,7 @@ export function MessagingChannels() {
       <PageHeader
         eyebrow="Messaging"
         title="Channels"
-        description="Where customer texts come from. A channel reads texts from a SIP trunk that carries SMS as SIP MESSAGE and sends replies through it; each number a customer texts becomes conversations in the inbox. Texts through a carrier's web interface and WhatsApp are not available yet."
+        description="Where customer texts come from. A channel reads texts from a SIP trunk that carries SMS as SIP MESSAGE and sends replies through it; each number a customer texts becomes conversations in the inbox. A Twilio or Telnyx channel sends texts through your own carrier account; WhatsApp is not available yet."
         actions={
           <Button icon="plus" onClick={() => setEditChannel("new")}>
             Add channel
@@ -509,10 +825,10 @@ export function MessagingChannels() {
               { key: "name", label: "Channel", render: (c) => c.name },
               {
                 key: "trunk",
-                label: "SIP trunk",
+                label: "SIP trunk or carrier",
                 render: (c) =>
-                  c.provider === "twilio"
-                    ? `Twilio …${c.accountHint}`
+                  isCarrier(c)
+                    ? `${carrierName(c.provider)}${c.accountHint ? ` …${c.accountHint}` : ""}`
                     : c.trunkName || "Deleted",
               },
               {
@@ -551,6 +867,15 @@ export function MessagingChannels() {
                     >
                       Test {c.name}
                     </Button>
+                    {isCarrier(c) && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setRegOf(c)}
+                      >
+                        Registration of {c.name}
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant="secondary"
@@ -623,6 +948,11 @@ export function MessagingChannels() {
                     ),
                 },
                 {
+                  key: "registration",
+                  label: "Registration",
+                  render: (a) => registrationOf(a),
+                },
+                {
                   key: "conversations",
                   label: "Conversations",
                   align: "right",
@@ -685,6 +1015,13 @@ export function MessagingChannels() {
             toast.show(`Number ${a.address} saved.`);
             refresh();
           }}
+        />
+      )}
+      {regOf && (
+        <RegistrationDialog
+          channel={regOf}
+          onClose={() => setRegOf(null)}
+          onRead={(id, r) => setRegs((m) => ({ ...m, [id]: r }))}
         />
       )}
       {delChannel && (
