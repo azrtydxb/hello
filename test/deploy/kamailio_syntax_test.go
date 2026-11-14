@@ -5,10 +5,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
 )
+
+// ctrNameUnsafe matches what a Docker container name may not contain.
+var ctrNameUnsafe = regexp.MustCompile(`[^a-z0-9_.-]+`)
 
 // TestKamailioConfigSyntax runs `kamailio -c` over deploy/kamailio/kamailio.cfg
 // in the real Kamailio image, once with no environment (the lab's defaults)
@@ -21,6 +25,7 @@ import (
 // variable the test skips, unless HELLO_REQUIRE_KAMAILIO=1 (set in that job),
 // where a missing image is a failure. Never run it against a Docker daemon
 // you did not mean to use: it starts short-lived containers.
+
 func TestKamailioConfigSyntax(t *testing.T) {
 	image := os.Getenv("HELLO_KAMAILIO_IMAGE")
 	if image == "" {
@@ -94,7 +99,9 @@ func TestKamailioConfigSyntax(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			// docker create + cp + start, not a bind mount: in CI the Docker
 			// daemon is a sidecar that cannot see the runner's temp files.
-			ctr := "kamailio-cfgcheck-" + strings.ReplaceAll(strings.ToLower(name), " ", "-")
+			// Docker allows only [a-zA-Z0-9_.-] in a container name; a case
+			// name with a comma or other punctuation is reduced to that.
+			ctr := "kamailio-cfgcheck-" + strings.Trim(ctrNameUnsafe.ReplaceAllString(strings.ToLower(name), "-"), "-")
 			_ = exec.Command(docker, "rm", "-f", ctr).Run()
 			args := []string{"create", "--name", ctr}
 			check := []string{image, "-c", "-f", "/etc/kamailio/kamailio.cfg"}

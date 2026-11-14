@@ -454,6 +454,16 @@ data:
     modparam("tm", "fr_timer", 1500)
     modparam("tm", "fr_inv_timer", 120000)
     modparam("tm", "reparse_invite", 1)
+    # No automatic 100 Trying: route[RELAY] sends it once the INVITE has been sent
+    # on. A 100 stops the sender retransmitting, so one for an INVITE that was
+    # never forwarded strands the call: that is what a draining instance did. Its
+    # kube-vip drops the VIP address at SIGTERM while Kamailio keeps running for
+    # the preStop; a request that arrived just before that got its 100 from tm,
+    # then the send on (and the 477 that follows) failed with "Network is
+    # unreachable", as every socket is bound to the VIP, and nothing ever answered.
+    # Without the 100 the sender retransmits and the instance that holds the VIP
+    # next gets the request.
+    modparam("tm", "auto_inv_100", 0)
 
     # rr: double Record-Route (phone-facing public address, Hello-facing edge
     # address), and Route processing for both at once (r2=on).
@@ -1016,6 +1026,12 @@ data:
     route[RELAY] {
     	if (!t_relay()) {
     		sl_reply_error();
+    		exit;
+    	}
+    	if (is_method("INVITE")) {
+    		# Sent on: tell the sender to stop retransmitting (auto_inv_100 is
+    		# off). Not sent when a reply from the far side was relayed already.
+    		t_reply("100", "Trying");
     	}
     	exit;
     }
@@ -1381,7 +1397,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: ef6813a0579bbe176e1b8abf2d4419dc75ed8dfa9c86ce7d291aae82f5141742
+        hello.watteel.com/kamailio-config-sha256: 5e7af10f65c86419532f5fb777dcb5ddbd2ffbba59722f65d9bf5aac376b90a1
     spec:
       # Phones must reach Kamailio with no NAT in between: through a NodePort
       # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's
