@@ -26,6 +26,7 @@ import (
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/msgai"
 	"github.com/azrtydxb/hello/internal/messaging/router"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/oauth"
@@ -211,6 +212,10 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	} else {
 		log.Info("ai agent off", "reason", reason)
 	}
+	// The inbox AI (spec messaging-channels M-30): triage, drafts and
+	// auto-replies through the agent's model; with the agent off it marks the
+	// queued runs skipped.
+	go runInboxAI(ctx, st, agent, cfg.MsgAIAuto, msgai.NewMetrics(metrics.Registry), log)
 	// Call events (spec integrations I-35): consume the stream hello-sip
 	// appends to, store it, and fan it out to the SSE clients of this pod.
 	// CRM connectors (spec integrations I-47): their hook queues calls in
@@ -322,6 +327,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Clients:         st,
 		ClientAuth:      clientConfig(cfg, metrics.Registry),
 		Inbox:           st,
+		MessagingAIAuto: cfg.MsgAIAuto,
 		Blocklist:       st,
 		Dialing:         cfg.Dial,
 		PromptLanguage:  cfg.VoicePromptLanguage,

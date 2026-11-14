@@ -70,6 +70,7 @@ import { InboxQueues } from "./pages/InboxQueues";
 import { MessagingChannels } from "./pages/MessagingChannels";
 import { MessagingOptOuts } from "./pages/MessagingOptOuts";
 import { MessagingSettings } from "./pages/MessagingSettings";
+import { MessagingAI } from "./pages/MessagingAI";
 import { MessagingWebchat } from "./pages/MessagingWebchat";
 import { getInboxStatus } from "./api/inbox";
 import { Messages } from "./pages/Messages";
@@ -147,6 +148,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/messaging/chat": MessagingWebchat,
   "/messaging/optouts": MessagingOptOuts,
   "/messaging/settings": MessagingSettings,
+  "/messaging/ai": MessagingAI,
   "/me/voicemail": MyVoicemail,
   "/me/forwarding": MyForwarding,
   "/me/history": MyHistory,

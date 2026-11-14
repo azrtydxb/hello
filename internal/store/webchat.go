@@ -456,6 +456,9 @@ func (s *Store) chatSend(ctx context.Context, tx *sql.Tx, in ChatSendInput, res 
 	if _, err := tx.ExecContext(ctx, `UPDATE msg_channels SET last_event_at = now() WHERE id = $1`, in.Site.ChannelID); err != nil {
 		return err
 	}
+	if err := queueAITriage(ctx, tx, conv, in.Site.AddressID, msgID); err != nil {
+		return err
+	}
 	if newConv {
 		if err := emitConversationEvent(ctx, tx, conv, msgID, "conversation.new", nil); err != nil {
 			return err

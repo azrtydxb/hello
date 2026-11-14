@@ -17249,6 +17249,569 @@
         }
       }
     },
+    "/api/v1/messaging/ai": {
+      "get": {
+        "operationId": "getMessagingAI",
+        "summary": "Inbox AI settings",
+        "description": "Returns the inbox AI's inbox-wide settings and kill switches (all AI, auto-replies), the intents the triage picks from, the sensitive topics the AI never answers, each channel's AI switch, each number's mode, and whether the in-product AI is available, its endpoint is public and HELLO_MSG_AI_AUTO allows auto-replies.",
+        "tags": ["messaging"],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingAI"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "put": {
+        "operationId": "updateMessagingAI",
+        "summary": "Change the inbox AI settings",
+        "description": "Changes the inbox-wide AI settings; fields left out keep their value. enabled false stops every triage, draft and auto-reply; autoEnabled false stops the auto-replies. channels sets the AI switch of the channels it names. Changing a channel's switch is audited.",
+        "tags": ["messaging"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingAIInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingAI"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/messaging/addresses/{id}/ai": {
+      "get": {
+        "operationId": "getMessagingAddressAI",
+        "summary": "A messaging number's AI",
+        "description": "Returns a number's (or chat site's) AI mode (off, triage, draft, auto) and the auto-reply guardrails: disclosure, holding line, reply cap, hourly cap, least confidence, allowed intents and handoff words.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The number's AI",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingAddressAI"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "put": {
+        "operationId": "updateMessagingAddressAI",
+        "summary": "Change a messaging number's AI",
+        "description": "Changes a number's AI mode and guardrails; fields left out keep their value. auto lets the AI answer customers from the number's FAQ, within the guardrails; turning it on or off is audited. A customer can always reach a person: handoffWords cannot be empty.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingAddressAIInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The number's AI",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingAddressAI"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/messaging/faq": {
+      "get": {
+        "operationId": "listMessagingFAQ",
+        "summary": "List FAQ snippets",
+        "description": "Lists the FAQ snippets auto-replies answer from, of one number with addressId, else of every number.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "name": "addressId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Only this number's snippets."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The snippets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingFAQList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "post": {
+        "operationId": "createMessagingFAQ",
+        "summary": "Add a FAQ snippet",
+        "description": "Adds a snippet to a number's FAQ: a title and up to 4096 bytes of text, at most 50 per number (409 faq_full). An auto-reply may only say what a snippet says, and only contain a link that is in a snippet.",
+        "tags": ["messaging"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingFAQInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The snippet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingFAQ"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/messaging/faq/{id}": {
+      "get": {
+        "operationId": "getMessagingFAQ",
+        "summary": "A FAQ snippet",
+        "description": "Returns one FAQ snippet.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The snippet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingFAQ"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "put": {
+        "operationId": "updateMessagingFAQ",
+        "summary": "Change a FAQ snippet",
+        "description": "Changes a snippet's title, text or switch; fields left out keep their value. A snippet stays on its number.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingFAQInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The snippet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingFAQ"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "delete": {
+        "operationId": "deleteMessagingFAQ",
+        "summary": "Delete a FAQ snippet",
+        "description": "Deletes a snippet.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/ai/revert": {
+      "post": {
+        "operationId": "revertInboxAI",
+        "summary": "Undo the AI triage's suggestions",
+        "description": "Removes the tags the AI triage added (those still there), lowers the priority it raised (while still high) and clears its spam flag. The triage stays visible, marked reverted.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/ai/revert": {
+      "post": {
+        "operationId": "revertMyInboxAI",
+        "summary": "Undo the AI triage's suggestions on one of my conversations",
+        "description": "Undoes what the AI triage changed (the tags it added, the priority it raised, its spam flag) on a conversation the caller reaches. The triage stays visible, marked reverted.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/ai/stats": {
+      "get": {
+        "operationId": "getInboxAIStats",
+        "summary": "Inbox AI counts",
+        "description": "Counts what the inbox AI did in the last 24 hours: runs by kind (triage, draft, autoreply) and state, auto-replies sent, conversations handed to a person, active conversations flagged as spam, and the numbers by AI mode. It carries no customer text.",
+        "tags": ["inbox"],
+        "responses": {
+          "200": {
+            "description": "The counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxAIStats"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/inbox/stats": {
       "get": {
         "operationId": "getInboxStats",
@@ -42931,7 +43494,14 @@
           },
           "routeKind": {
             "type": "string",
-            "enum": ["inbox", "queue", "user", "extension", "ring_group"],
+            "enum": [
+              "inbox",
+              "queue",
+              "user",
+              "extension",
+              "ring_group",
+              "ai_triage"
+            ],
             "description": "Where a new conversation goes: inbox is the pool every operator sees. Change it with the number's routing."
           },
           "enabled": {
@@ -43236,7 +43806,8 @@
           "firstResponseAt",
           "resolvedAt",
           "createdAt",
-          "chat"
+          "chat",
+          "ai"
         ],
         "properties": {
           "id": {
@@ -43343,6 +43914,9 @@
           },
           "chat": {
             "$ref": "#/components/schemas/ChatInfo"
+          },
+          "ai": {
+            "$ref": "#/components/schemas/InboxConversationAI"
           }
         }
       },
@@ -43665,7 +44239,14 @@
           },
           "routeKind": {
             "type": "string",
-            "enum": ["inbox", "queue", "user", "extension", "ring_group"],
+            "enum": [
+              "inbox",
+              "queue",
+              "user",
+              "extension",
+              "ring_group",
+              "ai_triage"
+            ],
             "description": "inbox is the supervisors' pool; queue assigns by the queue's strategy; user and extension assign to one person; ring_group is a shared pool of the users of the group's extensions."
           },
           "routeTarget": {
@@ -43695,7 +44276,14 @@
         "properties": {
           "routeKind": {
             "type": "string",
-            "enum": ["inbox", "queue", "user", "extension", "ring_group"],
+            "enum": [
+              "inbox",
+              "queue",
+              "user",
+              "extension",
+              "ring_group",
+              "ai_triage"
+            ],
             "description": "Where new conversations go: inbox (the supervisors' pool), queue, user, extension (its linked user) or ring_group (a shared pool of its users). Changing it needs a routeTarget."
           },
           "routeTarget": {
@@ -43960,6 +44548,639 @@
             "type": "string",
             "maxLength": 32,
             "description": "Why the agent pauses; A-Z a-z 0-9 space . _ - only."
+          }
+        }
+      },
+      "MessagingAI": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "autoEnabled",
+          "businessName",
+          "intents",
+          "sensitiveTopics",
+          "channels",
+          "addresses",
+          "status"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "The kill switch of all the inbox AI (triage, drafts, auto-replies)."
+          },
+          "autoEnabled": {
+            "type": "boolean",
+            "description": "The kill switch of the auto-replies."
+          },
+          "businessName": {
+            "type": "string",
+            "description": "The name the AI answers for."
+          },
+          "intents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The intents the triage picks from; other is always allowed."
+          },
+          "sensitiveTopics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Topics the AI never answers: a text about one goes to a person."
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "kind", "aiEnabled"],
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "aiEnabled": {
+                  "type": "boolean",
+                  "description": "The channel's AI kill switch."
+                }
+              }
+            }
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "channelId",
+                "address",
+                "label",
+                "mode",
+                "faqCount"
+              ],
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "channelId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "address": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["off", "triage", "draft", "auto"]
+                },
+                "faqCount": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "status": {
+            "type": "object",
+            "required": [
+              "available",
+              "reason",
+              "endpointPublic",
+              "autoAllowed"
+            ],
+            "properties": {
+              "available": {
+                "type": "boolean",
+                "description": "The in-product AI (HELLO_AI_*) is on."
+              },
+              "reason": {
+                "type": "string",
+                "description": "Why it is not; empty when it is."
+              },
+              "endpointPublic": {
+                "type": "boolean",
+                "description": "The model's endpoint is not on a private network: customer texts leave it."
+              },
+              "autoAllowed": {
+                "type": "boolean",
+                "description": "HELLO_MSG_AI_AUTO: false stops every auto-reply."
+              }
+            }
+          }
+        }
+      },
+      "MessagingAIInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "The kill switch of all the inbox AI: false stops every triage, draft and auto-reply."
+          },
+          "autoEnabled": {
+            "type": "boolean",
+            "description": "The kill switch of the auto-replies: false stops them; triage and drafts go on."
+          },
+          "businessName": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "The name the AI answers for."
+          },
+          "intents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "maxItems": 30,
+            "description": "The intents the triage picks from, at least one; do not list other.",
+            "minItems": 1
+          },
+          "sensitiveTopics": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "maxItems": 30,
+            "description": "Topics the AI never answers."
+          },
+          "channels": {
+            "type": "array",
+            "description": "The channels whose AI switch to set.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "aiEnabled"],
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "The channel."
+                },
+                "aiEnabled": {
+                  "type": "boolean",
+                  "description": "The channel's AI kill switch."
+                }
+              }
+            }
+          }
+        }
+      },
+      "MessagingAddressAI": {
+        "type": "object",
+        "required": [
+          "addressId",
+          "mode",
+          "redact",
+          "disclosure",
+          "disclosureText",
+          "holdingText",
+          "maxReplies",
+          "hourlyCap",
+          "minConfidence",
+          "autoIntents",
+          "handoffWords",
+          "faqCount"
+        ],
+        "properties": {
+          "addressId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["off", "triage", "draft", "auto"],
+            "description": "off; triage (classify and summarise, nothing the customer sees); draft (triage plus a reply an agent must click to use); auto (the AI may answer from the FAQ, within the guardrails)."
+          },
+          "redact": {
+            "type": "boolean",
+            "description": "Replace phone numbers and email addresses before a model call."
+          },
+          "disclosure": {
+            "type": "boolean",
+            "description": "The first AI reply of a conversation starts with disclosureText."
+          },
+          "disclosureText": {
+            "type": "string"
+          },
+          "holdingText": {
+            "type": "string",
+            "description": "Sent once, until a person replies, when the AI hands a conversation to a person; empty sends nothing."
+          },
+          "maxReplies": {
+            "type": "integer",
+            "description": "AI replies before a person must answer."
+          },
+          "hourlyCap": {
+            "type": "integer",
+            "description": "AI messages the number sends per hour at most."
+          },
+          "minConfidence": {
+            "type": "number",
+            "description": "The least confidence of the triage and the answer."
+          },
+          "autoIntents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The intents the AI may answer; empty allows every intent but other."
+          },
+          "handoffWords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "A customer text with one of these words goes to a person."
+          },
+          "faqCount": {
+            "type": "integer"
+          }
+        }
+      },
+      "MessagingAddressAIInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["off", "triage", "draft", "auto"],
+            "description": "off, triage, draft or auto (the AI may answer from the FAQ)."
+          },
+          "redact": {
+            "type": "boolean",
+            "description": "Replace phone numbers and email addresses before a model call (default true)."
+          },
+          "disclosure": {
+            "type": "boolean",
+            "description": "Start the first AI reply of a conversation with disclosureText (default true)."
+          },
+          "disclosureText": {
+            "type": "string",
+            "maxLength": 160,
+            "description": "The disclosure line; required while disclosure is on."
+          },
+          "holdingText": {
+            "type": "string",
+            "maxLength": 480,
+            "description": "Sent once, until a person replies, when the AI hands a conversation to a person; empty sends nothing."
+          },
+          "maxReplies": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "AI replies before a person must answer (default 3)."
+          },
+          "hourlyCap": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "AI messages the number sends per hour at most (default 60)."
+          },
+          "minConfidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The least confidence of the triage and of the answer (default 0.8)."
+          },
+          "autoIntents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "maxItems": 30,
+            "description": "The intents the AI may answer; empty allows every intent but other."
+          },
+          "handoffWords": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "maxItems": 30,
+            "description": "Words that send a customer text to a person; at least one.",
+            "minItems": 1
+          }
+        }
+      },
+      "MessagingFAQ": {
+        "type": "object",
+        "required": [
+          "id",
+          "addressId",
+          "title",
+          "body",
+          "enabled",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "addressId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingFAQInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "addressId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The number; required to create, fixed after."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "One line naming the question it answers."
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "The answer; an auto-reply may only use what it says, and only links it contains."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "An auto-reply may use it (default true)."
+          }
+        }
+      },
+      "MessagingFAQList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessagingFAQ"
+            }
+          }
+        }
+      },
+      "InboxAIStats": {
+        "type": "object",
+        "required": ["runs", "autoReplies", "handoffs", "spam", "modes"],
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["kind", "state", "count"],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["triage", "draft", "autoreply"]
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed",
+                    "skipped",
+                    "stale"
+                  ]
+                },
+                "count": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "autoReplies": {
+            "type": "integer",
+            "description": "AI messages sent in the last 24 hours."
+          },
+          "handoffs": {
+            "type": "integer",
+            "description": "Conversations the AI handed to a person in the last 24 hours."
+          },
+          "spam": {
+            "type": "integer",
+            "description": "Active conversations the triage flagged as spam."
+          },
+          "modes": {
+            "type": "object",
+            "required": ["off", "triage", "draft", "auto"],
+            "properties": {
+              "off": {
+                "type": "integer"
+              },
+              "triage": {
+                "type": "integer"
+              },
+              "draft": {
+                "type": "integer"
+              },
+              "auto": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "InboxConversationAI": {
+        "type": "object",
+        "required": [
+          "mode",
+          "triage",
+          "applied",
+          "spam",
+          "handoff",
+          "handoffReason",
+          "draft",
+          "pending"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["off", "triage", "draft", "auto"],
+            "description": "The number's AI mode; auto shows an auto-reply indicator."
+          },
+          "triage": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "language",
+                  "intent",
+                  "urgency",
+                  "sentiment",
+                  "spam",
+                  "sensitive",
+                  "confidence",
+                  "summary",
+                  "suggestedQueue",
+                  "suggestedTags",
+                  "handoffRecommended",
+                  "messageId",
+                  "reverted"
+                ],
+                "properties": {
+                  "language": {
+                    "type": "string",
+                    "description": "ISO 639-1 code of the customer's text."
+                  },
+                  "intent": {
+                    "type": "string",
+                    "description": "One of the intents of the inbox AI settings, or other."
+                  },
+                  "urgency": {
+                    "type": "string",
+                    "enum": ["low", "normal", "high"]
+                  },
+                  "sentiment": {
+                    "type": "string",
+                    "enum": ["positive", "neutral", "negative"]
+                  },
+                  "spam": {
+                    "type": "boolean"
+                  },
+                  "sensitive": {
+                    "type": "boolean",
+                    "description": "The text touches a sensitive topic."
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "summary": {
+                    "type": "string",
+                    "maxLength": 280,
+                    "description": "The model's one-sentence summary for the agent."
+                  },
+                  "suggestedQueue": {
+                    "type": "string",
+                    "description": "A text queue's name; empty for none."
+                  },
+                  "suggestedTags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "handoffRecommended": {
+                    "type": "boolean"
+                  },
+                  "messageId": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "The customer text it read."
+                  },
+                  "reverted": {
+                    "type": "boolean",
+                    "description": "An agent undid what it changed."
+                  }
+                }
+              }
+            ],
+            "description": "The last triage applied; null when none."
+          },
+          "applied": {
+            "type": "object",
+            "required": ["tags", "priority"],
+            "properties": {
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Tags the AI added."
+              },
+              "priority": {
+                "type": "string",
+                "description": "The priority before the AI raised it; empty when it did not."
+              }
+            }
+          },
+          "spam": {
+            "type": "boolean",
+            "description": "The triage flagged spam (supervisors decide; nothing is deleted)."
+          },
+          "handoff": {
+            "type": "boolean",
+            "description": "The AI asked for a person and nobody replied since."
+          },
+          "handoffReason": {
+            "type": "string"
+          },
+          "draft": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": ["runId", "messageId", "text", "createdAt"],
+                "properties": {
+                  "runId": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "messageId": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            ],
+            "description": "The reply the AI suggests for the latest customer text; only when one conversation is read. An agent must click to use it."
+          },
+          "pending": {
+            "type": "boolean",
+            "description": "An AI run is queued or running; only when one conversation is read."
           }
         }
       },

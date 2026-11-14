@@ -76,6 +76,19 @@ type InboxStore interface {
 	UserTextAgent(ctx context.Context, userID int64) ([]store.TextAgentExt, error)
 	StartConversation(ctx context.Context, acc store.InboxAccess, in store.StartInput) (store.Conversation, error)
 	ChannelProviderConfig(ctx context.Context, channelID int64) (provider.Config, error)
+
+	// The inbox AI (spec M-30, M-30a).
+	GetMessagingAI(ctx context.Context) (store.MessagingAI, error)
+	PutMessagingAI(ctx context.Context, actor string, in store.MessagingAIInput) (store.MessagingAI, error)
+	GetMsgAddressAI(ctx context.Context, addressID int64) (store.MsgAddressAI, error)
+	PutMsgAddressAI(ctx context.Context, actor string, m store.MsgAddressAI) (store.MsgAddressAI, error)
+	ListMsgFAQ(ctx context.Context, addressID int64) ([]store.MsgFAQ, error)
+	GetMsgFAQ(ctx context.Context, id int64) (store.MsgFAQ, error)
+	CreateMsgFAQ(ctx context.Context, actor string, in store.MsgFAQInput) (store.MsgFAQ, error)
+	UpdateMsgFAQ(ctx context.Context, actor string, id int64, in store.MsgFAQInput) (store.MsgFAQ, error)
+	DeleteMsgFAQ(ctx context.Context, actor string, id int64) error
+	RevertConversationAI(ctx context.Context, acc store.InboxAccess, convID int64) (store.Conversation, error)
+	GetInboxAIStats(ctx context.Context) (store.InboxAIStats, error)
 }
 
 var _ InboxStore = (*store.Store)(nil)
