@@ -621,6 +621,176 @@ administrator.
 
 Tables are in migration `00093`.
 
+## Directory sync: Google Workspace and Microsoft Entra ID
+
+The same engine runs two more connector kinds, chosen when the connector is
+created: **Google Workspace** (the Admin SDK Directory API) and **Microsoft
+Entra ID** (Microsoft Graph). Preview, apply, modes, group rules, the
+safeguards and the schedule are those of the LDAP connector above; only the
+source differs. Every call is read-only, over HTTPS to the provider's fixed
+endpoints, and a paging link that leaves the provider's host is refused. A
+`429` or `503` with `Retry-After` is waited out inside the run's budget (at
+most 12 retries, 2 minutes per wait, 6 minutes in total); after that the run
+fails as `quota`.
+
+The credential (a service account key, a client secret, or a certificate's
+private key) is sealed like the bind password, never returned, and needs the
+`secrets` scope. The API takes it in the connector's `credential` field
+(`bindPassword` is the LDAP spelling; a request may carry one of them, not
+both).
+
+### Google Workspace
+
+Users come from `users.list` and groups from `groups.list` and
+`members.list` (with derived membership when nested groups are on). Google
+has no change-since filter, so every run is a full read. A user is linked by
+Google's user `id`; the defaults map `primaryEmail` to username and email,
+`name.fullName` to the display name, the digits of the `work` phone to the
+extension, and a suspended or archived user to inactive. The customer is
+`my_customer` unless set; an optional domain and a `users.list` query (for
+example `orgUnitPath='/Sales'`) narrow the read.
+
+Hello asks only for these scopes, whatever the client was granted:
+
+- `https://www.googleapis.com/auth/admin.directory.user.readonly`
+- `https://www.googleapis.com/auth/admin.directory.group.readonly` (group
+  rules only)
+- `https://www.googleapis.com/auth/admin.directory.group.member.readonly`
+  (group rules only)
+
+There are three ways in:
+
+1. **Service account with a read-only admin role** (default, recommended). In
+   Google Cloud create a service account and a JSON key. In the Admin console
+   create a custom admin role with the read privileges for users and groups
+   only, and assign it to the service account's e-mail address. Paste or
+   upload the JSON key as the credential. No user is impersonated.
+2. **OAuth client with administrator consent.** Create an OAuth client (web
+   application) in your own Google Cloud project, register Hello's directory
+   consent redirect URI (shown on **Integrations > Single sign-on**,
+   `<HELLO_PUBLIC_URL>/api/v1/directory/oauth/callback`), enter the client id
+   and, as the credential, the client secret. Save, then press **Grant
+   consent**: a Google administrator signs in and approves the three scopes.
+   The refresh token Google returns is sealed with the secret. A grant with any
+   scope outside the list above is refused. Replacing the secret drops the
+   refresh token, so consent is granted again. Needs `HELLO_PUBLIC_URL`.
+3. **Domain-wide delegation** (offered, discouraged). The service account
+   impersonates the administrator named as the subject. In the Admin console
+   authorise the service account's client id for exactly the scopes above;
+   the page shows them. Anyone holding the key can then read the directory
+   as that administrator, which is why the first way is preferred.
+
+### Microsoft Entra ID
+
+Register an application in your tenant, grant it the **application**
+permissions `User.Read.All` and `GroupMember.Read.All` with administrator
+consent, and enter the tenant id and the application (client) id. The tenant
+is pinned: `common`, `organizations` and `consumers` are refused. The
+credential is either a **client secret** or a **certificate**: upload the
+certificate (public part) to the app registration, and give Hello the
+certificate PEM in the connector and its RSA private key as the credential.
+Hello signs a client assertion with it (headers `x5t` and `x5t#S256`); the key
+must belong to the certificate.
+
+A user is linked by its object id. The defaults map `userPrincipalName` to the
+username, `mail` (then `userPrincipalName`) to the email, `displayName`, the
+digits of the first `businessPhones` entry to the extension, and
+`accountEnabled` to active. Guests (`userType` Guest) are skipped unless
+**include guests** is on. Group rules read each group's `transitiveMembers`.
+
+A full run lists `/users` 999 at a time and ends by taking a delta link
+(`$deltatoken=latest`), which is kept with the connector. An incremental run
+follows that link and re-reads only the changed users. It falls back to a full
+read, named in the run's reason, when:
+
+| Reason           | When                                                        |
+| ---------------- | ----------------------------------------------------------- |
+| `delta_expired`  | Graph answers `410 Gone` (the token expired or was reset)   |
+| `delta_removed`  | the delta reports a removed user: absence needs a full list |
+| `delta_large`    | more than 1,000 users changed                               |
+| `groups_changed` | the membership of a group used by a rule changed            |
+
+The daily full read and the absence rule of the LDAP connector apply as well.
+
+## Single sign-on
+
+People sign in with their Google Workspace or Microsoft account through an
+OAuth client you own (OpenID Connect, authorization code with PKCE). It is set
+up on **Integrations > Single sign-on** (administrators only) and
+`/api/v1/auth/sso`; it needs `HELLO_PUBLIC_URL`, the address people reach
+Hello at, and Valkey. The sign-in page then shows a button for each enabled
+provider.
+
+### Setting up a provider
+
+- **Google:** create an OAuth client (web application), register the redirect
+  URI the page shows (`<HELLO_PUBLIC_URL>/api/v1/auth/oidc/google/callback`),
+  enter the client id and secret, and list your Workspace domains. Only an
+  account whose `hd` claim is one of them and whose email is verified is
+  accepted.
+- **Microsoft Entra ID:** register a web application with the redirect URI
+  `<HELLO_PUBLIC_URL>/api/v1/auth/oidc/entra/callback`, create a client
+  secret, and enter the tenant id, client id and secret. The issuer is pinned
+  to your tenant; `common` and `organizations` are refused.
+
+**Test** fetches the provider's discovery document and keys. The client
+secret is sealed with `HELLO_SECRET_KEY`, never returned, and setting it needs
+the `secrets` scope.
+
+Every ID token is checked for its signature against the provider's published
+keys, the issuer, the audience (and `azp`), the expiry and the nonce; `state`
+and `nonce` are single use and bound to the browser by a short-lived cookie.
+Any failure signs nobody in. A user with two-factor authentication still
+enters a code after the provider.
+
+### Who signs in as whom
+
+Hello never matches an account by email alone except in one narrow case. In
+order:
+
+1. An identity already linked to a user.
+2. A user a directory connector of the same provider synced, by its id
+   (Google user id, Entra object id), from the same tenant.
+3. Google only: exactly one synced user, not an administrator, with that
+   email address.
+4. Otherwise, with **create a user on first sign-in** on, a new `user`-role
+   account without a local password. Off by default.
+
+Local users and administrators link their account themselves, signed in, on
+**My phone > Profile** (**Link Google**, **Link Microsoft**); an administrator
+can unlink an identity on the user's dialog. A directory connector whose users
+sign in by single sign-on cannot be enabled until its provider is.
+
+### Directory users and passwords
+
+A user a connector manages has no local password and the password form never
+falls back to one: changing or resetting it answers `409 managed_by_directory`.
+Each connector says how its users sign in (**How these users sign in**):
+single sign-on with its provider, or, for Active Directory and LDAP, an **LDAP
+bind**: the sign-in page's password is checked by binding to the directory as
+that user (found by their stable id). A bind login is throttled after 5
+failures per user and per address in 10 minutes, and the answer never says
+which check failed. Hello's own lockout is in front of the directory's.
+
+### Requiring single sign-on and break-glass
+
+With **Require single sign-on** on, the password form only lets in
+**break-glass** administrators: enabled local administrators flagged on the
+Users page. If the identity provider is down, one of them signs in and
+switches it off. It cannot be turned on with no break-glass administrator
+(`409 no_break_glass`), and the last one cannot be disabled, demoted, deleted
+or unflagged while it is on (`409 last_break_glass`). A directory sync never
+adopts, updates or disables a break-glass user. Give these accounts long
+passwords and two-factor authentication.
+
+| Metric                                     | Meaning                                                                                                                            |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `hello_oidc_logins_total{provider,result}` | single sign-on attempts: `ok`, `denied`, `bad_state`, `bad_token`, `no_user`, `disabled`, `already_linked`, `unavailable`, `error` |
+| `hello_ldap_bind_logins_total{result}`     | LDAP bind logins: `ok`, `refused`, `throttled`, `error`                                                                            |
+
+Each sign-in, failure (without the identity that tried), link, unlink and
+settings change is audited. Tables are in migration `00150`.
+
 ## What comes next
 
 Click-to-call (P3), recording links (P4) and the CRM connectors build on these

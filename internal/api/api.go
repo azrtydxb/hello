@@ -50,6 +50,10 @@ type Store interface {
 	Audit(ctx context.Context, actor, action, resource, resourceID string) error
 
 	UserForLogin(ctx context.Context, username string) (store.Login, error)
+	// SSORequired is the sso_required policy (spec integrations I-29).
+	SSORequired(ctx context.Context) (bool, error)
+	// UserManagedByDirectory reports whether a user is directory-synced.
+	UserManagedByDirectory(ctx context.Context, id int64) (bool, error)
 	UpgradePasswordHash(ctx context.Context, id int64, oldHash, newHash string) error
 	UserPasswordHash(ctx context.Context, id int64) (string, error)
 	ChangeOwnPassword(ctx context.Context, id int64, newHash string, keep []byte) error
@@ -364,6 +368,9 @@ type Config struct {
 	// Directory is the directory engine (AD/LDAP sync); nil answers 503 on
 	// the directory routes.
 	Directory DirectoryService
+	// SSO is single sign-on (spec integrations P11); nil hides the login
+	// page's providers and answers 503 on the SSO routes.
+	SSO SSOService
 	// Originate and OriginateLive carry click-to-call (spec integrations
 	// I-37): its requests and policy in PostgreSQL, its queue, live state
 	// and limit counters in Valkey; nil answers 503. OriginateLimits

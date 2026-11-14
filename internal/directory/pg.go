@@ -497,7 +497,7 @@ func (p *PG) LoadState(ctx context.Context, connectorID int64) (State, error) {
 	st := State{Exts: map[string]LocalExt{}, RingGroups: map[int64]bool{}}
 	rows, err := p.DB.QueryContext(ctx, `
 		SELECT id, username, email, display_name, role, enabled, coalesce(source_connector_id, 0), coalesce(external_id, ''),
-			disabled_at IS NOT NULL, absent_runs, to_json(managed_fields)::text
+			disabled_at IS NOT NULL, absent_runs, to_json(managed_fields)::text, break_glass
 		FROM users ORDER BY id`)
 	if err != nil {
 		return st, err
@@ -509,7 +509,7 @@ func (p *PG) LoadState(ctx context.Context, connectorID int64) (State, error) {
 			managed string
 		)
 		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.DisplayName, &u.Role, &u.Enabled, &u.ConnectorID, &u.ExternalID,
-			&u.DisabledByDirectory, &u.AbsentRuns, &managed); err != nil {
+			&u.DisabledByDirectory, &u.AbsentRuns, &managed, &u.BreakGlass); err != nil {
 			_ = rows.Close()
 			return st, err
 		}
@@ -720,8 +720,8 @@ func (p *PG) create(ctx context.Context, tx *sql.Tx, actor string, c Connector, 
 	}
 	var id int64
 	// The password is a marker no hash equals ("An empty or unknown hash never
-	// matches"), so the user cannot sign in locally until it can through its
-	// directory (a later phase).
+	// matches"): a synced user signs in only through its directory, by OIDC
+	// or an LDAP bind (I-29).
 	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO users (username, password_hash, role, display_name, email, enabled, must_change_password,
 			source_connector_id, external_id, managed_fields)
@@ -757,12 +757,16 @@ func (p *PG) update(ctx context.Context, tx *sql.Tx, actor string, c Connector, 
 		return false, err
 	}
 	var (
-		role    string
-		enabled bool
-		src     sql.NullInt64
+		role       string
+		enabled    bool
+		src        sql.NullInt64
+		breakGlass bool
 	)
-	if err := tx.QueryRowContext(ctx, `SELECT role, enabled, source_connector_id FROM users WHERE id = $1 FOR UPDATE`, op.UserID).Scan(&role, &enabled, &src); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT role, enabled, source_connector_id, break_glass FROM users WHERE id = $1 FOR UPDATE`, op.UserID).Scan(&role, &enabled, &src, &breakGlass); err != nil {
 		return false, mapErr(err)
+	}
+	if breakGlass {
+		return false, ErrProtected
 	}
 	if op.Kind == ActionAdopt && src.Valid {
 		return false, fmt.Errorf("%w: already linked", ErrNotApplicable)
@@ -785,6 +789,10 @@ func (p *PG) update(ctx context.Context, tx *sql.Tx, actor string, c Connector, 
 			managed_fields = CASE WHEN $6 THEN ARRAY(SELECT jsonb_array_elements_text($7::jsonb)) ELSE managed_fields END,
 			source_connector_id = CASE WHEN $8 THEN $9 ELSE source_connector_id END,
 			external_id = CASE WHEN $8 THEN $10 ELSE external_id END,
+			-- An adopted user signs in through the directory from now on: its
+			-- local password stops working (I-29).
+			password_hash = CASE WHEN $8 THEN '!' ELSE password_hash END,
+			must_change_password = CASE WHEN $8 THEN FALSE ELSE must_change_password END,
 			absent_runs = 0
 		WHERE id = $1`,
 		op.UserID, op.Username, op.Email, op.Display, op.Role, op.SetManaged, jsonOf(nonNilStrings(op.Managed)),
@@ -872,11 +880,15 @@ func (p *PG) disable(ctx context.Context, tx *sql.Tx, actor string, op Op) (bool
 		return false, err
 	}
 	var (
-		role    string
-		enabled bool
+		role       string
+		enabled    bool
+		breakGlass bool
 	)
-	if err := tx.QueryRowContext(ctx, `SELECT role, enabled FROM users WHERE id = $1 FOR UPDATE`, op.UserID).Scan(&role, &enabled); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT role, enabled, break_glass FROM users WHERE id = $1 FOR UPDATE`, op.UserID).Scan(&role, &enabled, &breakGlass); err != nil {
 		return false, mapErr(err)
+	}
+	if breakGlass {
+		return false, ErrProtected
 	}
 	if !enabled {
 		return false, nil

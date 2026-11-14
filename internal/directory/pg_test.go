@@ -73,7 +73,7 @@ func newPGRig(t *testing.T) *pgRig {
 	r.e = &Engine{Store: r.pg, Drivers: map[string]Driver{KindLDAP: r.d}, Replica: "pg1"}
 	pw := "bind-password-123"
 	r.c, err = r.e.Create(ctx, "admin", ConnectorInput{Kind: KindLDAP, Name: strPtr("AD"), Secret: &pw, Enabled: boolPtr(true),
-		Config: json.RawMessage(`{"url":"ldaps://dc"}`)})
+		Config: json.RawMessage(`{"url":"ldaps://dc","ldapBindLogin":true}`)})
 	if err != nil {
 		t.Fatal(err)
 	}

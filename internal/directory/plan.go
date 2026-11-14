@@ -17,7 +17,10 @@ type LocalUser struct {
 	Email       string
 	DisplayName string
 	Role        string
-	Enabled     bool
+	// BreakGlass is a local admin who may always sign in with a password;
+	// sync never touches one (AC-10c).
+	BreakGlass bool
+	Enabled    bool
 	// ConnectorID and ExternalID are set for a directory-managed user.
 	ConnectorID int64
 	ExternalID  string
@@ -550,6 +553,10 @@ func (p *planner) match(s src, cand *LocalUser, byUsername bool) {
 			reason = ReasonEmailInUse
 		}
 		p.conflict(s, cand, reason, false)
+		return
+	case cand.BreakGlass:
+		id := cand.ID
+		p.add(Change{Action: ActionSkip, UserID: &id, ExternalID: s.u.ExternalID, Username: cand.Username, Reason: ReasonProtected}, nil)
 		return
 	case cand.Role == "admin":
 		id := cand.ID

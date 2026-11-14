@@ -32,6 +32,10 @@ type DirectoryService interface {
 	ListChanges(ctx context.Context, runID int64, f directory.ChangeFilter) ([]directory.Change, error)
 	Apply(ctx context.Context, actor string, runID int64, d directory.Decisions) (directory.Run, error)
 	Confirm(ctx context.Context, actor string, runID int64, d directory.Decisions) (directory.Run, error)
+	// ConsentURL and CompleteConsent are the Google administrator consent
+	// of an oauth_admin connector (P9, I-21).
+	ConsentURL(ctx context.Context, id int64, redirectURI, state, verifier string) (string, error)
+	CompleteConsent(ctx context.Context, actor string, id int64, code, verifier, redirectURI string) error
 }
 
 func (s *server) directoryDisabled(w http.ResponseWriter) bool {
@@ -57,6 +61,8 @@ func (s *server) directoryError(w http.ResponseWriter, what string, err error) {
 		writeFields(w, fields)
 	case errors.As(err, &de) && de.Code == directory.CodeTLSRequired:
 		writeError(w, http.StatusBadRequest, "tls_required", de.Detail)
+	case errors.As(err, &de) && de.Code == directory.CodeNoLoginMethod:
+		writeError(w, http.StatusBadRequest, "no_login_method", de.Detail)
 	case errors.Is(err, directory.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", what+": not found")
 	case errors.Is(err, directory.ErrDisabled):
@@ -109,19 +115,32 @@ type connectorBody struct {
 	GroupRules      *directory.GroupRules `json:"groupRules"`
 	Options         *directory.Options    `json:"options"`
 	AutoProvision   json.RawMessage       `json:"autoProvision"`
-	BindPassword    *string               `json:"bindPassword"`
+	// BindPassword is the LDAP credential; Credential that of the Google
+	// (key file, or OAuth client secret) and Entra (client secret, or the
+	// certificate's private key) connectors. Both are write-only.
+	BindPassword *string `json:"bindPassword"`
+	Credential   *string `json:"credential"`
 }
 
 func (b connectorBody) input() directory.ConnectorInput {
+	secret := b.BindPassword
+	if b.Credential != nil {
+		secret = b.Credential
+	}
 	return directory.ConnectorInput{Kind: b.Kind, Name: b.Name, Enabled: b.Enabled, Mode: b.Mode, ScheduleMinutes: b.ScheduleMinutes,
-		Config: b.Config, Mappings: b.Mappings, GroupRules: b.GroupRules, Options: b.Options, AutoProvision: b.AutoProvision, Secret: b.BindPassword}
+		Config: b.Config, Mappings: b.Mappings, GroupRules: b.GroupRules, Options: b.Options, AutoProvision: b.AutoProvision, Secret: secret}
 }
 
 // needsSecrets answers 403 when a body sets the credential without the
-// secrets scope (spec: credential fields need secrets).
+// secrets scope (spec: credential fields need secrets), and 400 when it sets
+// both spellings.
 func needsSecrets(w http.ResponseWriter, r *http.Request, b connectorBody) bool {
-	if b.BindPassword != nil && !actor(r).Scopes.Has(auth.ScopeSecrets) {
-		writeError(w, http.StatusForbidden, "insufficient_scope", "setting the bind password needs the secrets scope")
+	if b.BindPassword != nil && b.Credential != nil {
+		badRequest(w, "give bindPassword or credential, not both")
+		return true
+	}
+	if (b.BindPassword != nil || b.Credential != nil) && !actor(r).Scopes.Has(auth.ScopeSecrets) {
+		writeError(w, http.StatusForbidden, "insufficient_scope", "setting the credential needs the secrets scope")
 		return true
 	}
 	return false

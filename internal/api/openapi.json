@@ -14,6 +14,612 @@
     }
   ],
   "paths": {
+    "/api/v1/auth/oidc/providers": {
+      "get": {
+        "operationId": "listSSOProviders",
+        "summary": "List the single sign-on providers",
+        "description": "The enabled identity providers, for the login page's buttons. Public; empty without HELLO_PUBLIC_URL.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "The providers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSOPublicProviderList"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "the login page's buttons; an agent never signs in",
+          "category": "session"
+        },
+        "security": []
+      }
+    },
+    "/api/v1/auth/oidc/{provider}/start": {
+      "get": {
+        "operationId": "startSSO",
+        "summary": "Start a single sign-on",
+        "description": "A top-level navigation from the login page: it redirects to the provider with the authorization code flow (PKCE S256, state and nonce kept server-side for 10 minutes, single use) and sets the hello_oidc cookie (SameSite=Lax) that binds the callback to this browser. Limited to 20 per minute per address. A refusal redirects to /login?sso_error=<unavailable|throttled|retry|failed>.",
+        "tags": ["auth"],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The identity provider: google or entra."
+          },
+          {
+            "name": "next",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "A console path to return to after the sign-in."
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "To the identity provider, or back to the login page",
+            "headers": {
+              "Location": {
+                "description": "Where the browser goes next.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "starts a browser sign-in",
+          "category": "session"
+        },
+        "security": []
+      }
+    },
+    "/api/v1/auth/oidc/{provider}/callback": {
+      "get": {
+        "operationId": "ssoCallback",
+        "summary": "Single sign-on callback",
+        "description": "Where the provider returns the browser. The state is taken once (a replay fails), the hello_oidc cookie must match, the code is redeemed with the PKCE verifier and the ID token is checked: signature from the pinned issuer's keys, iss, aud, exp, nonce, azp when present, and the tenant (Entra tid; Google hd with a verified email). The identity maps to a user by an existing link, else on first sign-in to the user a connector of the same provider synced under the same stable id, else (Google) to the one synced non-admin user with that email; local users are never matched by email. Success sets the hello_session cookie exactly as a password login does and redirects to the console (or to /login#mfa=<token> when the user has two-factor authentication). A linking started from the profile redirects to /me/profile?sso_linked=<provider>. Every refusal redirects to /login?sso_error=<code> without saying why.",
+        "tags": ["auth"],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The identity provider: google or entra."
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The single-use state the round trip was started with."
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The authorization code the provider issued."
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Set by the provider when the person declined or the request failed."
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "To the console, the second step or the login page",
+            "headers": {
+              "Location": {
+                "description": "Where the browser goes next.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "a browser redirect target of the sign-in",
+          "category": "session"
+        },
+        "security": []
+      }
+    },
+    "/api/v1/auth/sso": {
+      "get": {
+        "operationId": "getSSOSettings",
+        "summary": "Get the single sign-on settings",
+        "description": "The providers (client secrets never returned), sso_required, the break-glass admins and the redirect URIs to register.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSOSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "sign-in configuration: an agent never manages access",
+          "category": "credentials"
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin"
+      },
+      "put": {
+        "operationId": "putSSOSettings",
+        "summary": "Change the single sign-on settings",
+        "description": "Changes providers and the sso_required policy, audited. Setting a clientSecret needs the secrets scope. Enabling Google needs a client id, a secret and at least one domain; Entra a client id, a secret and the tenant id. ssoRequired needs an enabled break-glass admin (409 no_break_glass).",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SSOSettingsUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSOSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "sign-in configuration with client secrets",
+          "category": "credentials"
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin"
+      }
+    },
+    "/api/v1/auth/sso/{provider}/test": {
+      "post": {
+        "operationId": "testSSOProvider",
+        "summary": "Test a single sign-on provider",
+        "description": "Reads the discovery document from the provider's pinned issuer and its signing keys. A failure is a 200 with ok false. Audited.",
+        "tags": ["auth"],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The identity provider: google or entra."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The test result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSOTestResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "sign-in configuration: an agent never manages access",
+          "category": "credentials"
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin"
+      }
+    },
+    "/api/v1/me/identities": {
+      "get": {
+        "operationId": "listMyIdentities",
+        "summary": "List my linked identities",
+        "description": "The signed-in user's identities at the single sign-on providers. Browser sessions only.",
+        "tags": ["me"],
+        "responses": {
+          "200": {
+            "description": "The identities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "the signed-in user's own sign-in identities",
+          "category": "credentials"
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user"
+      }
+    },
+    "/api/v1/me/identities/{provider}/link": {
+      "post": {
+        "operationId": "linkMyIdentity",
+        "summary": "Link my identity at a provider",
+        "description": "Starts a sign-in at the provider that links the identity to the signed-in user instead of signing in: the answer is the URL to navigate to, and the hello_oidc cookie is set. This is how a local user, an administrator included, gets single sign-on; nobody is ever linked by email alone. The callback returns to /me/profile.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The identity provider: google or entra."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Where to send the browser",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedirectURL"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "links a sign-in identity",
+          "category": "credentials"
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user"
+      }
+    },
+    "/api/v1/me/identities/{provider}": {
+      "delete": {
+        "operationId": "unlinkMyIdentity",
+        "summary": "Unlink my identity at a provider",
+        "description": "Removes the signed-in user's identity at the provider, audited.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The identity provider: google or entra."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Unlinked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "removes a sign-in identity",
+          "category": "credentials"
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user"
+      }
+    },
+    "/api/v1/users/{id}/identities": {
+      "get": {
+        "operationId": "listUserIdentities",
+        "summary": "List a user's linked identities",
+        "description": "The user's identities at the single sign-on providers.",
+        "tags": ["users"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The identities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "users' sign-in identities: an agent never manages access",
+          "category": "credentials"
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin"
+      }
+    },
+    "/api/v1/users/{id}/identities/{provider}": {
+      "delete": {
+        "operationId": "unlinkUserIdentity",
+        "summary": "Unlink a user's identity",
+        "description": "Removes the user's identity at the provider, audited. The next single sign-on maps it again from scratch.",
+        "tags": ["users"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The identity provider: google or entra."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Unlinked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "removes a sign-in identity",
+          "category": "credentials"
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin"
+      }
+    },
+    "/api/v1/directory/connectors/{id}/consent": {
+      "post": {
+        "operationId": "startDirectoryConsent",
+        "summary": "Grant a Google connector's consent",
+        "description": "For a google connector with authMode oauth_admin and its client secret set: answers the Google URL where an administrator grants Hello read-only access once (offline, PKCE). The callback stores the refresh token and returns to /integrations/directory?consent=ok|failed. A grant with any scope outside the read-only allow-list is refused and not stored. Browser sessions only.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Where to send the browser",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedirectURL"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "stores a directory credential",
+          "category": "credentials"
+        },
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin"
+      }
+    },
+    "/api/v1/directory/oauth/callback": {
+      "get": {
+        "operationId": "directoryConsentCallback",
+        "summary": "Google connector consent callback",
+        "description": "Where Google returns the administrator's browser after the consent. The single-use state and the hello_oidc cookie are the only credential. Redirects to /integrations/directory with consent=ok or consent=failed and the connector id.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The single-use state the round trip was started with."
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The authorization code the provider issued."
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Set by the provider when the person declined or the request failed."
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "To the directory page",
+            "headers": {
+              "Location": {
+                "description": "Where the browser goes next.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "a browser redirect target of the consent",
+          "category": "session"
+        },
+        "security": []
+      }
+    },
     "/api/v1/version": {
       "get": {
         "operationId": "getVersion",
@@ -68,7 +674,7 @@
       "post": {
         "operationId": "login",
         "summary": "Start a session; sets the hello_session cookie",
-        "description": "Starts a browser session for a username and password and sets the hello_session cookie. Used by the console; API clients use bearer tokens instead. For a user with two-factor authentication the password alone starts no session: the answer is 202 with an mfaToken, and login/2fa completes the login.",
+        "description": "Starts a browser session for a username and password and sets the hello_session cookie. Used by the console; API clients use bearer tokens instead. For a user with two-factor authentication the password alone starts no session: the answer is 202 with an mfaToken, and login/2fa completes the login. A directory-synced user has no local password: the users of an LDAP connector with loginMethod ldap_bind are checked by an LDAP bind as themselves (5 failures per user and per address in 10 minutes lock the form for them), every other synced user is refused. While single sign-on is required only break-glass admins may use this form. Every refusal is the same 401.",
         "tags": ["auth"],
         "requestBody": {
           "required": true,
@@ -852,7 +1458,7 @@
       "post": {
         "operationId": "changePassword",
         "summary": "Change my password",
-        "description": "Sets a new password for the signed-in user after checking the current one. Only a browser session may do it, not a token, and it ends the user's other sessions. Clears the forced-change flag an administrator set, which blocks every other operation until it is changed. Needs a password of 10 to 128 characters that differs from the current one.",
+        "description": "Sets a new password for the signed-in user after checking the current one. Only a browser session may do it, not a token, and it ends the user's other sessions. Clears the forced-change flag an administrator set, which blocks every other operation until it is changed. Needs a password of 10 to 128 characters that differs from the current one. A directory-synced user has no local password and gets 409 managed_by_directory.",
         "tags": ["auth"],
         "requestBody": {
           "required": true,
@@ -879,6 +1485,9 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           }
         },
         "x-hello-scope": "session",
@@ -1018,7 +1627,7 @@
       "patch": {
         "operationId": "updateUser",
         "summary": "Change a user",
-        "description": "Admin only, audited. Changes the role, display name, email, enabled state, extensions, voicemail email options or password. The new role applies on the user's next request, whatever credential it carries. A disabled user cannot sign in, their sessions end and their tokens stop working. Setting password resets it (10 to 128 characters) and makes the user choose a new one at next login unless mustChangePassword is false. Demoting or disabling the last enabled admin answers 409 last_admin, and an administrator cannot disable their own account (409 self_disable). extensionIds replaces the user's extensions (409 when another user has one, 400 when one does not exist); the legacy extensionId links exactly one extension or, with null, none; give one of them, not both.",
+        "description": "Admin only, audited. Changes the role, display name, email, enabled state, extensions, voicemail email options or password. The new role applies on the user's next request, whatever credential it carries. A disabled user cannot sign in, their sessions end and their tokens stop working. Setting password resets it (10 to 128 characters) and makes the user choose a new one at next login unless mustChangePassword is false. Demoting or disabling the last enabled admin answers 409 last_admin, and an administrator cannot disable their own account (409 self_disable). extensionIds replaces the user's extensions (409 when another user has one, 400 when one does not exist); the legacy extensionId links exactly one extension or, with null, none; give one of them, not both. breakGlass flags an enabled local admin who may always use the password form (409 break_glass_local_admin otherwise); the last enabled break-glass admin cannot be disabled, demoted or unflagged (409 last_break_glass).",
         "tags": ["users"],
         "parameters": [
           {
@@ -1082,7 +1691,7 @@
       "delete": {
         "operationId": "deleteUser",
         "summary": "Delete a user",
-        "description": "Admin only, audited. Deletes the user with their sessions, tokens and personal contacts. Deleting the last enabled admin answers 409 last_admin and an administrator cannot delete their own account (409 self_delete).",
+        "description": "Admin only, audited. Deletes the user with their sessions, tokens and personal contacts. Deleting the last enabled admin answers 409 last_admin and an administrator cannot delete their own account (409 self_delete). Deleting the last enabled break-glass admin answers 409 last_break_glass.",
         "tags": ["users"],
         "parameters": [
           {
@@ -22183,7 +22792,7 @@
       "post": {
         "operationId": "createDirectoryConnector",
         "summary": "Create a directory connector",
-        "description": "Creates a connector, disabled unless enabled is true and a bind password is given. Plain ldap:// without StartTLS is refused (400 tls_required); the filter is parsed on save; certificate verification is always on. Range auto-provisioning cannot be enabled yet. Setting bindPassword needs the secrets scope.",
+        "description": "Creates a connector, disabled unless enabled is true and a bind password is given. Plain ldap:// without StartTLS is refused (400 tls_required); the filter is parsed on save; certificate verification is always on. Range auto-provisioning cannot be enabled yet. Setting bindPassword needs the secrets scope. Kinds: ldap (bindPassword), google and entra (credential). Enabling a connector needs a login method for its users (options.loginMethod; 400 no_login_method).",
         "tags": ["directory"],
         "requestBody": {
           "required": true,
@@ -29049,6 +29658,319 @@
       }
     },
     "schemas": {
+      "SSOPublicProvider": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["google", "entra"]
+          },
+          "name": {
+            "type": "string",
+            "description": "The button label: Google or Microsoft."
+          }
+        },
+        "required": ["provider", "name"]
+      },
+      "SSOPublicProviderList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SSOPublicProvider"
+            }
+          }
+        },
+        "required": ["items"]
+      },
+      "SSOProvider": {
+        "type": "object",
+        "description": "One OIDC provider: the customer's own OAuth client. The client secret is write-only.",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["google", "entra"]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "clientId": {
+            "type": "string",
+            "description": "Google: the OAuth client id (ends in .apps.googleusercontent.com). Entra: the application (client) id."
+          },
+          "hasClientSecret": {
+            "type": "boolean",
+            "description": "A client secret is stored; it is never returned."
+          },
+          "tenant": {
+            "type": "string",
+            "description": "Entra only: the directory (tenant) id, a GUID. common, organizations and consumers are refused; the issuer is pinned to https://login.microsoftonline.com/<tenant>/v2.0."
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Google only: the Workspace domains whose hd claim is accepted (at least one before enabling)."
+          },
+          "jit": {
+            "type": "boolean",
+            "description": "Create a user (role user, no local password) on a first sign-in that no link and no synced user matches. Off by default."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SSOBreakGlassUser": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "username": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SSOSettings": {
+        "type": "object",
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SSOProvider"
+            },
+            "description": "google and entra, configured or not."
+          },
+          "ssoRequired": {
+            "type": "boolean",
+            "description": "Only break-glass users may use the password form; everyone else signs in through an identity provider or an LDAP bind."
+          },
+          "breakGlass": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SSOBreakGlassUser"
+            },
+            "description": "The break-glass admins (flag them on the user with breakGlass)."
+          },
+          "redirectUris": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The callback URL to register at each provider (google, entra) and for a directory connector's Google consent (directoryConsent)."
+          },
+          "available": {
+            "type": "boolean",
+            "description": "False without HELLO_PUBLIC_URL: single sign-on is off."
+          }
+        }
+      },
+      "SSOProviderInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["google", "entra"]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "clientSecret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Replaces the stored client secret; sealed at rest, never returned. Needs the secrets scope."
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "jit": {
+            "type": "boolean"
+          }
+        },
+        "required": ["provider"]
+      },
+      "SSOSettingsUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SSOProviderInput"
+            },
+            "description": "The providers to change; a missing field keeps its value."
+          },
+          "ssoRequired": {
+            "type": "boolean",
+            "description": "Turning it on needs an enabled break-glass admin (409 no_break_glass)."
+          }
+        }
+      },
+      "SSOTestResult": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "issuer": {
+            "type": "string",
+            "description": "The pinned issuer that was asked."
+          },
+          "keys": {
+            "type": "integer",
+            "description": "Signing keys in the issuer's key set."
+          },
+          "errorDetail": {
+            "type": "string"
+          }
+        }
+      },
+      "Identity": {
+        "type": "object",
+        "description": "An identity at a provider linked to a user.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "provider": {
+            "type": "string",
+            "enum": ["google", "entra"]
+          },
+          "subject": {
+            "type": "string",
+            "description": "The stable id at the provider: Google's sub, Entra's object id (oid)."
+          },
+          "tenant": {
+            "type": "string",
+            "description": "The Google Workspace domain (hd) or the Entra tenant id (tid)."
+          },
+          "email": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastLoginAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "IdentityList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Identity"
+            }
+          }
+        },
+        "required": ["items"]
+      },
+      "RedirectURL": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The identity provider URL the browser navigates to. The response also sets the short-lived hello_oidc cookie that binds the callback to this browser."
+          }
+        },
+        "required": ["url"]
+      },
+      "DirectoryGoogleConfig": {
+        "type": "object",
+        "description": "Config of a google connector (Google Workspace, Admin SDK Directory API). The credential (credential field) is the service account's JSON key file, or for oauth_admin the OAuth client secret; the refresh token comes from the consent.",
+        "properties": {
+          "authMode": {
+            "type": "string",
+            "enum": ["service_account", "oauth_admin", "delegation"],
+            "description": "service_account (default): a service account holding a custom read-only admin role, no impersonation. oauth_admin: your OAuth client, consented once by an administrator. delegation: domain-wide delegation impersonating subject (discouraged). Only read-only scopes are ever requested."
+          },
+          "customer": {
+            "type": "string",
+            "description": "my_customer (default) or a customer id."
+          },
+          "domain": {
+            "type": "string",
+            "description": "List only this domain's users."
+          },
+          "subject": {
+            "type": "string",
+            "description": "delegation only: the administrator to impersonate."
+          },
+          "clientId": {
+            "type": "string",
+            "description": "oauth_admin only: the OAuth client id."
+          },
+          "query": {
+            "type": "string",
+            "description": "An optional users.list query, for example orgUnitPath='/Sales'."
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          }
+        }
+      },
+      "DirectoryEntraConfig": {
+        "type": "object",
+        "description": "Config of an entra connector (Microsoft Graph). The credential is the client secret, or for certificate the PEM RSA private key of certificatePem.",
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "description": "The directory (tenant) id or a verified domain; common, organizations and consumers are refused."
+          },
+          "clientId": {
+            "type": "string",
+            "description": "The application (client) id."
+          },
+          "authMethod": {
+            "type": "string",
+            "enum": ["secret", "certificate"]
+          },
+          "certificatePem": {
+            "type": "string",
+            "description": "certificate only: the public certificate uploaded to the app registration (not a secret)."
+          },
+          "includeGuests": {
+            "type": "boolean",
+            "description": "Also list guest (B2B) accounts. Off by default."
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          }
+        },
+        "required": ["tenantId", "clientId"]
+      },
       "MessageSend": {
         "type": "object",
         "additionalProperties": false,
@@ -32926,80 +33848,7 @@
             "properties": {
               "code": {
                 "type": "string",
-                "enum": [
-                  "bad_request",
-                  "graph_too_large",
-                  "layout_stale",
-                  "config_changing",
-                  "unauthorized",
-                  "not_found",
-                  "conflict",
-                  "internal",
-                  "unavailable",
-                  "upstream",
-                  "timeout",
-                  "render_error",
-                  "forbidden_role",
-                  "insufficient_scope",
-                  "last_admin",
-                  "self_disable",
-                  "self_delete",
-                  "password_change_required",
-                  "two_factor_enrolment_required",
-                  "two_factor_required",
-                  "last_enrolled_admin",
-                  "invalid_code",
-                  "no_setup",
-                  "already_enrolled",
-                  "session_required",
-                  "not_configured",
-                  "smtp_failed",
-                  "no_user",
-                  "no_extension",
-                  "ai_disabled",
-                  "ai_busy",
-                  "ai_budget_exhausted",
-                  "task_running",
-                  "proposal_not_open",
-                  "proposal_stale",
-                  "rate_limited",
-                  "too_large",
-                  "messaging_disabled",
-                  "no_messaging_trunk",
-                  "opted_out",
-                  "not_agent",
-                  "not_chat",
-                  "no_email",
-                  "conversation_state",
-                  "channel_unavailable",
-                  "validation_failed",
-                  "config_stale",
-                  "op_not_batchable",
-                  "backup_busy",
-                  "backup_invalid",
-                  "key_mismatch",
-                  "schema_newer",
-                  "maintenance",
-                  "emergency_not_allowed",
-                  "caller_id_not_allowed",
-                  "route_denied",
-                  "tls_required",
-                  "managed_by_directory",
-                  "connector_in_use",
-                  "connector_disabled",
-                  "busy",
-                  "not_applicable",
-                  "stale_preview",
-                  "credentials_rejected",
-                  "provider_unreachable",
-                  "credentials_unreadable",
-                  "not_a_carrier_channel",
-                  "conversation_exists",
-                  "first_contact_off",
-                  "device_limit",
-                  "derived_device",
-                  "not_your_call"
-                ]
+                "enum": ["bad_request", "graph_too_large", "layout_stale", "config_changing", "unauthorized", "not_found", "conflict", "internal", "unavailable", "upstream", "timeout", "render_error", "forbidden_role", "insufficient_scope", "last_admin", "self_disable", "self_delete", "password_change_required", "two_factor_enrolment_required", "two_factor_required", "last_enrolled_admin", "invalid_code", "no_setup", "already_enrolled", "session_required", "not_configured", "smtp_failed", "no_user", "no_extension", "ai_disabled", "ai_busy", "ai_budget_exhausted", "task_running", "proposal_not_open", "proposal_stale", "rate_limited", "too_large", "messaging_disabled", "no_messaging_trunk", "opted_out", "not_agent", "not_chat", "no_email", "conversation_state", "channel_unavailable", "validation_failed", "config_stale", "op_not_batchable", "backup_busy", "backup_invalid", "key_mismatch", "schema_newer", "maintenance", "emergency_not_allowed", "caller_id_not_allowed", "route_denied", "tls_required", "managed_by_directory", "connector_in_use", "connector_disabled", "busy", "not_applicable", "stale_preview", "credentials_rejected", "provider_unreachable", "credentials_unreadable", "not_a_carrier_channel", "conversation_exists", "first_contact_off", "device_limit", "derived_device", "not_your_call", "no_login_method", "no_break_glass", "last_break_glass", "break_glass_local_admin", "provider_disabled", "already_linked"]
               },
               "message": {
                 "type": "string"
@@ -33292,24 +34141,7 @@
       },
       "User": {
         "type": "object",
-        "required": [
-          "id",
-          "username",
-          "displayName",
-          "email",
-          "authMethod",
-          "role",
-          "enabled",
-          "mustChangePassword",
-          "extensionId",
-          "extensionIds",
-          "voicemailEmail",
-          "totpEnabled",
-          "totpRequired",
-          "createdAt",
-          "managedBy",
-          "disabledAt"
-        ],
+        "required": ["id", "username", "displayName", "email", "authMethod", "role", "enabled", "mustChangePassword", "extensionId", "extensionIds", "voicemailEmail", "totpEnabled", "totpRequired", "createdAt", "managedBy", "disabledAt"],
         "properties": {
           "id": {
             "type": "integer",
@@ -33399,6 +34231,10 @@
             "type": ["string", "null"],
             "format": "date-time",
             "description": "When directory sync disabled the user; null otherwise."
+          },
+          "breakGlass": {
+            "type": "boolean",
+            "description": "A local admin who may always sign in with a password, also while single sign-on is required. The last enabled one cannot be disabled, demoted, deleted or unflagged (409 last_break_glass)."
           }
         }
       },
@@ -33559,6 +34395,10 @@
           "totpRequired": {
             "type": "boolean",
             "description": "Require two-factor authentication of this user. Setting it on an admin answers 409 two_factor_required unless the caller has active 2FA."
+          },
+          "breakGlass": {
+            "type": "boolean",
+            "description": "Flag or unflag a break-glass admin: only an enabled local admin (409 break_glass_local_admin); removing the last enabled one is 409 last_break_glass."
           }
         },
         "description": "At least one field."
@@ -45368,6 +46208,16 @@
             "minimum": 0,
             "maximum": 200000,
             "description": "Most users a run may read before it fails user_cap_exceeded (default 20000; 0 means the default)."
+          },
+          "loginMethod": {
+            "type": "string",
+            "enum": ["", "oidc", "ldap_bind"],
+            "description": "How the connector's users sign in; synced users have no local password, so an enabled connector needs one (400 no_login_method). oidc through oidcProvider; ldap_bind for LDAP connectors. Google and Entra connectors default to oidc with their own provider."
+          },
+          "oidcProvider": {
+            "type": "string",
+            "enum": ["", "google", "entra"],
+            "description": "The single sign-on provider of loginMethod oidc; it must be configured and enabled before the connector is enabled."
           }
         },
         "description": "Engine settings every connector kind shares: the absence rule, device handling, the admin switch and the run limits."
@@ -45427,7 +46277,7 @@
           },
           "ldapBindLogin": {
             "type": "boolean",
-            "description": "Reserved for signing in by an LDAP bind."
+            "description": "The earlier spelling of options.loginMethod ldap_bind: a connector saved with it true and no loginMethod gets ldap_bind."
           }
         },
         "required": ["url", "bindDn", "baseDn"],
@@ -45442,7 +46292,7 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["ldap"]
+            "enum": ["ldap", "google", "entra"]
           },
           "name": {
             "type": "string",
@@ -45462,7 +46312,18 @@
             "description": "0 is manual only, otherwise 5 to 10080. A schedule starts only after an administrator has applied a run by hand."
           },
           "config": {
-            "$ref": "#/components/schemas/DirectoryLDAPConfig"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DirectoryLDAPConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectoryGoogleConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectoryEntraConfig"
+              }
+            ],
+            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig or DirectoryEntraConfig."
           },
           "mappings": {
             "$ref": "#/components/schemas/DirectoryMappings"
@@ -45479,7 +46340,7 @@
           },
           "hasCredential": {
             "type": "boolean",
-            "description": "A bind password is stored. It is write-only and never returned."
+            "description": "A credential (bind password, key file, client secret or private key) is stored. It is write-only and never returned."
           },
           "status": {
             "type": "string",
@@ -45521,30 +46382,7 @@
             "format": "date-time"
           }
         },
-        "required": [
-          "id",
-          "kind",
-          "name",
-          "enabled",
-          "mode",
-          "scheduleMinutes",
-          "config",
-          "mappings",
-          "groupRules",
-          "options",
-          "autoProvision",
-          "hasCredential",
-          "status",
-          "lastRunAt",
-          "lastSuccessAt",
-          "lastErrorCode",
-          "lastErrorDetail",
-          "consecutiveFailures",
-          "linkedUsers",
-          "lastFullRunAt",
-          "createdAt",
-          "updatedAt"
-        ]
+        "required": ["id", "kind", "name", "enabled", "mode", "scheduleMinutes", "config", "mappings", "groupRules", "options", "autoProvision", "hasCredential", "status", "lastRunAt", "lastSuccessAt", "lastErrorCode", "lastErrorDetail", "consecutiveFailures", "linkedUsers", "lastFullRunAt", "createdAt", "updatedAt"]
       },
       "DirectoryConnectorList": {
         "type": "object",
@@ -45563,7 +46401,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["ldap"],
+            "enum": ["ldap", "google", "entra"],
             "description": "The connector kind."
           },
           "name": {
@@ -45586,7 +46424,18 @@
             "description": "0 is manual only, otherwise 5 to 10080. A schedule starts only after an administrator has applied a run by hand."
           },
           "config": {
-            "$ref": "#/components/schemas/DirectoryLDAPConfig"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DirectoryLDAPConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectoryGoogleConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectoryEntraConfig"
+              }
+            ],
+            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig or DirectoryEntraConfig."
           },
           "mappings": {
             "$ref": "#/components/schemas/DirectoryMappings"
@@ -45605,6 +46454,11 @@
             "type": "string",
             "minLength": 1,
             "description": "The bind password, sealed at rest and never returned. Needs the secrets scope."
+          },
+          "credential": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The google or entra credential: a service account JSON key file, an OAuth client secret, an Entra client secret or the certificate's PEM private key. Sealed at rest, never returned; needs the secrets scope. Give bindPassword or credential, not both."
           }
         },
         "required": ["kind", "name"]
@@ -45632,7 +46486,18 @@
             "description": "0 is manual only, otherwise 5 to 10080. A schedule starts only after an administrator has applied a run by hand."
           },
           "config": {
-            "$ref": "#/components/schemas/DirectoryLDAPConfig"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DirectoryLDAPConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectoryGoogleConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectoryEntraConfig"
+              }
+            ],
+            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig or DirectoryEntraConfig."
           },
           "mappings": {
             "$ref": "#/components/schemas/DirectoryMappings"
@@ -45651,6 +46516,11 @@
             "type": "string",
             "minLength": 1,
             "description": "Replaces the stored password. Needs the secrets scope. Required again when the host or the bind DN changes, so a stored password cannot be redirected to another server."
+          },
+          "credential": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The google or entra credential: a service account JSON key file, an OAuth client secret, an Entra client secret or the certificate's PEM private key. Sealed at rest, never returned; needs the secrets scope. Give bindPassword or credential, not both."
           }
         }
       },

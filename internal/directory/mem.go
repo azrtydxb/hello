@@ -415,6 +415,9 @@ func (m *Mem) Apply(_ context.Context, actor string, c Connector, op Op) error {
 	if err := m.ApplyErr[op.ExternalID]; err != nil {
 		return err
 	}
+	if u := m.Users[op.UserID]; u != nil && u.BreakGlass && op.Kind != ActionCreate {
+		return ErrProtected
+	}
 	m.Applied = append(m.Applied, op)
 	set := func(u *MemUser) {
 		if op.Username != nil {

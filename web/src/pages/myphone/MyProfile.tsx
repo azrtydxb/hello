@@ -19,6 +19,7 @@ import {
 import { mapFieldErrors } from "../../forms";
 import { PasswordForm } from "../ChangePassword";
 import { TwoFactorCard } from "../TwoFactor";
+import { LinkedIdentities } from "./LinkedIdentities";
 
 /** The user's own name, email, voicemail-email options and password. */
 export function MyProfile() {
@@ -45,6 +46,7 @@ export function MyProfile() {
           <PasswordForm onDone={() => toast.show("Password changed.")} />
         </div>
         <TwoFactorCard onChange={() => void refresh()} />
+        <LinkedIdentities />
       </div>
       {toast.node}
     </section>

@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { apiError, json, mockApi, noContent, renderApp } from "../test/api";
 import {
   countsText,
@@ -43,6 +43,8 @@ function connector(over: Partial<Connector> = {}): Connector {
       allowAdminFromDirectory: false,
       runTimeoutMinutes: 0,
       userCap: 0,
+      loginMethod: "ldap_bind",
+      oidcProvider: "",
     },
     hasCredential: true,
     status: "ok",
@@ -598,5 +600,180 @@ describe("Directory (spec integrations P8)", () => {
         ),
       ).toBe(true),
     );
+  });
+});
+
+describe("Directory: Google Workspace and Entra (spec integrations P9)", () => {
+  it("names a cloud connector's source", () => {
+    expect(
+      sourceText(
+        connector({
+          kind: "google",
+          config: {
+            authMode: "service_account",
+            customer: "my_customer",
+            domain: "example.com",
+          },
+        }),
+      ),
+    ).toBe("Google Workspace example.com");
+    expect(
+      sourceText(
+        connector({
+          kind: "entra",
+          config: { tenantId: "t-1", clientId: "c", authMethod: "secret" },
+        }),
+      ),
+    ).toBe("Entra tenant t-1");
+  });
+
+  it("creates an Entra connector with its credential, mapping and sign-in", async () => {
+    const calls = setup({
+      "POST /api/v1/directory/connectors": () =>
+        json(connector({ id: 4, kind: "entra", name: "Entra" }), 201),
+    });
+    renderApp("/integrations/directory");
+    fireEvent.click(
+      await screen.findByRole("button", { name: /New connector/ }),
+    );
+    const form = await screen.findByRole("form", {
+      name: "New directory connector",
+    });
+    fireEvent.change(within(form).getByLabelText("Directory"), {
+      target: { value: "entra" },
+    });
+    fireEvent.change(within(form).getByLabelText("Name"), {
+      target: { value: "Entra" },
+    });
+    expect(within(form).queryByLabelText("Server URL")).toBeNull();
+    fireEvent.change(within(form).getByLabelText("Directory (tenant) id"), {
+      target: { value: "11111111-2222-3333-4444-555555555555" },
+    });
+    fireEvent.change(within(form).getByLabelText("Application (client) id"), {
+      target: { value: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" },
+    });
+    fireEvent.change(within(form).getByLabelText("Client secret"), {
+      target: { value: "graph-secret" },
+    });
+    fireEvent.submit(form);
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "POST")).toBe(true),
+    );
+    const body = calls.find((c) => c.method === "POST")?.body as Record<
+      string,
+      unknown
+    >;
+    expect(body.kind).toBe("entra");
+    expect(body.credential).toBe("graph-secret");
+    expect(body.bindPassword).toBeUndefined();
+    expect(body.config).toEqual({
+      tenantId: "11111111-2222-3333-4444-555555555555",
+      clientId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      authMethod: "secret",
+      certificatePem: "",
+      includeGuests: false,
+      timeoutSeconds: undefined,
+    });
+    expect(body.options).toMatchObject({
+      loginMethod: "oidc",
+      oidcProvider: "entra",
+    });
+    expect(
+      (body.mappings as { username: { sources: string[] } }).username.sources,
+    ).toEqual(["userPrincipalName"]);
+  });
+
+  it("warns about domain-wide delegation and lists the scopes to authorise", async () => {
+    setup();
+    renderApp("/integrations/directory");
+    fireEvent.click(
+      await screen.findByRole("button", { name: /New connector/ }),
+    );
+    const form = await screen.findByRole("form", {
+      name: "New directory connector",
+    });
+    fireEvent.change(within(form).getByLabelText("Directory"), {
+      target: { value: "google" },
+    });
+    fireEvent.change(
+      within(form).getByLabelText("How Hello reads the directory"),
+      {
+        target: { value: "delegation" },
+      },
+    );
+    expect(
+      within(form).getByText("Domain-wide delegation is discouraged"),
+    ).toBeVisible();
+    expect(
+      within(form).getByText(
+        "https://www.googleapis.com/auth/admin.directory.user.readonly",
+      ),
+    ).toBeVisible();
+    fireEvent.submit(form);
+    expect(
+      await within(form).findByText("Required for domain-wide delegation."),
+    ).toBeVisible();
+  });
+
+  it("refuses to enable a connector without a sign-in method", async () => {
+    const calls = setup();
+    renderApp("/integrations/directory");
+    fireEvent.click(
+      await screen.findByRole("button", { name: /New connector/ }),
+    );
+    const form = await screen.findByRole("form", {
+      name: "New directory connector",
+    });
+    fireEvent.change(within(form).getByLabelText("Directory"), {
+      target: { value: "google" },
+    });
+    fireEvent.change(within(form).getByLabelText("Name"), {
+      target: { value: "GW" },
+    });
+    fireEvent.change(within(form).getByLabelText("How these users sign in"), {
+      target: { value: "" },
+    });
+    fireEvent.click(within(form).getByRole("switch", { name: /^Enabled/ }));
+    fireEvent.submit(form);
+    expect(
+      await within(form).findByText(/they have no local password/),
+    ).toBeVisible();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("starts the Google consent of an OAuth-admin connector", async () => {
+    const gw = connector({
+      id: 9,
+      kind: "google",
+      name: "GW",
+      config: {
+        authMode: "oauth_admin",
+        clientId: "1-x.apps.googleusercontent.com",
+      },
+    });
+    const calls = setup(
+      {
+        "POST /api/v1/directory/connectors/9/consent": () =>
+          json({ url: "https://accounts.google.com/o/oauth2/v2/auth?x=1" }),
+      },
+      [gw],
+    );
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign, search: "" });
+    renderApp("/integrations/directory");
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Grant Google consent for GW",
+      }),
+    );
+    await waitFor(() =>
+      expect(assign).toHaveBeenCalledWith(
+        "https://accounts.google.com/o/oauth2/v2/auth?x=1",
+      ),
+    );
+    expect(
+      calls.some((c) => c.url === "/api/v1/directory/connectors/9/consent"),
+    ).toBe(true);
+    vi.unstubAllGlobals();
   });
 });

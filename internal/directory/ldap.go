@@ -43,8 +43,8 @@ type LDAPConfig struct {
 	// NestedGroups resolves nested membership with the AD in-chain matching
 	// rule; slow on a large forest.
 	NestedGroups bool `json:"nestedGroups"`
-	// LDAPBindLogin is the switch for signing in by an LDAP bind (a later
-	// phase); it is stored and not acted on here.
+	// LDAPBindLogin is the P8 spelling of options.loginMethod ldap_bind: a
+	// connector saved with it gets that login method (I-30).
 	LDAPBindLogin bool `json:"ldapBindLogin"`
 }
 
