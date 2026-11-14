@@ -79,7 +79,32 @@ export interface InboxMessage {
   sentAt: string | null;
   deliveredAt: string | null;
   readAt: string | null;
+  /** The message's attachments, oldest first. */
+  media: InboxMedia[];
 }
+
+/**
+ * An attachment (spec messaging-channels M-18). Its file is read from
+ * `mediaUrl(...)`, only by people who can see the conversation.
+ */
+export interface InboxMedia {
+  id: number;
+  messageId: number | null;
+  direction: "in" | "out";
+  /** pending: still downloading; rejected or expired: no file (see reason). */
+  status: "pending" | "ready" | "rejected" | "expired";
+  /** The type sniffed from the bytes, which the file is served with. */
+  contentType: string;
+  size: number;
+  filename: string;
+  reason: string;
+  createdAt: string;
+}
+
+/** The types an agent may send into a website chat, and their size cap. */
+export const CHAT_MEDIA_TYPES =
+  "image/png,image/jpeg,image/gif,image/webp,application/pdf";
+export const CHAT_MEDIA_MAX = 5 * 1024 * 1024;
 
 export interface ConversationQuery {
   view?: "all" | "mine" | "unassigned";
@@ -136,7 +161,16 @@ export interface InboxApi {
     cursor?: string,
     signal?: AbortSignal,
   ): Promise<{ items: InboxMessage[]; next: string }>;
-  send(id: number, body: string, clientMsgId: string): Promise<InboxMessage>;
+  send(
+    id: number,
+    body: string,
+    clientMsgId: string,
+    mediaIds?: number[],
+  ): Promise<InboxMessage>;
+  /** Uploads a file to send with the next reply in a conversation. */
+  upload(conversationId: number, file: File): Promise<InboxMedia>;
+  /** Where an attachment's file is read (same-origin, the session's cookie). */
+  mediaUrl(id: number): string;
   note(id: number, body: string): Promise<InboxMessage>;
   claim(id: number): Promise<Conversation>;
   assign(id: number, userId: number): Promise<Conversation>;
@@ -192,8 +226,19 @@ function area(base: string): InboxApi {
     conversation: (id, signal) => request("GET", at(id), { signal }),
     messages: (id, cursor, signal) =>
       request("GET", at(id, `/messages${query({ cursor })}`), { signal }),
-    send: (id, body, clientMsgId) =>
-      request("POST", at(id, "/messages"), { body: { body, clientMsgId } }),
+    send: (id, body, clientMsgId, mediaIds) =>
+      request("POST", at(id, "/messages"), {
+        body: mediaIds?.length
+          ? { body, clientMsgId, mediaIds }
+          : { body, clientMsgId },
+      }),
+    upload: (conversationId, file) => {
+      const form = new FormData();
+      form.set("conversationId", String(conversationId));
+      form.set("file", file, file.name);
+      return request("POST", `${base}/media`, { rawBody: form });
+    },
+    mediaUrl: (id) => `${base}/media/${id}`,
     note: (id, body) => request("POST", at(id, "/notes"), { body: { body } }),
     claim: (id) => request("POST", at(id, "/claim")),
     assign: (id, userId) =>
@@ -377,6 +422,8 @@ export interface AddressInput {
 export interface MessagingSettings {
   retentionSmsDays: number;
   retentionChatDays: number;
+  /** How long attachments' files are kept. */
+  retentionMediaDays: number;
   reopenDays: number;
   emailNotify: boolean;
   firstContact: "off" | "attested";
@@ -409,6 +456,9 @@ export interface EraseReport {
   conversations: number;
   messages: number;
   optOutsKept: number;
+  /** Attachment files removed, and those left for the media sweeper. */
+  mediaObjects: number;
+  mediaObjectsPending: number;
   providers: { provider: string; redacted: boolean; detail: string }[];
 }
 
@@ -523,6 +573,10 @@ export interface ChatSite {
   maxOpenUnassigned: number;
   transcripts: boolean;
   retentionDays: number | null;
+  /** Visitors may send images and PDFs (off by default). */
+  attachments: boolean;
+  /** The site has a logo; see `chatSiteLogoUrl`. */
+  logo: boolean;
   conversations: number;
   createdAt: string;
   updatedAt: string;
@@ -546,6 +600,7 @@ export type ChatSiteInput = Partial<
     | "warnings"
     | "availability"
     | "retentionDays"
+    | "logo"
   >
 > & {
   /** Sealed when stored and never returned; "" removes it. */
@@ -581,3 +636,17 @@ export const listChatBlocks = (id: Id, signal?: AbortSignal) =>
   );
 export const deleteChatBlock = (id: Id) =>
   request<void>("DELETE", `${CHAT}/blocks/${id}`);
+
+/** A site's logo: PNG, JPEG, GIF or WebP, at most 256 KiB. */
+export const CHAT_LOGO_MAX = 256 * 1024;
+export const chatSiteLogoUrl = (id: Id, version: string) =>
+  `${CHAT}/sites/${id}/logo?v=${encodeURIComponent(version)}`;
+export function putChatSiteLogo(id: Id, file: File): Promise<ChatSite> {
+  const form = new FormData();
+  form.set("file", file, file.name);
+  return request<ChatSite>("PUT", `${CHAT}/sites/${id}/logo`, {
+    rawBody: form,
+  });
+}
+export const deleteChatSiteLogo = (id: Id) =>
+  request<void>("DELETE", `${CHAT}/sites/${id}/logo`);

@@ -24,7 +24,10 @@ This is the first phase of the messaging channels. What works now:
   campaign, toll-free verification) from the carrier (see "Sender
   registration");
 - a website chat widget for intranet pages and VPN users, served on the LAN only
-  (see "Website chat" below).
+  (see "Website chat" below);
+- attachments (see "Attachments"): images and PDFs both ways in a website
+  chat, a chat site's logo, and the download of a carrier's MMS media once a
+  carrier can deliver inbound texts.
 
 Not yet: receiving texts from a carrier's web API (needs an Internet-facing
 address), WhatsApp, and AI. None of the providers that need an
@@ -109,7 +112,7 @@ when Twilio reports it. There are no status callbacks on the LAN, so Hello
 5 minutes, then every 30 minutes after the first hour, and it stops at the
 final state or after 48 hours. A text still queued after an hour (the channel
 is off) fails with `not_sent`. A reply can be up to 1600 characters (Twilio
-segments it); media is not sent.
+segments it); media is not sent (see "Attachments").
 
 **Opt-out.** Twilio blocks a recipient who replied STOP and fails the send with
 error 21610. Hello records that as an opt-out on the number (source
@@ -274,7 +277,9 @@ registered phone of the user's extension (an unregistered phone gets it at its
 next REGISTER, within the text queue's TTL). The phone shows it from the
 customer, with the contact name resolved for that user, and a non-SMS channel
 is prefixed (`[WhatsApp] `). A text longer than 700 bytes is split into parts
-numbered `(1/3) `. Turning text messaging off ([messaging.md](messaging.md))
+numbered `(1/3) `. A phone cannot show an attachment: a text that came with one
+ends with `[1 attachment: open the inbox to see it]` (or the number of them),
+and a file sent alone arrives as that line. Turning text messaging off ([messaging.md](messaging.md))
 stops phone delivery but never the inbox.
 
 A text typed on the phone to the customer's number replies into the
@@ -410,9 +415,19 @@ after it was resolved, in batches of 500, by one control replica. An open
 conversation is never deleted by age. Snoozed conversations come back when
 their time passes.
 
+Attachment files are kept `retentionMediaDays` (default 90) after they arrived
+or were sent: the sweeper removes the file from MinIO, checks it is gone, and
+marks the attachment **expired**; the message stays. When retention deletes a
+conversation, its attachments' rows stay, without the conversation, until the
+sweeper has removed their files, so no file is ever left without a row that
+names it. An upload an agent never sent is removed after 24 hours.
+
 **Erase a customer** (Messaging settings, or `POST /api/v1/inbox/erase`)
 deletes every conversation, message and note with a number on every channel in
-one transaction, keeps only the opt-out hash, and returns a report of counts.
+one transaction, keeps only the opt-out hash, then removes every attachment
+file of that customer from MinIO and checks each is gone, and returns a report
+of counts (`mediaObjects` removed; `mediaObjectsPending` the store could not
+reach now, which the sweeper removes within minutes).
 The carrier keeps its own logs and database backups keep the rows until they
 expire: keep backups no longer than your longest erasure deadline.
 
@@ -558,10 +573,16 @@ All of them are server-side and none trusts the `Origin` header (anyone can run
 - **Content**: honeypot field, optional link stripping, no cookies, no
   fingerprinting, the user agent reduced to a browser family, the page to host
   and path.
-- **Not built**: attachments and the site logo. They need the media pipeline of
-  spec M-18 (`message_media`, MinIO storage under `msg/`, type sniffing and an
-  allowlist, the authorised media route), which no messaging item has built
-  yet; until it lands the attachment route does not exist (404).
+- **Attachments** (off by default, a switch on the site): images (PNG, JPEG,
+  GIF, WebP) and PDF, at most 5 MiB, 5 an hour per visitor, the type sniffed
+  from the bytes; SVG, HTML and files that also carry markup are refused.
+  Hello bundles **no virus scanner**: the site's settings say so, and the
+  switch is best left off for a site anyone can open. A visitor reads a file
+  of their chat with their token in the `Authorization` header (the frame
+  shows it from a blob, so the token is never in a URL). See "Attachments".
+- **Logo**: an administrator uploads one per site (PNG, JPEG, GIF or WebP, at
+  most 256 KiB, SVG refused); the widget shows it in its header from
+  `/chat/v1/logo`.
 
 Visitors' names, emails, tokens, addresses and text never reach a log, a metric
 label or an audit row. Retention for finished chats is 90 days by default (a
@@ -571,6 +592,63 @@ erasing `visitor:<id>` removes the visitor's whole record.
 Metrics: `hello_chat_sessions_total{result}`, `hello_chat_messages_total{result}`,
 `hello_chat_rate_limited_total{rule}`, `hello_chat_challenge_raised_total`,
 `hello_chat_rejected_total{reason}` and `hello_chat_streams`.
+
+## Attachments
+
+Attachments (spec messaging-channels M-18) are kept in the existing media
+bucket (`hello-recordings`, the same as the call recordings and the faxes)
+under `msg/<channel>/<year>/<message>/<sha256>`, an upload under
+`msg/<channel>/<year>/upload-<id>/<sha256>` and a chat site's logo under
+`msg/site/<site>/logo`. Their rows are in `message_media`.
+
+**What is accepted.** A file's type is **sniffed from its bytes**; the type the
+sender declared is only advisory and must name the same kind (image, audio,
+video, text, application), or the file is refused. The inbox takes still images
+(JPEG, PNG, GIF, WebP), audio, MP4 and 3GPP video, PDF, vCard and plain text,
+at most `HELLO_MSG_MEDIA_MAX` (default 16 MiB, at most 100 MiB); a website
+chat takes images and PDF, at most 5 MiB. SVG, HTML and XML are never taken,
+and neither is a file that also carries markup or script (a "polyglot": a GIF
+with HTML in it, an image that is also a ZIP). A refused file is never stored;
+the attachment shows why (`too_large`, `type_not_allowed`, `type_mismatch`,
+`active_content`, ...).
+
+**Who reads it.** `GET /api/v1/inbox/media/{id}` (supervisors) and
+`GET /api/v1/me/inbox/media/{id}` (an agent: the conversations they can see)
+stream a file to the people who can see its conversation, and an upload to the
+person who made it. A file is served with its sniffed type,
+`X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store` and a
+sandboxing `Content-Security-Policy`; images, audio and video show in the page,
+anything else is a download. Range requests work, so audio and video seek.
+
+**In the inbox.** A message shows its images as thumbnails (click to open),
+plays audio and video in place and offers other files as downloads. An
+attachment still downloading from the carrier says so; one that was refused or
+expired says why.
+
+**Sending.** In a **website chat** the composer has **Attach**: the file is
+uploaded at once (`POST /api/v1/inbox/media`, multipart `file` and
+`conversationId`), stays the agent's own until sent, and goes with the reply
+(`mediaIds`); a reply may be a file alone. The visitor sees it in the widget.
+**Text channels take no attachments in this build**: a SIP trunk carries no
+media at all, and Twilio, Telnyx and the others fetch an MMS's media from a
+public link (`/m/<token>`: 256 random bits, 15 minutes, 5 fetches, only its
+SHA-256 stored) that only the public listener could serve, which is not on
+(user decision, see the spec). The composer offers no **Attach** there, and the
+API answers `409 media_unsupported`.
+
+**Inbound MMS.** When a carrier delivers an inbound text with media (with the
+public listener, or a reconciliation pull; neither is on in this build), the
+message is stored at once with its attachments **pending**, and a worker on any
+control replica downloads each one with the account's own credentials: the
+URL, and every redirect, must be the carrier's own media host (Twilio's
+`api.twilio.com` for the account, then its CDN; Telnyx's hosts), the size is
+capped while reading, and the bytes are checked as above. A failed download is
+tried again for 24 hours (1, 5, 15 minutes, then hourly), then the attachment
+is **expired**; one the carrier no longer has is expired at once. The message
+and the other attachments stay whatever happens to one.
+
+**What is not done.** No virus scanning (none is bundled); no transcoding; no
+outbound MMS until the public listener exists.
 
 ## API
 
@@ -582,6 +660,8 @@ Metrics: `hello_chat_sessions_total{result}`, `hello_chat_messages_total{result}
 | `/api/v1/messaging/optouts` (+ `/{id}/reconsent`)                                         | admin, `admin`                |
 | `POST /api/v1/inbox/erase`                                                                | admin, `admin`                |
 | `/api/v1/messaging/chat/sites` (+ `/{id}`, `/{id}/blocks`), `/chat/blocks/{id}`           | admin, `admin`                |
+| `/api/v1/messaging/chat/sites/{id}/logo` (GET, PUT, DELETE)                               | admin, `admin`                |
+| `POST /api/v1/inbox/media`, `GET /api/v1/inbox/media/{id}` (and `/me/inbox/media...`)     | operator or agent, `messages` |
 | `/api/v1/inbox/conversations/{id}/block`, `/email-reply`, `/typing` (and `/me/inbox/...`) | operator or agent, `messages` |
 | `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`, `/api/v1/inbox/queues`           | operator, `messages`          |
 | `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream`                      | any agent, `messages`         |
@@ -604,7 +684,10 @@ a desk phone), `hello_msg_optout_total{source}`, `hello_msg_purged_total{kind}`,
 `hello_msg_unassigned` and `hello_msg_unassigned_oldest_seconds`, and for
 routing `hello_msg_assign_total{result}` (placed, assigned, full, lost,
 returned, after_hours_reply), `hello_msg_first_response_seconds`,
-`hello_msg_queue_text_waiting{queue}` and `hello_msg_assign_live_down_total`.
+`hello_msg_queue_text_waiting{queue}` and `hello_msg_assign_live_down_total`,
+and `hello_msg_media_total{result}` (ready, rejected, expired, pending: inbound
+attachment downloads); `hello_msg_purged_total{kind="media"}` counts attachment
+files the sweeper removed.
 No label carries a number, a name or text.
 
 ## HA
@@ -619,6 +702,12 @@ holds the agents' login and pause, and without it assignment falls back to
 static queue members.
 
 ## Lab checklist (real carrier)
+
+Attachments, with a real Twilio or Telnyx account and the public listener on
+(not in this build): an inbound MMS with a photo, a PDF and a vCard is
+downloaded and shown; which host the media URL and its redirect point at
+(Twilio's CDN host names; the host of a Telnyx `media[].url`, and whether it
+needs the API key); an MMS whose media expired at the carrier shows expired.
 
 Which carrier delivers inbound SMS as SIP MESSAGE to a registered or
 IP-authenticated trunk, and whether it accepts outbound MESSAGE for SMS, is

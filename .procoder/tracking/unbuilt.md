@@ -72,6 +72,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 4     | LAN chat widget                                     | done (#309)       |
 | 5     | Message routing and ACD                             | done (#311)       |
 | 6     | Telnyx, sender registration                         | done (#346)       |
+| M-18  | Media pipeline: attachments, chat files and logo    | wip (#PR)         |
 | W     | Wiring between items 2 to 6, one schedule           | wip (#352)        |
 | 7     | AI triage, drafts, auto-reply                       | todo              |
 | 8     | Integrations, reporting, DSAR export, redact        | todo              |

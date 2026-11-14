@@ -119,6 +119,23 @@ server {
         proxy_send_timeout 60s;
     }
 
+    # A visitor's attachment (docs/inbox.md, "Attachments"): the one chat
+    # request with a body larger than 16 KiB, an image or a PDF of at most
+    # 5 MiB that hello-control sniffs and checks.
+    location = /chat/v1/attachments {
+        set $hello_chat ${HELLO_CHAT_UPSTREAM};
+        proxy_pass $hello_chat;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $hello_forwarded_proto;
+        client_max_body_size 6m;
+        proxy_read_timeout 70s;
+        proxy_send_timeout 70s;
+    }
+
     # Recording links (docs/integrations.md, "Recording links"): GET
     # /r/<token>.wav is public, the token is the credential, and hello-control
     # sets the no-store and no-referrer headers. Range requests pass through.

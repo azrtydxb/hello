@@ -94,6 +94,8 @@ type ConvMessage struct {
 	SentAt         *time.Time `json:"sentAt"`
 	DeliveredAt    *time.Time `json:"deliveredAt"`
 	ReadAt         *time.Time `json:"readAt"`
+	// Media are the message's attachments (spec M-18), oldest first.
+	Media []ConvMedia `json:"media"`
 }
 
 const convSelect = `SELECT c.id, c.channel_id, ch.kind, ch.name, c.address_id, a.address, c.peer_key, c.peer_kind,
@@ -306,6 +308,7 @@ func scanConvMessage(r interface{ Scan(...any) error }) (ConvMessage, error) {
 		m.SenderUserID = &user.Int64
 	}
 	m.SentAt, m.DeliveredAt, m.ReadAt = nullTime(sent), nullTime(deliv), nullTime(read)
+	m.Media = []ConvMedia{}
 	return m, nil
 }
 
@@ -338,6 +341,9 @@ func (s *Store) ListConversationMessages(ctx context.Context, acc InboxAccess, c
 	if len(out) > limit {
 		out = out[:limit]
 		next = out[limit-1].ID
+	}
+	if err := loadMedia(ctx, s.db, out); err != nil {
+		return nil, 0, err
 	}
 	return out, next, nil
 }
@@ -433,6 +439,9 @@ type SendInput struct {
 	Body           string
 	// ClientMsgID makes a retried send idempotent; empty means none.
 	ClientMsgID string
+	// MediaIDs are the caller's uploads to this conversation that go with
+	// the text (spec M-18); only a website chat carries them in this build.
+	MediaIDs []int64
 }
 
 // SendConversationText sends an agent's reply through the conversation's
@@ -457,7 +466,11 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 			m, err := scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+`
 				FROM conversation_messages WHERE conversation_id = $1 AND client_msg_id = $2`, c.ID, in.ClientMsgID))
 			if err == nil {
-				msg, created = m, false
+				ms := []ConvMessage{m}
+				if err := loadMedia(ctx, tx, ms); err != nil {
+					return err
+				}
+				msg, created = ms[0], false
 				return nil
 			}
 			if !errors.Is(err, sql.ErrNoRows) {
@@ -466,6 +479,9 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 		}
 		if c.Status == messaging.StatusSpam {
 			return ErrConversationState
+		}
+		if err := cleanMediaIDs(in.MediaIDs); err != nil {
+			return err
 		}
 		var (
 			prov, address, kind, chStatus string
@@ -489,6 +505,11 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 			sinkEvent = &messaging.Event{Type: "message.sent", ConversationID: c.ID, MessageID: m.ID, ChannelKind: kind,
 				Direction: messaging.DirOut, Status: m.Status}
 			return nil
+		}
+		if len(in.MediaIDs) > 0 {
+			// A SIP trunk carries no media, and a carrier needs the public
+			// listener's links to fetch it (spec M-18, not in this build).
+			return ErrMediaUnsupported
 		}
 		carrier := prov != messaging.ProviderSIPTrunk
 		switch {

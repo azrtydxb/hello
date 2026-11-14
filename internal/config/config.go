@@ -129,6 +129,10 @@ type Control struct {
 	Syslog Syslog
 	// Chat is the LAN chat widget listener (HELLO_MSG_CHAT_*).
 	Chat Chat
+	// MsgMediaMax (HELLO_MSG_MEDIA_MAX, bytes, default 16 MiB, at most
+	// 100 MiB) is the largest inbound attachment the inbox keeps (spec
+	// messaging-channels M-18).
+	MsgMediaMax int64
 }
 
 // Chat configures the LAN chat widget (spec messaging-channels M-28). The
@@ -685,6 +689,10 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	c.Clients = r.clients()
 	c.Syslog = r.syslog()
 	c.Chat = r.chat()
+	c.MsgMediaMax = int64(r.positiveInt("HELLO_MSG_MEDIA_MAX", 16<<20))
+	if c.MsgMediaMax > 100<<20 {
+		r.fail("HELLO_MSG_MEDIA_MAX", errors.New("must be at most 104857600 (100 MiB)"))
+	}
 	return c, r.err()
 }
 
