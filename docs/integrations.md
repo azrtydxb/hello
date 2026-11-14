@@ -629,3 +629,13 @@ events. [Zapier and other automation tools](zapier.md) use the webhooks above.
 [Slack notifications](slack.md), [n8n and Make](n8n-make.md) and
 [Outlook and Google contacts and calendar](contacts-calendar.md) use the events
 and the connector framework above.
+
+## Microsoft Teams
+
+Teams Direct Routing needs a Microsoft-certified SBC, and Hello is not one.
+The supported way to connect Hello and Teams is an SBC (or a
+Direct-Routing-as-a-Service provider) in front of Hello, with Hello seeing it
+as a trunk of the **SBC peer** profile. There is no Teams code in Hello and no
+Microsoft account is configured in it. See [teams.md](teams.md) for the call
+flow, the Hello trunk, the number plan, the Teams-side steps, emergency calls
+and the support boundary.

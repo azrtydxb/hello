@@ -306,6 +306,38 @@ describe("Trunks", () => {
     });
   });
 
+  it("applies the SBC peer profile: IP peer, G.722 and G.711, sent as the profile", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [] }),
+      "GET /api/v1/trunks/status": () => json({ items: [] }),
+      "POST /api/v1/trunks": () => json({ ...TRUNK, profile: "sbc-peer" }, 201),
+    });
+    renderApp("/trunks");
+
+    expect(await screen.findByText("No trunks yet")).toBeVisible();
+    fireEvent.click(screen.getAllByRole("button", { name: "New trunk" })[0]!);
+    const drawer = screen.getByRole("dialog", { name: "New trunk" });
+    fireEvent.change(within(drawer).getByLabelText("Profile"), {
+      target: { value: "sbc-peer" },
+    });
+    expect(within(drawer).getByLabelText("Mode")).toHaveValue("ip");
+    expect(within(drawer).getByLabelText("Mode")).toBeDisabled();
+    expect(within(drawer).getByLabelText(/G\.722/)).toBeChecked();
+    expect(within(drawer).getByLabelText(/PCMU/)).toBeChecked();
+    expect(within(drawer).getByLabelText(/Opus/)).not.toBeChecked();
+    field("Name", "teams-sbc");
+    field("Source CIDRs", "192.0.2.10/32");
+    field("Host 1", "192.0.2.10");
+    fireEvent.click(screen.getByRole("button", { name: "Create trunk" }));
+    await screen.findByText("Trunk carrier-primary created.");
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
+      profile: "sbc-peer",
+      mode: "ip",
+      codecs: ["PCMU", "PCMA", "G722"],
+    });
+  });
+
   it("defaults a trunk's media encryption to off and sends the policy chosen", async () => {
     const calls = mockApi({
       ...ME,

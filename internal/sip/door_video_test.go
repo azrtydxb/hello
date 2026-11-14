@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/pion/rtcp"
 )
 
 // udpConn binds a loopback UDP socket on a free port.
@@ -31,18 +32,23 @@ func videoPhone(t *testing.T, p *phone, dir string) (rtp, rtcp *net.UDPConn) {
 		return fmt.Sprintf("v=0\r\no=%s 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"+
 			"m=audio %d RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\n"+
 			"m=video %d RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 profile-level-id=42e01f;packetization-mode=1\r\n"+
-			"a=rtcp:%d\r\na=%s\r\n", p.user, portOf4(audio), portOf4(rtp), portOf4(rtcp), dir)
+			"a=rtcp-fb:96 nack\r\na=rtcp-fb:96 nack pli\r\na=rtcp:%d\r\na=%s\r\n", p.user, portOf4(audio), portOf4(rtp), portOf4(rtcp), dir)
 	})
 	return rtp, rtcp
+}
+
+// withVideoOn switches video on, as the node's configuration does by default.
+func withVideoOn() pbxOpt {
+	return func(c *Config, _ *Deps) { c.VideoEnabled, c.VideoMaxKbps = true, 1500 }
 }
 
 // TestDoorVideoPassthrough fails if a door call offering H.264 video to a
 // callee whose SDP accepts video loses the video m-line on either side, does
 // not relay the video RTP and RTCP through ports of its own, adds video to a
 // callee that did not offer it (the door's answer must refuse the stream with
-// port 0), or carries video on a call without a door station (spec S-49).
+// port 0), (spec S-49). A call between two video phones is TestPhoneVideoCall.
 func TestDoorVideoPassthrough(t *testing.T) {
-	pbx := startPBX(t, doorDevices(), withMedia(false), doorFeatures())
+	pbx := startPBX(t, doorDevices(), withMedia(false), doorFeatures(), withVideoOn())
 	b := newPhone(t, pbx, "b1", "pb1")
 	b.register(t)
 	user := newPhone(t, pbx, "a1", "pa")
@@ -87,13 +93,17 @@ func TestDoorVideoPassthrough(t *testing.T) {
 		if _, err := bRTCP.WriteToUDP(pli, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: offerB.Port + 1}); err != nil {
 			t.Fatal(err)
 		}
-		if got := readUDP(t, doorRTCP, "RTCP at the door"); string(got) != string(pli) {
-			t.Errorf("door got RTCP %x, want the picture loss indication %x", got, pli)
+		pkts, err := rtcp.Unmarshal(readUDP(t, doorRTCP, "RTCP at the door"))
+		if err != nil || len(pkts) == 0 {
+			t.Fatalf("door got RTCP %v, %v", pkts, err)
+		}
+		if _, ok := pkts[0].(*rtcp.PictureLossIndication); !ok {
+			t.Errorf("door got %T, want the picture loss indication", pkts[0])
 		}
 		hangup(t, r.dcs)
 		waitReq(t, b.byes, "BYE to the callee")
 		cd := pbx.nextCDR(t)
-		wantTrace(t, cd.Trace, "Video offered by the caller (H.264), relayed through the anchor", "Video accepted by the callee (H.264)")
+		wantTrace(t, cd.Trace, "Video relayed (H264), at most 1500 kbit/s each way, not transcoded")
 	})
 
 	t.Run("a callee without video gets none and the door is told", func(t *testing.T) {
@@ -118,22 +128,7 @@ func TestDoorVideoPassthrough(t *testing.T) {
 		hangup(t, r.dcs)
 		waitReq(t, b.byes, "BYE to the callee")
 		cd := pbx.nextCDR(t)
-		wantTrace(t, cd.Trace, "Video refused by the callee")
-	})
-
-	t.Run("a call without a door station carries no video", func(t *testing.T) {
-		videoPhone(t, user, "sendrecv")
-		videoPhone(t, b, "sendrecv")
-		r := waitCall(t, dial(t.Context(), user, "200"))
-		if r.err != nil {
-			t.Fatalf("call: %v", r.err)
-		}
-		inv := waitReq(t, b.invites, "INVITE to the callee")
-		if strings.Contains(string(inv.Body()), "m=video") || strings.Contains(string(r.dcs.InviteResponse.Body()), "m=video") {
-			t.Error("video was carried on a call with no door station")
-		}
-		hangup(t, r.dcs)
-		pbx.nextCDR(t)
+		wantTrace(t, cd.Trace, "Video not carried: the callee cannot do video")
 	})
 
 	t.Run("an audio-only door call stays audio-only", func(t *testing.T) {

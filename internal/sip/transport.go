@@ -8,7 +8,7 @@ import (
 )
 
 // transportHeader carries the transport a phone's request arrived on at the
-// edge proxy (udp, tcp or tls), set by Kamailio from its received protocol
+// edge proxy (udp, tcp, tls, ws or wss), set by Kamailio from its received protocol
 // and honoured only from a trusted proxy, like X-Hello-Client. The edge is
 // where TLS ends: hello-sip itself speaks UDP to Kamailio, so this header is
 // the only way it learns that the phone leg was TLS.
@@ -19,10 +19,15 @@ const (
 	transportUDP = "udp"
 	transportTCP = "tcp"
 	transportTLS = "tls"
+	// transportWS and transportWSS are a browser's SIP over WebSocket
+	// (RFC 7118), ended at the edge (deploy/kamailio, docs/webrtc.md). wss is
+	// TLS to the edge, so a sips: call may ring it; ws is not.
+	transportWS  = "ws"
+	transportWSS = "wss"
 )
 
-// normTransport maps a stored or received transport to udp, tcp or tls
-// (anything unknown, including a binding written before this field was
+// normTransport maps a stored or received transport to udp, tcp, tls, ws or
+// wss (anything unknown, including a binding written before this field was
 // real, is udp).
 func normTransport(t string) string {
 	switch strings.ToLower(strings.TrimSpace(t)) {
@@ -30,8 +35,20 @@ func normTransport(t string) string {
 		return transportTCP
 	case transportTLS, "sips":
 		return transportTLS
+	case transportWSS:
+		return transportWSS
+	case transportWS:
+		return transportWS
 	}
 	return transportUDP
+}
+
+// secureTransport reports whether a phone leg of this transport is encrypted
+// to the edge, which is what a sips: request needs (RFC 3261 26.2.2): TLS or
+// WSS.
+func secureTransport(t string) bool {
+	t = normTransport(t)
+	return t == transportTLS || t == transportWSS
 }
 
 // clientTransport is the transport of the phone leg of req: X-Hello-Transport
@@ -54,14 +71,16 @@ func isSIPS(req *sip.Request) bool {
 
 // bindingOnTLS reports whether a binding's phone registered over TLS, i.e.
 // whether a request sent to it leaves Kamailio over a TLS connection. The
-// SRTP phase offers crypto only on such legs.
+// SRTP phase offers crypto only on such legs (a WSS browser negotiates
+// DTLS-SRTP, not SDES).
 func bindingOnTLS(b livestate.Binding) bool { return normTransport(b.Transport) == transportTLS }
 
-// secureTargets keeps the bindings reachable over TLS.
+// secureTargets keeps the bindings reachable over an encrypted leg (TLS or
+// WSS).
 func secureTargets(bs []livestate.Binding) []livestate.Binding {
 	var out []livestate.Binding
 	for _, b := range bs {
-		if bindingOnTLS(b) {
+		if secureTransport(b.Transport) {
 			out = append(out, b)
 		}
 	}

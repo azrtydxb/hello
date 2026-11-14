@@ -3555,6 +3555,125 @@ Decided while building, without asking, within the spec and the brief:
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
 
+## kw manifests for fax, coturn and the door camera allow-list (2026-11-13, deploy/kw-fax-coturn-door)
+
+Draft PR "HOLD: kw manifests (deploy when unpaused)": merging to main deploys through Sync, and deploys are paused (registry 503), so it stays a draft until the operator resumes them.
+
+- **hello-fax (#273)**: `kw/fax.yaml`, a Deployment and a ClusterIP Service on 8083, no Ingress. hello-sip-1/2 and hello-control get `HELLO_FAX_ENABLED`, `HELLO_FAX_ADDR=hello-fax.hello.svc.cluster.local:8083` and `HELLO_FAX_TOKEN`. The token is a new sops Secret `hello-fax` (`faxToken`, random), shared by the three callers and the engine.
+- **coturn (#282)**: `kw/coturn.yaml`, `coturn-1` on master-11 (192.168.10.101) and `coturn-2` on master-12 (192.168.10.102), host-networked, Recreate, one replica each, UDP/TCP 3478, TLS 5349 and relay 49152-49999/UDP, the chart's own settings. TLS is a cert-manager Certificate `hello-coturn-tls` from cluster-ca with both addresses as IP SANs. The secret is a new sops Secret `hello-coturn` (`turnSecret`, random), read by both coturn pods and hello-control, so `hello-app` (whose private key would be needed to edit it) is untouched. hello-control gets `HELLO_TURN_URLS` for both servers (UDP, TCP, TLS) and `HELLO_TURN_SECRET`.
+- **`TURN_ALLOWED_PEERS` is 192.168.10.101-192.168.10.108**, every node that can run a hello-sip (master-11 to master-13, worker-21 to worker-25): the two hello-sip Deployments are host-networked but not pinned, and their media address is the node's. Wider than today's two nodes; pinning hello-sip would narrow it. Earlier draft values (scratchpad coturn-values.yaml) were lost with the scratchpad, so these follow the chart's defaults and the cluster's node list.
+- **Not enabled here:** web devices themselves. They need `clientAuthKey` (`HELLO_CLIENT_AUTH_KEY` on hello-control and hello-sip), which the brief did not ask for; coturn and the ICE-server route are deployed without it.
+- **`HELLO_DOOR_CAMERA_ALLOW=192.168.10.0/24`** on hello-control (#285, still open: its config reads the variable and an older binary ignores it). 192.168.10.0/24 is the LAN of the nodes and the phones; narrow it if the cameras sit on a smaller network.
+- **Image tags** of hello-fax and coturn are `sha-<the main commit these files were written at>`; ci.yaml publishes them on push to main. They must be re-pinned to the tags of the release commit when deploys resume (kw has no earlier pin for either).
+- **Test:** `TestChartEnvParityWithKw` renders the chart with fax and coturn on so kw and chart agree; `HELLO_DOOR_CAMERA_ALLOW` is listed as kw-only (the chart sets it through `control.extraEnv`). `TestKwCoturn` and `TestKwFax` pin the manifests.
+- **Validated** with `kubectl --context kw apply --dry-run=server` (the whole rendered set, server-side, field manager kuvryn-sync): every object accepted; the private render was deleted afterwards.
+
+## kw: HELLO_CLIENT_AUTH_KEY for browser softphones (decided: add)
+
+The user decided to add the web-device key to the held kw change (#334). It supersedes the earlier note that web devices stay off.
+
+- A new sops Secret `hello-client-auth` (`clientAuthKey`, `openssl rand -base64 48`, generated straight into the encrypted file and never printed) is read as `HELLO_CLIENT_AUTH_KEY` by hello-control and by hello-sip-1 and hello-sip-2, the same key on all three, because hello-control issues the derived credentials and hello-sip checks them.
+- `HELLO_CLIENT_AUTH_KEY_PREVIOUS` is not set; rotation will add it (docs/webrtc.md).
+- Web devices still need the WSS edge to register (`HELLO_WSS_URL`), which is not part of this; the key and TURN servers are ready for it.
+- #334 stays a HOLD draft; nothing here deploys until it is merged.
+
+## Browsers on kw: TLS hop or cleartext hop (2026-11-14)
+
+- #340 refuses a WebRTC (browser) call whose signalling reached hello-sip over
+  the cleartext UDP hop from Kamailio, unless
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP=true`. kw runs with WSS and the TLS
+  hop off, so the web softphone (#343) cannot call there until one is chosen:
+  turn on the TLS hop for kw (`KAMAILIO_HELLO_TLS_PORT`, hello-sip
+  `HELLO_SIP_TLS_ADDR`, the Hello CA certificate for both) together with WSS,
+  or turn on WSS and allow the cleartext hop (the hop is node-to-node on the
+  kw LAN).
+- The user chose WSS + the TLS hop (2026-11-14). #334 turns on both for kw,
+  with a Hello-CA certificate for Kamailio and hello-sip.
+- Implementation (#334, kw manifests; docs/webrtc.md, "Browsers on kw"):
+  - Kamailio: `KAMAILIO_WSS_PORT=8088`, `KAMAILIO_WS_ORIGINS=https://hello.kw.watteel.lab`,
+    `KAMAILIO_WSS_TRUSTED_PROXIES=^10[.]42[.]`, `KAMAILIO_HELLO_TLS_PORT=5073`,
+    `KAMAILIO_HELLO_SIP_TLS_PORT=5061`; ports `wss` and `hello-tls`; dispatcher
+    set 2 for hello-sip-1 and hello-sip-2; checksum annotation updated.
+    kamailio.cfg, tls-hop.cfg and the kamailio image (kc-5f94d2b0d090316a
+    already has the websocket and tls modules) are unchanged.
+  - Trusted proxies: ingress-nginx is one pod in kw's pod network (not
+    host-networked; Cilium tunnel mode), so the regular expression is the pod
+    CIDR 10.42.0.0/16. If Kamailio sees a node address instead, X-Forwarded-For
+    is not believed and every browser shares the ingress's throttle key (safe;
+    checked after deploy, tracker hardware list).
+  - Browser path: Service and Ingress `kamailio-ws`, `/sip` (Exact) on
+    hello.kw.watteel.lab, the console's `hello-tls`, backend HTTPS, one-hour
+    timeouts, no cluster-issuer annotation (the Ingress `hello` owns
+    hello-tls). `HELLO_WSS_URL=wss://hello.kw.watteel.lab/sip` on hello-control.
+  - hello-sip-1/-2: `HELLO_SIP_TLS_ADDR=:5061` and `_CERT/_KEY/_CA` at
+    /etc/hello-sip-tls, port `sip-tls` (also on the headless Services),
+    `fsGroup: 65532`, and WebRTC media on (`HELLO_MEDIA_WEBRTC_ENABLED`, port
+    21100, `ALLOW_CLEARTEXT_HOP=false`): without it the anchor would refuse
+    browser legs.
+  - Certificates from the existing `cluster-ca` ClusterIssuer (the Hello CA
+    phones and the console's browsers already trust; its Secrets carry
+    ca.crt), no new issuer. `hello-edge-tls` (Kamailio, on every TLS socket as
+    tls-hop.cfg requires, so WSS and the hop share it): IP SANs
+    192.168.10.101, .102 and the VIP .109, the two DNS names, server and
+    client auth. `hello-sip-node-tls` (both nodes): hello-sip-N,
+    hello-sip-N.hello.svc and hello-sip-N.hello.svc.cluster.local, server and
+    client auth. It replaces `hello-sip-tls` (server auth, .101 only) under a
+    new name, and Kamailio's volume is no longer optional, so a new Kamailio
+    pod waits for the new certificate instead of racing cert-manager's
+    reissue of the old Secret. The go-live patch is regenerated for it.
+  - Chart bug fixed: the hello-sip StatefulSet mounted its TLS Secret 0440
+    with no fsGroup, so the image's user 65532 could not read the key; it now
+    gets `fsGroup: 65532` with `sip.tls.enabled` (TestChartTLSHop).
+  - Tests: TestKwBrowsers; TestChartEnvParityWithKw renders WSS, the hop and
+    WebRTC media.
+  - Renewal: Kamailio reads its certificate at start, so it must restart
+    within 30 days of a renewal (docs/tls.md); hello-sip re-reads its own.
+  - hello-fax and coturn are re-pinned to sha-cb5b6da6f7a705e381227870d3133ea566382e42
+    (main's #343 merge, whose publish built both); the other images keep
+    main's pins.
+
+## TLS hop from Kamailio to hello-sip (2026-11-13)
+
+- S-12 is opt-in at both ends: `KAMAILIO_HELLO_TLS_PORT` on Kamailio and
+  `HELLO_SIP_TLS_ADDR` on hello-sip (chart `kamailio.helloTLS`, `sip.tls`). Off,
+  kamailio.cfg and hello-sip behave as before; kw does not set either, so its
+  ConfigMap only gains the unused `tls-hop.cfg` key and the new defines.
+- It carries every encrypted phone leg (tls, ws, wss), not only WebSocket, so
+  it is testable in the lab with the existing TLS phone. (A first draft kept
+  one dispatcher set and converted the chosen destination to its TLS address;
+  it was replaced by the second set below, probed over TLS from hello_tls.)
+- Hello's requests come back to `hello_tls` on the instance's own address (as
+  `hello_ws` does for WSS), mutual TLS with one certificate of the Hello CA.
+  Kamailio verifies the node's certificate only on connections it opens
+  (`tls-hop.cfg` client section); what arrives on hello_tls is vetted by source
+  address like the UDP socket, because the tls module's server section cannot be
+  set per socket from a static file.
+- hello-sip needs the edge to present a client certificate (RequireAndVerify).
+  The certificate is re-read when it changes (cert-manager renewals).
+- The dispatcher has a second set (the same nodes by TLS address, `sockname`
+  attributes naming hello_tls) probed over TLS; an encrypted leg is balanced
+  over it, so a node whose TLS listener is down is skipped for those legs only.
+  The lab proves it by stopping a node and checking set 2 follows. hello-sip
+  counts `hello_sip_requests_by_wire_total{transport}` so the lab can assert a
+  REGISTER arrived on the TLS listener; Kamailio's `edge_requests_total` shows
+  Hello's requests on hello_tls.
+- The cleartext-hop refusal is built here, after #324 merged: a WebRTC leg
+  whose signalling did not arrive over the TLS hop is refused unless
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP` is set (internal/sip/tlshop.go).
+- Merged with SIP over WSS (#326), both opt-in and independent. With the hop
+  on, every encrypted leg (tls, ws, wss) goes over `hello_tls` and dispatcher
+  set 2: the hop supersedes `hello_ws` for WSS legs (both are this instance's
+  own address, and the hop is the encrypted one). With the hop off, WSS keeps
+  #326's behaviour (`hello_ws` under EDGE_VIP, else `hello`). Requests arriving
+  on `hello`, `hello_legacy`, `hello_ws` and `hello_tls` are all vetted against
+  the dispatcher and flagged as from Hello. NEED_TLS is defined by
+  KAMAILIO_TLS_PORT, KAMAILIO_WSS_PORT or KAMAILIO_HELLO_TLS_PORT; the tls
+  module reads `tls-hop.cfg` with the hop on, else `tls.cfg`. Because
+  `tls-hop.cfg` presents one certificate on every TLS socket, the chart refuses
+  `kamailio.helloTLS.enabled` with `kamailio.wss.enabled` when
+  `kamailio.wss.secretName` names a different Secret than
+  `kamailio.tls.secretName`. kw keeps both off.
+
 ## Messaging 4, LAN chat widget: defaults chosen (2026-11-11)
 
 Built from `.procoder/specs/messaging-channels.md` M-28, M-29, M-29a to M-29c.
@@ -4084,6 +4203,90 @@ Follow-up to "Clients item 1: media foundation on pion". Choices:
   browser leg before the keys are in, that nothing on it is in the clear after,
   and that a cleartext packet from the browser is not relayed.
 
+## Clients items 5 and 6: web softphone and web video (2026-11-13)
+
+Builds on #324, #276, #341 and the devices and ICE servers of #282. Choices:
+
+- **The softphone core lives in `web/src/softphone/`, not in a `clients/*`
+  workspace package.** The spec names a pnpm workspace so the mobile app can
+  share the core. A workspace would move the `hello-ui` image build context from
+  `web/` to the repository root, which touches the image build in CI and the kw
+  manifests for no gain while the apps are "not now". The seam is kept instead:
+  everything that touches JsSIP is in `jssipEngine.ts`; the rest uses the
+  `PhoneEngine` and `Platform` interfaces in `types.ts` and has no DOM or React
+  in it (`phoneState.ts`, `quality.ts`, `backoff.ts`, `lock.ts`), so moving the
+  folder into a workspace package when the apps start is a mechanical change.
+- **No Playwright run in this change.** The spec asks for a Chromium test through
+  the lab compose stack; that needs a browser and the lab, so it is on the
+  hardware list. In its place: a headless pion DTLS-SRTP client places calls
+  through the whole SIP path (`internal/sip/webrtc_test.go`) and the relay
+  (`internal/media/webrtcvideo_test.go`), and `vitest` covers the state machine,
+  the Web Lock rule, the failure states and the dock with a fake engine.
+- **Message waiting uses the SUBSCRIBE the server already answers.** JsSIP's
+  `Subscriber` sends `Event: message-summary`; no REST poll.
+- **A browser is a leg by its SDP, a browser callee by its binding.** An INVITE is
+  a browser's when its audio section is `UDP/TLS/RTP/SAVPF` with ICE; a contact is
+  a browser when it registered over WS or WSS or its device is a web or mobile
+  client (`isWebBinding`). This works with or without the WSS edge's `wss`
+  transport value (#326), so this change does not depend on it.
+- **Mixed rings need a leg of each kind: the alternate callee leg.** One relay
+  has two legs, and a ring across a desk phone and a browser has two kinds of
+  callee. Instead of a relay per fork, a third endpoint (parked until a fork
+  answers) is offered to every browser fork and promoted by the winner. All
+  browser forks of one call share its ICE credentials and fingerprint; only the
+  one that answers sends checks, and a simultaneous second answer is hung up by
+  the existing first-answer-wins rule.
+- **Every SDP for a browser leg carries its video line.** `AudioSDP.Build` appends
+  the video section (or the rejected one that keeps the dialog's `m=` count) for a
+  browser leg, so transfer, park, pickup and hold code that builds SDP the old way
+  cannot drop an `m=` line, which a browser refuses. `SetTarget` ignores browser
+  legs for the same reason: their address is what ICE verified.
+- **The cleartext-hop gate is real.** A WebRTC offer is refused with 488 unless the
+  edge-to-node hop is TLS or `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP` is on. Until
+  #340 (the TLS hop) deploys, kw sets the flag, as the spec says.
+- **Browser calls are not replicated.** The ICE and DTLS state is the node's own;
+  a taker cannot be given it. A dead node ends the call (the browser's ICE failure
+  hangs up in about five seconds) and a new call works at once. Re-homing by ICE
+  restart (S-7) is a lab item. This is stated in `docs/ha.md`.
+- **Video is relayed, per leg pair, never decoded.** Constant sequence and
+  timestamp offsets (so NACKs map by subtraction), one SSRC per leg, payload type
+  per leg, RTCP terminated and regenerated with PLI, FIR, NACK and REMB carried
+  across, a token-bucket ceiling at `HELLO_VIDEO_MAX_KBPS`, a node limit
+  `HELLO_VIDEO_MAX_SESSIONS`. RTX, RED, FEC, transport-cc and header extensions
+  are not negotiated. Video is for a web client on both legs; every other callee
+  (desk phone, trunk, IVR) gets `m=video 0`. The existing door-station video
+  relay (plain RTP) is untouched and is skipped for a browser caller.
+- **Mid-call video is accepted optimistically on the browser that asks.** The
+  re-INVITE is answered before the peer is asked (the existing hold path answers
+  first), so the peer is offered the one codec the browser listed first and, if it
+  refuses, the video ends again and the trace says so. The cost is a moment of
+  one-way video in that case; the benefit is that hold, resume and video changes
+  share one path.
+- **`extensions.video_allowed` and `cdrs.video`, and a client-quality table
+  matched to the CDR like RTCP-XR.** `POST /me/calls/{callId}/quality` files a
+  report under the dialog's SIP Call-ID and the device (it must be the caller's
+  own); the CDR detail reads reports whose Call-ID is the CDR's `sip_call_id` or
+  `peer_call_id`, so a report that arrives before the CDR is not lost. Retention
+  90 days, like the phones' reports. The route is `session`-scoped like the other
+  device routes; the scope `softphone` of the spec is introduced with the mobile
+  OAuth work.
+- **Out of this change, by the plan:** video recording (6b: a recorded video call
+  records audio only and the trace says so), conference-room video (11), video
+  phones and door stations (10).
+
+## WebRTC offers need the TLS hop (2026-11-13)
+
+- `media.Relay.AnswerWebRTC` takes a `SignalingHop`; an offer that arrived over a
+  cleartext edge-to-node hop is refused with `ErrCleartextHop` unless
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP=true` (default false). The check runs
+  first, before the leg is routed or a handshake starts.
+- hello-sip decides "encrypted" from the transport sipgo read the message on
+  (its TLS listener) from a trusted edge, never from the Via the sender wrote;
+  `wireLabel` (and so `hello_sip_requests_by_wire_total`) uses the same source.
+  `Server.checkWebRTCHop` logs the refusal at warn with the fix and counts
+  `hello_sip_webrtc_refused_total{reason="cleartext_hop"}`; the softphone call
+  path (not built yet) answers 488.
+
 ## Integrations P13 and P19: Salesforce Open CTI and Dynamics 365 CIF (2026-11-13)
 
 Decided while building, without asking, within the spec and the brief:
@@ -4406,3 +4609,167 @@ toll-free reads and Twilio's `UsAppToPerson`/`Tollfree` reads; what a limited ke
 returns (403 vs 404) for each registration read; a Twilio account with several
 Messaging Services.
 
+## WSS on Kamailio and the SBC-peer trunk profile (2026-11-13)
+
+- WSS (clients item 2) is opt-in by `KAMAILIO_WSS_PORT`, off in the chart
+  (`kamailio.wss.enabled`). Kamailio ends TLS and the WebSocket on a `wss`
+  listener on its own address; the Ingress (`/sip`, `backend-protocol: HTTPS`)
+  is a separate chart object. Origins are an exact allow-list
+  (`KAMAILIO_WS_ORIGINS`, default the console origin); a handshake without an
+  `Origin` is let in because a browser always sends one and the client still
+  needs digest. Unset list means no origin.
+- The browser's real address comes from `X-Forwarded-For` only when the TCP
+  peer matches `KAMAILIO_WSS_TRUSTED_PROXIES`, kept per connection id in an
+  htable and sent as `X-Hello-Client`. pike is skipped for WebSocket clients
+  because the ingress address is shared.
+- hello-sip records `ws` and `wss` as transports. A `sips:` call may ring `wss`
+  (encrypted to the edge) but not `ws`; SDES SRTP is still decided by TLS
+  only, since a browser negotiates DTLS-SRTP.
+- With the VIP, WebSocket clients use a separate `hello_ws` socket on the
+  instance's own address (UDP 5072), so Path and Record-Route name the
+  instance that holds the connection. HA activation is not changed.
+- The Kamailio to hello-sip TLS hop (S-12) is not built: it needs the DTLS-SRTP
+  work (#276) that this change does not depend on. It is a precondition for
+  accepting WebRTC calls in production, not for registering over WSS.
+- Teams (items 13 and P22): a trunk `profile` column (`generic`, `sbc-peer`,
+  migration 00096), defaults on create, limits on create and PATCH, a profile
+  list endpoint and MCP tool, a UI select, and docs/teams.md. No Teams code in
+  internal/sip. Hello has no TLS or SRTP transport towards trunks, so the
+  profile cannot ask for them and refuses `srtp: required`; the SBC encrypts
+  towards Microsoft and the Hello to SBC leg is UDP on the LAN or DMZ. A TLS
+  trunk transport and Diversion/History-Info are separate features that are
+  not built.
+- deploy/kuvryn-sync/kw/ is untouched by instruction, so its copy of
+  kamailio.cfg lags: TestKwKamailioConfigMatchesSource fails until the
+  manifests step copies deploy/kamailio/kamailio.cfg into the ConfigMap and
+  updates the checksum annotation.
+
+## Clients items 6b, 10 and 11: video recording, video phones and door stations, conference-room video (2026-11-13)
+
+Stacked on #343 (items 5 and 6); merges after it. Choices:
+
+- **A plain RTP video leg is the browser's leg with its own sockets.** A phone or
+  a door station that offers `m=video` on RTP/AVP gets an even RTP port and the
+  next one for RTCP from the RTP range, read by two goroutines per leg that feed
+  the relay's existing `forwardVideo` and `handleRTCP`. So it has the same
+  translator (offsets, one SSRC and payload type per leg, per-leg RTCP, PLI, FIR,
+  NACK, REMB, the ceiling) and every pairing works: phone to phone, door station to
+  phone, phone to browser, browser to phone. The old door-only "relay the port pair
+  unchanged" (`VideoRelay`) is gone: it could not carry a door's video to a
+  browser, could not enforce a slot or `video_allowed`, and could not be recorded.
+  Its test now asserts the translated stream and the regenerated PLI.
+- **The SDP section is written by the leg**, appended in `AudioSDP.Build` through a
+  `localVideo` hook (every SDP of the dialog carries it, so transfer, park, hold
+  and pickup cannot drop an `m=` line) and again by `withVideo` on the paths that
+  skip the relay's SDP functions. An offer that had a video line is always answered
+  with one, `m=video 0` unless carried; an offer without one clears it.
+- **Plain video never rides beside encrypted audio and never reaches a trunk.** A
+  plain video line has no SRTP here (`ParseVideoSDP` accepts RTP/AVP and AVPF only);
+  sending clear video next to SRTP audio would defeat the policy, so the line is
+  refused with the reason in the trace. Trunks and URI destinations stay audio only,
+  with one exception below.
+- **Codec match.** Between two plain ends any H.264 with the same packetization mode
+  and `profile_idc` goes (the answerer's fmtp is passed back as sent, the relay does
+  not look inside); with a browser on either end both must be Constrained Baseline
+  mode 1, the one thing browsers decode. VP8 is never offered to a plain leg.
+- **A phone that lists no `rtcp-fb` is still sent PLI and FIR** (the relay marks
+  both on for a plain leg with none listed). Door stations and video phones answer
+  a picture loss indication whether or not their SDP lists it, and a viewer who joins
+  a door camera needs a keyframe now, not at the next GOP; NACK and REMB stay as
+  negotiated.
+- **Video recording (6b) is fragments in the bucket, a row per stream, a finalizer
+  in hello-control.** The recorder reads the relay's `OnVideo` tap, depacketizes
+  (H.264 per RFC 6184, VP8 per RFC 7741) and writes fMP4 or WebM with in-tree writers
+  (a few boxes and elements; no dependency, `CGO_ENABLED=0` kept). It cuts a fragment
+  at a keyframe after 10 s or 4 MiB (hard cut at 1.5 times either) and stores it at
+  once; at most three wait for the object store. A keyframe that changes the picture
+  size or the SPS or PPS starts a new part.
+- **Fragments live under `<stem>.parts/`, the finalized file is `<stem>.<ext>`.** The
+  spec put both under one name (`x` finalized, `x/init` and `x/<seq>` fragments);
+  MinIO does not let an object and a prefix share a name. The file name is the
+  spec's.
+- **The finalizer streams.** It writes the header (`sidx` or Cues, from the manifest:
+  fragment sizes, durations, keyframe flags, offsets) and then copies each fragment
+  through a pipe to a put of known size, so a one-hour video is never in memory. A
+  fragment that is missing or the wrong size ends the file at the one before.
+- **Crash recovery is the row, not replication.** hello-sip writes a stream's row
+  when it opens and after every stored fragment; a node that dies leaves it in
+  `recording`, and hello-control's sweeper ends the rows nobody wrote for ten
+  minutes (`failure = interrupted`) and finalizes what they list. A takeover carries
+  audio only (the video relay is the node's own), so the spec's replicated video
+  recording state and "part 2 after a takeover" are not built: the part the dead node
+  held is kept, the taker records audio. This matches how the door video and the
+  browser legs already behave on takeover.
+- **Retention, quota and the notice.** `recording_settings.video_retention_days`
+  (default 30; the table is new, audio has no retention job) and
+  `HELLO_RECORDING_VIDEO_QUOTA_GB` (default 200, 0 for none). The quota is read by
+  hello-sip (no new video recording above it) and hello-control (a warning at 80
+  percent and a gauge). The notice plays `recording-notice-video` when the
+  recording includes video and the operator uploaded it, else the plain
+  `recording-notice`.
+- **Web clients are told what is recorded by an INFO** of type
+  `application/x-hello-recording` (`recording: on|off`, `video: yes|no`), sent on the
+  dialog of each browser leg when the recording starts, gains video or stops. The
+  softphone shows a REC badge, with a camera mark when video is in it. Desk phones
+  hear the notice. The spec's "both sides that are Hello clients" is this.
+- **The player slaves the video to the audio** (`RecordingPlayer`): the WAV is the
+  clock, each `<video>` muted and set to the audio's time minus the stream's offset
+  on play and seek and by a two-second check against a 100 ms drift, parts one after
+  another with a "recording gap" marker, a download when the browser cannot play the
+  codec. The manifest never names an object.
+- **Conference-room video (11) forwards the active speaker; it does not compose
+  and it is not an SFU.** The reasons are in docs/conference.md (composing needs
+  decoding and encoding, an SFU is a second media engine beside the one that anchors
+  and records). The room already measures each participant's audio every 20 ms, so
+  the speaker is the loudest participant with video above a gate and 1.5 times the
+  speaker's level, after a 1.5 s dwell; each viewer has its own outbound stream
+  (SSRC, payload type, offsets that continue across a switch) and waits for a
+  keyframe of a new source, asked for with a PLI every 250 ms and given up on after
+  two seconds. The speaker sees the one before. All the decisions about who is shown
+  whom, the wait and the queueing happen under the room's lock together, so a late
+  packet of the old speaker cannot land among the new one's.
+- **One codec per room**, fixed by the first participant with video (H.264
+  Constrained Baseline, else VP8); a later one joins the video only with that codec.
+  Phones and door stations are H.264 only.
+- **A per-room Video switch** (`conference_rooms.video`, migration 00099, default
+  on): bandwidth is the operator's to spend per room. Off answers every video line
+  with port 0.
+- **A forwarded participant carries video too**: the leg to the node that mixes the
+  room is the one URI destination that takes video, so a room that lives on another
+  node still shows video; each end of that leg takes a video slot.
+- **Not built for rooms:** recording of room video (the room's recording is its audio
+  mix, stored in segments as before) and re-homing video on a takeover.
+- **Tests use headless pion and plain SIP/RTP clients** (a DTLS-SRTP browser stand-in,
+  UDP video phones, a door station phone); real phones, door stations and browsers
+  are on the hardware list.
+
+## Kamailio HA flake, second cause: the 100 Trying of a draining instance (2026-11-13)
+
+- Symptom (main push 42882475277, kw run): in "graceful loss of the active
+  instance" the takeover re-INVITE got a 100 from the VIP, never a final
+  response (40 s), and the phone never saw it. #292 and #296/#298 fixed other
+  halves (the Lease, the masquerade, 2xx retransmission); this one is the INVITE
+  itself.
+- Root cause, from the victim's own Kamailio log (kamailio-ha job, run
+  43378502793, iterations 11 and 12; the old logs went with the deleted pod, so
+  the job now records them): kube-vip drops the VIP address at SIGTERM while
+  Kamailio runs on for the 5 s preStop, and every Kamailio socket is bound to
+  the VIP. A request that arrived in the ~100 ms before the address went got
+  tm's automatic 100 Trying; then `sendto` towards the phone failed with
+  "Network is unreachable (101)", t_relay failed, and the 477 error reply to
+  Hello failed the same way. A UA that has had a 100 stops retransmitting its
+  INVITE (the test's stub does, a real one does), so nothing ever reached the
+  survivor. Reproduced in a container (VIP address removed between the 100 and
+  the relay): 100, then silence.
+- Product gap, not a test artefact: the same happens to any INVITE (a phone's
+  too) in that window of a rolling restart or node drain. Keeping the instance
+  forwarding through the preStop is not possible: the VIP address is kube-vip's
+  to remove, and it does so at SIGTERM.
+- Fix: `modparam("tm", "auto_inv_100", 0)`; route[RELAY] sends the 100 with
+  `t_reply` only after `t_relay()` succeeded. An INVITE that could not be sent
+  on gets no answer, the sender retransmits, and the instance that holds the VIP
+  next serves it. (A 100 for a request whose 2xx was already relayed is
+  suppressed by tm.) Needs the Kamailio config in the chart's files/, the kw
+  ConfigMap copy and its checksum annotation: deploy/kuvryn-sync/kw changes.
+  Regression guard: TestKamailioInvite100AfterRelay; the kamailio-ha job
+  (KINDHA_GRACEFUL_REPEAT=n repeats the graceful loss) shows it end to end.

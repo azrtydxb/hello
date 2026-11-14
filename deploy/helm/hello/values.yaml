@@ -170,9 +170,37 @@ sip:
   # The IPv4 stamped into anchored SDP: "hostIP" (the node the pod runs on),
   # "podIP" (a routable pod network), or a literal IPv4 address.
   mediaAnchorHost: hostIP
+  # WebRTC media for the browser softphone (clients S-3, S-4): one shared UDP
+  # port for every browser leg, ICE-lite and DTLS-SRTP. Needs hostNetwork and
+  # mediaAnchorHost (the candidate address). allowCleartextHop lets browser
+  # calls in while Kamailio to hello-sip is not TLS (the DTLS fingerprint then
+  # travels in the clear on that hop); leave it off once the TLS hop is on.
+  webrtc:
+    enabled: false
+    port: 21100
+    publicIp: ""
+    allowCleartextHop: false
+  # Video between web clients (clients S-36 to S-41). Empty keeps the code's
+  # defaults (enabled, 1500 kbit/s each way, 20 calls per node); set any of
+  # enabled, maxKbps and maxSessions to change them.
+  video: {}
+  # Recording the video of recorded calls (clients S-42, docs/media.md). Empty
+  # keeps the code's defaults (on, fragments of 10 s or 4 MiB, a 200 GB quota);
+  # set any of enabled, segment, segmentBytes and quotaGB (0 for no quota) to
+  # change them. The quota is also given to hello-control, which alerts at 80
+  # percent. Video is large: check the MinIO capacity first.
+  recordingVideo: {}
   # Kamailio's addresses: only these may set Path/X-Hello-Client. Narrow it
   # to your pod CIDR (and node CIDR when Kamailio is on the host network).
   trustedProxies: "10.0.0.0/8"
+  # SIP over mutual TLS from Kamailio, for the encrypted phone legs
+  # (kamailio.helloTLS; docs/webrtc.md, "TLS hop"). The Secret is issued by
+  # the Hello CA, carries ca.crt, names every address Kamailio dials hello-sip
+  # at (the pod DNS names) and is usable as a server and a client certificate.
+  tls:
+    enabled: false
+    port: 5061
+    secretName: ""
   ringTimeout: 30s
   # A drain gives its calls to a ready survivor before the node exits. It
   # must stay below terminationGracePeriodSeconds.
@@ -282,6 +310,42 @@ kamailio:
     publicPort: 5061
     nodePort: null
     secretName: ""
+  # SIP over WSS for browsers (docs/webrtc.md; clients-webrtc-mobile-video
+  # S-8 to S-12). Kamailio ends TLS and the WebSocket on its pod address and
+  # speaks UDP to the hello-sip nodes (mutual TLS with helloTLS on). Needs a kamailio image with the
+  # websocket and tls modules (docker/kamailio) and a certificate Secret.
+  wss:
+    enabled: false
+    # The port Kamailio binds on its pod address (with hostNetwork, the node
+    # port). Only the ingress controller should reach it (docs/webrtc.md).
+    port: 8088
+    # A kubernetes.io/tls Secret issued by the Hello CA; default
+    # kamailio.tls.secretName. The ingress does not verify it.
+    secretName: ""
+    # Browser origins allowed to open a WebSocket, exact. Default: the origin
+    # of global.publicUrl.
+    origins: []
+    # A regular expression the ingress controller's pod address must match
+    # for its X-Forwarded-For to be believed (the browser's own address for
+    # Hello's throttles). Empty: the ingress's address stands for every
+    # browser.
+    trustedProxies: ""
+    # Publish wss://<ui.ingress.host>/sip through ui.ingress (needs
+    # ui.ingress.enabled).
+    ingress: true
+    ingressAnnotations: {}
+  # The TLS hop to Hello for encrypted phone legs (tls, ws, wss;
+  # clients-webrtc-mobile-video S-12): those requests go to hello-sip over
+  # mutual TLS and Hello's requests for them return to a TLS socket of the
+  # instance on port. Needs sip.tls.enabled, a certificate Secret
+  # (kamailio.tls.secretName, with its ca.crt, whose names include the
+  # address Hello dials: every Kamailio node address) and an image with the
+  # tls module. Off: kamailio.cfg behaves exactly as before.
+  helloTLS:
+    enabled: false
+    port: 5073
+    # hello-sip's TLS port (sip.tls.port).
+    sipPort: 5061
   # Phones' Service when hostNetwork is off.
   service:
     type: LoadBalancer

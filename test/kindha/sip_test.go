@@ -221,7 +221,7 @@ type ua struct {
 	mu        sync.Mutex
 	pending   map[string]chan *msg // by our Via branch
 	onRequest func(*msg)
-	log       []string
+	log       []logLine
 	closed    bool
 	options   map[string]int  // OPTIONS answered, by source address (the dispatcher's probes)
 	acked     map[string]bool // INVITEs whose 2xx was acknowledged, by Call-ID and CSeq number
@@ -251,17 +251,32 @@ func (u *ua) addr() string { return net.JoinHostPort(u.host, strconv.Itoa(u.port
 func (u *ua) record(dir string, m *msg) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.log = append(u.log, fmt.Sprintf("%s %s %s %s", time.Now().Format("15:04:05.000"), u.name, dir, m))
-	if len(u.log) > 400 {
-		u.log = u.log[len(u.log)-400:]
+	now := time.Now()
+	u.log = append(u.log, logLine{now, fmt.Sprintf("%s %s %s %s", now.Format("15:04:05.000"), u.name, dir, m)})
+	if len(u.log) > 2000 {
+		u.log = u.log[len(u.log)-2000:]
 	}
 }
 
-func (u *ua) dump() {
+// logLine is one line of an endpoint's SIP trace.
+type logLine struct {
+	at time.Time
+	s  string
+}
+
+func (u *ua) dump() { u.dumpSince(u.t, time.Time{}) }
+
+// dumpSince logs the endpoint's SIP trace from since on to t (OPTIONS probes
+// left out when a window is asked for: they bury the dialog's messages).
+func (u *ua) dumpSince(t *testing.T, since time.Time) {
+	t.Helper()
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	for _, l := range u.log {
-		u.t.Log(l)
+		if l.at.Before(since) || (!since.IsZero() && strings.Contains(l.s, " OPTIONS sip:")) {
+			continue
+		}
+		t.Log(l.s)
 	}
 }
 

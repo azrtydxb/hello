@@ -54,8 +54,11 @@ type Control struct {
 	// and loopback and link-local ones are never reachable.
 	DoorCameraAllow []netip.Prefix
 	// Fax is the fax feature (HELLO_FAX_*); disabled unless HELLO_FAX_ENABLED.
-	Fax         Fax
-	DatabaseURL string
+	Fax Fax
+	// RecordingVideoQuotaGB is hello-sip's HELLO_RECORDING_VIDEO_QUOTA_GB, read
+	// so the alert at 80 percent and the gauge know the same limit (0 for none).
+	RecordingVideoQuotaGB int
+	DatabaseURL           string
 	// Database is DatabaseURL parsed, so a malformed DSN fails at startup.
 	Database *pgx.ConnConfig
 	// ValkeyAddr is read for the live registrations/calls API.
@@ -430,12 +433,18 @@ type ProvRedirect struct {
 type SIP struct {
 	Common
 	// Fax is the fax feature (HELLO_FAX_*); disabled unless HELLO_FAX_ENABLED.
-	Fax               Fax
-	ValkeyAddr        string
-	ValkeySentinels   []string
-	ValkeyMaster      string
-	SIPBindAddr       string
-	SIPAdvertisedAddr string
+	Fax             Fax
+	ValkeyAddr      string
+	ValkeySentinels []string
+	ValkeyMaster    string
+	SIPBindAddr     string
+	// SIPTLSAddr (HELLO_SIP_TLS_ADDR) is where hello-sip also takes SIP over
+	// mutual TLS from the edge (Kamailio), for the traffic of browsers
+	// (clients-webrtc-mobile-video S-12); empty turns it off. SIPTLSCert and
+	// SIPTLSKey are its certificate, SIPTLSCA the CA that signs the edge's
+	// certificate too; the edge must present one.
+	SIPTLSAddr, SIPTLSCert, SIPTLSKey, SIPTLSCA string
+	SIPAdvertisedAddr                           string
 	// DatabaseURL is used read-only for the configuration snapshot and to
 	// insert CDRs.
 	DatabaseURL string
@@ -565,6 +574,25 @@ type SIP struct {
 	// default false) permits WebRTC calls while the Kamailio to hello-sip
 	// hop is not TLS: the fingerprint then travels in the clear on that hop.
 	MediaWebRTCAllowCleartextHop bool
+	// VideoEnabled (HELLO_VIDEO_ENABLED, default true) lets calls between web
+	// clients carry video (clients S-36); off, every video section is answered
+	// with port 0. VideoMaxKbps (HELLO_VIDEO_MAX_KBPS, default 1500) is the
+	// per-direction ceiling of a call's video, written as b=AS and enforced as
+	// a rate cap on the relay; VideoMaxSessions (HELLO_VIDEO_MAX_SESSIONS,
+	// default 20) the number of calls one node carries video for.
+	VideoEnabled     bool
+	VideoMaxKbps     int
+	VideoMaxSessions int
+	// RecordingVideo (HELLO_RECORDING_VIDEO, default true) keeps the video of
+	// a recorded call (S-42); RecordingVideoSegment (HELLO_RECORDING_VIDEO_SEGMENT,
+	// default 10s) and RecordingVideoSegmentBytes (HELLO_RECORDING_VIDEO_SEGMENT_BYTES,
+	// default 4 MiB) cut its fragments; RecordingVideoQuotaGB
+	// (HELLO_RECORDING_VIDEO_QUOTA_GB, default 200, 0 for none) stops new video
+	// recordings when the video stored reaches it.
+	RecordingVideo             bool
+	RecordingVideoSegment      time.Duration
+	RecordingVideoSegmentBytes int
+	RecordingVideoQuotaGB      int
 	// MediaDTLS (HELLO_MEDIA_DTLS, default true) lets the anchor terminate
 	// DTLS-SRTP (phone-feature-parity S-16); off, an offer that carries only
 	// DTLS is refused with 488 and no device is offered it. MediaICE
@@ -603,6 +631,7 @@ func (c SIP) LogValue() slog.Value {
 		slog.String("node_id", c.NodeID),
 		slog.String("http_addr", c.HTTPAddr),
 		slog.String("sip_bind", c.SIPBindAddr),
+		slog.String("sip_tls", c.SIPTLSAddr),
 		slog.String("sip_advertised", c.SIPAdvertisedAddr),
 		slog.String("sip_domain", c.SIPDomain),
 		slog.String("valkey_addr", c.ValkeyAddr),
@@ -623,6 +652,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		SessionTTL:             r.duration("HELLO_SESSION_TTL", 12*time.Hour),
 	}
 	c.Fax = r.fax()
+	c.RecordingVideoQuotaGB = r.quotaGB()
 	c.EventRetentionDays = r.positiveInt("HELLO_EVENT_RETENTION_DAYS", 7)
 	if c.EventRetentionDays > 30 {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
@@ -1202,6 +1232,16 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.MediaWebRTCPort = r.port("HELLO_MEDIA_WEBRTC_PORT", 21100)
 	c.MediaWebRTCPublicIP = r.optional("HELLO_MEDIA_WEBRTC_PUBLIC_IP", "")
 	c.MediaWebRTCAllowCleartextHop = r.boolean("HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP")
+	c.VideoEnabled = r.booleanDefault("HELLO_VIDEO_ENABLED", true)
+	c.VideoMaxKbps = r.positiveInt("HELLO_VIDEO_MAX_KBPS", 1500)
+	c.VideoMaxSessions = r.positiveInt("HELLO_VIDEO_MAX_SESSIONS", 20)
+	c.RecordingVideo = r.booleanDefault("HELLO_RECORDING_VIDEO", true)
+	c.RecordingVideoSegment = r.duration("HELLO_RECORDING_VIDEO_SEGMENT", 10*time.Second)
+	if c.RecordingVideoSegment < time.Second || c.RecordingVideoSegment > time.Minute {
+		r.fail("HELLO_RECORDING_VIDEO_SEGMENT", errors.New("must be between 1s and 1m"))
+	}
+	c.RecordingVideoSegmentBytes = r.positiveInt("HELLO_RECORDING_VIDEO_SEGMENT_BYTES", 4<<20)
+	c.RecordingVideoQuotaGB = r.quotaGB()
 	if c.MediaWebRTCPublicIP != "" {
 		if ip := net.ParseIP(c.MediaWebRTCPublicIP); ip == nil || ip.To4() == nil {
 			r.fail("HELLO_MEDIA_WEBRTC_PUBLIC_IP", fmt.Errorf("%q is not an IPv4 address", c.MediaWebRTCPublicIP))
@@ -1229,6 +1269,17 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.SecretKey = r.secretKey()
 	r.minio(&c.MinioEndpoint, &c.MinioAccessKey, &c.MinioSecretKey, &c.MinioSecure)
 	c.TrustedProxies = r.prefixes("HELLO_SIP_TRUSTED_PROXIES")
+	c.SIPTLSAddr = r.optional("HELLO_SIP_TLS_ADDR", "")
+	c.SIPTLSCert = r.optional("HELLO_SIP_TLS_CERT", "")
+	c.SIPTLSKey = r.optional("HELLO_SIP_TLS_KEY", "")
+	c.SIPTLSCA = r.optional("HELLO_SIP_TLS_CA", "")
+	if c.SIPTLSAddr != "" {
+		for k, v := range map[string]string{"HELLO_SIP_TLS_CERT": c.SIPTLSCert, "HELLO_SIP_TLS_KEY": c.SIPTLSKey, "HELLO_SIP_TLS_CA": c.SIPTLSCA} {
+			if v == "" {
+				r.fail(k, errors.New("is required with HELLO_SIP_TLS_ADDR"))
+			}
+		}
+	}
 	c.DrainTimeout = r.duration("HELLO_DRAIN_TIMEOUT", 2*time.Hour)
 	if c.DrainTimeout == 0 {
 		r.fail("HELLO_DRAIN_TIMEOUT", errors.New("must be positive"))
@@ -1546,6 +1597,19 @@ func (r *reader) positiveInt(key string, def int) int {
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
 		r.fail(key, errors.New("must be a positive integer"))
+	}
+	return n
+}
+
+// quotaGB reads HELLO_RECORDING_VIDEO_QUOTA_GB: whole gigabytes, 0 for no limit.
+func (r *reader) quotaGB() int {
+	v := r.getenv("HELLO_RECORDING_VIDEO_QUOTA_GB")
+	if v == "" {
+		return 200
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		r.fail("HELLO_RECORDING_VIDEO_QUOTA_GB", errors.New("must be a whole number of gigabytes, 0 for no limit"))
 	}
 	return n
 }

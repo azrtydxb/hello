@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/emiago/sipgo/sip"
 )
@@ -43,7 +44,7 @@ func bindingTransport(t *testing.T, pbx *testPBX, p *phone) string {
 func TestSIPTransports(t *testing.T) {
 	t.Run("register records the edge transport", func(t *testing.T) {
 		pbx := startPBX(t, ringAllDevices(), trustLoopback)
-		for _, tc := range []struct{ header, want string }{{"tls", "tls"}, {"tcp", "tcp"}, {"udp", "udp"}, {"", "udp"}, {"bogus", "udp"}} {
+		for _, tc := range []struct{ header, want string }{{"tls", "tls"}, {"tcp", "tcp"}, {"udp", "udp"}, {"wss", "wss"}, {"ws", "ws"}, {"", "udp"}, {"bogus", "udp"}} {
 			p := newPhone(t, pbx, "b1", "pb1")
 			req := p.registerReq(300)
 			if tc.header != "" {
@@ -216,4 +217,27 @@ func TestRegistrationsByTransport(t *testing.T) {
 		return pbx.metric(t, "hello_sip_registrations_by_transport", map[string]string{"transport": "tls"}) == 1 &&
 			pbx.metric(t, "hello_sip_registrations_by_transport", map[string]string{"transport": "udp"}) == 1
 	})
+}
+
+// TestSecureTransport fails if a sips: request treats a WebSocket leg wrongly:
+// WSS is encrypted to the edge and may carry a sips: call, plain ws may not,
+// and neither is taken for TLS where SDES SRTP is decided (a browser
+// negotiates DTLS-SRTP).
+func TestSecureTransport(t *testing.T) {
+	for tr, want := range map[string]bool{"tls": true, "wss": true, "WSS": true, "sips": true, "ws": false, "tcp": false, "udp": false, "": false, "bogus": false} {
+		if got := secureTransport(tr); got != want {
+			t.Errorf("secureTransport(%q) = %v, want %v", tr, got, want)
+		}
+	}
+	if bindingOnTLS(livestate.Binding{Transport: "wss"}) {
+		t.Error("a wss binding counts as TLS for SDES SRTP")
+	}
+	bs := []livestate.Binding{{Device: "t", Transport: "tls"}, {Device: "w", Transport: "wss"}, {Device: "s", Transport: "ws"}, {Device: "u", Transport: "udp"}}
+	var got []string
+	for _, b := range secureTargets(bs) {
+		got = append(got, b.Device)
+	}
+	if len(got) != 2 || got[0] != "t" || got[1] != "w" {
+		t.Errorf("secureTargets = %v, want the tls and wss devices", got)
+	}
 }

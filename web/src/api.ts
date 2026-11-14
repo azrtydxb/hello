@@ -120,6 +120,10 @@ export interface Extension {
    * setting is switched off at the next resync.
    */
   callWaiting?: boolean;
+  /** Video between web clients is allowed; true by default. */
+  videoAllowed?: boolean;
+  /** The video of a recorded call is kept next to the audio; true by default. */
+  recordVideo?: boolean;
   /**
    * Anonymous outbound; false by default. On: every trunk call from the
    * extension carries Privacy: id, an anonymous From and the trunk's asserted
@@ -269,6 +273,10 @@ export interface Cdr {
   rtpJitterMs?: number | null;
   /** What the phones on the call reported (RTCP-XR); single-CDR read only. */
   rtcpxr?: RtcpxrQuality[];
+  /** The call carried video at some point (web clients). */
+  video?: boolean;
+  /** What the web clients on the call reported at its end; single-CDR read only. */
+  clientQuality?: ClientQualityReport[];
   /**
    * The audio codec each leg ended on, as "name/clock rate" ("PCMU/8000");
    * null when none was negotiated, and for calls recorded before it was kept.
@@ -278,6 +286,20 @@ export interface Cdr {
 }
 
 /** One phone's own view of a call's voice quality (RFC 6035 report). */
+/** A web client's end-of-call report (the browser softphone). */
+export interface ClientQualityReport {
+  device: string;
+  extension: string;
+  codec: string;
+  lossPct: number;
+  jitterMs: number;
+  rttMs: number;
+  candidateLocal: string;
+  candidateRemote: string;
+  video?: { width: number; height: number; fps: number; codec: string };
+  durationMs: number;
+}
+
 export interface RtcpxrQuality {
   device: string;
   extension: string;
@@ -407,6 +429,11 @@ export interface TrunkFields {
   geolocation: boolean;
   /** How a fax call is carried: G.711 passthrough, T.38, or refused. */
   faxMode: "passthrough" | "t38" | "off";
+  /**
+   * "generic" or "sbc-peer": a session border controller Hello peers with,
+   * such as the SBC in front of Teams Direct Routing (docs/teams.md).
+   */
+  profile?: "generic" | "sbc-peer";
   /**
    * Anonymous calls: "honour" carries a device's privacy request (default),
    * "always" makes every call through the trunk anonymous.
@@ -925,6 +952,8 @@ export const updateExtension = (
     directoryHidden?: boolean;
     allowIntercom?: boolean;
     callWaiting?: boolean;
+    videoAllowed?: boolean;
+    recordVideo?: boolean;
     anonymousOutbound?: boolean;
     phoneSendAnonymous?: boolean;
 
@@ -1526,6 +1555,8 @@ export interface Conference {
   exitAnnouncement: string;
   record: boolean;
   enabled: boolean;
+  /** The room forwards the active speaker's video; true by default. */
+  video: boolean;
   createdAt: string;
   updatedAt: string;
   live: ConferenceLive | null;
@@ -1545,6 +1576,7 @@ export interface ConferenceFields {
   exitAnnouncement: string;
   record: boolean;
   enabled: boolean;
+  video: boolean;
 }
 
 export type ConferenceAction =

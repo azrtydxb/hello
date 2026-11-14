@@ -129,6 +129,10 @@ string clears it; an in-use room cannot be renumbered or deleted (409 names
 the routes). A DID reaches a room with an inbound route of `destinationKind`
 `conference`.
 
+A room forwards the active speaker's video to participants that bring video
+(`"video": true`, the default; `false` makes it audio only). Bandwidth is the
+reason to turn it off: every viewer takes one stream.
+
 `controlConference` (operator) acts on a live room: `{ "action": "mute" |
 "unmute" | "kick" | "lock" | "unlock" | "mute_all" | "unmute_all" | "end",
 "participant": "<id from getConference>" }`. The room's owner applies it
@@ -245,9 +249,15 @@ A boss and an assistant can share a line.
   `markVoicemailMessageHeard` (empty body heard, `{"heard": false}` unheard),
   `deleteVoicemailMessage` (permanent; ask first). PIN and greetings are in
   `hello-setup`.
-- Recordings: `listRecordings` (filter by `extension`, page with `before`),
-  `deleteRecording` (permanent; ask first). Listening is for people in the
-  console.
+- Recordings: `listRecordings` (filter by `extension`, page with `before`; a
+  recording with `video: true` has its video stored next to the audio),
+  `getRecordingManifest` (the recording's video streams: which leg, codec,
+  size, offset against the audio, state), `deleteRecording` (permanent, video
+  included; ask first). Listening and watching are for people in the console.
+  Video recording is switched per extension (`recordVideo` on
+  `updateExtension`, on by default) and kept for `videoRetentionDays`
+  (`getRecordingSettings`, `putRecordingSettings`, admin; default 30, 1 to
+  3650). Video is large: ask before raising the retention.
 
 ## Recipe: a support line
 

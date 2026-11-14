@@ -91,6 +91,13 @@ type Relay struct {
 	secureFail func(leg, reason string)
 	secureUp   func(leg string)
 
+	// alt is the alternate callee leg (AddAltMuxLeg): a browser the call is
+	// offered to while the plain callee leg stays for the other forks. It is
+	// not in legs until PromoteAlt.
+	alt *relayLeg
+	// video is the session's video limits and clock (relayvideo.go).
+	video relayVideo
+
 	started bool
 	// lastRx is when a datagram from a leg's accepted peer last arrived
 	// (unix nanoseconds, 0 before any); startedAt is when Start ran. They
@@ -156,6 +163,24 @@ type relayLeg struct {
 	// muted drops what this leg receives instead of forwarding it to the
 	// peer (a holder's stream while music plays to the held party).
 	muted atomic.Bool
+
+	// parked drops the media of an alternate callee leg until it is promoted
+	// (Relay.PromoteAlt); its ICE and DTLS run meanwhile.
+	parked atomic.Bool
+	// retired is closed when a promotion replaces the leg: its pump ends.
+	retired chan struct{}
+
+	// web is the leg's browser-profile state (webrtcrelay.go); nil for a
+	// plain or SDES leg. vid is its video relay state (relayvideo.go); the
+	// zero value carries no video. vq carries the video and RTCP packets
+	// bound for this leg, apart from the audio queue so a keyframe burst
+	// never costs audio.
+	web *legWeb
+	vid videoLeg
+	vq  chan relayMsg
+	// pv is a plain leg's video transport and SDP state (plainvideo.go).
+	pvMu sync.Mutex
+	pv   *plainVideo
 }
 
 // legStats is one leg's inbound counters; the direction label comes from
@@ -173,7 +198,10 @@ type legStats struct {
 }
 
 type relayMsg struct {
-	data []byte // the full RTP packet, copied before queueing
+	data []byte // the full RTP packet (or, with rtcp, RTCP compound packet), copied before queueing
+	// rtcp marks plain RTCP that the leg protects and sends; it is only ever
+	// queued on vq.
+	rtcp bool
 	// own marks a packet of the relay's own stream (SendDTMF): it is sent as
 	// built, not rewritten into the relayed stream. It rides the same queue
 	// so it cannot overtake relayed packets queued before it.
@@ -195,6 +223,16 @@ type rewriteState struct {
 	inSeq  uint16
 	inTS   uint32
 	haveIn bool
+}
+
+// newRelayLeg makes a leg around conn with its queues.
+func newRelayLeg(r *Relay, name string, conn LegConn, port int) *relayLeg {
+	return &relayLeg{
+		name: name, r: r, conn: conn, port: port,
+		q:       make(chan relayMsg, relayQueue),
+		vq:      make(chan relayMsg, relayVideoQueue),
+		retired: make(chan struct{}),
+	}
 }
 
 // NewRelay validates the range for the two relay sockets (contract 3). It
@@ -243,10 +281,7 @@ func (r *Relay) AddLeg(name string) (int, error) {
 	if conn == nil {
 		return 0, fmt.Errorf("media: bind leg %q RTP socket: %w", name, lastErr)
 	}
-	l := &relayLeg{
-		name: name, r: r, conn: conn, port: port,
-		q: make(chan relayMsg, relayQueue),
-	}
+	l := newRelayLeg(r, name, conn, port)
 	l.remoteMu.Lock()
 	l.remote = nil
 	l.remoteMu.Unlock()
@@ -254,26 +289,6 @@ func (r *Relay) AddLeg(name string) (int, error) {
 		func(from *net.UDPAddr, nominated bool) { l.iceVerified(from, nominated) })
 	l.secure.OnFail(func(reason string) { r.secureFailed(l.name, reason) })
 	l.secure.OnReady(func() { r.secureUpCall(l.name) })
-	r.legs = append(r.legs, l)
-	r.used[port] = true
-	return port, nil
-}
-
-// addLegAt is AddLeg on one given port.
-func (r *Relay) addLegAt(name string, port int) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed || len(r.legs) >= 2 {
-		return 0, errors.New("media: relay takes exactly two legs")
-	}
-	if r.used[port] {
-		return 0, fmt.Errorf("media: port %d is in use", port)
-	}
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: port})
-	if err != nil {
-		return 0, fmt.Errorf("media: bind leg %q RTP socket: %w", name, err)
-	}
-	l := &relayLeg{name: name, r: r, conn: conn, port: port, q: make(chan relayMsg, relayQueue)}
 	r.legs = append(r.legs, l)
 	r.used[port] = true
 	return port, nil
@@ -294,10 +309,7 @@ func (r *Relay) AddMuxLeg(name string, mux *Mux) (port int, ep *MuxEndpoint, err
 	if err != nil {
 		return 0, nil, fmt.Errorf("media: leg %q on the WebRTC port: %w", name, err)
 	}
-	l := &relayLeg{
-		name: name, r: r, conn: ep, port: mux.Port(),
-		q: make(chan relayMsg, relayQueue),
-	}
+	l := newRelayLeg(r, name, ep, mux.Port())
 	l.secure.Bind(ep.LocalAddr(), func(b []byte, to *net.UDPAddr) { _, _ = ep.WriteToUDP(b, to) },
 		func(from *net.UDPAddr, nominated bool) { l.iceVerified(from, nominated) })
 	l.secure.OnFail(func(reason string) { r.secureFailed(l.name, reason) })
@@ -313,6 +325,13 @@ func (r *Relay) AddMuxLeg(name string, mux *Mux) (port int, ep *MuxEndpoint, err
 func (r *Relay) SetTarget(name string, addr *net.UDPAddr) {
 	l := r.findLeg(name)
 	if l == nil {
+		return
+	}
+	if _, mux := l.conn.(*MuxEndpoint); mux && (addr == nil || addr.IP.IsUnspecified() || addr.Port == 9) {
+		// A browser leg's media address is what ICE verifies, not what an
+		// SDP that names none says (c=0.0.0.0, port 9, or a hold's nothing): a
+		// target like that would only undo the address the first
+		// authenticated check selected.
 		return
 	}
 	l.remoteMu.Lock()
@@ -432,6 +451,9 @@ func (r *Relay) ResetSources(name string, vouch ...net.IP) {
 func (r *Relay) findLeg(name string) *relayLeg {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if name == AltLeg {
+		return r.alt
+	}
 	for _, l := range r.legs {
 		if l.name == name {
 			return l
@@ -588,9 +610,20 @@ func (r *Relay) Start() {
 	r.started = true
 	r.startedAt.Store(time.Now().UnixNano())
 	r.wg.Add(len(r.legs))
+	if r.alt != nil {
+		r.wg.Add(1)
+		go r.runLeg(r.alt)
+	}
+	r.startVideoLocked()
 	for _, l := range r.legs {
 		go r.runLeg(l)
 	}
+	legs := append([]*relayLeg(nil), r.legs...)
+	go func() {
+		for _, l := range legs {
+			r.startPlainVideo(l)
+		}
+	}()
 	r.wg.Add(1)
 	go r.observeLoop()
 }
@@ -653,7 +686,7 @@ func (r *Relay) recv(l *relayLeg) {
 		// counted, tapped or relayed. RTCP on the RTP port (rtcp-mux) is
 		// checked and consumed; Hello sends no RTCP of its own. DTLS
 		// records of a DTLS-SRTP leg go to its handshake.
-		plain, ok, failed := l.secure.UnprotectFrom(data, from)
+		plain, isRTCP, ok, failed := l.secure.UnprotectAny(data, from)
 		if failed {
 			l.authFail.Add(1)
 		}
@@ -663,6 +696,13 @@ func (r *Relay) recv(l *relayLeg) {
 		data = plain
 		r.lastRx.Store(time.Now().UnixNano())
 		r.latch(l, from)
+		if l.parked.Load() {
+			continue // an alternate leg carries no media before its promotion
+		}
+		if isRTCP {
+			r.handleRTCP(l, data)
+			continue
+		}
 		if r.udptl.Load() {
 			// UDPTL (T.38) is relayed unmodified except for its addresses:
 			// no sequence rewrite, no payload inspection. The fax endpoint
@@ -675,6 +715,10 @@ func (r *Relay) recv(l *relayLeg) {
 		pkt, ok := ParseRTP(data)
 		if !ok {
 			continue // a malformed datagram is a dropped packet, never fatal
+		}
+		if l.vid.carries(pkt.PayloadType) {
+			r.forwardVideo(l, pkt, data)
+			continue
 		}
 		dtmfPT := l.eventType()
 		if l.carries(pkt.PayloadType) && pkt.PayloadType != dtmfPT {
@@ -871,6 +915,10 @@ func (r *Relay) pump(l *relayLeg) {
 			} else if out, ok := r.rewrite(l, m.data); ok {
 				l.send(out)
 			}
+		case m := <-l.vq:
+			r.sendVideoMsg(l, m)
+		case <-l.retired:
+			return
 		case <-r.ctx.Done():
 			return
 		}
@@ -989,11 +1037,18 @@ func (r *Relay) Close() {
 	}
 	r.closed = true
 	legs := append([]*relayLeg(nil), r.legs...)
+	if r.alt != nil {
+		legs = append(legs, r.alt)
+	}
 	r.mu.Unlock()
 	r.cancel()
+	r.closeVideo()
 	for _, l := range legs {
 		l.secure.Close() // a DTLS handshake still running ends with the call
 		_ = l.conn.Close()
+		if pv := l.pvState(false); pv != nil {
+			pv.close()
+		}
 	}
 	r.wg.Wait()
 	r.mu.Lock()

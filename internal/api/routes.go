@@ -102,6 +102,10 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/lookup/calls", auth.ScopeCalls, auth.RoleUser, false, s.lookupCalls},
 		{"GET", "/api/v1/lookup/recordings", auth.ScopeRecordings, auth.RoleUser, false, s.lookupRecordings},
 		{"GET", "/api/v1/recordings/{id}/audio", auth.ScopeRead, auth.RoleViewer, false, s.recordingAudio},
+		{"GET", "/api/v1/recordings/{id}/manifest", auth.ScopeRead, auth.RoleViewer, false, s.recordingManifest},
+		{"GET", "/api/v1/recordings/{id}/video/{stream}", auth.ScopeRead, auth.RoleViewer, false, s.recordingVideo},
+		{"GET", "/api/v1/recordings/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.getRecordingSettings},
+		{"PUT", "/api/v1/recordings/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.putRecordingSettings},
 
 		{"GET", "/api/v1/announcements", auth.ScopeRead, auth.RoleViewer, false, s.listAnnouncements},
 		{"POST", "/api/v1/announcements", auth.ScopeWrite, auth.RoleOperator, false, s.createAnnouncement},
@@ -304,6 +308,7 @@ func (s *server) routes() []route {
 
 		{"GET", "/api/v1/trunks", auth.ScopeRead, auth.RoleViewer, false, s.listTrunks},
 		{"POST", "/api/v1/trunks", auth.ScopeWrite, auth.RoleOperator, false, s.createTrunk},
+		{"GET", "/api/v1/trunk-profiles", auth.ScopeRead, auth.RoleViewer, false, s.listTrunkProfiles},
 		{"GET", "/api/v1/trunks/status", auth.ScopeRead, auth.RoleViewer, false, s.trunkStatus},
 		{"GET", "/api/v1/trunks/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getTrunk},
 		{"PATCH", "/api/v1/trunks/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.updateTrunk},
@@ -414,6 +419,7 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/me/devices/{id}", auth.ScopeSession, auth.RoleUser, false, s.deleteMyDevice},
 		{"POST", "/api/v1/me/devices/{id}/credentials", auth.ScopeSession, auth.RoleUser, false, s.refreshMyDevice},
 		{"GET", "/api/v1/me/ice-servers", auth.ScopeSession, auth.RoleUser, false, s.getICEServers},
+		{"POST", "/api/v1/me/calls/{callId}/quality", auth.ScopeSession, auth.RoleUser, false, s.postCallQuality},
 		{"PATCH", "/api/v1/me/profile", auth.ScopeWrite, auth.RoleUser, false, s.updateProfile},
 		{"GET", "/api/v1/me/connections", auth.ScopeRead, auth.RoleUser, false, s.listMyConnections},
 		{"POST", "/api/v1/me/connections/{id}/connect", auth.ScopeWrite, auth.RoleUser, false, s.connectMyConnection},

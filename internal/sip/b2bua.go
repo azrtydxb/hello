@@ -155,9 +155,10 @@ type call struct {
 	// doorOpening is set while a door-open code is being sent (spec S-47),
 	// guarded by mu, so two presses never interleave their events.
 	doorOpening bool
-	// video is the door station's video through the anchor (S-49), nil for a
-	// call without one; guarded by mu.
-	video *callVideo
+	// vrec is the call's video recording (videorec.go); nil when none runs.
+	vrec *callVideoRec
+	// web is the call's browser state (webrtc.go); nil for a call with none.
+	web *callWeb
 
 	// Music on hold (S-33), guarded by mu: moh plays to the held party,
 	// ringMOH to a caller in place of ringback; the route and group carry
@@ -438,6 +439,9 @@ type leg struct {
 	abandoned bool   // guarded by c.mu: failed over, may no longer win
 	lastRSeq  uint32 // guarded by mu: the last RSeq acknowledged with a PRACK
 	stage     int    // the forwarding stage this fork belongs to; setup ignores older stages' events
+	// web marks a fork to a browser or app: it is offered the alternate
+	// WebRTC callee leg (webrtc.go).
+	web bool
 	// pl is set on a page member leg (Phase E): it carries the page's
 	// per-member state and offer.
 	pl *pageLeg
@@ -506,7 +510,7 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	// A sips: request is secure end to end (RFC 3261 26.2.2): its caller must
 	// be on TLS, and every leg it forks onto must be too (see c.secure).
-	if isSIPS(req) && s.clientTransport(req) != transportTLS {
+	if isSIPS(req) && !secureTransport(s.clientTransport(req)) {
 		s.refuseSecure(req, tx, secureCallerNotTLS, "sips: caller is not on TLS")
 		return
 	}
@@ -1084,6 +1088,7 @@ func (c *call) answer(w *leg) {
 		c.abortCaller()
 		return
 	}
+	calleeWeb := c.webFork(w)
 	if !c.calleeCryptoOK(w, bres) {
 		w.bye()
 		why := "SRTP is required on the callee leg but its answer did not deliver it"
@@ -1121,7 +1126,7 @@ func (c *call) answer(w *leg) {
 				allowSignalSource(c.relay, legCallee, bres.Source())
 				calleeAns = ans
 			}
-			c.noteVideoAnswer(bres.Body(), bres.Source())
+			c.videoAnswered(bres.Body(), calleeWeb)
 		}
 		off, _ := media.ParseAudioSDP(c.inv.Body())
 		body = c.anchoredAnswerA(off, calleeAns)
@@ -1555,6 +1560,7 @@ func (c *call) record(status int, side, reason, result string) {
 	if c.winner != nil {
 		r.PeerCallID = c.winner.callID
 	}
+	r.Video = c.web != nil && c.web.used
 	c.mu.Unlock()
 	if !answer.IsZero() {
 		r.BillableMs = end.Sub(answer).Milliseconds()
@@ -1712,7 +1718,7 @@ func (l *leg) drive(report func(legEvent)) {
 	}
 	dcs, err := s.uac.WriteInvite(context.Background(), req)
 	if err != nil {
-		s.log.Debug("fork INVITE failed", "contact", l.binding.ContactURI, "error", err)
+		s.log.Warn("fork INVITE could not be sent", "contact", l.binding.ContactURI, "path", l.binding.Path, "trunk", l.trunk != nil, "error", err)
 		report(legEvent{leg: l, kind: evFailed, code: sip.StatusServiceUnavailable})
 		return
 	}
@@ -2342,5 +2348,24 @@ func routeViaPath(req *sip.Request, b livestate.Binding) error {
 		req.AppendHeader(sip.NewHeader("Route", p))
 	}
 	req.SetDestination(hostPort(first))
+	// The hop to the edge: UDP unless the Path names a TLS socket of the edge
+	// (the TLS hop, S-12). The transport of the phone's own leg, which the
+	// Path carries after received=, says nothing about it.
+	req.SetTransport(pathHopTransport(b.Path[0]))
 	return nil
+}
+
+// pathHopTransport is the transport Hello uses to reach the edge socket a Path
+// header names: TLS when the Path's own URI says transport=tls, else UDP.
+// Kamailio writes the phone's transport after received=, as a parameter of the
+// same header, so only what comes before it describes the Path's own socket.
+func pathHopTransport(path string) string {
+	own := path
+	if i := strings.Index(strings.ToLower(own), ";received="); i >= 0 {
+		own = own[:i]
+	}
+	if strings.Contains(strings.ToLower(own), "transport=tls") {
+		return "TLS"
+	}
+	return "UDP"
 }

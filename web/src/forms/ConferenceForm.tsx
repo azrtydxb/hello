@@ -41,6 +41,7 @@ interface Draft {
   exitAnnouncement: string;
   record: boolean;
   enabled: boolean;
+  video: boolean;
 }
 
 const draftOf = (r: Conference | null): Draft => ({
@@ -58,6 +59,7 @@ const draftOf = (r: Conference | null): Draft => ({
   exitAnnouncement: r?.exitAnnouncement ?? "",
   record: r?.record ?? false,
   enabled: r?.enabled ?? true,
+  video: r?.video ?? true,
 });
 
 const KEYS = [
@@ -73,6 +75,7 @@ const KEYS = [
   "exitAnnouncement",
   "record",
   "enabled",
+  "video",
 ];
 
 function validate(d: Draft): Record<string, string> {
@@ -196,6 +199,7 @@ export function RoomDrawer({
           d.entryExit === "announcement" ? d.exitAnnouncement : "",
         record: d.record,
         enabled: d.enabled,
+        video: d.video,
         ...(d.clearUserPin
           ? { userPin: "" }
           : d.userPin !== ""
@@ -345,6 +349,13 @@ export function RoomDrawer({
           labelPosition="end"
           checked={d.record}
           onChange={(e) => set("record", e.target.checked)}
+        />
+        <Switch
+          label="Video"
+          hint="Participants with video see the active speaker (H.264 or VP8, forwarded and never mixed); the speaker sees the one before. Off: the room is audio only. The recording of the room is audio only either way"
+          labelPosition="end"
+          checked={d.video}
+          onChange={(e) => set("video", e.target.checked)}
         />
         <Switch
           label="Enabled"

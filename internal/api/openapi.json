@@ -3040,6 +3040,62 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/trunk-profiles": {
+      "get": {
+        "operationId": "listTrunkProfiles",
+        "summary": "The trunk profiles and the defaults and limits each one applies",
+        "description": "Lists the profiles a trunk can have: generic and sbc-peer (the SBC in front of Microsoft Teams Direct Routing, see docs/teams.md). For each, the defaults a new trunk takes for the fields it leaves unset, and the limits the profile enforces.",
+        "tags": ["trunks"],
+        "responses": {
+          "200": {
+            "description": "Profiles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["name", "description", "defaults", "limits"],
+                        "properties": {
+                          "name": { "type": "string", "enum": ["generic", "sbc-peer"] },
+                          "description": { "type": "string" },
+                          "defaults": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "Trunk fields (as in createTrunk) a new trunk of this profile takes when it leaves them unset."
+                          },
+                          "limits": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "What the profile requires of the trunk, one sentence each."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/trunks/status": {
       "get": {
         "operationId": "listTrunkStatus",
@@ -5183,6 +5239,217 @@
         },
         "x-hello-scope": "write",
         "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/recordings/{id}/manifest": {
+      "get": {
+        "operationId": "getRecordingManifest",
+        "summary": "List a recording's video streams",
+        "description": "The video streams recorded next to a call recording's audio: one per sending leg and part, with the offset of each against the audio's start so a player can slave the video to the audio clock. A recording without video has no streams. The same role and scope as the audio.",
+        "tags": ["media"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The manifest, Cache-Control: private, no-store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingVideoManifest"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/recordings/{id}/video/{stream}": {
+      "get": {
+        "operationId": "getRecordingVideo",
+        "summary": "Play or download a recording's video stream",
+        "description": "Streams one video stream of a recording (MP4 for H.264, WebM for VP8; video only, the audio is the recording's WAV). Range is supported and answers 206. A stream that hello-control has not finalized yet is its init segment and fragments joined, a valid progressive file without fast seeking. Cache-Control: private, no-store; a viewing is audited (recording.video.download).",
+        "tags": ["media"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "stream",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "A stream id from the manifest."
+          },
+          {
+            "name": "download",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false", "1", "0"]
+            },
+            "description": "true or 1 sends the stream as an attachment (recording-<id>-video-<stream>.mp4 or .webm)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The video file",
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/webm": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested byte range (Range request)",
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "video/webm": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "binary video response",
+          "category": "binary-download"
+        }
+      }
+    },
+    "/api/v1/recordings/settings": {
+      "get": {
+        "operationId": "getRecordingSettings",
+        "summary": "Read the recording settings",
+        "description": "The video retention in days. Admin only.",
+        "tags": ["media"],
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putRecordingSettings",
+        "summary": "Set the recording settings",
+        "description": "Sets how many days video recordings are kept (1 to 3650); hello-control's retention job purges what is older, objects first, then rows, and audits the count only. Admin only, audited.",
+        "tags": ["media"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordingSettingsUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
         "x-hello-mcp": true
       }
     },
@@ -25024,6 +25291,47 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/me/calls/{callId}/quality": {
+      "post": {
+        "operationId": "postMyCallQuality",
+        "summary": "File a web client's end-of-call quality report",
+        "description": "The browser softphone posts what it measured when a call ends: codec, loss, jitter, round-trip time, the candidate types of the selected pair and, for a video call, the resolution it received. It is numbers and short words, never media. callId is the SIP Call-ID of the client's own dialog (one leg of the call); the report is matched to the call's CDR when read, so it may arrive before the CDR exists. The device must be one of the caller's own: another user's is 404. A later report of the same call from the same device replaces the earlier one. Rate limited. Needs a browser session.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "description": "The SIP Call-ID of the client's own dialog, as the browser saw it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CallQualityReport" }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Stored" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/Internal" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "a client's own end-of-call report, posted by the browser softphone",
+          "category": "credentials"
+        }
+      }
+    },
     "/api/v1/me/ice-servers": {
       "get": {
         "operationId": "getMyIceServers",
@@ -31223,6 +31531,7 @@
           "exitAnnouncement",
           "record",
           "enabled",
+          "video",
           "createdAt",
           "updatedAt",
           "live"
@@ -31281,6 +31590,10 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "video": {
+            "type": "boolean",
+            "description": "Video. On: the room forwards the active speaker's picture (H.264 Constrained Baseline or VP8, never mixed or transcoded) to the participants that bring video; every participant sees the speaker, the speaker sees the one before. Off: every video line is answered with port 0 and the room is audio only."
           },
           "createdAt": {
             "type": "string",
@@ -31373,6 +31686,11 @@
             "type": "boolean",
             "default": true,
             "description": "A disabled room refuses callers."
+          },
+          "video": {
+            "type": "boolean",
+            "default": true,
+            "description": "Forward the active speaker's video to participants that bring video; off makes the room audio only."
           }
         }
       },
@@ -33983,6 +34301,8 @@
           "callWaiting",
           "anonymousOutbound",
           "phoneSendAnonymous",
+          "videoAllowed",
+          "recordVideo",
           "noAnswerRings",
           "directoryHidden",
           "kind",
@@ -34069,6 +34389,14 @@
           "phoneSendAnonymous": {
             "type": "boolean",
             "description": "Phone Send Anonymous (Grandstream P65, line 1). On: provisioning writes the phone's own Send Anonymous setting, so the phone hides its caller ID on every call it makes, internal calls included; applied at the phone's next resync. Off (the default): nothing is written and the phone keeps its own setting. Distinct from anonymousOutbound, which only makes the calls Hello places through a trunk anonymous and leaves internal caller ID alone."
+          },
+          "videoAllowed": {
+            "type": "boolean",
+            "description": "Video allowed. On (the default): the extension's calls may carry video between web clients (H.264 Constrained Baseline or VP8, relayed, never transcoded). Off: every video section is answered with port 0 and the call goes on as audio. Trunk legs never carry video either way."
+          },
+          "recordVideo": {
+            "type": "boolean",
+            "description": "Record video. On (the default): when a call of this extension is recorded and carries video, the video is recorded next to the audio (fragmented MP4 for H.264, WebM for VP8). Off: the recording is audio only."
           },
           "mohClassId": {
             "oneOf": [
@@ -34222,6 +34550,14 @@
             "type": "boolean",
             "description": "Phone Send Anonymous (Grandstream P65, line 1). On: provisioning writes the phone's own Send Anonymous setting, so the phone hides its caller ID on every call it makes, internal calls included; applied at the phone's next resync. Off (the default): nothing is written and the phone keeps its own setting. Distinct from anonymousOutbound, which only makes the calls Hello places through a trunk anonymous and leaves internal caller ID alone."
           },
+          "videoAllowed": {
+            "type": "boolean",
+            "description": "Video allowed. On (the default): the extension's calls may carry video between web clients (H.264 Constrained Baseline or VP8, relayed, never transcoded). Off: every video section is answered with port 0 and the call goes on as audio. Trunk legs never carry video either way."
+          },
+          "recordVideo": {
+            "type": "boolean",
+            "description": "Record video. On (the default): when a call of this extension is recorded and carries video, the video is recorded next to the audio (fragmented MP4 for H.264, WebM for VP8). Off: the recording is audio only."
+          },
           "mohClassId": {
             "oneOf": [
               {
@@ -34291,6 +34627,141 @@
           "destination": {
             "type": "string",
             "description": "The CDR's destination; empty until the CDR is written."
+          },
+          "video": {
+            "type": "boolean",
+            "description": "The call's video was recorded too: GET /recordings/{id}/manifest lists the streams."
+          }
+        }
+      },
+      "RecordingVideoStream": {
+        "type": "object",
+        "required": ["id", "part", "leg", "direction", "codec", "container", "segments", "bytes", "width", "height", "offsetMs", "durationMs", "startedAt", "state", "finalized", "mediaType"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The stream's id, the {stream} of GET /recordings/{id}/video/{stream}."
+          },
+          "part": {
+            "type": "integer",
+            "description": "Starts at 1 and counts up when the stream restarts (another picture size or codec)."
+          },
+          "leg": {
+            "type": "string",
+            "enum": ["caller", "callee"],
+            "description": "Whose camera: the leg that sent the video."
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["in"]
+          },
+          "codec": {
+            "type": "string",
+            "enum": ["h264", "vp8"]
+          },
+          "container": {
+            "type": "string",
+            "enum": ["mp4", "webm"]
+          },
+          "segments": {
+            "type": "integer",
+            "description": "Fragments stored so far."
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "offsetMs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the stream's first picture came, in milliseconds after the audio recording started. A player starts the video at the audio's time minus this."
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["recording", "ended", "finalized", "failed", "purged"],
+            "description": "recording: the call is running; ended: waits for hello-control to join the fragments; finalized: one file with a seek index; failed: stopped early (see failure), what was stored is kept."
+          },
+          "failure": {
+            "type": "string",
+            "description": "Why a stream stopped early: object_store, unsupported or interrupted (its node stopped writing it)."
+          },
+          "finalized": {
+            "type": "boolean"
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": ["video/mp4", "video/webm"]
+          }
+        }
+      },
+      "RecordingVideoManifest": {
+        "type": "object",
+        "required": ["recordingId", "correlationId", "durationMs", "streams"],
+        "properties": {
+          "recordingId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The audio recording's duration: the player's master clock."
+          },
+          "streams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecordingVideoStream"
+            }
+          }
+        }
+      },
+      "RecordingSettings": {
+        "type": "object",
+        "required": ["videoRetentionDays", "updatedAt"],
+        "properties": {
+          "videoRetentionDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650,
+            "description": "How long video recordings are kept after the call (default 30). The audio keeps no retention job."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RecordingSettingsUpdate": {
+        "type": "object",
+        "required": ["videoRetentionDays"],
+        "properties": {
+          "videoRetentionDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650,
+            "description": "Days video recordings are kept after the call, 1 to 3650."
           }
         }
       },
@@ -35219,6 +35690,7 @@
           "unknownCallerAction",
           "rejectCode",
           "faxMode",
+          "profile",
           "geolocation"
         ],
         "properties": {
@@ -35367,6 +35839,12 @@
             "enum": [603, 486],
             "default": 603,
             "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
+          },
+          "profile": {
+            "type": "string",
+            "enum": ["generic", "sbc-peer"],
+            "default": "generic",
+            "description": "The trunk's profile. generic is every trunk. sbc-peer is a trunk to a session border controller Hello peers with, such as the certified SBC in front of Microsoft Teams Direct Routing (docs/teams.md): on create the unset fields take the profile's defaults (GET /api/v1/trunk-profiles), and the trunk must be IP-authenticated with source CIDRs and a destination, offer only G.711 and G.722, and never use SRTP required. 400 lists what is wrong."
           },
           "faxMode": {
             "type": "string",
@@ -35530,6 +36008,12 @@
             "default": 603,
             "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
           },
+          "profile": {
+            "type": "string",
+            "enum": ["generic", "sbc-peer"],
+            "default": "generic",
+            "description": "The trunk's profile. generic is every trunk. sbc-peer is a trunk to a session border controller Hello peers with, such as the certified SBC in front of Microsoft Teams Direct Routing (docs/teams.md): on create the unset fields take the profile's defaults (GET /api/v1/trunk-profiles), and the trunk must be IP-authenticated with source CIDRs and a destination, offer only G.711 and G.722, and never use SRTP required. 400 lists what is wrong."
+          },
           "faxMode": {
             "type": "string",
             "enum": ["passthrough", "t38", "off"],
@@ -35690,6 +36174,12 @@
             "enum": [603, 486],
             "default": 603,
             "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
+          },
+          "profile": {
+            "type": "string",
+            "enum": ["generic", "sbc-peer"],
+            "default": "generic",
+            "description": "The trunk's profile. generic is every trunk. sbc-peer is a trunk to a session border controller Hello peers with, such as the certified SBC in front of Microsoft Teams Direct Routing (docs/teams.md): on create the unset fields take the profile's defaults (GET /api/v1/trunk-profiles), and the trunk must be IP-authenticated with source CIDRs and a destination, offer only G.711 and G.722, and never use SRTP required. 400 lists what is wrong."
           },
           "faxMode": {
             "type": "string",
@@ -46767,6 +47257,76 @@
             "type": ["integer", "null"],
             "format": "int64",
             "description": "The wired 802.1X profile; null or left out for none."
+          }
+        }
+      },
+      "CallQualityReport": {
+        "type": "object",
+        "required": [
+          "deviceId",
+          "codec",
+          "lossPct",
+          "jitterMs",
+          "rttMs",
+          "durationMs"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "The caller's own web device that took the call."
+          },
+          "codec": {
+            "type": "string",
+            "maxLength": 32,
+            "example": "opus",
+            "description": "The audio codec of the call."
+          },
+          "lossPct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Worst percent of inbound audio packets lost during the call."
+          },
+          "jitterMs": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Worst inbound audio jitter in milliseconds."
+          },
+          "rttMs": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Worst round-trip time of the selected candidate pair in milliseconds."
+          },
+          "candidateLocal": {
+            "type": "string",
+            "maxLength": 16,
+            "example": "host",
+            "description": "The local candidate type of the selected pair (host, srflx, prflx, relay)."
+          },
+          "candidateRemote": {
+            "type": "string",
+            "maxLength": 16,
+            "example": "relay",
+            "description": "The remote candidate type of the selected pair."
+          },
+          "video": {
+            "type": "object",
+            "description": "The video the client received, when the call had some.",
+            "required": ["width", "height", "fps", "codec"],
+            "properties": {
+              "width": { "type": "integer", "minimum": 0, "maximum": 16384 },
+              "height": { "type": "integer", "minimum": 0, "maximum": 16384 },
+              "fps": { "type": "integer", "minimum": 0, "maximum": 1000 },
+              "codec": { "type": "string", "maxLength": 32, "example": "H264" }
+            }
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "How long the call was connected, in milliseconds."
           }
         }
       },

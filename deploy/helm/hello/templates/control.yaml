@@ -109,7 +109,11 @@ spec:
             {{- include "hello.clientKeyEnv" . | nindent 12 }}
             - name: HELLO_CLIENT_MAX_DEVICES
               value: {{ .Values.clients.maxDevices | quote }}
-            {{- with .Values.clients.wssUrl }}
+            {{- $wssUrl := .Values.clients.wssUrl }}
+            {{- if and (not $wssUrl) .Values.kamailio.wss.enabled .Values.kamailio.wss.ingress .Values.ui.ingress.enabled }}
+            {{- $wssUrl = printf "wss://%s/sip" .Values.ui.ingress.host }}
+            {{- end }}
+            {{- with $wssUrl }}
             - name: HELLO_WSS_URL
               value: {{ . | quote }}
             {{- end }}
@@ -117,6 +121,10 @@ spec:
             - name: HELLO_TURN_URLS
               value: {{ include "hello.turnUrls" . | quote }}
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_TURN_SECRET" "key" "turnSecret") | nindent 12 }}
+            {{- end }}
+            {{- if hasKey .Values.sip.recordingVideo "quotaGB" }}
+            - name: HELLO_RECORDING_VIDEO_QUOTA_GB
+              value: {{ .Values.sip.recordingVideo.quotaGB | quote }}
             {{- end }}
             - name: HELLO_BACKUP_TMP
               value: /var/lib/hello-backup

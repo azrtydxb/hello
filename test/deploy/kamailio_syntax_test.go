@@ -1,13 +1,18 @@
 package deploy
 
 import (
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
 )
+
+// ctrNameUnsafe matches what a Docker container name may not contain.
+var ctrNameUnsafe = regexp.MustCompile(`[^a-z0-9_.-]+`)
 
 // TestKamailioConfigSyntax runs `kamailio -c` over deploy/kamailio/kamailio.cfg
 // in the real Kamailio image, once with no environment (the lab's defaults)
@@ -20,6 +25,7 @@ import (
 // variable the test skips, unless HELLO_REQUIRE_KAMAILIO=1 (set in that job),
 // where a missing image is a failure. Never run it against a Docker daemon
 // you did not mean to use: it starts short-lived containers.
+
 func TestKamailioConfigSyntax(t *testing.T) {
 	image := os.Getenv("HELLO_KAMAILIO_IMAGE")
 	if image == "" {
@@ -38,7 +44,7 @@ func TestKamailioConfigSyntax(t *testing.T) {
 
 	root := repoRoot(t)
 	dir := t.TempDir()
-	for _, f := range []string{"kamailio.cfg", "dispatcher.list"} {
+	for _, f := range []string{"kamailio.cfg", "dispatcher.list", "tls.cfg", "tls-hop.cfg"} {
 		b, err := os.ReadFile(filepath.Join(root, "deploy", "kamailio", f))
 		if err != nil {
 			t.Fatal(err)
@@ -52,6 +58,43 @@ func TestKamailioConfigSyntax(t *testing.T) {
 	for name, env := range kwKamailioEnvs(t) {
 		variants[name] = env
 	}
+	// The kw environment above has WSS and the TLS hop on (browsers on kw).
+	// WSS set (clients item 2): the lab layout, and the kw environment with
+	// the VIP on top of it.
+	wss := map[string]string{"KAMAILIO_WSS_PORT": "8088", "KAMAILIO_WS_ORIGINS": "https://hello.example", "KAMAILIO_WSS_TRUSTED_PROXIES": "^10[.]42[.]"}
+	variants["lab with WSS"] = maps.Clone(wss)
+	withVIP := maps.Clone(variants["kw environment with the VIP"])
+	maps.Copy(withVIP, wss)
+	variants["kw environment with the VIP and WSS"] = withVIP
+	// An image without the websocket module must still start the kw
+	// environment with WSS unset: the same check runs, minus the WSS
+	// variables, with websocket.so removed from the image (as root, in the
+	// throwaway container only).
+	noWS := map[string]bool{}
+	for _, n := range []string{"kw environment", "kw environment with the VIP", "kw environment without the legacy sockets"} {
+		env := maps.Clone(variants[n])
+		for _, k := range []string{"KAMAILIO_WSS_PORT", "KAMAILIO_WS_ORIGINS", "KAMAILIO_WSS_TRUSTED_PROXIES"} {
+			delete(env, k)
+		}
+		variants[n+" without the websocket module"] = env
+		noWS[n+" without the websocket module"] = true
+	}
+	// The TLS hop to hello-sip (S-12), beyond kw's own environment (which has
+	// it on): the lab layout, and the kw environment with the VIP and the
+	// legacy sockets, with and without SIP over TLS for phones, and with WSS
+	// too.
+	hop := map[string]string{"KAMAILIO_HELLO_TLS_PORT": "5073", "KAMAILIO_HELLO_SIP_TLS_PORT": "5061"}
+	variants["lab with the TLS hop"] = maps.Clone(hop)
+	variants["lab with TLS phones and the TLS hop"] = map[string]string{"KAMAILIO_TLS_PORT": "5061", "KAMAILIO_HELLO_TLS_PORT": "5073"}
+	withHop := maps.Clone(variants["kw environment with the VIP"])
+	maps.Copy(withHop, hop)
+	variants["kw environment with the VIP and the TLS hop"] = withHop
+	wssHop := maps.Clone(wss)
+	maps.Copy(wssHop, hop)
+	variants["lab with WSS and the TLS hop"] = wssHop
+	withBoth := maps.Clone(withVIP)
+	maps.Copy(withBoth, hop)
+	variants["kw environment with the VIP, WSS and the TLS hop"] = withBoth
 	names := make([]string, 0, len(variants))
 	for n := range variants {
 		names = append(names, n)
@@ -62,9 +105,16 @@ func TestKamailioConfigSyntax(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			// docker create + cp + start, not a bind mount: in CI the Docker
 			// daemon is a sidecar that cannot see the runner's temp files.
-			ctr := "kamailio-cfgcheck-" + strings.ReplaceAll(strings.ToLower(name), " ", "-")
+			// Docker allows only [a-zA-Z0-9_.-] in a container name; a case
+			// name with a comma or other punctuation is reduced to that.
+			ctr := "kamailio-cfgcheck-" + strings.Trim(ctrNameUnsafe.ReplaceAllString(strings.ToLower(name), "-"), "-")
 			_ = exec.Command(docker, "rm", "-f", ctr).Run()
 			args := []string{"create", "--name", ctr}
+			check := []string{image, "-c", "-f", "/etc/kamailio/kamailio.cfg"}
+			if noWS[name] {
+				args = append(args, "--user", "0", "--entrypoint", "sh")
+				check = []string{image, "-c", "find /usr/lib -name websocket.so -delete && ! find /usr/lib -name websocket.so | grep -q . && exec kamailio -c -f /etc/kamailio/kamailio.cfg"}
+			}
 			keys := make([]string, 0, len(env))
 			for k := range env {
 				keys = append(keys, k)
@@ -73,7 +123,7 @@ func TestKamailioConfigSyntax(t *testing.T) {
 			for _, k := range keys {
 				args = append(args, "-e", k+"="+env[k])
 			}
-			args = append(args, image, "-c", "-f", "/etc/kamailio/kamailio.cfg")
+			args = append(args, check...)
 			if out, err := exec.Command(docker, args...).CombinedOutput(); err != nil {
 				t.Fatalf("docker create: %v\n%s", err, out)
 			}

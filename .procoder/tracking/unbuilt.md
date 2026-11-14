@@ -85,16 +85,16 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P10 | SCIM 2.0                                       | todo        |
 | P11 | OIDC SSO, LDAP bind login                      | todo        |
 | P12 | Auto-provisioning extensions from a range      | todo        |
-| P13 | Salesforce Open CTI                            | wip (#331)  |
-| P14 | Pipedrive                                      | wip (#329)  |
-| P15 | Zoho CRM                                       | wip (#329)  |
-| P16 | Zendesk, Freshdesk                             | wip (#328)  |
-| P17 | Slack, n8n, Make                               | wip (#335)  |
-| P18 | Outlook/Google contacts lookup, calendar DND   | wip (#335)  |
-| P19 | Dynamics 365 CIF                               | wip (#331)  |
-| P20 | ConnectWise, Autotask, HaloPSA, Clio           | wip (#328)  |
-| P21 | Odoo, Bitrix24                                 | wip (#329)  |
-| P22 | Teams Direct Routing guide (shared with WR 13) | todo        |
+| P13 | Salesforce Open CTI                            | done (#331) |
+| P14 | Pipedrive                                      | done (#329) |
+| P15 | Zoho CRM                                       | done (#329) |
+| P16 | Zendesk, Freshdesk                             | done (#328) |
+| P17 | Slack, n8n, Make                               | done (#335) |
+| P18 | Outlook/Google contacts lookup, calendar DND   | done (#335) |
+| P19 | Dynamics 365 CIF                               | done (#331) |
+| P20 | ConnectWise, Autotask, HaloPSA, Clio           | done (#328) |
+| P21 | Odoo, Bitrix24                                 | done (#329) |
+| P22 | Teams Direct Routing guide (shared with WR 13) | done (#326) |
 | #   | Item                                           | Status      |
 | --- | ---------------------------------------------- | ----------- |
 | P1  | Call events: stream, integration_events, SSE   | done (#205) |
@@ -109,16 +109,16 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P10 | SCIM 2.0                                       | todo        |
 | P11 | OIDC SSO, LDAP bind login                      | todo        |
 | P12 | Auto-provisioning extensions from a range      | todo        |
-| P13 | Salesforce Open CTI                            | wip (#331)  |
-| P14 | Pipedrive                                      | wip (#329)  |
-| P15 | Zoho CRM                                       | wip (#329)  |
-| P16 | Zendesk, Freshdesk                             | wip (#328)  |
-| P17 | Slack, n8n, Make                               | wip (#335)  |
-| P18 | Outlook/Google contacts lookup, calendar DND   | wip (#335)  |
-| P19 | Dynamics 365 CIF                               | wip (#331)  |
-| P20 | ConnectWise, Autotask, HaloPSA, Clio           | wip (#328)  |
-| P21 | Odoo, Bitrix24                                 | wip (#329)  |
-| P22 | Teams Direct Routing guide (shared with WR 13) | todo        |
+| P13 | Salesforce Open CTI                            | done (#331) |
+| P14 | Pipedrive                                      | done (#329) |
+| P15 | Zoho CRM                                       | done (#329) |
+| P16 | Zendesk, Freshdesk                             | done (#328) |
+| P17 | Slack, n8n, Make                               | done (#335) |
+| P18 | Outlook/Google contacts lookup, calendar DND   | done (#335) |
+| P19 | Dynamics 365 CIF                               | done (#331) |
+| P20 | ConnectWise, Autotask, HaloPSA, Clio           | done (#328) |
+| P21 | Odoo, Bitrix24                                 | done (#329) |
+| P22 | Teams Direct Routing guide (shared with WR 13) | done (#326) |
 
 ## messaging-channels
 
@@ -138,16 +138,18 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | #   | Item                                        | Status                       |
 | --- | ------------------------------------------- | ---------------------------- |
-| 1   | Media foundation (pion)                     | wip (#324)                   |
-| 2   | WSS on Kamailio                             | blocked (parity 23)          |
+| 1   | Media foundation (pion)                     | done (#324, #341)            |
+| 2   | WSS on Kamailio                             | done (#326)                  |
+| 2b  | Kamailio to hello-sip TLS hop (S-12)        | done (#340)                  |
+| 2c  | Browsers on kw: WSS, TLS hop, WebRTC media  | wip (#334, held)             |
 | 3   | Web devices and credentials                 | wip (#282)                   |
 | 4   | coturn, ICE servers                         | wip (#282)                   |
-| 5   | Web softphone, audio                        | blocked (1-4)                |
-| 6   | Web video                                   | blocked (5)                  |
-| 6b  | Video recording                             | blocked (6)                  |
-| 10  | Video phones and door stations              | todo (code), hw (test)       |
-| 11  | Conference-room video                       | blocked (6)                  |
-| 13  | Teams SBC-peer trunk profile, docs/teams.md | wip (#225)                   |
+| 5   | Web softphone, audio                        | done (#343)                  |
+| 6   | Web video                                   | done (#343)                  |
+| 6b  | Video recording                             | wip (#344)                   |
+| 10  | Video phones and door stations              | wip (#344), hw (test)        |
+| 11  | Conference-room video                       | wip (#344)                   |
+| 13  | Teams SBC-peer trunk profile, docs/teams.md | done (#326)                  |
 | 7-9 | Push gateway, mobile apps, mobile video     | not now                      |
 | 12  | Public reach                                | not now (user decides later) |
 
@@ -193,7 +195,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                                                                                      | Status                |
 | --------------------------------------------------------------------------------------------------------- | --------------------- |
-| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-f650e32)    |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-abdf747)    |
 | MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
 | Transfer-to-voicemail phone key                                                                           | done (#200)           |
@@ -225,3 +227,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - Salesforce (Developer Edition) and Dynamics 365 (trial) live checks: docs/crm.md, "Lab checklist: Salesforce" and "Lab checklist: Dynamics 365"
 - CRM connector live checks on real accounts: Pipedrive, Zoho CRM, Odoo, Bitrix24 (docs/crm.md lab checklists)
 - Telnyx and Twilio accounts, messaging item 6 (docs/inbox.md, "Sending through Telnyx", "Sender registration"): a real Telnyx send, delivery receipt and the 40300 STOP block; the field names of Telnyx's 10DLC, campaign-assignment and toll-free reads and of Twilio's UsAppToPerson and Tollfree reads; what a limited key answers for each registration read; a Twilio account with several Messaging Services; a US long code and a toll-free number in each state (approved, pending, rejected, unregistered)
+- Clients 5 and 6: a real browser (Chrome, Edge, Firefox, Safari) calling a G.711 desk phone, a G.722 phone and another browser on the LAN; H.264 and VP8 between browsers with and without hardware encoding and the REMB fallback's quality; DTLS re-handshake and ICE restart on a re-INVITE; a Playwright run with Chromium fake media devices through the lab stack; video capacity per node (the number behind `HELLO_VIDEO_MAX_SESSIONS`)
+- Clients 6b, 10 and 11: a real video desk phone and a real door station (H.264 on RTP/AVP) calling each other, a browser and a conference room, with the picture checked on both ends, the keyframe wait on a speaker switch and REMB behaviour; MP4 (H.264) and WebM (VP8) recordings playing in Chrome, Edge, Firefox and Safari with the video slaved to the audio; the real storage per hour of a typical video call (the number behind the 200 GB quota and the 30-day retention); a node killed during a video recording on kw (the sweeper and finalizer); the vendor video preview keys of `phone-feature-parity` S-49
+- Teams Direct Routing run (item 13, P22): a Microsoft 365 tenant with Teams Phone, a certified SBC or DRaaS contract, and a public SBC name and certificate; the cmdlet steps in docs/teams.md are unverified until then
+- WSS in a browser through the kw Ingress (items 2 and 2c): the kw manifests are in #334 (held); after it deploys, a real browser registering at wss://hello.kw.watteel.lab/sip and calling a desk phone, a `hello_tls` entry in Kamailio's metrics, and whether Kamailio sees ingress-nginx's pod address (10.42.x) so its X-Forwarded-For is believed

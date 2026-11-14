@@ -64,4 +64,7 @@
 | `putVoicemailGroup`         | write | Replace a voicemail group including members.                           |
 | `deleteVoicemailGroup`      | write | Delete a voicemail group; refused while something names it.            |
 | `listRecordings`            | read  | Call recordings, newest first.                                         |
+| `getRecordingManifest`      | read  | A recording's video streams with their offsets against the audio.      |
+| `getRecordingSettings`      | admin | The video retention in days.                                           |
+| `putRecordingSettings`      | admin | Set the video retention (1 to 3650 days).                              |
 | `deleteRecording`           | write | Delete a recording and its audio.                                      |

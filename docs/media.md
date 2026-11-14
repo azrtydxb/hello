@@ -410,10 +410,122 @@ devices and the softphone build on it.
 - **Settings.** `HELLO_MEDIA_WEBRTC_ENABLED` (default false; needs
   `HELLO_MEDIA_ANCHOR_HOST`), `HELLO_MEDIA_WEBRTC_PORT`,
   `HELLO_MEDIA_WEBRTC_PUBLIC_IP`, `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP`
-  (read; enforced by the WSS edge item). Metrics: `hello_webrtc_mux_legs`,
+  (default false: see below). Metrics: `hello_webrtc_mux_legs`,
   `hello_webrtc_mux_unrouted_total`, `hello_webrtc_mux_queue_drops_total`.
+- **Cleartext hop.** The browser's DTLS fingerprint travels in the offer, so it
+  is only as trustworthy as the signalling path to this node. `AnswerWebRTC`
+  takes a `SignalingHop` and refuses an offer that arrived over a cleartext
+  edge-to-node hop with `ErrCleartextHop`, before the leg is touched, unless
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP=true`. An offer counts as encrypted when
+  it arrived on the node's own TLS listener (`HELLO_SIP_TLS_ADDR`, the TLS hop in
+  [webrtc.md](webrtc.md#tls-hop-from-kamailio-to-hello-sip)) from a trusted edge;
+  what a Via header says does not count, only the transport sipgo read the
+  message on. A softphone call path asks `Server.WebRTCHop` for the hop and
+  runs `checkWebRTCHop` first, which logs the refusal at warn
+  (`WebRTC offer refused ... reason=cleartext_hop`, with the fix) and counts it in
+  `hello_sip_webrtc_refused_total{reason="cleartext_hop"}`; the call is answered
+  with 488. Set the flag only on a network whose edge-to-node path you trust
+  (for example Cilium transparent encryption).
+- **Beyond the first answer.** A browser leg's SDP is the leg's own audio SDP
+  (`AudioSDP.Build`, whose `Secure` already writes DTLS, ICE-lite and rtcp-mux)
+  plus `a=mid`, one BUNDLE group, every node address as a candidate and, for
+  video, a video section on the same transport (`webrtcrelay.go`). `Build` adds
+  the video section itself, so every SDP Hello writes for a browser leg carries
+  it and no code path can drop an `m=` line. `SetTarget` ignores browser legs:
+  their media address is what ICE verifies, not the SDP's `c=0.0.0.0`.
+- **Alternate callee leg.** A relay has two legs, and a ring across a desk phone
+  and a browser needs a callee that is both. `AddAltMuxLeg` adds a third,
+  parked endpoint on the shared port (media dropped, ICE and DTLS running);
+  `PromoteAlt` makes it the callee leg when its fork answers, `DropAlt` closes it
+  when another fork does.
+- **Video.** See [docs/webrtc.md](webrtc.md#video). `relayvideo.go`: per-leg
+  `VideoLeg` (payload type, codec, feedback), constant-offset rewrite, per-leg
+  RTCP reports, PLI/FIR/NACK/REMB carried across, a token-bucket ceiling, and a
+  node limit of calls with video. A phone or a door station is a plain-RTP video
+  leg (`plainvideo.go`: its own socket pair, the same translator); the relay's
+  `OnVideo` tap is what the video recorder reads.
 - **Firewall.** Open one UDP port per node, and list it as the one port in the
   TURN `allowed-peer-ip` rules.
+
+## Recording video
+
+A recorded call that carries video records the video too, next to the audio
+(clients-webrtc-mobile-video S-42, `internal/media/vrecorder.go`). Nothing is
+decoded, transcoded or muxed into the audio.
+
+- **When.** The recording is on (`*1` or `record_default`), the call carries video
+  (a browser, a video phone or a door station), `HELLO_RECORDING_VIDEO` (default
+  true) is on, neither extension has "Record video" off (Extensions page), and the
+  stored video is under `HELLO_RECORDING_VIDEO_QUOTA_GB` (default 200, 0 for no
+  limit). A call that adds video mid-recording starts its video files then. When
+  the recording includes video, the `recording-notice-video` announcement plays
+  instead of `recording-notice` (upload one; without it the plain notice plays).
+  Web softphones are told by an INFO and show a REC badge with a camera mark.
+- **What is written.** One video-only file per sending leg and part. H.264 is
+  depacketized (RFC 6184: single NAL unit, STAP-A, FU-A) into **fragmented MP4**,
+  VP8 (RFC 7741) into **WebM**, both written in-tree. A stream starts on a
+  keyframe (the sender is asked for one with PLI), packets are reordered within a
+  small window, and a loss that cannot be repaired drops the pictures until the
+  next keyframe. A keyframe with another picture size or codec configuration
+  starts a new part, so no file mixes two sizes. The offset of each stream's first
+  picture against the audio's start is stored; the player uses it.
+- **Streamed, not held.** A fragment (an MP4 `moof` and `mdat`, a WebM Cluster) is
+  cut at a keyframe once 10 s or 4 MiB have gathered
+  (`HELLO_RECORDING_VIDEO_SEGMENT`, `HELLO_RECORDING_VIDEO_SEGMENT_BYTES`; at 1.5
+  times either, wherever the picture is) and stored at once in the recordings
+  bucket under `rec/<unix>-<callid>/v<part>-<leg>-in.parts/`: `init`, `1`, `2`,
+  and so on. The stream's row (`recording_streams`) follows every stored fragment.
+  At most three fragments wait for the object store per stream; past that the
+  stream stops with "Video recording stopped: object store" in the trace and
+  `hello_recording_video_failures_total{reason="object_store"}`, and the audio
+  recording goes on.
+- **Finalizing.** hello-control (any replica, claimed with `FOR UPDATE SKIP
+LOCKED`) joins the pieces into `rec/<unix>-<callid>/v<part>-<leg>-in.<mp4|webm>`
+  with a seek index (an MP4 `sidx`, WebM `Cues`), checks the size, deletes the
+  pieces and marks the row `finalized`. Until then, and if it fails, the API
+  serves the init segment and the fragments joined, which both containers play
+  without fast seeking. The fragments are not under the final name's prefix on
+  purpose: the object store does not let `x` and `x/1` both exist.
+- **A node that dies.** The row of a stream nobody has written for ten minutes
+  (`recording` state) is ended by hello-control's sweeper with what its list
+  holds (`failure` says `interrupted`); everything stored up to the last fragment
+  is kept. A takeover carries audio only, so the video of a call that was taken
+  over ends where the node died; a graceful drain flushes the open fragments
+  first.
+- **Retention and quota.** `PUT /api/v1/recordings/settings` (admin, the
+  Recordings page) sets `videoRetentionDays` (default 30, 1 to 3650): a daily job
+  removes the objects of streams that ended earlier, then their rows, and audits
+  the count only. `hello_recording_video_bytes` and
+  `hello_recording_video_quota_ratio` show the storage; hello-control logs a
+  warning at 80 percent, and at 100 percent new video recordings do not start (the
+  trace says "quota used up", the audio records on) until the purge or the
+  operator frees space. Deleting a recording removes its video.
+- **Sizing.** At the default ceiling (`HELLO_VIDEO_MAX_KBPS` 1500 each way) one
+  hour of a two-way video call is up to about 1.35 GB, against about 58 MB of
+  8 kHz audio or 115 MB at 16 kHz; real calls sit below the ceiling. Check the
+  MinIO capacity before turning it on: 200 GB is about 150 hours of the worst case.
+- **API and player.** `GET /api/v1/recordings/{id}/manifest` lists a recording's
+  streams with their offsets, `GET /api/v1/recordings/{id}/video/{stream}` serves
+  one with Range support (`Cache-Control: private, no-store`, the audio's role and
+  scope, audited as `recording.video.download`); the Recordings list marks a
+  recording with video. The player makes the audio (the WAV) the clock: each
+  `<video>` is muted, set to the audio's time minus its offset on play and seek,
+  and checked every two seconds against a 100 ms drift. The caller's picture is
+  large, the callee's small; parts play one after another with a "recording gap"
+  marker; a browser that cannot play a stream offers the file as a download.
+- **Not recorded.** The mixed audio of a conference room (video there is
+  forwarded, not recorded), a trunk leg (trunks carry no video), and a call whose
+  audio is encrypted (it carries no plain video either).
+
+Tests: `TestVideoRecordingMux`, `TestVideoRecordingLoss`, `TestVideoRecordingSegments`,
+`TestVideoRecordingWebM`, `TestVideoRecordingConfigChange` and
+`TestVideoRecordingObjectStoreDown` (internal/media) read back the files they write;
+`TestVideoRecordingOnCall`, `TestVideoRecordingPolicy` and `TestRecordingSignalToBrowsers`
+(internal/sip) record a call end to end; `TestFinalizeMP4`, `TestFinalizeWebM` and
+`TestPurgeVideo` (internal/vidrec); `TestRecordingVideoAPI` and
+`TestRecordingSettingsAPI` (internal/api, need the database). Playback of the MP4
+and WebM files in Chrome, Edge, Firefox and Safari and the real storage per hour
+are on the hardware list.
 
 ## Metrics
 

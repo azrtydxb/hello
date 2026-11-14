@@ -229,7 +229,14 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 		c.anchorFailed("port range", err)
 		return
 	}
-	portA, err := relay.AddLeg(legCaller)
+	var portA int
+	if c.webCaller() {
+		// A browser's leg is on the shared WebRTC port, keyed by ICE and DTLS.
+		err = c.webAnchorCaller(relay, offer)
+		portA = relay.LegPort(legCaller)
+	} else {
+		portA, err = relay.AddLeg(legCaller)
+	}
 	if err != nil {
 		relay.Close()
 		c.anchorFailed("bind leg a", err)
@@ -240,7 +247,9 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	offered := off.Filter(nil)
 	relay.SetCodecs(legCaller, offered.Codecs, offered.DTMFPayloadType)
 	relay.SetTarget(legCaller, udpAddr(off.Address, off.Port))
-	allowSignalSource(relay, legCaller, c.inv.Source())
+	if !c.webCaller() {
+		allowSignalSource(relay, legCaller, c.inv.Source())
+	}
 	portB, err := relay.AddLeg(legCallee)
 	if err != nil {
 		relay.Close()
@@ -250,7 +259,7 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	relay.SetCodecs(legCallee, offered.Codecs, offered.DTMFPayloadType)
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
-	c.startVideo(offer)
+	c.noteVideoOffer(relay, offer)
 	c.mu.Lock()
 	c.anchored = true
 	c.anchorReason = reason
@@ -512,6 +521,10 @@ func (c *call) anchoredOfferB(offer media.AudioSDP, allow []string, l *leg) []by
 	if r == nil {
 		return nil
 	}
+	if c.legIsWeb(l) {
+		return c.webOfferB(offer, allow, l)
+	}
+	c.offerPlainVideo(l)
 	return c.withVideo(c.cryptoOffer(filteredOffer(offer, allow).PlainOffer(), l).Build(c.anchorHost, r.LegPort(legCallee), "sendrecv"), legCallee)
 }
 
@@ -609,7 +622,19 @@ func (c *call) closeMedia() {
 	c.anchored = false
 	c.mu.Unlock()
 	c.confLeave()
-	c.closeVideo()
+	c.releaseVideoSlot()
+	// The video recording is closed before the relay: its open fragments are
+	// stored, but a slow object store never holds the teardown for long.
+	vdone := make(chan struct{})
+	go func() {
+		defer close(vdone)
+		c.stopVideoRecording()
+	}()
+	select {
+	case <-vdone:
+	case <-time.After(5 * time.Second):
+		c.addTrace("Video recording still storing when the call ended")
+	}
 	if rec != nil {
 		if r, by := rec.stop(); r != nil {
 			c.storeRecording(r, by)
@@ -776,11 +801,15 @@ func (c *call) startRecordingFlow(by string) {
 		return // already recording (spec: one recording per call)
 	}
 	c.addTrace("Recording started")
+	withVideo := c.startVideoRecording()
+	if !withVideo {
+		c.signalRecording(true, false)
+	}
 	c.noteHAState(haPhaseRecording, "")
 	// The notice announcement plays before the capture becomes a kept
 	// recording, matching the voicemail beep discipline.
 	if c.s.cfg.MediaRecordingNotice {
-		go c.playRecordingNotice()
+		go c.playRecordingNotice(withVideo)
 	}
 }
 
@@ -799,6 +828,8 @@ func (c *call) toggleRecording() {
 	if r, by := rec.stop(); r != nil {
 		c.addTrace("Recording stopped")
 		c.noteHAState("", "")
+		go c.stopVideoRecording()
+		c.signalRecording(false, false)
 		go c.storeRecording(r, by)
 		return
 	}
@@ -822,13 +853,21 @@ func (c *call) setRecording(on bool) {
 // playRecordingNotice plays the recording-notice announcement to both
 // parties when the announcement set has it (contract 5). A missing WAV is
 // skipped (spec failure mode).
-func (c *call) playRecordingNotice() {
+func (c *call) playRecordingNotice(withVideo bool) {
 	defer contain(c.s.log, "recording notice")
 	snap := c.s.deps.Snapshots.Current()
 	if snap == nil {
 		return
 	}
-	obj, ok := snap.Announcement(recordingNotice)
+	// A recording that includes video says so when the operator uploaded the
+	// announcement for it; otherwise the plain notice plays.
+	obj, ok := "", false
+	if withVideo {
+		obj, ok = snap.Announcement(recordingNoticeVideo)
+	}
+	if !ok {
+		obj, ok = snap.Announcement(recordingNotice)
+	}
 	if !ok {
 		return
 	}
@@ -969,6 +1008,7 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	// A new media address after a roam (a handset on another AP or subnet)
 	// re-learns the leg's address before anything is relayed (S-9).
 	c.relearnMedia(fromCaller, req.Source(), off)
+	c.webInDialog(fromCaller, body, dir)
 	c.setHADirs(fromCaller, dir)
 	// An inactive hold stays inactive toward the holder, but the held peer
 	// is offered sendonly so it can hear the music (S-33).

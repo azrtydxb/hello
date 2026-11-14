@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -95,6 +96,19 @@ func run(args []string) error {
 	if err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("sip listen: %w", err)
+	}
+	// SIP over mutual TLS from the edge, for browsers (S-12); optional.
+	var hop *sip.TLSHop
+	transports := []string{"udp"}
+	if cfg.SIPTLSAddr != "" {
+		hop, err = sip.ListenTLS(cfg.SIPTLSAddr, cfg.SIPTLSCert, cfg.SIPTLSKey, cfg.SIPTLSCA)
+		if err != nil {
+			_ = udp.Close()
+			_ = ln.Close()
+			return fmt.Errorf("sip tls listen: %w", err)
+		}
+		transports = append(transports, "tls")
+		log.Info("SIP over TLS from the edge", "addr", cfg.SIPTLSAddr)
 	}
 	// One Valkey or a Sentinel-managed primary (vkconn). A single Valkey
 	// that is down still yields a client that redials, so readiness
@@ -194,12 +208,16 @@ func run(args []string) error {
 		MaxContacts: cfg.MaxContacts, MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
+		TLSListener: tlsListener(hop), TLSClient: tlsClient(hop), WebRTCAllowCleartextHop: cfg.MediaWebRTCAllowCleartextHop,
 		SessionExpires: cfg.SessionExpires, SessionMinSE: cfg.SessionMinSE, SessionTimersTrunks: cfg.SessionTimersTrunks, MediaDeadAfter: cfg.MediaDeadAfter,
 		DoorHangup: cfg.DoorHangup, PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
 		PageMulticastIface: cfg.PageMulticastIface, PageMulticastTTL: cfg.PageMulticastTTL,
 		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax, Dialing: cfg.Dial,
 		MediaForceAnchor: cfg.MediaForceAnchor, MediaRecordingNotice: cfg.MediaRecordingNotice,
-		PromptLanguage: cfg.VoicePromptLanguage, Timezone: cfg.Timezone,
+		VideoEnabled: cfg.VideoEnabled, VideoMaxKbps: cfg.VideoMaxKbps, VideoMaxSessions: cfg.VideoMaxSessions,
+		RecordingVideo: cfg.RecordingVideo, RecordingVideoSegment: cfg.RecordingVideoSegment, RecordingVideoSegmentBytes: cfg.RecordingVideoSegmentBytes,
+		RecordingVideoQuotaBytes: int64(cfg.RecordingVideoQuotaGB) << 30,
+		PromptLanguage:           cfg.VoicePromptLanguage, Timezone: cfg.Timezone,
 		HADialogHeartbeat: cfg.MemberHeartbeat, HATakeoverEnabled: cfg.HATakeoverEnabled,
 		HATakeoverPoll: cfg.HATakeoverPoll, HATakeoverJitter: cfg.HATakeoverJitter, PushRate: cfg.PushRate,
 	}, sip.Deps{
@@ -214,7 +232,7 @@ func run(args []string) error {
 		Conversations:  conversations{st: controlStore, dial: cfg.Dial, log: log.With("component", "inbox"), metrics: messaging.NewMetrics(metrics.Registry)},
 		Voicemails:     voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings, TimeConditions: timeConditions{st: controlStore},
 		Speech:     newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
-		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
+		Recordings: controlStore, VideoRecordings: videoRows{st: controlStore}, Media: media.NewMetrics(metrics.Registry),
 		HAState: live, Membership: members, PageTests: live, DoorTriggers: live, Originates: live, Queues: queue.NewValkey(vk), Callbacks: controlStore.QueueCallbacks(), Fax: faxDeps(cfg, controlStore), Park: live, Published: live, Emergency: live,
 		Conferences: live, ConferenceAudit: controlStore,
 		CallerNames: crmLookup,
@@ -227,6 +245,7 @@ func run(args []string) error {
 	// node address instead of mirroring the offer's own c= line. Empty
 	// keeps the tests'/lab's offer-mirroring behaviour.
 	media.SetFeatures(cfg.MediaDTLS, cfg.MediaICE)
+	media.SetVideoMaxSessions(cfg.VideoMaxSessions)
 	if cfg.MediaAnchorHost != "" {
 		srv.SetMediaAnchor(media.NewAnchor(cfg.MediaAnchorHost, log.With("component", "media")))
 	}
@@ -251,7 +270,7 @@ func run(args []string) error {
 	}
 	machine := lifecycle.New(lifecycle.Options{
 		Member: cluster.Member{ID: cfg.NodeID, Kind: cluster.KindSIP, SIPAddr: cfg.SIPAdvertisedAddr, HTTPAddr: cfg.HTTPAddr,
-			Transports: []string{"udp"}, Version: version.Version, Incarnation: incarnation},
+			Transports: transports, Version: version.Version, Incarnation: incarnation},
 		Checks: map[string]lifecycle.Check{
 			"valkey": valkeyReady,
 			"sip": func(context.Context) error {
@@ -395,4 +414,19 @@ func faxDeps(cfg config.SIP, st *store.Store) *sip.FaxDeps {
 		return nil
 	}
 	return &sip.FaxDeps{Enabled: true, Client: &fax.Client{Addr: cfg.Fax.Addr, Token: cfg.Fax.Token}, Store: st.Faxes(), Objects: objs}
+}
+
+// tlsListener and tlsClient unpack the optional TLS hop.
+func tlsListener(h *sip.TLSHop) net.Listener {
+	if h == nil {
+		return nil
+	}
+	return h.Listener
+}
+
+func tlsClient(h *sip.TLSHop) *tls.Config {
+	if h == nil {
+		return nil
+	}
+	return h.Client
 }

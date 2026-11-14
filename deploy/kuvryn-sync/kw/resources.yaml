@@ -52,8 +52,12 @@ data:
     #     Hello node reaches any phone through Kamailio;
     #   - record-routes initial INVITEs in both directions;
     #   - tells Hello the phone's real source in X-Hello-Client and the transport
-    #     of the phone's connection (udp, tcp or tls) in X-Hello-Transport;
+    #     of the phone's connection (udp, tcp, tls, ws or wss) in X-Hello-Transport;
     #   - terminates SIP over TLS for phones (optional, see TLS below);
+    #   - terminates SIP over WebSocket (WSS, RFC 7118) for browsers (optional,
+    #     see WSS below);
+    #   - talks to Hello over mutual TLS for the encrypted phone legs (TLS, WS,
+    #     WSS; optional, see "TLS hop" below);
     #   - rate-limits REGISTER, INVITE and MESSAGE per source IP (pike).
     #
     # SIP MESSAGE (RFC 3428, text messaging) is routed like an initial INVITE:
@@ -167,6 +171,72 @@ data:
     #!endif
     #!endif
 
+    # SIP over WSS (RFC 7118, clients-webrtc-mobile-video S-8 to S-12), off unless
+    # KAMAILIO_WSS_PORT is set. Browsers reach it as wss://<console host>/sip
+    # through the console's Ingress (docs/webrtc.md), which forwards to this TLS
+    # listener on the instance's own address; the certificate is the same one as
+    # SIP over TLS (/etc/hello-tls, tls.cfg or tls-hop.cfg). Kamailio ends the
+    # WebSocket and talks plain UDP to the hello-sip nodes, like for any phone,
+    # telling them the leg was wss in X-Hello-Transport; with the TLS hop on
+    # (below) it talks to them over the hop instead. It needs an image with the
+    # websocket and tls modules (docker/kamailio); an image without them must run
+    # with KAMAILIO_WSS_PORT unset.
+    #   KAMAILIO_WS_ORIGINS: the browser origins allowed to open a WebSocket,
+    #     comma separated, exact (https://hello.kw.watteel.lab,...). A handshake
+    #     carrying any other Origin is refused (cross-site WebSocket hijacking); a
+    #     client that sends no Origin is not a browser and is let in (it still has
+    #     to authenticate with SIP digest). Unset: no origin is allowed.
+    #   KAMAILIO_WSS_TRUSTED_PROXIES: a regular expression the TCP peer's address
+    #     must match for its X-Forwarded-For to be believed (the ingress
+    #     controller's pods). Unset: never believed, the peer is the client.
+    #!trydefenv WSS_PORT=KAMAILIO_WSS_PORT
+
+    # TLS hop to Hello (clients-webrtc-mobile-video S-12), off unless
+    # KAMAILIO_HELLO_TLS_PORT is set. The signalling of a browser carries the
+    # fingerprint of its media, which is only as trustworthy as the path that
+    # carries it, so requests that arrive over an encrypted phone leg (tls, ws,
+    # wss) go on to the hello-sip node over mutual TLS (the dispatcher's node,
+    # port KAMAILIO_HELLO_SIP_TLS_PORT, default 5061), and Hello's requests for
+    # that phone come back to a TLS socket of this instance, "hello_tls", on its
+    # own address (the phone's connection is pinned to this instance anyway) and
+    # KAMAILIO_HELLO_TLS_PORT. For a WSS leg the hop supersedes the UDP hello_ws
+    # socket. Everything else, and the dispatcher's probes, stay UDP on the
+    # "hello" socket. Both sides present a certificate of the Hello CA
+    # (tls-hop.cfg: /etc/hello-tls, the same Secret as SIP over TLS) and Kamailio
+    # verifies the node's; hello-sip verifies this one and requires it
+    # (HELLO_SIP_TLS_*). Source-address vetting of what arrives on hello_tls is
+    # unchanged: only a dispatcher node's address is a Hello node.
+    #!trydefenv HELLO_TLS_PORT=KAMAILIO_HELLO_TLS_PORT
+    #!trydefenv HELLO_SIP_TLS_PORT=KAMAILIO_HELLO_SIP_TLS_PORT
+    #!ifdef HELLO_TLS_PORT
+    #!ifndef HELLO_SIP_TLS_PORT
+    #!define HELLO_SIP_TLS_PORT 5061
+    #!endif
+    #!endif
+
+    # The dispatcher set a request to Hello is balanced over: 1 (UDP nodes), or
+    # with the hop 2 for an encrypted phone leg: the same nodes by their TLS
+    # address, probed over TLS from hello_tls, so a node whose TLS listener is down
+    # is skipped for those legs only (route PICK_SET, PICK_SET_FAIL).
+    #!ifdef HELLO_TLS_PORT
+    #!define HELLO_SET "$var(dset)"
+    #!else
+    #!define HELLO_SET "1"
+    #!endif
+
+    # tls.so is needed by SIP over TLS, by WSS and by the TLS hop.
+    #!ifdef TLS_PORT
+    #!define NEED_TLS
+    #!else
+    #!ifdef WSS_PORT
+    #!define NEED_TLS
+    #!else
+    #!ifdef HELLO_TLS_PORT
+    #!define NEED_TLS
+    #!endif
+    #!endif
+    #!endif
+
     # How long (ms) an INVITE towards Hello may stay unanswered after its first
     # provisional reply. Hello ends ringing itself (HELLO_SIP_RING_TIMEOUT,
     # default 30s), so this only matters when the node dies mid-ring: the
@@ -190,10 +260,13 @@ data:
 
     # FLT_FROM_HELLO: the request came from a hello-sip node.
     # FLT_RETRIED: already failed over once (ds_next_dst).
+    # FLT_HOP_TLS: the request goes to Hello over the TLS hop (kept for the
+    # failure routes, which retry on another node).
     # FLB_NATB (branch): the phone is behind NAT (usrloc nat_bflag).
     # FLB_NATSIPPING (branch): send it SIP OPTIONS keep-alives.
     #!define FLT_FROM_HELLO 1
     #!define FLT_RETRIED 2
+    #!define FLT_HOP_TLS 3
     #!define FLB_NATB 6
     #!define FLB_NATSIPPING 7
 
@@ -245,6 +318,12 @@ data:
     listen=tls:EDGE_VIP:TLS_PORT advertise PUBLIC_HOST:PUBLIC_TLS_PORT name "phones_tls"
     #!endif
     listen=udp:EDGE_VIP:5070 name "hello"
+    #!ifdef WSS_PORT
+    # A WebSocket is one TCP connection pinned to the instance that accepted it, so
+    # the Path and Record-Route of a browser's requests name this instance's own
+    # address, not the VIP: Hello's requests for it must come back to this one.
+    listen=udp:LISTEN_IP:5072 name "hello_ws"
+    #!endif
     # Dispatcher probes (ds_default_sockname): on this node's own address, so a
     # Hello node answers the instance that asked.
     listen=udp:LISTEN_IP:5071 name "probe"
@@ -255,6 +334,16 @@ data:
     listen=tls:LISTEN_IP:TLS_PORT advertise PUBLIC_HOST:PUBLIC_TLS_PORT name "phones_tls"
     #!endif
     listen=udp:LISTEN_IP:5070 name "hello"
+    #!endif
+    #!ifdef HELLO_TLS_PORT
+    # Hello's requests for an encrypted phone leg (Path, Record-Route): this
+    # instance's own address, see "TLS hop to Hello" above.
+    listen=tls:LISTEN_IP:HELLO_TLS_PORT name "hello_tls"
+    #!endif
+    #!ifdef WSS_PORT
+    # SIP over WebSocket for browsers: TLS here, the WebSocket upgrade on it. No
+    # advertise: its address is this instance's own (see hello_ws above).
+    listen=tls:LISTEN_IP:WSS_PORT name "wss"
     #!endif
     #!ifdef LEGACY_IP
     listen=udp:LEGACY_IP:PHONES_PORT name "phones_legacy"
@@ -270,7 +359,7 @@ data:
     # NOTIFY, MESSAGE) take back to it, so an idle one stays open for an hour
     # (phone-feature-parity S-13); a phone's keep-alive (OPTIONS, CRLF) resets it.
     tcp_connection_lifetime=3600
-    #!ifdef TLS_PORT
+    #!ifdef NEED_TLS
     enable_tls=yes
     #!endif
 
@@ -314,17 +403,44 @@ data:
     loadmodule "xhttp.so"
     loadmodule "xhttp_prom.so"
     loadmodule "rtimer.so"
-    #!ifdef TLS_PORT
+    #!ifdef NEED_TLS
     loadmodule "tls.so"
+    #!endif
+    #!ifdef WSS_PORT
+    loadmodule "websocket.so"
+    loadmodule "htable.so"
     #!endif
 
     # ctl: kamcmd's default socket (/run/kamailio/kamailio_ctl), so
     # `docker compose exec kamailio kamcmd dispatcher.list` works as the
     # kamailio user the container runs as.
 
-    #!ifdef TLS_PORT
+    #!ifdef HELLO_TLS_PORT
+    # tls: tls-hop.cfg is tls.cfg plus the CA and a client certificate, and it
+    # verifies the hello-sip node's certificate on the connections Kamailio opens.
+    modparam("tls", "config", "/etc/kamailio/tls-hop.cfg")
+    #!else
+    #!ifdef NEED_TLS
     # tls: certificate, key and the 1.2 minimum are in tls.cfg (next to this file).
     modparam("tls", "config", "/etc/kamailio/tls.cfg")
+    #!endif
+    #!endif
+
+    #!ifdef WSS_PORT
+    # websocket: Kamailio pings every connection (browsers answer with a pong
+    # without any script), and closes one that has not answered within the
+    # timeout, so a dead tab or a lost network frees its binding sooner than the
+    # registration expires. nathelper's OPTIONS keep-alive is not sent to these
+    # contacts (route REGISTER). Sub-protocol "sip" only (RFC 7118).
+    modparam("websocket", "keepalive_mechanism", 1)
+    modparam("websocket", "keepalive_timeout", 30)
+    modparam("websocket", "keepalive_interval", 10)
+    modparam("websocket", "sub_protocols", 1)
+    # The real client address of each WebSocket, from the trusted ingress's
+    # X-Forwarded-For at the handshake, by connection id. Hello's failed-auth
+    # throttle and trunk checks use it (X-Hello-Client) instead of the ingress's
+    # own address, which every browser shares. Entries expire after a day.
+    modparam("htable", "htable", "wsclient=>size=12;autoexpire=86400")
     #!endif
 
     # jsonrpcs: RPC over the FIFO only (no HTTP transport here).
@@ -338,6 +454,16 @@ data:
     modparam("tm", "fr_timer", 1500)
     modparam("tm", "fr_inv_timer", 120000)
     modparam("tm", "reparse_invite", 1)
+    # No automatic 100 Trying: route[RELAY] sends it once the INVITE has been sent
+    # on. A 100 stops the sender retransmitting, so one for an INVITE that was
+    # never forwarded strands the call: that is what a draining instance did. Its
+    # kube-vip drops the VIP address at SIGTERM while Kamailio keeps running for
+    # the preStop; a request that arrived just before that got its 100 from tm,
+    # then the send on (and the 477 that follows) failed with "Network is
+    # unreachable", as every socket is bound to the VIP, and nothing ever answered.
+    # Without the 100 the sender retransmits and the instance that holds the VIP
+    # next gets the request.
+    modparam("tm", "auto_inv_100", 0)
 
     # rr: double Record-Route (phone-facing public address, Hello-facing edge
     # address), and Route processing for both at once (r2=on).
@@ -438,7 +564,7 @@ data:
     	route(EDGE_SIDE);
     	prom_counter_inc("edge_requests_total", "1", "$Rn");
 
-    	if ($Rn == "hello" || $Rn == "hello_legacy") {
+    	if ($Rn == "hello" || $Rn == "hello_legacy" || $Rn == "hello_ws" || $Rn == "hello_tls") {
     		# Received on the Hello-facing socket (5070). On kw that socket is on
     		# the node address (hostNetwork), reachable from the whole LAN, so it
     		# is trusted only from an address the dispatcher holds (set 1, the
@@ -457,10 +583,15 @@ data:
 
     	route(REQINIT);
 
-    	if ($Rn == "hello" || $Rn == "hello_legacy") {
+    	if ($Rn == "hello" || $Rn == "hello_legacy" || $Rn == "hello_ws" || $Rn == "hello_tls") {
     		# A hello-sip node (vetted above).
     		setflag(FLT_FROM_HELLO);
     	}
+    #!ifdef HELLO_TLS_PORT
+    	if ($Rn == "hello_tls" && is_method("INVITE")) {
+    		xlog("L_INFO", "hop: INVITE from $si:$sp on hello_tls to $ru\n");
+    	}
+    #!endif
 
     	if (is_method("CANCEL")) {
     		if (t_check_trans()) {
@@ -512,12 +643,39 @@ data:
     	if ($Rn == "phones_legacy" || $Rn == "phones_legacy_tcp" || $Rn == "hello_legacy") {
     		$var(legacy) = 1;
     	}
+    	# $var(sec) is 1 for an encrypted phone leg (tls, ws, wss) and for Hello's
+    	# own requests on hello_tls: they use the TLS hop (always 0 without it).
+    	$var(sec) = 0;
+    #!ifdef HELLO_TLS_PORT
+    	if ($pr == "tls" || $pr == "wss" || $pr == "ws") {
+    		$var(sec) = 1;
+    	}
+    #!endif
+    	# $var(ws) is 1 for a browser's WebSocket and for a Hello node answering
+    	# one through the Path or Record-Route naming hello_ws.
+    	$var(ws) = 0;
+    	if ($Rn == "wss" || $Rn == "hello_ws") {
+    		$var(ws) = 1;
+    	}
     }
 
     # The Hello-facing socket of this request's family.
     route[HELLO_SOCKET] {
     	if ($var(legacy) == 1) {
     		$fsn = "hello_legacy";
+    #!ifdef HELLO_TLS_PORT
+    	} else if ($var(sec) == 1) {
+    		# The TLS hop, for every encrypted leg (WSS included: it supersedes
+    		# hello_ws).
+    		$fsn = "hello_tls";
+    #!endif
+    #!ifdef WSS_PORT
+    #!ifdef EDGE_VIP
+    	} else if ($var(ws) == 1) {
+    		# Without the VIP "hello" already is the instance's own address.
+    		$fsn = "hello_ws";
+    #!endif
+    #!endif
     	} else {
     		$fsn = "hello";
     	}
@@ -531,7 +689,10 @@ data:
     	remove_hf("X-Hello-Transport");
     	force_rport();
 
-    	if (is_method("REGISTER|INVITE|MESSAGE") && !has_totag()) {
+    	# Not for a WebSocket: every browser behind the ingress shares its address,
+    	# so a per-source-IP limit would block them all together. Hello's
+    	# failed-auth throttle (by the client address, X-Hello-Client) covers them.
+    	if (is_method("REGISTER|INVITE|MESSAGE") && !has_totag() && $var(ws) != 1) {
     		if (!pike_check_req()) {
     			if ($rc == -2) {
     				prom_counter_inc("pike_blocked_total", "1");
@@ -578,7 +739,10 @@ data:
     		set_contact_alias();
     	}
 
-    	if (!ds_select_dst("1", "4")) {
+    #!ifdef HELLO_TLS_PORT
+    	route(PICK_SET);
+    #!endif
+    	if (!ds_select_dst(HELLO_SET, "4")) {
     		route(NO_NODE);
     	}
     	route(TO_HELLO);
@@ -590,18 +754,33 @@ data:
     	# Only our own Path reaches Hello: a phone could otherwise steer Hello's
     	# requests for its binding through a host of its choosing.
     	remove_hf("Path");
+    #!ifdef HELLO_TLS_PORT
+    	if ($var(sec) == 1) {
+    		# The Path names the socket Hello's requests come back to: hello_tls.
+    		route(HELLO_SOCKET);
+    	}
+    #!endif
     	if (!add_path_received()) {
     		sl_send_reply("503", "Internal Path Error");
     		exit;
     	}
-    	# Keep-alive list (route REGISTER_REPLY): record where the phone is.
-    	if (nat_uac_test("19")) {
+    	if ($var(ws) == 1) {
+    		# A browser's Contact host is a random .invalid name (RFC 7118): name
+    		# the live connection instead, so Hello's later requests reach it. The
+    		# WebSocket ping replaces the OPTIONS keep-alive, so it is not put on
+    		# the keep-alive list.
+    		set_contact_alias();
+    		setbflag(FLB_NATB);
+    	} else if (nat_uac_test("19")) {
     		fix_nated_register();
     		setbflag(FLB_NATB);
     		setbflag(FLB_NATSIPPING);
     	}
     	t_on_reply("REGISTER_REPLY");
-    	if (!ds_select_dst("1", "7")) {
+    #!ifdef HELLO_TLS_PORT
+    	route(PICK_SET);
+    #!endif
+    	if (!ds_select_dst(HELLO_SET, "7")) {
     		route(NO_NODE);
     	}
     	route(TO_HELLO);
@@ -654,7 +833,10 @@ data:
     	# Spec S-3: an in-dialog request aimed at a dead Hello node goes to a
     	# surviving one, which answers from the replicated dialog state. The
     	# R-URI (the dead node's Contact) stays; only the next hop changes.
-    	if (!ds_select_dst("1", "4")) {
+    #!ifdef HELLO_TLS_PORT
+    	route(PICK_SET);
+    #!endif
+    	if (!ds_select_dst(HELLO_SET, "4")) {
     		route(NO_NODE);
     	}
     	xlog("L_INFO", "in-dialog $rm to dead Hello node $var(next): rerouted to $du\n");
@@ -687,6 +869,13 @@ data:
     # Forward to the Hello node in $du with the client's address.
     route[TO_HELLO] {
     	route(HELLO_SOCKET);
+    #!ifdef HELLO_TLS_PORT
+    	if ($var(sec) == 1) {
+    		# An encrypted phone leg: on to Hello over the TLS hop.
+    		setflag(FLT_HOP_TLS);
+    		route(HELLO_TLS_DST);
+    	}
+    #!endif
     	# Hello answers at the source port of what we send it (rport), not at a
     	# Via port that a replaced pod or a NAT no longer owns (kw: stale
     	# conntrack on 5070 after a Kamailio pod replacement).
@@ -696,6 +885,12 @@ data:
     	}
     	# The phone's source after NAT fix-up (force_rport): the address Hello's
     	# failed-auth throttle, trunk source check and binding Source use.
+    #!ifdef WSS_PORT
+    	if ($var(ws) == 1 && $Rn == "wss" && $sht(wsclient=>$conid) != $null) {
+    		# A browser behind the ingress: the address the ingress vouched for.
+    		append_hf("X-Hello-Client: $sht(wsclient=>$conid):$sp\r\n");
+    	} else
+    #!endif
     	if (af == INET6) {
     		append_hf("X-Hello-Client: [$si]:$sp\r\n");
     	} else {
@@ -711,6 +906,37 @@ data:
     	route(RELAY);
     	exit;
     }
+
+    #!ifdef HELLO_TLS_PORT
+    # $var(dset): 2 (the nodes' TLS addresses) for an encrypted phone leg, else 1.
+    # A failure route has no $var(sec) of its own: it asks the message flag.
+    route[PICK_SET] {
+    	$var(dset) = 1;
+    	if ($var(sec) == 1) {
+    		$var(dset) = 2;
+    	}
+    }
+
+    route[PICK_SET_FAIL] {
+    	$var(dset) = 1;
+    	if (isflagset(FLT_HOP_TLS)) {
+    		$var(dset) = 2;
+    	}
+    }
+
+    # Turn the next hop towards a Hello node into its TLS address: the node the
+    # dispatcher chose (or, with no chosen hop, the Request-URI's), on
+    # HELLO_SIP_TLS_PORT with transport=tls.
+    route[HELLO_TLS_DST] {
+    	$var(hp) = HELLO_SIP_TLS_PORT;
+    	if ($du != $null && $du != "") {
+    		$var(hh) = $(du{uri.host});
+    	} else {
+    		$var(hh) = $(ru{uri.host});
+    	}
+    	$du = "sip:" + $var(hh) + ":" + $var(hp) + ";transport=tls";
+    }
+    #!endif
 
     route[NO_NODE] {
     	xlog("L_WARN", "no active hello-sip node for $rm\n");
@@ -754,6 +980,11 @@ data:
     # or TCP when the destination (the Path's received, an alias or the R-URI)
     # says so, UDP otherwise.
     route[PHONES_SOCKET] {
+    	if ($dP == "ws" || $dP == "wss") {
+    		# The WebSocket connection the browser registered on carries it; no
+    		# socket to force.
+    		return;
+    	}
     	if ($dP == "tls") {
     #!ifdef TLS_PORT
     		$fsn = "phones_tls";
@@ -795,6 +1026,12 @@ data:
     route[RELAY] {
     	if (!t_relay()) {
     		sl_reply_error();
+    		exit;
+    	}
+    	if (is_method("INVITE")) {
+    		# Sent on: tell the sender to stop retransmitting (auto_inv_100 is
+    		# off). Not sent when a reply from the far side was relayed already.
+    		t_reply("100", "Trying");
     	}
     	exit;
     }
@@ -838,17 +1075,31 @@ data:
     	} else {
     		$var(dead) = $ru;
     	}
-    	if (!ds_select_dst("1", "4")) {
+    #!ifdef HELLO_TLS_PORT
+    	route(PICK_SET_FAIL);
+    #!endif
+    	if (!ds_select_dst(HELLO_SET, "4")) {
     		xlog("L_WARN", "in-dialog failover of $rm: no other hello-sip node\n");
     		exit;
     	}
+    #!ifdef HELLO_TLS_PORT
+    	# Compared by host: over the TLS hop the dead hop is the TLS form of the
+    	# node the dispatcher lists.
+    	if ($(var(dead){uri.host}) == $(du{uri.host})) {
+    #!else
     	if ($var(dead) == $du) {
+    #!endif
     		if (!ds_next_dst()) {
     			xlog("L_WARN", "in-dialog failover of $rm: only the dead node is listed\n");
     			exit;
     		}
     	}
     	setflag(FLT_RETRIED);
+    #!ifdef HELLO_TLS_PORT
+    	if (isflagset(FLT_HOP_TLS)) {
+    		route(HELLO_TLS_DST);
+    	}
+    #!endif
     	xlog("L_INFO", "in-dialog failover of $rm: $var(dead) is dead, trying $du\n");
     	t_relay();
     	exit;
@@ -866,6 +1117,11 @@ data:
     	if (t_check_status("503") || (t_branch_timeout() && !t_branch_replied())) {
     		if (ds_next_dst()) {
     			setflag(FLT_RETRIED);
+    #!ifdef HELLO_TLS_PORT
+    			if (isflagset(FLT_HOP_TLS)) {
+    				route(HELLO_TLS_DST);
+    			}
+    #!endif
     			xlog("L_INFO", "failover of $rm to $du\n");
     			t_on_failure("HELLO_FAILOVER");
     			t_relay();
@@ -892,10 +1148,21 @@ data:
     	ds_dsg_fetch("1");
     	prom_gauge_set("dispatcher_set_destinations", "$dsg(count)", "1");
     	prom_gauge_set("dispatcher_set_active", "$dsg(active)", "1");
+    #!ifdef HELLO_TLS_PORT
+    	ds_dsg_fetch("2");
+    	prom_gauge_set("dispatcher_set_destinations", "$dsg(count)", "2");
+    	prom_gauge_set("dispatcher_set_active", "$dsg(active)", "2");
+    #!endif
     }
 
     # HTTP is answered on the metrics socket only, never on the phones TCP one.
     event_route[xhttp:request] {
+    #!ifdef WSS_PORT
+    	if ($Rn == "wss") {
+    		route(WSS_HANDSHAKE);
+    		exit;
+    	}
+    #!endif
     	if ($Rp != METRICS_PORT) {
     		xhttp_reply("403", "Forbidden", "text/plain", "forbidden\n");
     		exit;
@@ -910,6 +1177,55 @@ data:
     	}
     	xhttp_reply("404", "Not Found", "text/plain", "not found\n");
     }
+
+    #!ifdef WSS_PORT
+    # The HTTP request that upgrades a connection on the WSS socket to SIP over
+    # WebSocket. Nothing else is answered there. A handshake is accepted only for
+    # GET /sip with the sip sub-protocol (the websocket module checks it) and an
+    # Origin that is on the list or absent (a non-browser client; a browser always
+    # sends one, so cross-site WebSocket hijacking needs an origin that is listed).
+    route[WSS_HANDSHAKE] {
+    	set_reply_close();
+    	set_reply_no_connect();
+    	if (!($rm == "GET" && $hu =~ "^/sip/?$" && $hdr(Upgrade) =~ "websocket" && $hdr(Connection) =~ "Upgrade")) {
+    		xhttp_reply("404", "Not Found", "text/plain", "not found\n");
+    		exit;
+    	}
+    	if ($hdr(Origin) != $null && $hdr(Origin) != "") {
+    		# The Origin is the client's to write: only a plain scheme://host[:port]
+    		# gets as far as the regular expression built from it below.
+    		$var(allowed) = 0;
+    		if ($hdr(Origin) =~ "^https?://[A-Za-z0-9.:-]+$" && $env(KAMAILIO_WS_ORIGINS) != $null) {
+    			$var(esc) = $(hdr(Origin){re.subst,/[.]/[.]/g});
+    			$var(list) = "," + $env(KAMAILIO_WS_ORIGINS) + ",";
+    			$var(re) = "," + $var(esc) + ",";
+    			if ($var(list) =~ $var(re)) {
+    				$var(allowed) = 1;
+    			}
+    		}
+    		if ($var(allowed) != 1) {
+    			xlog("L_WARN", "refused WebSocket from $si:$sp: origin $hdr(Origin) is not allowed\n");
+    			xhttp_reply("403", "Forbidden", "text/plain", "forbidden\n");
+    			exit;
+    		}
+    	}
+    	if (!ws_handle_handshake()) {
+    		xhttp_reply("400", "Bad Request", "text/plain", "bad request\n");
+    		exit;
+    	}
+    	# The client address behind the ingress, believed only from a trusted
+    	# peer (the first X-Forwarded-For entry, which the ingress sets from the
+    	# connection it accepted), kept for this connection's requests.
+    	if ($hdr(X-Forwarded-For) != $null && $env(KAMAILIO_WSS_TRUSTED_PROXIES) != $null) {
+    		$var(proxies) = $env(KAMAILIO_WSS_TRUSTED_PROXIES);
+    		$var(xff) = $(hdr(X-Forwarded-For){s.select,0,,}{s.trim});
+    		if ($si =~ $var(proxies) && $var(xff) =~ "^[0-9A-Fa-f:.]+$") {
+    			$sht(wsclient=>$conid) = $var(xff);
+    		}
+    	}
+    	exit;
+    }
+    #!endif
   # Verbatim copy of deploy/kamailio/tls.cfg (test/deploy). Read only when
   # KAMAILIO_TLS_PORT is set on the pod (see the kamailio Deployment).
   tls.cfg: |
@@ -936,6 +1252,41 @@ data:
     method = TLSv1.2+
     verify_certificate = no
     require_certificate = no
+  # Verbatim copy of deploy/kamailio/tls-hop.cfg (test/deploy). Read when
+  # KAMAILIO_HELLO_TLS_PORT is set on the pod (the TLS hop to hello-sip,
+  # S-12), which kw does; tls.cfg is then unused.
+  tls-hop.cfg: |
+    # Kamailio tls module configuration when the TLS hop to Hello is on
+    # (KAMAILIO_HELLO_TLS_PORT, see kamailio.cfg; clients-webrtc-mobile-video
+    # S-12). It replaces tls.cfg then: the same server settings for phones, plus
+    # the CA and a client certificate for the connections Kamailio opens.
+    #
+    # The certificate is the one of SIP over TLS (the Hello CA's, mounted with its
+    # ca.crt at /etc/hello-tls) and must be usable as a server and as a client
+    # certificate: hello-sip requires a client certificate on its TLS port, and
+    # Kamailio verifies the node's certificate against the CA. Hello's own
+    # connections to the hello_tls socket are vetted by their source address, as
+    # the UDP hello socket is.
+    #
+    # Connections Kamailio opens verify the far side, so a phone that has no
+    # connection to reuse cannot be dialled over TLS with an unverifiable
+    # certificate: that is the point of the hop, and phones normally reuse their
+    # own connection.
+    [server:default]
+    method = TLSv1.2+
+    certificate = /etc/hello-tls/tls.crt
+    private_key = /etc/hello-tls/tls.key
+    ca_list = /etc/hello-tls/ca.crt
+    verify_certificate = no
+    require_certificate = no
+
+    [client:default]
+    method = TLSv1.2+
+    certificate = /etc/hello-tls/tls.crt
+    private_key = /etc/hello-tls/tls.key
+    ca_list = /etc/hello-tls/ca.crt
+    verify_certificate = yes
+    require_certificate = yes
   dispatcher.list: |
     # Hello SIP edge dispatcher destinations (lab twin:
     # deploy/kamailio/dispatcher.list). Format:
@@ -946,6 +1297,11 @@ data:
     # hello-sip pod that returns on another node keeps its entry.
     1 sip:hello-sip-1.hello.svc.cluster.local:5060 0 0 duid=hello-sip-1
     1 sip:hello-sip-2.hello.svc.cluster.local:5060 0 0 duid=hello-sip-2
+    # Set 2 (the TLS hop, KAMAILIO_HELLO_TLS_PORT): the same nodes by their
+    # TLS address (HELLO_SIP_TLS_ADDR), probed over TLS from the hello_tls
+    # socket, for the encrypted phone legs (wss, and tls once phones use it).
+    2 sip:hello-sip-1.hello.svc.cluster.local:5061;transport=tls 0 0 duid=hello-sip-1-tls;sockname=hello_tls
+    2 sip:hello-sip-2.hello.svc.cluster.local:5061;transport=tls 0 0 duid=hello-sip-2-tls;sockname=hello_tls
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -1046,7 +1402,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: 4f9c03d844b862a1c43a8c404ef4f00094e64852c21908a09372ca51b7de25d0
+        hello.watteel.com/kamailio-config-sha256: dbc61113f5e1e14d2579fe1bf775587a5348139202ae2847612ed2c406c6bd1e
     spec:
       # Phones must reach Kamailio with no NAT in between: through a NodePort
       # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's
@@ -1093,7 +1449,7 @@ spec:
         # starts Kamailio regardless: a node that stays gone still fails
         # loudly there rather than silently running without it.
         - name: wait-dispatcher
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/kamailio:kc-1cb144b339f03799
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/kamailio:kc-5f94d2b0d090316a
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 102
@@ -1137,7 +1493,7 @@ spec:
           # kamailio/Dockerfile), pinned to the tag it published for
           # commit 1c3fe03 (the full sha tag; the registry keeps no short
           # tags). Later: an immutable repository@sha256:... digest.
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/kamailio:kc-1cb144b339f03799
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/kamailio:kc-5f94d2b0d090316a
           imagePullPolicy: IfNotPresent
           securityContext:
             # uid/gid of the image's kamailio user (read from the image).
@@ -1176,13 +1532,39 @@ spec:
             - name: KAMAILIO_INVITE_TIMEOUT
               # Above HELLO_SIP_RING_TIMEOUT (10s), as in the lab.
               value: "25000"
-            # SIP over TLS (phone-feature-parity S-14) is switched on by
-            # adding KAMAILIO_TLS_PORT="30509" (and KAMAILIO_PUBLIC_TLS_PORT
-            # "30509") here and the phones-tls port below, in the same change
-            # that pins a kamailio image built with kamailio-tls-modules
-            # (docker/kamailio): an image without tls.so exits on loading it.
-            # The certificate (Certificate hello-sip-tls below) is already
-            # issued and mounted at /etc/hello-tls.
+            # SIP over TLS for phones (phone-feature-parity S-14) is switched
+            # on by adding KAMAILIO_TLS_PORT="30509" (and
+            # KAMAILIO_PUBLIC_TLS_PORT "30509") here and the phones-tls port
+            # below. The pinned image has the tls and websocket modules, and
+            # the certificate (Certificate hello-edge-tls below) is mounted
+            # at /etc/hello-tls for WSS and the TLS hop already.
+            - name: KAMAILIO_HELLO_TLS_PORT
+              # The TLS hop to hello-sip (docs/webrtc.md, "TLS hop"): the
+              # encrypted phone legs (wss here) go to the node over mutual
+              # TLS (dispatcher set 2) and Hello's requests for them come
+              # back to this instance's hello_tls socket, on its own node
+              # address and this port. tls-hop.cfg is read instead of
+              # tls.cfg.
+              value: "5073"
+            - name: KAMAILIO_HELLO_SIP_TLS_PORT
+              # hello-sip's HELLO_SIP_TLS_ADDR port.
+              value: "5061"
+            - name: KAMAILIO_WSS_PORT
+              # SIP over WSS for browsers (docs/webrtc.md): the console's
+              # Ingress forwards wss://hello.kw.watteel.lab/sip here (Service
+              # and Ingress kamailio-ws below). Bound on the node address;
+              # only the ingress controller should reach it.
+              value: "8088"
+            - name: KAMAILIO_WS_ORIGINS
+              # The console's origin: a WebSocket handshake from any other
+              # page is refused (403).
+              value: https://hello.kw.watteel.lab
+            - name: KAMAILIO_WSS_TRUSTED_PROXIES
+              # ingress-nginx's pod address (kw's pod CIDR 10.42.0.0/16; the
+              # controller is not host-networked and reaches the node over
+              # the Cilium tunnel): its X-Forwarded-For is believed, so
+              # Hello's throttles count per browser.
+              value: ^10[.]42[.]
           ports:
             - name: phones
               containerPort: 30508
@@ -1193,6 +1575,12 @@ spec:
             - name: hello
               containerPort: 5070
               protocol: UDP
+            - name: hello-tls
+              containerPort: 5073
+              protocol: TCP
+            - name: wss
+              containerPort: 8088
+              protocol: TCP
             - name: metrics
               containerPort: 9071
               protocol: TCP
@@ -1234,16 +1622,15 @@ spec:
           emptyDir: {}
         - name: tls
           secret:
-            secretName: hello-sip-tls
+            secretName: hello-edge-tls
             defaultMode: 288
-            # Absent until cert-manager has issued it; only read when TLS is
-            # on, so the pod starts either way.
-            optional: true
+            # Not optional: WSS and the TLS hop read it at start, so the pod
+            # waits for cert-manager to issue it rather than start without.
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: hello-sip-tls
+  name: hello-edge-tls
   namespace: hello
   labels:
     app.kubernetes.io/name: hello
@@ -1251,14 +1638,30 @@ metadata:
     app.kubernetes.io/component: edge
     app.kubernetes.io/managed-by: kuvryn-sync
 spec:
-  # The SIP-over-TLS certificate Kamailio presents to phones (S-14), issued
-  # by the Hello CA (cluster-ca) that phones already trust through the CA
-  # push of provisioning. Phones connect to the node address, so it is an IP
-  # SAN; the DNS names serve a phone provisioned with a name. RSA, because
-  # the older phone TLS stacks handle it everywhere. Renewed 30 days before
-  # expiry: cert-manager keeps serving the old certificate if a renewal
-  # fails, and the alert in docs/tls.md fires 14 days before it runs out.
-  secretName: hello-sip-tls
+  # Kamailio's certificate, mounted with its ca.crt at /etc/hello-tls, on
+  # every TLS socket it has (tls-hop.cfg presents one): the WSS listener the
+  # console's Ingress forwards browsers to, the hello_tls socket hello-sip
+  # dials, its client certificate on the TLS hop to hello-sip, and SIP over
+  # TLS for phones once that is on (S-14). Issued by the Hello CA
+  # (cluster-ca), which hello-sip trusts (HELLO_SIP_TLS_CA) and phones
+  # already trust through the CA push of provisioning.
+  #
+  # - IP SANs: hello-sip verifies the address it dials, which is the node
+  #   address of the instance (master-11 192.168.10.101, master-12
+  #   192.168.10.102); phones on TLS will use 192.168.10.101 or, after the
+  #   VIP go-live, the VIP 192.168.10.109. The DNS names serve a phone
+  #   provisioned with a name.
+  # - server auth and client auth: hello-sip requires a client certificate
+  #   of the CA on its TLS listener.
+  # - RSA, because the older phone TLS stacks handle it everywhere.
+  # - Renewed 30 days before expiry. Kamailio reads it only at start, so a
+  #   renewal reaches it with the next Kamailio restart (any deploy that
+  #   touches the edge); the old certificate stays valid for those 30 days.
+  #
+  # It replaces hello-sip-tls (server auth and 192.168.10.101 only): a new
+  # Secret name lets the pod wait for the new certificate instead of racing
+  # cert-manager's reissue of the old one.
+  secretName: hello-edge-tls
   issuerRef:
     name: cluster-ca
     kind: ClusterIssuer
@@ -1268,6 +1671,8 @@ spec:
     - sip.hello.kw.watteel.lab
   ipAddresses:
     - 192.168.10.101
+    - 192.168.10.102
+    - 192.168.10.109
   duration: 2160h
   renewBefore: 720h
   privateKey:
@@ -1278,6 +1683,51 @@ spec:
     - digital signature
     - key encipherment
     - server auth
+    - client auth
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: hello-sip-node-tls
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: sip
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  # hello-sip's certificate on the TLS hop (HELLO_SIP_TLS_*, mounted at
+  # /etc/hello-sip-tls on hello-sip-1 and hello-sip-2): its TLS listener's
+  # server certificate, which Kamailio verifies against the same CA
+  # (tls-hop.cfg), and the client certificate of hello-sip's own connections
+  # to Kamailio's hello_tls socket. The names are the ones Kamailio's
+  # dispatcher dials (set 2: hello-sip-N.hello.svc.cluster.local:5061) and
+  # their shorter forms. Both nodes share it, as the chart's StatefulSet
+  # does. hello-sip re-reads it when the files change, so renewals need no
+  # restart.
+  secretName: hello-sip-node-tls
+  issuerRef:
+    name: cluster-ca
+    kind: ClusterIssuer
+  commonName: hello-sip.hello.svc.cluster.local
+  dnsNames:
+    - hello-sip-1
+    - hello-sip-1.hello.svc
+    - hello-sip-1.hello.svc.cluster.local
+    - hello-sip-2
+    - hello-sip-2.hello.svc
+    - hello-sip-2.hello.svc.cluster.local
+  duration: 2160h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+    - client auth
 ---
 apiVersion: v1
 kind: Service
@@ -1303,6 +1753,71 @@ spec:
       port: 9090
       protocol: TCP
       targetPort: metrics
+---
+# The browsers' WebSocket edge (docs/webrtc.md): the Ingress below forwards
+# wss://hello.kw.watteel.lab/sip here. The Kamailio pods are host-networked,
+# so the endpoints are the nodes' own addresses (192.168.10.101:8088 and
+# 192.168.10.102:8088); a connection lands on one instance and stays there.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kamailio-ws
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+  ports:
+    - name: wss
+      port: 8088
+      protocol: TCP
+      targetPort: wss
+---
+# /sip on the console's host, so the browser reuses the console's certificate
+# (hello-tls, issued for the Ingress "hello" by cert-manager's ingress-shim)
+# and origin: no second DNS name and no CORS. ingress-nginx ends the
+# browser's TLS, speaks TLS to Kamailio's WSS listener (hello-edge-tls; not
+# verified by the ingress) and keeps the upgraded connection open for the
+# long timeouts. No cluster-issuer annotation here: the Ingress "hello" owns
+# hello-tls.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kamailio-ws
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - hello.kw.watteel.lab
+      secretName: hello-tls
+  rules:
+    - host: hello.kw.watteel.lab
+      http:
+        paths:
+          - path: /sip
+            pathType: Exact
+            backend:
+              service:
+                name: kamailio-ws
+                port:
+                  name: wss
 ---
 # At most one Kamailio is voluntarily disrupted at a time (a node drain by
 # kured, an eviction): the other is the survivor that carries the phones. The
@@ -1379,9 +1894,13 @@ spec:
       # restart token and a READY hello-sip-2) plus the 90s drain (lab: 2h,
       # capped here) plus margin.
       terminationGracePeriodSeconds: 270
+      securityContext:
+        # The image's user (65532) reads the TLS hop's key: the Secret's
+        # files are 0440, group-owned by fsGroup.
+        fsGroup: 65532
       containers:
         - name: hello-sip
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-f650e322e6293a7ba627760f03660ce8d3f94979
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-abdf747c7306d24ba9fc3c1bd5bfcaab642b68f4
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1481,12 +2000,61 @@ spec:
             - name: HELLO_MEDIA_RECORDING_NOTICE
               # The spoken notice plays before a recording starts.
               value: "true"
+            - name: HELLO_FAX_ENABLED
+              # The fax engine (kw/fax.yaml, docs/fax.md).
+              value: "true"
+            - name: HELLO_FAX_ADDR
+              value: hello-fax.hello.svc.cluster.local:8083
+            - name: HELLO_FAX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hello-fax
+                  key: faxToken
+            - name: HELLO_CLIENT_AUTH_KEY
+              # Derived credentials of the browser softphone's web devices
+              # (docs/webrtc.md): the same key on hello-control and every
+              # hello-sip, which check what the other issues.
+              valueFrom:
+                secretKeyRef:
+                  name: hello-client-auth
+                  key: clientAuthKey
+            - name: HELLO_SIP_TLS_ADDR
+              # SIP over mutual TLS from Kamailio for the encrypted phone legs
+              # (docs/webrtc.md, "TLS hop"; dispatcher set 2). On the host
+              # network, so TCP 5061 on the node. The certificate is
+              # hello-sip-node-tls; Kamailio must present one of the same CA
+              # (cluster-ca, hello-edge-tls).
+              value: ":5061"
+            - name: HELLO_SIP_TLS_CERT
+              value: /etc/hello-sip-tls/tls.crt
+            - name: HELLO_SIP_TLS_KEY
+              value: /etc/hello-sip-tls/tls.key
+            - name: HELLO_SIP_TLS_CA
+              value: /etc/hello-sip-tls/ca.crt
+            - name: HELLO_MEDIA_WEBRTC_ENABLED
+              # Browser legs (ICE-lite, DTLS-SRTP) on one shared UDP port of
+              # the node, beside the RTP range; candidate address
+              # HELLO_MEDIA_ANCHOR_HOST (docs/webrtc.md, docs/media.md).
+              value: "true"
+            - name: HELLO_MEDIA_WEBRTC_PORT
+              value: "21100"
+            - name: HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP
+              # The hop is TLS (above): a WebRTC offer that did not arrive
+              # over it is refused.
+              value: "false"
           ports:
             - name: http
               containerPort: 8082
             - name: sip
               containerPort: 5060
               protocol: UDP
+            - name: sip-tls
+              containerPort: 5061
+              protocol: TCP
+          volumeMounts:
+            - name: sip-tls
+              mountPath: /etc/hello-sip-tls
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /readyz
@@ -1510,6 +2078,13 @@ spec:
             capabilities:
               drop:
                 - ALL
+      volumes:
+        - name: sip-tls
+          secret:
+            secretName: hello-sip-node-tls
+            defaultMode: 288
+            # Not optional: the node exits if HELLO_SIP_TLS_CERT is missing,
+            # so the pod waits for cert-manager to issue it.
 ---
 # No RTP Service here, and none is needed: the relay binds its UDP
 # 20000-21000 legs on the host network, so anchored RTP lands on the node
@@ -1554,6 +2129,10 @@ spec:
       port: 8082
       protocol: TCP
       targetPort: http
+    - name: sip-tls
+      port: 5061
+      protocol: TCP
+      targetPort: sip-tls
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -1601,9 +2180,13 @@ spec:
               topologyKey: kubernetes.io/hostname
       # Same budget as hello-sip-1: the rollout gate wait plus the drain.
       terminationGracePeriodSeconds: 270
+      securityContext:
+        # The image's user (65532) reads the TLS hop's key: the Secret's
+        # files are 0440, group-owned by fsGroup.
+        fsGroup: 65532
       containers:
         - name: hello-sip
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-f650e322e6293a7ba627760f03660ce8d3f94979
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-abdf747c7306d24ba9fc3c1bd5bfcaab642b68f4
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1703,12 +2286,61 @@ spec:
             - name: HELLO_MEDIA_RECORDING_NOTICE
               # The spoken notice plays before a recording starts.
               value: "true"
+            - name: HELLO_FAX_ENABLED
+              # The fax engine (kw/fax.yaml, docs/fax.md).
+              value: "true"
+            - name: HELLO_FAX_ADDR
+              value: hello-fax.hello.svc.cluster.local:8083
+            - name: HELLO_FAX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hello-fax
+                  key: faxToken
+            - name: HELLO_CLIENT_AUTH_KEY
+              # Derived credentials of the browser softphone's web devices
+              # (docs/webrtc.md): the same key on hello-control and every
+              # hello-sip, which check what the other issues.
+              valueFrom:
+                secretKeyRef:
+                  name: hello-client-auth
+                  key: clientAuthKey
+            - name: HELLO_SIP_TLS_ADDR
+              # SIP over mutual TLS from Kamailio for the encrypted phone legs
+              # (docs/webrtc.md, "TLS hop"; dispatcher set 2). On the host
+              # network, so TCP 5061 on the node. The certificate is
+              # hello-sip-node-tls; Kamailio must present one of the same CA
+              # (cluster-ca, hello-edge-tls).
+              value: ":5061"
+            - name: HELLO_SIP_TLS_CERT
+              value: /etc/hello-sip-tls/tls.crt
+            - name: HELLO_SIP_TLS_KEY
+              value: /etc/hello-sip-tls/tls.key
+            - name: HELLO_SIP_TLS_CA
+              value: /etc/hello-sip-tls/ca.crt
+            - name: HELLO_MEDIA_WEBRTC_ENABLED
+              # Browser legs (ICE-lite, DTLS-SRTP) on one shared UDP port of
+              # the node, beside the RTP range; candidate address
+              # HELLO_MEDIA_ANCHOR_HOST (docs/webrtc.md, docs/media.md).
+              value: "true"
+            - name: HELLO_MEDIA_WEBRTC_PORT
+              value: "21100"
+            - name: HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP
+              # The hop is TLS (above): a WebRTC offer that did not arrive
+              # over it is refused.
+              value: "false"
           ports:
             - name: http
               containerPort: 8082
             - name: sip
               containerPort: 5060
               protocol: UDP
+            - name: sip-tls
+              containerPort: 5061
+              protocol: TCP
+          volumeMounts:
+            - name: sip-tls
+              mountPath: /etc/hello-sip-tls
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /readyz
@@ -1732,6 +2364,13 @@ spec:
             capabilities:
               drop:
                 - ALL
+      volumes:
+        - name: sip-tls
+          secret:
+            secretName: hello-sip-node-tls
+            defaultMode: 288
+            # Not optional: the node exits if HELLO_SIP_TLS_CERT is missing,
+            # so the pod waits for cert-manager to issue it.
 ---
 # See the hello-sip-1 Service above: no RTP Service, by the same
 # host-network argument (docs/media.md).
@@ -1762,6 +2401,10 @@ spec:
       port: 8082
       protocol: TCP
       targetPort: http
+    - name: sip-tls
+      port: 5061
+      protocol: TCP
+      targetPort: sip-tls
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -1798,7 +2441,7 @@ spec:
           # hello-migrate); a Sync-managed Job would need RBAC the deployer
           # does not have, so it runs as an init container instead. The retry
           # loop absorbs PostgreSQL and the Sentinel quorum still coming up.
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-f650e322e6293a7ba627760f03660ce8d3f94979
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-abdf747c7306d24ba9fc3c1bd5bfcaab642b68f4
           command:
             - sh
             - -c
@@ -1845,7 +2488,7 @@ spec:
               value: "false"
       containers:
         - name: hello-control
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-f650e322e6293a7ba627760f03660ce8d3f94979
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-abdf747c7306d24ba9fc3c1bd5bfcaab642b68f4
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1945,6 +2588,44 @@ spec:
               value: https://hello.kw.watteel.lab
             - name: HELLO_OAUTH_DCR
               value: "true"
+            - name: HELLO_FAX_ENABLED
+              # The fax engine (kw/fax.yaml, docs/fax.md).
+              value: "true"
+            - name: HELLO_FAX_ADDR
+              value: hello-fax.hello.svc.cluster.local:8083
+            - name: HELLO_FAX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hello-fax
+                  key: faxToken
+            - name: HELLO_CLIENT_AUTH_KEY
+              # Derived credentials of the browser softphone's web devices
+              # (docs/webrtc.md): the same key on hello-control and every
+              # hello-sip, which check what the other issues.
+              valueFrom:
+                secretKeyRef:
+                  name: hello-client-auth
+                  key: clientAuthKey
+            - name: HELLO_WSS_URL
+              # Where the softphone registers: Kamailio's WSS listener behind
+              # the console's Ingress (Ingress kamailio-ws).
+              value: wss://hello.kw.watteel.lab/sip
+            - name: HELLO_TURN_URLS
+              # The coturn servers of kw/coturn.yaml (docs/webrtc.md): clients
+              # are given every address, UDP, TCP and TLS.
+              value: >-
+                turn:192.168.10.101:3478?transport=udp,turn:192.168.10.101:3478?transport=tcp,turns:192.168.10.101:5349?transport=tcp,turn:192.168.10.102:3478?transport=udp,turn:192.168.10.102:3478?transport=tcp,turns:192.168.10.102:5349?transport=tcp
+            - name: HELLO_TURN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hello-coturn
+                  key: turnSecret
+            - name: HELLO_DOOR_CAMERA_ALLOW
+              # Door video (docs/door-stations.md, S-49): hello-control fetches
+              # a door station's camera picture itself and may only reach
+              # public addresses plus these private networks: the LAN the door
+              # stations and their cameras are on.
+              value: 192.168.10.0/24
             # Phone provisioning (.procoder/specs/phone-auto-provisioning-service.md):
             # the listener on :8083 (HELLO_PROV_ADDR's default) behind the
             # hello-prov Ingress, which terminates TLS with hello-prov-tls.
@@ -2175,7 +2856,7 @@ spec:
     spec:
       containers:
         - name: hello-ui
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-ui:sha-f650e322e6293a7ba627760f03660ce8d3f94979
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-ui:sha-abdf747c7306d24ba9fc3c1bd5bfcaab642b68f4
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -2475,7 +3156,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: minio
-          image: minio/minio:latest
+          image: cgr.dev/chainguard/minio@sha256:ddfab4c402bf32e7701600d16d8c40dbccfab4c4e5340eef4c324394349c7926
           imagePullPolicy: IfNotPresent
           args: ["server", "/data"]
           env:
@@ -2763,8 +3444,11 @@ spec:
                 # never joined the mesh (see deploy/valkey/sentinel.conf and
                 # the lab's compose healthchecks).
                 - valkey-cli -p 26379 sentinel ckquorum hello | grep -q ^OK
-            periodSeconds: 2
-            failureThreshold: 30
+            # ckquorum polls every peer and can take over a second under load;
+            # the default 1s timeout failed it several times an hour.
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
           volumeMounts:
             - name: config
               mountPath: /etc/valkey
@@ -2879,8 +3563,11 @@ spec:
                 # never joined the mesh (see deploy/valkey/sentinel.conf and
                 # the lab's compose healthchecks).
                 - valkey-cli -p 26379 sentinel ckquorum hello | grep -q ^OK
-            periodSeconds: 2
-            failureThreshold: 30
+            # ckquorum polls every peer and can take over a second under load;
+            # the default 1s timeout failed it several times an hour.
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
           volumeMounts:
             - name: config
               mountPath: /etc/valkey
@@ -2970,8 +3657,11 @@ spec:
                 # never joined the mesh (see deploy/valkey/sentinel.conf and
                 # the lab's compose healthchecks).
                 - valkey-cli -p 26379 sentinel ckquorum hello | grep -q ^OK
-            periodSeconds: 2
-            failureThreshold: 30
+            # ckquorum polls every peer and can take over a second under load;
+            # the default 1s timeout failed it several times an hour.
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
           volumeMounts:
             - name: config
               mountPath: /etc/valkey

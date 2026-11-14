@@ -15,7 +15,7 @@ network. Kamailio tells them which transport the phone used in an
 request arrived on and honoured only from a trusted proxy
 (`HELLO_SIP_TRUSTED_PROXIES`), like `X-Hello-Client`. The registration stores
 it: `GET /api/v1/registrations` shows `transport` per binding, and the metric
-`hello_sip_registrations_by_transport{transport}` counts them per node.
+`hello_sip_registrations_by_transport{transport}` counts them per node. `hello_sip_requests_by_wire_total{transport}` counts every request by the transport it arrived on at the node (`tls` is the TLS hop from Kamailio, see [webrtc.md](webrtc.md#tls-hop-from-kamailio-to-hello-sip)).
 
 Calls to a phone registered over TLS leave Kamailio over that phone's TLS
 connection (Path `received=...;transport=tls`, then the connection Kamailio
@@ -69,13 +69,15 @@ deploy.
 ### kw
 
 `deploy/kuvryn-sync/kw/resources.yaml` carries the cert-manager Certificate
-`hello-sip-tls` (issuer `cluster-ca`, the node IP `192.168.10.101` as an IP
-SAN, 90 days, renewed 30 days early) and mounts its Secret (optional) at
-`/etc/hello-tls`. To turn TLS on, in the same change that pins the new
-kamailio image, add `KAMAILIO_TLS_PORT` and `KAMAILIO_PUBLIC_TLS_PORT`
-(`"30509"`) to the kamailio Deployment, the `phones-tls` container port, and
-`HELLO_PROV_SIP_TLS_SERVER=192.168.10.101:30509` to hello-control. An image
-without `tls.so` exits on start when `KAMAILIO_TLS_PORT` is set.
+`hello-edge-tls` (issuer `cluster-ca`; the node IPs `192.168.10.101` and
+`192.168.10.102` and the VIP `192.168.10.109` as IP SANs; server and client
+auth; 90 days, renewed 30 days early) and mounts its Secret at
+`/etc/hello-tls`. kw's Kamailio already uses it for WSS and the TLS hop to
+hello-sip ([webrtc.md](webrtc.md#browsers-on-kw)), and the pinned kamailio
+image has `tls.so`. To turn TLS on for phones, add `KAMAILIO_TLS_PORT` and
+`KAMAILIO_PUBLIC_TLS_PORT` (`"30509"`) to the kamailio Deployment, the
+`phones-tls` container port, and `HELLO_PROV_SIP_TLS_SERVER=192.168.10.101:30509`
+to hello-control. It replaced the server-only `hello-sip-tls`.
 
 ### Compose lab
 
@@ -146,10 +148,10 @@ DTLS-SRTP and ICE (S-16, see [media.md](media.md#dtls-srtp-and-ice-lite)) add
 two Grandstream keys, from the vendor's WP8x6 config templates (wp8x6_config
 1.0.3.35 and later, wp856_config 1.0.3.16):
 
-| Key      | Models                  | Written                                              | Values                                   |
-| -------- | ----------------------- | ---------------------------------------------------- | ---------------------------------------- |
-| `P60078` | WP826, WP836, WP856     | with `P183`, for a phone on TLS                      | `0` SDES, `1` DTLS (the device's **Key exchange**) |
-| `P95002` | WP826, WP836            | for any phone of the model, Auto by default          | `1` Auto, `4` ICE (the device's **ICE** switch)    |
+| Key      | Models              | Written                                     | Values                                             |
+| -------- | ------------------- | ------------------------------------------- | -------------------------------------------------- |
+| `P60078` | WP826, WP836, WP856 | with `P183`, for a phone on TLS             | `0` SDES, `1` DTLS (the device's **Key exchange**) |
+| `P95002` | WP826, WP836        | for any phone of the model, Auto by default | `1` Auto, `4` ICE (the device's **ICE** switch)    |
 
 Both are account 1, as `P183`. Other models and vendors write neither.
 
@@ -158,11 +160,13 @@ Both are account 1, as `P183`. Other models and vendors write neither.
 cert-manager renews the certificate 30 days before it expires. Kamailio reads
 the certificate at start, so a renewed one is served after the pod restarts
 (`kubectl -n hello rollout restart deploy/kamailio`); until then the old
-certificate is served and UDP keeps working. Alert on cert-manager's own
-metric, 14 days ahead:
+certificate is served and UDP keeps working. The old certificate runs out 30
+days after the renewal, so Kamailio must restart within them; the metric below
+follows the Secret, not what a running Kamailio serves. hello-sip re-reads its
+own certificate. Alert on cert-manager's own metric, 14 days ahead:
 
 ```
-certmanager_certificate_expiration_timestamp_seconds{name="hello-sip-tls"} - time() < 14 * 86400
+certmanager_certificate_expiration_timestamp_seconds{name=~"hello-edge-tls|hello-sip-node-tls"} - time() < 14 * 86400
 ```
 
 ## Hardware checks

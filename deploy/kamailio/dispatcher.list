@@ -12,3 +12,9 @@
 # dynamic source.
 1 sip:10.89.53.11:5060 0 0 duid=hello-sip-1
 1 sip:10.89.53.12:5060 0 0 duid=hello-sip-2
+# Set 2 (only read with the TLS hop, KAMAILIO_HELLO_TLS_PORT; the lab turns it
+# on): the same nodes by their TLS address, for the encrypted phone legs. It is
+# probed over TLS from the hello_tls socket, so a node whose TLS listener is
+# down is skipped for those legs while its UDP set-1 entry stays up.
+2 sip:10.89.53.11:5061;transport=tls 0 0 duid=hello-sip-1-tls;sockname=hello_tls;socket=tls:10.89.53.10:5073
+2 sip:10.89.53.12:5061;transport=tls 0 0 duid=hello-sip-2-tls;sockname=hello_tls;socket=tls:10.89.53.10:5073

@@ -112,6 +112,8 @@ type trunkBody struct {
 	SRTP          *string `json:"srtp"`
 	SessionTimers *string `json:"sessionTimers"`
 	FaxMode       *string `json:"faxMode"`
+	// Profile is generic or sbc-peer (docs/teams.md).
+	Profile *string `json:"profile"`
 }
 
 // dialingBody is an internalDialing request field (trunk plan contract 5).
@@ -179,6 +181,7 @@ func (b trunkBody) applyTo(in *store.TrunkInput) {
 	}
 	setIf(&in.SessionTimers, b.SessionTimers)
 	setIf(&in.FaxMode, b.FaxMode)
+	setIf(&in.Profile, b.Profile)
 	if b.Codecs != nil {
 		// Canonical spelling; validateTrunk refuses what does not normalise.
 		if canon, why := routing.NormalizeCodecs(*b.Codecs); why == "" {
@@ -229,6 +232,14 @@ func (s *server) createTrunk(w http.ResponseWriter, r *http.Request) {
 		CallerPolicy:    routing.CallerPolicy{UnknownCallerAction: routing.UnknownBlock, RejectCode: routing.RejectDecline},
 		SRTP:            string(secmedia.Off),
 		SessionTimers:   routing.SessionTimersDefault, FaxMode: fax.ModePassthrough}
+	if b.Profile != nil && *b.Profile == routing.ProfileSBCPeer {
+		// The profile's defaults; anything the body sets overrides them.
+		in.Profile = routing.ProfileSBCPeer
+		in.Mode = "ip"
+		in.Codecs = slices.Clone(routing.SBCPeerCodecs)
+		in.IdentityHeader = routing.IdentityPAI
+		in.AnonymousPolicy = routing.AnonymousHonour
+	}
 	b.applyTo(&in)
 	if b.InternalDialing != nil {
 		d, f := dialingPolicy(b.InternalDialing)
@@ -602,4 +613,33 @@ func (s *server) reorder(kind string) http.HandlerFunc {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// trunkProfile is one entry of GET /api/v1/trunk-profiles.
+type trunkProfile struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Defaults    map[string]any `json:"defaults"`
+	Limits      []string       `json:"limits"`
+}
+
+// listTrunkProfiles lists the trunk profiles with their defaults and limits.
+func (s *server) listTrunkProfiles(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, items([]trunkProfile{
+		{
+			Name:        routing.ProfileGeneric,
+			Description: "A carrier trunk, by registration or by IP.",
+			Defaults:    map[string]any{"codecs": routing.DefaultTrunkCodecs},
+			Limits:      []string{},
+		},
+		{
+			Name:        routing.ProfileSBCPeer,
+			Description: "A session border controller Hello peers with by IP, such as the certified SBC in front of Microsoft Teams Direct Routing (docs/teams.md).",
+			Defaults: map[string]any{
+				"mode": "ip", "codecs": routing.SBCPeerCodecs, "identityHeader": routing.IdentityPAI,
+				"anonymousPolicy": routing.AnonymousHonour, "srtp": "off", "optionsInterval": 30,
+			},
+			Limits: routing.SBCPeerLimits,
+		},
+	}))
 }

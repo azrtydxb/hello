@@ -2,7 +2,14 @@ package kindha
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"os/exec"
@@ -358,6 +365,11 @@ func (l *labEnv) manifests(t *testing.T) []byte {
 	if seen != len(keep) {
 		t.Fatalf("found %d of the %d edge objects of the %s", seen, len(keep), l.source)
 	}
+	if l.source == "kw" {
+		// kw's Kamailio waits for its certificate (cert-manager's on kw,
+		// WSS and the TLS hop read it): the lab issues a throwaway one.
+		out.Write(labTLSSecret(t, l.namespace, kwEdgeSecret(t, docs)))
+	}
 	fmt.Fprintf(&out, `---
 apiVersion: v1
 kind: Service
@@ -387,6 +399,68 @@ endpoints:
   - addresses: ["%[2]s"]
 `, l.namespace, l.runnerIP, l.stubPort)
 	return out.Bytes()
+}
+
+// kwEdgeSecret is the Secret kw's Kamailio mounts as its certificate (the
+// "tls" volume).
+func kwEdgeSecret(t *testing.T, docs []map[string]any) string {
+	t.Helper()
+	for _, d := range docs {
+		if d["kind"] != "Deployment" || asMap(d["metadata"])["name"] != "kamailio" {
+			continue
+		}
+		v := named(asList(asMap(asMap(asMap(d["spec"])["template"])["spec"])["volumes"]), "tls")
+		if name, _ := asMap(v["secret"])["secretName"].(string); name != "" {
+			return name
+		}
+	}
+	t.Fatal("kw's kamailio Deployment mounts no certificate Secret (volume tls)")
+	return ""
+}
+
+// labTLSSecret is a kubernetes.io/tls Secret with a self-signed certificate
+// usable as a server and a client certificate, its own CA as ca.crt: what
+// cert-manager's Secret holds on kw, for the lab only.
+func labTLSSecret(t *testing.T, namespace, name string) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               pkix.Name{CommonName: "kindha edge"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	crt := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	b, err := yaml.Marshal(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"type":       "kubernetes.io/tls",
+		"metadata":   map[string]any{"name": name, "namespace": namespace},
+		"stringData": map[string]any{
+			"tls.crt": crt,
+			"tls.key": string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})),
+			"ca.crt":  crt,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append([]byte("---\n"), b...)
 }
 
 func (l *labEnv) patchDeployment(t *testing.T, d map[string]any) {
@@ -595,15 +669,9 @@ func (l *labEnv) diagnostics(t *testing.T) {
 func (l *labEnv) withStaleVIPNeighbour(t *testing.T, node string, f func()) {
 	t.Helper()
 	mac := strings.TrimSpace(run(t, "docker", "exec", node, "cat", "/sys/class/net/eth0/address"))
-	var dev string
-	fields := strings.Fields(run(t, "ip", "-o", "route", "get", l.vip))
-	for i, w := range fields {
-		if w == "dev" && i+1 < len(fields) {
-			dev = fields[i+1]
-		}
-	}
+	dev := l.vipDevice()
 	if dev == "" {
-		t.Fatalf("no interface towards %s in %v", l.vip, fields)
+		t.Fatalf("no interface towards %s", l.vip)
 	}
 	run(t, "sudo", "-n", "ip", "neigh", "replace", l.vip, "lladdr", mac, "dev", dev, "nud", "permanent")
 	defer func() {

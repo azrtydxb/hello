@@ -5,15 +5,13 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 )
 
-// Door station video (spec phone-feature-parity S-49). A door station may
-// offer an H.264 video stream next to its audio. Hello does not decode it:
-// the anchor relays the RTP and RTCP of the video port pairs unchanged
-// between the door and the phone that answered, and the SDP carries a video
-// m-line on each side with Hello's own ports.
+// Plain RTP video sections (spec phone-feature-parity S-49, clients S-44). A
+// door station or a video phone offers an H.264 video stream next to its audio
+// on a video m-line of its own. This reads such a section out of an SDP; the
+// relay (plainvideo.go, relayvideo.go) carries the stream, and the SDP Hello
+// writes for it is the leg's (plainVideo.section).
 
 // VideoCodec is one H.264 payload type of a video m-line.
 type VideoCodec struct {
@@ -219,144 +217,4 @@ func RejectedVideoSection(offered VideoSDP) string {
 		pt = offered.Codecs[0].PT
 	}
 	return fmt.Sprintf("m=video 0 RTP/AVP %d\r\n", pt)
-}
-
-// VideoRelay relays the RTP and the RTCP of one video stream between two
-// legs, unchanged: an RTP Relay on legs "a" and "b" plus a bridge between the
-// RTCP sockets one port above each leg's RTP port. RTCP carries the picture
-// loss and keyframe requests a phone sends back to the door.
-type VideoRelay struct {
-	*Relay
-	rtcp [2]*rtcpSide
-	wg   sync.WaitGroup
-}
-
-type rtcpSide struct {
-	conn   *net.UDPConn
-	mu     sync.Mutex
-	remote *net.UDPAddr
-}
-
-// NewVideoRelay binds two video legs, each an even RTP port with the next port
-// free for RTCP.
-func NewVideoRelay(minPort, maxPort int) (*VideoRelay, error) {
-	r, err := NewRelay(minPort, maxPort)
-	if err != nil {
-		return nil, err
-	}
-	v := &VideoRelay{Relay: r}
-	for i, name := range []string{"a", "b"} {
-		if err := v.addLeg(i, name, minPort, maxPort); err != nil {
-			v.Close()
-			return nil, err
-		}
-	}
-	return v, nil
-}
-
-func (v *VideoRelay) addLeg(i int, name string, minPort, maxPort int) error {
-	start := minPort + minPort%2
-	for p := start; p+1 <= maxPort; p += 2 {
-		v.mu.Lock()
-		taken := v.used[p] || v.used[p+1]
-		v.mu.Unlock()
-		if taken {
-			continue
-		}
-		rc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: p + 1})
-		if err != nil {
-			continue
-		}
-		if _, err := v.addLegAt(name, p); err != nil {
-			_ = rc.Close()
-			continue
-		}
-		v.mu.Lock()
-		v.used[p+1] = true
-		v.mu.Unlock()
-		v.rtcp[i] = &rtcpSide{conn: rc}
-		return nil
-	}
-	return fmt.Errorf("media: no free video port pair for leg %q", name)
-}
-
-// SetRTCPTarget aims leg "a" or "b" RTCP at addr until the phone's own RTCP
-// latches the real source.
-func (v *VideoRelay) SetRTCPTarget(name string, addr *net.UDPAddr) {
-	if s := v.side(name); s != nil {
-		s.mu.Lock()
-		s.remote = addr
-		s.mu.Unlock()
-	}
-}
-
-func (v *VideoRelay) side(name string) *rtcpSide {
-	switch name {
-	case "a":
-		return v.rtcp[0]
-	case "b":
-		return v.rtcp[1]
-	}
-	return nil
-}
-
-// Start starts the RTP relay and the RTCP bridge.
-func (v *VideoRelay) Start() {
-	v.Relay.Start()
-	for i, name := range []string{"a", "b"} {
-		v.wg.Go(func() { v.bridge(name, v.rtcp[i], v.rtcp[1-i]) })
-	}
-}
-
-// bridge forwards RTCP read on one side to the other. A datagram is accepted
-// only from a source the matching RTP leg accepts.
-func (v *VideoRelay) bridge(name string, from, to *rtcpSide) {
-	leg := v.findLeg(name)
-	buf := make([]byte, 1500)
-	for {
-		_ = from.conn.SetReadDeadline(time.Now().Add(time.Second))
-		n, src, err := from.conn.ReadFromUDP(buf)
-		if err != nil {
-			select {
-			case <-v.ctx.Done():
-				return
-			default:
-			}
-			if ne, ok := err.(net.Error); ok && ne.Timeout() { //nolint:errorlint // a read deadline, not a wrapped error
-				continue
-			}
-			return
-		}
-		if leg == nil || !leg.sourceOK(src) {
-			continue
-		}
-		from.mu.Lock()
-		from.remote = &net.UDPAddr{IP: append(net.IP(nil), src.IP...), Port: src.Port}
-		from.mu.Unlock()
-		to.mu.Lock()
-		dst := to.remote
-		to.mu.Unlock()
-		if dst != nil {
-			_, _ = to.conn.WriteToUDP(buf[:n], dst)
-		}
-	}
-}
-
-// RTCPPort is the RTCP port of leg "a" or "b".
-func (v *VideoRelay) RTCPPort(name string) int {
-	if s := v.side(name); s != nil {
-		return s.conn.LocalAddr().(*net.UDPAddr).Port //nolint:forcetypeassert // always a UDPAddr
-	}
-	return 0
-}
-
-// Close stops the relay and the bridge.
-func (v *VideoRelay) Close() {
-	v.Relay.Close()
-	for _, s := range v.rtcp {
-		if s != nil {
-			_ = s.conn.Close()
-		}
-	}
-	v.wg.Wait()
 }

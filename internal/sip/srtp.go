@@ -91,6 +91,9 @@ func (c *call) srtpSnapshot() *snapshot.Snapshot {
 // callerSRTP is the caller endpoint's SRTP capability: a phone's policy over
 // its INVITE's transport, or an inbound trunk's policy (trunk legs are UDP).
 func (c *call) callerSRTP() srtpLeg {
+	if c.webCaller() {
+		return webLegSRTP()
+	}
 	if c.callerDevice != "" {
 		l := srtpLeg{policy: devicePolicy(c.srtpSnapshot(), c.callerDevice)}
 		l.dtls, l.ice = deviceMedia(c.srtpSnapshot(), c.callerDevice)
@@ -121,6 +124,9 @@ func (c *call) calleeSRTP(l *leg) srtpLeg {
 // bindingSRTP is the SRTP capability of a phone's registered contact: its
 // device's policy over the transport the contact registered on.
 func (c *call) bindingSRTP(b livestate.Binding) srtpLeg {
+	if isWebBinding(c.srtpSnapshot(), b) {
+		return webLegSRTP()
+	}
 	l := srtpLeg{policy: devicePolicy(c.srtpSnapshot(), b.Device), tls: bindingOnTLS(b)}
 	l.dtls, l.ice = deviceMedia(c.srtpSnapshot(), b.Device)
 	return l
@@ -144,6 +150,9 @@ func (c *call) srtpGate(tx sip.ServerTransaction, snap *snapshot.Snapshot) bool 
 	req := c.inv
 	if req == nil || len(req.Body()) == 0 {
 		return true
+	}
+	if media.IsWebRTCOffer(req.Body()) && !c.webrtcGate(tx, req) {
+		return false
 	}
 	off, err := media.ParseAudioSDP(req.Body())
 	if err != nil {
@@ -435,6 +444,7 @@ func (c *call) learnPeerAnswer(r *media.Relay, leg string, body []byte) {
 	if a, err := media.ParseAudioSDP(body); err == nil {
 		learnCrypto(r, leg, a)
 	}
+	c.webVideoPeerAnswer(leg, body)
 }
 
 // haSRTP is the replicated SRTP mode of relay leg: "" (plain), "savp", "avp"

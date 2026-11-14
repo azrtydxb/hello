@@ -71,12 +71,19 @@ Two separate things, both optional:
 
 **Video in the call.** A door station that offers H.264 video in its SDP (as the caller,
 or when a user dials its number) has the video carried to the phone that answers, if that
-phone's SDP accepts it. The anchor opens a second pair of ports for the stream and relays
-its RTP and its RTCP (the phone's keyframe requests) unchanged; both SDPs carry a video
-m-line with Hello's own address. A phone that does not take the video gets none, and the
-station's offer is answered with a refused (port 0) video line. A call with no station
-never carries video. After a takeover by another node, a transfer or a re-anchor the call
-continues with audio only. Only H.264 over plain RTP is carried (no SRTP, no VP8).
+phone's SDP accepts it, and also to a web softphone that answers. The anchor opens a pair
+of ports for the station's video next to its audio and relays the stream through the same
+translator a browser's video uses (one SSRC per leg, payload types rewritten, RTCP ended
+per leg, the phone's picture loss and NACK requests carried to the station, a rate
+ceiling); both SDPs carry a video m-line with Hello's own address. A phone that does not
+take the video gets none, and the station's offer is answered with a refused (port 0)
+video line. It is a call like any other: `HELLO_VIDEO_ENABLED`, the extensions' "Video
+allowed" and the node's video session limit apply, and the video is recorded with the
+call when the call is recorded (Record video on the extension). Trunk legs never carry
+video. After a takeover by another node, a transfer or a re-anchor the call continues
+with audio only. Only H.264 over plain RTP is carried (no SRTP, no VP8); with a browser on
+the other end the station must offer Constrained Baseline in packetization mode 1. See
+[docs/webrtc.md](webrtc.md#video-phones-and-door-stations).
 
 **The camera picture in the console.** Give a station the address of its camera under
 **Extensions**, the station's drawer, **Camera** (administrators), or with
