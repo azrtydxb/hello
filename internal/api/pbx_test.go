@@ -179,20 +179,26 @@ func startMinio(t *testing.T) *MinioObjects {
 	_ = l.Close()
 	name := fmt.Sprintf("p4ctl-minio-%d", time.Now().UnixNano())
 	ep := fmt.Sprintf("127.0.0.1:%d", port)
-	// minio/minio first; the local mirror's cleanstart/minio as fallback.
+	// Chainguard's minio first (minio/minio is no longer pullable); the local
+	// mirror's cleanstart/minio as fallback.
 	var out []byte
 	started := false
-	// The data path differs per image: /data on minio/minio, /tmp/data on
-	// the cleanstart mirror (its backend refuses /data).
-	for _, image := range []string{"minio/minio:latest", "cleanstart/minio:latest"} {
-		path := "/data"
-		if image != "minio/minio:latest" {
-			path = "/tmp/data"
+	// The data path differs per image: /data on the Chainguard image (run as
+	// root so it can create it), /tmp/data on the cleanstart mirror (its
+	// backend refuses /data).
+	const chainguard = "cgr.dev/chainguard/minio@sha256:ddfab4c402bf32e7701600d16d8c40dbccfab4c4e5340eef4c324394349c7926"
+	for _, image := range []string{chainguard, "cleanstart/minio:latest"} {
+		path, user := "/data", "0:0"
+		if image != chainguard {
+			path, user = "/tmp/data", ""
 		}
-		cmd := exec.Command("docker", "run", "-d", "--rm", "--name", name,
+		args := []string{"run", "-d", "--rm", "--name", name,
 			"-p", fmt.Sprintf("127.0.0.1:%d:9000", port),
-			"-e", "MINIO_ROOT_USER="+testMinioUser, "-e", "MINIO_ROOT_PASSWORD="+testMinioPass,
-			image, "server", path)
+			"-e", "MINIO_ROOT_USER=" + testMinioUser, "-e", "MINIO_ROOT_PASSWORD=" + testMinioPass}
+		if user != "" {
+			args = append(args, "--user", user)
+		}
+		cmd := exec.Command("docker", append(args, image, "server", path)...)
 		out, err = cmd.CombinedOutput()
 		if err == nil {
 			started = true
