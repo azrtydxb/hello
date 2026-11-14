@@ -3,6 +3,7 @@ package sip
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -144,50 +145,69 @@ func TestPrackAndReplaces(t *testing.T) {
 		}
 	})
 
-	t.Run("attended transfer before answer", func(t *testing.T) {
-		pbx := startPBX(t, threeDevices())
-		a, b, c := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1"), newPhone(t, pbx, "c1", "pc")
-		for _, p := range []*phone{a, b, c} {
-			p.register(t)
-		}
-		// Call 1: a -> b, answered.
-		r1 := waitCall(t, dial(t.Context(), a, "200"))
-		if r1.err != nil {
-			t.Fatalf("call 1: %v", r1.err)
-		}
-		inv1 := waitReq(t, b.invites, "INVITE to b")
-		dssAB := b.serverFor(inv1)
-		// Call 2: b -> c, which rings.
-		release := make(chan struct{})
-		c.setCallee(answerAfter(release))
-		ch2 := dial(t.Context(), b, "300")
-		inv2 := waitReq(t, c.invites, "consultation INVITE to c")
-		// b transfers a to c before c answers.
-		cs2 := b.clientCallID(t)
-		referTo := "<sip:300@" + testDomain + "?Replaces=" + cs2 + ">"
-		if res := b.sendReferFromCallee(t, dssAB, referTo); res.StatusCode != 202 {
-			t.Fatalf("REFER = %d, want 202", res.StatusCode)
-		}
-		// The consultation call is cancelled: b's INVITE ends, c stops ringing it.
-		if r2 := waitCall(t, ch2); r2.err == nil {
-			t.Fatal("the transferor's consultation call stayed up after the transfer")
-		}
-		if got := waitReq(t, c.cancels, "CANCEL of the consultation call"); got.CallID().Value() != inv2.CallID().Value() {
-			t.Fatalf("CANCEL for %s, want the consultation call %s", got.CallID().Value(), inv2.CallID().Value())
-		}
-		// c rings once more, for a, and answers: a and c talk, b is gone.
-		c.setCallee(answerAfter(nil))
-		inv3 := waitReq(t, c.invites, "the transferred call's INVITE to c")
-		if inv3.CallID().Value() == inv2.CallID().Value() {
-			t.Fatal("the transferred call reused the consultation call")
-		}
-		waitReq(t, b.byes, "BYE to the transferor's first call")
-		noReq(t, c.invites, 500*time.Millisecond, "a second ring of the target")
-		pbx.nextCDR(t) // the consultation call, cancelled
-		hangup(t, r1.dcs)
-		waitReq(t, c.byes, "BYE to the target")
-		close(release)
-	})
+	// The target's phone decides per INVITE: the consultation INVITE rings,
+	// the transferred call's INVITE is answered (at once, or only once the
+	// consultation's CANCEL reached the phone). The answer must not depend on
+	// when the test reads its events: the transferred call's INVITE can reach
+	// the target before the test has seen the consultation end, and a
+	// callee swapped in by the test after that would never answer it.
+	for _, order := range []struct {
+		name        string
+		afterCancel bool // the target answers only after the CANCEL arrived
+	}{
+		{"attended transfer before answer, answered at once", false},
+		{"attended transfer before answer, answered after the cancel", true},
+	} {
+		t.Run(order.name, func(t *testing.T) {
+			pbx := startPBX(t, threeDevices())
+			a, b, c := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1"), newPhone(t, pbx, "c1", "pc")
+			for _, p := range []*phone{a, b, c} {
+				p.register(t)
+			}
+			// Call 1: a -> b, answered.
+			r1 := waitCall(t, dial(t.Context(), a, "200"))
+			if r1.err != nil {
+				t.Fatalf("call 1: %v", r1.err)
+			}
+			inv1 := waitReq(t, b.invites, "INVITE to b")
+			dssAB := b.serverFor(inv1)
+			// Call 2: b -> c, which rings; c answers the next INVITE.
+			var gate chan struct{}
+			if order.afterCancel {
+				gate = make(chan struct{})
+			}
+			c.setCallee(consultThenAnswer(gate))
+			ch2 := dial(t.Context(), b, "300")
+			inv2 := waitReq(t, c.invites, "consultation INVITE to c")
+			// b transfers a to c before c answers.
+			cs2 := b.clientCallID(t)
+			referTo := "<sip:300@" + testDomain + "?Replaces=" + cs2 + ">"
+			if res := b.sendReferFromCallee(t, dssAB, referTo); res.StatusCode != 202 {
+				t.Fatalf("REFER = %d, want 202", res.StatusCode)
+			}
+			// The consultation call is cancelled: c stops ringing it.
+			if got := waitReq(t, c.cancels, "CANCEL of the consultation call"); got.CallID().Value() != inv2.CallID().Value() {
+				t.Fatalf("CANCEL for %s, want the consultation call %s", got.CallID().Value(), inv2.CallID().Value())
+			}
+			if gate != nil {
+				close(gate)
+			}
+			// b's consultation INVITE ends without an answer.
+			if r2 := waitCall(t, ch2); r2.err == nil {
+				t.Fatal("the transferor's consultation call stayed up after the transfer")
+			}
+			// c rings once more, for a, and answers: b's first call goes.
+			inv3 := waitReq(t, c.invites, "the transferred call's INVITE to c")
+			if inv3.CallID().Value() == inv2.CallID().Value() {
+				t.Fatal("the transferred call reused the consultation call")
+			}
+			waitReq(t, b.byes, "BYE to the transferor's first call")
+			noReq(t, c.invites, 500*time.Millisecond, "a second ring of the target")
+			pbx.nextCDR(t) // the consultation call, cancelled
+			hangup(t, r1.dcs)
+			waitReq(t, c.byes, "BYE to the target")
+		})
+	}
 
 	t.Run("confirmed dialog", func(t *testing.T) {
 		ha := newFakeHA()
@@ -299,6 +319,20 @@ func TestPrackAndReplaces(t *testing.T) {
 			t.Errorf("hello_replaces_total{confirmed,ok} = %v, want 3", v)
 		}
 	})
+}
+
+// consultThenAnswer rings on a phone's first INVITE until it is cancelled
+// and answers every later one: at once when gate is nil, else once gate is
+// closed.
+func consultThenAnswer(gate <-chan struct{}) calleeFn {
+	var n atomic.Int32
+	return func(p *phone, req *sip.Request, tx sip.ServerTransaction, dss *sipgo.DialogServerSession) {
+		if n.Add(1) == 1 {
+			ringForever()(p, req, tx, dss)
+			return
+		}
+		answerAfter(gate)(p, req, tx, dss)
+	}
 }
 
 // clientCallID is the Call-ID of the one call p dialled that is still being
