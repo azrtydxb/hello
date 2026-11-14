@@ -143,3 +143,40 @@ func TestChooseOneUserManyExtensions(t *testing.T) {
 		t.Fatalf("order = %v, want 2 then 1 (by their remaining extension)", got)
 	}
 }
+
+// TestStaffed fails if a queue counts as staffed with only logged-out dynamic
+// or paused members, if a logged-in member does not count, if capacity or a
+// call keeps a staffed agent from counting, or if an unreadable state does
+// not fall back to the static members.
+func TestStaffed(t *testing.T) {
+	q := Queue{Name: "support", Strategy: queue.Linear, Capacity: 1, RequiresIdleVoice: true}
+	dyn := Agent{UserID: 1, Ext: "101", Dynamic: true, Open: 5}
+	stat := Agent{UserID: 2, Ext: "102"}
+	states := map[string]queue.AgentState{}
+	if Staffed(q, []Agent{dyn}, Availability{States: states}) {
+		t.Fatal("a logged-out dynamic member counted")
+	}
+	states["101"] = queue.AgentState{Ext: "101", LoggedIn: true}
+	av := Availability{States: states, OnCall: map[string]bool{"101": true}}
+	if !Staffed(q, []Agent{dyn}, av) {
+		t.Fatal("a logged-in member at capacity and on a call must still count")
+	}
+	states["101"] = queue.AgentState{Ext: "101", LoggedIn: true, Paused: true}
+	if Staffed(q, []Agent{dyn}, Availability{States: states}) {
+		t.Fatal("a paused member counted")
+	}
+	states["102"] = queue.AgentState{Ext: "102", Paused: true}
+	if Staffed(q, []Agent{dyn, stat}, Availability{States: states}) {
+		t.Fatal("a paused static member counted")
+	}
+	delete(states, "102")
+	if !Staffed(q, []Agent{dyn, stat}, Availability{States: states}) {
+		t.Fatal("a static member who is not paused must count")
+	}
+	if !Staffed(q, []Agent{dyn, stat}, Availability{}) || Staffed(q, []Agent{dyn}, Availability{}) {
+		t.Fatal("with the state unreadable only static members count")
+	}
+	if Staffed(q, nil, Availability{States: states}) {
+		t.Fatal("a queue with no members counted")
+	}
+}

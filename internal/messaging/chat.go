@@ -5,14 +5,11 @@ package messaging
 // coarse facts kept about a visitor. Nothing here logs or stores anything.
 
 import (
-	"errors"
-	"fmt"
 	"net/mail"
 	"net/netip"
 	"net/url"
 	"regexp"
 	"strings"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -136,75 +133,6 @@ func UAFamily(ua string) string {
 		return "safari"
 	}
 	return "other"
-}
-
-// Hours is a weekly schedule: the chat is open in the listed windows. An
-// empty schedule is always open.
-type Hours struct {
-	Zone string     `json:"zone"`
-	Days []HoursDay `json:"days"`
-}
-
-// HoursDay is one opening window: Day is 0 (Sunday) to 6, From and To are
-// "HH:MM" with From before To.
-type HoursDay struct {
-	Day  int    `json:"day"`
-	From string `json:"from"`
-	To   string `json:"to"`
-}
-
-func parseClock(s string) (int, bool) {
-	t, err := time.Parse("15:04", s)
-	if err != nil || len(s) != 5 {
-		return 0, false
-	}
-	return t.Hour()*60 + t.Minute(), true
-}
-
-// Validate reports why the schedule is unusable.
-func (h Hours) Validate() error {
-	if len(h.Days) == 0 {
-		return nil
-	}
-	if len(h.Days) > 28 {
-		return errors.New("at most 28 windows")
-	}
-	if h.Zone == "" {
-		return errors.New("a time zone is required")
-	}
-	if _, err := time.LoadLocation(h.Zone); err != nil {
-		return fmt.Errorf("unknown time zone %q", h.Zone)
-	}
-	for _, d := range h.Days {
-		if d.Day < 0 || d.Day > 6 {
-			return errors.New("day must be 0 (Sunday) to 6")
-		}
-		from, ok1 := parseClock(d.From)
-		to, ok2 := parseClock(d.To)
-		if !ok1 || !ok2 || from >= to {
-			return errors.New("each window needs from and to as HH:MM, from before to")
-		}
-	}
-	return nil
-}
-
-// Open reports whether the chat is open at now. An invalid schedule is
-// treated as always open, so a bad setting never silences the widget.
-func (h Hours) Open(now time.Time) bool {
-	if len(h.Days) == 0 || h.Validate() != nil {
-		return true
-	}
-	loc, _ := time.LoadLocation(h.Zone)
-	t := now.In(loc)
-	m := t.Hour()*60 + t.Minute()
-	for _, d := range h.Days {
-		from, _ := parseClock(d.From)
-		to, _ := parseClock(d.To)
-		if d.Day == int(t.Weekday()) && m >= from && m < to {
-			return true
-		}
-	}
-	return false
 }
 
 // ValidOrigin reports whether o is an origin a page can be served from:

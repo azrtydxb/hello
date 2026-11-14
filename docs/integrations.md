@@ -661,7 +661,7 @@ administrator.
 | `hello_directory_last_success_timestamp_seconds{connector}` | alert when older than three schedule intervals |
 | `hello_directory_provisioned_total{connector_kind}`         | extensions created by auto-provisioning        |
 
-Tables are in migrations `00093` and `00170` (auto-provisioning).
+Tables are in migrations `00093` and `00101` (auto-provisioning).
 
 ## What comes next
 

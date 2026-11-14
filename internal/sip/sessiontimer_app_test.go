@@ -218,8 +218,22 @@ func TestSessionTimersQueueTransfer(t *testing.T) {
 
 // TestSessionTimersIVRTakeover fails if an IVR menu's caller, taken over by a
 // survivor, is not refreshed with the timer the owner negotiated, or the
-// one-legged call is ended for a callee dialog it never had.
+// one-legged call is ended for a callee dialog it never had. The second case
+// has the owner's last refresh reach the caller before the takeover
+// re-INVITE: it fails if that refresh is mistaken for the survivor's.
 func TestSessionTimersIVRTakeover(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		ownerRefreshedFirst bool
+	}{
+		{"taken over before the owner refreshed", false},
+		{"the owner's refresh arrives first", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) { testSessionTimersIVRTakeover(t, tc.ownerRefreshedFirst) })
+	}
+}
+
+func testSessionTimersIVRTakeover(t *testing.T, ownerRefreshedFirst bool) {
 	objs := &fakeObjects{}
 	_ = objs.Put(context.Background(), "ann/greet.wav", media.EncodeWAV(make([]byte, 16000*4), 8000))
 	m := ivrMenu("main", "800", map[string]snapshot.IVRDest{"1": ext("200")})
@@ -243,12 +257,26 @@ func TestSessionTimersIVRTakeover(t *testing.T) {
 		t.Fatalf("replicated session = %+v", rec.Session)
 	}
 	haReinviteTimeout.Set(time.Second)
+	if ownerRefreshedFirst {
+		// Leave the owner's refresh and its ACK queued at the phone, ahead
+		// of the takeover's re-INVITE (the order a slow CI runner produced).
+		eventually(t, "the owner refreshed the caller", func() bool {
+			return len(a.reinvites) > 0 && len(a.acks) > 0
+		})
+	}
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
-	waitReq(t, a.reinvites, "takeover re-INVITE to the caller")
-	waitReq(t, a.acks, "ACK to the caller's 200")
-	drain(a.reinvites)
-	refreshWithin(t, a.reinvites, 4*time.Second, "the caller on the survivor")
+	// The owner refreshes the caller every second until it dies: its last
+	// refresh and ACK may reach the phone before the takeover's, so only the
+	// survivor's requests count.
+	reinv := reqFromWithin(t, a.reinvites, taker, 10*time.Second, "takeover re-INVITE to the caller")
+	for {
+		ack := reqFromWithin(t, a.acks, taker, 10*time.Second, "ACK to the caller's 200")
+		if ack.CSeq().SeqNo == reinv.CSeq().SeqNo {
+			break
+		}
+	}
+	refreshFrom(t, a.reinvites, taker, 4*time.Second, "the caller on the survivor")
 	noReq(t, a.byes, 1500*time.Millisecond, "BYE to a caller whose refresh was answered")
 	if n := len(liveCalls(t, taker)); n != 1 {
 		t.Fatalf("live calls on the survivor = %d, want the menu call", n)
