@@ -48,6 +48,7 @@ func startChat(ctx context.Context, cfg config.Control, st *store.Store, box *se
 			MaxInFlight:    cfg.Chat.MaxInFlight,
 			MaxStreams:     cfg.Chat.MaxStreams,
 			Mail:           chatMail(smtp),
+			Agents:         vk.Agents,
 			Turnstile:      chat.NewTurnstile(),
 			Metrics:        chat.NewMetrics(reg),
 			Log:            clog,

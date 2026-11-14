@@ -266,8 +266,10 @@ The numbers match by their last nine digits, so `0475 12 34 56` and
 A text can follow the conversation to the desk phone. Two switches must both be
 on, both off by default: **Deliver to desk phones** on the number (Messaging
 channels) and **Show customer texts on my desk phone** in the user's profile.
-Then, when a conversation is assigned to or taken by that user, and for each
-later customer text while it is theirs, Hello queues a SIP MESSAGE to every
+Then, when a conversation is assigned to or taken by that user (by a
+supervisor, by the user taking it, or by the router: a number routed to the
+user, or a text queue's strategy picking them), and for each later customer
+text while it is theirs, Hello queues a SIP MESSAGE to every
 registered phone of the user's extension (an unregistered phone gets it at its
 next REGISTER, within the text queue's TTL). The phone shows it from the
 customer, with the contact name resolved for that user, and a non-SMS channel
@@ -314,16 +316,32 @@ once, when it starts; a reopened one keeps where it was.
 **First contact.** A number may have a first-contact text, sent once to a
 customer who texts it for the first time (never again to the same customer on
 that number, never to one who opted out, and not in addition to the
-closed-hours reply). Like the closed-hours reply it is sent by a SIP trunk
-channel only today.
+closed-hours reply). It goes out like the closed-hours reply, below.
 
 **Opening hours.** A number may have a weekly schedule (a time zone and
 windows). A conversation that starts outside it gets the **after-hours action**:
 route as usual (the default), send a reply text and then route as usual, or go
-to another target. The reply is sent once, never to a customer who opted out,
-and only a SIP trunk channel can send it today (another channel's conversation
-gets a line in the thread saying it was not sent). The time-conditions engine
-is not used for texts; the number's own schedule is.
+to another target. The reply is sent once, never to a customer who opted out.
+The time-conditions engine is not used for texts; the number's own schedule is.
+On a chat site the same schedule is the widget's opening hours (see Website
+chat): a site has no second schedule.
+
+**How an automatic text goes out** (the first-contact text and the
+closed-hours reply, shown in the inbox as "Automatic reply"):
+
+| Channel        | What happens                                                                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SIP trunk      | Queued in the SIP text queue at once, split into parts like a reply.                                                                               |
+| Twilio, Telnyx | Queued for the send worker, which checks the opt-out list again just before the carrier call; status polled.                                       |
+| Chat site      | Shown in the visitor's widget at once, from "Support" like an agent's reply. It does not count as an answer for the visitor's cap of 200 messages. |
+
+A channel that cannot send it writes a line in the conversation instead, saying
+which text was not sent and why: a carrier whose credentials were refused, a
+customer address a carrier cannot text (not `+` and digits), a carrier this
+build has no adapter for, or a SIP trunk channel without a trunk. Today the
+carrier case matters only once inbound texts reach a carrier number (the public
+listener or polling, not built); a conversation started by first contact is
+assigned to its sender and is not routed.
 
 **Text queues.** On a queue (Queues > the queue), **Texts** turns it on and sets
 how many open conversations each agent holds (default 3, 1 to 50), after how
@@ -472,9 +490,32 @@ form-action 'none'`. A Turnstile site also allows Cloudflare's host for
 A launcher bubble, an optional pre-chat form (name and email: off, optional or
 required; the retention period and a privacy policy link are shown, and
 consent is recorded), the conversation, a typing indicator and "Support"
-as the agents' name. Outside the site's opening hours, with no supervisor
-holding the inbox open, or with the live queue full, the widget offers to leave
-a message and an email address (or hides itself, per site). A visitor may end
+as the agents' name. When nobody can take a live chat the widget offers to
+leave a message and an email address (or hides itself, per site). Whether
+somebody can follows where the site's chats go (**Routing and hours** on the
+chat sites page: the routing of the site's address, see Routing and queues):
+
+| Chats go to                         | Live while                                                                              |
+| ----------------------------------- | --------------------------------------------------------------------------------------- |
+| A text queue                        | a member is staffed: a static member not paused, a dynamic member logged in, not paused |
+| A user, or the user of an extension | that user has the inbox open (seen in the last two minutes)                             |
+| A ring group                        | one of its users has the inbox open                                                     |
+| The pool (or a target that is gone) | an operator or administrator has the inbox open                                         |
+
+Login and pause are the call queues' own (the inbox toggle or the feature
+codes); an agent at their conversation limit or on a call still counts, and the
+chat waits in the queue for them. If Valkey cannot be read, only static members
+count, as for the router. Outside the opening hours the widget is closed, unless
+the after-hours action routes chats elsewhere: then that target decides. In any
+case the widget goes offline when the site's unassigned live chats reach its
+cap. The chat sites page shows each widget's state now (live, closed, nobody
+available, too many waiting); `GET /api/v1/messaging/chat/sites` carries it as
+`availability`.
+
+The site's opening hours are the schedule of its address: the site's `hours`
+field and the routing's `schedule` are the same data, and changing either
+changes both (migration `00140_messaging_one_schedule` moved each site's own
+hours there). A visitor may end
 the chat and, when the site allows it, email themselves a transcript (three a
 day). Messages are plain text everywhere; a link in a visitor's message is
 clickable only in the inbox, with `rel="noopener noreferrer nofollow"` and one
@@ -517,8 +558,10 @@ All of them are server-side and none trusts the `Origin` header (anyone can run
 - **Content**: honeypot field, optional link stripping, no cookies, no
   fingerprinting, the user agent reduced to a browser family, the page to host
   and path.
-- **Not built**: attachments and the site logo (they need the media pipeline,
-  which is not on main).
+- **Not built**: attachments and the site logo. They need the media pipeline of
+  spec M-18 (`message_media`, MinIO storage under `msg/`, type sniffing and an
+  allowlist, the authorised media route), which no messaging item has built
+  yet; until it lands the attachment route does not exist (404).
 
 Visitors' names, emails, tokens, addresses and text never reach a log, a metric
 label or an audit row. Retention for finished chats is 90 days by default (a

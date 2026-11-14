@@ -94,7 +94,7 @@ func TestChatSiteLifecycle(t *testing.T) {
 	// An update keeps the key and the stored secret when none is sent.
 	in := store.ChatSiteInput{Name: "Help desk 2", Enabled: false, Accent: "#112233", Position: "left", Collect: "required", OfflineMode: "hidden", Challenge: "turnstile",
 		TurnstileSiteKey: "0xKEY", PowBits: 18, MaxOpenUnassigned: 5, Transcripts: true, StripLinks: true,
-		Hours: messaging.Hours{Zone: "UTC", Days: []messaging.HoursDay{{Day: 1, From: "09:00", To: "17:00"}}}}
+		Hours: messaging.Schedule{Zone: "UTC", Days: []messaging.ScheduleDay{{Day: 1, From: "09:00", To: "17:00"}}}}
 	up, err := r.st.UpdateChatSite(ctx, "test", site.ID, in)
 	if err != nil {
 		t.Fatal(err)
@@ -308,7 +308,7 @@ func TestChatCaps(t *testing.T) {
 		if !errors.Is(err, store.ErrChatFull) {
 			t.Fatalf("a third live chat over a cap of 2: %v", err)
 		}
-		on, reason, err := r.st.ChatAvailability(ctx, site, time.Now())
+		on, reason, err := r.st.ChatAvailability(ctx, site, time.Now(), nil)
 		if err != nil || on {
 			t.Fatalf("availability = %v %q %v", on, reason, err)
 		}
@@ -371,19 +371,19 @@ func TestChatCaps(t *testing.T) {
 func TestChatAvailability(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
-	hours := messaging.Hours{Zone: "UTC", Days: []messaging.HoursDay{{Day: 1, From: "09:00", To: "17:00"}}}
+	hours := messaging.Schedule{Zone: "UTC", Days: []messaging.ScheduleDay{{Day: 1, From: "09:00", To: "17:00"}}}
 	site := r.site("Hours", func(in *store.ChatSiteInput) { in.Hours = hours })
 	monday := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
-	if on, reason, _ := r.st.ChatAvailability(ctx, site, monday.Add(8*time.Hour)); on || reason != "hours" {
+	if on, reason, _ := r.st.ChatAvailability(ctx, site, monday.Add(8*time.Hour), nil); on || reason != "hours" {
 		t.Fatalf("after hours: %v %q", on, reason)
 	}
-	if on, reason, _ := r.st.ChatAvailability(ctx, site, monday); on || reason != "no_agent" {
+	if on, reason, _ := r.st.ChatAvailability(ctx, site, monday, nil); on || reason != "no_agent" {
 		t.Fatalf("nobody present: %v %q", on, reason)
 	}
 	if err := r.st.TouchInboxPresence(ctx, r.admin); err != nil {
 		t.Fatal(err)
 	}
-	if on, reason, err := r.st.ChatAvailability(ctx, site, monday); err != nil || !on {
+	if on, reason, err := r.st.ChatAvailability(ctx, site, monday, nil); err != nil || !on {
 		t.Fatalf("a supervisor present: %v %q %v", on, reason, err)
 	}
 	// A plain agent's presence does not make the pool answerable.
@@ -393,7 +393,7 @@ func TestChatAvailability(t *testing.T) {
 	if err := r.st.TouchInboxPresence(ctx, r.agent); err != nil {
 		t.Fatal(err)
 	}
-	if on, _, _ := r.st.ChatAvailability(ctx, site, monday); on {
+	if on, _, _ := r.st.ChatAvailability(ctx, site, monday, nil); on {
 		t.Fatal("a user with no supervisor role counted as available")
 	}
 }

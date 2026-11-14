@@ -129,7 +129,8 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | done (#307) |
 | 4     | LAN chat widget                                              | done (#309) |
 | 5     | Message routing and ACD                                      | done (#311) |
-| 6     | Telnyx, sender registration                                  | wip (#346)  |
+| 6     | Telnyx, sender registration                                  | done (#346) |
+| W     | Wiring between items 2 to 6, one schedule                    | wip         |
 | 7     | AI triage, drafts, auto-reply                                | todo        |
 | 8     | Integrations, reporting, DSAR export, redact                 | todo        |
 | N1-N3 | Public listener, WhatsApp, polling                           | not now     |
