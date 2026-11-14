@@ -47,9 +47,9 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P6  | HubSpot and internal/crm framework             | done (#289, #333) |
 | P7  | Zapier                                         | done (#304)       |
 | P8  | Directory engine, AD/LDAP                      | done (#306)       |
-| P9  | Google Workspace and Entra connectors          | todo              |
+| P9  | Google Workspace and Entra connectors          | wip (#358)        |
 | P10 | SCIM 2.0                                       | todo              |
-| P11 | OIDC SSO, LDAP bind login                      | todo              |
+| P11 | OIDC SSO, LDAP bind login                      | wip (#358)        |
 | P12 | Auto-provisioning extensions from a range      | todo              |
 | P13 | Salesforce Open CTI                            | done (#331)       |
 | P14 | Pipedrive                                      | done (#329)       |
@@ -173,3 +173,4 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - Clients 6b, 10 and 11: a real video desk phone and a real door station (H.264 on RTP/AVP) calling each other, a browser and a conference room, with the picture checked on both ends, the keyframe wait on a speaker switch and REMB behaviour; MP4 (H.264) and WebM (VP8) recordings playing in Chrome, Edge, Firefox and Safari with the video slaved to the audio; the real storage per hour of a typical video call (the number behind the 200 GB quota and the 30-day retention); a node killed during a video recording on kw (the sweeper and finalizer); the vendor video preview keys of `phone-feature-parity` S-49
 - Teams Direct Routing run (item 13, P22): a Microsoft 365 tenant with Teams Phone, a certified SBC or DRaaS contract, and a public SBC name and certificate; the cmdlet steps in docs/teams.md are unverified until then
 - WSS in a browser through the kw Ingress (items 2 and 2c): the kw manifests came with #334: a real browser registering at wss://hello.kw.watteel.lab/sip and calling a desk phone, a `hello_tls` entry in Kamailio's metrics, and whether Kamailio sees ingress-nginx's pod address (10.42.x) so its X-Forwarded-For is believed
+- Directory and single sign-on (integrations P9 and P11, #358; docs/integrations.md, "Directory sync: Google Workspace and Microsoft Entra ID" and "Single sign-on"): a real Google Workspace tenant (a service account with a custom read-only admin role listing users without delegation, `oauth_admin` consent and its refresh token, domain-wide delegation with the three scopes); a real Entra tenant (client secret and certificate auth, whether Entra wants `x5t` or `x5t#S256`, `$deltatoken=latest`, an expired delta link answering 410, `@removed` entries, `transitiveMembers`, guests); OIDC sign-in, linking and JIT on both tenants (Google `hd`, Entra `tid`/`oid`, a user with TOTP); LDAP bind login against a real AD (objectGUID lookup, a wrong password, an AD-locked account, Hello's throttle before AD's lockout)
