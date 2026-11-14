@@ -30,8 +30,8 @@ const (
 // mwiPollInterval is how often subscribed mailboxes are re-read. Changes made
 // through the control-plane API reach this process as mailbox events and are
 // NOTIFYed at once; the re-read is only the safety net for an event lost
-// while the listener reconnects. A variable so tests can shorten it.
-var mwiPollInterval = 60 * time.Second
+// while the listener reconnects. A tunable so tests can shorten it.
+var mwiPollInterval = newTunable(60 * time.Second)
 
 // mailboxChanged handles a mailbox event from the control plane: box 0 means
 // anything may have changed (the listener just (re)connected), otherwise the
@@ -225,7 +225,7 @@ func (s *Server) sendUnsolicitedMWI(ctx context.Context, ext string, b livestate
 // heard or deleted through the control-plane API reaches the phone, on any
 // node holding the subscription.
 func (s *Server) mwiPollLoop(ctx context.Context) {
-	t := time.NewTicker(mwiPollInterval)
+	t := time.NewTicker(mwiPollInterval.Get())
 	defer t.Stop()
 	for {
 		select {

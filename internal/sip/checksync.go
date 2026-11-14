@@ -89,12 +89,12 @@ type PushQueue interface {
 }
 
 // checkSyncTimeout bounds one NOTIFY exchange (challenge included); a
-// variable so tests can shorten it.
-var checkSyncTimeout = 8 * time.Second
+// tunable so tests can shorten it.
+var checkSyncTimeout = newTunable(8 * time.Second)
 
 // pushPollInterval is how often the queue is claimed from besides wakeups,
 // so rows held back by the rate limit are picked up.
-var pushPollInterval = 2 * time.Second
+var pushPollInterval = newTunable(2 * time.Second)
 
 // checkSyncEvent is the Event header value for a vendor and push kind.
 // The reboot parameter is vendor-specific (spec "Vendor reference"):
@@ -130,7 +130,7 @@ func (s *Server) pushLoop(ctx context.Context) {
 	if rate <= 0 {
 		rate = 20
 	}
-	t := time.NewTicker(pushPollInterval)
+	t := time.NewTicker(pushPollInterval.Get())
 	defer t.Stop()
 	for {
 		select {
@@ -225,7 +225,7 @@ func (s *Server) sendCheckSyncDevice(j PushJob, device string) PushResult {
 		go func() {
 			defer wg.Done()
 			defer contain(s.log, "check-sync contact")
-			ctx, cancel := context.WithTimeout(context.Background(), checkSyncTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), checkSyncTimeout.Get())
 			defer cancel()
 			results[i] = s.checkSyncContact(ctx, dev.Username, dev.Realm, dev.HA1MD5, dev.HA1SHA256, b, event)
 		}()

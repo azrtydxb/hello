@@ -32,8 +32,8 @@ const (
 )
 
 // bossAssistantLead is how long an assistant_first link rings the assistant
-// alone (a variable so a test need not wait for it).
-var bossAssistantLead = 10 * time.Second
+// alone (a tunable so a test need not wait for it).
+var bossAssistantLead = newTunable(10 * time.Second)
 
 // Results of hello_boss_divert_total.
 const (
@@ -138,7 +138,7 @@ func (c *call) ringBoss(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 	mode := "both"
 	if link.RingMode == snapshot.BossRingAssistantFirst && len(bTargets) > 0 {
 		mode = "assistant first"
-		time.AfterFunc(bossAssistantLead, b.release)
+		time.AfterFunc(bossAssistantLead.Get(), b.release)
 	}
 	c.addTrace(fmt.Sprintf("Boss %s rings with assistant %s (%s)", boss, link.Assistant, mode))
 	for _, l := range legs {
