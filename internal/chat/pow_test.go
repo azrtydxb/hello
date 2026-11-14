@@ -32,7 +32,14 @@ func TestPow(t *testing.T) {
 	if err := p.Verify(nonce, "0", 7, "10.0.0.1", 14); err == nil && leadingZeroBits(sha256Sum(nonce+":0")) < 14 {
 		t.Fatal("accepted a wrong solution")
 	}
-	forged := nonce[:len(nonce)-2] + "AA"
+	// Change the signature's last two characters to two that differ from
+	// them: a fixed "AA" left the nonce intact whenever its signature already
+	// ended in "AA" (1 in 256), and the genuine nonce was rightly accepted.
+	tail := "AA"
+	if nonce[len(nonce)-2:] == tail {
+		tail = "BB"
+	}
+	forged := nonce[:len(nonce)-2] + tail
 	if err := p.Verify(forged, Solve(forged, 14), 7, "10.0.0.1", 14); err == nil {
 		t.Fatal("accepted a forged signature")
 	}
