@@ -21,10 +21,12 @@ import (
 	"github.com/azrtydxb/hello/internal/apispec"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
+	"github.com/azrtydxb/hello/internal/directory"
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/router"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/oauth"
 	"github.com/azrtydxb/hello/internal/originate"
@@ -32,6 +34,7 @@ import (
 	"github.com/azrtydxb/hello/internal/prov/redirect"
 	"github.com/azrtydxb/hello/internal/safehttp"
 	"github.com/azrtydxb/hello/internal/secret"
+	"github.com/azrtydxb/hello/internal/slack"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/turn"
@@ -130,6 +133,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	go bootstrap(ctx, st, cfg.BootstrapAdminPassword, log)
 	go pruneSessions(ctx, st, log)
 	go seedFeatureCodes(ctx, st, log)
+	go adoptWifiEAP(ctx, st, log)
 
 	// The voicemail object store and the email worker are the Phase 4
 	// control-plane services (spec contract 6, S-8). minio.New does not
@@ -156,8 +160,15 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		_ = ln.Close()
 		return fmt.Errorf("MINIO_ENDPOINT: %w", err)
 	}
-	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, messaging.NewMetrics(metrics.Registry), log)
+	msgMetrics := messaging.NewMetrics(metrics.Registry)
+	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, msgMetrics, log)
+	go runCarrierWorkers(ctx, st, msgMetrics, log)
 	go runInboxNotifier(ctx, envSMTP(cfg), st, log)
+	go runMessageRouter(ctx, st, routerLive{vk}, router.NewMetrics(metrics.Registry), log)
+	if _, err := startChat(ctx, cfg, st, box, vk, effectiveSMTP(st, envSMTP(cfg)), metrics.Registry, log); err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("HELLO_MSG_CHAT_LAN_ADDR: %w", err)
+	}
 
 	// Scheduled and manual backups, and restore (spec pbx-gaps S-2 to S-4).
 	// Every replica runs the scheduler; the run itself is taken under an
@@ -203,7 +214,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// appends to, store it, and fan it out to the SSE clients of this pod.
 	// CRM connectors (spec integrations I-47): their hook queues calls in
 	// the ingest transaction, so it is registered before the service runs.
-	crmSvc := newCRM(cfg, st, db, box, vk, metrics.Registry, &crmLinks{Store: st, PublicURL: cfg.AI.PublicURL}, log)
+	crmSvc := newCRM(cfg, st, db, box, vk, metrics.Registry, &crmLinks{Store: st, PublicURL: cfg.AI.PublicURL}, crmAudio{st: st, objs: objs}, log)
 	evSvc := &events.Service{
 		Hooks: []events.TxHook{crmSvc.Hook},
 		DB:    db, Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
@@ -218,6 +229,12 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Log: log.With("component", "webhooks"),
 	}
 	evSvc.Hooks = append(evSvc.Hooks, hooks.Hook())
+	// Slack notifications (spec integrations P17): queued in the same
+	// ingest transaction, sent by a worker on each replica.
+	slackSvc := &slack.Service{Store: &slack.PG{DB: db}, Box: box, PublicURL: cfg.AI.PublicURL, Log: log.With("component", "slack")}
+	evSvc.Hooks = append(evSvc.Hooks, slackSvc.Hook())
+	slackWorker := &slack.Worker{Svc: slackSvc, Metrics: slack.NewMetrics(metrics.Registry), Log: log.With("component", "slack")}
+	go slackWorker.Run(ctx)
 	dispatcher := &webhook.Dispatcher{
 		Svc: hooks, Locker: st, Metrics: webhook.NewMetrics(metrics.Registry), Log: log.With("component", "webhooks"),
 		RetentionDays: cfg.EventRetentionDays,
@@ -230,6 +247,25 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		}, nil, log.With("component", "webhooks")),
 	}
 	go dispatcher.Run(ctx)
+	// Directory sync (spec integrations P8): connectors read their source and
+	// sync users; one replica runs a connector, the one holding its lock.
+	dirEngine := &directory.Engine{
+		Store:          &directory.PG{DB: db, Box: box},
+		Drivers:        map[string]directory.Driver{directory.KindLDAP: directory.LDAP{}},
+		Metrics:        directory.NewMetrics(metrics.Registry),
+		Log:            log.With("component", "directory"),
+		Replica:        cfg.NodeID,
+		AllowPlaintext: cfg.DirectoryAllowPlaintextLDAP,
+		Allow:          cfg.IntegrationsAllowedCIDRs,
+		Notify: directory.MailNotifier(st.AdminEmails, func(ctx context.Context) (mailer.Settings, bool, error) {
+			s, source, err := api.EffectiveSMTP(ctx, st, envSMTP(cfg))
+			if err != nil || source == api.SMTPNone || s.Validate() != nil {
+				return mailer.Settings{}, false, err
+			}
+			return s, true, nil
+		}, nil, log.With("component", "directory")),
+	}
+	go dirEngine.Run(ctx)
 	go evSvc.Run(ctx)
 	go crmSvc.Run(ctx)
 	if err := startSyslog(ctx, cfg.Syslog, st, vk, metrics.Registry, log); err != nil {
@@ -242,6 +278,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	go sweeper.Run(ctx)
 	apiCfg := api.Config{
 		CRM:          crmSvc.Service,
+		Slack:        slackSvc,
+		Directory:    dirEngine,
 		Events:       evSvc,
 		Webhooks:     hooks,
 		AIAgent:      agent,
@@ -398,6 +436,30 @@ func seedFeatureCodes(ctx context.Context, st *store.Store, log *slog.Logger) {
 			return
 		}
 		log.Warn("seed feature codes: retrying", "error", err, "retry_in", bootstrapRetry.String())
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(bootstrapRetry):
+		}
+	}
+}
+
+// adoptWifiEAP moves the EAP settings of enterprise Wi-Fi profiles from before
+// the shared 802.1X model into 802.1X profiles (migration 00088), retrying
+// while the database is not reachable.
+func adoptWifiEAP(ctx context.Context, st *store.Store, log *slog.Logger) {
+	for {
+		n, skipped, err := st.AdoptWifiEAP(ctx)
+		if err == nil {
+			if n > 0 {
+				log.Info("wifi: enterprise profiles moved to 802.1X profiles", "count", n)
+			}
+			if len(skipped) > 0 {
+				log.Warn("wifi: enterprise profiles with an identity an 802.1X profile cannot hold; name an 802.1X profile for them", "profiles", skipped)
+			}
+			return
+		}
+		log.Warn("wifi: adopt enterprise profiles: retrying", "error", err, "retry_in", bootstrapRetry.String())
 		select {
 		case <-ctx.Done():
 			return

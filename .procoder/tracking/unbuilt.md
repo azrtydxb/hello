@@ -18,7 +18,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 17  | Door video preview (S-49)                                                     | wip (#285)          |
 | 18  | vCard phonebook slot (S-31), partial                                          | todo                |
 | 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)    | done (#232)         |
-| 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                      | todo                |
+| 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                      | wip (#322)          |
 | 21  | Multiple lines and account sharing (S-10, S-11)                               | wip (#270)          |
 | 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial      | todo                |
 | 23  | SIP over TLS and sips (S-14)                                                  | done (#202)         |
@@ -49,7 +49,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 17  | Door video preview (S-49)                                                   | todo (code), hw (test) |
 | 18  | vCard phonebook slot (S-31), partial                                        | wip (#261)             |
 | 19  | Firmware minimum versions, WP defaults, drift badge, upgrade window (S-26)  | done (#232)            |
-| 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                    | todo                   |
+| 20  | Lab sweep `TestWPPhonesAsVendors` (S-38)                                    | wip (#322)             |
 | 21  | Multiple lines and account sharing (S-10, S-11)                             | todo                   |
 | 22  | SIP over TCP: provisioning the transport, hello-sip side (S-13), partial    | wip (#258)             |
 | 23  | SIP over TLS and sips (S-14)                                                | done (#202)            |
@@ -77,7 +77,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P2  | Webhooks: signing, retries, DLQ                | done (#222) |
 | P3  | Click-to-call: originate API, /dial, tel:      | done (#234) |
 | P4  | Recording links and lookup API                 | todo        |
-| P5  | Browser extension (MV3), fixed signing key     | todo        |
+| P5  | Browser extension (MV3), fixed signing key     | wip (#327)  |
 | P6  | HubSpot and internal/crm framework             | todo        |
 | P7  | Zapier                                         | todo        |
 | P8  | Directory engine, AD/LDAP                      | todo        |
@@ -85,23 +85,23 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P10 | SCIM 2.0                                       | todo        |
 | P11 | OIDC SSO, LDAP bind login                      | todo        |
 | P12 | Auto-provisioning extensions from a range      | todo        |
-| P13 | Salesforce Open CTI                            | todo        |
-| P14 | Pipedrive                                      | todo        |
-| P15 | Zoho CRM                                       | todo        |
-| P16 | Zendesk, Freshdesk                             | wip (#328)  |
-| P17 | Slack, n8n, Make                               | todo        |
-| P18 | Outlook/Google contacts lookup, calendar DND   | todo        |
-| P19 | Dynamics 365 CIF                               | todo        |
-| P20 | ConnectWise, Autotask, HaloPSA, Clio           | wip (#328)  |
-| P21 | Odoo, Bitrix24                                 | todo        |
-| P22 | Teams Direct Routing guide (shared with WR 13) | wip (#326)  |
+| P13 | Salesforce Open CTI                            | done (#331) |
+| P14 | Pipedrive                                      | done (#329) |
+| P15 | Zoho CRM                                       | done (#329) |
+| P16 | Zendesk, Freshdesk                             | done (#328) |
+| P17 | Slack, n8n, Make                               | done (#335) |
+| P18 | Outlook/Google contacts lookup, calendar DND   | done (#335) |
+| P19 | Dynamics 365 CIF                               | done (#331) |
+| P20 | ConnectWise, Autotask, HaloPSA, Clio           | done (#328) |
+| P21 | Odoo, Bitrix24                                 | done (#329) |
+| P22 | Teams Direct Routing guide (shared with WR 13) | done (#326) |
 | #   | Item                                           | Status      |
 | --- | ---------------------------------------------- | ----------- |
 | P1  | Call events: stream, integration_events, SSE   | done (#205) |
 | P2  | Webhooks: signing, retries, DLQ                | wip (#222)  |
 | P3  | Click-to-call: originate API, /dial, tel:      | wip (#234)  |
 | P4  | Recording links and lookup API                 | wip (#281)  |
-| P5  | Browser extension (MV3), fixed signing key     | todo        |
+| P5  | Browser extension (MV3), fixed signing key     | wip (#327)  |
 | P6  | HubSpot and internal/crm framework             | wip (#289)  |
 | P7  | Zapier                                         | todo        |
 | P8  | Directory engine, AD/LDAP                      | todo        |
@@ -109,27 +109,27 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P10 | SCIM 2.0                                       | todo        |
 | P11 | OIDC SSO, LDAP bind login                      | todo        |
 | P12 | Auto-provisioning extensions from a range      | todo        |
-| P13 | Salesforce Open CTI                            | todo        |
-| P14 | Pipedrive                                      | todo        |
-| P15 | Zoho CRM                                       | todo        |
-| P16 | Zendesk, Freshdesk                             | wip (#328)  |
-| P17 | Slack, n8n, Make                               | todo        |
-| P18 | Outlook/Google contacts lookup, calendar DND   | todo        |
-| P19 | Dynamics 365 CIF                               | todo        |
-| P20 | ConnectWise, Autotask, HaloPSA, Clio           | wip (#328)  |
-| P21 | Odoo, Bitrix24                                 | todo        |
-| P22 | Teams Direct Routing guide (shared with WR 13) | wip (#326)  |
+| P13 | Salesforce Open CTI                            | done (#331) |
+| P14 | Pipedrive                                      | done (#329) |
+| P15 | Zoho CRM                                       | done (#329) |
+| P16 | Zendesk, Freshdesk                             | done (#328) |
+| P17 | Slack, n8n, Make                               | done (#335) |
+| P18 | Outlook/Google contacts lookup, calendar DND   | done (#335) |
+| P19 | Dynamics 365 CIF                               | done (#331) |
+| P20 | ConnectWise, Autotask, HaloPSA, Clio           | done (#328) |
+| P21 | Odoo, Bitrix24                                 | done (#329) |
+| P22 | Teams Direct Routing guide (shared with WR 13) | done (#326) |
 
 ## messaging-channels
 
 | #     | Item                                                         | Status      |
 | ----- | ------------------------------------------------------------ | ----------- |
 | 1     | Inbox core                                                   | done (#211) |
-| 2     | Twilio sending                                               | todo        |
-| 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | todo        |
-| 4     | LAN chat widget                                              | todo        |
-| 5     | Message routing and ACD                                      | todo        |
-| 6     | Telnyx, sender registration                                  | todo        |
+| 2     | Twilio sending                                               | done (#305) |
+| 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | done (#307) |
+| 4     | LAN chat widget                                              | done (#309) |
+| 5     | Message routing and ACD                                      | done (#311) |
+| 6     | Telnyx, sender registration                                  | wip (#346)  |
 | 7     | AI triage, drafts, auto-reply                                | todo        |
 | 8     | Integrations, reporting, DSAR export, redact                 | todo        |
 | N1-N3 | Public listener, WhatsApp, polling                           | not now     |
@@ -138,8 +138,9 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | #   | Item                                        | Status                       |
 | --- | ------------------------------------------- | ---------------------------- |
-| 1   | Media foundation (pion)                     | wip (#324)                   |
-| 2   | WSS on Kamailio                             | wip (#326)                   |
+| 1   | Media foundation (pion)                     | done (#324, #341)            |
+| 2   | WSS on Kamailio                             | done (#326)                  |
+| 2b  | Kamailio to hello-sip TLS hop (S-12)        | done (#340)                  |
 | 3   | Web devices and credentials                 | wip (#282)                   |
 | 4   | coturn, ICE servers                         | wip (#282)                   |
 | 5   | Web softphone, audio                        | wip (#343)                   |
@@ -147,7 +148,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 6b  | Video recording                             | blocked (6)                  |
 | 10  | Video phones and door stations              | todo (code), hw (test)       |
 | 11  | Conference-room video                       | blocked (6)                  |
-| 13  | Teams SBC-peer trunk profile, docs/teams.md | wip (#326)                   |
+| 13  | Teams SBC-peer trunk profile, docs/teams.md | done (#326)                  |
 | 7-9 | Push gateway, mobile apps, mobile video     | not now                      |
 | 12  | Public reach                                | not now (user decides later) |
 
@@ -193,7 +194,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                                                                                      | Status                |
 | --------------------------------------------------------------------------------------------------------- | --------------------- |
-| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-f1d7e1e)    |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-95939a0)    |
 | MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
 | Transfer-to-voicemail phone key                                                                           | done (#200)           |
@@ -222,6 +223,9 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - Parity lab items 1-7 and 14
 - Hello MCP "Connected apps" end-to-end (after #189)
 - Real-account lab lists for integrations, messaging, clients (after those phases)
+- Salesforce (Developer Edition) and Dynamics 365 (trial) live checks: docs/crm.md, "Lab checklist: Salesforce" and "Lab checklist: Dynamics 365"
+- CRM connector live checks on real accounts: Pipedrive, Zoho CRM, Odoo, Bitrix24 (docs/crm.md lab checklists)
+- Telnyx and Twilio accounts, messaging item 6 (docs/inbox.md, "Sending through Telnyx", "Sender registration"): a real Telnyx send, delivery receipt and the 40300 STOP block; the field names of Telnyx's 10DLC, campaign-assignment and toll-free reads and of Twilio's UsAppToPerson and Tollfree reads; what a limited key answers for each registration read; a Twilio account with several Messaging Services; a US long code and a toll-free number in each state (approved, pending, rejected, unregistered)
 - Clients 5 and 6: a real browser (Chrome, Edge, Firefox, Safari) calling a G.711 desk phone, a G.722 phone and another browser on the LAN; H.264 and VP8 between browsers with and without hardware encoding and the REMB fallback's quality; DTLS re-handshake and ICE restart on a re-INVITE; a Playwright run with Chromium fake media devices through the lab stack; video capacity per node (the number behind `HELLO_VIDEO_MAX_SESSIONS`)
 - Teams Direct Routing run (item 13, P22): a Microsoft 365 tenant with Teams Phone, a certified SBC or DRaaS contract, and a public SBC name and certificate; the cmdlet steps in docs/teams.md are unverified until then
 - WSS in a browser through the kw Ingress (item 2): needs the kw manifests, the image with the websocket module and a real browser

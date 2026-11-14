@@ -80,13 +80,16 @@ func (s *server) updateProfile(w http.ResponseWriter, r *http.Request) {
 		DisplayName    *string    `json:"displayName"`
 		Email          *string    `json:"email"`
 		VoicemailEmail *vmPrefsIn `json:"voicemailEmail"`
-		RingWeb        *bool      `json:"ringWeb"`
-		RingMobile     *bool      `json:"ringMobile"`
+		// DeskphoneDelivery sends customer texts of the user's conversations
+		// to their desk phone.
+		DeskphoneDelivery *bool `json:"deskphoneDelivery"`
+		RingWeb           *bool `json:"ringWeb"`
+		RingMobile        *bool `json:"ringMobile"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.DisplayName == nil && in.Email == nil && in.VoicemailEmail == nil && in.RingWeb == nil && in.RingMobile == nil {
+	if in.DisplayName == nil && in.Email == nil && in.VoicemailEmail == nil && in.DeskphoneDelivery == nil && in.RingWeb == nil && in.RingMobile == nil {
 		badRequest(w, "a field to change is required")
 		return
 	}
@@ -109,6 +112,7 @@ func (s *server) updateProfile(w http.ResponseWriter, r *http.Request) {
 		c.Email = in.Email
 	}
 	in.VoicemailEmail.validate(&f, "voicemailEmail")
+	c.DeskphoneDelivery = in.DeskphoneDelivery
 	c.RingWeb, c.RingMobile = in.RingWeb, in.RingMobile
 	if len(f) > 0 {
 		writeFields(w, f)
@@ -139,6 +143,7 @@ type selfExtensionView struct {
 	Number           string `json:"number"`
 	Name             string `json:"name"`
 	DND              bool   `json:"dnd"`
+	DNDSource        string `json:"dndSource"`
 	ForwardAlways    string `json:"forwardAlways"`
 	ForwardBusy      string `json:"forwardBusy"`
 	ForwardNoAnswer  string `json:"forwardNoAnswer"`
@@ -146,7 +151,7 @@ type selfExtensionView struct {
 }
 
 func selfView(e store.Extension) selfExtensionView {
-	return selfExtensionView{ID: e.ID, Number: e.Number, Name: e.Name, DND: e.DND, ForwardAlways: e.ForwardAlways,
+	return selfExtensionView{ID: e.ID, Number: e.Number, Name: e.Name, DND: e.DND, DNDSource: e.DNDSource, ForwardAlways: e.ForwardAlways,
 		ForwardBusy: e.ForwardBusy, ForwardNoAnswer: e.ForwardNoAnswer, VoicemailEnabled: e.VoicemailEnabled}
 }
 

@@ -164,6 +164,12 @@ type Config struct {
 	// CallbackInterval is how often this node sweeps the queues' callback
 	// requests; zero means every 3 s.
 	CallbackInterval time.Duration
+	// CallbackOfferCheck is how often a waiting caller's estimated wait is
+	// compared with the callback offer threshold (zero: 3 s), and
+	// CallbackWatchEvery how often a ringing callback attempt, or a caller on
+	// the line, checks that the request was not cancelled (zero: 2 s).
+	CallbackOfferCheck time.Duration
+	CallbackWatchEvery time.Duration
 	// FaxInterval is how often this node looks for queued faxes to send; zero
 	// means every 5 s.
 	FaxInterval time.Duration
@@ -652,8 +658,11 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	go func() { errc <- srv.ServeUDP(conn) }()
 	if s.cfg.TLSListener != nil {
 		go func() {
-			if err := srv.ServeTLS(s.cfg.TLSListener); err != nil && ctx.Err() == nil && s.serving.Load() {
-				// The TLS hop is down; UDP still serves everything else.
+			// ServeTLS returns only when the listener stops. During shutdown that
+			// is expected; otherwise the TLS hop is down while UDP still serves
+			// everything else.
+			err := srv.ServeTLS(s.cfg.TLSListener)
+			if ctx.Err() == nil && s.serving.Load() {
 				s.log.Error("SIP over TLS stopped", "error", err)
 			}
 		}()

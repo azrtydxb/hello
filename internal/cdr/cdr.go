@@ -110,7 +110,7 @@ type Record struct {
 	// ICE-lite.
 	SRTPKeyEx string
 	ICE       bool
-	// Video says the call carried video at some point (migration 00120).
+	// Video says the call carried video at some point (migration 00097).
 	Video bool
 	// PeerCallID is the Call-ID of the answering callee leg (migration
 	// 00066), so an RTCP-XR report from the callee's phone finds the record;

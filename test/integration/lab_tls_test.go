@@ -174,6 +174,16 @@ func TestLabSIPTLS(t *testing.T) {
 	})
 }
 
+// labDigest answers the challenge with a digest Authorization header value.
+func labDigest(t *testing.T, challenges []string, method, uri, user, secret string) string {
+	t.Helper()
+	cred, err := digest.Digest(pickLabChallenge(t, challenges), digest.Options{Method: method, URI: uri, Username: user, Password: secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cred.String()
+}
+
 func pickLabChallenge(t *testing.T, headers []string) *digest.Challenge {
 	t.Helper()
 	var first *digest.Challenge

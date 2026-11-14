@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -114,5 +115,42 @@ func TestCleanTags(t *testing.T) {
 	}
 	if got, ok := CleanTags(nil); !ok || got == nil || len(got) != 0 {
 		t.Errorf("CleanTags(nil) = %v, %v; want an empty list", got, ok)
+	}
+}
+
+// TestDeskPhoneParts fails if a short SMS gets a prefix or a counter, a
+// non-SMS channel is not prefixed, a long text is not split into numbered
+// parts that each fit one SIP MESSAGE, a part cuts a character in two, or the
+// parts do not add up to the text.
+func TestDeskPhoneParts(t *testing.T) {
+	if got := DeskPhoneParts(KindSMS, "hello"); len(got) != 1 || got[0] != "hello" {
+		t.Errorf("sms = %q, want the body as it is", got)
+	}
+	if got := DeskPhoneParts(KindWhats, "hello"); len(got) != 1 || got[0] != "[WhatsApp] hello" {
+		t.Errorf("whatsapp = %q", got)
+	}
+	long := strings.Repeat("héllo wörld ", 300) // multi-byte, 3900+ bytes
+	for _, kind := range []string{KindSMS, KindWhats} {
+		parts := DeskPhoneParts(kind, long)
+		if len(parts) < 5 {
+			t.Fatalf("%s: %d parts, want several", kind, len(parts))
+		}
+		var joined strings.Builder
+		for i, p := range parts {
+			if len(p) > DeskPartBytes || !utf8.ValidString(p) {
+				t.Fatalf("%s: part %d is %d bytes (valid utf8 %v)", kind, i+1, len(p), utf8.ValidString(p))
+			}
+			head := "(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(parts)) + ") "
+			if kind == KindWhats {
+				head = "[WhatsApp] " + head
+			}
+			if !strings.HasPrefix(p, head) {
+				t.Fatalf("%s: part %d = %.20q, want it to start %q", kind, i+1, p, head)
+			}
+			joined.WriteString(strings.TrimPrefix(p, head))
+		}
+		if joined.String() != long {
+			t.Errorf("%s: the parts do not add up to the text", kind)
+		}
 	}
 }

@@ -98,7 +98,7 @@ func TestTakeoverRestartInPlace(t *testing.T) {
 		byCallee bool
 	}{{"caller hangs up", false}, {"callee hangs up", true}} {
 		t.Run(tc.name, func(t *testing.T) {
-			haReinviteTimeout = time.Second
+			haReinviteTimeout.Set(time.Second)
 			ha, mem, owner, a, b, st, before := restartedCall(t)
 			// The process crashes; Kubernetes restarts it in place within
 			// the OFFLINE window: membership lists sip-1 READY throughout,
@@ -242,13 +242,13 @@ func TestTakeoverOnDemandBye(t *testing.T) {
 // them over once that node shows up under another incarnation (restarted
 // in place, never OFFLINE).
 func TestTakeoverIncarnationWatch(t *testing.T) {
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	// A short watch window: the change of incarnation must re-open it
 	// after the first sighting's window has passed.
 	// Restored after the PBXs stop (cleanups run last-registered first).
-	old := haIncWindow
-	t.Cleanup(func() { haIncWindow = old })
-	haIncWindow = 150 * time.Millisecond
+	old := haIncWindow.Get()
+	t.Cleanup(func() { haIncWindow.Set(old) })
+	haIncWindow.Set(150 * time.Millisecond)
 	ha, mem, owner, a, b, st, _ := restartedCall(t)
 	mem.set(
 		cluster.Member{ID: "sip-1", Kind: cluster.KindSIP, State: cluster.Ready, Incarnation: "inc-1"},
@@ -291,7 +291,7 @@ func TestTakeoverCDRContinuity(t *testing.T) {
 		byCallee bool
 	}{{"caller hangs up", false}, {"callee hangs up", true}} {
 		t.Run(tc.name, func(t *testing.T) {
-			haReinviteTimeout = time.Second
+			haReinviteTimeout.Set(time.Second)
 			ha, mem, owner, taker := haPair(t, ringAllDevices())
 			a, b := newPhone(t, owner, "a1", "pa"), newPhone(t, owner, "b1", "pb1")
 			a.register(t)
@@ -364,10 +364,10 @@ func TestTakeoverCDRContinuity(t *testing.T) {
 // one was dropped): the call must stay listed on the taker, and the one CDR
 // must be the taker's, closed at the call's end with its original start.
 func TestHandoffKeepsLiveCallAndCDR(t *testing.T) {
-	oldPoll := handoffPoll
-	t.Cleanup(func() { handoffPoll = oldPoll })
-	handoffPoll = 20 * time.Millisecond
-	haReinviteTimeout = time.Second
+	oldPoll := handoffPoll.Get()
+	t.Cleanup(func() { handoffPoll.Set(oldPoll) })
+	handoffPoll.Set(20 * time.Millisecond)
+	haReinviteTimeout.Set(time.Second)
 	fs := newFakeState()
 	ha, mem, owner, taker := haPair(t, ringAllDevices(), withSharedState(fs))
 	a, b := newPhone(t, owner, "a1", "pa"), newPhone(t, owner, "b1", "pb1")
@@ -423,9 +423,9 @@ func TestHandoffKeepsLiveCallAndCDR(t *testing.T) {
 // zombie once the 10s dialog TTL brought the reap inside the test), or
 // stops counting its unreplicated connected ones.
 func TestReapCountsConnectedCallsOnly(t *testing.T) {
-	old := haReapDelay
-	t.Cleanup(func() { haReapDelay = old })
-	haReapDelay = 0
+	old := haReapDelay.Get()
+	t.Cleanup(func() { haReapDelay.Set(old) })
+	haReapDelay.Set(0)
 	for _, tc := range []struct {
 		name      string
 		connected int

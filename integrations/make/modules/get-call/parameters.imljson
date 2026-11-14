@@ -1,0 +1,3 @@
+[
+  { "name": "cdrId", "type": "uinteger", "label": "CDR ID", "required": true, "help": "The cdrId of a Call Completed event." }
+]

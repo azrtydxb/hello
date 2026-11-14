@@ -16,7 +16,8 @@
 
   function callLink(number) {
     var a = el("a", "Call", "call");
-    a.href = HELLO_URL.replace(/\/+$/, "") + "/dial?n=" + encodeURIComponent(number);
+    a.href =
+      HELLO_URL.replace(/\/+$/, "") + "/dial?n=" + encodeURIComponent(number);
     a.target = "_blank";
     a.rel = "noopener noreferrer";
     a.setAttribute("aria-label", "Call " + number + " with Hello");
@@ -33,12 +34,24 @@
       li.appendChild(callLink(n));
       ul.appendChild(li);
     });
-    if (!numbers.length) ul.appendChild(el("li", "No phone number on file.", "muted"));
+    if (!numbers.length)
+      ul.appendChild(el("li", "No phone number on file.", "muted"));
     root.appendChild(ul);
     root.appendChild(el("h2", "Recent tickets"));
     var tl = el("ul");
     tickets.forEach(function (t) {
-      tl.appendChild(el("li", "#" + t.id + " " + (t.subject || "(no subject)") + " (" + t.status + ")"));
+      tl.appendChild(
+        el(
+          "li",
+          "#" +
+            t.id +
+            " " +
+            (t.subject || "(no subject)") +
+            " (" +
+            t.status +
+            ")",
+        ),
+      );
     });
     if (!tickets.length) tl.appendChild(el("li", "No other tickets.", "muted"));
     root.appendChild(tl);
@@ -51,7 +64,11 @@
       if (!id) throw new Error("This ticket has no requester.");
       return Promise.all([
         client.request("/api/v2/users/" + encodeURIComponent(id) + ".json"),
-        client.request("/api/v2/users/" + encodeURIComponent(id) + "/tickets/requested.json?per_page=5&sort_order=desc"),
+        client.request(
+          "/api/v2/users/" +
+            encodeURIComponent(id) +
+            "/tickets/requested.json?per_page=5&sort_order=desc",
+        ),
       ]);
     })
     .then(function (r) {
@@ -59,6 +76,7 @@
       client.invoke("resize", { width: "100%", height: "260px" });
     })
     .catch(function (e) {
-      root.textContent = e && e.message ? e.message : "Could not load the requester.";
+      root.textContent =
+        e && e.message ? e.message : "Could not load the requester.";
     });
 })();

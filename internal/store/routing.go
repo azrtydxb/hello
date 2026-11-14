@@ -76,7 +76,7 @@ type Trunk struct {
 	// FaxMode is passthrough (default), t38 or off (migration 00073).
 	FaxMode string `json:"faxMode"`
 	// Profile is the trunk's profile: "generic" or "sbc-peer" (migration
-	// 00110; docs/teams.md). A profile is a set of defaults and limits the
+	// 00096; docs/teams.md). A profile is a set of defaults and limits the
 	// API enforces, never read by hello-sip.
 	Profile   string    `json:"profile"`
 	CreatedAt time.Time `json:"createdAt"`

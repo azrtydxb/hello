@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Hello click-to-call",
+  "description": "Click a phone number on a web page and Hello rings your desk phone first. Shows who is calling.",
+  "version": "1.0.0",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAszdwCnIij8gJ6KtPLsBkcEv9ugQz5491LkyajjJjw3r9wlUyr54zWCgkDwcd8tyEm4GlzNlp0f5ynTAv9jvXuYI9MSXkxJO9si9KPuay6oXdKGNGjabN59qDrrcde/CoOltsMFtYPgKA9P49zATK9Q1z90ffG/2QFuzt+r3cAA2SvQ/u/0qxJlqv72TwIZHRnwswvVpo+1v2n52TpuIkIOIsv37TRF+siop0Du1c33IGl/ELBX5BxZkDiRMC4TKeO1gwxKpm+rQG6KeSlejxYxw4D0qyGhd8N4g7SQX2NXPoXvZy9AlKlLn0nbAgyb59P/ksTsqOyknfDqmUZkEaQQIDAQAB",
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "action": {
+    "default_title": "Hello",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/16.png", "48": "icons/48.png" }
+  },
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "background": { "service_worker": "background.js", "type": "module" },
+  "permissions": [
+    "identity",
+    "storage",
+    "notifications",
+    "alarms",
+    "scripting"
+  ],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "web_accessible_resources": [
+    {
+      "resources": ["lib/numbers.js"],
+      "matches": ["https://*/*", "http://*/*"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

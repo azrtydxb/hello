@@ -25,40 +25,49 @@ var (
 	pauseReasonRe = regexp.MustCompile(`^[A-Za-z0-9 ._-]{0,32}$`)
 )
 
+// defaultTextReassign is how long an agent has to answer a text before the
+// conversation returns to the queue's waiting list.
+const defaultTextReassign = 300
+
 // queueBody is the create and replace body; absent optional fields take the
 // defaults of toInput.
 type queueBody struct {
-	Name               *string            `json:"name"`
-	Number             *string            `json:"number"`
-	Enabled            *bool              `json:"enabled"`
-	Strategy           *string            `json:"strategy"`
-	AgentTimeout       *int               `json:"agentTimeout"`
-	RetryDelay         *int               `json:"retryDelay"`
-	WrapUp             *int               `json:"wrapUp"`
-	MaxCallers         *int               `json:"maxCallers"`
-	MaxWait            *int               `json:"maxWait"`
-	JoinEmpty          *bool              `json:"joinEmpty"`
-	LeaveEmpty         *bool              `json:"leaveEmpty"`
-	Timeout            *ivrDestBody       `json:"timeout"`
-	Full               *ivrDestBody       `json:"full"`
-	NoAgents           *ivrDestBody       `json:"noAgents"`
-	MOHClassID         *int64             `json:"mohClassId"`
-	AnnounceFrequency  *int               `json:"announceFrequency"`
-	AnnouncePosition   *bool              `json:"announcePosition"`
-	AnnounceWait       *bool              `json:"announceWait"`
-	PeriodicPromptID   *int64             `json:"periodicPromptId"`
-	PositionPromptID   *int64             `json:"positionPromptId"`
-	WaitPromptID       *int64             `json:"waitPromptId"`
-	MinutesPromptID    *int64             `json:"minutesPromptId"`
-	DigitsPrefix       *string            `json:"digitsPrefix"`
-	BreakoutKey        *string            `json:"breakoutKey"`
-	BreakoutPromptID   *int64             `json:"breakoutPromptId"`
-	BreakoutVoicemail  *string            `json:"breakoutVoicemail"`
-	CallbackEnabled    *bool              `json:"callbackEnabled"`
-	CallbackOfferAfter *int               `json:"callbackOfferAfterSeconds"`
-	CallbackDigit      *string            `json:"callbackDigit"`
-	PromptLanguage     *string            `json:"promptLanguage"`
-	Members            *[]queueMemberBody `json:"members"`
+	Name               *string      `json:"name"`
+	Number             *string      `json:"number"`
+	Enabled            *bool        `json:"enabled"`
+	Strategy           *string      `json:"strategy"`
+	AgentTimeout       *int         `json:"agentTimeout"`
+	RetryDelay         *int         `json:"retryDelay"`
+	WrapUp             *int         `json:"wrapUp"`
+	MaxCallers         *int         `json:"maxCallers"`
+	MaxWait            *int         `json:"maxWait"`
+	JoinEmpty          *bool        `json:"joinEmpty"`
+	LeaveEmpty         *bool        `json:"leaveEmpty"`
+	Timeout            *ivrDestBody `json:"timeout"`
+	Full               *ivrDestBody `json:"full"`
+	NoAgents           *ivrDestBody `json:"noAgents"`
+	MOHClassID         *int64       `json:"mohClassId"`
+	AnnounceFrequency  *int         `json:"announceFrequency"`
+	AnnouncePosition   *bool        `json:"announcePosition"`
+	AnnounceWait       *bool        `json:"announceWait"`
+	PeriodicPromptID   *int64       `json:"periodicPromptId"`
+	PositionPromptID   *int64       `json:"positionPromptId"`
+	WaitPromptID       *int64       `json:"waitPromptId"`
+	MinutesPromptID    *int64       `json:"minutesPromptId"`
+	DigitsPrefix       *string      `json:"digitsPrefix"`
+	BreakoutKey        *string      `json:"breakoutKey"`
+	BreakoutPromptID   *int64       `json:"breakoutPromptId"`
+	BreakoutVoicemail  *string      `json:"breakoutVoicemail"`
+	CallbackEnabled    *bool        `json:"callbackEnabled"`
+	CallbackOfferAfter *int         `json:"callbackOfferAfterSeconds"`
+	CallbackDigit      *string      `json:"callbackDigit"`
+	PromptLanguage     *string      `json:"promptLanguage"`
+	// The text settings (spec messaging-channels M-13).
+	TextEnabled           *bool              `json:"textEnabled"`
+	TextCapacity          *int               `json:"textCapacity"`
+	TextReassignSeconds   *int               `json:"textReassignSeconds"`
+	TextRequiresIdleVoice *bool              `json:"textRequiresIdleVoice"`
+	Members               *[]queueMemberBody `json:"members"`
 }
 
 type queueMemberBody struct {
@@ -74,6 +83,7 @@ func (b queueBody) toInput() store.QueueInput {
 		Enabled: true, Strategy: queue.RingAll, AgentTimeout: 20, RetryDelay: 5, MaxWait: 600, JoinEmpty: true,
 		Timeout: hang, Full: hang, NoAgents: hang, Members: []store.QueueMember{},
 		CallbackOfferAfter: queue.DefaultCallbackOffer, CallbackDigit: queue.DefaultCallbackDigit,
+		TextCapacity: store.DefaultTextCapacity, TextReassignSeconds: defaultTextReassign,
 	}
 	setS := func(dst *string, v *string) {
 		if v != nil {
@@ -122,6 +132,10 @@ func (b queueBody) toInput() store.QueueInput {
 	setI(&in.CallbackOfferAfter, b.CallbackOfferAfter)
 	setS(&in.CallbackDigit, b.CallbackDigit)
 	setS(&in.PromptLanguage, b.PromptLanguage)
+	setB(&in.TextEnabled, b.TextEnabled)
+	setI(&in.TextCapacity, b.TextCapacity)
+	setI(&in.TextReassignSeconds, b.TextReassignSeconds)
+	setB(&in.TextRequiresIdleVoice, b.TextRequiresIdleVoice)
 	if b.Members != nil {
 		for i, m := range *b.Members {
 			if m.Position == 0 {
@@ -179,6 +193,10 @@ func validateQueue(in *store.QueueInput) fieldErrs {
 		f.add("callbackDigit", "must differ from the breakout key")
 	}
 	checkPromptLanguage(&f, "promptLanguage", in.PromptLanguage)
+	if in.TextCapacity != 0 { // 0 reads as the default
+		between("textCapacity", in.TextCapacity, 1, 50)
+	}
+	between("textReassignSeconds", in.TextReassignSeconds, 0, 86400)
 	for path, id := range map[string]*int64{"periodicPromptId": in.PeriodicPromptID, "positionPromptId": in.PositionPromptID,
 		"waitPromptId": in.WaitPromptID, "minutesPromptId": in.MinutesPromptID, "breakoutPromptId": in.BreakoutPromptID} {
 		if id != nil && *id <= 0 {
@@ -628,6 +646,34 @@ type agentBody struct {
 	Queues   *[]string `json:"queues"`
 }
 
+// applyAgentBody applies a login or pause request to an agent's state;
+// fields the request leaves out keep their value. Pausing takes a reason
+// (default "pause").
+func applyAgentBody(st queue.AgentState, ext string, b agentBody) queue.AgentState {
+	st.Ext = ext
+	if b.LoggedIn != nil {
+		st.LoggedIn = *b.LoggedIn
+		if !st.LoggedIn {
+			st.Queues, st.Paused, st.Reason = nil, false, ""
+		}
+	}
+	if b.Queues != nil {
+		st.Queues = *b.Queues
+	}
+	if b.Paused != nil {
+		st.Paused = *b.Paused
+		st.Reason = ""
+		if st.Paused {
+			st.Reason = "pause"
+			if b.Reason != nil && *b.Reason != "" {
+				st.Reason = *b.Reason
+			}
+		}
+	}
+	st.SinceMs = time.Now().UnixMilli()
+	return st
+}
+
 // setQueueAgent logs an agent in or out and pauses or unpauses it; absent
 // fields keep their value. Pausing takes a reason (default "pause").
 func (s *server) setQueueAgent(w http.ResponseWriter, r *http.Request) {
@@ -674,27 +720,7 @@ func (s *server) setQueueAgent(w http.ResponseWriter, r *http.Request) {
 		s.liveDown(w, "queue agent", err)
 		return
 	}
-	st.Ext = ext
-	if b.LoggedIn != nil {
-		st.LoggedIn = *b.LoggedIn
-		if !st.LoggedIn {
-			st.Queues, st.Paused, st.Reason = nil, false, ""
-		}
-	}
-	if b.Queues != nil {
-		st.Queues = *b.Queues
-	}
-	if b.Paused != nil {
-		st.Paused = *b.Paused
-		st.Reason = ""
-		if st.Paused {
-			st.Reason = "pause"
-			if b.Reason != nil && *b.Reason != "" {
-				st.Reason = *b.Reason
-			}
-		}
-	}
-	st.SinceMs = time.Now().UnixMilli()
+	st = applyAgentBody(st, ext, b)
 	if err := s.Queues.SetAgent(ctx, st); err != nil {
 		s.liveDown(w, "set queue agent", err)
 		return

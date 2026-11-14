@@ -8,6 +8,7 @@ import {
   CRM_LOG_STATUSES,
   deleteCRMConnector,
   disconnectCRMConnector,
+  getCRMSetup,
   listCRMConnectors,
   listCRMLogs,
   listCRMUsers,
@@ -18,12 +19,14 @@ import {
   type CRMConnector,
   type CRMLog,
   type CRMLogStatus,
+  type CRMSetupItem,
   type CRMUserMapping,
 } from "../api/crm";
 import {
   Alert,
   Badge,
   Button,
+  Checkbox,
   CodeBlock,
   ConfirmDialog,
   EmptyState,
@@ -69,6 +72,38 @@ const ERRORS: Record<string, string> = {
   state: "The sign-in expired or was already used. Start it again.",
   failed: "The CRM did not accept the sign-in. Check the client id and secret.",
 };
+
+/** The values of the HubSpot calling extension (the iframe URL is Hello's). */
+function callingSettings(redirectUri?: string): string {
+  let origin = "";
+  try {
+    if (redirectUri) origin = new URL(redirectUri).origin;
+  } catch {
+    // Not a URL: the page says the public URL is missing.
+  }
+  return JSON.stringify(
+    {
+      name: "Hello",
+      url: origin
+        ? `${origin}/integrations/hubspot/iframe`
+        : "Set HELLO_PUBLIC_URL first",
+      width: 320,
+      height: 240,
+      isReady: true,
+      supportsCustomObjects: false,
+    },
+    null,
+    2,
+  );
+}
+
+/** The values of a comma-separated multi-choice config entry. */
+function listOf(v: string): string[] {
+  return v
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
 
 function statusLabel(c: CRMConnector): { text: string; tone: BadgeTone } {
   if (!c.connection) return { text: "Not connected", tone: "warn" };
@@ -122,7 +157,7 @@ export function IntegrationsCRM() {
           <EmptyState
             icon="plug"
             title="No CRM connected"
-            description="Add HubSpot, Zendesk, Freshdesk, ConnectWise, Autotask, HaloPSA or Clio with the credentials you created in your own account."
+            description="Add HubSpot, Salesforce, Dynamics 365, Zendesk, Freshdesk, ConnectWise, Autotask, HaloPSA or Clio with the credentials you created in your own account."
           />
         )}
         {items?.map((c) => (
@@ -150,6 +185,42 @@ function KindFieldInput({
   value: string;
   onChange: (v: string) => void;
 }) {
+  if (field.switch)
+    return (
+      <Switch
+        label={field.label}
+        hint={field.hint}
+        checked={value === "true"}
+        onChange={(e) => onChange(e.target.checked ? "true" : "false")}
+      />
+    );
+  if (field.multi)
+    return (
+      <fieldset>
+        <legend>{field.label}</legend>
+        {field.multi.map((o) => {
+          const on = listOf(value);
+          return (
+            <Checkbox
+              key={o.value}
+              label={o.label}
+              checked={on.includes(o.value)}
+              onChange={(e) =>
+                onChange(
+                  (e.target.checked
+                    ? [...on, o.value]
+                    : on.filter((x) => x !== o.value)
+                  ).join(","),
+                )
+              }
+            />
+          );
+        })}
+        {listOf(value).length === 0 && (
+          <p role="alert">Pick at least one; contacts is used when none is.</p>
+        )}
+      </fieldset>
+    );
   if (field.options)
     return (
       <Select
@@ -164,9 +235,67 @@ function KindFieldInput({
       label={field.label}
       value={value}
       required={field.required}
+      placeholder={field.placeholder}
       hint={field.hint}
       onChange={(e) => onChange(e.target.value)}
     />
+  );
+}
+
+/** What the customer sets up in the CRM: values to copy, files to import. */
+function SetupPanel({ connector: c }: { connector: CRMConnector }) {
+  const load = useCallback(
+    (sig: AbortSignal) => getCRMSetup(c.id, sig),
+    [c.id],
+  );
+  const setup = usePolling(load, 60_000);
+  if (setup.status === "loading") return <Spinner label="Loading setup…" />;
+  if (setup.status === "error")
+    return (
+      <Alert tone="warn" title="Setup values are not available">
+        {setup.message}
+      </Alert>
+    );
+  if (setup.data.length === 0) return null;
+  return (
+    <details open>
+      <summary>Set up {kindSpec(c.kind).label}</summary>
+      {setup.data.map((it) => (
+        <SetupRow key={it.name} item={it} />
+      ))}
+    </details>
+  );
+}
+
+function SetupRow({ item }: { item: CRMSetupItem }) {
+  if (item.kind === "file") {
+    const download = () => {
+      const url = URL.createObjectURL(
+        new Blob([item.value], { type: "application/xml" }),
+      );
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = item.filename ?? "hello.xml";
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+    return (
+      <div>
+        <p>
+          <Button icon="download" variant="secondary" onClick={download}>
+            Download {item.label}
+          </Button>{" "}
+          {item.hint}
+        </p>
+        <CodeBlock title={item.filename ?? item.label} code={item.value} />
+      </div>
+    );
+  }
+  return (
+    <div>
+      <CodeBlock title={item.label} code={item.value} />
+      {item.hint && <p>{item.hint}</p>}
+    </div>
   );
 }
 
@@ -186,6 +315,8 @@ function NewConnector({
   const [values, setValues] = useState(() => initialValues(spec));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const cfgNow = buildConfig(spec, clientId, values);
+  const creds = spec.needsCredentials?.(cfgNow) ?? true;
 
   function pick(next: string) {
     const sp = kindSpec(next);
@@ -203,13 +334,17 @@ function NewConnector({
       const created = await createCRMConnector({
         kind,
         name,
-        clientSecret: secret,
-        config: buildConfig(spec, clientId, values),
+        ...(secret !== "" ? { clientSecret: secret } : {}),
+        config: cfgNow,
       });
       setOpen(false);
       setSecret("");
       reload();
       if (spec.auth === "direct") {
+        if (!(spec.canConnect?.(cfgNow) ?? true)) {
+          say("Connector added.");
+          return;
+        }
         // No browser step: sign in with the typed credentials now.
         try {
           await connectCRMConnector(created.id);
@@ -246,6 +381,7 @@ function NewConnector({
         options={KINDS.map((k) => ({ value: k.value, label: k.label }))}
         onChange={(e) => pick(e.target.value)}
       />
+      {spec.intro && <p>{spec.intro}</p>}
       <Input
         label="Name"
         value={name}
@@ -257,7 +393,7 @@ function NewConnector({
         <Input
           label={spec.idLabel}
           value={clientId}
-          required
+          required={creds}
           hint={spec.idHint}
           onChange={(e) => setClientId(e.target.value)}
         />
@@ -267,7 +403,7 @@ function NewConnector({
         type="password"
         autoComplete="off"
         value={secret}
-        required
+        required={creds}
         onChange={(e) => setSecret(e.target.value)}
         hint={spec.secretHint}
       />
@@ -306,7 +442,10 @@ function ConnectorPanel({
   say: (m: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("connection");
-  const st = statusLabel(c);
+  const personal = c.capabilities.userScope;
+  const st = personal
+    ? { text: "Per user", tone: "info" as BadgeTone }
+    : statusLabel(c);
   return (
     <article aria-label={`${c.name} connector`}>
       <h2>
@@ -321,11 +460,15 @@ function ConnectorPanel({
       )}
       <Tabs
         aria-label={`${c.name} sections`}
-        items={[
-          { id: "connection", label: "Connection" },
-          { id: "users", label: "Users" },
-          { id: "calls", label: "Calls" },
-        ]}
+        items={
+          personal
+            ? [{ id: "connection", label: "Connection" }]
+            : [
+                { id: "connection", label: "Connection" },
+                { id: "users", label: "Users" },
+                { id: "calls", label: "Calls" },
+              ]
+        }
         value={tab}
         onChange={setTab}
       />
@@ -366,6 +509,10 @@ function ConnectionTab({
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<"disconnect" | "delete" | null>(null);
+  const credsNow =
+    spec.needsCredentials?.(buildConfig(spec, clientId, values)) ?? true;
+  const personal = c.capabilities.userScope;
+  const canConnect = !personal && (spec.canConnect?.(c.config) ?? true);
   // Changing the identity or where the secret goes asks for the secret again.
   const idChanged =
     (spec.idLabel !== undefined && clientId !== (c.config.clientId ?? "")) ||
@@ -399,9 +546,9 @@ function ConnectionTab({
   async function connect() {
     setErr(null);
     try {
-      const url = await connectCRMConnector(c.id);
-      if (url) {
-        window.location.assign(url);
+      const r = await connectCRMConnector(c.id);
+      if (r.authorizeUrl) {
+        window.location.assign(r.authorizeUrl);
       } else {
         reload();
         say("Connected.");
@@ -425,28 +572,46 @@ function ConnectionTab({
   return (
     <div>
       <PropertyList
-        items={[
-          { label: "Account", value: conn?.externalAccount || "—", mono: true },
-          {
-            label: "Granted scopes",
-            value: conn?.grantedScopes.length
-              ? conn.grantedScopes.join(", ")
-              : "—",
-          },
-          {
-            label: "Last change",
-            value: conn ? formatTime(conn.updatedAt) : "—",
-          },
-          ...(c.auth === "oauth"
+        items={
+          personal
             ? [
                 {
                   label: "Redirect URI",
                   value: c.redirectUri ?? "needs HELLO_PUBLIC_URL",
                   mono: true,
                 },
+                {
+                  label: "Connected users",
+                  value: "Each user connects under My connections.",
+                },
               ]
-            : []),
-        ]}
+            : [
+                {
+                  label: "Account",
+                  value: conn?.externalAccount || "—",
+                  mono: true,
+                },
+                {
+                  label: "Granted scopes",
+                  value: conn?.grantedScopes.length
+                    ? conn.grantedScopes.join(", ")
+                    : "—",
+                },
+                {
+                  label: "Last change",
+                  value: conn ? formatTime(conn.updatedAt) : "—",
+                },
+                ...(c.auth === "oauth"
+                  ? [
+                      {
+                        label: "Redirect URI",
+                        value: c.redirectUri ?? "needs HELLO_PUBLIC_URL",
+                        mono: true,
+                      },
+                    ]
+                  : []),
+              ]
+        }
       />
       <details>
         <summary>{spec.guide.summary}</summary>
@@ -467,6 +632,30 @@ function ConnectionTab({
         {spec.guide.scopes && (
           <CodeBlock title="Scopes" code={spec.guide.scopes.join("\n")} />
         )}
+        {spec.featureScopes && (
+          <CodeBlock
+            title="Permissions"
+            code={listOf(values.features ?? "")
+              .map((f) => spec.featureScopes?.[f])
+              .filter(Boolean)
+              .join("\n")}
+          />
+        )}
+        {c.kind === "hubspot" && (
+          <>
+            <p>
+              <strong>Calling from HubSpot.</strong> For HubSpot&apos;s phone
+              icon to place a call with the user&apos;s Hello phone, add a
+              calling extension to the same app (Calling, in the app&apos;s
+              settings) with these values. Each user opens the phone widget once
+              and signs in to Hello in the window that appears.
+            </p>
+            <CodeBlock
+              title="Calling settings"
+              code={callingSettings(c.redirectUri)}
+            />
+          </>
+        )}
         {spec.sidebarApp && (
           <p>
             <a href={crmAppUrl(c.id)} download>
@@ -477,33 +666,44 @@ function ConnectionTab({
           </p>
         )}
       </details>
+      {spec.setup && (
+        <SetupPanel key={JSON.stringify(c.config)} connector={c} />
+      )}
       <p>
-        <Button
-          icon="link"
-          onClick={() => void connect()}
-          disabled={
-            c.auth === "oauth"
-              ? !c.redirectUri || !c.hasClientSecret || !c.config.clientId
-              : !c.hasClientSecret
-          }
-        >
-          {conn ? "Connect again" : "Connect"}
-        </Button>{" "}
-        <Button
-          variant="secondary"
-          icon="activity"
-          onClick={() => void test()}
-          disabled={!conn}
-        >
-          Test
-        </Button>{" "}
-        <Button
-          variant="secondary"
-          disabled={!conn}
-          onClick={() => setConfirm("disconnect")}
-        >
-          Disconnect
-        </Button>{" "}
+        {canConnect && (
+          <>
+            <Button
+              icon="link"
+              onClick={() => void connect()}
+              disabled={
+                c.auth === "oauth"
+                  ? !c.redirectUri || !c.hasClientSecret || !c.config.clientId
+                  : !c.hasClientSecret
+              }
+            >
+              {conn ? "Connect again" : "Connect"}
+            </Button>{" "}
+          </>
+        )}
+        {!personal && (
+          <>
+            <Button
+              variant="secondary"
+              icon="activity"
+              onClick={() => void test()}
+              disabled={!conn}
+            >
+              Test
+            </Button>{" "}
+            <Button
+              variant="secondary"
+              disabled={!conn}
+              onClick={() => setConfirm("disconnect")}
+            >
+              Disconnect
+            </Button>{" "}
+          </>
+        )}
         <Button
           variant="danger"
           icon="trash-2"
@@ -524,7 +724,7 @@ function ConnectionTab({
           <Input
             label={spec.idLabel}
             value={clientId}
-            required
+            required={credsNow}
             hint={spec.idHint}
             onChange={(e) => setClientId(e.target.value)}
           />
@@ -556,35 +756,51 @@ function ConnectionTab({
           checked={enabled}
           onChange={(e) => setEnabled(e.target.checked)}
         />
-        <Switch
-          label="Log missed calls"
-          checked={logMissed}
-          onChange={(e) => setLogMissed(e.target.checked)}
-        />
-        <Switch
-          label="Attach recording links"
-          hint="Off by default. A link to the recording is written into the CRM record; anyone with the link can play it until it expires."
-          checked={recordings}
-          onChange={(e) => setRecordings(e.target.checked)}
-        />
-        {recordings && (
-          <Input
-            label="Recording link lifetime (days)"
-            type="number"
-            min={1}
-            max={365}
-            value={ttlDays}
-            onChange={(e) => setTtlDays(e.target.value)}
-            hint="Links of recent calls are renewed before they expire."
-          />
+        {!personal && (
+          <>
+            <Switch
+              label="Log missed calls"
+              checked={logMissed}
+              onChange={(e) => setLogMissed(e.target.checked)}
+            />
+            <Switch
+              label={
+                c.capabilities.recordingUpload
+                  ? "Attach recordings"
+                  : "Attach recording links"
+              }
+              hint={
+                c.capabilities.recordingUpload
+                  ? "Off by default. The CRM stores an audio file, not a link: the recording is uploaded to the call log."
+                  : c.capabilities.recordingCopy
+                    ? "Off by default. The CRM fetches the recording once from a one-day link and keeps its own copy."
+                    : "Off by default. A link to the recording is written into the CRM record; anyone with the link can play it until it expires."
+              }
+              checked={recordings}
+              onChange={(e) => setRecordings(e.target.checked)}
+            />
+            {recordings &&
+              !c.capabilities.recordingUpload &&
+              !c.capabilities.recordingCopy && (
+                <Input
+                  label="Recording link lifetime (days)"
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={ttlDays}
+                  onChange={(e) => setTtlDays(e.target.value)}
+                  hint="Links of recent calls are renewed before they expire."
+                />
+              )}
+            <Input
+              label={spec.ownerLabel}
+              value={fallback}
+              maxLength={64}
+              onChange={(e) => setFallback(e.target.value)}
+              hint="Owns the calls of users with no CRM user. Empty skips those calls."
+            />
+          </>
         )}
-        <Input
-          label={spec.ownerLabel}
-          value={fallback}
-          maxLength={64}
-          onChange={(e) => setFallback(e.target.value)}
-          hint="Owns the calls of users with no CRM user. Empty skips those calls."
-        />
         {err && (
           <Alert tone="bad" title="Not saved">
             {err}

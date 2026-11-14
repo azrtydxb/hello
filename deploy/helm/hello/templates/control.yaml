@@ -5,6 +5,8 @@
 {{- $syslog := .Values.control.syslog -}}
 {{- $ldap := .Values.control.ldap -}}
 {{- $ldapOn := and $ldap.enabled $provOn -}}
+{{- $chat := .Values.control.chat -}}
+{{- $chatOn := ne $chat.lanAddr "" -}}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -132,6 +134,16 @@ spec:
             - name: HELLO_OAUTH_DCR
               value: "true"
             {{- end }}
+            {{- if $chatOn }}
+            - name: HELLO_MSG_CHAT_LAN_ADDR
+              value: {{ $chat.lanAddr | quote }}
+            - name: HELLO_MSG_CHAT_ENABLED
+              value: {{ $chat.enabled | quote }}
+            {{- with $chat.trustedProxies }}
+            - name: HELLO_MSG_CHAT_TRUSTED_PROXIES
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
             {{- if $provOn }}
             - name: HELLO_PROV_PUBLIC_URL
               value: {{ $prov.publicUrl | quote }}
@@ -241,6 +253,10 @@ spec:
             - name: prov
               containerPort: 8083
             {{- end }}
+            {{- if $chatOn }}
+            - name: chat
+              containerPort: {{ trimPrefix ":" $chat.lanAddr | int }}
+            {{- end }}
             {{- if $syslog.enabled }}
             - name: syslog
               containerPort: 5514
@@ -328,6 +344,24 @@ spec:
       port: 8083
       protocol: TCP
       targetPort: prov
+{{- end }}
+{{- if $chatOn }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-chat
+  labels:
+    {{- include "hello.labels" (dict "root" . "component" "chat") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: chat
+      port: {{ trimPrefix ":" $chat.lanAddr | int }}
+      protocol: TCP
+      targetPort: chat
 {{- end }}
 {{- if $ldapOn }}
 ---

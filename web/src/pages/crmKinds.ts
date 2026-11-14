@@ -15,6 +15,11 @@ export interface KindField {
   required?: boolean;
   /** A fixed list; the field is a select. */
   options?: KindOption[];
+  /** Several choices from a fixed list, stored comma-separated. */
+  multi?: KindOption[];
+  /** A true/false setting shown as a switch (stored as "true" or "false"). */
+  switch?: boolean;
+  placeholder?: string;
   /** The value a new connector starts with. */
   initial?: string;
 }
@@ -34,9 +39,21 @@ export interface KindSpec {
   bound: string[];
   /** Ticket kinds can download a sidebar app. */
   sidebarApp?: boolean;
+  /** What the customer needs, shown when the connector is added. */
+  intro?: string;
+  /** The kind shows what the customer configures in the CRM (GET .../setup). */
+  setup?: boolean;
+  /** Whether the client id and secret are needed for these settings (default: always). */
+  needsCredentials?: (cfg: Record<string, string>) => boolean;
+  /** Whether Connect does anything for these settings (default: always). */
+  canConnect?: (cfg: Record<string, string>) => boolean;
   guide: { summary: string; text: string; scopes?: string[]; steps?: string[] };
   /** Label of the fallback owner field. */
   ownerLabel: string;
+  /** Every user signs in with their own account (Outlook, Google): no organisation sign-in, call logging or user mapping. */
+  personal?: boolean;
+  /** The scopes a personal connector asks for, by feature (the features field). */
+  featureScopes?: Record<string, string>;
 }
 
 const HUBSPOT_SCOPES = [
@@ -298,6 +315,251 @@ export const KINDS: KindSpec[] = [
         "In Clio's developer portal create an application and set the redirect URI below.",
         "Grant it read access to contacts and users and write access to communications.",
       ],
+    },
+  },
+  {
+    value: "pipedrive",
+    label: "Pipedrive",
+    auth: "oauth",
+    idLabel: "Client ID",
+    secretLabel: "Client secret",
+    secretHint: "Kept sealed; it is never shown again.",
+    fields: [],
+    bound: [],
+    ownerLabel: "Fallback owner (Pipedrive user id)",
+    guide: {
+      summary: "Pipedrive app settings",
+      text: "In the Pipedrive developer hub create a private app and set the callback URL below. Calls are logged for each user by their Pipedrive user id, so one connection by an administrator serves everyone. Pipedrive stores an audio file, not a link: with recordings on, the audio is uploaded to the call log (up to HELLO_CRM_UPLOAD_MAX_MB, 50 MB by default).",
+      scopes: [
+        "Contacts: read",
+        "Calls (activities): full access",
+        "Users: read",
+      ],
+    },
+  },
+  {
+    value: "zoho",
+    label: "Zoho CRM",
+    auth: "oauth",
+    idLabel: "Client ID",
+    secretLabel: "Client secret",
+    secretHint: "Kept sealed; it is never shown again.",
+    fields: [
+      {
+        key: "region",
+        label: "Zoho data centre",
+        initial: "us",
+        options: [
+          { value: "us", label: "United States (zoho.com)" },
+          { value: "eu", label: "Europe (zoho.eu)" },
+          { value: "in", label: "India (zoho.in)" },
+          { value: "au", label: "Australia (zoho.com.au)" },
+          { value: "jp", label: "Japan (zoho.jp)" },
+          { value: "ca", label: "Canada (zohocloud.ca)" },
+          { value: "sa", label: "Saudi Arabia (zoho.sa)" },
+          { value: "cn", label: "China (zoho.com.cn)" },
+        ],
+      },
+    ],
+    bound: ["region"],
+    ownerLabel: "Fallback owner (Zoho user id)",
+    guide: {
+      summary: "Zoho API console client",
+      text: "In the Zoho API console (the data centre of your account) add a Server-based Application and set the redirect URI below. Zoho's own PhoneBridge dialling is not used: call from Zoho with the browser extension.",
+      scopes: [
+        "ZohoCRM.modules.calls.CREATE",
+        "ZohoCRM.modules.calls.UPDATE",
+        "ZohoCRM.modules.contacts.READ",
+        "ZohoCRM.modules.leads.READ",
+        "ZohoCRM.users.READ",
+      ],
+    },
+  },
+  {
+    value: "odoo",
+    label: "Odoo",
+    auth: "direct",
+    idLabel: "Login of the API key's user",
+    secretLabel: "API key",
+    secretHint: "Kept sealed; it is never shown again.",
+    fields: [
+      {
+        key: "url",
+        label: "Odoo address",
+        hint: "https://odoo.example.com",
+        required: true,
+      },
+      { key: "db", label: "Database", required: true },
+    ],
+    bound: ["url", "db"],
+    ownerLabel: "Fallback owner (Odoo user id)",
+    guide: {
+      summary: "Odoo API key",
+      text: "Hello logs a call as a note in the contact's chatter, or in the call owner's own when the caller is unknown. Hello checks the key when you press Connect. Odoo 14 or later.",
+      steps: [
+        "In Odoo open the user's preferences, Account Security, New API Key.",
+        "The user needs access to Contacts and the right to post notes.",
+      ],
+    },
+  },
+  {
+    value: "bitrix24",
+    label: "Bitrix24",
+    auth: "direct",
+    secretLabel: "Inbound webhook address",
+    secretHint:
+      "https://your-portal.bitrix24.com/rest/1/xxxxxxxx/ . The address contains the secret; it is kept sealed and never shown again.",
+    fields: [],
+    bound: [],
+    ownerLabel: "Fallback owner (Bitrix24 user id)",
+    guide: {
+      summary: "Bitrix24 inbound webhook",
+      text: "Calls appear in the CRM entity found by phone. The recording is fetched by Bitrix24 from a one-day link and kept as its own copy.",
+      steps: [
+        "Developer resources, Other, Inbound webhook: give it the permissions CRM, Telephony and Users.",
+        "Paste its address here as the secret; Hello checks it when you press Connect.",
+      ],
+    },
+  },
+  {
+    value: "salesforce",
+    label: "Salesforce",
+    auth: "direct",
+    idLabel: "Client ID",
+    secretLabel: "Client secret",
+    secretHint: "Kept sealed; it is never shown again.",
+    intro:
+      "The Open CTI softphone needs no sign-in: import the call center from the Connection tab. Add a connected app only to let Hello also log calls nobody had a browser open for.",
+    fields: [
+      {
+        key: "serverLogging",
+        label: "Also log calls from the server",
+        switch: true,
+        initial: "false",
+        hint: "Needs a connected app with the client credentials flow and an integration user. Logs missed calls and calls made on a desk phone, looks callers up by phone and adds recording links.",
+      },
+      {
+        key: "domain",
+        label: "My Domain",
+        placeholder: "acme.my.salesforce.com",
+        hint: "The host of your org, without https://. Needed for server-side logging.",
+      },
+      {
+        key: "apiVersion",
+        label: "API version",
+        initial: "62.0",
+        placeholder: "62.0",
+      },
+    ],
+    bound: ["domain"],
+    setup: true,
+    needsCredentials: (c) => c.serverLogging === "true",
+    canConnect: (c) => c.serverLogging === "true",
+    ownerLabel: "Fallback owner (Salesforce user id)",
+    guide: {
+      summary: "Salesforce setup",
+      text: "The softphone runs in each user's own Salesforce session. Server-side logging signs in with the client credentials flow of a connected app, so no browser step is needed.",
+    },
+  },
+  {
+    value: "dynamics",
+    label: "Dynamics 365",
+    auth: "direct",
+    idLabel: "Client ID",
+    secretLabel: "Client secret",
+    secretHint: "Kept sealed; it is never shown again.",
+    intro:
+      "Register an app in Microsoft Entra, add it to your environment as an application user, and enter its tenant, environment address and credentials.",
+    fields: [
+      {
+        key: "orgUrl",
+        label: "Environment URL",
+        placeholder: "https://contoso.crm4.dynamics.com",
+        required: true,
+      },
+      {
+        key: "tenantId",
+        label: "Directory (tenant) ID",
+        required: true,
+        hint: "A GUID, from the app registration.",
+      },
+    ],
+    bound: ["orgUrl", "tenantId"],
+    setup: true,
+    ownerLabel: "Fallback owner (Dynamics user id)",
+    guide: {
+      summary: "Dynamics 365 setup",
+      text: "Hello signs in with the client credentials of an Entra app registered as an application user of the environment, so no browser step is needed.",
+    },
+  },
+  {
+    value: "outlook",
+    label: "Outlook",
+    auth: "oauth",
+    personal: true,
+    intro:
+      "Microsoft 365: each user signs in with their own account under My connections; their contacts name callers and their calendar can set Do Not Disturb.",
+    idLabel: "Client ID",
+    secretLabel: "Client secret",
+    secretHint: "Kept sealed; it is never shown again.",
+    fields: [
+      {
+        key: "tenant",
+        label: "Tenant",
+        initial: "organizations",
+        hint: "organizations (any work or school account), a tenant id or your domain.",
+      },
+      {
+        key: "features",
+        label: "What users may connect",
+        initial: "contacts",
+        multi: [
+          { value: "contacts", label: "Contacts name callers" },
+          { value: "calendar", label: "Calendar sets DND" },
+        ],
+      },
+    ],
+    bound: [],
+    ownerLabel: "Fallback owner",
+    featureScopes: {
+      contacts: "Contacts.Read",
+      calendar: "Calendars.Read",
+    },
+    guide: {
+      summary: "Microsoft Entra app settings",
+      text: "In the Microsoft Entra admin center register an application (a web platform), add this redirect URI, create a client secret and add these delegated Microsoft Graph permissions. They are read-only and need no administrator consent.",
+    },
+  },
+  {
+    value: "google",
+    label: "Google",
+    auth: "oauth",
+    personal: true,
+    intro:
+      "Google Workspace: each user signs in with their own account under My connections; their contacts name callers and their calendar can set Do Not Disturb.",
+    idLabel: "Client ID",
+    secretLabel: "Client secret",
+    secretHint: "Kept sealed; it is never shown again.",
+    fields: [
+      {
+        key: "features",
+        label: "What users may connect",
+        initial: "contacts",
+        multi: [
+          { value: "contacts", label: "Contacts name callers" },
+          { value: "calendar", label: "Calendar sets DND" },
+        ],
+      },
+    ],
+    bound: [],
+    ownerLabel: "Fallback owner",
+    featureScopes: {
+      contacts: "https://www.googleapis.com/auth/contacts.readonly",
+      calendar: "https://www.googleapis.com/auth/calendar.freebusy",
+    },
+    guide: {
+      summary: "Google Cloud app settings",
+      text: "In the Google Cloud console create an OAuth client (web application), add this redirect URI, enable the People API and the Calendar API, and add these scopes to the consent screen. Keep the app in Testing for your own domain, or publish it internal.",
     },
   },
 ];

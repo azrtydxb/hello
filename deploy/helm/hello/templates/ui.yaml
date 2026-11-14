@@ -42,6 +42,10 @@ spec:
               # Fully qualified: nginx's runtime resolver applies no search
               # domains, so the short name never resolves (502).
               value: {{ printf "http://%s:8081" (include "hello.svcFQDN" (dict "root" . "name" (printf "%s-control" $full))) | quote }}
+            {{- if ne .Values.control.chat.lanAddr "" }}
+            - name: HELLO_CHAT_UPSTREAM
+              value: {{ printf "http://%s:%d" (include "hello.svcFQDN" (dict "root" . "name" (printf "%s-chat" $full))) (trimPrefix ":" .Values.control.chat.lanAddr | int) | quote }}
+            {{- end }}
             - name: HELLO_DNS_RESOLVER
               value: {{ $ui.dnsResolver | quote }}
           ports:

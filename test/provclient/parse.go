@@ -37,6 +37,17 @@ type Config struct {
 	ParkRetrieveCode string
 	// LDAP is the directory setting, nil when the file has none.
 	LDAP *LDAPConfig
+	// Raw is every P-value of a Grandstream file by name ("P130"), the
+	// P-value parser the WP profiles read the phone-parity keys through
+	// (spec S-38); nil for another vendor. Value reads it.
+	Raw map[string]string
+}
+
+// Value is the P-value name ("P130") of a Grandstream file, and whether the
+// file sets it.
+func (c Config) Value(name string) (string, bool) {
+	v, ok := c.Raw[name]
+	return v, ok
 }
 
 // caCommentRE finds the CA URL the XML formats carry in a comment, where
@@ -233,6 +244,7 @@ func ParseGrandstream(b []byte, mac string) (Config, error) {
 		ProvURL: gsURL(p["P212"], p["P237"], "/"), CAURL: caFromComment(b), FirmwareURL: gsURL(p["P6767"], p["P192"], ""), AdminPassword: p["P2"],
 	}
 	c.LDAP = ldapFromGrandstream(p)
+	c.Raw = p
 	if c.Server, c.Port, err = hostPort(p["P47"]); err != nil {
 		return Config{}, fmt.Errorf("grandstream: P47: %w", err)
 	}

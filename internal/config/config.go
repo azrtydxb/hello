@@ -82,6 +82,14 @@ type Control struct {
 	// RFC 1918 ranges by default, "none" for no private target at all).
 	// Loopback, link-local and metadata addresses are never allowed.
 	IntegrationsAllowedCIDRs []netip.Prefix
+	// DirectoryAllowPlaintextLDAP lets an LDAP directory connector use ldap://
+	// without StartTLS (HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP, lab only, off by
+	// default; every use logs a warning). Certificate verification stays on.
+	DirectoryAllowPlaintextLDAP bool
+	// CRMUploadMaxMB (HELLO_CRM_UPLOAD_MAX_MB, default 50) is the largest
+	// recording uploaded to a CRM that stores the file itself (Pipedrive);
+	// a larger one is not sent.
+	CRMUploadMaxMB int
 	// MinIO (voicemail audio) and SMTP (voicemail email). SMTP is optional:
 	// an empty SmtpHost disables the mailer.
 	MinioEndpoint      string
@@ -116,6 +124,30 @@ type Control struct {
 	AIAgent AIAgent
 	// Syslog is the phone syslog sink (HELLO_SYSLOG_*).
 	Syslog Syslog
+	// Chat is the LAN chat widget listener (HELLO_MSG_CHAT_*).
+	Chat Chat
+}
+
+// Chat configures the LAN chat widget (spec messaging-channels M-28). The
+// listener serves only /chat/* and /healthz, and starts only when LANAddr is
+// set.
+type Chat struct {
+	// LANAddr (HELLO_MSG_CHAT_LAN_ADDR, default off) is where the listener
+	// binds, for example :8087.
+	LANAddr string
+	// Enabled (HELLO_MSG_CHAT_ENABLED, default true) is the global kill
+	// switch: false answers every /chat request with 503.
+	Enabled bool
+	// TrustedProxies (HELLO_MSG_CHAT_TRUSTED_PROXIES) may set
+	// X-Forwarded-For; without them every visitor behind the ingress shares
+	// its address and its limits.
+	TrustedProxies []netip.Prefix
+	// MaxInFlight (HELLO_MSG_CHAT_MAX_INFLIGHT, default 500) is the requests
+	// in flight per pod before the listener answers 503.
+	MaxInFlight int
+	// MaxStreams (HELLO_MSG_CHAT_MAX_STREAMS, default 2000) is the open
+	// visitor event streams per pod.
+	MaxStreams int
 }
 
 // Syslog configures the phone syslog sink (phone-feature-parity S-27). It is
@@ -426,6 +458,10 @@ type SIP struct {
 	// PushRate (HELLO_PROV_PUSH_RATE, default 20) is how many check-sync
 	// pushes the cluster sends per minute.
 	PushRate int
+	// IntegrationsAllowedCIDRs are the private ranges the CRM caller-name
+	// lookup may reach (a self-hosted Odoo or Bitrix24); the same setting
+	// as hello-control's.
+	IntegrationsAllowedCIDRs []netip.Prefix
 	// VoicePromptLanguage (HELLO_VOICEMAIL_LANGUAGE, default en) is the
 	// language of the spoken voicemail prompts. Timezone (HELLO_TIMEZONE,
 	// else HELLO_PROV_TIMEZONE, else UTC) is the zone message times are
@@ -608,6 +644,8 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
 	}
 	c.IntegrationsAllowedCIDRs = r.allowedCIDRs("HELLO_INTEGRATIONS_ALLOWED_CIDRS")
+	c.DirectoryAllowPlaintextLDAP = r.boolean("HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP")
+	c.CRMUploadMaxMB = r.positiveInt("HELLO_CRM_UPLOAD_MAX_MB", 50)
 	c.Database = r.database(c.DatabaseURL)
 	c.DoorCameraAllow = r.cameraAllow()
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
@@ -632,7 +670,28 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	c.AIAgent = r.aiAgent()
 	c.Clients = r.clients()
 	c.Syslog = r.syslog()
+	c.Chat = r.chat()
 	return c, r.err()
+}
+
+// chat reads the HELLO_MSG_CHAT_* settings.
+func (r *reader) chat() Chat {
+	c := Chat{
+		LANAddr:        r.getenv("HELLO_MSG_CHAT_LAN_ADDR"),
+		Enabled:        true,
+		TrustedProxies: r.prefixes("HELLO_MSG_CHAT_TRUSTED_PROXIES"),
+		MaxInFlight:    r.positiveInt("HELLO_MSG_CHAT_MAX_INFLIGHT", 500),
+		MaxStreams:     r.positiveInt("HELLO_MSG_CHAT_MAX_STREAMS", 2000),
+	}
+	switch r.getenv("HELLO_MSG_CHAT_ENABLED") {
+	case "", "true":
+	case "false":
+		c.Enabled = false
+	default:
+		r.fail("HELLO_MSG_CHAT_ENABLED", errors.New("must be true or false"))
+	}
+	r.hostPort("HELLO_MSG_CHAT_LAN_ADDR", c.LANAddr)
+	return c
 }
 
 // cameraAllow reads HELLO_DOOR_CAMERA_ALLOW. The error names the key and
@@ -715,8 +774,9 @@ func (r *reader) clients() Clients {
 	if c.AuthKeyPrevious != "" && c.AuthKey == "" {
 		r.fail("HELLO_CLIENT_AUTH_KEY_PREVIOUS", errors.New("needs HELLO_CLIENT_AUTH_KEY"))
 	}
-	if c.WSSURL != "" && !strings.HasPrefix(c.WSSURL, "wss://") && !strings.HasPrefix(c.WSSURL, "ws://") {
-		r.fail("HELLO_WSS_URL", errors.New("must be a wss:// (or ws://) URL"))
+	// A plain ws scheme is accepted on purpose, for a lab without TLS.
+	if u, err := url.Parse(c.WSSURL); c.WSSURL != "" && (err != nil || (u.Scheme != "wss" && u.Scheme != "ws")) {
+		r.fail("HELLO_WSS_URL", errors.New("must be a wss (or ws) URL"))
 	}
 	if len(c.TURNURLs) > 0 && len(c.TURNSecret) < 16 {
 		r.fail("HELLO_TURN_SECRET", errors.New("is required with HELLO_TURN_URLS and must be at least 16 bytes"))
@@ -1119,6 +1179,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 		MaxCallDuration:    r.duration("HELLO_SIP_MAX_CALL_DURATION", 4*time.Hour),
 		PushRate:           r.positiveInt("HELLO_PROV_PUSH_RATE", 20),
 	}
+	c.IntegrationsAllowedCIDRs = r.allowedCIDRs("HELLO_INTEGRATIONS_ALLOWED_CIDRS")
 	c.VoicePromptLanguage = r.optional("HELLO_VOICEMAIL_LANGUAGE", "en")
 	c.Timezone = r.optional("HELLO_TIMEZONE", r.optional("HELLO_PROV_TIMEZONE", "UTC"))
 	if _, err := time.LoadLocation(c.Timezone); err != nil {
