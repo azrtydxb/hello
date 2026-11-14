@@ -514,7 +514,7 @@ available, too many waiting); `GET /api/v1/messaging/chat/sites` carries it as
 
 The site's opening hours are the schedule of its address: the site's `hours`
 field and the routing's `schedule` are the same data, and changing either
-changes both (migration `00140_messaging_one_schedule` moved each site's own
+changes both (migration `00100_messaging_one_schedule` moved each site's own
 hours there). A visitor may end
 the chat and, when the site allows it, email themselves a transcript (three a
 day). Messages are plain text everywhere; a link in a visitor's message is

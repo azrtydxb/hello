@@ -4807,7 +4807,7 @@ entry and the code it names).
   fields and JSON), and a chat site stored its own hours next to its address's
   routing schedule, so the widget and the router could disagree. `Hours` is
   removed; the site's `hours` field reads and writes its address's `schedule`.
-  Migration `00140_messaging_one_schedule` copies a site's non-empty hours to
+  Migration `00100_messaging_one_schedule` copies a site's non-empty hours to
   its address (a site's hours win over a schedule set through routing) and
   drops `chat_sites.hours`; down restores it from the schedule. The API keeps
   `hours` on chat sites (same JSON); OpenAPI's `ChatHours` is folded into
