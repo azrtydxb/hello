@@ -506,7 +506,7 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	// A sips: request is secure end to end (RFC 3261 26.2.2): its caller must
 	// be on TLS, and every leg it forks onto must be too (see c.secure).
-	if isSIPS(req) && s.clientTransport(req) != transportTLS {
+	if isSIPS(req) && !secureTransport(s.clientTransport(req)) {
 		s.refuseSecure(req, tx, secureCallerNotTLS, "sips: caller is not on TLS")
 		return
 	}

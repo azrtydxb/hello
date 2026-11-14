@@ -52,8 +52,10 @@ data:
     #     Hello node reaches any phone through Kamailio;
     #   - record-routes initial INVITEs in both directions;
     #   - tells Hello the phone's real source in X-Hello-Client and the transport
-    #     of the phone's connection (udp, tcp or tls) in X-Hello-Transport;
+    #     of the phone's connection (udp, tcp, tls, ws or wss) in X-Hello-Transport;
     #   - terminates SIP over TLS for phones (optional, see TLS below);
+    #   - terminates SIP over WebSocket (WSS, RFC 7118) for browsers (optional,
+    #     see WSS below);
     #   - rate-limits REGISTER, INVITE and MESSAGE per source IP (pike).
     #
     # SIP MESSAGE (RFC 3428, text messaging) is routed like an initial INVITE:
@@ -167,6 +169,34 @@ data:
     #!endif
     #!endif
 
+    # SIP over WSS (RFC 7118, clients-webrtc-mobile-video S-8 to S-12), off unless
+    # KAMAILIO_WSS_PORT is set. Browsers reach it as wss://<console host>/sip
+    # through the console's Ingress (docs/webrtc.md), which forwards to this TLS
+    # listener on the instance's own address; the certificate is the same one as
+    # SIP over TLS (/etc/hello-tls, tls.cfg). Kamailio ends the WebSocket and
+    # talks plain UDP to the hello-sip nodes, like for any phone, telling them the
+    # leg was wss in X-Hello-Transport. It needs an image with the websocket and
+    # tls modules (docker/kamailio); an image without them must run with
+    # KAMAILIO_WSS_PORT unset.
+    #   KAMAILIO_WS_ORIGINS: the browser origins allowed to open a WebSocket,
+    #     comma separated, exact (https://hello.kw.watteel.lab,...). A handshake
+    #     carrying any other Origin is refused (cross-site WebSocket hijacking); a
+    #     client that sends no Origin is not a browser and is let in (it still has
+    #     to authenticate with SIP digest). Unset: no origin is allowed.
+    #   KAMAILIO_WSS_TRUSTED_PROXIES: a regular expression the TCP peer's address
+    #     must match for its X-Forwarded-For to be believed (the ingress
+    #     controller's pods). Unset: never believed, the peer is the client.
+    #!trydefenv WSS_PORT=KAMAILIO_WSS_PORT
+
+    # tls.so is needed by SIP over TLS and by WSS.
+    #!ifdef TLS_PORT
+    #!define NEED_TLS
+    #!else
+    #!ifdef WSS_PORT
+    #!define NEED_TLS
+    #!endif
+    #!endif
+
     # How long (ms) an INVITE towards Hello may stay unanswered after its first
     # provisional reply. Hello ends ringing itself (HELLO_SIP_RING_TIMEOUT,
     # default 30s), so this only matters when the node dies mid-ring: the
@@ -245,6 +275,12 @@ data:
     listen=tls:EDGE_VIP:TLS_PORT advertise PUBLIC_HOST:PUBLIC_TLS_PORT name "phones_tls"
     #!endif
     listen=udp:EDGE_VIP:5070 name "hello"
+    #!ifdef WSS_PORT
+    # A WebSocket is one TCP connection pinned to the instance that accepted it, so
+    # the Path and Record-Route of a browser's requests name this instance's own
+    # address, not the VIP: Hello's requests for it must come back to this one.
+    listen=udp:LISTEN_IP:5072 name "hello_ws"
+    #!endif
     # Dispatcher probes (ds_default_sockname): on this node's own address, so a
     # Hello node answers the instance that asked.
     listen=udp:LISTEN_IP:5071 name "probe"
@@ -255,6 +291,11 @@ data:
     listen=tls:LISTEN_IP:TLS_PORT advertise PUBLIC_HOST:PUBLIC_TLS_PORT name "phones_tls"
     #!endif
     listen=udp:LISTEN_IP:5070 name "hello"
+    #!endif
+    #!ifdef WSS_PORT
+    # SIP over WebSocket for browsers: TLS here, the WebSocket upgrade on it. No
+    # advertise: its address is this instance's own (see hello_ws above).
+    listen=tls:LISTEN_IP:WSS_PORT name "wss"
     #!endif
     #!ifdef LEGACY_IP
     listen=udp:LEGACY_IP:PHONES_PORT name "phones_legacy"
@@ -270,7 +311,7 @@ data:
     # NOTIFY, MESSAGE) take back to it, so an idle one stays open for an hour
     # (phone-feature-parity S-13); a phone's keep-alive (OPTIONS, CRLF) resets it.
     tcp_connection_lifetime=3600
-    #!ifdef TLS_PORT
+    #!ifdef NEED_TLS
     enable_tls=yes
     #!endif
 
@@ -314,17 +355,38 @@ data:
     loadmodule "xhttp.so"
     loadmodule "xhttp_prom.so"
     loadmodule "rtimer.so"
-    #!ifdef TLS_PORT
+    #!ifdef NEED_TLS
     loadmodule "tls.so"
+    #!endif
+    #!ifdef WSS_PORT
+    loadmodule "websocket.so"
+    loadmodule "htable.so"
     #!endif
 
     # ctl: kamcmd's default socket (/run/kamailio/kamailio_ctl), so
     # `docker compose exec kamailio kamcmd dispatcher.list` works as the
     # kamailio user the container runs as.
 
-    #!ifdef TLS_PORT
+    #!ifdef NEED_TLS
     # tls: certificate, key and the 1.2 minimum are in tls.cfg (next to this file).
     modparam("tls", "config", "/etc/kamailio/tls.cfg")
+    #!endif
+
+    #!ifdef WSS_PORT
+    # websocket: Kamailio pings every connection (browsers answer with a pong
+    # without any script), and closes one that has not answered within the
+    # timeout, so a dead tab or a lost network frees its binding sooner than the
+    # registration expires. nathelper's OPTIONS keep-alive is not sent to these
+    # contacts (route REGISTER). Sub-protocol "sip" only (RFC 7118).
+    modparam("websocket", "keepalive_mechanism", 1)
+    modparam("websocket", "keepalive_timeout", 30)
+    modparam("websocket", "keepalive_interval", 10)
+    modparam("websocket", "sub_protocols", 1)
+    # The real client address of each WebSocket, from the trusted ingress's
+    # X-Forwarded-For at the handshake, by connection id. Hello's failed-auth
+    # throttle and trunk checks use it (X-Hello-Client) instead of the ingress's
+    # own address, which every browser shares. Entries expire after a day.
+    modparam("htable", "htable", "wsclient=>size=12;autoexpire=86400")
     #!endif
 
     # jsonrpcs: RPC over the FIFO only (no HTTP transport here).
@@ -438,7 +500,7 @@ data:
     	route(EDGE_SIDE);
     	prom_counter_inc("edge_requests_total", "1", "$Rn");
 
-    	if ($Rn == "hello" || $Rn == "hello_legacy") {
+    	if ($Rn == "hello" || $Rn == "hello_legacy" || $Rn == "hello_ws") {
     		# Received on the Hello-facing socket (5070). On kw that socket is on
     		# the node address (hostNetwork), reachable from the whole LAN, so it
     		# is trusted only from an address the dispatcher holds (set 1, the
@@ -457,7 +519,7 @@ data:
 
     	route(REQINIT);
 
-    	if ($Rn == "hello" || $Rn == "hello_legacy") {
+    	if ($Rn == "hello" || $Rn == "hello_legacy" || $Rn == "hello_ws") {
     		# A hello-sip node (vetted above).
     		setflag(FLT_FROM_HELLO);
     	}
@@ -512,12 +574,25 @@ data:
     	if ($Rn == "phones_legacy" || $Rn == "phones_legacy_tcp" || $Rn == "hello_legacy") {
     		$var(legacy) = 1;
     	}
+    	# $var(ws) is 1 for a browser's WebSocket and for a Hello node answering
+    	# one through the Path or Record-Route naming hello_ws.
+    	$var(ws) = 0;
+    	if ($Rn == "wss" || $Rn == "hello_ws") {
+    		$var(ws) = 1;
+    	}
     }
 
     # The Hello-facing socket of this request's family.
     route[HELLO_SOCKET] {
     	if ($var(legacy) == 1) {
     		$fsn = "hello_legacy";
+    #!ifdef WSS_PORT
+    #!ifdef EDGE_VIP
+    	} else if ($var(ws) == 1) {
+    		# Without the VIP "hello" already is the instance's own address.
+    		$fsn = "hello_ws";
+    #!endif
+    #!endif
     	} else {
     		$fsn = "hello";
     	}
@@ -531,7 +606,10 @@ data:
     	remove_hf("X-Hello-Transport");
     	force_rport();
 
-    	if (is_method("REGISTER|INVITE|MESSAGE") && !has_totag()) {
+    	# Not for a WebSocket: every browser behind the ingress shares its address,
+    	# so a per-source-IP limit would block them all together. Hello's
+    	# failed-auth throttle (by the client address, X-Hello-Client) covers them.
+    	if (is_method("REGISTER|INVITE|MESSAGE") && !has_totag() && $var(ws) != 1) {
     		if (!pike_check_req()) {
     			if ($rc == -2) {
     				prom_counter_inc("pike_blocked_total", "1");
@@ -594,8 +672,14 @@ data:
     		sl_send_reply("503", "Internal Path Error");
     		exit;
     	}
-    	# Keep-alive list (route REGISTER_REPLY): record where the phone is.
-    	if (nat_uac_test("19")) {
+    	if ($var(ws) == 1) {
+    		# A browser's Contact host is a random .invalid name (RFC 7118): name
+    		# the live connection instead, so Hello's later requests reach it. The
+    		# WebSocket ping replaces the OPTIONS keep-alive, so it is not put on
+    		# the keep-alive list.
+    		set_contact_alias();
+    		setbflag(FLB_NATB);
+    	} else if (nat_uac_test("19")) {
     		fix_nated_register();
     		setbflag(FLB_NATB);
     		setbflag(FLB_NATSIPPING);
@@ -696,6 +780,12 @@ data:
     	}
     	# The phone's source after NAT fix-up (force_rport): the address Hello's
     	# failed-auth throttle, trunk source check and binding Source use.
+    #!ifdef WSS_PORT
+    	if ($var(ws) == 1 && $Rn == "wss" && $sht(wsclient=>$conid) != $null) {
+    		# A browser behind the ingress: the address the ingress vouched for.
+    		append_hf("X-Hello-Client: $sht(wsclient=>$conid):$sp\r\n");
+    	} else
+    #!endif
     	if (af == INET6) {
     		append_hf("X-Hello-Client: [$si]:$sp\r\n");
     	} else {
@@ -754,6 +844,11 @@ data:
     # or TCP when the destination (the Path's received, an alias or the R-URI)
     # says so, UDP otherwise.
     route[PHONES_SOCKET] {
+    	if ($dP == "ws" || $dP == "wss") {
+    		# The WebSocket connection the browser registered on carries it; no
+    		# socket to force.
+    		return;
+    	}
     	if ($dP == "tls") {
     #!ifdef TLS_PORT
     		$fsn = "phones_tls";
@@ -896,6 +991,12 @@ data:
 
     # HTTP is answered on the metrics socket only, never on the phones TCP one.
     event_route[xhttp:request] {
+    #!ifdef WSS_PORT
+    	if ($Rn == "wss") {
+    		route(WSS_HANDSHAKE);
+    		exit;
+    	}
+    #!endif
     	if ($Rp != METRICS_PORT) {
     		xhttp_reply("403", "Forbidden", "text/plain", "forbidden\n");
     		exit;
@@ -910,6 +1011,55 @@ data:
     	}
     	xhttp_reply("404", "Not Found", "text/plain", "not found\n");
     }
+
+    #!ifdef WSS_PORT
+    # The HTTP request that upgrades a connection on the WSS socket to SIP over
+    # WebSocket. Nothing else is answered there. A handshake is accepted only for
+    # GET /sip with the sip sub-protocol (the websocket module checks it) and an
+    # Origin that is on the list or absent (a non-browser client; a browser always
+    # sends one, so cross-site WebSocket hijacking needs an origin that is listed).
+    route[WSS_HANDSHAKE] {
+    	set_reply_close();
+    	set_reply_no_connect();
+    	if (!($rm == "GET" && $hu =~ "^/sip/?$" && $hdr(Upgrade) =~ "websocket" && $hdr(Connection) =~ "Upgrade")) {
+    		xhttp_reply("404", "Not Found", "text/plain", "not found\n");
+    		exit;
+    	}
+    	if ($hdr(Origin) != $null && $hdr(Origin) != "") {
+    		# The Origin is the client's to write: only a plain scheme://host[:port]
+    		# gets as far as the regular expression built from it below.
+    		$var(allowed) = 0;
+    		if ($hdr(Origin) =~ "^https?://[A-Za-z0-9.:-]+$" && $env(KAMAILIO_WS_ORIGINS) != $null) {
+    			$var(esc) = $(hdr(Origin){re.subst,/[.]/[.]/g});
+    			$var(list) = "," + $env(KAMAILIO_WS_ORIGINS) + ",";
+    			$var(re) = "," + $var(esc) + ",";
+    			if ($var(list) =~ $var(re)) {
+    				$var(allowed) = 1;
+    			}
+    		}
+    		if ($var(allowed) != 1) {
+    			xlog("L_WARN", "refused WebSocket from $si:$sp: origin $hdr(Origin) is not allowed\n");
+    			xhttp_reply("403", "Forbidden", "text/plain", "forbidden\n");
+    			exit;
+    		}
+    	}
+    	if (!ws_handle_handshake()) {
+    		xhttp_reply("400", "Bad Request", "text/plain", "bad request\n");
+    		exit;
+    	}
+    	# The client address behind the ingress, believed only from a trusted
+    	# peer (the first X-Forwarded-For entry, which the ingress sets from the
+    	# connection it accepted), kept for this connection's requests.
+    	if ($hdr(X-Forwarded-For) != $null && $env(KAMAILIO_WSS_TRUSTED_PROXIES) != $null) {
+    		$var(proxies) = $env(KAMAILIO_WSS_TRUSTED_PROXIES);
+    		$var(xff) = $(hdr(X-Forwarded-For){s.select,0,,}{s.trim});
+    		if ($si =~ $var(proxies) && $var(xff) =~ "^[0-9A-Fa-f:.]+$") {
+    			$sht(wsclient=>$conid) = $var(xff);
+    		}
+    	}
+    	exit;
+    }
+    #!endif
   # Verbatim copy of deploy/kamailio/tls.cfg (test/deploy). Read only when
   # KAMAILIO_TLS_PORT is set on the pod (see the kamailio Deployment).
   tls.cfg: |
@@ -1046,7 +1196,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: 4f9c03d844b862a1c43a8c404ef4f00094e64852c21908a09372ca51b7de25d0
+        hello.watteel.com/kamailio-config-sha256: d4b0ffe3350047672cb3ab80b96df30641ad5f312faff2358a32a742e9b53cae
     spec:
       # Phones must reach Kamailio with no NAT in between: through a NodePort
       # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's

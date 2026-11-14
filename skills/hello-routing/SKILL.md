@@ -53,6 +53,10 @@ Read the trace back to the user in plain words.
    policy; trunk legs are UDP today, so `optional` behaves as `off`, and
    `required` is refused with 422 (it needs a TLS trunk transport, which
    Hello does not have yet).
+   For the SBC in front of Microsoft Teams Direct Routing, set `profile` to
+   `sbc-peer` (see `listTrunkProfiles` for its defaults and limits: IP mode,
+   source CIDRs and a destination required, only G.722, PCMU and PCMA, no
+   required SRTP; docs/teams.md).
 3. `listTrunkStatus` until the registration is registered (registration
    mode) and the destinations are up.
 4. Nothing uses a new trunk until a route lists it: add or change an

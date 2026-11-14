@@ -85,16 +85,16 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P10 | SCIM 2.0                                       | todo        |
 | P11 | OIDC SSO, LDAP bind login                      | todo        |
 | P12 | Auto-provisioning extensions from a range      | todo        |
-| P13 | Salesforce Open CTI                            | wip (#331)  |
-| P14 | Pipedrive                                      | wip (#329)  |
-| P15 | Zoho CRM                                       | wip (#329)  |
-| P16 | Zendesk, Freshdesk                             | wip (#328)  |
-| P17 | Slack, n8n, Make                               | wip (#335)  |
-| P18 | Outlook/Google contacts lookup, calendar DND   | wip (#335)  |
-| P19 | Dynamics 365 CIF                               | wip (#331)  |
-| P20 | ConnectWise, Autotask, HaloPSA, Clio           | wip (#328)  |
-| P21 | Odoo, Bitrix24                                 | wip (#329)  |
-| P22 | Teams Direct Routing guide (shared with WR 13) | todo        |
+| P13 | Salesforce Open CTI                            | done (#331) |
+| P14 | Pipedrive                                      | done (#329) |
+| P15 | Zoho CRM                                       | done (#329) |
+| P16 | Zendesk, Freshdesk                             | done (#328) |
+| P17 | Slack, n8n, Make                               | done (#335) |
+| P18 | Outlook/Google contacts lookup, calendar DND   | done (#335) |
+| P19 | Dynamics 365 CIF                               | done (#331) |
+| P20 | ConnectWise, Autotask, HaloPSA, Clio           | done (#328) |
+| P21 | Odoo, Bitrix24                                 | done (#329) |
+| P22 | Teams Direct Routing guide (shared with WR 13) | wip (#326)  |
 | #   | Item                                           | Status      |
 | --- | ---------------------------------------------- | ----------- |
 | P1  | Call events: stream, integration_events, SSE   | done (#205) |
@@ -109,16 +109,16 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P10 | SCIM 2.0                                       | todo        |
 | P11 | OIDC SSO, LDAP bind login                      | todo        |
 | P12 | Auto-provisioning extensions from a range      | todo        |
-| P13 | Salesforce Open CTI                            | wip (#331)  |
-| P14 | Pipedrive                                      | wip (#329)  |
-| P15 | Zoho CRM                                       | wip (#329)  |
-| P16 | Zendesk, Freshdesk                             | wip (#328)  |
-| P17 | Slack, n8n, Make                               | wip (#335)  |
-| P18 | Outlook/Google contacts lookup, calendar DND   | wip (#335)  |
-| P19 | Dynamics 365 CIF                               | wip (#331)  |
-| P20 | ConnectWise, Autotask, HaloPSA, Clio           | wip (#328)  |
-| P21 | Odoo, Bitrix24                                 | wip (#329)  |
-| P22 | Teams Direct Routing guide (shared with WR 13) | todo        |
+| P13 | Salesforce Open CTI                            | done (#331) |
+| P14 | Pipedrive                                      | done (#329) |
+| P15 | Zoho CRM                                       | done (#329) |
+| P16 | Zendesk, Freshdesk                             | done (#328) |
+| P17 | Slack, n8n, Make                               | done (#335) |
+| P18 | Outlook/Google contacts lookup, calendar DND   | done (#335) |
+| P19 | Dynamics 365 CIF                               | done (#331) |
+| P20 | ConnectWise, Autotask, HaloPSA, Clio           | done (#328) |
+| P21 | Odoo, Bitrix24                                 | done (#329) |
+| P22 | Teams Direct Routing guide (shared with WR 13) | wip (#326)  |
 
 ## messaging-channels
 
@@ -138,8 +138,8 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | #   | Item                                        | Status                       |
 | --- | ------------------------------------------- | ---------------------------- |
-| 1   | Media foundation (pion)                     | wip (#324)                   |
-| 2   | WSS on Kamailio                             | blocked (parity 23)          |
+| 1   | Media foundation (pion)                     | done (#324, #341)            |
+| 2   | WSS on Kamailio                             | wip (#326)                   |
 | 3   | Web devices and credentials                 | wip (#282)                   |
 | 4   | coturn, ICE servers                         | wip (#282)                   |
 | 5   | Web softphone, audio                        | blocked (1-4)                |
@@ -147,7 +147,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 6b  | Video recording                             | blocked (6)                  |
 | 10  | Video phones and door stations              | todo (code), hw (test)       |
 | 11  | Conference-room video                       | blocked (6)                  |
-| 13  | Teams SBC-peer trunk profile, docs/teams.md | wip (#225)                   |
+| 13  | Teams SBC-peer trunk profile, docs/teams.md | wip (#326)                   |
 | 7-9 | Push gateway, mobile apps, mobile video     | not now                      |
 | 12  | Public reach                                | not now (user decides later) |
 
@@ -225,3 +225,5 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - Salesforce (Developer Edition) and Dynamics 365 (trial) live checks: docs/crm.md, "Lab checklist: Salesforce" and "Lab checklist: Dynamics 365"
 - CRM connector live checks on real accounts: Pipedrive, Zoho CRM, Odoo, Bitrix24 (docs/crm.md lab checklists)
 - Telnyx and Twilio accounts, messaging item 6 (docs/inbox.md, "Sending through Telnyx", "Sender registration"): a real Telnyx send, delivery receipt and the 40300 STOP block; the field names of Telnyx's 10DLC, campaign-assignment and toll-free reads and of Twilio's UsAppToPerson and Tollfree reads; what a limited key answers for each registration read; a Twilio account with several Messaging Services; a US long code and a toll-free number in each state (approved, pending, rejected, unregistered)
+- Teams Direct Routing run (item 13, P22): a Microsoft 365 tenant with Teams Phone, a certified SBC or DRaaS contract, and a public SBC name and certificate; the cmdlet steps in docs/teams.md are unverified until then
+- WSS in a browser through the kw Ingress (item 2): needs the kw manifests, the image with the websocket module and a real browser
