@@ -74,7 +74,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 6     | Telnyx, sender registration                         | done (#346)       |
 | W     | Wiring between items 2 to 6, one schedule           | wip (#352)        |
 | 7     | AI triage, drafts, auto-reply                       | todo              |
-| 8     | Integrations, reporting, DSAR export, redact        | todo              |
+| 8     | Integrations, reporting, DSAR export, redact        | wip (#362)        |
 | N1-N3 | Public listener, WhatsApp, polling                  | not now           |
 
 ## clients-webrtc-mobile-video
