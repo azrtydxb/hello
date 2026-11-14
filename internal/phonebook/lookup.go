@@ -30,6 +30,9 @@ type LookupResult struct {
 	// extensions book) and Name what the callee's phone would show.
 	EntryID int64  `json:"entryId,omitempty"`
 	Name    string `json:"name,omitempty"`
+	// Company is the matching entry's company, when it has one; the extensions
+	// book has none.
+	Company string `json:"company,omitempty"`
 	// Matches is how many entries share the suffix when ambiguous.
 	Matches int `json:"matches,omitempty"`
 	// Searched lists the books looked in, in order.

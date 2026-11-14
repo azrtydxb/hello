@@ -3582,10 +3582,249 @@ Decided while building, without asking, within the spec and the brief:
   REGISTER arrived on the TLS listener; Kamailio's `edge_requests_total` shows
   Hello's requests on hello_tls.
 - Not built: the cleartext-hop refusal flag (it belongs to the media path;
-  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP` is added when #324 merges). This branch is based on main without #326;
-  kamailio.cfg, the kw ConfigMap and test/deploy tests need re-syncing against
-  #326 and #338 at merge (NEED_TLS defined in both, the hello-socket checks, the
-  TLS opt-in test).
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP` is added when #324 merges).
+- Merged with SIP over WSS (#326), both opt-in and independent. With the hop
+  on, every encrypted leg (tls, ws, wss) goes over `hello_tls` and dispatcher
+  set 2: the hop supersedes `hello_ws` for WSS legs (both are this instance's
+  own address, and the hop is the encrypted one). With the hop off, WSS keeps
+  #326's behaviour (`hello_ws` under EDGE_VIP, else `hello`). Requests arriving
+  on `hello`, `hello_legacy`, `hello_ws` and `hello_tls` are all vetted against
+  the dispatcher and flagged as from Hello. NEED_TLS is defined by
+  KAMAILIO_TLS_PORT, KAMAILIO_WSS_PORT or KAMAILIO_HELLO_TLS_PORT; the tls
+  module reads `tls-hop.cfg` with the hop on, else `tls.cfg`. Because
+  `tls-hop.cfg` presents one certificate on every TLS socket, the chart refuses
+  `kamailio.helloTLS.enabled` with `kamailio.wss.enabled` when
+  `kamailio.wss.secretName` names a different Secret than
+  `kamailio.tls.secretName`. kw keeps both off.
+
+## Messaging 4, LAN chat widget: defaults chosen (2026-11-11)
+
+Built from `.procoder/specs/messaging-channels.md` M-28, M-29, M-29a to M-29c.
+Where the spec left a product decision open, the conservative option was chosen
+and is listed here as chosen by default; change one by editing this entry and
+the code it names.
+
+- **Routing.** A chat conversation goes to the unassigned inbox pool, which is
+  what `route_kind = 'inbox'` is today. Queue routing and ACD assignment are
+  item 5, so the "default route (queue)" site setting is not offered yet.
+- **Who is available.** Agent staffing (M-13) is not on main, so a site is
+  online when it is inside its opening hours, a supervisor (operator or admin)
+  has an inbox stream open (seen in the last two minutes, `inbox_presence`), and
+  the unassigned live chats are under the site's cap. Otherwise the widget goes
+  offline: it collects a name, an email address and a message, and the chat is
+  flagged offline.
+- **Opening hours.** The M-14 schedule and the time-conditions engine are not
+  on main, so a site keeps its own weekly schedule (an IANA zone and windows per
+  weekday); empty means always open. A bad schedule counts as open, so a typo
+  never silences the widget.
+- **Agents are anonymous to visitors.** A visitor sees "Support", never an
+  agent's username or display name.
+- **Visitor events** are in `chat_events`, not `conversation_events`: that
+  table is per user and its user id is a required key. Same design (ids in
+  commit order, 7 days, `Last-Event-ID` resume on any pod).
+- **A challenge endpoint.** `GET /chat/v1/challenge?site=` returns the site's
+  public look and the nonce to solve; the spec lists the session call but a
+  proof of work needs its nonce first. Nonces are signed, expire in three
+  minutes, are bound to the client address and the site, are accepted once per
+  pod, and may never carry less difficulty than the site's setting.
+- **Turnstile and the frame's policy.** Turnstile cannot render under
+  `script-src 'self'`, so only a Turnstile site's frame also allows
+  `https://challenges.cloudflare.com` for scripts and frames. Every other site
+  keeps the spec's policy exactly. The admin page warns that Turnstile needs
+  the browser and the server to reach Cloudflare.
+- **Blocks.** A block holds the visitor for the hours chosen (24 by default, at
+  most 720) and the day's address hash until 00:00 UTC at most. A blocked
+  visitor gets a normal 200 with a closed state and a worthless token; nothing is
+  stored. Unblocking is on the sites page.
+- **Daily address salt.** The hash is HMAC-SHA256 under a key derived from
+  `HELLO_SECRET_KEY` and the UTC date, so there is no salt table and the salt
+  rotates at 00:00 UTC on every pod.
+- **One stream per visitor** is enforced per pod (a second stream is refused
+  with 429 after waiting up to a second for the old one to close, so a page
+  reload is not refused); there is no cross-pod stream registry.
+- **Adaptive difficulty** is tracked per pod in memory (this minute against
+  three times the median of the last hour, at least 10 sessions): only a
+  hardening, nothing depends on it.
+- **Email replies** are allowed only for chats the visitor left while nobody was
+  available and gave an address for; a live chat is answered in the widget. The
+  email holds the reply and no link, and the failure is kept as a failed message.
+- **A resolved chat reopens** when the same visitor writes again within
+  `reopen_days` (M-12); after a visitor ends a chat and returns later, a new
+  conversation starts. A chat an agent marked spam stays closed to that visitor.
+- **A site collecting nothing still takes an email address while offline**, so
+  the reply has somewhere to go.
+- **Defaults.** The listener is off until `HELLO_MSG_CHAT_LAN_ADDR` is set; the
+  global switch `HELLO_MSG_CHAT_ENABLED` defaults to true; a new site has the
+  proof-of-work challenge at 16 bits, no contact collection, no transcripts,
+  links kept, and no allowed origins until some are listed (the frame is then
+  not embeddable by any page).
+- **Not built, and why.** Chat attachments (`POST /chat/v1/attachments`, the
+  site's attachment switch) and the site logo from MinIO are not built: the
+  media pipeline and its tables (M-18) are not on main, and the spec has
+  attachments off by default. The route does not exist (404), so nothing is
+  half-wired. They join the media work.
+
+## Integrations P8: directory engine and AD/LDAP sync (2026-11-10)
+
+Built from spec `integrations.md` I-1 to I-10 and I-12 to I-19 (range
+auto-provisioning I-11 stays P12; the Google, Entra, SCIM and OIDC connectors
+build on the same `Driver` and `Store` later). The spec left the points below
+open; each was **chosen by default (the conservative option)**, not by the
+user.
+
+- **Scheduling starts only after a manual apply.** A connector never changes
+  users on its first, unreviewed run: the scheduler skips a connector until one
+  `apply` run (a reviewed preview applied, or "Run now") has succeeded. New
+  connectors are created disabled.
+- **Mass-deprovision threshold.** "More than 20 percent of linked users
+  (minimum 5)" is read as: the run halts when it would disable more than
+  `max(5, 20 percent of the enabled linked users)`. A small install (under 25
+  users) is therefore only guarded by the empty-result guard below 6
+  disables. The empty-result guard is `needs_confirmation` with code
+  `empty_result` (not a hard failure), so an administrator can confirm a
+  genuine emptying.
+- **A created directory user has no usable password and no new login method.**
+  The spec's SSO-only rule for synced users needs the later SSO phase. In P8
+  the sync stores the marker `!` as the password hash (it never matches, "an
+  empty or unknown hash never matches") and keeps `auth_method = 'local'`: the
+  `users_auth_method_check` constraint is left alone, so the later phase adds its
+  own value. A local user an administrator _adopts_ keeps its password, so
+  adopting never locks anyone out; the later phase flips adopted users.
+- **Adoption needs a decision.** Matching is by email, then username (a
+  username match whose email differs is the `username_collision` conflict).
+  Adopt rows are applied only when listed in the apply body (`adopt` /
+  `adoptAll`); otherwise they stay `adopt_not_confirmed`. A local admin is
+  skipped (`local_admin_not_adopted`).
+- **Only `extension_linked` can be overridden**, by moving the extension from
+  its current user, on the administrator's explicit decision (audited). Every
+  other conflict reason is not overridable.
+- **An empty or missing extension value never unlinks.** A user whose mapped
+  extension is empty keeps the link it has; one with no extension value is
+  created without a link (not a conflict). Auto-create is P12.
+- **Disabling is allowed on a managed user, enabling is not.** An
+  administrator may disable a directory user by hand (the safe direction);
+  re-enabling, and every other managed field, is `409 managed_by_directory`.
+  A directory user has no local password: setting one is refused too.
+- **Deleting a connector with linked users is refused** (`409
+connector_in_use`) unless `release=true`, which turns the users into local
+  users (keeping their rows, no password) and the ring-group rows into manual
+  ones.
+- **Reads are admin, not operator.** The spec lists runs and changes as
+  "operator"; the route table ties role to scope (a read scope is viewer), and
+  runs name users, so every directory route is scope `admin`, role admin. The
+  MCP tools are the five read operations; the writes, the test, the sync and
+  the apply and confirm are excluded (credentials, human-in-the-loop).
+- **Incremental runs (I-12).** Only a scheduled run reads incrementally; a
+  preview, a manual apply and a confirm always read everything, so an apply
+  matches its preview. AD reads `uSNChanged>=` the `highestCommittedUSN` taken
+  from the rootDSE before the read, kept per connector with the server's
+  invocation ID; without a USN, `whenChanged>=` (AD) or `modifyTimestamp>=`
+  (other LDAP) from the read's start less 5 minutes for clock skew. The mark is
+  stored only after a run applied with no error row. A full run is forced when
+  there is no mark, 24 h after the last full run, when the config, mappings,
+  group rules or mode changed (a fingerprint), when the invocation ID changed
+  or the USN or clock went backwards, and when a group the rules use changed
+  (AD does not bump a user's USN for a membership change). An incremental run
+  never counts, skips or disables a user for being absent and never trips the
+  empty-result guard; only full runs detect absences. Unchanged users with a
+  conflict are re-examined by the next full run, not before. Stored in
+  `directory_connectors` (`sync_mark`, `sync_fingerprint`, `last_full_run_at`)
+  and shown per run (`incremental`, `fullReason`). `delta_token` stays reserved
+  for Entra.
+- **Stable id.** AD `objectGUID` in its canonical string form, else
+  `entryUUID`, else `nsUniqueId`; an entry with none fails the run
+  (`bad_filter`) instead of being skipped, because a skipped user would read as
+  absent and be disabled.
+- **LDAP servers must be reachable through the SSRF-safe dialer**: public, or in
+  `HELLO_INTEGRATIONS_ALLOWED_CIDRS` (RFC 1918 by default). Loopback and
+  link-local never are.
+- **A failed connection test is a 200** with `ok: false` and a classified
+  code, so the console can show it; a failed run is a run row, not an API
+  error.
+- Devices a sync switches off are marked (`devices.disabled_by_directory`) so
+  that only those come back when the user does. Applying is per user, in its
+  own transaction under the configuration lock when it touches ring groups or
+  devices, so one bad row becomes an `error` row and the run goes on.
+- Live tests against a real Active Directory (certificate chains, paging at
+  1000, nested groups, `userAccountControl` flags) are on the PR's
+  hardware-and-accounts list; the suite uses an in-process LDAP server.
+
+## Messaging item 3: desk-phone texting and the SIP trunk channel (2026-11-10)
+
+The SIP-trunk adapter, the inbox gateway hand-off (`InboundFromTrunk`), replies
+through the trunk and the `messages.conversation_message_id` link already
+shipped with the inbox core (#211). This item adds what was missing. Where the
+spec left a product decision open, the conservative option below was chosen by
+default; each is a one-line change if the user decides otherwise.
+
+- Part size stays 700 bytes (the sip-messaging queue limit, which also keeps a
+  part in one UDP datagram), not the spec's 1000. Desk-phone parts include the
+  `(1/3) ` counter and any `[WhatsApp] ` prefix inside the 700. A body from a
+  phone above 700 bytes is refused with 413 as sip-messaging already does,
+  below RFC 3428's 1300.
+- Delivery to the desk phone happens when a conversation is assigned or taken
+  (the latest customer text) and on each later customer text while it is
+  assigned. Resolving, snoozing or returning it to the pool sends nothing.
+- A phone never makes first contact: a number with no conversation is
+  `handled=false` and takes the old external-number path, so no conversation is
+  opened from a handset. Spec M-17 consent gating therefore needs no phone path.
+- A customer who is in another agent's open conversation is refused to a phone
+  (with the reason sent to it), never texted around the inbox, and so are
+  opted-out customers. A resolved conversation of the user's own is not
+  reachable from a phone unless the number's owner extension is theirs.
+- A phone's reply is rate limited per user by the text queue's
+  `rate_per_minute`, counted on inbox replies; the refusal is 429.
+- `owner_extension_id` lets the owner's phone reply only into an existing
+  conversation that is unassigned or its user's. It does not create one.
+- Desk-phone delivery is off for the number and for the user by default and
+  needs both. A text that cannot be queued for the phone (text messaging off, a
+  door station, the text queue's rate limit) is skipped silently: the inbox
+  always keeps the text.
+- Vendor capability `sip_message` is on for Grandstream only. Every other
+  vendor stays off until a lab check shows its handset has a text UI. An
+  extension with no phone yet counts as capable, so an administrator can set it
+  up first.
+- Contact naming overlays the stored name at read time with the reader's own
+  books (personal, named, company, extensions), contact first, then the
+  carrier's name. Only a shared source is ever stored on the conversation. Add
+  to contacts defaults to the user's own book; the company book is chosen
+  explicitly by an operator or administrator. The click-to-call button and the
+  peer's recent CDRs in the right panel of spec M-15 wait for the integrations
+  click-to-call and the CDR number filter.
+- Chat visitor alerts ("New chat in Support") are not built: there is no chat
+  channel yet (item 4).
+
+## Browser extension (integrations P5, 2026-11-13)
+
+- The extension is plain JavaScript modules under `web/extension/`, with no
+  bundler, so the source loads unpacked as it is. It is packaged by
+  `web/extension/tools/build.mjs` (a deterministic zip, and a CRX3 signed with
+  `node:crypto`, no dependencies) in the web image build, and served by nginx
+  from `/downloads/`. The download card is on the Dial page (user role), not a
+  new nav item.
+- Fixed id: the manifest carries a fixed public key, so the extension id is
+  `kengpjalagamnmmkljldjhhgonmbdcph` everywhere, and the preregistered client
+  `hello-extension` has the single redirect `https://<id>.chromiumapp.org/`
+  (not derived from the deployment URL, since it cannot vary). A Go test and a
+  web test recompute the id from the manifest.
+- Signing key: the private key is never committed. The image build reads it from
+  the `extension_key` build secret (CI repo secret `HELLO_EXTENSION_KEY`); with
+  none, only the zip is built and the card says "unsigned". Docker's layer cache
+  does not key on a secret, so the first build without it must not be reused
+  once the secret exists (bump the cache or rebuild).
+- `GrantableScopes(user)` now includes `calls`, `events` and `recordings`, as
+  spec I-31 says. Without it a `user` could not grant the extension its scopes.
+  The handlers already limit a user to their own extensions (originate, events,
+  recording links), so no new access is opened; `docs/ai-access.md` and the
+  role tests are updated.
+- Tokens are kept in `chrome.storage.local` (the refresh token must survive a
+  browser restart). Refreshes are serialised, since the refresh token rotates and
+  reuse revokes the grant.
+- The page script is registered dynamically only for sites the user lists and
+  the browser has granted (`optional_host_permissions`), so there is no
+  `<all_urls>` grant and no always-on content script.
+- The incoming-call notification looks the caller up through
+  `GET /api/v1/lookup/number` (I-43, #304); see "Extension caller lookup" below.
 
 ## Integrations P17: Slack, n8n and Make (2026-11-13)
 
@@ -3974,3 +4213,285 @@ Reconciles the Wi-Fi profiles (#278, migration 00074) with the 802.1X and SCEP p
 - **Server certificate check is the 802.1X profile's:** the system certificates, or its uploaded CA (P83016 = 3, CA in P83011) with the optional server name (P83018 = 1, P83019). "Trust on first use" (2) and "skip verification" (0) are no longer offered; an adopted profile that had either becomes the system certificates. Reason: #279 decided Hello never writes 0, and one check per profile is what a shared model means.
 - **EAP-TLS on Wi-Fi** is now possible (P83004 = 1, P83007 CA, P83009 identity) where the phone has a SCEP certificate; the client certificate (P83008) is not written, as P8440 is not on the wired port (verify on a handset). EAP-MD5 is refused for a Wi-Fi profile (the API, and a 802.1X profile in use cannot be changed to it); a network whose 802.1X profile is missing, EAP-MD5 or EAP-TLS without SCEP is skipped at render, and its slot goes to the next profile.
 - **Template re-check of #278** against config-template-10212026.zip: WP8x6 slots 1 to 10 at P83000 + 100 (n - 1) (SSID +0, security +2, key +3, EAP +4, priority +49, preferred account +85), security codes 0, 4, 5, 11, 12, 14, EAP codes 1 TLS and 2 PEAP, CA type 0 skip / 1 system / 2 TOFU / 3 uploaded, phase 2 0 MSCHAPv2, and the network-5 EAP key at P83304: all confirmed. WP810/822/825: SSID +0, enabled +1, security +2, key +3, 802.11r +48, hidden +50 per slot for 17 slots; slots 18 to 20 have security at +72: confirmed. WP856: P7812, P7814 (0, 1 WEP, 2 WPA/WPA2 PSK; the template calls it "Security Mode for Hidden SSID"), P7830: confirmed. Radio keys P25438, P82332, P22232, P22231, P82334 (WP8x6), P84992 (WP810), P25420, P25421, P22443, P22230, P25315, P82333 (WP856): confirmed. No mismatch found. Not written because #278 did not know them: P83018 and P83019 (domain validation, now written), P83086 and P83087 (management frame protection and transition mode), P83051 and P83052 (IP mode, IPv4 mode).
+
+## WP lab sweep runs against a third control replica (2026-11-13)
+
+- `TestWPPhonesAsVendors` (S-38) needs the server-wide provisioning settings
+  that are environment variables (TCP models, TLS models and server, backup
+  registrar, RTCP-XR) rendered into WP files, without changing what the
+  other lab tests' phones get. The compose lab therefore gains
+  `hello-control-wp` (host 8444) with those settings; phones are bound through
+  the API on hello-control-1 and fetch their files from it.
+- The WP822 is provisioned for TCP (with a backup server), the WP836 for TLS
+  with SRTP required, because a model has one transport; between them every
+  transport key is read back. The emulated phones register over UDP direct to
+  hello-sip-1, as the park test does; TLS and TCP signalling stay covered by
+  the TLS lab test and the unit tests.
+- 802.1X on a WP is the Wi-Fi enterprise (PEAP) profile on the WP836; wired
+  802.1X is GRP26xx only, so the sweep asserts a WP file carries no P7901.
+- The hardware lab list is printed at the end as "confirmed" (Hello's side
+  proven by a subtest of the run) or "needs hardware".
+
+## Messaging item 2: outbound sending on Twilio (2026-11-10)
+
+Delivery item 2 of `.procoder/specs/messaging-channels.md`, on the inbox core
+(item 1, #211). Migration `00091_messaging_twilio.sql`. Everything additive: no existing CHECK constraint
+changes, so `pg_temp.hello_check_values` is not needed.
+
+What is in: `internal/messaging/provider` (the interface and registry; only
+what works on the LAN: `Validate`, `Send`, `Status`, `Numbers`) and its Twilio
+adapter; the send, status-poll and settle workers (`messaging.Worker`, run on
+every control replica); sealed credentials (`secret.MsgChannelAAD`, the same
+`secret.Box` as trunk passwords); first contact (`POST /api/v1/inbox/conversations`,
+settings `firstContact` and two limits); the per-number throughput cap; the
+numbers route; the Inbox "Text a customer" dialog, the Twilio fields of the
+channel dialog and the first-contact settings.
+
+How inbound replies arrive without N1: **they do not.** A Twilio number cannot
+receive a text while there is no public listener (spec Default 6), and polling
+for inbound (`Reconcile`, N3) is not scheduled. So a Twilio conversation starts
+with a first-contact text and only the outbound side lives in the inbox. This
+is documented in `docs/inbox.md` and the channel dialog.
+
+Choices made by default (the spec leaves them open; the conservative option was
+taken):
+
+1. **First contact is a supervisor action only** (`POST /api/v1/inbox/conversations`,
+   operator and above, scope `messages`); the `user` role has no route to start
+   one (no `/me/inbox` form). Fewer people can send to a customer who has not
+   texted. The Inbox status carries `senders` for supervisors only.
+2. **The first-contact guard applies to every new outbound conversation**, even
+   to a number that texted before in a resolved conversation. A customer with
+   an **open** conversation on the number is `409 conversation_exists` (reply
+   there) rather than reused.
+3. **First contact only through a carrier number**; a SIP trunk number is
+   `409 channel_unavailable` (its texts have no web API, and the spec names
+   provider numbers as the case).
+4. **No idempotency key on first contact:** a double submit hits the open
+   conversation (`409`). One message, one recipient, one attestation.
+5. **A consent note is mandatory** (1-500 characters) besides the attestation
+   flag. It is stored on the conversation (`consent_note`); the audit row holds
+   ids only ("first_contact attested"), never the note or the number.
+6. **Credentials are replaced as a whole** (SID and token together, optionally
+   the Messaging Service SID), after Twilio accepts them. The token cannot be
+   changed alone, so a stored SID is never paired with an unchecked token.
+7. **Save is refused when the carrier is unreachable** (`502`), not stored
+   unvalidated: an administrator who cannot reach Twilio cannot add a channel.
+8. **A lost or 5xx answer is `unknown`, never retried.** A 429 from Twilio is a
+   definite refusal (`failed`, `rate_limited`). Failures that are not the
+   customer's (lost answers, 429) count toward `degraded` at five in a row; a
+   bad number (21211 and the like) does not.
+9. **Queued for an hour without a send becomes `failed` (`not_sent`)**, since it
+   never reached the carrier, rather than `unknown`.
+10. **Throughput cap default 60 texts a minute per number**, enforced when a
+    text is claimed (one advisory lock), so the cap holds across replicas.
+11. **Limits default as in the spec:** 20 first-contact texts per agent per
+    hour, 200 per number per 24 hours; the `429` carries `Retry-After: 600`.
+12. **Status polling schedule:** 5 s doubling to 5 min for the first hour, then
+    30 min, stopping at the final state, on `404`, after 48 hours, or while the
+    channel's credentials are invalid. No `StatusCallback` is sent (LAN-only).
+13. **Twilio's `21610` on send or on a status read** records an opt-out with
+    source `provider`, as if the customer had texted STOP.
+14. **Body limit 1600 characters** for a carrier text (Twilio's), on top of the
+    API's 2000 bytes; longer is `400` on `body`. Media is never sent (MMS is N1).
+15. **Erasing a customer does not call Twilio** (no provider-side `Redact`; that
+    is item 8). The report already says the carrier keeps its own logs.
+16. **MCP:** every new operation is excluded, category `private-data` (the
+    messaging configuration and message content are never exposed to an agent),
+    so no skill teaches them and the `docs/ai-access.md` doctable is unchanged.
+
+Not testable without a Twilio account (hardware/accounts list in the PR): a real
+send and delivery receipt, error code mapping against live Twilio, 10DLC and
+toll-free registration state, Messaging Service sends, what carriers do to an
+unregistered sender.
+
+## Extension caller lookup (2026-11-13, feat/extension-lookup)
+
+- **No new scope.** The lookup route needs `read` and the `hello-extension`
+  client already asks for `calls events read`; the preregistered client and the
+  scope rules are unchanged.
+- **The route gains the fields the notification needs.** It returned only a
+  name, so it now also returns `company` (the matching book entry's company)
+  and `crm`: `{id, name, company, url}` from the CRM connectors (organisation
+  connectors first, then the caller's own Outlook/Google), via
+  `crm.Service.FindContact` and the 1.5 s budget and 5 min/60 s cache of the
+  existing CRM lookup. `crm` is independent of `result`: a number can be `none`
+  in the books and known to the CRM. A service account gets only organisation
+  connectors. Additive; no other consumer changes.
+- **Name precedence:** CRM contact, then an address-book match, then the name in
+  the event. An ambiguous or unresolvable answer names nobody.
+- **Quiet failure:** 404, no match, errors and a 2 s timeout all fall back to the
+  event name. Cache in the worker's memory (5 min hit, 60 s miss and 404, 10 s
+  failure); it is not persisted, and sign-out clears it.
+- **CRM link** is an "Open in CRM" notification button (only http and https
+  links), not a click on the body, which still just dismisses.
+
+## Messaging item 5: routing and ACD (2026-11-11)
+
+Built on origin/main so that routing does not depend on which channel created
+the conversation: the router places any conversation whose `routed_at` is NULL,
+so the Twilio (item 2), desk-phone (item 3) and chat (item 4) channels are
+routed once they merge, with no change of their own. Where the spec left a
+product choice open, the conservative one was taken and is listed here as
+chosen by default; change one by editing this entry and the code it names.
+
+- **Wake-up.** The router sweeps every 2 s on every control replica instead of
+  waiting on `pg_notify` plus a 10 s tick (the repo has no LISTEN
+  infrastructure, and the sweep is a few indexed queries). Returning
+  unanswered conversations and releasing orphans run every 10 s
+  (`router.DefaultSlowEvery`). Agent login lives in Valkey, which PostgreSQL
+  cannot wake on either way.
+- **Routing config is a sub-resource.** `GET|PUT /api/v1/messaging/addresses/{id}/routing`
+  carries the route, schedule, after-hours action and first-contact text,
+  rather than more fields on the address PUT, so the address contract of the
+  other open messaging PRs stays as it is. `route_target` is the id of the
+  queue, user, extension or ring group as text; a queue target must take texts
+  when it is set.
+- **Fallback is the supervisors' pool.** A route whose target is deleted,
+  disabled, unlinked or (for a queue) off for texts sends the conversation to
+  the pool. The spec's "the address's fallback route" is read as that pool.
+  Turning a queue's texting off moves its unassigned conversations to the pool;
+  assigned ones stay with their agent.
+- **After-hours.** `none` routes as usual, `reply` sends the text and then
+  routes as usual, `route` goes to the other target. Evaluated by the number's
+  own weekly schedule (the time-conditions engine is not used for texts); an
+  empty schedule is always open and an invalid stored one reads as open. The
+  reply is sent once per conversation, never to an opted-out customer, and only
+  a SIP trunk channel can send it today: another provider gets a system line
+  saying the text was not sent, until its channel adds a send path.
+- **First contact.** The first-contact text (M-14) goes once to a peer with no
+  earlier conversation on that number, not together with the closed-hours
+  reply, never to an opted-out peer.
+- **Capacity.** An agent's open conversations are those assigned to them that
+  are open or pending (snoozed does not count), across every queue and direct
+  assignment. Only the router enforces it; a person who claims or replies is
+  not blocked.
+- **Statistics for the strategies.** Calls and last end come from
+  `msg_agent_stats` in PostgreSQL (answered = conversations the queue gave the
+  user; last end = when it last did), the round robin counter from
+  `msg_queue_rr`, both separate from the voice statistics. A user linked to
+  several member extensions counts once, by their best extension.
+- **Reassign.** Only conversations the router assigned (the latest assignment
+  row is `acd`) and only while open with the customer's last text unanswered
+  by any user reply. The agent who let it lapse is not offered it again; with
+  nobody else eligible it waits in the queue (its members can claim it). A
+  conversation a person assigned, took or answered, or a direct user or
+  extension route, is never taken back. An agent whose extension is unlinked
+  or who leaves the queue loses their router-assigned conversations to the
+  queue.
+- **Shared pool visibility.** The members of a text queue and the users of a
+  ring group see the unassigned conversations waiting there (and are told by
+  the live stream and, with an address, by email); nobody else does.
+- **Availability is the call queues' state.** One login and one pause per
+  extension, so pausing for texts pauses calls too; the inbox sets it on every
+  extension of the user that is a member of a text queue (`/me/inbox/agent`).
+  With Valkey unreadable the router assigns to static members only.
+- **Not offered.** The `ai_triage` route kind waits for the AI item; `desk_phone_delivery`
+  and the owner extension wait for item 3 (the router calls `Store.afterAssign`,
+  where that item's delivery on assignment belongs).
+- **Deleting a queue** is refused (409) while a number routes to it or an open
+  conversation is placed in it.
+
+## Messaging item 6: Telnyx and sender registration (2026-11-13)
+
+1. **Telnyx is one more adapter on the framework,** `internal/messaging/provider/telnyx`,
+   registered by `cmd/hello-control` like Twilio. Credentials are an API key and
+   an optional messaging profile ID (UUID), added to `provider.Config` as
+   `APIKey` and `MessagingProfileID`; `Secret()`, `Hint()` and `Pooled()` replace
+   the Twilio-only reads in the store. No migration: `msg_channels.provider` is
+   free text and the sealed blob is JSON, so the placeholder 00130 is unused.
+2. **Credentials are replaced as a whole,** as for Twilio: `apiKey` and
+   `messagingProfileId` together after Telnyx accepts the key (a `PUT` with only
+   `apiKey` drops the profile). The channel's `accountHint` is the last four
+   characters of the profile ID (never of the key); empty without a profile.
+3. **Validation lists the account's messaging numbers**
+   (`GET /phone_numbers/messaging`), paged to 20 pages of 250, so `Validate` and
+   `Numbers` are the same call and a key without messaging access is refused.
+4. **Telnyx's 403 is split by code before status.** Error `40300` ("blocked due
+   to STOP") is mapped to Hello's `CodeOptedOut` (the same constant Twilio's
+   21610 uses), on send and on a status read, and so records a provider opt-out.
+   Any other 403 (or 401) is refused credentials. 40300 is from Telnyx's docs,
+   not a live account (on the accounts list).
+5. **Status polling uses a 48 hour window for Telnyx too,** inside Telnyx's 10
+   day limit, so M-9a's "never poll past 10 days" holds by construction.
+   `delivery_unconfirmed` is shown as `sent` (it is carrier silence, not a
+   failure); `sending_failed` and `delivery_failed` are `failed`.
+6. **Registration is an optional `provider.Registrar`** with
+   `Registration(ctx, numbers)`, not the spec's per-number `Registration(ctx, n)`:
+   one call per carrier reads the brands, campaigns and verifications once and
+   answers for every number, instead of N reads. Both adapters implement it.
+7. **Registration states are the same five for every carrier** (`approved`,
+   `pending`, `rejected`, `unregistered`, `unknown`) and the kind comes from the
+   number (+1 toll-free prefixes, other +1, rest of the world). A number outside
+   the US and Canada is `other`/`unknown`: this follows the spec's out-of-scope
+   line (no country-specific registration, no UK/EU alphanumeric sender IDs, no
+   India DLT). Sender IDs are therefore not read or managed.
+8. **A section the carrier will not answer degrades, it does not fail.** The
+   route names it under `unavailable` and its numbers are `unknown`; only when
+   nothing at all can be read is it the carrier's error (`422` refused, `502`
+   unreachable). A 403 on a registration read does not mark the channel
+   `credentials_invalid` (the send path alone decides that).
+9. **Twilio reads:** `BrandRegistrations` (brands), each Messaging Service's
+   `UsAppToPerson` (campaigns, at most 20 services) and `PhoneNumbers` (which
+   numbers are on a service), and `Tollfree/Verifications` keyed by the number's
+   SID (`Number.ID`). A long code is approved only when it sits in a service whose
+   campaign is verified. Twilio's `messaging.twilio.com/v1` root is a second API
+   root in the adapter (`WithMessagingURL`, tests only).
+10. **Telnyx reads:** `/10dlc/brand`, `/10dlc/campaign`,
+    `/10dlc/phone_number_campaigns` and
+    `/messaging_tollfree/verification/requests`. Field names are from Telnyx's
+    published API and have not been checked on a live account.
+11. **The checklist is derived server-side** (`buildChecklist`) so the console and
+    any other client agree: brand, campaign, numbers on a campaign, toll-free,
+    sample messages (always `manual`: Hello cannot read what a carrier reviews)
+    and an answer to HELP (Hello's own `helpText`, done when every enabled number
+    has one). Steps that do not apply to the account's numbers are
+    `not_applicable`. Links point at each carrier's documentation; the Telnyx
+    toll-free link is the messaging docs root because no stable page was verified.
+12. **The numbers table loads registrations on its own,** one best-effort read per
+    enabled carrier channel when the page opens (not for a SIP trunk channel or a
+    channel with refused credentials); a failure leaves "Unknown". Nothing is
+    cached or stored server-side.
+13. **MCP:** the registration route is excluded like the other messaging routes
+    (`private-data`); the doctable is unchanged.
+
+Not testable without accounts (accounts list in the PR): a real Telnyx send,
+delivery receipt and the 40300 STOP block; the exact fields of Telnyx's 10DLC and
+toll-free reads and Twilio's `UsAppToPerson`/`Tollfree` reads; what a limited key
+returns (403 vs 404) for each registration read; a Twilio account with several
+Messaging Services.
+
+## WSS on Kamailio and the SBC-peer trunk profile (2026-11-13)
+
+- WSS (clients item 2) is opt-in by `KAMAILIO_WSS_PORT`, off in the chart
+  (`kamailio.wss.enabled`). Kamailio ends TLS and the WebSocket on a `wss`
+  listener on its own address; the Ingress (`/sip`, `backend-protocol: HTTPS`)
+  is a separate chart object. Origins are an exact allow-list
+  (`KAMAILIO_WS_ORIGINS`, default the console origin); a handshake without an
+  `Origin` is let in because a browser always sends one and the client still
+  needs digest. Unset list means no origin.
+- The browser's real address comes from `X-Forwarded-For` only when the TCP
+  peer matches `KAMAILIO_WSS_TRUSTED_PROXIES`, kept per connection id in an
+  htable and sent as `X-Hello-Client`. pike is skipped for WebSocket clients
+  because the ingress address is shared.
+- hello-sip records `ws` and `wss` as transports. A `sips:` call may ring `wss`
+  (encrypted to the edge) but not `ws`; SDES SRTP is still decided by TLS
+  only, since a browser negotiates DTLS-SRTP.
+- With the VIP, WebSocket clients use a separate `hello_ws` socket on the
+  instance's own address (UDP 5072), so Path and Record-Route name the
+  instance that holds the connection. HA activation is not changed.
+- The Kamailio to hello-sip TLS hop (S-12) is not built: it needs the DTLS-SRTP
+  work (#276) that this change does not depend on. It is a precondition for
+  accepting WebRTC calls in production, not for registering over WSS.
+- Teams (items 13 and P22): a trunk `profile` column (`generic`, `sbc-peer`,
+  migration 00096), defaults on create, limits on create and PATCH, a profile
+  list endpoint and MCP tool, a UI select, and docs/teams.md. No Teams code in
+  internal/sip. Hello has no TLS or SRTP transport towards trunks, so the
+  profile cannot ask for them and refuses `srtp: required`; the SBC encrypts
+  towards Microsoft and the Hello to SBC leg is UDP on the LAN or DMZ. A TLS
+  trunk transport and Diversion/History-Info are separate features that are
+  not built.
+- deploy/kuvryn-sync/kw/ is untouched by instruction, so its copy of
+  kamailio.cfg lags: TestKwKamailioConfigMatchesSource fails until the
+  manifests step copies deploy/kamailio/kamailio.cfg into the ConfigMap and
+  updates the checksum annotation.

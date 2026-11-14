@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/routing"
@@ -142,6 +143,24 @@ type ConversationGateway interface {
 	// unchanged. An error means the text was not stored: the carrier is
 	// answered with a failure and retries.
 	InboundFromTrunk(ctx context.Context, in TrunkText) (handled bool, err error)
+	// OutboundFromDevice takes a text an authenticated device sent to a
+	// number that is no extension or group (spec M-26), before the existing
+	// external-number path: a reply into a conversation of the extension's
+	// user. Handled=false means the number is not the inbox's and the
+	// existing path runs unchanged; the extension is the authenticated
+	// device's, never the From header. A refusal (opted out, a conversation
+	// that is another agent's, a rate limit) is answered to the phone, not
+	// sent on. An error means nothing was stored.
+	OutboundFromDevice(ctx context.Context, ext, to, contentType string, body []byte) (DeviceReply, error)
+}
+
+// DeviceReply is what the inbox did with a text typed on a desk phone.
+type DeviceReply struct {
+	Handled bool
+	// Refusal is why a handled text was not sent, worded for the phone's
+	// user; empty when it was sent. Limited marks a rate limit.
+	Refusal string
+	Limited bool
 }
 
 // MessageSent is what the queue stored.
@@ -283,6 +302,13 @@ func (s *Server) handleMessage(req *sip.Request, tx sip.ServerTransaction) {
 	case isRingGroup(snap, target):
 		send.TargetKind = MsgTargetRing
 	default:
+		// A reply to a customer of the messaging inbox goes into its
+		// conversation; any other number takes the external path below.
+		if !typing && s.deps.Conversations != nil && validSenderNumber(target) {
+			if s.deviceReply(req, tx, dev, target, ct, body, count) {
+				return
+			}
+		}
 		// An external number: only through a trunk with messaging on.
 		dec, ok := s.messagingRoute(snap, dev.Extension, target)
 		switch {
@@ -331,6 +357,58 @@ func (s *Server) handleMessage(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	count(msgAccepted)
 	s.respond(tx, req, sip.StatusAccepted, "Accepted")
+}
+
+// deviceReply offers a device's text to the inbox. It reports true when the
+// inbox answered the request (sent the reply, or refused it with a notice to
+// the phone), false when the number is not the inbox's.
+func (s *Server) deviceReply(req *sip.Request, tx sip.ServerTransaction, dev snapshot.Device, to, ct string,
+	body []byte, count func(string),
+) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	r, err := s.deps.Conversations.OutboundFromDevice(ctx, dev.Extension, to, ct, body)
+	cancel()
+	switch {
+	case err != nil:
+		s.messageSendFailed(req, tx, err, count)
+		return true
+	case !r.Handled:
+		return false
+	case r.Refusal == "":
+		count(msgAccepted)
+		s.respond(tx, req, sip.StatusAccepted, "Accepted")
+		return true
+	}
+	// The sender is told why, as a text from the system, and the request is
+	// refused the way sip-messaging refuses a forbidden target.
+	nctx, ncancel := context.WithTimeout(context.Background(), 5*time.Second)
+	_, nerr := s.deps.Messages.Send(nctx, MessageSend{
+		SenderKind: MsgSenderSystem, TargetKind: MsgTargetExtension, Target: dev.Extension,
+		ContentType: "text/plain", Body: []byte(truncateUTF8(r.Refusal, MaxMessageBytes)),
+	})
+	ncancel()
+	if nerr != nil {
+		s.log.Warn("could not tell a phone why its text was refused", "extension", dev.Extension, "error", nerr)
+	}
+	if r.Limited {
+		count(msgRateLimited)
+		s.respond(tx, req, 429, "Too Many Requests", sip.NewHeader("Retry-After", "30"))
+		return true
+	}
+	count(msgForbidden)
+	s.respond(tx, req, sip.StatusForbidden, "Forbidden")
+	return true
+}
+
+// truncateUTF8 cuts s to at most n bytes on a character boundary.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // messageContent reads the content type and body, or the response to give.

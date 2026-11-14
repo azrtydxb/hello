@@ -145,6 +145,7 @@ var NonFlowResources = map[string]string{
 	"backups":                       "backup archives of the database and audio, not call routing",
 	"service-accounts":              "API credentials, not call routing",
 	"webhooks":                      "outbound event receivers, not call routing",
+	"directory/connectors":          "company directory (AD/LDAP) sources that sync users, not call routing",
 	"service-accounts/{id}/secrets": "API credentials, not call routing",
 	"prov/templates":                "phone provisioning templates, not call routing",
 	"prov/firmware":                 "phone firmware files, not call routing",
@@ -168,6 +169,8 @@ var NonFlowResources = map[string]string{
 	"integrations/slack":            "Slack channels that receive missed-call and voicemail notifications; they never change where a call goes",
 	"messaging/channels":            "customer text channels of the messaging inbox, not call routing",
 	"messaging/addresses":           "numbers customers text in the messaging inbox, not call routing",
+	"messaging/chat/sites":          "website chat widgets of the messaging inbox, not call routing",
+	"inbox/conversations":           "customer text conversations of the messaging inbox, not call routing",
 }
 
 // NotDestinationEnums lists the OpenAPI enums that look like destination
@@ -175,12 +178,19 @@ var NonFlowResources = map[string]string{
 // each with why. The key is the schema path of the enum. Anything else that
 // overlaps fails TestCatalogueDrift until it is classified.
 var NotDestinationEnums = map[string]string{
-	"/components/schemas/MessageSend/properties/targetKind":                               "who a text message is addressed to, not where a call goes",
-	"/components/schemas/CDRDetail/allOf/1/properties/followMeLegs/items/properties/kind": "which follow-me target a call leg rang (own phones included), not where a call goes",
+	"/components/schemas/MessageSend/properties/targetKind":                                "who a text message is addressed to, not where a call goes",
+	"/components/schemas/MessagingAddress/properties/routeKind":                            "where a customer text conversation is placed in the messaging inbox, not where a call goes",
+	"/components/schemas/MessagingRouting/properties/routeKind":                            "where a customer text conversation is placed in the messaging inbox, not where a call goes",
+	"/components/schemas/MessagingAfterHours/properties/routeKind":                         "where a customer text conversation is placed in the messaging inbox, not where a call goes",
+	"/components/schemas/MessagingRoutingInput/properties/routeKind":                       "where a customer text conversation is placed in the messaging inbox, not where a call goes",
+	"/components/schemas/MessagingRoutingInput/properties/afterHours/properties/routeKind": "where a customer text conversation is placed in the messaging inbox, not where a call goes",
+	"/components/schemas/CDRDetail/allOf/1/properties/followMeLegs/items/properties/kind":  "which follow-me target a call leg rang (own phones included), not where a call goes",
 }
 
 // NotDestinationConstraints is NotDestinationEnums for database CHECK
 // constraints, keyed by constraint name.
 var NotDestinationConstraints = map[string]string{
-	"follow_me_targets_kind_check": "a follow-me target is an extra ring of the extension, not a destination the call is sent to",
+	"msg_addresses_route_kind_check":             "where a customer text conversation is placed in the messaging inbox, not where a call goes",
+	"msg_addresses_after_hours_route_kind_check": "where a customer text conversation is placed in the messaging inbox, not where a call goes",
+	"follow_me_targets_kind_check":               "a follow-me target is an extra ring of the extension, not a destination the call is sent to",
 }

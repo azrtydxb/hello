@@ -21,10 +21,12 @@ import (
 	"github.com/azrtydxb/hello/internal/apispec"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
+	"github.com/azrtydxb/hello/internal/directory"
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/router"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/oauth"
 	"github.com/azrtydxb/hello/internal/originate"
@@ -158,8 +160,15 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		_ = ln.Close()
 		return fmt.Errorf("MINIO_ENDPOINT: %w", err)
 	}
-	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, messaging.NewMetrics(metrics.Registry), log)
+	msgMetrics := messaging.NewMetrics(metrics.Registry)
+	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, msgMetrics, log)
+	go runCarrierWorkers(ctx, st, msgMetrics, log)
 	go runInboxNotifier(ctx, envSMTP(cfg), st, log)
+	go runMessageRouter(ctx, st, routerLive{vk}, router.NewMetrics(metrics.Registry), log)
+	if _, err := startChat(ctx, cfg, st, box, vk, effectiveSMTP(st, envSMTP(cfg)), metrics.Registry, log); err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("HELLO_MSG_CHAT_LAN_ADDR: %w", err)
+	}
 
 	// Scheduled and manual backups, and restore (spec pbx-gaps S-2 to S-4).
 	// Every replica runs the scheduler; the run itself is taken under an
@@ -238,6 +247,25 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		}, nil, log.With("component", "webhooks")),
 	}
 	go dispatcher.Run(ctx)
+	// Directory sync (spec integrations P8): connectors read their source and
+	// sync users; one replica runs a connector, the one holding its lock.
+	dirEngine := &directory.Engine{
+		Store:          &directory.PG{DB: db, Box: box},
+		Drivers:        map[string]directory.Driver{directory.KindLDAP: directory.LDAP{}},
+		Metrics:        directory.NewMetrics(metrics.Registry),
+		Log:            log.With("component", "directory"),
+		Replica:        cfg.NodeID,
+		AllowPlaintext: cfg.DirectoryAllowPlaintextLDAP,
+		Allow:          cfg.IntegrationsAllowedCIDRs,
+		Notify: directory.MailNotifier(st.AdminEmails, func(ctx context.Context) (mailer.Settings, bool, error) {
+			s, source, err := api.EffectiveSMTP(ctx, st, envSMTP(cfg))
+			if err != nil || source == api.SMTPNone || s.Validate() != nil {
+				return mailer.Settings{}, false, err
+			}
+			return s, true, nil
+		}, nil, log.With("component", "directory")),
+	}
+	go dirEngine.Run(ctx)
 	go evSvc.Run(ctx)
 	go crmSvc.Run(ctx)
 	if err := startSyslog(ctx, cfg.Syslog, st, vk, metrics.Registry, log); err != nil {
@@ -251,6 +279,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	apiCfg := api.Config{
 		CRM:          crmSvc.Service,
 		Slack:        slackSvc,
+		Directory:    dirEngine,
 		Events:       evSvc,
 		Webhooks:     hooks,
 		AIAgent:      agent,

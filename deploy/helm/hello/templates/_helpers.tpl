@@ -163,6 +163,10 @@ capabilities:
 {{ include "hello.secretEnv" (dict "root" . "env" "HELLO_CLIENT_AUTH_KEY" "key" "clientAuthKey" "optional" true) }}
 {{ include "hello.secretEnv" (dict "root" . "env" "HELLO_CLIENT_AUTH_KEY_PREVIOUS" "key" "clientAuthKeyPrevious" "optional" true) }}
 {{- end -}}
+{{/* The browser origin of the console: scheme and host of global.publicUrl, or empty. */}}
+{{- define "hello.publicOrigin" -}}
+{{- regexFind "^https?://[^/]+" (.Values.global.publicUrl | default "") -}}
+{{- end -}}
 {{/* Where phones reach Kamailio: the VIP with kamailio.vip.enabled, else kamailio.publicHost. */}}
 {{- define "hello.kamailioPublicHost" -}}
 {{- $k := .Values.kamailio -}}

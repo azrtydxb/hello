@@ -92,6 +92,33 @@ server {
         proxy_send_timeout 600s;
     }
 
+    # The LAN chat widget (docs/inbox.md, "Website chat"): /chat/ is the chat
+    # listener of hello-control (HELLO_MSG_CHAT_LAN_ADDR), served on this same
+    # LAN host so an intranet page can embed
+    # <script src=".../chat/v1/widget.js">. It is its own http.Server: it
+    # answers only /chat/* and /healthz, never the admin API. Its event
+    # stream (GET /chat/v1/events) must reach the browser as it is written:
+    # no buffering, no caching, no compression, X-Accel-Buffering for an
+    # ingress controller in front, and a read timeout above the stream's
+    # 30 minute idle limit. Bodies are at most 16 KiB.
+    location /chat/ {
+        set $hello_chat ${HELLO_CHAT_UPSTREAM};
+        proxy_pass $hello_chat;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $hello_forwarded_proto;
+        client_max_body_size 32k;
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+        add_header X-Accel-Buffering "no" always;
+        proxy_read_timeout 1900s;
+        proxy_send_timeout 60s;
+    }
+
     # Recording links (docs/integrations.md, "Recording links"): GET
     # /r/<token>.wav is public, the token is the credential, and hello-control
     # sets the no-store and no-referrer headers. Range requests pass through.
@@ -168,6 +195,20 @@ server {
         add_header Content-Security-Policy "frame-ancestors 'none'" always;
         add_header X-Frame-Options "DENY" always;
         try_files /index.html =404;
+    }
+
+    # The browser extension package (docs/browser-extension.md): built into
+    # the image, never cached, always downloaded rather than shown.
+    location /downloads/ {
+        types {
+            application/zip zip;
+            application/x-chrome-extension crx;
+            application/json json;
+        }
+        add_header Cache-Control "no-cache" always;
+        add_header Content-Disposition "attachment" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        try_files $uri =404;
     }
 
     # Hello inside another product's frame (docs/crm.md): the Salesforce Open

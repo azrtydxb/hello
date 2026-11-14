@@ -6,12 +6,23 @@
 {{- $pair := gt (int $k.replicas) 1 -}}
 {{- $list := include "hello.dispatcherList" . -}}
 {{- $tls := $k.tls | default dict -}}
+{{- $wss := $k.wss | default dict -}}
 {{- $hop := $k.helloTLS | default dict -}}
 {{- if $hop.enabled }}
 {{- if not .Values.sip.tls.enabled }}{{ fail "kamailio.helloTLS.enabled needs sip.tls.enabled: hello-sip must take TLS" }}{{ end }}
 {{- if not $tls.secretName }}{{ fail "kamailio.helloTLS.enabled needs kamailio.tls.secretName: the certificate (and ca.crt) Kamailio presents and verifies with" }}{{ end }}
 {{- end }}
 {{- if and $tls.enabled (not $tls.secretName) }}{{ fail "kamailio.tls.secretName is required when kamailio.tls.enabled: a kubernetes.io/tls Secret issued by the Hello CA" }}{{ end }}
+{{- /* WSS presents the same certificate as SIP over TLS unless it has its own. */ -}}
+{{- $certSecret := $wss.secretName | default $tls.secretName -}}
+{{- /* The hop's tls-hop.cfg presents one certificate (with its ca.crt) on every TLS socket. */ -}}
+{{- if and $hop.enabled $wss.enabled $wss.secretName (ne $wss.secretName $tls.secretName) }}{{ fail "kamailio.helloTLS.enabled with kamailio.wss.enabled needs kamailio.wss.secretName empty or equal to kamailio.tls.secretName: tls-hop.cfg presents one certificate on every TLS socket" }}{{ end }}
+{{- $wssOrigins := $wss.origins | default list -}}
+{{- if and $wss.enabled (not $wssOrigins) }}{{ $wssOrigins = list (include "hello.publicOrigin" .) }}{{ end }}
+{{- if $wss.enabled }}
+{{- if not $certSecret }}{{ fail "kamailio.wss.enabled needs kamailio.wss.secretName (or kamailio.tls.secretName): a kubernetes.io/tls Secret issued by the Hello CA" }}{{ end }}
+{{- if not (first $wssOrigins) }}{{ fail "kamailio.wss.enabled needs kamailio.wss.origins or global.publicUrl: the browser origins allowed to open a WebSocket" }}{{ end }}
+{{- end }}
 {{- if le (int .Values.sip.nodes) 0 }}{{ fail "sip.nodes must be at least 1" }}{{ end }}
 {{- if lt (int $k.replicas) 1 }}{{ fail "kamailio.replicas must be at least 1" }}{{ end }}
 {{- if $vip.enabled }}
@@ -222,6 +233,18 @@ spec:
             - name: KAMAILIO_HELLO_SIP_TLS_PORT
               value: {{ $hop.sipPort | quote }}
             {{- end }}
+            {{- if $wss.enabled }}
+            # SIP over WSS for browsers (docs/webrtc.md): needs an image with
+            # the websocket and tls modules.
+            - name: KAMAILIO_WSS_PORT
+              value: {{ $wss.port | quote }}
+            - name: KAMAILIO_WS_ORIGINS
+              value: {{ join "," $wssOrigins | quote }}
+            {{- with $wss.trustedProxies }}
+            - name: KAMAILIO_WSS_TRUSTED_PROXIES
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
           ports:
             - name: phones
               containerPort: {{ $k.phonesPort }}
@@ -237,6 +260,11 @@ spec:
             {{- if $hop.enabled }}
             - name: hello-tls
               containerPort: {{ $hop.port }}
+              protocol: TCP
+            {{- end }}
+            {{- if $wss.enabled }}
+            - name: wss
+              containerPort: {{ $wss.port }}
               protocol: TCP
             {{- end }}
             - name: hello
@@ -276,7 +304,7 @@ spec:
               readOnly: true
             - name: run
               mountPath: /run/kamailio
-            {{- if or $tls.enabled $hop.enabled }}
+            {{- if or $tls.enabled $wss.enabled $hop.enabled }}
             - name: tls
               mountPath: /etc/hello-tls
               readOnly: true
@@ -380,10 +408,10 @@ spec:
                       fieldRef:
                         fieldPath: metadata.namespace
         {{- end }}
-        {{- if or $tls.enabled $hop.enabled }}
+        {{- if or $tls.enabled $wss.enabled $hop.enabled }}
         - name: tls
           secret:
-            secretName: {{ $tls.secretName }}
+            secretName: {{ $certSecret }}
             defaultMode: 288
         {{- end }}
 ---
@@ -403,6 +431,67 @@ spec:
       port: {{ $k.metricsPort }}
       protocol: TCP
       targetPort: metrics
+{{- if $wss.enabled }}
+---
+# The browsers' WebSocket edge (docs/webrtc.md): the Ingress below forwards
+# wss://<console host>/sip here. With hostNetwork its endpoints are the nodes'
+# own addresses; a connection lands on one instance and stays there.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-kamailio-ws
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: wss
+      port: {{ $wss.port }}
+      protocol: TCP
+      targetPort: wss
+{{- if and .Values.ui.ingress.enabled $wss.ingress }}
+---
+# /sip on the console's host, so the browser reuses the console's certificate
+# and origin: no second DNS name and no CORS. nginx speaks TLS to Kamailio and
+# keeps the upgraded connection open for the long timeouts.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $full }}-kamailio-ws
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    {{- with $wss.ingressAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ui.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ui.ingress.tlsSecretName }}
+  tls:
+    - hosts:
+        - {{ required "ui.ingress.host is required" .Values.ui.ingress.host }}
+      secretName: {{ .Values.ui.ingress.tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ required "ui.ingress.host is required" .Values.ui.ingress.host }}
+      http:
+        paths:
+          - path: /sip
+            pathType: Exact
+            backend:
+              service:
+                name: {{ $full }}-kamailio-ws
+                port:
+                  name: wss
+{{- end }}
+{{- end }}
 {{- if $vip.enabled }}
 ---
 # kube-vip's identity: it elects the VIP holder with one Lease in this

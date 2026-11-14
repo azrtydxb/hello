@@ -9,19 +9,27 @@ package messaging
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 )
 
 // Channel kinds and the providers a channel can have. Only sip_trunk exists
-// in the first phase; the carrier adapters of later phases add theirs.
+// in the first phase; the carrier adapters (Twilio, Telnyx) add theirs.
 const (
 	KindSMS     = "sms"
 	KindWhats   = "whatsapp"
 	KindWebchat = "webchat"
 
 	ProviderSIPTrunk = "sip_trunk"
+	ProviderTwilio   = "twilio"
+	ProviderTelnyx   = "telnyx"
+
+	// FirstContactOff and FirstContactAttested are the values of the
+	// first-contact setting (M-17).
+	FirstContactOff      = "off"
+	FirstContactAttested = "attested"
 )
 
 // Conversation states.
@@ -60,6 +68,9 @@ const (
 	// MaxBodyBytes is the longest text an agent can send in one go; it is
 	// split into parts the carrier path accepts.
 	MaxBodyBytes = 2000
+	// MaxCarrierBody is the longest text in characters a carrier takes in one
+	// message (Twilio's limit); the carrier segments it.
+	MaxCarrierBody = 1600
 	// MaxNoteBytes is the longest internal note.
 	MaxNoteBytes = 4000
 	// MaxPartBytes is the longest part of a split text: one SIP MESSAGE
@@ -230,3 +241,35 @@ func (NopSink) Emit(context.Context, Event) {}
 // DefaultOptOutText is the confirmation sent when an address has none of its
 // own.
 const DefaultOptOutText = "You have been unsubscribed and will receive no more messages. Reply START to subscribe again."
+
+// DeskPartBytes is the longest SIP MESSAGE body Hello puts on a desk phone,
+// the prefix and the "(1/3) " counter included. It is the sip-messaging
+// queue's limit (MaxPartBytes), which keeps every part within one UDP
+// datagram; RFC 3428's 1300 bytes is the ceiling this stays well under.
+const DeskPartBytes = MaxPartBytes
+
+// DeskPhoneParts builds what a desk phone shows for a customer text: the
+// body, led by "[WhatsApp] " for a channel that is not SMS so a reply is
+// never taken for a text, cut on UTF-8 boundaries into parts of at most
+// DeskPartBytes. More than one part is numbered "(1/3) ".
+func DeskPhoneParts(channelKind, body string) []string {
+	prefix := ""
+	switch channelKind {
+	case KindWhats:
+		prefix = "[WhatsApp] "
+	case KindWebchat:
+		prefix = "[Chat] "
+	}
+	whole := prefix + body
+	if len(whole) <= DeskPartBytes {
+		return []string{whole}
+	}
+	// Reserve room for the prefix and a counter like "(12/12) " in each part.
+	const counter = len("(99/99) ")
+	raw := SplitText(body, DeskPartBytes-len(prefix)-counter)
+	out := make([]string, len(raw))
+	for i, p := range raw {
+		out[i] = prefix + "(" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(raw)) + ") " + p
+	}
+	return out
+}

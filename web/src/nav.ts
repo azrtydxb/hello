@@ -253,10 +253,24 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "operator",
       },
       {
+        label: "Text queues",
+        path: "/inbox/queues",
+        phase: 5,
+        icon: "list-ordered",
+        minRole: "operator",
+      },
+      {
         label: "Channels",
         path: "/messaging/channels",
         phase: 5,
         icon: "radio-tower",
+        minRole: "admin",
+      },
+      {
+        label: "Chat sites",
+        path: "/messaging/chat",
+        phase: 5,
+        icon: "messages-square",
         minRole: "admin",
       },
       {
@@ -316,6 +330,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         path: "/integrations/api-access",
         phase: 5,
         icon: "key-round",
+        minRole: "admin",
+      },
+      {
+        label: "Directory",
+        path: "/integrations/directory",
+        phase: 5,
+        icon: "users",
         minRole: "admin",
       },
       {
@@ -396,7 +417,11 @@ export const NAV_GROUPS: readonly NavGroup[] = [
 export const MY_PHONE_GROUP = "My phone";
 
 /** The nav items of the inbox, hidden until a channel has a number. */
-const INBOX_PATHS: ReadonlySet<string> = new Set(["/inbox", "/me/inbox"]);
+const INBOX_PATHS: ReadonlySet<string> = new Set([
+  "/inbox",
+  "/inbox/queues",
+  "/me/inbox",
+]);
 
 /**
  * The groups and items `role` may see; empty groups are dropped. The AI

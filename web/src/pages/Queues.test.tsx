@@ -177,6 +177,67 @@ describe("Queues", () => {
     });
   });
 
+  it("turns on texts with a limit per agent", async () => {
+    const calls = setup({
+      "GET /api/v1/queues": () => json({ items: [] }),
+      "POST /api/v1/queues": () =>
+        json({ ...QUEUE, name: "sales", textEnabled: true }, 201),
+    });
+    renderApp("/queues");
+    const [create] = await screen.findAllByRole("button", {
+      name: "New queue",
+    });
+    await waitFor(() => expect(create).toBeEnabled());
+    fireEvent.click(create!);
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "sales" },
+    });
+    // The limits wait for the switch.
+    expect(
+      screen.getByLabelText("Open conversations per agent"),
+    ).toBeDisabled();
+    fireEvent.click(
+      screen.getByLabelText("Take customer texts in the messaging inbox"),
+    );
+    fireEvent.change(screen.getByLabelText("Open conversations per agent"), {
+      target: { value: "5" },
+    });
+    fireEvent.change(screen.getByLabelText("Return after (s)"), {
+      target: { value: "0" },
+    });
+    fireEvent.click(screen.getByLabelText("Not while the agent is on a call"));
+    fireEvent.click(screen.getByRole("button", { name: "Create queue" }));
+    expect(await screen.findByText("Queue sales created.")).toBeVisible();
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
+      textEnabled: true,
+      textCapacity: 5,
+      textReassignSeconds: 0,
+      textRequiresIdleVoice: true,
+    });
+  });
+
+  it("refuses a text limit outside 1 to 50", async () => {
+    const calls = setup({ "GET /api/v1/queues": () => json({ items: [] }) });
+    renderApp("/queues");
+    const [create] = await screen.findAllByRole("button", {
+      name: "New queue",
+    });
+    await waitFor(() => expect(create).toBeEnabled());
+    fireEvent.click(create!);
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "sales" },
+    });
+    fireEvent.click(
+      screen.getByLabelText("Take customer texts in the messaging inbox"),
+    );
+    fireEvent.change(screen.getByLabelText("Open conversations per agent"), {
+      target: { value: "51" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create queue" }));
+    expect(await screen.findByText("Use 1 to 50.")).toBeVisible();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
   it("refuses a callback key that is the voicemail key", async () => {
     const calls = setup({ "GET /api/v1/queues": () => json({ items: [] }) });
     renderApp("/queues");

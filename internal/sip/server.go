@@ -159,6 +159,12 @@ type Config struct {
 	// CallbackInterval is how often this node sweeps the queues' callback
 	// requests; zero means every 3 s.
 	CallbackInterval time.Duration
+	// CallbackOfferCheck is how often a waiting caller's estimated wait is
+	// compared with the callback offer threshold (zero: 3 s), and
+	// CallbackWatchEvery how often a ringing callback attempt, or a caller on
+	// the line, checks that the request was not cancelled (zero: 2 s).
+	CallbackOfferCheck time.Duration
+	CallbackWatchEvery time.Duration
 	// FaxInterval is how often this node looks for queued faxes to send; zero
 	// means every 5 s.
 	FaxInterval time.Duration
@@ -1050,7 +1056,7 @@ func (s *Server) recountRegistrations(ctx context.Context) {
 		return
 	}
 	n := 0
-	byTransport := map[string]int{"udp": 0, "tcp": 0, "tls": 0}
+	byTransport := map[string]int{"udp": 0, "tcp": 0, "tls": 0, "ws": 0, "wss": 0}
 	for _, b := range bs {
 		if b.ReceivedNode == s.cfg.NodeID {
 			n++

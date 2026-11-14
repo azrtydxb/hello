@@ -632,7 +632,7 @@ func TestCallParkTakeover(t *testing.T) {
 		t.Fatalf("replicated park state = %+v", rec)
 	}
 
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	re := waitReq(t, b.reinvites, "takeover re-INVITE to the parked party")

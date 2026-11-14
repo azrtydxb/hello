@@ -231,7 +231,7 @@
         "number": "820",
         "strategy": "ring_all"
       },
-      "version": "3b631fd2d30de4d1"
+      "version": "b34e49e352940519"
     },
     {
       "id": "schedule:1",
@@ -266,7 +266,7 @@
         "maxCalls": 0,
         "mode": "ip"
       },
-      "version": "6f6e050282223349"
+      "version": "7a4fb5e741355915"
     }
   ],
   "edges": [

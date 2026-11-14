@@ -8,15 +8,6 @@ import (
 	"testing"
 )
 
-func readRepo(t *testing.T, rel ...string) string {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join(append([]string{repoRoot(t)}, rel...)...))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(b)
-}
-
 // TestKamailioTLSHopIsOptIn guards the TLS hop from Kamailio to hello-sip
 // (clients-webrtc-mobile-video S-12): everything it adds sits under
 // #!ifdef HELLO_TLS_PORT (kw does not set KAMAILIO_HELLO_TLS_PORT, so its

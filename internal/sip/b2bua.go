@@ -506,7 +506,7 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	// A sips: request is secure end to end (RFC 3261 26.2.2): its caller must
 	// be on TLS, and every leg it forks onto must be too (see c.secure).
-	if isSIPS(req) && s.clientTransport(req) != transportTLS {
+	if isSIPS(req) && !secureTransport(s.clientTransport(req)) {
 		s.refuseSecure(req, tx, secureCallerNotTLS, "sips: caller is not on TLS")
 		return
 	}
@@ -1930,7 +1930,16 @@ func (l *leg) ack(body []byte, contentType string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	if err := dcs.WriteAck(ctx, ack); err != nil {
+	l.mu.Lock()
+	prackd := l.lastRSeq != 0
+	l.mu.Unlock()
+	var err error
+	if prackd {
+		err = writeAckKeepingCSeq(dcs, ack)
+	} else {
+		err = dcs.WriteAck(ctx, ack)
+	}
+	if err != nil {
 		l.c.s.log.Debug("ACK to fork failed", "error", err)
 	}
 }

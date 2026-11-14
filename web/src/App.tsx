@@ -41,6 +41,7 @@ import { IntegrationsCRM } from "./pages/IntegrationsCRM";
 import { IntegrationsSlack } from "./pages/IntegrationsSlack";
 import { MyConnections } from "./pages/MyConnections";
 import { Webhooks } from "./pages/Webhooks";
+import { DirectorySync } from "./pages/DirectorySync";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
 import { AIProposalDetail } from "./pages/AIProposalDetail";
@@ -65,9 +66,11 @@ import { PhoneGroups } from "./pages/PhoneGroups";
 import { MyContacts } from "./pages/MyContacts";
 import { MyMessages } from "./pages/MyMessages";
 import { Inbox, MyInbox } from "./pages/Inbox";
+import { InboxQueues } from "./pages/InboxQueues";
 import { MessagingChannels } from "./pages/MessagingChannels";
 import { MessagingOptOuts } from "./pages/MessagingOptOuts";
 import { MessagingSettings } from "./pages/MessagingSettings";
+import { MessagingWebchat } from "./pages/MessagingWebchat";
 import { getInboxStatus } from "./api/inbox";
 import { Messages } from "./pages/Messages";
 import { Phonebooks } from "./pages/Phonebooks";
@@ -137,7 +140,9 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/messages": Messages,
   "/me/inbox": MyInbox,
   "/inbox": Inbox,
+  "/inbox/queues": InboxQueues,
   "/messaging/channels": MessagingChannels,
+  "/messaging/chat": MessagingWebchat,
   "/messaging/optouts": MessagingOptOuts,
   "/messaging/settings": MessagingSettings,
   "/me/voicemail": MyVoicemail,
@@ -191,6 +196,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/integrations/slack": IntegrationsSlack,
   "/me/connections": MyConnections,
   "/integrations/webhooks": Webhooks,
+  "/integrations/directory": DirectorySync,
 };
 
 /** The canvas pulls in the graph library, so it loads on first use. */

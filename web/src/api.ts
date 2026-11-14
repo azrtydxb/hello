@@ -45,6 +45,10 @@ export interface Me {
   voicemailEmail?: VoicemailEmailPrefs;
   /** Whether the system can send email at all. */
   emailDelivery?: boolean;
+  /** Customer texts of the user's conversations also go to their desk phone. */
+  deskphoneDelivery?: boolean;
+  /** False when no phone of the user's extension has a text UI. */
+  deskphoneCapable?: boolean;
   /** 2FA is required of the user and not enrolled: only the enrolment works. */
   mustEnrollMfa?: boolean;
   /** The user's own two-factor state. */
@@ -403,6 +407,11 @@ export interface TrunkFields {
   geolocation: boolean;
   /** How a fax call is carried: G.711 passthrough, T.38, or refused. */
   faxMode: "passthrough" | "t38" | "off";
+  /**
+   * "generic" or "sbc-peer": a session border controller Hello peers with,
+   * such as the SBC in front of Teams Direct Routing (docs/teams.md).
+   */
+  profile?: "generic" | "sbc-peer";
   /**
    * Anonymous calls: "honour" carries a device's privacy request (default),
    * "always" makes every call through the trunk anonymous.
@@ -1839,6 +1848,14 @@ export interface QueueFields {
   callbackDigit: string;
   /** The queue's prompt language; "" inherits. */
   promptLanguage: string;
+  /** Whether the queue takes customer texts (the messaging inbox). */
+  textEnabled: boolean;
+  /** Open conversations each agent holds at once, 1 to 50. */
+  textCapacity: number;
+  /** Seconds an assigned conversation may wait for a reply; 0 never. */
+  textReassignSeconds: number;
+  /** An agent on a call is offered no conversation. */
+  textRequiresIdleVoice: boolean;
   members: QueueMember[];
 }
 

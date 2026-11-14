@@ -63,6 +63,7 @@ type Store interface {
 	UpdateAccount(ctx context.Context, actor string, id int64, c store.AccountChange) (store.User, error)
 	DeleteUser(ctx context.Context, actor string, id int64) error
 	UserExtensions(ctx context.Context, userID int64) ([]store.Extension, error)
+	UserPhoneVendors(ctx context.Context, userID int64) ([]prov.Vendor, error)
 	UserExtension(ctx context.Context, userID, id int64) (store.Extension, error)
 	UserVoicemailMessage(ctx context.Context, userID, id int64) (store.VoicemailMessage, error)
 	UserCDRs(ctx context.Context, userID, before int64, limit int) ([]store.CDR, string, error)
@@ -355,6 +356,9 @@ type Config struct {
 	// Webhooks is the outbound webhook service (endpoints, deliveries,
 	// dead letters); nil answers 503 on the webhook routes.
 	Webhooks WebhookService
+	// Directory is the directory engine (AD/LDAP sync); nil answers 503 on
+	// the directory routes.
+	Directory DirectoryService
 	// Originate and OriginateLive carry click-to-call (spec integrations
 	// I-37): its requests and policy in PostgreSQL, its queue, live state
 	// and limit counters in Valkey; nil answers 503. OriginateLimits

@@ -3,8 +3,9 @@
 Hello can ring and place calls in a browser. This page covers what exists
 today: a user's **web devices** (credentials for a browser softphone),
 **coturn** (STUN and TURN for the media) and the **ICE servers endpoint** the
-softphone calls. The WSS edge, the DTLS-SRTP media path and the softphone
-itself are separate pieces; this page says where they plug in.
+softphone calls. The WSS edge is described [below](#sip-over-wss-on-kamailio); the DTLS-SRTP
+media path and the softphone itself are separate pieces, and this page says
+where they plug in.
 
 ## Web devices
 
@@ -115,6 +116,79 @@ builds them from `coturn.servers`), `HELLO_STUN_URLS` (default: the plain
 1h) configure it. With no server configured it answers 503. Issuing is
 counted in `hello_ice_credentials_issued_total`, not logged per credential.
 
+## SIP over WSS on Kamailio
+
+Browsers register and call over SIP on a WebSocket (RFC 7118). Kamailio, the
+SIP edge, ends the WebSocket and TLS and talks plain UDP to the hello-sip
+nodes, as for any phone (or mutual TLS with the
+[TLS hop](#tls-hop-from-kamailio-to-hello-sip) on): hello-sip has no
+WebSocket code. A browser is
+therefore a phone that registers through the edge, with the credentials of a
+[web device](#web-devices). Off by default.
+
+- **Address.** `wss://<console host>/sip`, sub-protocol `sip`. The console's
+  Ingress forwards `/sip` to Kamailio's WSS listener, so the browser reuses
+  the console's certificate and origin: no second DNS name and no CORS.
+  `HELLO_WSS_URL` (what a new device is told) is derived from
+  `ui.ingress.host` when `clients.wssUrl` is empty.
+- **Image.** `docker/kamailio` installs `kamailio-websocket-modules`; the
+  build checks that `websocket.so` and `tls.so` load. An image without them
+  must run with `KAMAILIO_WSS_PORT` unset (the config loads nothing for WSS
+  then).
+- **Config.** `KAMAILIO_WSS_PORT` turns it on: a TLS listener named `wss` on
+  the instance's own address (the certificate of SIP over TLS,
+  `/etc/hello-tls`, TLS 1.2 minimum). The websocket module pings every
+  connection every 10 s and closes one that has not answered in 30 s, so a
+  dead tab frees its binding quickly; only the `sip` sub-protocol is
+  accepted. HTTP on that socket answers one thing: the upgrade for `GET /sip`;
+  everything else is 404, and the metrics socket stays separate.
+- **Origins.** `KAMAILIO_WS_ORIGINS` is a comma-separated list of exact
+  origins (`https://hello.kw.watteel.lab`). A handshake whose `Origin` is not
+  on the list is refused with 403 (cross-site WebSocket hijacking). A client
+  that sends no `Origin` is not a browser and may connect; it still has to
+  authenticate with digest. Unset, no origin is allowed. The chart defaults the
+  list to the origin of `global.publicUrl`.
+- **Client address.** After the ingress, every browser shares its address.
+  `KAMAILIO_WSS_TRUSTED_PROXIES` is a regular expression the ingress pod's
+  address must match for its `X-Forwarded-For` to be believed; Kamailio then
+  keeps that address for the connection and tells Hello in `X-Hello-Client`,
+  so Hello's failed-authentication throttle counts per browser. Unset, it is
+  never believed. Per-IP request limiting (pike) is not applied to WebSocket
+  clients for the same reason; Hello's throttle and the per-AOR contact limit
+  apply.
+- **Contact, Path and Record-Route.** The browser's Contact host is a random
+  `.invalid` name; Kamailio rewrites it with `set_contact_alias()` so Hello's
+  requests reach the live connection. With the Kamailio pair, Path and
+  Record-Route of a WebSocket client name that instance's own address
+  (a `hello_ws` socket on UDP 5072), not the virtual address, because a
+  WebSocket is one TCP connection pinned to the instance that accepted it. If
+  the instance dies the socket closes, the client reconnects through the
+  Ingress to the survivor and registers again; until then Hello forks to the
+  user's other devices. nathelper's OPTIONS keep-alive is not sent to these
+  contacts. With the TLS hop on, `hello_tls` (also this instance's own
+  address) takes that role for WebSocket clients instead of `hello_ws`.
+- **Transport.** The binding records `wss` (`transport` in
+  `/api/v1/registrations`, `hello_sip_registrations_by_transport{transport="wss"}`).
+  A `sips:` call may ring a `wss` binding (encrypted to the edge); a plain
+  `ws` one does not count. Media encryption (SDES) is not offered to it: a
+  browser negotiates DTLS-SRTP, which belongs to the media path.
+- **Chart.** `kamailio.wss.enabled`, `port` (8088), `secretName` (default
+  `kamailio.tls.secretName`), `origins`, `trustedProxies`, `ingress`,
+  `ingressAnnotations`. Enabled, the chart adds the container port, the
+  `hello-kamailio-ws` Service and, with `ui.ingress.enabled`, the Ingress for
+  `/sip` (`backend-protocol: HTTPS`, one-hour read and send timeouts). The
+  Kamailio pods are on the host network, so only the ingress controller
+  should reach the port: restrict it with a host firewall or Cilium host
+  policy on the nodes; the chart cannot do that for hostNetwork pods.
+- **Lab.** The compose lab enables it (host TCP 5083 to 8088, origins
+  `http://localhost:8081` and `https://localhost:8443`);
+  `TestLabWSSRegister` registers through it, checks the `wss` transport and
+  that a foreign origin is refused.
+- **Not covered.** A browser call needs the media path (DTLS-SRTP and ICE) and
+  the softphone, which are separate pieces. Kamailio-to-hello-sip stays UDP
+  inside the edge network unless the TLS hop below is on; a DTLS-SRTP
+  fingerprint must not travel over a cleartext hop in production.
+
 ## TLS hop from Kamailio to hello-sip
 
 The signalling of a browser carries the fingerprint of its media (DTLS-SRTP),
@@ -149,7 +223,10 @@ with it off Kamailio and hello-sip behave exactly as before.
   default; the chart refuses one without the other's prerequisites. In
   Kamailio it is `KAMAILIO_HELLO_TLS_PORT` and `KAMAILIO_HELLO_SIP_TLS_PORT`.
   The kw manifests do not set them: turning the hop on there is a manifest
-  change together with the certificate.
+  change together with the certificate. With `kamailio.wss.enabled` too, WSS
+  presents the same certificate (`tls-hop.cfg` serves one on every TLS
+  socket), so `kamailio.wss.secretName` must be empty or equal to
+  `kamailio.tls.secretName`; the chart refuses anything else.
 - **Health.** The dispatcher holds a second set: the same nodes by their TLS
   address (`sip:<node>:5061;transport=tls`, `sockname=hello_tls`), probed with
   OPTIONS over TLS from the `hello_tls` socket like set 1 is over UDP. An
