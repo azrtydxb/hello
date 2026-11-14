@@ -1,0 +1,26 @@
+[
+  {
+    "name": "events",
+    "type": "select",
+    "multiple": true,
+    "label": "Events",
+    "required": true,
+    "default": ["call.missed"],
+    "options": [
+      { "label": "Call Answered", "value": "call.answered" },
+      { "label": "Call Completed (has the CDR id)", "value": "call.completed" },
+      { "label": "Call Ended", "value": "call.ended" },
+      { "label": "Call Missed", "value": "call.missed" },
+      { "label": "Call Recording Ready", "value": "call.recording.ready" },
+      { "label": "Call Ringing", "value": "call.ringing" },
+      { "label": "Voicemail Received", "value": "voicemail.received" }
+    ]
+  },
+  {
+    "name": "extensions",
+    "type": "array",
+    "label": "Only these extensions",
+    "help": "Extension numbers. Empty is every extension.",
+    "spec": { "type": "text", "label": "Extension" }
+  }
+]

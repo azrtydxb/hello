@@ -80,3 +80,30 @@ func (c conversations) InboundFromTrunk(ctx context.Context, in sip.TrunkText) (
 	}
 	return res.Handled, nil
 }
+
+// OutboundFromDevice offers a text a desk phone typed to the inbox (spec
+// messaging-channels M-26). The extension is the authenticated device's. Only
+// plain text is the inbox's: a phone cannot send media, and anything else
+// takes the ordinary external path.
+func (c conversations) OutboundFromDevice(ctx context.Context, ext, to, contentType string, body []byte) (sip.DeviceReply, error) {
+	if !store.IsTextContentType(contentType) || !utf8.Valid(body) {
+		return sip.DeviceReply{}, nil
+	}
+	key, ok := c.dial.Key(to, nil)
+	if !ok {
+		return sip.DeviceReply{}, nil
+	}
+	r, err := c.st.ReplyFromDevice(ctx, ext, key, string(body))
+	if err != nil {
+		c.metrics.DeviceReplies.WithLabelValues("failed").Inc()
+		return sip.DeviceReply{}, err
+	}
+	switch {
+	case !r.Handled:
+	case r.Refusal != "":
+		c.metrics.DeviceReplies.WithLabelValues("refused").Inc()
+	default:
+		c.metrics.DeviceReplies.WithLabelValues("sent").Inc()
+	}
+	return sip.DeviceReply{Handled: r.Handled, Refusal: r.Refusal, Limited: r.Limited}, nil
+}

@@ -14,11 +14,16 @@ import (
 // targets and VoicemailEnabled are the Phase 4 per-extension call features;
 // RecordDefault is the Phase 5 default-recording switch.
 type Extension struct {
-	ID               int64  `json:"id"`
-	Number           string `json:"number"`
-	Name             string `json:"name"`
-	ExternalNumber   string `json:"externalNumber"`
-	DND              bool   `json:"dnd"`
+	ID             int64  `json:"id"`
+	Number         string `json:"number"`
+	Name           string `json:"name"`
+	ExternalNumber string `json:"externalNumber"`
+	DND            bool   `json:"dnd"`
+	// DNDSource is who set DND: manual (the user, the API or a feature
+	// code) or calendar (the calendar of a connected Outlook or Google
+	// account, migration 00090). A calendar DND ends with the event; a
+	// manual one never does.
+	DNDSource        string `json:"dndSource"`
 	ForwardAlways    string `json:"forwardAlways"`
 	ForwardBusy      string `json:"forwardBusy"`
 	ForwardNoAnswer  string `json:"forwardNoAnswer"`
@@ -32,11 +37,11 @@ type Extension struct {
 	// 486 (migration 00026, spec S-18).
 	CallWaiting bool `json:"callWaiting"`
 	// VideoAllowed lets the extension's calls carry video between web
-	// clients (migration 00120, clients-webrtc-mobile-video S-36); false
+	// clients (migration 00097, clients-webrtc-mobile-video S-36); false
 	// answers every video section with port 0 and the call goes on as audio.
 	VideoAllowed bool `json:"videoAllowed"`
 	// RecordVideo keeps the video of the extension's recorded calls
-	// (migration 00121, S-42); false records the audio only.
+	// (migration 00098, S-42); false records the audio only.
 	RecordVideo bool `json:"recordVideo"`
 	// AnonymousOutbound makes every trunk call from the extension anonymous
 	// (migration 00067, spec S-19): Privacy: id and an anonymous From, the
@@ -65,14 +70,14 @@ type Extension struct {
 	UpdatedAt   time.Time   `json:"updatedAt"`
 }
 
-const extensionCols = `id, number, name, external_number, dnd, forward_always, forward_busy, forward_no_answer,
+const extensionCols = `id, number, name, external_number, dnd, dnd_source, forward_always, forward_busy, forward_no_answer,
 	voicemail_enabled, record_default, allow_intercom, call_waiting, no_answer_rings, directory_hidden, moh_class_id, anonymous_outbound, phone_send_anonymous, video_allowed, record_video, kind, door_targets, created_at, updated_at`
 
 func scanExtension(r interface{ Scan(...any) error }) (Extension, error) {
 	var e Extension
 	var moh sql.NullInt64
 	var targets []byte
-	err := r.Scan(&e.ID, &e.Number, &e.Name, &e.ExternalNumber, &e.DND, &e.ForwardAlways, &e.ForwardBusy,
+	err := r.Scan(&e.ID, &e.Number, &e.Name, &e.ExternalNumber, &e.DND, &e.DNDSource, &e.ForwardAlways, &e.ForwardBusy,
 		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.CallWaiting, &e.NoAnswerRings, &e.DirectoryHidden, &moh, &e.AnonymousOutbound, &e.PhoneSendAnonymous, &e.VideoAllowed, &e.RecordVideo,
 		&e.Kind, &targets, &e.CreatedAt, &e.UpdatedAt)
 	if moh.Valid {
@@ -209,6 +214,7 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 		e, err = scanExtension(tx.QueryRowContext(ctx, `
 			UPDATE extensions SET number = COALESCE($2, number), name = COALESCE($3, name),
 			       external_number = COALESCE($4, external_number), dnd = COALESCE($5, dnd),
+			       dnd_source = CASE WHEN $5::boolean IS NULL THEN dnd_source ELSE 'manual' END,
 			       forward_always = COALESCE($6, forward_always), forward_busy = COALESCE($7, forward_busy),
 			       forward_no_answer = COALESCE($8, forward_no_answer), voicemail_enabled = COALESCE($9, voicemail_enabled),
 			       record_default = COALESCE($10, record_default), allow_intercom = COALESCE($11, allow_intercom),

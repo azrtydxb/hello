@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/azrtydxb/hello/internal/auth"
@@ -173,6 +174,27 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "give extensionId or extensionIds, not both")
 		return
 	}
+	// A field a directory connector owns is read-only here (spec integrations
+	// I-5), and a directory user has no local password.
+	if in.Role != nil || in.DisplayName != nil || in.Email != nil || (in.Enabled != nil && *in.Enabled) ||
+		in.ExtensionID != nil || in.ExtensionIDs != nil || in.Password != nil {
+		u, err := s.Store.GetUser(r.Context(), id)
+		if err != nil {
+			s.storeError(w, "user", err)
+			return
+		}
+		if u.ManagedBy != nil {
+			if fields := managedTouched(u.ManagedBy, map[string]bool{
+				"role": in.Role != nil, "displayName": in.DisplayName != nil, "email": in.Email != nil,
+				"enabled": in.Enabled != nil && *in.Enabled, "extension": in.ExtensionID != nil || in.ExtensionIDs != nil,
+				"password": in.Password != nil,
+			}); len(fields) > 0 {
+				writeError(w, http.StatusConflict, "managed_by_directory",
+					strings.Join(fields, ", ")+" is managed by the directory connector "+strconv.Quote(u.ManagedBy.Connector)+"; change it there")
+				return
+			}
+		}
+	}
 	var (
 		c   store.AccountChange
 		f   fieldErrs
@@ -268,6 +290,22 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, u)
+}
+
+// managedTouched lists the fields of an edit that the connector owns. The
+// password is never settable on a directory user.
+func managedTouched(m *store.ManagedBy, edit map[string]bool) []string {
+	owned := map[string]bool{"password": true}
+	for _, f := range m.Fields {
+		owned[f] = true
+	}
+	var out []string
+	for _, f := range []string{"role", "displayName", "email", "enabled", "extension", "password"} {
+		if edit[f] && owned[f] {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func (s *server) deleteUser(w http.ResponseWriter, r *http.Request) {

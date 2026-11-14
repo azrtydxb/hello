@@ -27,6 +27,9 @@ type LinkMinter interface {
 // LinkLabel is the label a connector's links carry.
 func LinkLabel(connectorID int64) string { return "crm:" + strconv.FormatInt(connectorID, 10) }
 
+// CopyLinkTTL is the life of a link a CRM fetches once (RecordingCopy).
+const CopyLinkTTL = 24 * time.Hour
+
 // RenewWindow is how long before expiry a recording link is renewed, and
 // RenewMaxAge how old a call may be for its link to be renewed.
 const (
@@ -37,9 +40,12 @@ const (
 // Worker runs the logging jobs: it claims due rows, resolves the owner,
 // writes the call (or patches it) and settles the row.
 type Worker struct {
-	Repo    Repo
-	Tokens  *TokenManager
-	Links   LinkMinter
+	Repo   Repo
+	Tokens *TokenManager
+	Links  LinkMinter
+	// Audio opens a recording's audio for connectors that upload it
+	// (Capabilities.RecordingUpload); without it they send none.
+	Audio   AudioSource
 	Metrics *Metrics
 	Log     *slog.Logger
 	Now     func() time.Time
@@ -142,6 +148,10 @@ func (w *Worker) fail(ctx context.Context, row LogRow, err error) {
 	if permanent || !more {
 		res.Status, res.NextAttemptAt = LogDead, w.now()
 	}
+	var pe *PartialError
+	if errors.As(err, &pe) {
+		res.State = &pe.State
+	}
 	w.log().Warn("crm: job failed", "log", row.ID, "connector", row.ConnectorID, "attempt", n, "dead", res.Status == LogDead, "error", msg)
 	w.settle(ctx, row, res)
 }
@@ -211,28 +221,62 @@ func (w *Worker) handle(ctx context.Context, row LogRow) {
 		}
 	}
 
-	// The recording link.
+	// The recording: a link, or for a connector that stores the file itself
+	// the audio (opened only for the update step below).
 	var linkExpires *time.Time
-	if row.RecordingID != 0 && cr.Recordings && caps.Recordings && w.Links != nil &&
+	upload := row.RecordingID != 0 && cr.Recordings && caps.RecordingUpload && w.Audio != nil
+	if row.RecordingID != 0 && cr.Recordings && caps.Recordings && !caps.RecordingUpload && w.Links != nil &&
 		(row.LinkExpiresAt == nil || row.LinkExpiresAt.Before(w.now().Add(RenewWindow))) {
 		ttl := time.Duration(cr.LinkTTLHours) * time.Hour
+		if caps.RecordingCopy {
+			// The CRM fetches the link once and keeps a copy.
+			ttl = min(ttl, CopyLinkTTL)
+		}
 		url, exp, merr := w.Links.Mint(ctx, row.RecordingID, LinkLabel(cr.ID), ttl)
 		if merr != nil {
 			w.fail(ctx, row, fmt.Errorf("minting the recording link: %w", merr))
 			return
 		}
-		call.RecordingURL, linkExpires = url, &exp
+		call.RecordingURL = url
+		if !caps.RecordingCopy {
+			linkExpires = &exp
+		}
 	}
 
+	call.State = row.State
 	ref := row.ExternalID
 	if ref == "" {
 		ref, err = withAuth(ctx, w, cr, &cc, func(cc Conn) (string, error) { return conn.LogCall(ctx, cc, call) })
 		w.Metrics.request(cr.Kind, "log", err)
+		if err == nil && upload {
+			// Keep the CRM's reference first, so a failed upload is retried
+			// as an update and never creates the call twice.
+			w.settle(ctx, row, LogResult{Status: LogUpdate, ExternalID: ref, Attempts: row.Attempts, NextAttemptAt: w.now()})
+			return
+		}
 	} else {
+		if upload {
+			rf, oerr := w.Audio.Open(ctx, row.RecordingID)
+			switch {
+			case errors.Is(oerr, ErrAudioGone):
+				w.settle(ctx, row, LogResult{Status: LogLogged, ExternalID: ref, NextAttemptAt: w.now(), LastError: "recording not sent: it no longer exists"})
+				return
+			case oerr != nil:
+				w.fail(ctx, row, fmt.Errorf("opening the recording: %w", oerr))
+				return
+			}
+			defer func() { _ = rf.Body.Close() }()
+			call.Recording = &rf
+		}
 		_, err = withAuth(ctx, w, cr, &cc, func(cc Conn) (struct{}, error) {
 			return struct{}{}, conn.UpdateCallLog(ctx, cc, ref, call)
 		})
 		w.Metrics.request(cr.Kind, "update", err)
+		var se *SkipError
+		if errors.As(err, &se) {
+			w.settle(ctx, row, LogResult{Status: LogLogged, ExternalID: ref, NextAttemptAt: w.now(), LastError: scrub(se.Error())})
+			return
+		}
 	}
 	if err != nil {
 		if errors.Is(err, ErrNoTarget) {
@@ -248,7 +292,7 @@ func (w *Worker) handle(ctx context.Context, row LogRow) {
 		w.fail(ctx, row, err)
 		return
 	}
-	w.settle(ctx, row, LogResult{Status: LogLogged, ExternalID: ref, NextAttemptAt: w.now(), LinkExpiresAt: linkExpires})
+	w.settle(ctx, row, LogResult{Status: LogLogged, ExternalID: ref, NextAttemptAt: w.now(), LinkExpiresAt: linkExpires, State: &noState})
 }
 
 // withAuth runs f with the connection's token; when the CRM refuses the
@@ -363,3 +407,6 @@ func (r *Renewer) Once(ctx context.Context) {
 	}
 	_ = r.Repo.PurgeStates(ctx, now)
 }
+
+// noState clears a job's saved connector state.
+var noState = ""

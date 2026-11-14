@@ -1,0 +1,16 @@
+[
+  {
+    "name": "url",
+    "type": "url",
+    "label": "Hello URL",
+    "help": "The address of your Hello console, for example https://pbx.example.com. It must be reachable from the internet over https.",
+    "required": true
+  },
+  {
+    "name": "token",
+    "type": "password",
+    "label": "API token",
+    "help": "A personal API token (hello_pat_...) or a service account token from Integrations, API access. Triggers need an administrator's token with the admin, secrets, events and read scopes; Place a Call needs the calls scope.",
+    "required": true
+  }
+]

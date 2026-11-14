@@ -1,0 +1,8 @@
+{
+  "url": "/webhooks/{{webhook.data.id}}",
+  "method": "PATCH",
+  "body": {
+    "events": "{{parameters.events}}",
+    "extensions": "{{ifempty(parameters.extensions; emptyarray)}}"
+  }
+}

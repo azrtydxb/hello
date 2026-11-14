@@ -1,6 +1,6 @@
 package store
 
-// What a web client reports about a call at its end (migration 00120,
+// What a web client reports about a call at its end (migration 00097,
 // clients-webrtc-mobile-video S-20): the client's own receive-side view (codec,
 // loss, jitter, round trip, the candidate types of the selected pair, the
 // video it got). It is numbers and short words, never media. A report names

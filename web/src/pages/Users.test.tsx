@@ -314,6 +314,57 @@ describe("Users", () => {
     ).toBeInTheDocument();
   });
 
+  it("locks the fields a directory connector owns and never sends them", async () => {
+    const managed = user({
+      managedBy: {
+        connectorId: 1,
+        connector: "Corp AD",
+        fields: ["email", "displayName", "role", "extension", "enabled"],
+      },
+    });
+    const calls = mockApi({
+      "GET /api/v1/auth/me": () => json({ username: "pat", role: "admin" }),
+      "GET /api/v1/users": () => json({ items: [USERS[0], managed] }),
+      "GET /api/v1/extensions": () =>
+        json({ items: [ext(7, "101", "Front desk")] }),
+      "PATCH /api/v1/users/2": () => json(managed),
+    });
+    renderApp("/users");
+    expect(await screen.findByText("directory: Corp AD")).toBeVisible();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit sam" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit sam" });
+    expect(within(dialog).getByLabelText("Name")).toBeDisabled();
+    expect(within(dialog).getByLabelText("Email")).toBeDisabled();
+    expect(within(dialog).getByLabelText("Role")).toBeDisabled();
+    expect(within(dialog).getByLabelText(/101 Front desk/)).toBeDisabled();
+    expect(
+      within(dialog).getAllByText(/Managed by the directory connector Corp AD/),
+    ).not.toHaveLength(0);
+    expect(within(dialog).queryByLabelText("Reset password")).toBeNull();
+    expect(within(dialog).getByText(/no local password/)).toBeVisible();
+    fireEvent.click(
+      within(dialog).getByRole("switch", { name: "Attach the recording" }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PATCH")).toBe(true),
+    );
+    const patch = calls.find((c) => c.method === "PATCH")?.body as Record<
+      string,
+      unknown
+    >;
+    for (const f of [
+      "displayName",
+      "email",
+      "role",
+      "extensionIds",
+      "password",
+    ]) {
+      expect(patch).not.toHaveProperty(f);
+    }
+    expect(patch).toHaveProperty("voicemailEmail");
+  });
+
   it("is for administrators only", async () => {
     const calls = api("operator");
     renderApp("/users");

@@ -324,7 +324,7 @@ func TestTakeoverMediaGap(t *testing.T) {
 	connect(t, a, b, "200")
 	waitRecord(t, ha, "the call is replicated", "sip-1", twoLegged)
 
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	claimed := time.Now()
 	taker.srv.takeoverPass(t.Context())
@@ -372,7 +372,7 @@ func TestTakeoverMediaGap(t *testing.T) {
 // if a zombie is not counted in hello_zombie_calls_total — exactly once,
 // and never for a call a survivor took over (spec S-6).
 func TestHonestyFlags(t *testing.T) {
-	defer func(d time.Duration) { haReapDelay = d }(haReapDelay)
+	defer func(d time.Duration) { haReapDelay.Set(d) }(haReapDelay.Get())
 	t.Run("taken-over", func(t *testing.T) {
 		ha, mem, owner, taker := haPair(t, ringAllDevices())
 		a, b := newPhone(t, owner, "a1", "pa"), newPhone(t, owner, "b1", "pb1")
@@ -381,7 +381,7 @@ func TestHonestyFlags(t *testing.T) {
 		connect(t, a, b, "200")
 		st := waitRecord(t, ha, "the call is replicated", "sip-1", twoLegged)
 		eventually(t, "the owner lists the call owned", func() bool { return connectedOn(owner, "200", livestate.HAOwned) })
-		haReinviteTimeout = time.Second
+		haReinviteTimeout.Set(time.Second)
 		killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 		taker.srv.takeoverPass(t.Context())
 		ra := waitReq(t, a.reinvites, "takeover re-INVITE to the caller")
@@ -407,7 +407,7 @@ func TestHonestyFlags(t *testing.T) {
 		a.register(t)
 		b.register(t)
 		connect(t, a, b, "200")
-		haReapDelay = 50 * time.Millisecond
+		haReapDelay.Set(50 * time.Millisecond)
 		// Seen alive with its call; once OFFLINE, membership lists it with
 		// no load (as the real store does), and the reaper must still
 		// count the call it last had.
@@ -438,14 +438,14 @@ func TestHonestyFlags(t *testing.T) {
 		b.register(t)
 		connect(t, a, b, "200")
 		waitRecord(t, ha, "the call is replicated", "sip-1", twoLegged)
-		haReapDelay = 300 * time.Millisecond
-		haReinviteTimeout = time.Second
+		haReapDelay.Set(300 * time.Millisecond)
+		haReinviteTimeout.Set(time.Second)
 		killNode(owner, mem, map[string]int{"sip-1": 2}, "sip-2")
 		taker.srv.takeoverPass(t.Context())
 		waitReq(t, a.reinvites, "takeover re-INVITE to the caller")
 		waitReq(t, b.reinvites, "takeover re-INVITE to the callee")
 		eventually(t, "taken over", func() bool { return taker.metric(t, "hello_dialog_takeovers_total", nil) == 1 })
-		time.Sleep(haReapDelay)
+		time.Sleep(haReapDelay.Get())
 		taker.srv.takeoverPass(t.Context())
 		taker.srv.takeoverPass(t.Context())
 		if z := taker.metric(t, "hello_zombie_calls_total", nil); z != 1 {
@@ -481,7 +481,7 @@ func TestDoubleFailure(t *testing.T) {
 	recX := waitRecord(t, ha, "X replicated", "sip-1", twoLegged)
 	recY := waitRecord(t, ha, "Y replicated", "sip-3", twoLegged)
 
-	haReinviteTimeout = 5 * time.Second
+	haReinviteTimeout.Set(5 * time.Second)
 	hold := make(chan struct{})
 	a.mu.Lock()
 	a.reinviteHold = hold // X's takeover stalls on the caller's answer
@@ -572,7 +572,7 @@ func TestHAMetrics(t *testing.T) {
 	ha.failSave = false
 	ha.mu.Unlock()
 	// A takeover moves the takeover counter and flips the live flag.
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	ra := waitReq(t, a.reinvites, "takeover re-INVITE")
@@ -580,7 +580,7 @@ func TestHAMetrics(t *testing.T) {
 	eventually(t, "live ha flag is taken-over", func() bool { return connectedOn(taker, "200", livestate.HATakenOver) })
 	// A dialog whose endpoint is gone moves the zombie counter.
 	ha.put(orphanState("orphan-m", "sip-9", "sip:x@127.0.0.1:1"))
-	haReinviteTimeout = 300 * time.Millisecond
+	haReinviteTimeout.Set(300 * time.Millisecond)
 	killNode(nil, mem, map[string]int{"sip-1": 1, "sip-9": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	eventually(t, "zombies moves", func() bool { return taker.metric(t, "hello_zombie_calls_total", nil) == 1 })
@@ -638,7 +638,7 @@ func matrixBlindTransfer(t *testing.T) {
 	st := waitRecord(t, ha, "the transfer is replicated", "sip-1", func(s livestate.DialogState) bool {
 		return s.State == haPhaseTransferring && s.StateDetail == "refer:callee" && s.Legs[1].LocalCSeq > trying.CSeq().SeqNo
 	})
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	ra := waitReq(t, a.reinvites, "takeover re-INVITE to the transferee's peer")
@@ -697,7 +697,7 @@ func matrixBlindTransferAnswered(t *testing.T) {
 	st := waitRecord(t, ha, "the transferred call is replicated", "sip-1", func(s livestate.DialogState) bool {
 		return s.Legs[0].CallID == aCallID && s.Legs[1].CallID == cInv.CallID().Value() && s.Destination == "300"
 	})
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	ra := waitReq(t, a.reinvites, "takeover re-INVITE to the caller")
@@ -734,7 +734,7 @@ func matrixAttendedTransferHalf(t *testing.T) {
 	rec2 := waitRecord(t, ha, "the consultation replicated", "sip-1", func(s livestate.DialogState) bool {
 		return s.CallID == id2 && twoLegged(s)
 	})
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 2}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	ra := reinviteOn(t, a, id1, "takeover re-INVITE to the original caller")
@@ -789,7 +789,7 @@ func matrixAttendedBridged(t *testing.T) {
 	st := waitRecord(t, ha, "the bridged call is replicated", "sip-1", func(s livestate.DialogState) bool {
 		return s.Legs[0].CallID == aCallID && s.Legs[1].CallID == cLeg && s.Destination == "300"
 	})
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	ra := waitReq(t, a.reinvites, "takeover re-INVITE to the caller")
@@ -822,7 +822,7 @@ func matrixAnnouncement(t *testing.T) {
 	st := waitRecord(t, ha, "the announcement is replicated", "sip-1", func(s livestate.DialogState) bool {
 		return s.State == haPhaseAnnouncement && s.StateDetail == haRecordDetailPrefix+obj
 	})
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	ra := waitReq(t, a.reinvites, "takeover re-INVITE to the caller")
@@ -865,7 +865,7 @@ func matrixAnnouncementDestination(t *testing.T) {
 	st := waitRecord(t, ha, "the announcement destination is replicated", "sip-1", func(s livestate.DialogState) bool {
 		return s.State == haPhaseAnnouncement && s.Legs[1].CallID == "" && s.StateDetail == haRecordDetailPrefix+obj
 	})
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	ra := waitReq(t, a.reinvites, "takeover re-INVITE to the caller")
@@ -918,7 +918,7 @@ func matrixVoicemail(t *testing.T) {
 			strings.HasPrefix(s.StateDetail, "vm:leave:") && strings.HasSuffix(s.StateDetail, ":200")
 	})
 	ownerAns, _ := media.ParseAudioSDP(r.dcs.InviteResponse.Body())
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	ra := waitReq(t, a.reinvites, "takeover re-INVITE to the voicemail caller")

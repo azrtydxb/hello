@@ -87,11 +87,11 @@ type Extension struct {
 	// built without the flag) on the default, call waiting on.
 	NoCallWaiting bool
 	// VideoDenied is true when the extension may not carry video (migration
-	// 00120, clients-webrtc-mobile-video S-36); inverted like NoCallWaiting so
+	// 00097, clients-webrtc-mobile-video S-36); inverted like NoCallWaiting so
 	// every extension built without the flag allows it.
 	VideoDenied bool
 	// NoRecordVideo is true when the extension's recorded calls keep the
-	// audio only (migration 00121, S-42); inverted like VideoDenied.
+	// audio only (migration 00098, S-42); inverted like VideoDenied.
 	NoRecordVideo bool
 	// AnonymousOutbound makes the extension's trunk calls anonymous
 	// (migration 00067, spec S-19).

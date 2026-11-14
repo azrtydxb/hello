@@ -489,6 +489,7 @@ func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureU
 		res, err := tx.ExecContext(ctx, `
 			UPDATE extensions SET
 				dnd = COALESCE($2, dnd),
+				dnd_source = CASE WHEN $2::boolean IS NULL THEN dnd_source ELSE 'manual' END,
 				forward_always = COALESCE($3, forward_always),
 				forward_busy = COALESCE($4, forward_busy),
 				forward_no_answer = COALESCE($5, forward_no_answer),

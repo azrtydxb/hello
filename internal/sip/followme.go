@@ -31,7 +31,7 @@ import (
 
 // fmAcceptWindow is how long an external target has, after the prompt, to
 // press 1 before it is dropped (S-6).
-var fmAcceptWindow = 10 * time.Second
+var fmAcceptWindow = newTunable(10 * time.Second)
 
 // Follow-me leg results (the CDR's and the metric's).
 const (
@@ -803,7 +803,7 @@ func (c *call) fmScreen(l *leg) string {
 			return ""
 		case <-done:
 			done = nil
-			t := time.NewTimer(fmAcceptWindow)
+			t := time.NewTimer(fmAcceptWindow.Get())
 			defer t.Stop()
 			window = t.C
 		case <-window:

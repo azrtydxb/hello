@@ -52,7 +52,7 @@ func TestRoutesTable(t *testing.T) {
 			return false
 		}
 		switch r.Pattern {
-		case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password":
+		case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password", "/api/v1/lookup/number":
 			return true
 		case "/api/v1/calls/{id}/door-open":
 			// Open the door of the user's own answered door call (spec
@@ -63,6 +63,7 @@ func TestRoutesTable(t *testing.T) {
 		return strings.HasPrefix(r.Pattern, "/api/v1/me/") || strings.HasPrefix(r.Pattern, "/api/v1/events") ||
 			strings.HasPrefix(r.Pattern, "/api/v1/lookup/") || r.Pattern == "/api/v1/recording-links/{id}" ||
 			r.Pattern == "/api/v1/recordings/{id}/links" || r.Pattern == "/api/v1/integrations/hubspot/engagements" ||
+			r.Pattern == "/api/v1/integrations/salesforce/engagements" ||
 			strings.HasPrefix(r.Pattern, "/api/v1/calls/originate")
 	}
 	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true, "POST /api/v1/auth/login/2fa": true,

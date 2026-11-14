@@ -66,7 +66,7 @@ func TestConnectDirectStoresTheCredentialAsTheConnection(t *testing.T) {
 		t.Fatalf("view = %+v %v", v, err)
 	}
 	// The OAuth callback is not for a direct connector.
-	if _, err := r.svc.Callback(ctx, "x", "y"); !errors.Is(err, ErrBadState) {
+	if _, _, err := r.svc.Callback(ctx, "x", "y"); !errors.Is(err, ErrBadState) {
 		t.Fatalf("callback = %v", err)
 	}
 	// Refused credentials: a validation error on the secret, no connection.

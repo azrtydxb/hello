@@ -32,6 +32,14 @@ const (
 	Generic     Vendor = "generic"
 )
 
+// SIPMessage is the vendor's capability flag for SIP MESSAGE texting on the
+// handset (spec messaging-channels M-26). Only Grandstream is known to show
+// it, from its administration guide (P22650 in the built-in template); it is
+// unverified on hardware. Every other vendor is off until a lab check proves
+// its handset has a text UI, so the console offers desk-phone delivery only
+// to an extension with at least one phone that has it.
+func (v Vendor) SIPMessage() bool { return v == Grandstream }
+
 // Vendors lists every vendor, first-class ones first.
 var Vendors = []Vendor{Yealink, Poly, Grandstream, Snom, Fanvil, Generic}
 

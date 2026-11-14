@@ -1,0 +1,10 @@
+{
+  "url": "/lookup/number",
+  "method": "GET",
+  "qs": {
+    "number": "{{parameters.number}}"
+  },
+  "response": {
+    "output": "{{body}}"
+  }
+}

@@ -15,7 +15,7 @@ network. Kamailio tells them which transport the phone used in an
 request arrived on and honoured only from a trusted proxy
 (`HELLO_SIP_TRUSTED_PROXIES`), like `X-Hello-Client`. The registration stores
 it: `GET /api/v1/registrations` shows `transport` per binding, and the metric
-`hello_sip_registrations_by_transport{transport}` counts them per node.
+`hello_sip_registrations_by_transport{transport}` counts them per node. `hello_sip_requests_by_wire_total{transport}` counts every request by the transport it arrived on at the node (`tls` is the TLS hop from Kamailio, see [webrtc.md](webrtc.md#tls-hop-from-kamailio-to-hello-sip)).
 
 Calls to a phone registered over TLS leave Kamailio over that phone's TLS
 connection (Path `received=...;transport=tls`, then the connection Kamailio
@@ -146,10 +146,10 @@ DTLS-SRTP and ICE (S-16, see [media.md](media.md#dtls-srtp-and-ice-lite)) add
 two Grandstream keys, from the vendor's WP8x6 config templates (wp8x6_config
 1.0.3.35 and later, wp856_config 1.0.3.16):
 
-| Key      | Models                  | Written                                              | Values                                   |
-| -------- | ----------------------- | ---------------------------------------------------- | ---------------------------------------- |
-| `P60078` | WP826, WP836, WP856     | with `P183`, for a phone on TLS                      | `0` SDES, `1` DTLS (the device's **Key exchange**) |
-| `P95002` | WP826, WP836            | for any phone of the model, Auto by default          | `1` Auto, `4` ICE (the device's **ICE** switch)    |
+| Key      | Models              | Written                                     | Values                                             |
+| -------- | ------------------- | ------------------------------------------- | -------------------------------------------------- |
+| `P60078` | WP826, WP836, WP856 | with `P183`, for a phone on TLS             | `0` SDES, `1` DTLS (the device's **Key exchange**) |
+| `P95002` | WP826, WP836        | for any phone of the model, Auto by default | `1` Auto, `4` ICE (the device's **ICE** switch)    |
 
 Both are account 1, as `P183`. Other models and vendors write neither.
 

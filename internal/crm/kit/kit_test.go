@@ -2,6 +2,7 @@ package kit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -90,6 +91,44 @@ func TestDoMapsFailures(t *testing.T) {
 	// The URL never reaches an error.
 	if err := Do(context.Background(), srv.Client, Request{Method: "GET", URL: "http://127.0.0.1:1/secret-path?token=abc"}, nil); err == nil || strings.Contains(err.Error(), "secret-path") || strings.Contains(err.Error(), "abc") {
 		t.Fatalf("network error leaks: %v", err)
+	}
+}
+
+// TestDoClassifyReadsTheCRMsOwnError fails if a 403 the CRM calls a rate
+// limit is permanent, if a Retry-After is dropped for it, or if the CRM's
+// message is not the one shown.
+func TestDoClassifyReadsTheCRMsOwnError(t *testing.T) {
+	srv := kittest.New(t)
+	srv.Handle("GET /limit", func(w http.ResponseWriter, _ *http.Request, _ string) {
+		w.Header().Set("Retry-After", "9")
+		w.WriteHeader(403)
+		_, _ = w.Write([]byte(`[{"errorCode":"REQUEST_LIMIT_EXCEEDED","message":"over  limit"}]`))
+	})
+	srv.JSON("GET /denied", 403, `[{"errorCode":"INSUFFICIENT_ACCESS","message":"no"}]`)
+	srv.JSON("GET /plain", 400, `{"message":"fallback"}`)
+	classify := func(_ int, raw []byte) (string, bool) {
+		var arr []struct{ ErrorCode, Message string }
+		if json.Unmarshal(raw, &arr) != nil || len(arr) == 0 {
+			return "", false
+		}
+		return arr[0].ErrorCode + ": " + arr[0].Message, arr[0].ErrorCode == "REQUEST_LIMIT_EXCEEDED"
+	}
+	do := func(path string) *crm.APIError {
+		var ae *crm.APIError
+		err := Do(context.Background(), srv.Client, Request{Method: "GET", URL: srv.URL + path, Authed: true, Classify: classify}, nil)
+		if !errors.As(err, &ae) {
+			t.Fatalf("%s = %v", path, err)
+		}
+		return ae
+	}
+	if ae := do("/limit"); !ae.Retry || ae.After != 9*time.Second || ae.Msg != "REQUEST_LIMIT_EXCEEDED: over limit" {
+		t.Fatalf("limit = %+v", ae)
+	}
+	if ae := do("/denied"); ae.Retry || ae.Msg != "INSUFFICIENT_ACCESS: no" {
+		t.Fatalf("denied = %+v", ae)
+	}
+	if ae := do("/plain"); ae.Retry || ae.Msg != "fallback" {
+		t.Fatalf("plain = %+v", ae)
 	}
 }
 

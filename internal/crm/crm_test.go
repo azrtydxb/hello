@@ -432,6 +432,31 @@ func TestEngagementHandshakeAvoidsADuplicate(t *testing.T) {
 	}
 }
 
+// TestRecordingLinkGoesToTheIframesEngagement fails if the recording link of a
+// call placed through the HubSpot iframe is written to a new record instead of
+// being patched into the engagement the iframe handed over.
+func TestRecordingLinkGoesToTheIframesEngagement(t *testing.T) {
+	r := newRig(t)
+	r.f.owners["anna@example.com"] = "o1"
+	if ok, err := r.svc.Engagement(context.Background(), "u", "fake", "c1", "eng-77", nil, false); err != nil || !ok {
+		t.Fatalf("handshake = %v, %v", ok, err)
+	}
+	r.feed(t, completed("c1", "outbound", "201"))
+	r.worker.Process(context.Background())
+	rec := events.Entry{Cursor: "1-4", Event: events.New(events.CallRecordingReady, events.Data{CallID: "c1", Direction: "outbound", Extension: "201", RecordingID: 42}, "42", time.Now())}
+	r.feed(t, rec)
+	r.worker.Process(context.Background())
+	if len(r.f.logs) != 0 || len(r.f.updates) != 2 {
+		t.Fatalf("logs = %d, updates = %d: the link must patch the iframe's engagement, not create one", len(r.f.logs), len(r.f.updates))
+	}
+	if last := r.f.updates[1]; last.RecordingURL == "" || len(r.links.minted) != 1 {
+		t.Fatalf("the engagement was patched without a link: %+v, minted %v", last, r.links.minted)
+	}
+	if row, _ := r.repo.Log(r.conn.ID, "c1"); row.ExternalID != "eng-77" || row.LinkExpiresAt == nil {
+		t.Fatalf("row = %+v", row)
+	}
+}
+
 func TestEngagementOwnershipForTheUserRole(t *testing.T) {
 	r := newRig(t)
 	r.repo.Events = [][2]string{{"c1", "201"}}
@@ -525,19 +550,19 @@ func TestOAuthFlowThroughTheService(t *testing.T) {
 	}
 	state := u[len("https://crm.example/auth?client=cid&state="):]
 	state = state[:len(state)-len("&redirect=https://hello.example"+CallbackPath)]
-	if _, err := r.svc.Callback(ctx, "wrong", "good"); !errors.Is(err, ErrBadState) {
+	if _, _, err := r.svc.Callback(ctx, "wrong", "good"); !errors.Is(err, ErrBadState) {
 		t.Fatalf("wrong state = %v", err)
 	}
-	if _, err := r.svc.Callback(ctx, state, "bad"); err == nil {
+	if _, _, err := r.svc.Callback(ctx, state, "bad"); err == nil {
 		t.Fatal("a bad code was accepted")
 	}
-	if _, err := r.svc.Callback(ctx, state, "good"); !errors.Is(err, ErrBadState) {
+	if _, _, err := r.svc.Callback(ctx, state, "good"); !errors.Is(err, ErrBadState) {
 		t.Fatalf("a state must be single use, got %v", err)
 	}
 	u, _ = r.svc.Connect(ctx, "admin", r.conn.ID)
 	state = u[len("https://crm.example/auth?client=cid&state="):]
 	state = state[:len(state)-len("&redirect=https://hello.example"+CallbackPath)]
-	if id, err := r.svc.Callback(ctx, state, "good"); err != nil || id != r.conn.ID {
+	if id, _, err := r.svc.Callback(ctx, state, "good"); err != nil || id != r.conn.ID {
 		t.Fatalf("callback = %d, %v", id, err)
 	}
 	v, _ := r.svc.Get(ctx, r.conn.ID)

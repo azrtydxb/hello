@@ -409,8 +409,50 @@ describe("My phone (role user)", () => {
           displayName: "Alice",
           email: "a@new.example",
           voicemailEmail: { notify: true, attach: false, after: "mark_read" },
+          deskphoneDelivery: false,
         },
       }),
+    );
+  });
+
+  it("offers desk phone delivery only to an extension with a capable phone", async () => {
+    const calls = api(
+      { "PATCH /api/v1/me/profile": () => noContent() },
+      { ...ME, deskphoneDelivery: false, deskphoneCapable: true },
+    );
+    renderApp("/me/profile");
+    const form = await screen.findByRole("form", { name: "Profile" });
+    fireEvent.click(
+      within(form).getByRole("switch", {
+        name: /Show customer texts on my desk phone/,
+      }),
+    );
+    fireEvent.click(within(form).getByRole("button", { name: "Save profile" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+        deskphoneDelivery: true,
+      }),
+    );
+  });
+
+  it("hides desk phone delivery when no phone of the extension can text", async () => {
+    const calls = api(
+      { "PATCH /api/v1/me/profile": () => noContent() },
+      { ...ME, deskphoneDelivery: false, deskphoneCapable: false },
+    );
+    renderApp("/me/profile");
+    const form = await screen.findByRole("form", { name: "Profile" });
+    expect(
+      within(form).queryByRole("switch", {
+        name: /Show customer texts on my desk phone/,
+      }),
+    ).toBeNull();
+    fireEvent.click(within(form).getByRole("button", { name: "Save profile" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PATCH")).toBe(true),
+    );
+    expect(calls.find((c) => c.method === "PATCH")?.body).not.toHaveProperty(
+      "deskphoneDelivery",
     );
   });
 

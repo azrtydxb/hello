@@ -63,7 +63,7 @@ type CDR struct {
 	// or mixed, and ICE whether a leg ran ICE-lite (migration 00084).
 	SRTPKeyEx string `json:"srtpKeyEx"`
 	ICE       bool   `json:"ice"`
-	// Video says the call carried video at some point (migration 00120).
+	// Video says the call carried video at some point (migration 00097).
 	Video bool `json:"video"`
 	// RecordingID is the call's recording; set by GetCDR when it has one.
 	RecordingID *int64 `json:"recordingId,omitempty"`
@@ -80,7 +80,7 @@ type CDR struct {
 	// by GetCDR, empty when no phone sent a report.
 	RTCPXR []RTCPXRQuality `json:"rtcpxr,omitempty"`
 	// ClientQuality is what the web clients on the call reported at its end
-	// (migration 00120); set by CDRDetail only.
+	// (migration 00097); set by CDRDetail only.
 	ClientQuality []ClientQuality `json:"clientQuality,omitempty"`
 }
 

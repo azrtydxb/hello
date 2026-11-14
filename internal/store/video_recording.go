@@ -1,6 +1,6 @@
 package store
 
-// Video recording rows (clients-webrtc-mobile-video S-42, migration 00121).
+// Video recording rows (clients-webrtc-mobile-video S-42, migration 00098).
 // hello-sip writes a stream's row while it records and keeps it current after
 // every stored fragment; hello-control finalizes, sweeps and purges them. The
 // objects (init segment, fragments, the finalized file) live in the recordings

@@ -132,7 +132,7 @@ func (s *Server) inboundCall(req *sip.Request, tx sip.ServerTransaction, snap *s
 	if dec.CallerID != "" {
 		c.callerNum = dec.CallerID // the route's normalised caller ID
 	}
-	if name := s.crmCallerName(c.callerNum, c.callerName); name != c.callerName {
+	if name := s.crmCallerName(c.callerNum, c.callerName, dec.Extension); name != c.callerName {
 		c.callerName = name
 		c.trace.Add("Caller name from the CRM")
 	}

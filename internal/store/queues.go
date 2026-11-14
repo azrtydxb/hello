@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,10 +91,18 @@ type Queue struct {
 	CallbackOfferAfter int    `json:"callbackOfferAfterSeconds"`
 	CallbackDigit      string `json:"callbackDigit"`
 	// PromptLanguage is the queue's own prompt language; "" inherits (S-20).
-	PromptLanguage string        `json:"promptLanguage"`
-	Members        []QueueMember `json:"members"`
-	CreatedAt      time.Time     `json:"createdAt"`
-	UpdatedAt      time.Time     `json:"updatedAt"`
+	PromptLanguage string `json:"promptLanguage"`
+	// Text settings (migration 00095, spec messaging-channels M-13): whether
+	// the queue takes customer texts, how many open conversations each agent
+	// holds, when an unanswered one returns to the pool (0 never) and whether
+	// an agent on a call is offered none.
+	TextEnabled           bool          `json:"textEnabled"`
+	TextCapacity          int           `json:"textCapacity"`
+	TextReassignSeconds   int           `json:"textReassignSeconds"`
+	TextRequiresIdleVoice bool          `json:"textRequiresIdleVoice"`
+	Members               []QueueMember `json:"members"`
+	CreatedAt             time.Time     `json:"createdAt"`
+	UpdatedAt             time.Time     `json:"updatedAt"`
 }
 
 // QueueInput is the writable shape of a queue; an update replaces the whole
@@ -129,7 +138,12 @@ type QueueInput struct {
 	CallbackOfferAfter int
 	CallbackDigit      string
 	PromptLanguage     string
-	Members            []QueueMember
+	// The text settings; a zero TextCapacity is read as the default, 3.
+	TextEnabled           bool
+	TextCapacity          int
+	TextReassignSeconds   int
+	TextRequiresIdleVoice bool
+	Members               []QueueMember
 }
 
 const queueCols = `q.id, q.name, q.number, q.enabled, q.strategy, q.agent_timeout, q.retry_delay, q.wrap_up,
@@ -139,7 +153,8 @@ const queueCols = `q.id, q.name, q.number, q.enabled, q.strategy, q.agent_timeou
 	q.periodic_prompt_id, COALESCE(pp.name, ''), q.position_prompt_id, COALESCE(po.name, ''),
 	q.wait_prompt_id, COALESCE(wp.name, ''), q.minutes_prompt_id, COALESCE(mp.name, ''), q.digits_prefix,
 	q.breakout_key, q.breakout_prompt_id, COALESCE(bp.name, ''), q.breakout_voicemail,
-	q.callback_enabled, q.callback_offer_after_seconds, q.callback_digit, COALESCE(q.prompt_language, ''), q.created_at, q.updated_at`
+	q.callback_enabled, q.callback_offer_after_seconds, q.callback_digit, COALESCE(q.prompt_language, ''),
+	q.text_enabled, q.text_capacity, q.text_reassign_seconds, q.text_requires_idle_voice, q.created_at, q.updated_at`
 
 const queueFrom = ` FROM queues q
 	LEFT JOIN announcements pp ON pp.id = q.periodic_prompt_id
@@ -165,7 +180,8 @@ func listQueues(ctx context.Context, q querier, where string, args ...any) ([]Qu
 			&x.PeriodicPromptID, &x.PeriodicPromptName, &x.PositionPromptID, &x.PositionPromptName,
 			&x.WaitPromptID, &x.WaitPromptName, &x.MinutesPromptID, &x.MinutesPromptName, &x.DigitsPrefix,
 			&x.BreakoutKey, &x.BreakoutPromptID, &x.BreakoutPromptName, &x.BreakoutVoicemail,
-			&x.CallbackEnabled, &x.CallbackOfferAfter, &x.CallbackDigit, &x.PromptLanguage, &x.CreatedAt, &x.UpdatedAt); err != nil {
+			&x.CallbackEnabled, &x.CallbackOfferAfter, &x.CallbackDigit, &x.PromptLanguage,
+			&x.TextEnabled, &x.TextCapacity, &x.TextReassignSeconds, &x.TextRequiresIdleVoice, &x.CreatedAt, &x.UpdatedAt); err != nil {
 			return nil, err
 		}
 		x.Members = []QueueMember{}
@@ -351,7 +367,8 @@ const queueWriteCols = `name, number, enabled, strategy, agent_timeout, retry_de
 	join_empty, leave_empty, timeout_kind, timeout_target, full_kind, full_target, no_agents_kind, no_agents_target,
 	moh_class_id, announce_frequency, announce_position, announce_wait, periodic_prompt_id, position_prompt_id,
 	wait_prompt_id, minutes_prompt_id, digits_prefix, breakout_key, breakout_prompt_id, breakout_voicemail,
-	callback_enabled, callback_offer_after_seconds, callback_digit, prompt_language`
+	callback_enabled, callback_offer_after_seconds, callback_digit, prompt_language,
+	text_enabled, text_capacity, text_reassign_seconds, text_requires_idle_voice`
 
 func nullIfEmpty(s string) any {
 	if s == "" {
@@ -367,12 +384,24 @@ func orDefaultStr(v, def string) string {
 	return v
 }
 
+// DefaultTextCapacity is how many open conversations an agent holds when the
+// queue does not say.
+const DefaultTextCapacity = 3
+
+func (in QueueInput) textCapacity() int {
+	if in.TextCapacity == 0 {
+		return DefaultTextCapacity
+	}
+	return in.TextCapacity
+}
+
 func (in QueueInput) args() []any {
 	return []any{in.Name, in.Number, in.Enabled, in.Strategy, in.AgentTimeout, in.RetryDelay, in.WrapUp, in.MaxCallers, in.MaxWait,
 		in.JoinEmpty, in.LeaveEmpty, in.Timeout.Kind, in.Timeout.Target, in.Full.Kind, in.Full.Target, in.NoAgents.Kind, in.NoAgents.Target,
 		in.MOHClassID, in.AnnounceFrequency, in.AnnouncePosition, in.AnnounceWait, in.PeriodicPromptID, in.PositionPromptID,
 		in.WaitPromptID, in.MinutesPromptID, in.DigitsPrefix, in.BreakoutKey, in.BreakoutPromptID, in.BreakoutVoicemail,
-		in.CallbackEnabled, in.CallbackOfferAfter, orDefaultStr(in.CallbackDigit, queue.DefaultCallbackDigit), nullIfEmpty(in.PromptLanguage)}
+		in.CallbackEnabled, in.CallbackOfferAfter, orDefaultStr(in.CallbackDigit, queue.DefaultCallbackDigit), nullIfEmpty(in.PromptLanguage),
+		in.TextEnabled, in.textCapacity(), in.TextReassignSeconds, in.TextRequiresIdleVoice}
 }
 
 // CreateQueue inserts a queue with its members.
@@ -389,7 +418,7 @@ func (s *Store) CreateQueue(ctx context.Context, actor string, in QueueInput, ch
 		if err := checkQueue(ctx, tx, 0, in); err != nil {
 			return 0, err
 		}
-		ph := make([]string, 33)
+		ph := make([]string, 37)
 		for i := range ph {
 			ph[i] = fmt.Sprintf("$%d", i+1)
 		}
@@ -500,7 +529,11 @@ func (s *Store) DeleteQueue(ctx context.Context, actor string, id int64, check C
 		if err != nil {
 			return id, err
 		}
-		if len(refs) > 0 {
+		more, err := queueTextReferences(ctx, tx, id)
+		if err != nil {
+			return id, err
+		}
+		if refs = append(refs, more...); len(refs) > 0 {
 			return id, inUseBy("queue "+name, refs)
 		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM queues WHERE id = $1`, id)
@@ -509,4 +542,38 @@ func (s *Store) DeleteQueue(ctx context.Context, actor string, id int64, check C
 		}
 		return id, requireRow(res)
 	})
+}
+
+// queueTextReferences names what points at the queue by id: the messaging
+// numbers that route to it and the open conversations placed in it. A queue
+// with either cannot be deleted (spec messaging-channels edge cases); turning
+// its texting off sends the waiting conversations back to the pool instead.
+func queueTextReferences(ctx context.Context, tx *sql.Tx, id int64) ([]string, error) {
+	var refs []string
+	rows, err := tx.QueryContext(ctx, `SELECT coalesce(NULLIF(label, ''), address) FROM msg_addresses
+		WHERE (route_kind = 'queue' AND route_target = $1) OR (after_hours_action = 'route' AND after_hours_route_kind = 'queue' AND after_hours_route_target = $1)
+		ORDER BY id`, strconv.FormatInt(id, 10))
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		refs = append(refs, "messaging number "+n)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var open int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM conversations WHERE queue_id = $1 AND status IN ('open', 'pending', 'snoozed')`, id).Scan(&open); err != nil {
+		return nil, err
+	}
+	if open > 0 {
+		refs = append(refs, plural(open, "an open conversation", strconv.Itoa(open)+" open conversations"))
+	}
+	return refs, nil
 }

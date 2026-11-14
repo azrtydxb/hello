@@ -44,6 +44,18 @@ import {
 import { mapFieldErrors } from "../forms";
 import { ROLES, useCan, type Role } from "../role";
 
+/** Whether a directory connector owns a field of the user. */
+function owns(u: User, field: string): boolean {
+  return u.managedBy?.fields.includes(field) ?? false;
+}
+
+/** The hint of a field a directory connector owns, undefined when it is free. */
+function lockHint(u: User | null, field: string): string | undefined {
+  return u && owns(u, field)
+    ? `Managed by the directory connector ${u.managedBy?.connector ?? ""}: change it there.`
+    : undefined;
+}
+
 const ROLE_TONE: Record<Role, BadgeTone> = {
   user: "outline",
   viewer: "neutral",
@@ -177,6 +189,14 @@ function UserList() {
                   {u.displayName && (
                     <span className="az-field__hint"> {u.displayName}</span>
                   )}
+                  {u.managedBy && (
+                    <>
+                      {" "}
+                      <Badge tone="info">
+                        directory: {u.managedBy.connector}
+                      </Badge>
+                    </>
+                  )}
                 </>
               ),
             },
@@ -259,6 +279,12 @@ function UserList() {
                         size="sm"
                         variant="secondary"
                         aria-label={`${u.enabled ? "Disable" : "Enable"} ${u.username}`}
+                        disabled={!u.enabled && owns(u, "enabled")}
+                        title={
+                          !u.enabled && owns(u, "enabled")
+                            ? "The directory decides when this user is enabled"
+                            : undefined
+                        }
                         onClick={() => void toggle(u)}
                       >
                         {u.enabled ? "Disable" : "Enable"}
@@ -381,6 +407,8 @@ function UserDialog({
   onSaved: (u: User, wasNew: boolean) => void | Promise<void>;
 }) {
   const isNew = user === null;
+  // The fields a directory connector owns cannot be edited here (409).
+  const owned = (field: string) => (user ? owns(user, field) : false);
   const [username, setUsername] = useState(user?.username ?? "");
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
@@ -451,16 +479,14 @@ function UserDialog({
           voicemailEmail,
         });
       } else {
-        const change: UserChange = {
-          displayName: displayName.trim(),
-          email: email.trim(),
-          role,
-          extensionIds,
-          voicemailEmail,
-        };
+        const change: UserChange = { voicemailEmail };
+        if (!owned("displayName")) change.displayName = displayName.trim();
+        if (!owned("email")) change.email = email.trim();
+        if (!owned("role")) change.role = role;
+        if (!owned("extension")) change.extensionIds = extensionIds;
         if (totpRequired !== (user.totpRequired ?? false))
           change.totpRequired = totpRequired;
-        if (password !== "") {
+        if (password !== "" && !user.managedBy) {
           change.password = password;
           change.mustChangePassword = must;
         }
@@ -522,20 +548,27 @@ function UserDialog({
         <Input
           label="Name"
           value={displayName}
+          disabled={owned("displayName")}
+          hint={lockHint(user, "displayName")}
           error={errors.displayName}
           onChange={(e) => setDisplayName(e.target.value)}
         />
         <Input
           label="Email"
           type="email"
-          hint="Voicemail notifications are sent here."
+          hint={
+            lockHint(user, "email") ?? "Voicemail notifications are sent here."
+          }
           value={email}
+          disabled={owned("email")}
           error={errors.email}
           onChange={(e) => setEmail(e.target.value)}
         />
         <Select
           label="Role"
           value={role}
+          disabled={owned("role")}
+          hint={lockHint(user, "role")}
           error={errors.role}
           options={ROLES.map((r) => ({
             value: r,
@@ -563,7 +596,7 @@ function UserDialog({
                   : undefined
               }
               checked={exts.has(String(x.id))}
-              disabled={holder.has(String(x.id))}
+              disabled={holder.has(String(x.id)) || owned("extension")}
               onChange={(e) => toggleExt(x.id, e.target.checked)}
             />
           ))}
@@ -571,36 +604,44 @@ function UserDialog({
             <span className="az-field__error">{errors.extensionIds}</span>
           )}
         </fieldset>
-        <Input
-          label={isNew ? "Initial password" : "Reset password"}
-          type="text"
-          autoComplete="off"
-          spellCheck={false}
-          hint={
-            isNew
-              ? "At least 10 characters. Hand it to the user; they choose their own at first sign-in."
-              : "Leave empty to keep the current password."
-          }
-          value={password}
-          error={errors.password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        <div>
-          <Button
-            variant="secondary"
-            size="sm"
-            icon="dices"
-            onClick={() => setPassword(generatePassword())}
-          >
-            Generate a password
-          </Button>
-        </div>
-        {(isNew || password !== "") && (
-          <Switch
-            label="Must choose a new password at next sign-in"
-            checked={must}
-            onChange={(e) => setMust(e.target.checked)}
-          />
+        {user?.managedBy ? (
+          <p className="az-field__hint">
+            This user signs in through the directory and has no local password.
+          </p>
+        ) : (
+          <>
+            <Input
+              label={isNew ? "Initial password" : "Reset password"}
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              hint={
+                isNew
+                  ? "At least 10 characters. Hand it to the user; they choose their own at first sign-in."
+                  : "Leave empty to keep the current password."
+              }
+              value={password}
+              error={errors.password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <div>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="dices"
+                onClick={() => setPassword(generatePassword())}
+              >
+                Generate a password
+              </Button>
+            </div>
+            {(isNew || password !== "") && (
+              <Switch
+                label="Must choose a new password at next sign-in"
+                checked={must}
+                onChange={(e) => setMust(e.target.checked)}
+              />
+            )}
+          </>
         )}
         {!isNew && (
           <Switch

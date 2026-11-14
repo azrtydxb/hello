@@ -35,7 +35,7 @@ type Conference struct {
 	Record            bool
 	Enabled           bool
 	// Video forwards the active speaker's picture to participants that bring
-	// video (migration 00122, S-45).
+	// video (migration 00099, S-45).
 	Video bool
 	// Misconfigured is set when a sealed PIN did not open (a changed
 	// HELLO_SECRET_KEY): the room refuses callers rather than run unguarded.

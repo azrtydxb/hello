@@ -410,8 +410,22 @@ devices and the softphone build on it.
 - **Settings.** `HELLO_MEDIA_WEBRTC_ENABLED` (default false; needs
   `HELLO_MEDIA_ANCHOR_HOST`), `HELLO_MEDIA_WEBRTC_PORT`,
   `HELLO_MEDIA_WEBRTC_PUBLIC_IP`, `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP`
-  (read; enforced by the WSS edge item). Metrics: `hello_webrtc_mux_legs`,
+  (default false: see below). Metrics: `hello_webrtc_mux_legs`,
   `hello_webrtc_mux_unrouted_total`, `hello_webrtc_mux_queue_drops_total`.
+- **Cleartext hop.** The browser's DTLS fingerprint travels in the offer, so it
+  is only as trustworthy as the signalling path to this node. `AnswerWebRTC`
+  takes a `SignalingHop` and refuses an offer that arrived over a cleartext
+  edge-to-node hop with `ErrCleartextHop`, before the leg is touched, unless
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP=true`. An offer counts as encrypted when
+  it arrived on the node's own TLS listener (`HELLO_SIP_TLS_ADDR`, the TLS hop in
+  [webrtc.md](webrtc.md#tls-hop-from-kamailio-to-hello-sip)) from a trusted edge;
+  what a Via header says does not count, only the transport sipgo read the
+  message on. A softphone call path asks `Server.WebRTCHop` for the hop and
+  runs `checkWebRTCHop` first, which logs the refusal at warn
+  (`WebRTC offer refused ... reason=cleartext_hop`, with the fix) and counts it in
+  `hello_sip_webrtc_refused_total{reason="cleartext_hop"}`; the call is answered
+  with 488. Set the flag only on a network whose edge-to-node path you trust
+  (for example Cilium transparent encryption).
 - **Beyond the first answer.** A browser leg's SDP is the leg's own audio SDP
   (`AudioSDP.Build`, whose `Secure` already writes DTLS, ICE-lite and rtcp-mux)
   plus `a=mid`, one BUNDLE group, every node address as a candidate and, for

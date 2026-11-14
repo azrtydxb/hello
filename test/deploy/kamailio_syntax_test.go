@@ -5,10 +5,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
 )
+
+// ctrNameUnsafe matches what a Docker container name may not contain.
+var ctrNameUnsafe = regexp.MustCompile(`[^a-z0-9_.-]+`)
 
 // TestKamailioConfigSyntax runs `kamailio -c` over deploy/kamailio/kamailio.cfg
 // in the real Kamailio image, once with no environment (the lab's defaults)
@@ -21,6 +25,7 @@ import (
 // variable the test skips, unless HELLO_REQUIRE_KAMAILIO=1 (set in that job),
 // where a missing image is a failure. Never run it against a Docker daemon
 // you did not mean to use: it starts short-lived containers.
+
 func TestKamailioConfigSyntax(t *testing.T) {
 	image := os.Getenv("HELLO_KAMAILIO_IMAGE")
 	if image == "" {
@@ -39,7 +44,7 @@ func TestKamailioConfigSyntax(t *testing.T) {
 
 	root := repoRoot(t)
 	dir := t.TempDir()
-	for _, f := range []string{"kamailio.cfg", "dispatcher.list"} {
+	for _, f := range []string{"kamailio.cfg", "dispatcher.list", "tls.cfg", "tls-hop.cfg"} {
 		b, err := os.ReadFile(filepath.Join(root, "deploy", "kamailio", f))
 		if err != nil {
 			t.Fatal(err)
@@ -68,6 +73,22 @@ func TestKamailioConfigSyntax(t *testing.T) {
 		variants[n+" without the websocket module"] = maps.Clone(variants[n])
 		noWS[n+" without the websocket module"] = true
 	}
+	// The TLS hop to hello-sip (S-12) is off in every variant above, kw's
+	// included: that is the check that kw is unchanged while it is off. On:
+	// the lab layout, and the kw environment with the VIP and the legacy
+	// sockets, with and without SIP over TLS for phones, and with WSS too.
+	hop := map[string]string{"KAMAILIO_HELLO_TLS_PORT": "5073", "KAMAILIO_HELLO_SIP_TLS_PORT": "5061"}
+	variants["lab with the TLS hop"] = maps.Clone(hop)
+	variants["lab with TLS phones and the TLS hop"] = map[string]string{"KAMAILIO_TLS_PORT": "5061", "KAMAILIO_HELLO_TLS_PORT": "5073"}
+	withHop := maps.Clone(variants["kw environment with the VIP"])
+	maps.Copy(withHop, hop)
+	variants["kw environment with the VIP and the TLS hop"] = withHop
+	wssHop := maps.Clone(wss)
+	maps.Copy(wssHop, hop)
+	variants["lab with WSS and the TLS hop"] = wssHop
+	withBoth := maps.Clone(withVIP)
+	maps.Copy(withBoth, hop)
+	variants["kw environment with the VIP, WSS and the TLS hop"] = withBoth
 	names := make([]string, 0, len(variants))
 	for n := range variants {
 		names = append(names, n)
@@ -78,7 +99,9 @@ func TestKamailioConfigSyntax(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			// docker create + cp + start, not a bind mount: in CI the Docker
 			// daemon is a sidecar that cannot see the runner's temp files.
-			ctr := "kamailio-cfgcheck-" + strings.ReplaceAll(strings.ToLower(name), " ", "-")
+			// Docker allows only [a-zA-Z0-9_.-] in a container name; a case
+			// name with a comma or other punctuation is reduced to that.
+			ctr := "kamailio-cfgcheck-" + strings.Trim(ctrNameUnsafe.ReplaceAllString(strings.ToLower(name), "-"), "-")
 			_ = exec.Command(docker, "rm", "-f", ctr).Run()
 			args := []string{"create", "--name", ctr}
 			check := []string{image, "-c", "-f", "/etc/kamailio/kamailio.cfg"}

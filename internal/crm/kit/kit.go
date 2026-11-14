@@ -38,6 +38,10 @@ type Request struct {
 	// Authed marks a request that carries credentials: a 401 is then
 	// crm.ErrAuth, so the framework signs in again instead of failing the job.
 	Authed bool
+	// Classify reads a CRM's own error body: its message (empty falls back to
+	// Message) and whether the failure may pass although the status is not a
+	// 5xx (a rate limit the CRM reports as 403). Nil uses the status alone.
+	Classify func(status int, raw []byte) (msg string, retry bool)
 }
 
 // Do sends r and decodes a JSON answer into out (nil ignores the body).
@@ -85,7 +89,7 @@ func Do(ctx context.Context, hc *http.Client, r Request, out any) error {
 	defer func() { _ = resp.Body.Close() }()
 	raw, rerr := safehttp.ReadBody(resp.Body, MaxBody)
 	if resp.StatusCode/100 != 2 {
-		return StatusError(resp, raw, r.Authed)
+		return statusError(resp, raw, r.Authed, r.Classify)
 	}
 	if rerr != nil {
 		return &crm.APIError{Status: resp.StatusCode, Retry: true, Msg: "reading the response"}
@@ -102,6 +106,10 @@ func Do(ctx context.Context, hc *http.Client, r Request, out any) error {
 // authenticated request is crm.ErrAuth; 408, 429 and 5xx may pass (retry,
 // with the CRM's Retry-After); everything else is permanent.
 func StatusError(resp *http.Response, raw []byte, authed bool) error {
+	return statusError(resp, raw, authed, nil)
+}
+
+func statusError(resp *http.Response, raw []byte, authed bool, classify func(int, []byte) (string, bool)) error {
 	if resp.StatusCode == http.StatusUnauthorized && authed {
 		return crm.ErrAuth
 	}
@@ -113,7 +121,20 @@ func StatusError(resp *http.Response, raw []byte, authed bool) error {
 	case resp.StatusCode >= 500 || resp.StatusCode == http.StatusRequestTimeout:
 		e.Retry = true
 	}
-	e.Msg = Message(raw)
+	if classify != nil {
+		msg, retry := classify(resp.StatusCode, raw)
+		e.Msg = strings.Join(strings.Fields(msg), " ")
+		if len(e.Msg) > 200 {
+			e.Msg = e.Msg[:200]
+		}
+		if retry && !e.Retry {
+			e.Retry = true
+			e.After = RetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		}
+	}
+	if e.Msg == "" {
+		e.Msg = Message(raw)
+	}
 	if e.Msg == "" {
 		e.Msg = http.StatusText(resp.StatusCode)
 	}

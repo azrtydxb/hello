@@ -1,0 +1,12 @@
+{
+  "url": "{{parameters.url}}",
+  "method": "{{parameters.method}}",
+  "qs": "{{parameters.qs}}",
+  "body": "{{parameters.body}}",
+  "response": {
+    "output": {
+      "statusCode": "{{statusCode}}",
+      "body": "{{body}}"
+    }
+  }
+}

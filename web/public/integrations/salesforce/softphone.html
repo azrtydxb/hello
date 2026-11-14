@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Hello</title>
+    <link rel="stylesheet" href="/integrations/embed.css" />
+  </head>
+  <body>
+    <h1>Hello</h1>
+    <div id="signin" hidden>
+      <p>Sign in to Hello to place and log calls from Salesforce.</p>
+      <button id="signin-btn" type="button">Sign in to Hello</button>
+    </div>
+    <div id="phone" hidden>
+      <form id="dial-form" class="row">
+        <input
+          id="number"
+          type="tel"
+          inputmode="tel"
+          autocomplete="off"
+          aria-label="Number to call"
+          placeholder="Number"
+        />
+        <button type="submit">Call</button>
+      </form>
+      <div
+        id="call"
+        class="status"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></div>
+      <p class="muted">
+        <span id="live">Connecting…</span>
+        <button id="signout-btn" type="button">Sign out</button>
+      </p>
+    </div>
+    <div id="error" class="status bad" role="alert" hidden></div>
+    <script src="/integrations/embed.js"></script>
+    <script src="/integrations/salesforce/softphone.js"></script>
+  </body>
+</html>

@@ -51,13 +51,13 @@ func TestSRVAndBackupProvisioning(t *testing.T) {
 
 	// Keys per model, from wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83,
 	// wp820_config_1.0.7.90 and wp856_config_1.0.3.16: every template has P48,
-	// P2333, P103, P29095 and P26040; P2312 (Secondary SIP Server) all but the
-	// WP820; P60056 (Failback Timer) all but the WP810/822/825.
+	// P2333, P103, P29095 and P26040; P2312 (Secondary SIP Server), which the
+	// WP820 template names P50602; P60056 (Failback Timer) all but the WP810/822/825.
 	for _, c := range []struct {
 		model     string
-		secondary bool // P2312 in the template
-		failback  bool // P60056 in the template
-	}{{"WP836", true, true}, {"WP822", true, false}, {"WP856", true, true}, {"WP820", false, true}, {"GRP2614", true, true}} {
+		secondary string // the Secondary SIP Server key in the template
+		failback  bool   // P60056 in the template
+	}{{"WP836", "P2312", true}, {"WP822", "P2312", false}, {"WP856", "P2312", true}, {"WP820", "P50602", true}, {"GRP2614", "P2312", true}} {
 		model := c.model
 		gs := renderDevice(t, Grandstream, backupData(Grandstream, model, withBackup))
 		for _, want := range []string{"<P47>192.0.2.10:5060</P47>", "<P103>0</P103>", "<P48>192.0.2.10:5060</P48>", "<P2333>192.0.2.21:5062</P2333>"} {
@@ -65,8 +65,8 @@ func TestSRVAndBackupProvisioning(t *testing.T) {
 				t.Errorf("%s lacks %s", model, want)
 			}
 		}
-		if got := strings.Contains(gs, "<P2312>192.0.2.21:5062</P2312>"); got != c.secondary {
-			t.Errorf("%s: P2312 written = %v, want %v", model, got, c.secondary)
+		if !strings.Contains(gs, "<"+c.secondary+">192.0.2.21:5062</"+c.secondary+">") {
+			t.Errorf("%s: %s not written", model, c.secondary)
 		}
 		for _, not := range []string{"<P29095>", "<P60056>", "<P26040>"} {
 			if strings.Contains(gs, not) {
@@ -74,7 +74,7 @@ func TestSRVAndBackupProvisioning(t *testing.T) {
 			}
 		}
 		plain := renderDevice(t, Grandstream, backupData(Grandstream, model, udpServer))
-		if strings.Contains(plain, "<P2333>") || strings.Contains(plain, "<P48>") || strings.Contains(plain, "<P2312>") {
+		if strings.Contains(plain, "<P2333>") || strings.Contains(plain, "<P48>") || strings.Contains(plain, "<P2312>") || strings.Contains(plain, "<P50602>") {
 			t.Errorf("%s without a backup writes a second server or an outbound proxy", model)
 		}
 
@@ -88,7 +88,7 @@ func TestSRVAndBackupProvisioning(t *testing.T) {
 		if got := strings.Contains(gs, "<P60056>60</P60056>"); got != c.failback {
 			t.Errorf("%s SRV: P60056 written = %v, want %v", model, got, c.failback)
 		}
-		if strings.Contains(gs, "sip.hello.example.com:") || strings.Contains(gs, "<P2333>") || strings.Contains(gs, "<P48>") || strings.Contains(gs, "<P2312>") {
+		if strings.Contains(gs, "sip.hello.example.com:") || strings.Contains(gs, "<P2333>") || strings.Contains(gs, "<P48>") || strings.Contains(gs, "<P2312>") || strings.Contains(gs, "<P50602>") {
 			t.Errorf("%s SRV mode writes a port, a second server or an outbound proxy", model)
 		}
 	}

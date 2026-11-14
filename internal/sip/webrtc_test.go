@@ -296,7 +296,7 @@ func TestWebRTCCallToDeskPhone(t *testing.T) {
 		if bytes.Contains(wire, bytes.Repeat([]byte{0x5a}, 160)) {
 			t.Fatal("the browser's packet was in the clear")
 		}
-		b.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		_ = b.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 		buf := make([]byte, 2048)
 		if n, _, err := b.sock.ReadFromUDP(buf); err == nil {
 			got, _ = media.ParseRTP(buf[:n])
@@ -396,12 +396,17 @@ func TestPhoneCallsBrowser(t *testing.T) {
 			t.Fatalf("call: %v", r.err)
 		}
 		if browserAnswers {
-			close(release)
+			// The desk phone keeps ringing until its CANCEL arrives: Hello
+			// cancels the fork before it answers the caller, but the CANCEL
+			// goes out on the fork's own goroutine, so it can reach the desk
+			// after the caller's 200. Releasing the desk first would let it
+			// answer in that gap and get a BYE instead.
 			select {
 			case <-desk.cancels:
 			case <-time.After(3 * time.Second):
 				t.Fatal("the desk phone was not cancelled")
 			}
+			close(release)
 			toBrowserLeg := candidateAddr(t, winnerOffer)
 			w.connect(t, winnerOffer, true) // answered active to Hello's actpass offer
 			toHelloA := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: cryptoOf(t, r.dcs.InviteResponse.Body()).Port}
@@ -418,7 +423,7 @@ func TestPhoneCallsBrowser(t *testing.T) {
 			var back *media.RTPPacket
 			for i := 0; i < 40 && back == nil; i++ {
 				w.send(t, toBrowserLeg, rtpPacket(uint16(200+i), 0x32))
-				a.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+				_ = a.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 				buf := make([]byte, 2048)
 				if n, _, err := a.sock.ReadFromUDP(buf); err == nil {
 					back, _ = media.ParseRTP(buf[:n])
@@ -445,7 +450,7 @@ func TestPhoneCallsBrowser(t *testing.T) {
 		var got *media.RTPPacket
 		for i := 0; i < 40 && got == nil; i++ {
 			_, _ = a.sock.WriteToUDP(rtpPacket(uint16(i+1), 0x41), toHelloA)
-			desk.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			_ = desk.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 			buf := make([]byte, 2048)
 			if n, _, err := desk.sock.ReadFromUDP(buf); err == nil {
 				got, _ = media.ParseRTP(buf[:n])

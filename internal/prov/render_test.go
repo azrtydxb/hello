@@ -109,6 +109,7 @@ func TestRenderedConfigContents(t *testing.T) {
 				}
 			}
 			for _, g := range got {
+				g.Raw = nil // the P-values are for the WP sweep, not this field comparison
 				if !reflect.DeepEqual(g, want) {
 					t.Errorf("%s (firmware pinned %v):\n got %+v\nwant %+v", v, pinned, g, want)
 				}

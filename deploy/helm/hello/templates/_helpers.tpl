@@ -106,6 +106,14 @@ imagePullSecrets:
 {{- $pod := printf "%s-sip-%d" $full $i }}
 1 sip:{{ include "hello.svcFQDN" (dict "root" $ "name" (printf "%s.%s-sip" $pod $full)) }}:5060 0 0 duid={{ $pod }}
 {{- end }}
+{{- if .Values.kamailio.helloTLS.enabled }}
+# Set 2: the same nodes by their TLS address, probed over TLS from the
+# hello_tls socket (kamailio.helloTLS), for the encrypted phone legs.
+{{- range $i := until (int .Values.sip.nodes) }}
+{{- $pod := printf "%s-sip-%d" $full $i }}
+2 sip:{{ include "hello.svcFQDN" (dict "root" $ "name" (printf "%s.%s-sip" $pod $full)) }}:{{ $.Values.kamailio.helloTLS.sipPort }};transport=tls 0 0 duid={{ $pod }}-tls;sockname=hello_tls
+{{- end }}
+{{- end }}
 {{- end -}}
 
 {{/* Soft hostname anti-affinity for a component. */}}

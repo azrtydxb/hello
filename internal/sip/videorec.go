@@ -15,13 +15,13 @@ import (
 // and carries video, the video is recorded next to the audio: the relay's
 // video tap feeds a media.VideoRecorder that depacketizes without decoding and
 // stores fragments in the recordings bucket as it goes, and the stream rows
-// (migration 00121) follow, so hello-control can finalize a stream whatever
+// (migration 00098) follow, so hello-control can finalize a stream whatever
 // became of this node. The audio recording is unchanged; nothing is muxed into
 // it. Both the node's switch and the extensions must allow it, and the video
 // already stored must be under the quota. A takeover carries audio only, so a
 // node that dies leaves the stream's row for hello-control's sweeper.
 
-// VideoRecordingStore is the store of video stream rows (migration 00121,
+// VideoRecordingStore is the store of video stream rows (migration 00098,
 // implemented over internal/store by hello-sip's wiring).
 type VideoRecordingStore interface {
 	// OpenVideoStream inserts the row of a stream and returns its id.

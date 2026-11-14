@@ -1,0 +1,5 @@
+[
+  { "name": "destination", "type": "text", "label": "Destination", "required": true, "help": "What to dial: digits, +, * and # only." },
+  { "name": "extension", "type": "text", "label": "Extension", "help": "The extension whose phone rings first. Empty uses the single extension of the token's owner." },
+  { "name": "idempotencyKey", "type": "text", "label": "Idempotency key", "help": "The same key within 10 minutes returns the same call instead of placing another. Map the execution id to protect against retries." }
+]

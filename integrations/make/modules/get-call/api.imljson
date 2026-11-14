@@ -1,0 +1,7 @@
+{
+  "url": "/cdrs/{{parameters.cdrId}}",
+  "method": "GET",
+  "response": {
+    "output": "{{body}}"
+  }
+}

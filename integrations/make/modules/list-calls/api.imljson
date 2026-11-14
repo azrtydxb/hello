@@ -1,0 +1,12 @@
+{
+  "url": "/cdrs",
+  "method": "GET",
+  "qs": {
+    "limit": "{{min(parameters.limit; 200)}}",
+    "direction": "{{ifempty(parameters.direction; emptystring)}}"
+  },
+  "response": {
+    "iterate": "{{body.items}}",
+    "output": "{{item}}"
+  }
+}

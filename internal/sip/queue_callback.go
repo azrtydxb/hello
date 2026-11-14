@@ -57,12 +57,33 @@ const (
 // caller is rung.
 var (
 	callbackEvery       = 3 * time.Second
-	callbackOfferCheck  = 3 * time.Second
 	callbackRingTimeout = 30 * time.Second
-	// callbackWatchEvery is how often a ringing attempt, or a caller on the
-	// line, checks that the request was not cancelled (and renews its lease).
-	callbackWatchEvery = 2 * time.Second
 )
+
+// Defaults of Config.CallbackOfferCheck and Config.CallbackWatchEvery (the
+// latter also renews the request's lease). They are per server, not package
+// variables, so a call still running after a test ends cannot race with the
+// next test's setting.
+const (
+	defaultCallbackOfferCheck = 3 * time.Second
+	defaultCallbackWatchEvery = 2 * time.Second
+)
+
+// callbackOfferCheck is how often a waiting caller is checked for the offer.
+func (s *Server) callbackOfferCheck() time.Duration {
+	if s.cfg.CallbackOfferCheck > 0 {
+		return s.cfg.CallbackOfferCheck
+	}
+	return defaultCallbackOfferCheck
+}
+
+// callbackWatchEvery is how often a callback attempt checks for cancellation.
+func (s *Server) callbackWatchEvery() time.Duration {
+	if s.cfg.CallbackWatchEvery > 0 {
+		return s.cfg.CallbackWatchEvery
+	}
+	return defaultCallbackWatchEvery
+}
 
 // callbackNumberRe is a number a callback can dial: digits with an optional
 // leading plus. A caller that is anonymous or has no number does not match,
@@ -747,7 +768,7 @@ func (c *call) callbackAwait(pending, stage int, only *leg, silent time.Duration
 		defer st.Stop()
 		silentC = st.C
 	}
-	watch := time.NewTicker(callbackWatchEvery)
+	watch := time.NewTicker(s.callbackWatchEvery())
 	defer watch.Stop()
 	total, busy := pending, 0
 	for {

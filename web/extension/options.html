@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hello extension settings</title>
+    <link rel="stylesheet" href="ui.css" />
+  </head>
+  <body class="options">
+    <main>
+      <h1>Hello click-to-call</h1>
+
+      <h2>Hello server</h2>
+      <p id="state" class="muted"></p>
+      <label for="server">Address of your Hello server</label>
+      <input
+        id="server"
+        type="text"
+        placeholder="https://hello.example.com"
+        autocomplete="off"
+      />
+      <button id="signin" class="p" type="button">Sign in</button>
+      <button id="signout" type="button" hidden>Sign out</button>
+      <p class="muted">
+        Sign-in opens Hello's own consent page. The extension asks for calls,
+        events and read access, and signing out revokes it.
+      </p>
+
+      <h2>Websites</h2>
+      <label for="hosts"
+        >Sites where phone links are handled (one per line, for example
+        crm.example.com or *.example.com)</label
+      >
+      <textarea id="hosts" spellcheck="false"></textarea>
+      <label class="check"
+        ><input id="linkify" type="checkbox" /> Also turn phone numbers in the
+        text of those sites into links</label
+      >
+      <p class="muted">
+        The browser asks you to allow each site. The extension does nothing on
+        any other site.
+      </p>
+
+      <h2>Calls</h2>
+      <label for="extension">Extension to ring first</label>
+      <select id="extension"></select>
+      <label class="check"
+        ><input id="notify" type="checkbox" /> Show a notification when a call
+        rings</label
+      >
+
+      <p>
+        <button id="save" class="p" type="button">Save</button>
+        <span id="msg" role="status"></span>
+      </p>
+
+      <h2>About</h2>
+      <p class="muted">
+        Redirect address for this browser:
+        <span id="redirect" class="mono"></span>
+      </p>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

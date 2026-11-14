@@ -1,0 +1,4 @@
+[
+  { "name": "id", "type": "text", "label": "Request ID" },
+  { "name": "state", "type": "text", "label": "State" }
+]

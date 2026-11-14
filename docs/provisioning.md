@@ -559,6 +559,14 @@ own extension (anything else is `403`), `Expires` is held between 60 and
 Contacts that hold no subscription get an unsolicited `NOTIFY` with the same
 body instead, never both. Hello no longer sends MWI as a SIP `MESSAGE`.
 
+**Texts on the handset.** The built-in Grandstream template sets `P22650 = 1`
+(account 1 is the designated instant-message account) so a WP822 or WP836
+shows SIP `MESSAGE`; this is unverified on hardware. Each vendor carries a
+`sip_message` capability (`prov.Vendor.SIPMessage`), true only for Grandstream,
+and the profile page offers customer texts on the desk phone only to a user
+with at least one phone of a vendor that has it (or none yet). See
+[inbox.md](inbox.md#desk-phones).
+
 A subscription lives on the node that accepted it. After a node restart or
 failover the phone re-subscribes on its next refresh and gets the current
 counts at once. Messages heard or deleted through the API reach the phone
@@ -1348,11 +1356,13 @@ hand, and a guessed key can strand a handset.
 
 ### Profiles
 
-A profile is a named network: SSID, security, a pre-shared key or an 802.1X
-identity and password, a priority, a hidden flag, a preferred account and a
+A profile is a named network: SSID, security, a pre-shared key or, for an
+enterprise network, an 802.1X profile (`dot1xProfileId`; see
+[scep.md](scep.md): the EAP method, identity, password and the RADIUS CA are
+that profile's, shared with the wired port), a priority, a hidden flag, a preferred account and a
 "verified on a test phone" mark. A group or a phone carries at most 10
-profiles. The key and the password are stored sealed with `HELLO_SECRET_KEY`
-(context `wifi-psk:<id>` and `wifi-password:<id>`), are never returned by the
+profiles. The key is stored sealed with `HELLO_SECRET_KEY` (context `wifi-psk:<id>`;
+an 802.1X password is sealed in its own profile), is never returned by the
 API or the MCP tools, and are masked as `********` in the configuration
 preview. A profile in use by a group or phone cannot be deleted.
 
@@ -1367,15 +1377,16 @@ network typed in on the handset is overwritten at the next provisioning.
 | wpa2-psk          | `4`, key in `P83003`                    | `4`, key in `P83003`                             | `P7814 = 2`, key in `P7830`     |
 | wpa3-sae          | `11`                                    | `11`                                             | not offered                     |
 | owe               | `14`                                    | not offered                                      | not offered                     |
-| wpa2/3-enterprise | `5` / `12`, PEAP, MSCHAPv2              | not offered (no 802.1X keys in the template)     | not offered                     |
+| wpa2/3-enterprise | `5` / `12`, PEAP or EAP-TLS             | not offered (no 802.1X keys in the template)     | not offered                     |
 
 The key blocks are `P83000 + 100 (n - 1)` for network n: SSID at +0, security
-+2, key +3, EAP method +4, anonymous identity +12, phase 2 +13, identity +14,
-password +15, server certificate check +16, priority +49 and preferred account
-+85 on the WP8x6; SSID +0, enabled +1, security +2, key +3, 802.11r +48 and
++2, key +3, EAP method +4 (1 TLS, 2 PEAP), uploaded CA +11, anonymous identity
++12, phase 2 +13, identity +14, password +15, server certificate check +16
+(1 system, 3 uploaded), domain validation +18 and server name +19, TLS CA +7
+and TLS identity +9, priority +49 and preferred account +85 on the WP8x6; SSID +0, enabled +1, security +2, key +3, 802.11r +48 and
 hidden +50 on the WP810/822/825. The WP856 has one network (`P7812`, `P7814`,
-`P7830`): the profile with the highest priority it can take. EAP-TLS is not
-offered: it needs a device certificate (S-25). The WP820 has a template of its
+`P7830`): the profile with the highest priority it can take. The WP856 and the
+WP810/822/825 take no enterprise network (the templates have no EAP keys). The WP820 has a template of its
 own and is not provisioned.
 
 Capacity: the WP8x6 takes 10 networks, the WP810/822/825 17 and the WP856 one.
@@ -1647,7 +1658,12 @@ BLF, ring tags and call waiting, because each is a device of its own extension.
   password, name, voicemail number, expiry, MWI subscription, transport (and the
   `sips` scheme on TLS), the four-codec choice, the Broadsoft special feature
   with feature key sync, accept-SIP-from-the-proxy-only (S-32) and call waiting
-  (not on the WP820, whose template has only the phone-wide switch). The WP8x6
+  (not on the WP820, whose template has only the phone-wide switch). Each line
+  also gets its own SRTP mode and key exchange (on TLS), presence keys (WP8x6 and
+  WP8xx: both off), RTCP-XR collector keys (when `HELLO_PROV_RTCPXR` is on) and
+  backup server keys (`P2412` and on, `P403` and on, `P2433` and on), at the
+  account offsets of the same templates. The WP820's Secondary SIP Server is
+  `P50602` (`P51102` for line 2), not `P2312`. The WP8x6
   template labels account 3 "GRP2602/2603/2604 only"; the spec and the
   template's account choices give the WP8x6 three accounts, so check the third on
   a handset.
@@ -1746,11 +1762,11 @@ Wi-Fi handset), so leave both off until it has.
 registrars, at most two; the first is written to the phones that take one. List
 the other HA nodes here.
 
-| Vendor      | Keys written                                                                                                                                                                                                                                  |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.1.sip_server.2.address`, `.port`, `.transport_type = 0`, `.expires`                                                                                                                                                                  |
-| Poly        | `reg.1.server.2.address`, `.port`, `.transport = "UDPOnly"`, `.expires`                                                                                                                                                                       |
-| Grandstream | `P48` Outbound Proxy (the primary, `host:port`), `P2333` Backup Outbound Proxy (the backup) and, on the WP8x6, WP810/822/825 and WP856, `P2312` Secondary SIP Server (the backup); the phone uses the backup when the primary does not answer |
+| Vendor      | Keys written                                                                                                                                                                                                                 |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.1.sip_server.2.address`, `.port`, `.transport_type = 0`, `.expires`                                                                                                                                                 |
+| Poly        | `reg.1.server.2.address`, `.port`, `.transport = "UDPOnly"`, `.expires`                                                                                                                                                      |
+| Grandstream | `P48` Outbound Proxy (the primary, `host:port`), `P2333` Backup Outbound Proxy (the backup) and `P2312` Secondary SIP Server (the backup; `P50602` on the WP820); the phone uses the backup when the primary does not answer |
 
 Snom and Fanvil get none: no key for a second registrar is in a vendor
 document Hello was checked against. A phone that registers over TLS gets none

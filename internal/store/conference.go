@@ -49,7 +49,7 @@ type Conference struct {
 	Record            bool   `json:"record"`
 	Enabled           bool   `json:"enabled"`
 	// Video forwards the active speaker's picture to the participants that
-	// bring video (migration 00122, S-45); off, the room is audio only.
+	// bring video (migration 00099, S-45); off, the room is audio only.
 	Video     bool      `json:"video"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`

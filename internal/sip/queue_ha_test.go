@@ -53,7 +53,7 @@ func TestQueueSurvivesNodeFailover(t *testing.T) {
 		return s.State == haPhaseQueue && s.Legs[1].CallID == "" && strings.HasPrefix(s.StateDetail, "queue:sales:") &&
 			!strings.HasSuffix(s.StateDetail, ":0")
 	})
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 2}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	raFirst := waitReq(t, a.reinvites, "takeover re-INVITE to the first caller")

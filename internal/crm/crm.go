@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"sync"
@@ -29,6 +30,19 @@ type Capabilities struct {
 	ClickToCall bool `json:"clickToCall"`
 	ScreenPop   bool `json:"screenPop"`
 	Ticket      bool `json:"ticket"`
+	// UserScope marks a connector each user signs in to with their own
+	// account (Outlook, Google): its lookups search the callee's own
+	// contacts, not an organisation's.
+	UserScope bool `json:"userScope"`
+	// Calendar marks a connector that can say whether the user is busy
+	// (the Calendar interface).
+	Calendar bool `json:"calendar"`
+	// RecordingUpload means the connector stores the audio file itself
+	// (Pipedrive): Hello hands it the bytes instead of a link, once.
+	RecordingUpload bool `json:"recordingUpload,omitempty"`
+	// RecordingCopy means the CRM fetches a link once and keeps its own
+	// copy (Bitrix24): the link is short-lived and never renewed.
+	RecordingCopy bool `json:"recordingCopy,omitempty"`
 }
 
 // Contact is a CRM contact found by phone number.
@@ -37,6 +51,9 @@ type Contact struct {
 	Name    string `json:"name"`
 	Company string `json:"company,omitempty"`
 	URL     string `json:"url,omitempty"`
+	// CompanyID is the CRM's id of the company or organisation, when the
+	// connector links calls to it.
+	CompanyID string `json:"companyId,omitempty"`
 }
 
 // Outcome is how a call ended, in the CRM-neutral terms connectors map onto
@@ -74,7 +91,52 @@ type CallLog struct {
 	Contact *Contact
 	// RecordingURL is a recording link, empty while there is none.
 	RecordingURL string
+	// Recording is the audio of the call for a connector with
+	// Capabilities.RecordingUpload; the worker opens and closes it around
+	// UpdateCallLog.
+	Recording *RecordingFile
+	// State is what an earlier, failed LogCall of this call saved (see
+	// PartialError); empty on the first attempt.
+	State string
 }
+
+// PartialError is returned by LogCall when it failed after a step that
+// cannot be repeated (a call already registered in the CRM). State is kept on
+// the job and handed back as CallLog.State, so the retry continues with the
+// failed step, also after a restart. Err is the failure; it decides retry or
+// dead as usual.
+type PartialError struct {
+	State string
+	Err   error
+}
+
+func (e *PartialError) Error() string { return e.Err.Error() }
+func (e *PartialError) Unwrap() error { return e.Err }
+
+// RecordingFile is a recording's audio.
+type RecordingFile struct {
+	Body        io.ReadCloser
+	Size        int64
+	Name        string
+	ContentType string
+}
+
+// AudioSource opens a recording's audio for a connector that uploads it.
+type AudioSource interface {
+	// Open returns the audio; ErrAudioGone means the recording no longer
+	// exists.
+	Open(ctx context.Context, recordingID int64) (RecordingFile, error)
+}
+
+// ErrAudioGone is a recording that was deleted before it could be sent.
+var ErrAudioGone = errors.New("crm: the recording no longer exists")
+
+// SkipError is returned by UpdateCallLog when a recording is deliberately
+// not sent (too large for the CRM): the call stays logged and the reason is
+// shown on the job.
+type SkipError struct{ Reason string }
+
+func (e *SkipError) Error() string { return "crm: recording not sent: " + e.Reason }
 
 // Conn is what a connector needs to call its CRM: the connector's settings
 // and a valid access token.
@@ -116,6 +178,22 @@ type Connector interface {
 	// ResolveUser maps a Hello user's verified email to the CRM user id;
 	// empty means the CRM has no such user.
 	ResolveUser(ctx context.Context, c Conn, email string) (string, error)
+}
+
+// Busy is what a calendar says about a moment.
+type Busy struct {
+	// Busy is set while an event the user attends, or an out-of-office
+	// block, covers the moment.
+	Busy bool
+	// Until is when the busy stretch ends (the latest end of the events that
+	// overlap it); zero when not busy.
+	Until time.Time
+}
+
+// Calendar is implemented by connectors that read a user's calendar.
+type Calendar interface {
+	// Busy reports whether the user is busy at the given moment.
+	Busy(ctx context.Context, c Conn, at time.Time) (Busy, error)
 }
 
 // OAuth is implemented by connectors that authorise with OAuth 2.

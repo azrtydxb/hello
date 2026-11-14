@@ -16,6 +16,8 @@ package kindha
 import (
 	"fmt"
 	"net"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -444,7 +446,19 @@ func runHA(t *testing.T, source string) {
 	t.Run("legacy node address flows", func(t *testing.T) {
 		l.flows(t, l.oldPhone, l.oldAddr, l.nodeIPs[l.nodes[0]], "node address")
 	})
-	t.Run("graceful loss of the active instance", func(t *testing.T) { l.failover(t, false) })
+	// KINDHA_GRACEFUL_REPEAT=n runs the graceful loss n times in a row (the
+	// holder of the VIP changes sides each time), to hunt a flake in it.
+	repeat := 1
+	if v, err := strconv.Atoi(os.Getenv("KINDHA_GRACEFUL_REPEAT")); err == nil && v > 1 {
+		repeat = v
+	}
+	for i := 1; i <= repeat; i++ {
+		name := "graceful loss of the active instance"
+		if repeat > 1 {
+			name += fmt.Sprintf(" %d", i)
+		}
+		t.Run(name, func(t *testing.T) { l.failover(t, false) })
+	}
 	t.Run("crash of the active instance", func(t *testing.T) { l.failover(t, true) })
 	t.Run("rolling restart", l.rolling)
 }
@@ -532,6 +546,26 @@ func (l *lab) failover(t *testing.T, crash bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A burst of calls whose re-INVITEs go out in the first 120 ms of a
+	// graceful loss: the window in which the old instance's VIP address goes
+	// while it still reads requests (see the burst below).
+	type burstCall struct {
+		phone, hello *dialog
+	}
+	var burst []burstCall
+	if !crash {
+		for i := 0; i < 12; i++ {
+			c, err := p.call(l.vipAddr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hd := l.hello.dialog(c.callID)
+			if hd == nil {
+				t.Fatal("Hello has no dialog for a burst call")
+			}
+			burst = append(burst, burstCall{c, hd})
+		}
+	}
 	h1 := l.hello.dialog(c1.callID)
 	h3 := l.hello.dialog(c3.callID)
 	if h1 == nil || h3 == nil {
@@ -569,24 +603,52 @@ func (l *lab) failover(t *testing.T, crash bool) {
 			}
 		})
 	}
+	// Record the loss: the nodes' Kamailio and kube-vip logs and the SIP on the
+	// wire, and (below) the phone's and Hello's own trace of the window.
+	l.watchEdge(t)
+	type result struct {
+		resp *msg
+		at   time.Time
+		err  error
+	}
+	burstDone := make(chan result, len(burst)+1)
 	t0 := time.Now()
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("SIP trace of the loss at %s, from the endpoints' side:", t0.Format("15:04:05.000"))
+			l.hello.dumpSince(t, t0.Add(-time.Second))
+			p.dumpSince(t, t0.Add(-time.Second))
+		}
+	})
 	if crash {
 		// A power-off: the node container is killed, its network namespace goes
 		// with it (a paused one would still answer ARP for the VIP).
 		run(t, "docker", "kill", victim)
 		t.Cleanup(func() { _, _ = tryRun("docker", "start", victim) })
 	} else {
+		// Re-INVITEs from Hello, one every 10 ms from the moment the pod is
+		// deleted: SIGTERM stops kube-vip, which drops the VIP address within
+		// ~100 ms, while Kamailio goes on reading requests for its preStop. A
+		// request taken in the milliseconds around that moment got a 100 and was
+		// then lost (the old instance could no longer send from the VIP); the
+		// sender, having a 100, never retransmitted. All of them must complete.
+		for i, b := range burst {
+			go func() {
+				time.Sleep(time.Duration(i) * 10 * time.Millisecond)
+				req, br, dst := l.hello.inDialog(b.hello, "INVITE", l.hello.sdp())
+				r, err := l.hello.transact(dst, req, br, 40*time.Second)
+				if err == nil && r.status() == 200 {
+					l.hello.ack(b.hello, b.hello.cseq)
+				}
+				burstDone <- result{r, time.Now(), err}
+			}()
+		}
 		l.kubectl(t, "-n", l.namespace, "delete", "pod", victimPod, "--wait=false")
 	}
 
 	// The takeover's re-INVITE goes out at once, through the route set the
 	// call already has (its first hop is the VIP), and is retransmitted until
 	// the VIP answers again.
-	type result struct {
-		resp *msg
-		at   time.Time
-		err  error
-	}
 	re := make(chan result, 1)
 	go func() {
 		req, br, dst := l.hello.inDialog(h1, "INVITE", l.hello.sdp())
@@ -657,6 +719,27 @@ func (l *lab) failover(t *testing.T, crash bool) {
 		t.Fatalf("BYE of the re-INVITEd call: %v", err)
 	} else {
 		t.Logf("BYE of the call that was re-INVITEd during the outage: %s", dur)
+	}
+	var slowest time.Duration
+	for range burst {
+		select {
+		case r := <-burstDone:
+			if r.err != nil || r.resp.status() != 200 {
+				t.Errorf("a re-INVITE sent in the first 120 ms of the loss: %v %v", r.resp, r.err)
+			} else {
+				slowest = max(slowest, r.at.Sub(t0))
+			}
+		case <-time.After(45 * time.Second):
+			t.Fatal("a burst re-INVITE never completed")
+		}
+	}
+	if len(burst) > 0 {
+		t.Logf("the %d re-INVITEs sent in the first 120 ms of the loss all completed, the last %s after it", len(burst), slowest.Round(100*time.Millisecond))
+	}
+	for _, b := range burst {
+		if _, err := p.hangup(b.phone, byeBound); err != nil {
+			t.Errorf("BYE of a burst call: %v", err)
+		}
 	}
 
 	// The phone registered before the failover receives a call after it,

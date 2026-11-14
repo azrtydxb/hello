@@ -786,7 +786,7 @@ func TestConferenceTakeover(t *testing.T) {
 	if f.ownerNow("800") != "sip-1" {
 		t.Fatalf("owner = %q before the crash", f.ownerNow("800"))
 	}
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	ra := waitReq(t, a.reinvites, "takeover re-INVITE to the participant")

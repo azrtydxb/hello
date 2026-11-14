@@ -22,12 +22,20 @@ import (
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/crm"
 	_ "github.com/azrtydxb/hello/internal/crm/autotask"    // registers the autotask connector
+	_ "github.com/azrtydxb/hello/internal/crm/bitrix24"    // registers the Bitrix24 connector
 	_ "github.com/azrtydxb/hello/internal/crm/clio"        // registers the clio connector
 	_ "github.com/azrtydxb/hello/internal/crm/connectwise" // registers the connectwise connector
+	_ "github.com/azrtydxb/hello/internal/crm/dynamics"    // registers the Dynamics 365 connector
 	_ "github.com/azrtydxb/hello/internal/crm/freshdesk"   // registers the freshdesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/google"      // registers the Google contacts connector
 	_ "github.com/azrtydxb/hello/internal/crm/halopsa"     // registers the halopsa connector
 	_ "github.com/azrtydxb/hello/internal/crm/hubspot"     // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/odoo"        // registers the Odoo connector
+	_ "github.com/azrtydxb/hello/internal/crm/outlook"     // registers the Outlook contacts connector
+	_ "github.com/azrtydxb/hello/internal/crm/pipedrive"   // registers the Pipedrive connector
+	_ "github.com/azrtydxb/hello/internal/crm/salesforce"  // registers the Salesforce connector
 	_ "github.com/azrtydxb/hello/internal/crm/zendesk"     // registers the zendesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/zoho"        // registers the Zoho CRM connector
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/lifecycle"
@@ -184,7 +192,7 @@ func run(args []string) error {
 	// the SIP path bounds to a few hundred milliseconds. The CRM query runs
 	// in the background, so a slow CRM never holds a call.
 	crmRepo := &crm.PG{DB: sipDB, Box: box}
-	crmTokens := &crm.TokenManager{Repo: crmRepo, Providers: crm.DefaultProvider(safehttp.NewClient(safehttp.Options{Timeout: crm.LookupTimeout})),
+	crmTokens := &crm.TokenManager{Repo: crmRepo, Providers: crm.DefaultProvider(safehttp.NewClient(safehttp.Options{Timeout: crm.LookupTimeout, Allow: cfg.IntegrationsAllowedCIDRs})),
 		Log: log.With("component", "crm")}
 	crmLookup := &crm.Lookup{Repo: crmRepo, Tokens: crmTokens, Cache: crm.ValkeyCache{Client: func() valkey.Client { return vk }}, Log: log.With("component", "crm")}
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),

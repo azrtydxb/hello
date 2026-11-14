@@ -275,7 +275,7 @@ func (l *lazyObjects) GetAnnouncement(ctx context.Context, key string) ([]byte, 
 	return o.GetAnnouncement(ctx, key)
 }
 
-// videoRows adapts the store's video stream rows (migration 00121) to the SIP
+// videoRows adapts the store's video stream rows (migration 00098) to the SIP
 // node's VideoRecordingStore.
 type videoRows struct{ st *store.Store }
 

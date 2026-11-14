@@ -24,7 +24,7 @@ func TestTakeoverKeepsClaimUntilRecorded(t *testing.T) {
 	b.register(t)
 	connect(t, a, b, "200")
 	st := waitRecord(t, ha, "the call is replicated", "sip-1", twoLegged)
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	// The replication store refuses writes while the taker re-homes.
 	ha.mu.Lock()
@@ -128,7 +128,7 @@ func TestTakeoverByeFromAnotherProxyAddress(t *testing.T) {
 			b.register(t)
 			connect(t, a, b, "200")
 			st := waitRecord(t, ha, "the call is replicated", "sip-1", twoLegged)
-			haReinviteTimeout = time.Second
+			haReinviteTimeout.Set(time.Second)
 			killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 			taker.srv.takeoverPass(t.Context())
 			ra := waitReq(t, a.reinvites, "takeover re-INVITE to the caller")
@@ -185,7 +185,7 @@ func TestTakeoverKeepsMaxDuration(t *testing.T) {
 		t.Fatal("the record lacks the call's answer time")
 	}
 	time.Sleep(time.Second) // most of the call's duration passes on the owner
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	waitReq(t, a.reinvites, "takeover re-INVITE to the caller")

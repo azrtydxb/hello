@@ -1,6 +1,8 @@
 // Wi-Fi profiles and roaming client (migration 00074): the networks Wi-Fi
-// handsets join, assigned to phone groups and phones. A pre-shared key and an
-// 802.1X password are write-only: the API reports only that one is stored.
+// handsets join, assigned to phone groups and phones. A pre-shared key is
+// write-only: the API reports only that one is stored. An enterprise network
+// names an 802.1X profile (api/scep.ts, migration 00088) for its EAP method
+// and credentials, the same profiles the wired ports use.
 
 import { list, request, type Id } from "../api";
 
@@ -16,7 +18,6 @@ export const WIFI_SECURITIES = [
 ] as const;
 
 export type WifiSecurity = (typeof WIFI_SECURITIES)[number]["value"];
-export type WifiCACert = "system" | "tofu" | "skip";
 
 export const usesPSK = (s: string) => s === "wpa2-psk" || s === "wpa3-sae";
 export const isEnterprise = (s: string) =>
@@ -29,11 +30,8 @@ export interface WifiProfile {
   security: WifiSecurity;
   /** A key is stored; it is never returned. */
   pskSet: boolean;
-  eapMethod: string;
-  identity: string;
-  anonymousIdentity: string;
-  passwordSet: boolean;
-  caCert: WifiCACert;
+  /** The 802.1X profile an enterprise network authenticates with; null otherwise. */
+  dot1xProfileId: Id | null;
   priority: number;
   hidden: boolean;
   preferAccount: number;
@@ -43,18 +41,15 @@ export interface WifiProfile {
   updatedAt: string;
 }
 
-/** On create name, ssid and security are required; psk and password are
- * kept when left out and cleared when sent empty. */
+/** On create name, ssid and security are required; psk is kept when left
+ * out and cleared when sent empty. dot1xProfileId is required for an
+ * enterprise network and refused for any other. */
 export interface WifiProfileInput {
   name?: string;
   ssid?: string;
   security?: WifiSecurity;
   psk?: string;
-  eapMethod?: string;
-  identity?: string;
-  anonymousIdentity?: string;
-  password?: string;
-  caCert?: WifiCACert;
+  dot1xProfileId?: Id;
   priority?: number;
   hidden?: boolean;
   preferAccount?: number;

@@ -82,6 +82,8 @@ export interface Dot1XProfile {
   caCertPem: string;
   serverDomain: string;
   usedByGroups: Id[];
+  /** The enterprise Wi-Fi profiles that authenticate with it. */
+  usedByWifiProfiles: Id[];
   updatedAt: string;
 }
 

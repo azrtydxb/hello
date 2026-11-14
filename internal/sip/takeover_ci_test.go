@@ -55,7 +55,7 @@ func TestTakeoverLoopOnValkey(t *testing.T) {
 
 	mem := &fakeMembership{}
 	mem.set(dead) // membership as this node reads it (the real store backs HAState)
-	haReinviteTimeout = 300 * time.Millisecond
+	haReinviteTimeout.Set(300 * time.Millisecond)
 	taker := startPBX(t, nil, withNodeID("sip-live"), withHA(live, members))
 	taker.srv.takeoverPass(ctx)
 	eventually(t, "the orphan claimed and its takeover failed one-sidedly", func() bool {

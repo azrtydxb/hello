@@ -65,7 +65,7 @@
         "number": "101",
         "voicemail": true
       },
-      "version": "1e9719f90b854540"
+      "version": "0be0b8e7fdb23369"
     },
     {
       "id": "extension:11",
@@ -78,7 +78,7 @@
         "number": "102",
         "voicemail": true
       },
-      "version": "e6d0d3dfd791c5d2"
+      "version": "332329b488e0130d"
     },
     {
       "id": "featureCode:*50",
@@ -231,7 +231,7 @@
         "number": "820",
         "strategy": "ring_all"
       },
-      "version": "3b631fd2d30de4d1"
+      "version": "b34e49e352940519"
     },
     {
       "id": "schedule:1",
