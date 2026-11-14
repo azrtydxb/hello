@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/provider"
 	"github.com/azrtydxb/hello/internal/messaging/router"
 )
 
@@ -279,7 +280,7 @@ type placement struct {
 
 // resolvePlacement turns a route into a placement; a target that is gone or
 // cannot take conversations falls back to the supervisors' pool.
-func resolvePlacement(ctx context.Context, tx *sql.Tx, kind, target string) (placement, error) {
+func resolvePlacement(ctx context.Context, tx rowQuerier, kind, target string) (placement, error) {
 	var p placement
 	id, err := strconv.ParseInt(target, 10, 64)
 	if err != nil || id <= 0 {
@@ -336,21 +337,38 @@ func nilIf(id int64) any {
 	return id
 }
 
-// systemText queues a text the router sends on its own (the closed-hours
-// reply) through the conversation's channel. A customer who opted out gets
-// nothing. Only a SIP trunk channel can send today; another provider's
-// channel gets a line in the thread saying the text was not sent. sent is
-// whether a text was queued.
-func (s *Store) systemText(ctx context.Context, tx *sql.Tx, c convRow, body string) (sent bool, err error) {
+// Automatic texts the router sends on its own, as systemText names them in
+// the line it writes when one cannot go.
+const (
+	autoClosedHours  = "closed-hours reply"
+	autoFirstContact = "first-contact text"
+)
+
+// systemText sends a text the router sends on its own (the closed-hours
+// reply, the first-contact text; what names it in the thread) through the
+// conversation's channel. A customer who opted out gets nothing. sent is
+// whether a text went or was queued.
+//
+//   - A chat site: the text is stored sent and the visitor's stream carries
+//     it, as an agent's reply is (the visitor sees "Support").
+//   - A SIP trunk channel: queued in the SIP text queue in this transaction,
+//     split into parts.
+//   - A carrier channel (Twilio, Telnyx): queued for the send worker, which
+//     checks the opt-out list again just before the carrier call.
+//
+// A channel that cannot send it (a carrier whose credentials were refused or
+// is not registered on this build, a customer address a carrier cannot text,
+// a trunk channel with no trunk) gets a line in the thread saying so.
+func (s *Store) systemText(ctx context.Context, tx *sql.Tx, c convRow, body, what string) (sent bool, err error) {
 	var (
-		provider, address    string
-		chEnabled, adEnabled bool
-		trunk                sql.NullInt64
+		prov, address, chStatus string
+		chEnabled, adEnabled    bool
+		trunk                   sql.NullInt64
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT ch.provider, ch.enabled, ch.trunk_id, a.address, a.enabled
+		SELECT ch.provider, ch.enabled, ch.trunk_id, ch.status, a.address, a.enabled
 		FROM msg_channels ch JOIN msg_addresses a ON a.channel_id = ch.id WHERE ch.id = $1 AND a.id = $2`,
-		c.ChannelID, c.AddressID).Scan(&provider, &chEnabled, &trunk, &address, &adEnabled)
+		c.ChannelID, c.AddressID).Scan(&prov, &chEnabled, &trunk, &chStatus, &address, &adEnabled)
 	if err != nil {
 		return false, err
 	}
@@ -361,33 +379,61 @@ func (s *Store) systemText(ctx context.Context, tx *sql.Tx, c convRow, body stri
 	if err != nil || out {
 		return false, err
 	}
-	if provider != messaging.ProviderSIPTrunk || !trunk.Valid {
-		_, err = addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", "The closed-hours reply was not sent: this channel cannot send automatic texts")
+	notSent := func(why string) (bool, error) {
+		_, err := addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", "The "+what+" was not sent: "+why)
 		return false, err
 	}
 	var id int64
-	if err := tx.QueryRowContext(ctx, `
-		INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_name, body, status)
-		VALUES ($1, $2, 'out', 'message', 'system', '', $3, 'sending') RETURNING id`, c.ID, c.ChannelID, body).Scan(&id); err != nil {
-		return false, err
-	}
-	for _, part := range messaging.SplitText(body, messaging.MaxPartBytes) {
-		text, raw := splitBody(messageDefaultCType, []byte(part))
-		var m MessageSent
-		err := s.sendMessageTx(ctx, tx, MessageInput{
-			Sender: address, SenderKind: MsgSenderSystem, Actor: "system:router",
-			TargetKind: MsgKindExternal, Target: c.PeerKey, ContentType: messageDefaultCType, Body: []byte(part),
-			TrunkID: trunk.Int64, ConversationMessageID: id,
-		}, text, raw, &m)
-		if errors.Is(err, ErrMessagesDisabled) || errors.Is(err, ErrNoExternalTrunk) || errors.Is(err, ErrMessageRate) ||
-			errors.Is(err, ErrMessageTarget) || errors.Is(err, ErrMessageForbidden) {
-			// Texting is off or refuses: the message row would never be sent.
-			if _, derr := tx.ExecContext(ctx, `DELETE FROM conversation_messages WHERE id = $1`, id); derr != nil {
-				return false, derr
-			}
-			return false, nil
+	switch {
+	case prov == messaging.ProviderChat:
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_name, body, status, sent_at)
+			VALUES ($1, $2, 'out', 'message', 'system', '', $3, 'sent', now()) RETURNING id`, c.ID, c.ChannelID, body).Scan(&id); err != nil {
+			return false, err
 		}
-		if err != nil {
+		if err := chatEvent(ctx, tx, c.ID, id, "message"); err != nil {
+			return false, err
+		}
+	case prov == messaging.ProviderSIPTrunk:
+		if !trunk.Valid {
+			return notSent("the channel has no SIP trunk")
+		}
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_name, body, status)
+			VALUES ($1, $2, 'out', 'message', 'system', '', $3, 'sending') RETURNING id`, c.ID, c.ChannelID, body).Scan(&id); err != nil {
+			return false, err
+		}
+		for _, part := range messaging.SplitText(body, messaging.MaxPartBytes) {
+			text, raw := splitBody(messageDefaultCType, []byte(part))
+			var m MessageSent
+			err := s.sendMessageTx(ctx, tx, MessageInput{
+				Sender: address, SenderKind: MsgSenderSystem, Actor: "system:router",
+				TargetKind: MsgKindExternal, Target: c.PeerKey, ContentType: messageDefaultCType, Body: []byte(part),
+				TrunkID: trunk.Int64, ConversationMessageID: id,
+			}, text, raw, &m)
+			if errors.Is(err, ErrMessagesDisabled) || errors.Is(err, ErrNoExternalTrunk) || errors.Is(err, ErrMessageRate) ||
+				errors.Is(err, ErrMessageTarget) || errors.Is(err, ErrMessageForbidden) {
+				// Texting is off or refuses: the message row would never be sent.
+				if _, derr := tx.ExecContext(ctx, `DELETE FROM conversation_messages WHERE id = $1`, id); derr != nil {
+					return false, derr
+				}
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
+		}
+	case !provider.Known(prov):
+		return notSent("this channel cannot send automatic texts")
+	case chStatus == "credentials_invalid":
+		return notSent("the carrier refused the channel's credentials")
+	default:
+		if checkCarrierText(prov, c.PeerKey, body) != nil {
+			return notSent("the carrier cannot text this customer's number")
+		}
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_name, body, status)
+			VALUES ($1, $2, 'out', 'message', 'system', '', $3, 'queued') RETURNING id`, c.ID, c.ChannelID, body).Scan(&id); err != nil {
 			return false, err
 		}
 	}
@@ -462,7 +508,7 @@ func (s *Store) routeOne(ctx context.Context, tx *sql.Tx, now time.Time) (more, 
 			kind, target = ahKind, ahTarget
 		case messaging.AfterReply:
 			if strings.TrimSpace(text) != "" {
-				if replied, err = s.systemText(ctx, tx, c, text); err != nil {
+				if replied, err = s.systemText(ctx, tx, c, text, autoClosedHours); err != nil {
 					return true, false, err
 				}
 			}
@@ -477,7 +523,7 @@ func (s *Store) routeOne(ctx context.Context, tx *sql.Tx, now time.Time) (more, 
 			return true, false, err
 		}
 		if !earlier {
-			if replied, err = s.systemText(ctx, tx, c, firstText); err != nil {
+			if replied, err = s.systemText(ctx, tx, c, firstText, autoFirstContact); err != nil {
 				return true, false, err
 			}
 		}

@@ -3,7 +3,6 @@ package messaging
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestCleanChatText fails if control or bidirectional-override characters
@@ -86,50 +85,6 @@ func TestPageHintAndFamily(t *testing.T) {
 		if got := UAFamily(ua); got != want {
 			t.Errorf("UAFamily(%q) = %s, want %s", ua, got, want)
 		}
-	}
-}
-
-func TestHours(t *testing.T) {
-	h := Hours{Zone: "Europe/Brussels", Days: []HoursDay{{Day: 1, From: "09:00", To: "17:00"}, {Day: 3, From: "09:00", To: "12:00"}}}
-	if err := h.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	at := func(s string) time.Time {
-		tm, err := time.Parse(time.RFC3339, s)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return tm
-	}
-	// 2026-11-09 is a Monday; Brussels is UTC+1 in November.
-	for s, want := range map[string]bool{
-		"2026-11-09T08:30:00Z": true,  // 09:30 local
-		"2026-11-09T07:59:00Z": false, // 08:59 local
-		"2026-11-09T16:00:00Z": false, // 17:00 local: closed at the end
-		"2026-11-10T10:00:00Z": false, // Tuesday
-		"2026-11-11T10:00:00Z": true,  // Wednesday 11:00 local
-		"2026-11-11T11:00:00Z": false, // Wednesday 12:00 local
-	} {
-		if got := h.Open(at(s)); got != want {
-			t.Errorf("Open(%s) = %v, want %v", s, got, want)
-		}
-	}
-	if !(Hours{}).Open(at("2026-11-10T03:00:00Z")) {
-		t.Error("an empty schedule is always open")
-	}
-	for _, bad := range []Hours{
-		{Days: []HoursDay{{Day: 1, From: "09:00", To: "17:00"}}},
-		{Zone: "Nowhere/Land", Days: []HoursDay{{Day: 1, From: "09:00", To: "17:00"}}},
-		{Zone: "UTC", Days: []HoursDay{{Day: 7, From: "09:00", To: "17:00"}}},
-		{Zone: "UTC", Days: []HoursDay{{Day: 1, From: "17:00", To: "09:00"}}},
-		{Zone: "UTC", Days: []HoursDay{{Day: 1, From: "9:00", To: "17:00"}}},
-	} {
-		if bad.Validate() == nil {
-			t.Errorf("%+v accepted", bad)
-		}
-	}
-	if !(Hours{Zone: "Nowhere", Days: []HoursDay{{Day: 1}}}).Open(at("2026-11-10T03:00:00Z")) {
-		t.Error("an invalid schedule must not silence the widget")
 	}
 }
 

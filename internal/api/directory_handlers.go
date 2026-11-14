@@ -32,6 +32,7 @@ type DirectoryService interface {
 	ListChanges(ctx context.Context, runID int64, f directory.ChangeFilter) ([]directory.Change, error)
 	Apply(ctx context.Context, actor string, runID int64, d directory.Decisions) (directory.Run, error)
 	Confirm(ctx context.Context, actor string, runID int64, d directory.Decisions) (directory.Run, error)
+	RangeUsage(ctx context.Context, id int64) (directory.RangeUsage, error)
 }
 
 func (s *server) directoryDisabled(w http.ResponseWriter) bool {
@@ -99,17 +100,17 @@ func (s *server) getDirectoryConnector(w http.ResponseWriter, r *http.Request) {
 
 // connectorBody is a create or a patch as sent.
 type connectorBody struct {
-	Kind            string                `json:"kind"`
-	Name            *string               `json:"name"`
-	Enabled         *bool                 `json:"enabled"`
-	Mode            *string               `json:"mode"`
-	ScheduleMinutes *int                  `json:"scheduleMinutes"`
-	Config          json.RawMessage       `json:"config"`
-	Mappings        *directory.Mappings   `json:"mappings"`
-	GroupRules      *directory.GroupRules `json:"groupRules"`
-	Options         *directory.Options    `json:"options"`
-	AutoProvision   json.RawMessage       `json:"autoProvision"`
-	BindPassword    *string               `json:"bindPassword"`
+	Kind            string                   `json:"kind"`
+	Name            *string                  `json:"name"`
+	Enabled         *bool                    `json:"enabled"`
+	Mode            *string                  `json:"mode"`
+	ScheduleMinutes *int                     `json:"scheduleMinutes"`
+	Config          json.RawMessage          `json:"config"`
+	Mappings        *directory.Mappings      `json:"mappings"`
+	GroupRules      *directory.GroupRules    `json:"groupRules"`
+	Options         *directory.Options       `json:"options"`
+	AutoProvision   *directory.AutoProvision `json:"autoProvision"`
+	BindPassword    *string                  `json:"bindPassword"`
 }
 
 func (b connectorBody) input() directory.ConnectorInput {
@@ -166,6 +167,22 @@ func (s *server) updateDirectoryConnector(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
+}
+
+// getDirectoryRange answers how the connector's auto-provisioning range is
+// used: its size, the numbers claimed, the next free one and the users that
+// have a number from it (I-11).
+func (s *server) getDirectoryRange(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok || s.directoryDisabled(w) {
+		return
+	}
+	u, err := s.Directory.RangeUsage(r.Context(), id)
+	if err != nil {
+		s.directoryError(w, "directory connector", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
 }
 
 func (s *server) deleteDirectoryConnector(w http.ResponseWriter, r *http.Request) {

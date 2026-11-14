@@ -641,6 +641,7 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/directory/connectors/{id}/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testDirectoryConnector},
 		{"POST", "/api/v1/directory/connectors/{id}/sync", auth.ScopeAdmin, auth.RoleAdmin, false, s.syncDirectoryConnector},
 		{"GET", "/api/v1/directory/connectors/{id}/runs", auth.ScopeAdmin, auth.RoleAdmin, false, s.listDirectoryRuns},
+		{"GET", "/api/v1/directory/connectors/{id}/range", auth.ScopeAdmin, auth.RoleAdmin, false, s.getDirectoryRange},
 		{"GET", "/api/v1/directory/runs/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getDirectoryRun},
 		{"GET", "/api/v1/directory/runs/{id}/changes", auth.ScopeAdmin, auth.RoleAdmin, false, s.listDirectoryChanges},
 		{"POST", "/api/v1/directory/runs/{id}/apply", auth.ScopeAdmin, auth.RoleAdmin, false, s.applyDirectoryRun},

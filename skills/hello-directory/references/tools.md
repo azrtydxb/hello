@@ -9,6 +9,7 @@ MCP: they carry the bind password or change who can use the PBX.
 | ------------------------- | ----- | -------------------------------------------------------------------------------------------------- |
 | `listDirectoryConnectors` | admin | Every connector with its status, last success and the number of users it manages.                  |
 | `getDirectoryConnector`   | admin | One connector: config, mappings, group rules, options; never the bind password.                    |
+| `getDirectoryRange`       | admin | A connector's auto-provisioning range: size, numbers used, next free, users with a number from it. |
 | `listDirectoryRuns`       | admin | A connector's runs, newest first (`limit`).                                                        |
 | `getDirectoryRun`         | admin | One run: status, counts by action, error code, diff hash.                                          |
 | `listDirectoryChanges`    | admin | A run's rows: action, user, field before and after, reason. Filter by `action`; page with `after`. |

@@ -16,12 +16,15 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/router"
+	"github.com/azrtydxb/hello/internal/queue"
 )
 
 // Errors of the chat store; the chat listener and the API map them.
@@ -102,22 +105,49 @@ func (s *Store) ChatIPBlocked(ctx context.Context, siteID int64, ipHash []byte) 
 	return b, err
 }
 
-// ChatAvailability says whether a live chat can be answered now: the site is
-// inside its opening hours, a supervisor has the inbox open (it counts the
-// last two minutes), and the unassigned live chats are under the site's cap.
-// reason is "hours", "no_agent" or "full" when not.
-func (s *Store) ChatAvailability(ctx context.Context, site ChatSite, now time.Time) (online bool, reason string, err error) {
-	if !site.Hours.Open(now) {
-		return false, "hours", nil
-	}
-	var agent bool
+// Why a chat site is offline, as ChatAvailability reports it.
+const (
+	ChatOfflineHours   = "hours"    // outside the address's schedule, with no after-hours route
+	ChatOfflineNoAgent = "no_agent" // nobody staffs where the chat would go
+	ChatOfflineFull    = "full"     // the site's unassigned live chats are at its cap
+)
+
+// ChatAvailability says whether a live chat can be answered now, from where a
+// new chat of the site would go: the route of its address (or, outside the
+// address's schedule, its after-hours route; with no after-hours route the
+// site is closed). A text queue is available while one of its members is
+// staffed (logged in and not paused, the call queues' state in states); a
+// user, an extension's user or a ring group's users while one of them has
+// the inbox open (seen in the last two minutes); the supervisors' pool (the
+// inbox route, or a target that is gone) while a supervisor has. Then the
+// unassigned live chats must be under the site's cap. reason is one of the
+// ChatOffline constants when not.
+//
+// states is the call queues' agent state by extension; nil means it could
+// not be read, and then only static queue members count, as the router does.
+func (s *Store) ChatAvailability(ctx context.Context, site ChatSite, now time.Time, states map[string]queue.AgentState) (online bool, reason string, err error) {
+	var kind, target, sched, action, ahKind, ahTarget string
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT EXISTS (SELECT 1 FROM inbox_presence p JOIN users u ON u.id = p.user_id
-			WHERE p.seen_at > now() - interval '2 minutes' AND u.enabled AND u.role IN ('operator', 'admin'))`).Scan(&agent); err != nil {
+		SELECT route_kind, route_target, schedule::text, after_hours_action, after_hours_route_kind, after_hours_route_target
+		FROM msg_addresses WHERE id = $1`, site.AddressID).Scan(&kind, &target, &sched, &action, &ahKind, &ahTarget); err != nil {
+		return false, "", mapErr(err)
+	}
+	var schedule messaging.Schedule
+	if json.Unmarshal([]byte(sched), &schedule) != nil {
+		schedule = messaging.Schedule{} // an unreadable schedule is always open
+	}
+	if !schedule.Open(now) {
+		if action != messaging.AfterRoute {
+			return false, ChatOfflineHours, nil
+		}
+		kind, target = ahKind, ahTarget
+	}
+	staffed, err := s.routeStaffed(ctx, kind, target, states)
+	if err != nil {
 		return false, "", err
 	}
-	if !agent {
-		return false, "no_agent", nil
+	if !staffed {
+		return false, ChatOfflineNoAgent, nil
 	}
 	var n int
 	if err := s.db.QueryRowContext(ctx, `
@@ -126,9 +156,47 @@ func (s *Store) ChatAvailability(ctx context.Context, site ChatSite, now time.Ti
 		return false, "", err
 	}
 	if n >= site.MaxOpenUnassigned {
-		return false, "full", nil
+		return false, ChatOfflineFull, nil
 	}
 	return true, "", nil
+}
+
+// routeStaffed reports whether someone is there to answer a conversation the
+// route would place now (see ChatAvailability).
+func (s *Store) routeStaffed(ctx context.Context, kind, target string, states map[string]queue.AgentState) (bool, error) {
+	p, err := resolvePlacement(ctx, s.db, kind, target)
+	if err != nil {
+		return false, err
+	}
+	var present bool
+	switch {
+	case p.queue > 0:
+		var name string
+		if err := s.db.QueryRowContext(ctx, `SELECT name FROM queues WHERE id = $1`, p.queue).Scan(&name); err != nil {
+			return false, mapErr(err)
+		}
+		agents, err := routerStore{s}.Agents(ctx, p.queue)
+		if err != nil {
+			return false, err
+		}
+		return router.Staffed(router.Queue{ID: p.queue, Name: name}, agents, router.Availability{States: states}), nil
+	case p.user > 0:
+		err = s.db.QueryRowContext(ctx, `
+			SELECT EXISTS (SELECT 1 FROM inbox_presence WHERE user_id = $1 AND seen_at > now() - interval '2 minutes')`,
+			p.user).Scan(&present)
+	case p.group > 0:
+		err = s.db.QueryRowContext(ctx, `
+			SELECT EXISTS (SELECT 1 FROM ring_group_members gm
+				JOIN user_extensions ue ON ue.extension_id = gm.extension_id
+				JOIN users u ON u.id = ue.user_id AND u.enabled AND u.role IN ('user', 'operator', 'admin')
+				JOIN inbox_presence p ON p.user_id = u.id AND p.seen_at > now() - interval '2 minutes'
+				WHERE gm.group_id = $1)`, p.group).Scan(&present)
+	default:
+		err = s.db.QueryRowContext(ctx, `
+			SELECT EXISTS (SELECT 1 FROM inbox_presence p JOIN users u ON u.id = p.user_id
+				WHERE p.seen_at > now() - interval '2 minutes' AND u.enabled AND u.role IN ('operator', 'admin'))`).Scan(&present)
+	}
+	return present, err
 }
 
 // ChatSessionInput creates or resumes a visitor. Name and Email are already
@@ -353,7 +421,8 @@ func (s *Store) chatSend(ctx context.Context, tx *sql.Tx, in ChatSendInput, res 
 	if err := tx.QueryRowContext(ctx, `
 		SELECT count(*) FROM conversation_messages m WHERE m.conversation_id = $1 AND m.direction = 'in' AND m.kind = 'message'
 			AND m.id > coalesce((SELECT max(o.id) FROM conversation_messages o
-				WHERE o.conversation_id = $1 AND o.direction = 'out' AND o.kind = 'message'), 0)`, conv).Scan(&unanswered); err != nil {
+				WHERE o.conversation_id = $1 AND o.direction = 'out' AND o.kind = 'message' AND o.sender_kind <> 'system'), 0)`,
+		conv).Scan(&unanswered); err != nil {
 		return err
 	}
 	if unanswered >= messaging.MaxChatUnanswered {

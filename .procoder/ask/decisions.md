@@ -4774,6 +4774,116 @@ Stacked on #343 (items 5 and 6); merges after it. Choices:
   Regression guard: TestKamailioInvite100AfterRelay; the kamailio-ha job
   (KINDHA_GRACEFUL_REPEAT=n repeats the graceful loss) shows it end to end.
 
+## Messaging wiring between items 2 to 6 (2026-11-14, feat/messaging-wiring)
+
+What the merged messaging items left between them, and the choices made where
+the spec left them open (each chosen by default; change one by editing this
+entry and the code it names).
+
+- **Router to desk phone was already wired.** Item 5's `Store.afterAssign`
+  calls item 3's `deliverLastToDeskPhone` for both a direct user or extension
+  route and a text queue's assignment, in the assigning transaction. Nothing
+  changed; `TestRouterDeliversToDeskPhone` now proves it (direct route, queue
+  strategy, and no delivery for a `ring_all` shared pool).
+- **Automatic texts on every channel.** `systemText` (the first-contact text
+  and the closed-hours reply) had a SIP trunk branch only. A chat site now
+  stores it sent and puts it on the visitor's stream (shown from "Support"); a
+  Twilio or Telnyx number queues it for the send worker (opt-out checked again
+  at claim). A carrier with refused credentials, a peer that is not E.164, an
+  unregistered adapter or a trunk channel without a trunk write a line naming
+  the text and the reason. An automatic text is not an agent's answer: it does
+  not reset a visitor's 200-message cap. The inbox labels it "Automatic reply".
+- **Chat availability follows the route.** A site is live when whoever its
+  address routes to is there: a text queue while a member is staffed (the call
+  queues' login and pause; capacity and the idle-voice flag are ignored, so a
+  chat waits in the queue rather than going offline), a user or extension's
+  user or a ring group's users while one has the inbox open, the supervisors'
+  pool (also the fallback for a target that is gone) while an operator or
+  administrator has. Outside the hours the site is closed unless the
+  after-hours action routes elsewhere, in which case that target decides.
+  Valkey unreadable counts static members only, as the router does. The site
+  cap still applies. Chat sites gain a read-only `availability` on list and get.
+- **One schedule.** `messaging.Hours` was a copy of `messaging.Schedule` (same
+  fields and JSON), and a chat site stored its own hours next to its address's
+  routing schedule, so the widget and the router could disagree. `Hours` is
+  removed; the site's `hours` field reads and writes its address's `schedule`.
+  Migration `00100_messaging_one_schedule` copies a site's non-empty hours to
+  its address (a site's hours win over a schedule set through routing) and
+  drops `chat_sites.hours`; down restores it from the schedule. The API keeps
+  `hours` on chat sites (same JSON); OpenAPI's `ChatHours` is folded into
+  `MessagingSchedule`. The chat sites page edits hours and the route in one
+  "Routing and hours" dialog (the routing dialog), not in the site dialog.
+- **M-18 is not on main.** The media pipeline (`message_media`, MinIO under
+  `msg/`, sniffing and allowlist, `GET /api/v1/inbox/media/{id}`) belongs to no
+  delivered phase and no PR has built it, so chat attachments and the site logo
+  stay unbuilt (the route is 404, nothing half-wired).
+- **MCP:** no new operation; chat sites and routing stay excluded, so the
+  doctable is unchanged.
+
+## Integrations P12: range auto-provisioning for directory users (2026-11-14)
+
+Built from spec `integrations.md` I-11 on the P8 directory engine. The spec
+left the points below open; each was **chosen by default (the conservative
+option)**, not by the user.
+
+- **Who gets a number.** A user the connector creates, adopts or manages whose
+  mapped extension is empty, or names no extension, when provisioning is on and
+  the user is in the optional source-group filter (`autoProvision.groups`,
+  empty = everyone). A value that is invalid, duplicated or linked elsewhere
+  stays the conflict it was. A user that already has its synced extension keeps
+  it even when the directory value names a missing one. In `create_only` mode a
+  user is provisioned once (Hello owns the extension afterwards, so a deleted
+  one is not recreated); `link_only` users are provisioned like
+  `authoritative` ones.
+- **A full range is a conflict, not a user without a number.**
+  `range_exhausted` leaves that user unchanged (not created, not linked), like
+  every other conflict, so nobody appears half set up; the administrator widens
+  the range. Not overridable.
+- **Stable numbers need state.** Migration 00101 keeps the allocated number on
+  the user (`users.provisioned_number`) and marks the extension
+  (`extensions.provisioned_by`, set null when the connector is deleted). A
+  re-run prefers that number even outside a changed range, relinks its
+  extension when it still exists unlinked, and recreates it with the same
+  number when it was deleted (at the next full run: an incremental run reads
+  only changed users).
+- **Preview predicts, apply allocates.** The preview shows the number the
+  planner predicts from the current dial space; the apply allocates in the
+  user's own transaction under the `hellocfg` lock through the configuration
+  store (the same dial-space rules and whole-configuration check as a console
+  create). A number taken in between is replaced by the next free one and the
+  run row shows the number actually given; a full range at that point is an
+  `error` row with reason `range_exhausted`. Enabling or changing provisioning
+  changes the sync fingerprint, so the next scheduled run is a full one.
+- **"Free" and "reserved prefix".** Free = no extension, ring group, IVR menu,
+  conference room, queue or voicemail group number, no park slot, and no
+  feature or paging code that is a prefix of it or it of one (feature and paging
+  codes start with `*`, so today that never matches a digit number; kept as a
+  guard). Hello has no other reserved-prefix setting; outbound route patterns
+  are not numbers an extension can take, and the whole-configuration check runs
+  anyway.
+- **What is created.** The extension (named from the display name, else the
+  username, trimmed to 100 printable characters), its voicemail box (on, mailed
+  to the user's email; with `voicemail: false` the box exists switched off, as
+  for every extension) and, unless `device: false`, one desk device named
+  after the number (`2000`, else `2000-2`, ...) whose secret is generated and
+  dropped. Ranges hold 2 to 10 digit numbers of equal width (zero-padded ones
+  allowed) and at most 100,000 numbers. Overlapping ranges of two connectors are
+  allowed: the lock keeps them apart.
+- **Following the user.** While provisioning is on, a display-name or email
+  change renames the provisioned extension and updates its voicemail email, but
+  only while each still holds the value provisioning gave it (an administrator's
+  own edit wins).
+- **Deprovisioning is unchanged (I-7).** A disabled user keeps the extension,
+  the voicemail box and its messages; its devices are switched off with the
+  existing `disableDevices` option and come back when the user does. Deleting a
+  connector keeps the extensions and clears their mark.
+- **Audit and metrics.** Each provisioning writes `provision user`, `create
+extension` and `create device` rows with the actor `directory:<connector>`;
+  `hello_directory_provisioned_total{connector_kind}` counts them.
+- **New read route** `GET /api/v1/directory/connectors/{id}/range` (admin,
+  exposed over MCP as `getDirectoryRange` like the other directory reads):
+  size, numbers used, next free and the users holding a number.
+
 ## Clients item 3: Diagnostics Clients tab, WebRTC status and the S-52 series (2026-11-14)
 
 Builds on the web devices of #282 and the WebRTC legs of #324, #341 and #343.
