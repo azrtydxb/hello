@@ -58,25 +58,31 @@ func TestKamailioConfigSyntax(t *testing.T) {
 	for name, env := range kwKamailioEnvs(t) {
 		variants[name] = env
 	}
-	// WSS unset is the kw environment above. WSS set (clients item 2): the lab
-	// layout, and the kw environment with the VIP on top of it.
+	// The kw environment above has WSS and the TLS hop on (browsers on kw).
+	// WSS set (clients item 2): the lab layout, and the kw environment with
+	// the VIP on top of it.
 	wss := map[string]string{"KAMAILIO_WSS_PORT": "8088", "KAMAILIO_WS_ORIGINS": "https://hello.example", "KAMAILIO_WSS_TRUSTED_PROXIES": "^10[.]42[.]"}
 	variants["lab with WSS"] = maps.Clone(wss)
 	withVIP := maps.Clone(variants["kw environment with the VIP"])
 	maps.Copy(withVIP, wss)
 	variants["kw environment with the VIP and WSS"] = withVIP
 	// An image without the websocket module must still start the kw
-	// environment while WSS is unset: the same check runs with websocket.so
-	// removed from the image (as root, in the throwaway container only).
+	// environment with WSS unset: the same check runs, minus the WSS
+	// variables, with websocket.so removed from the image (as root, in the
+	// throwaway container only).
 	noWS := map[string]bool{}
 	for _, n := range []string{"kw environment", "kw environment with the VIP", "kw environment without the legacy sockets"} {
-		variants[n+" without the websocket module"] = maps.Clone(variants[n])
+		env := maps.Clone(variants[n])
+		for _, k := range []string{"KAMAILIO_WSS_PORT", "KAMAILIO_WS_ORIGINS", "KAMAILIO_WSS_TRUSTED_PROXIES"} {
+			delete(env, k)
+		}
+		variants[n+" without the websocket module"] = env
 		noWS[n+" without the websocket module"] = true
 	}
-	// The TLS hop to hello-sip (S-12) is off in every variant above, kw's
-	// included: that is the check that kw is unchanged while it is off. On:
-	// the lab layout, and the kw environment with the VIP and the legacy
-	// sockets, with and without SIP over TLS for phones, and with WSS too.
+	// The TLS hop to hello-sip (S-12), beyond kw's own environment (which has
+	// it on): the lab layout, and the kw environment with the VIP and the
+	// legacy sockets, with and without SIP over TLS for phones, and with WSS
+	// too.
 	hop := map[string]string{"KAMAILIO_HELLO_TLS_PORT": "5073", "KAMAILIO_HELLO_SIP_TLS_PORT": "5061"}
 	variants["lab with the TLS hop"] = maps.Clone(hop)
 	variants["lab with TLS phones and the TLS hop"] = map[string]string{"KAMAILIO_TLS_PORT": "5061", "KAMAILIO_HELLO_TLS_PORT": "5073"}

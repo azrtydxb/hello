@@ -162,6 +162,11 @@ func TestChartTLSHop(t *testing.T) {
 	if !mounted {
 		t.Error("hello-sip's certificate Secret is not mounted read-only")
 	}
+	// The Secret's files are 0440 (defaultMode 288) and the image runs as
+	// 65532, so the group must be the pod's fsGroup or the key is unreadable.
+	if got := str(dig(podSpec(findObj(t, objs, "StatefulSet", "hello-sip")), "securityContext", "fsGroup")); got != "65532" {
+		t.Errorf("hello-sip fsGroup = %q, want 65532 (the image's user must read the 0440 key)", got)
+	}
 }
 
 // TestLabTLSHop fails if the lab does not turn the hop on at both ends.

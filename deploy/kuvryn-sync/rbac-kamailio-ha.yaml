@@ -18,7 +18,8 @@ rules:
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # The SIP TLS Certificate (hello-sip-tls) the kw manifests carry.
+  # The cert-manager Certificates the kw manifests carry (hello-edge-tls,
+  # hello-sip-node-tls, hello-coturn-tls).
   - apiGroups: ["cert-manager.io"]
     resources: ["certificates"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
