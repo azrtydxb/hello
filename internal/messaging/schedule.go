@@ -44,8 +44,9 @@ const (
 func ValidAfterHours(a string) bool { return a == AfterNone || a == AfterReply || a == AfterRoute }
 
 // Schedule is a weekly opening schedule: the number is open in the listed
-// windows. An empty schedule is always open. (The shape matches the chat
-// widget's opening hours.)
+// windows. An empty schedule is always open. It is the one schedule of a
+// number: the router's after-hours decision and, for a chat site's address,
+// the widget's opening hours both read it.
 type Schedule struct {
 	Zone string        `json:"zone"`
 	Days []ScheduleDay `json:"days"`
@@ -103,4 +104,12 @@ func (s Schedule) Open(now time.Time) bool {
 		}
 	}
 	return false
+}
+
+func parseClock(s string) (int, bool) {
+	t, err := time.Parse("15:04", s)
+	if err != nil || len(s) != 5 {
+		return 0, false
+	}
+	return t.Hour()*60 + t.Minute(), true
 }

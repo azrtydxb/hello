@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -43,7 +44,7 @@ type Backend interface {
 	ChatTurnstileSecret(ctx context.Context, siteID int64) (string, error)
 	ChatRetentionDays(ctx context.Context, site store.ChatSite) (int, error)
 	ChatIPHash(ip string, now time.Time) ([]byte, error)
-	ChatAvailability(ctx context.Context, site store.ChatSite, now time.Time) (bool, string, error)
+	ChatAvailability(ctx context.Context, site store.ChatSite, now time.Time, states map[string]queue.AgentState) (bool, string, error)
 	ChatSession(ctx context.Context, in store.ChatSessionInput) (store.ChatSessionResult, error)
 	ChatAuth(ctx context.Context, siteID int64, token string, ipHash []byte) (store.ChatVisitor, error)
 	ChatSend(ctx context.Context, in store.ChatSendInput) (store.ChatSendResult, error)
@@ -73,7 +74,12 @@ type Config struct {
 	// MaxStreams is the per-pod limit of open event streams (default 2000).
 	MaxStreams int
 	// Mail sends a transcript; nil turns transcripts off.
-	Mail      func(ctx context.Context, to, subject, body string) error
+	Mail func(ctx context.Context, to, subject, body string) error
+	// Agents reads the call queues' agent state (login and pause by
+	// extension), which decides whether a site routed to a text queue has
+	// anyone to answer. nil, or an error, counts only the queues' static
+	// members, as the router does when Valkey cannot be read.
+	Agents    func(ctx context.Context) (map[string]queue.AgentState, error)
 	Turnstile *Turnstile
 	Metrics   *Metrics
 	Log       *slog.Logger
@@ -203,6 +209,26 @@ func (m *Metrics) limited(rule string) {
 }
 
 func (s *Server) now() time.Time { return s.cfg.Now() }
+
+// agentStatesTimeout bounds the read of the agents' state, so a slow Valkey
+// costs a visitor at most this.
+const agentStatesTimeout = 2 * time.Second
+
+// agentStates is the call queues' agent state, or nil when there is no source
+// or it cannot be read now (only static queue members count then).
+func (s *Server) agentStates(ctx context.Context) map[string]queue.AgentState {
+	if s.cfg.Agents == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, agentStatesTimeout)
+	defer cancel()
+	st, err := s.cfg.Agents(ctx)
+	if err != nil {
+		s.cfg.Log.Debug("agent state unreadable; counting static queue members only", "error", err)
+		return nil
+	}
+	return st
+}
 
 // asset serves a static file of the widget.
 func (s *Server) asset(name, ctype string, cross bool) http.HandlerFunc {
@@ -400,7 +426,7 @@ type siteConfig struct {
 }
 
 func (s *Server) config(ctx context.Context, site store.ChatSite) (siteConfig, error) {
-	online, _, err := s.cfg.Backend.ChatAvailability(ctx, site, s.now())
+	online, _, err := s.cfg.Backend.ChatAvailability(ctx, site, s.now(), s.agentStates(ctx))
 	if err != nil {
 		return siteConfig{}, err
 	}
@@ -689,7 +715,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errBody("invalid"))
 		return
 	}
-	online, _, err := s.cfg.Backend.ChatAvailability(r.Context(), site, s.now())
+	online, _, err := s.cfg.Backend.ChatAvailability(r.Context(), site, s.now(), s.agentStates(r.Context()))
 	if err != nil {
 		s.fail(w, "availability", err)
 		return

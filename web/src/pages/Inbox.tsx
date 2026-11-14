@@ -88,7 +88,9 @@ function whoLabel(m: InboxMessage): string {
     case "ai":
       return "AI assistant";
     default:
-      return "Hello";
+      // The router's own texts: the first-contact text and the closed-hours
+      // reply.
+      return m.kind === "message" ? "Automatic reply" : "Hello";
   }
 }
 

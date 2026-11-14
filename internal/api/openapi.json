@@ -3059,9 +3059,17 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["name", "description", "defaults", "limits"],
+                        "required": [
+                          "name",
+                          "description",
+                          "defaults",
+                          "limits"
+                        ],
                         "properties": {
-                          "name": { "type": "string", "enum": ["generic", "sbc-peer"] },
+                          "name": {
+                            "type": "string",
+                            "enum": ["generic", "sbc-peer"]
+                          },
                           "description": { "type": "string" },
                           "defaults": {
                             "type": "object",
@@ -16566,7 +16574,7 @@
       "get": {
         "operationId": "listChatSites",
         "summary": "List chat sites",
-        "description": "Lists the sites of the LAN chat widget with their settings and what deserves a second look. The Turnstile secret is never returned.",
+        "description": "Lists the sites of the LAN chat widget with their settings, what deserves a second look and whether each widget takes live chats now. The Turnstile secret is never returned.",
         "tags": ["messaging"],
         "responses": {
           "200": {
@@ -16656,7 +16664,7 @@
       "get": {
         "operationId": "getChatSite",
         "summary": "One chat site",
-        "description": "Returns one chat site by id.",
+        "description": "Returns one chat site by id, with whether its widget takes live chats now.",
         "tags": ["messaging"],
         "parameters": [
           {
@@ -34636,7 +34644,24 @@
       },
       "RecordingVideoStream": {
         "type": "object",
-        "required": ["id", "part", "leg", "direction", "codec", "container", "segments", "bytes", "width", "height", "offsetMs", "durationMs", "startedAt", "state", "finalized", "mediaType"],
+        "required": [
+          "id",
+          "part",
+          "leg",
+          "direction",
+          "codec",
+          "container",
+          "segments",
+          "bytes",
+          "width",
+          "height",
+          "offsetMs",
+          "durationMs",
+          "startedAt",
+          "state",
+          "finalized",
+          "mediaType"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -43562,7 +43587,7 @@
       "MessagingSchedule": {
         "type": "object",
         "required": ["zone", "days"],
-        "description": "A weekly opening schedule. No windows means always open.",
+        "description": "A weekly opening schedule. No windows means always open. It is the one schedule of a number: the router's after-hours action and, for a chat site, the widget's opening hours both read it.",
         "properties": {
           "zone": {
             "type": "string",
@@ -43606,7 +43631,7 @@
           "text": {
             "type": "string",
             "maxLength": 480,
-            "description": "The text a reply sends. Only a SIP trunk channel can send it today."
+            "description": "The text a reply sends: queued on a SIP trunk or carrier (Twilio, Telnyx) channel, shown in the widget on a chat site. A channel that cannot send it gets a line in the conversation saying so."
           },
           "routeKind": {
             "type": "string",
@@ -43660,7 +43685,7 @@
           "firstContactText": {
             "type": "string",
             "maxLength": 480,
-            "description": "Sent once to a customer who texts the number for the first time (not when the closed-hours reply already went); empty sends nothing. Only a SIP trunk channel can send it today."
+            "description": "Sent once to a customer who texts the number for the first time (not when the closed-hours reply already went); empty sends nothing. On a chat site it is shown in the widget to a first-time visitor."
           }
         }
       },
@@ -43972,44 +43997,6 @@
           }
         }
       },
-      "ChatHours": {
-        "type": "object",
-        "description": "A weekly schedule; empty means always open.",
-        "required": ["zone", "days"],
-        "additionalProperties": false,
-        "properties": {
-          "zone": {
-            "type": "string",
-            "description": "An IANA time zone such as Europe/Brussels; required when there are windows."
-          },
-          "days": {
-            "type": "array",
-            "maxItems": 28,
-            "description": "The opening windows.",
-            "items": {
-              "type": "object",
-              "required": ["day", "from", "to"],
-              "additionalProperties": false,
-              "properties": {
-                "day": {
-                  "type": "integer",
-                  "description": "0 is Sunday, 6 is Saturday.",
-                  "minimum": 0,
-                  "maximum": 6
-                },
-                "from": {
-                  "type": "string",
-                  "description": "Opening time, HH:MM."
-                },
-                "to": {
-                  "type": "string",
-                  "description": "Closing time, HH:MM, after the opening time."
-                }
-              }
-            }
-          }
-        }
-      },
       "ChatSite": {
         "type": "object",
         "required": [
@@ -44094,12 +44081,12 @@
             "description": "Whether the widget asks for a name and an email address before the first message."
           },
           "hours": {
-            "$ref": "#/components/schemas/ChatHours"
+            "$ref": "#/components/schemas/MessagingSchedule"
           },
           "offlineMode": {
             "type": "string",
             "enum": ["collect", "hidden"],
-            "description": "Outside the hours or with nobody available: collect a message and an email address, or hide the widget."
+            "description": "Outside the hours (the schedule of the site's address, also shown in its routing) or with nobody available: collect a message and an email address, or hide the widget."
           },
           "privacyUrl": {
             "type": "string",
@@ -44158,6 +44145,23 @@
               "type": "string"
             },
             "description": "Settings that work but deserve a second look: a public-looking origin, no challenge, Turnstile on an isolated LAN."
+          },
+          "availability": {
+            "type": "object",
+            "description": "What the widget shows right now; only reads (list and get) carry it. A site follows its address's routing: inside the hours (or outside them with an after-hours route) a text queue is available while one of its members is logged in and not paused, a user, an extension's user or a ring group's users while one of them has the inbox open, and the supervisors' pool while a supervisor has; then the unassigned live chats must be under the cap.",
+            "required": ["online"],
+            "additionalProperties": false,
+            "properties": {
+              "online": {
+                "type": "boolean",
+                "description": "Whether a visitor can start a live chat now; otherwise the widget is offline (collects a message, or hides)."
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["hours", "no_agent", "full"],
+                "description": "Why it is offline: outside the hours with no after-hours route, nobody staffs where a chat would go, or the cap of unassigned live chats is reached. Absent when online."
+              }
+            }
           }
         }
       },
@@ -44211,7 +44215,7 @@
             "description": "Whether the widget asks for a name and an email address before the first message. Left as it is when omitted."
           },
           "hours": {
-            "$ref": "#/components/schemas/ChatHours"
+            "$ref": "#/components/schemas/MessagingSchedule"
           },
           "offlineMode": {
             "type": "string",
