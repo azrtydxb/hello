@@ -232,6 +232,46 @@ func TestKamailioHelloSocketVetsSource(t *testing.T) {
 	}
 }
 
+// TestKamailioInvite100AfterRelay guards the graceful handover of the VIP: a
+// 100 Trying stops the sender retransmitting its INVITE, so it must not be
+// sent for an INVITE this instance has not managed to send on. A draining
+// instance's VIP address goes at SIGTERM while Kamailio runs on (preStop);
+// with tm's automatic 100 a request that arrived just before got its 100,
+// then the send on and the 477 after it failed (every socket is bound to the
+// VIP) and the call was stranded: the kamailio-ha graceful-loss flake
+// (test/kindha). route[RELAY] sends the 100, after t_relay succeeded.
+func TestKamailioInvite100AfterRelay(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "kamailio", "kamailio.cfg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := string(b)
+	if !strings.Contains(cfg, `modparam("tm", "auto_inv_100", 0)`) {
+		t.Fatal(`tm must not send 100 Trying by itself: modparam("tm", "auto_inv_100", 0)`)
+	}
+	start := strings.Index(cfg, "route[RELAY] {")
+	if start < 0 {
+		t.Fatal("route[RELAY] not found")
+	}
+	body := cfg[start:]
+	if end := strings.Index(body, "\n}\n"); end > 0 {
+		body = body[:end]
+	}
+	relay := strings.Index(body, "t_relay()")
+	reply := strings.Index(body, `t_reply("100", "Trying")`)
+	if relay < 0 || reply < 0 || relay >= reply {
+		t.Fatalf("route[RELAY] must send the 100 only after t_relay() (t_relay at %d, t_reply 100 at %d)", relay, reply)
+	}
+	if !strings.Contains(body[relay:reply], "exit;") {
+		t.Fatal("route[RELAY] must stop (exit) when t_relay() fails, before the 100")
+	}
+	for _, other := range []string{"sl_send_reply(\"100\"", "t_reply(\"100\""} {
+		if strings.Count(cfg, other) != strings.Count(body, other) {
+			t.Fatalf("%s outside route[RELAY]: a 100 must follow a successful t_relay", other)
+		}
+	}
+}
+
 // TestKwSIPRolloutGated guards the rollout of the two hostNetwork hello-sip
 // Deployments: both are Recreate and Sync applies them together, so each
 // node must hold at the rollout gate (HELLO_ROLLOUT_WAIT: the one-at-a-time

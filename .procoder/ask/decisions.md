@@ -4440,3 +4440,34 @@ Messaging Services.
   kamailio.cfg lags: TestKwKamailioConfigMatchesSource fails until the
   manifests step copies deploy/kamailio/kamailio.cfg into the ConfigMap and
   updates the checksum annotation.
+
+## Kamailio HA flake, second cause: the 100 Trying of a draining instance (2026-11-13)
+
+- Symptom (main push 42882475277, kw run): in "graceful loss of the active
+  instance" the takeover re-INVITE got a 100 from the VIP, never a final
+  response (40 s), and the phone never saw it. #292 and #296/#298 fixed other
+  halves (the Lease, the masquerade, 2xx retransmission); this one is the INVITE
+  itself.
+- Root cause, from the victim's own Kamailio log (kamailio-ha job, run
+  43378502793, iterations 11 and 12; the old logs went with the deleted pod, so
+  the job now records them): kube-vip drops the VIP address at SIGTERM while
+  Kamailio runs on for the 5 s preStop, and every Kamailio socket is bound to
+  the VIP. A request that arrived in the ~100 ms before the address went got
+  tm's automatic 100 Trying; then `sendto` towards the phone failed with
+  "Network is unreachable (101)", t_relay failed, and the 477 error reply to
+  Hello failed the same way. A UA that has had a 100 stops retransmitting its
+  INVITE (the test's stub does, a real one does), so nothing ever reached the
+  survivor. Reproduced in a container (VIP address removed between the 100 and
+  the relay): 100, then silence.
+- Product gap, not a test artefact: the same happens to any INVITE (a phone's
+  too) in that window of a rolling restart or node drain. Keeping the instance
+  forwarding through the preStop is not possible: the VIP address is kube-vip's
+  to remove, and it does so at SIGTERM.
+- Fix: `modparam("tm", "auto_inv_100", 0)`; route[RELAY] sends the 100 with
+  `t_reply` only after `t_relay()` succeeded. An INVITE that could not be sent
+  on gets no answer, the sender retransmits, and the instance that holds the VIP
+  next serves it. (A 100 for a request whose 2xx was already relayed is
+  suppressed by tm.) Needs the Kamailio config in the chart's files/, the kw
+  ConfigMap copy and its checksum annotation: deploy/kuvryn-sync/kw changes.
+  Regression guard: TestKamailioInvite100AfterRelay; the kamailio-ha job
+  (KINDHA_GRACEFUL_REPEAT=n repeats the graceful loss) shows it end to end.
