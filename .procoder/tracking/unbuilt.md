@@ -73,7 +73,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 5     | Message routing and ACD                             | done (#311)       |
 | 6     | Telnyx, sender registration                         | done (#346)       |
 | W     | Wiring between items 2 to 6, one schedule           | wip (#352)        |
-| 7     | AI triage, drafts, auto-reply                       | todo              |
+| 7     | AI triage, drafts, auto-reply                       | wip (#360)        |
 | 8     | Integrations, reporting, DSAR export, redact        | todo              |
 | N1-N3 | Public listener, WhatsApp, polling                  | not now           |
 
