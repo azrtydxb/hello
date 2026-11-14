@@ -142,7 +142,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 2   | WSS on Kamailio                             | done (#326)                  |
 | 2b  | Kamailio to hello-sip TLS hop (S-12)        | done (#340)                  |
 | 2c  | Browsers on kw: WSS, TLS hop, WebRTC media  | wip (#334, held)             |
-| 3   | Web devices and credentials                 | wip (#282)                   |
+| 3   | Web devices and credentials                 | wip (#354)                   |
 | 4   | coturn, ICE servers                         | wip (#282)                   |
 | 5   | Web softphone, audio                        | done (#343)                  |
 | 6   | Web video                                   | done (#343)                  |
