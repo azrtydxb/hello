@@ -33,6 +33,7 @@ type ClientStore interface {
 	ListClientDevices(ctx context.Context, userID int64) ([]store.ClientDevice, error)
 	RefreshClientDevice(ctx context.Context, userID, id int64) (store.ClientDevice, error)
 	RevokeClientDevice(ctx context.Context, actor string, userID, id int64) error
+	RecordClientQuality(ctx context.Context, userID, deviceID int64, callID string, in store.ClientQualityInput) error
 }
 
 var _ ClientStore = (*store.Store)(nil)
@@ -335,4 +336,80 @@ func (s *server) getICEServers(w http.ResponseWriter, r *http.Request) {
 		s.ClientAuth.ICEIssued.Inc()
 	}
 	writeJSON(w, http.StatusOK, s.ClientAuth.ICE.Servers(name))
+}
+
+// qualityBody is what a web client posts at the end of a call (S-20): numbers
+// and short words about the media it received, never media. Everything is
+// bounded; an out-of-range value is a 400, not a clamp, so a broken client
+// shows up.
+type qualityBody struct {
+	DeviceID        int64   `json:"deviceId"`
+	Codec           string  `json:"codec"`
+	LossPct         float64 `json:"lossPct"`
+	JitterMs        float64 `json:"jitterMs"`
+	RTTMs           float64 `json:"rttMs"`
+	CandidateLocal  string  `json:"candidateLocal"`
+	CandidateRemote string  `json:"candidateRemote"`
+	Video           *struct {
+		Width  int    `json:"width"`
+		Height int    `json:"height"`
+		FPS    int    `json:"fps"`
+		Codec  string `json:"codec"`
+	} `json:"video"`
+	DurationMs int64 `json:"durationMs"`
+}
+
+// postCallQuality files a client's end-of-call report under the SIP Call-ID of
+// the client's own dialog. The device must be one of the caller's own.
+func (s *server) postCallQuality(w http.ResponseWriter, r *http.Request) {
+	uid, ok := s.clientUser(w, r)
+	if !ok {
+		return
+	}
+	callID := r.PathValue("callId")
+	var in qualityBody
+	if !decode(w, r, &in) {
+		return
+	}
+	var f fieldErrs
+	if callID == "" || len(callID) > 256 {
+		f.add("callId", "must be 1 to 256 characters")
+	}
+	if in.DeviceID <= 0 {
+		f.add("deviceId", "is required")
+	}
+	if len(in.Codec) > 32 {
+		f.add("codec", "must be at most 32 characters")
+	}
+	if len(in.CandidateLocal) > 16 || len(in.CandidateRemote) > 16 {
+		f.add("candidateLocal", "candidate types are at most 16 characters")
+	}
+	if in.LossPct < 0 || in.LossPct > 100 {
+		f.add("lossPct", "must be 0 to 100")
+	}
+	if in.JitterMs < 0 || in.JitterMs > 60000 || in.RTTMs < 0 || in.RTTMs > 600000 {
+		f.add("jitterMs", "jitter and round-trip time must be non-negative and plausible")
+	}
+	if in.DurationMs < 0 || in.DurationMs > 7*24*3600*1000 {
+		f.add("durationMs", "must be 0 to a week")
+	}
+	q := store.ClientQualityInput{
+		Codec: in.Codec, LossPct: in.LossPct, JitterMs: in.JitterMs, RTTMs: in.RTTMs,
+		CandidateLocal: in.CandidateLocal, CandidateRemote: in.CandidateRemote, DurationMs: in.DurationMs,
+	}
+	if v := in.Video; v != nil {
+		if v.Width < 0 || v.Width > 16384 || v.Height < 0 || v.Height > 16384 || v.FPS < 0 || v.FPS > 1000 || len(v.Codec) > 32 {
+			f.add("video", "resolution, frame rate and codec are out of range")
+		}
+		q.Video = &store.ClientVideo{Width: v.Width, Height: v.Height, FPS: v.FPS, Codec: v.Codec}
+	}
+	if len(f) > 0 {
+		writeFields(w, f)
+		return
+	}
+	if err := s.Clients.RecordClientQuality(r.Context(), uid, in.DeviceID, callID, q); err != nil {
+		s.storeError(w, "device", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

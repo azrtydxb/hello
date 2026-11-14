@@ -158,6 +158,8 @@ type call struct {
 	// video is the door station's video through the anchor (S-49), nil for a
 	// call without one; guarded by mu.
 	video *callVideo
+	// web is the call's browser state (webrtc.go); nil for a call with none.
+	web *callWeb
 
 	// Music on hold (S-33), guarded by mu: moh plays to the held party,
 	// ringMOH to a caller in place of ringback; the route and group carry
@@ -438,6 +440,9 @@ type leg struct {
 	abandoned bool   // guarded by c.mu: failed over, may no longer win
 	lastRSeq  uint32 // guarded by mu: the last RSeq acknowledged with a PRACK
 	stage     int    // the forwarding stage this fork belongs to; setup ignores older stages' events
+	// web marks a fork to a browser or app: it is offered the alternate
+	// WebRTC callee leg (webrtc.go).
+	web bool
 	// pl is set on a page member leg (Phase E): it carries the page's
 	// per-member state and offer.
 	pl *pageLeg
@@ -1084,6 +1089,7 @@ func (c *call) answer(w *leg) {
 		c.abortCaller()
 		return
 	}
+	calleeWeb := c.webFork(w)
 	if !c.calleeCryptoOK(w, bres) {
 		w.bye()
 		why := "SRTP is required on the callee leg but its answer did not deliver it"
@@ -1122,6 +1128,7 @@ func (c *call) answer(w *leg) {
 				calleeAns = ans
 			}
 			c.noteVideoAnswer(bres.Body(), bres.Source())
+			c.webVideoAnswered(bres.Body(), calleeWeb)
 		}
 		off, _ := media.ParseAudioSDP(c.inv.Body())
 		body = c.anchoredAnswerA(off, calleeAns)
@@ -1555,6 +1562,7 @@ func (c *call) record(status int, side, reason, result string) {
 	if c.winner != nil {
 		r.PeerCallID = c.winner.callID
 	}
+	r.Video = c.web != nil && c.web.used
 	c.mu.Unlock()
 	if !answer.IsZero() {
 		r.BillableMs = end.Sub(answer).Milliseconds()

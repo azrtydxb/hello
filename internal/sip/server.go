@@ -146,6 +146,11 @@ type Config struct {
 	// MediaRecordingNotice plays the recording-notice announcement before
 	// a recording starts (default true).
 	MediaRecordingNotice bool
+	// VideoEnabled, VideoMaxKbps and VideoMaxSessions are the video policy
+	// (HELLO_VIDEO_*, clients S-36 to S-41); the zero Config carries no video.
+	VideoEnabled     bool
+	VideoMaxKbps     int
+	VideoMaxSessions int
 
 	// In-call HA (Phase 7). HADialogHeartbeat is the replication cadence
 	// (5s; the record's TTL is 30s). HATakeoverEnabled gates the orphan

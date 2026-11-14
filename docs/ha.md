@@ -134,6 +134,16 @@ This table is normative: it is what Hello does. The Test column names the test t
 | **Delayed or out-of-order NOTIFY**             | —                                                                      | —                                                                                                                                              | Each reload reads the database's current revision, so a late NOTIFY never applies an older one; a reload that finds the revision already loaded is skipped. A missed NOTIFY is caught by the 30 s poll                                                                                                                                                                                              | Automatic                                                                                         | Phase 1 `TestWatcherNotifyPollAndRetention`                                                                      |
 | **Kamailio dies** (one of two, behind the VIP) | kube-vip's Lease (5 s) and Kamailio's own `/healthz`, probed every 2 s | —                                                                                                                                              | Registered phones: the survivor takes the VIP and the next request reaches it. Calls in progress: media keeps flowing, and a BYE from either side, a takeover re-INVITE and an INVITE to a phone registered before the loss all go through the survivor, because the addresses a dialog names (Via, Path, Record-Route) are the VIP. Requests in flight at the moment of the loss are retransmitted | Automatic: the restarted instance joins the election and does not take the VIP from a healthy one | `test/kindha` `TestKamailioHA` (CI job `kamailio-ha`): [Kamailio pair](#kamailio-pair)                           |
 
+## Browser calls
+
+A call with a browser leg (the web softphone, [docs/webrtc.md](webrtc.md)) is not
+replicated. Its ICE-lite agent and DTLS-SRTP keys belong to the node that made
+them, and a taker cannot be given them. If the owning node dies the call ends:
+the browser's ICE failure (about five seconds without media) hangs it up cleanly,
+no zombie is left, and a new call or registration works at once through a
+survivor. Calls between desk phones are unaffected. Re-homing a browser call by an
+ICE restart on the taker is a lab item.
+
 ## Conference rooms
 
 A conference room is mixed on one node, its owner, chosen by a lease in Valkey.

@@ -280,7 +280,7 @@ func (c *call) joinConference(req *sip.Request, tx sip.ServerTransaction, snap *
 	c.mediaMode = "anchored"
 	c.mu.Unlock()
 	c.logTerminatedCodec("answer", "conference", answer)
-	if s.deps.HAState != nil && !c.confPeer {
+	if s.deps.HAState != nil && !c.confPeer && !c.webCaller() {
 		// A local participant replicates like any call Hello answers
 		// itself: a taker re-INVITEs the phone onto its own mixer and the
 		// participant rejoins there.
@@ -296,6 +296,10 @@ func (c *call) joinConference(req *sip.Request, tx sip.ServerTransaction, snap *
 // confParty binds the participant's media socket on this node and builds the
 // answer.
 func (s *Server) confParty(offer []byte, pol media.SecurePolicy) ([]byte, *media.Party, error) {
+	if media.IsWebRTCOffer(offer) {
+		// A browser joins on the shared WebRTC port, keyed by ICE and DTLS.
+		return media.NewPartyWebRTC(media.CurrentWebRTC(), offer)
+	}
 	a := s.voicemailAnchor(offer)
 	if a == nil {
 		return nil, nil, errors.New("no media address to advertise")

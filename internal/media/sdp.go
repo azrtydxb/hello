@@ -69,6 +69,28 @@ type AudioSDP struct {
 	localProto  string
 	localICE    *ICEInfo
 	localMux    bool
+	// localWeb is the browser-profile extras Build writes for a webrtc leg
+	// (clients-webrtc-mobile-video S-3): a=mid, the BUNDLE group, a candidate
+	// for every node address and end-of-candidates. nil for every other leg.
+	localWeb *webSDP
+}
+
+// webSDP is what makes a leg's SDP a browser's: the section id and the host
+// candidates of the shared WebRTC port.
+type webSDP struct {
+	mid   string
+	hosts []string
+	// finish, when set, post-processes the built SDP: it appends the leg's
+	// video section (or the rejected one that keeps the m= line count of the
+	// dialog), so every SDP Hello writes for a browser leg carries it, whatever
+	// code built the audio part.
+	finish func([]byte) []byte
+}
+
+// withWeb returns the SDP with the webrtc extras for its Build.
+func (a AudioSDP) withWeb(mid string, hosts []string) AudioSDP {
+	a.localWeb = &webSDP{mid: mid, hosts: append([]string(nil), hosts...)}
+	return a
 }
 
 // DTLSInfo is the DTLS-SRTP part of an SDP: the certificate fingerprints and
@@ -141,6 +163,7 @@ func (a AudioSDP) PlainOffer() AudioSDP {
 	a.localSRTP, a.localCrypto = false, nil
 	a.Proto, a.DTLS, a.ICE, a.RTCPMux = "", nil, nil, false
 	a.localDTLS, a.localProto, a.localICE, a.localMux = nil, "", nil, false
+	a.localWeb = nil
 	return a
 }
 
@@ -591,9 +614,13 @@ func AnswerFor(callerOffer, calleeAnswer AudioSDP) AudioSDP {
 // ("sendrecv" when empty or unknown). Lines use CRLF and the session is
 // valid forever (t=0 0), the shape every SIP endpoint accepts.
 func (a AudioSDP) Build(ip string, port int, dir string) []byte {
-	return buildSDP(ip, port, a.Codecs, a.Events, dir, localSec{
+	out := buildSDP(ip, port, a.Codecs, a.Events, dir, localSec{
 		srtpOnly: a.localSRTP, keys: a.localCrypto, proto: a.localProto,
-		dtls: a.localDTLS, ice: a.localICE, mux: a.localMux})
+		dtls: a.localDTLS, ice: a.localICE, mux: a.localMux, web: a.localWeb})
+	if a.localWeb != nil && a.localWeb.finish != nil {
+		return a.localWeb.finish(out)
+	}
+	return out
 }
 
 // BuildSDP writes an SDP body for codecs followed by events.
@@ -610,6 +637,7 @@ type localSec struct {
 	dtls     *DTLSInfo
 	ice      *ICEInfo
 	mux      bool
+	web      *webSDP
 }
 
 func buildSDP(ip string, port int, codecs, events []Codec, dir string, sec localSec) []byte {
@@ -637,6 +665,9 @@ func buildSDP(ip string, port int, codecs, events []Codec, dir string, sec local
 	if sec.ice != nil {
 		b.WriteString("a=ice-lite\r\n")
 	}
+	if sec.web != nil {
+		fmt.Fprintf(&b, "a=group:BUNDLE %s\r\n", sec.web.mid)
+	}
 	profile := "RTP/AVP"
 	switch {
 	case sec.proto != "":
@@ -657,7 +688,17 @@ func buildSDP(ip string, port int, codecs, events []Codec, dir string, sec local
 	}
 	if sec.ice != nil {
 		fmt.Fprintf(&b, "a=ice-ufrag:%s\r\na=ice-pwd:%s\r\n", sec.ice.Ufrag, sec.ice.Pwd)
-		fmt.Fprintf(&b, "a=candidate:1 1 udp %d %s %d typ host\r\n", hostPriority, ip, port)
+		if sec.web != nil && len(sec.web.hosts) > 0 {
+			for i, h := range sec.web.hosts {
+				fmt.Fprintf(&b, "a=candidate:%d 1 udp %d %s %d typ host\r\n", i+1, 126<<24|(65535-i)<<8|255, h, port)
+			}
+			b.WriteString("a=end-of-candidates\r\n")
+		} else {
+			fmt.Fprintf(&b, "a=candidate:1 1 udp %d %s %d typ host\r\n", hostPriority, ip, port)
+		}
+	}
+	if sec.web != nil {
+		fmt.Fprintf(&b, "a=mid:%s\r\n", sec.web.mid)
 	}
 	if sec.dtls != nil {
 		for _, f := range sec.dtls.Fingerprints {

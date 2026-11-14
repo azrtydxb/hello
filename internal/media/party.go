@@ -88,7 +88,7 @@ const (
 // and sends the mixed audio back. It is created from the participant's SDP
 // offer, so the answer carries the node's address and the socket's port.
 type Party struct {
-	conn  *net.UDPConn
+	conn  LegConn
 	codec *partyCodec
 	offer AudioSDP // the negotiated single codec and its telephone-event
 
@@ -411,4 +411,95 @@ func (p *Party) send(frame []int16) error {
 	}
 	p.tx.Add(1)
 	return nil
+}
+
+// NewPartyWebRTC is NewPartySecure for a participant that is a browser: its
+// media is an endpoint of the shared WebRTC port (ICE-lite, DTLS-SRTP) instead
+// of a socket of its own, and the answer is the browser's SDP, listing only the
+// participant's audio: a video or data line in the offer is answered with port 0
+// in place (the conference mixes audio; room video comes later).
+func NewPartyWebRTC(node *WebRTCNode, offer []byte) ([]byte, *Party, error) {
+	if node == nil {
+		return nil, nil, errors.New("media: WebRTC is not enabled on this node")
+	}
+	sess, err := ParseSDPSession(offer)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := ValidateWebRTC(sess); err != nil {
+		return nil, nil, err
+	}
+	parsed, err := ParseAudioSDP(offer)
+	if err != nil {
+		return nil, nil, err
+	}
+	off, ok := parsed.Terminated()
+	if !ok {
+		return nil, nil, errors.New("media: the offer has no codec a conference can mix")
+	}
+	codec, err := newPartyCodec(off.Codec)
+	if err != nil {
+		return nil, nil, fmt.Errorf("media: conference codec %s: %w", off.Codec.Name, err)
+	}
+	ep, err := node.Mux().NewEndpoint()
+	if err != nil {
+		codec.close()
+		return nil, nil, err
+	}
+	var p *Party
+	sec := &Secure{}
+	sec.Bind(ep.LocalAddr(), func(b []byte, to *net.UDPAddr) { _, _ = ep.WriteToUDP(b, to) },
+		func(from *net.UDPAddr, _ bool) {
+			if p != nil {
+				p.latch(from)
+			}
+		})
+	fail := func(err error) ([]byte, *Party, error) {
+		_ = ep.Close()
+		sec.Close()
+		codec.close()
+		return nil, nil, err
+	}
+	ufrag, _, ok := sec.iceLocal()
+	if !ok {
+		return fail(errors.New("media: ICE-lite is off on this node"))
+	}
+	if err := ep.SetUfrag(ufrag); err != nil {
+		return fail(err)
+	}
+	ans, err := sec.AnswerSDP(parsed, off, SecurePolicy{Allow: true, Require: true})
+	if err != nil {
+		return fail(err)
+	}
+	w := sectionSpec{audioMid: "0"}
+	for _, m := range sess.Media() {
+		rs := remoteSection{kind: m.Kind(), mid: m.Mid(), proto: m.Proto(), port0: m.Port() == 0}
+		if f := m.Formats(); len(f) > 0 {
+			rs.first = f[0]
+		}
+		w.remote = append(w.remote, rs)
+		if m.Kind() == "audio" && !rs.port0 && w.audioMid == "0" {
+			w.audioMid = m.Mid()
+		}
+	}
+	ans = ans.withWeb(w.audioMid, node.Hosts())
+	ans.localWeb.finish = func(sdp []byte) []byte {
+		out, _, _, err := renderSections(w, false, sdp)
+		if err != nil {
+			return sdp
+		}
+		return out
+	}
+	var b [10]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fail(fmt.Errorf("media: party RTP identifiers: %w", err))
+	}
+	p = &Party{
+		conn: ep, codec: codec, offer: off, target: nil,
+		seq: startSeq(b[0:2]), ts: binary.BigEndian.Uint32(b[2:6]), ssrc: binary.BigEndian.Uint32(b[6:10]),
+		marker: true, sec: sec,
+		dtmf: make(chan byte, partyDTMFQueue), done: make(chan struct{}),
+	}
+	go p.recv()
+	return ans.Build(node.Hosts()[0], node.Mux().Port(), "sendrecv"), p, nil
 }

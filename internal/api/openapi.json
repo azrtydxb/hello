@@ -25080,6 +25080,47 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/me/calls/{callId}/quality": {
+      "post": {
+        "operationId": "postMyCallQuality",
+        "summary": "File a web client's end-of-call quality report",
+        "description": "The browser softphone posts what it measured when a call ends: codec, loss, jitter, round-trip time, the candidate types of the selected pair and, for a video call, the resolution it received. It is numbers and short words, never media. callId is the SIP Call-ID of the client's own dialog (one leg of the call); the report is matched to the call's CDR when read, so it may arrive before the CDR exists. The device must be one of the caller's own: another user's is 404. A later report of the same call from the same device replaces the earlier one. Rate limited. Needs a browser session.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "description": "The SIP Call-ID of the client's own dialog, as the browser saw it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CallQualityReport" }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Stored" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/Internal" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "a client's own end-of-call report, posted by the browser softphone",
+          "category": "credentials"
+        }
+      }
+    },
     "/api/v1/me/ice-servers": {
       "get": {
         "operationId": "getMyIceServers",
@@ -34039,6 +34080,7 @@
           "callWaiting",
           "anonymousOutbound",
           "phoneSendAnonymous",
+          "videoAllowed",
           "noAnswerRings",
           "directoryHidden",
           "kind",
@@ -34125,6 +34167,10 @@
           "phoneSendAnonymous": {
             "type": "boolean",
             "description": "Phone Send Anonymous (Grandstream P65, line 1). On: provisioning writes the phone's own Send Anonymous setting, so the phone hides its caller ID on every call it makes, internal calls included; applied at the phone's next resync. Off (the default): nothing is written and the phone keeps its own setting. Distinct from anonymousOutbound, which only makes the calls Hello places through a trunk anonymous and leaves internal caller ID alone."
+          },
+          "videoAllowed": {
+            "type": "boolean",
+            "description": "Video allowed. On (the default): the extension's calls may carry video between web clients (H.264 Constrained Baseline or VP8, relayed, never transcoded). Off: every video section is answered with port 0 and the call goes on as audio. Trunk legs never carry video either way."
           },
           "mohClassId": {
             "oneOf": [
@@ -34277,6 +34323,10 @@
           "phoneSendAnonymous": {
             "type": "boolean",
             "description": "Phone Send Anonymous (Grandstream P65, line 1). On: provisioning writes the phone's own Send Anonymous setting, so the phone hides its caller ID on every call it makes, internal calls included; applied at the phone's next resync. Off (the default): nothing is written and the phone keeps its own setting. Distinct from anonymousOutbound, which only makes the calls Hello places through a trunk anonymous and leaves internal caller ID alone."
+          },
+          "videoAllowed": {
+            "type": "boolean",
+            "description": "Video allowed. On (the default): the extension's calls may carry video between web clients (H.264 Constrained Baseline or VP8, relayed, never transcoded). Off: every video section is answered with port 0 and the call goes on as audio. Trunk legs never carry video either way."
           },
           "mohClassId": {
             "oneOf": [
@@ -46842,6 +46892,76 @@
             "type": ["integer", "null"],
             "format": "int64",
             "description": "The wired 802.1X profile; null or left out for none."
+          }
+        }
+      },
+      "CallQualityReport": {
+        "type": "object",
+        "required": [
+          "deviceId",
+          "codec",
+          "lossPct",
+          "jitterMs",
+          "rttMs",
+          "durationMs"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "The caller's own web device that took the call."
+          },
+          "codec": {
+            "type": "string",
+            "maxLength": 32,
+            "example": "opus",
+            "description": "The audio codec of the call."
+          },
+          "lossPct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Worst percent of inbound audio packets lost during the call."
+          },
+          "jitterMs": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Worst inbound audio jitter in milliseconds."
+          },
+          "rttMs": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Worst round-trip time of the selected candidate pair in milliseconds."
+          },
+          "candidateLocal": {
+            "type": "string",
+            "maxLength": 16,
+            "example": "host",
+            "description": "The local candidate type of the selected pair (host, srflx, prflx, relay)."
+          },
+          "candidateRemote": {
+            "type": "string",
+            "maxLength": 16,
+            "example": "relay",
+            "description": "The remote candidate type of the selected pair."
+          },
+          "video": {
+            "type": "object",
+            "description": "The video the client received, when the call had some.",
+            "required": ["width", "height", "fps", "codec"],
+            "properties": {
+              "width": { "type": "integer", "minimum": 0, "maximum": 16384 },
+              "height": { "type": "integer", "minimum": 0, "maximum": 16384 },
+              "fps": { "type": "integer", "minimum": 0, "maximum": 1000 },
+              "codec": { "type": "string", "maxLength": 32, "example": "H264" }
+            }
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "How long the call was connected, in milliseconds."
           }
         }
       },

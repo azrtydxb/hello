@@ -264,8 +264,8 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 39 {
-		t.Fatalf("insert takes %d arguments, want 39", len(db.args))
+	if len(db.args) != 40 {
+		t.Fatalf("insert takes %d arguments, want 40", len(db.args))
 	}
 	if db.args[33] != SRTPNone || db.args[34] != KeyExNone || db.args[35] != false {
 		t.Fatalf("srtp, key exchange, ice = %v, %v, %v, want the defaults %q, %q, false", db.args[33], db.args[34], db.args[35], SRTPNone, KeyExNone)
@@ -382,8 +382,8 @@ func TestCDRCodecColumns(t *testing.T) {
 	if err := w.write(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 39 || db.args[27] != nil || db.args[28] != nil {
-		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 39", db.args[27], db.args[28], len(db.args))
+	if len(db.args) != 40 || db.args[27] != nil || db.args[28] != nil {
+		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 40", db.args[27], db.args[28], len(db.args))
 	}
 	r.CallerCodec, r.CalleeCodec = "opus/48000", "PCMU/8000"
 	if err := w.write(context.Background(), r); err != nil {
@@ -392,7 +392,7 @@ func TestCDRCodecColumns(t *testing.T) {
 	if db.args[27] != "opus/48000" || db.args[28] != "PCMU/8000" {
 		t.Fatalf("codecs = %#v, %#v", db.args[27], db.args[28])
 	}
-	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client, peer_call_id, answered_by, srtp, srtp_keyex, ice)") || !strings.Contains(insert, "$35, $36)") {
-		t.Fatal("the insert does not name the codec, origin, peer call id, answered_by, srtp, key exchange and ice columns with $28 to $36")
+	if !strings.Contains(insert, "caller_codec, callee_codec, origin, origin_client, peer_call_id, answered_by, srtp, srtp_keyex, ice, video)") || !strings.Contains(insert, "$35, $36, $40)") {
+		t.Fatal("the insert does not name the codec, origin, peer call id, answered_by, srtp, key exchange, ice and video columns with $28 to $36 and $40")
 	}
 }

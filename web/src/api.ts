@@ -120,6 +120,8 @@ export interface Extension {
    * setting is switched off at the next resync.
    */
   callWaiting?: boolean;
+  /** Video between web clients is allowed; true by default. */
+  videoAllowed?: boolean;
   /**
    * Anonymous outbound; false by default. On: every trunk call from the
    * extension carries Privacy: id, an anonymous From and the trunk's asserted
@@ -269,6 +271,10 @@ export interface Cdr {
   rtpJitterMs?: number | null;
   /** What the phones on the call reported (RTCP-XR); single-CDR read only. */
   rtcpxr?: RtcpxrQuality[];
+  /** The call carried video at some point (web clients). */
+  video?: boolean;
+  /** What the web clients on the call reported at its end; single-CDR read only. */
+  clientQuality?: ClientQualityReport[];
   /**
    * The audio codec each leg ended on, as "name/clock rate" ("PCMU/8000");
    * null when none was negotiated, and for calls recorded before it was kept.
@@ -278,6 +284,20 @@ export interface Cdr {
 }
 
 /** One phone's own view of a call's voice quality (RFC 6035 report). */
+/** A web client's end-of-call report (the browser softphone). */
+export interface ClientQualityReport {
+  device: string;
+  extension: string;
+  codec: string;
+  lossPct: number;
+  jitterMs: number;
+  rttMs: number;
+  candidateLocal: string;
+  candidateRemote: string;
+  video?: { width: number; height: number; fps: number; codec: string };
+  durationMs: number;
+}
+
 export interface RtcpxrQuality {
   device: string;
   extension: string;
@@ -930,6 +950,7 @@ export const updateExtension = (
     directoryHidden?: boolean;
     allowIntercom?: boolean;
     callWaiting?: boolean;
+    videoAllowed?: boolean;
     anonymousOutbound?: boolean;
     phoneSendAnonymous?: boolean;
 

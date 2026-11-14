@@ -556,37 +556,50 @@ func (s *Secure) Unprotect(data []byte) (plain []byte, ok, authFailed bool) {
 // datagram came from; the host has already vetted it as a source. An endpoint
 // that negotiated DTLS-SRTP and has no keys yet drops all media.
 func (s *Secure) UnprotectFrom(data []byte, from *net.UDPAddr) (plain []byte, ok, authFailed bool) {
+	plain, rtcp, ok, authFailed := s.UnprotectAny(data, from)
+	if rtcp {
+		return nil, false, authFailed
+	}
+	return plain, ok, authFailed
+}
+
+// UnprotectAny is UnprotectFrom for a host that also wants the RTCP of a
+// muxed port: a datagram that is RTCP and authenticates (or is plain RTCP on
+// a plain endpoint) comes back decrypted with rtcp true, where UnprotectFrom
+// consumes it. The result aliases an internal buffer like UnprotectFrom's.
+func (s *Secure) UnprotectAny(data []byte, from *net.UDPAddr) (plain []byte, rtcp, ok, authFailed bool) {
 	if x := s.xp.Load(); x != nil && from != nil {
 		switch {
 		case isSTUN(data):
 			s.stunIn(x, data, from)
-			return nil, false, false
+			return nil, false, false, false
 		case isDTLS(data):
 			s.dtlsIn(x, data, from)
-			return nil, false, false
+			return nil, false, false, false
 		}
 	}
 	k := s.active.Load()
 	if k == nil {
 		if s.pending.Load() {
-			return nil, false, false
+			return nil, false, false, false
 		}
 		if x := s.xp.Load(); x != nil && x.muxed() && isRTCP(data) {
-			return nil, false, false // plain RTCP on a muxed port is consumed
+			return data, true, true, false // plain RTCP on a muxed port
 		}
-		return data, true, false
+		return data, false, true, false
 	}
 	if isRTCP(data) {
-		if _, err := k.unprotectRTCP(data); err != nil {
-			return nil, false, true
+		p, err := k.unprotectRTCP(data)
+		if err != nil {
+			return nil, false, false, true
 		}
-		return nil, false, false
+		return p, true, true, false
 	}
 	p, err := k.unprotect(data)
 	if err != nil {
-		return nil, false, true
+		return nil, false, false, true
 	}
-	return p, true, false
+	return p, false, true, false
 }
 
 // LocalCrypto returns the keys Hello offers on leg, generating them on first
@@ -681,7 +694,8 @@ func (r *Relay) AnswerSDP(leg string, offer, ans AudioSDP, p SecurePolicy) (Audi
 	if l == nil {
 		return ans, errors.New("media: unknown relay leg " + leg)
 	}
-	return l.secure.AnswerSDP(offer, ans, p)
+	out, err := l.secure.AnswerSDP(offer, ans, p)
+	return l.webAudio(out), err
 }
 
 // OfferSDP adds the leg's security to an offer Hello makes; see
@@ -691,6 +705,15 @@ func (r *Relay) OfferSDP(leg string, off AudioSDP, p SecurePolicy) (AudioSDP, er
 	if l == nil {
 		return off, errors.New("media: unknown relay leg " + leg)
 	}
+	if l.web != nil {
+		// A browser leg is offered DTLS-SRTP on the browser transport, whatever
+		// the caller's policy says.
+		out, err := l.secure.OfferSDP(off, secureWebPolicy)
+		l.secure.sec.mu.Lock()
+		l.secure.setProto(ProtoDTLSFB)
+		l.secure.sec.mu.Unlock()
+		return l.webAudio(out), err
+	}
 	return l.secure.OfferSDP(off, p)
 }
 
@@ -698,7 +721,7 @@ func (r *Relay) OfferSDP(leg string, off AudioSDP, p SecurePolicy) (AudioSDP, er
 // Secure.KeepSDP.
 func (r *Relay) KeepSDP(leg string, a AudioSDP) AudioSDP {
 	if l := r.findLeg(leg); l != nil {
-		return l.secure.KeepSDP(a)
+		return l.webAudio(l.secure.KeepSDP(a))
 	}
 	return a
 }
@@ -757,4 +780,22 @@ func (r *Relay) ReOffer(leg string, off AudioSDP, mode string) (AudioSDP, error)
 		return off, err
 	}
 	return off.WithCrypto(mode == "savp", keys...), nil
+}
+
+// ProtectRTCP encrypts a plain RTCP compound packet for sending when the
+// endpoint is encrypted; ok is false when it is encrypted and the packet
+// cannot be protected (the caller drops it, never sends it in the clear).
+func (s *Secure) ProtectRTCP(pkt []byte) (out []byte, ok bool) {
+	k := s.active.Load()
+	if k == nil {
+		if s.pending.Load() {
+			return nil, false
+		}
+		return pkt, true
+	}
+	enc, err := k.protectRTCP(pkt)
+	if err != nil {
+		return nil, false
+	}
+	return enc, true
 }

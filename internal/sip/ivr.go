@@ -1076,6 +1076,7 @@ func (c *call) ivrConnect(w *leg, ext string) ivrResult {
 		return ivrResult{kind: ivrFailed}
 	}
 	if relay := c.anchorRelay(); relay != nil && bres != nil && len(bres.Body()) > 0 {
+		c.webFork(w)
 		if ans, err := media.ParseAudioSDP(bres.Body()); err == nil {
 			if !c.learnCalleeCrypto(w, ans) {
 				refused()

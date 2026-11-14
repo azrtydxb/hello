@@ -256,6 +256,7 @@ export function ExtensionDrawer({
   const [record, setRecord] = useState(ext.recordDefault ?? false);
   const [intercom, setIntercom] = useState(ext.allowIntercom !== false);
   const [callWaiting, setCallWaiting] = useState(ext.callWaiting !== false);
+  const [videoAllowed, setVideoAllowed] = useState(ext.videoAllowed !== false);
   const [anonymous, setAnonymous] = useState(ext.anonymousOutbound === true);
   const [phoneAnon, setPhoneAnon] = useState(ext.phoneSendAnonymous === true);
   const [mohClass, setMohClass] = useState<Id | null>(ext.mohClassId ?? null);
@@ -309,6 +310,9 @@ export function ExtensionDrawer({
     if (record !== (ext.recordDefault ?? false)) patch.recordDefault = record;
     if (!door && intercom !== (ext.allowIntercom !== false)) {
       patch.allowIntercom = intercom;
+    }
+    if (videoAllowed !== (ext.videoAllowed !== false)) {
+      patch.videoAllowed = videoAllowed;
     }
     if (callWaiting !== (ext.callWaiting !== false)) {
       patch.callWaiting = callWaiting;
@@ -490,6 +494,13 @@ export function ExtensionDrawer({
               labelPosition="end"
               checked={callWaiting}
               onChange={(e) => setCallWaiting(e.target.checked)}
+            />
+            <Switch
+              label="Video allowed"
+              hint="On: calls of this extension may carry video between web softphones (H.264 or VP8, relayed and never transcoded). Off: every video line is answered with port 0 and the call goes on as audio. Trunk and desk-phone legs never carry video"
+              labelPosition="end"
+              checked={videoAllowed}
+              onChange={(e) => setVideoAllowed(e.target.checked)}
             />
             <Switch
               label="Anonymous outbound"

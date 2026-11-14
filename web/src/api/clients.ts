@@ -83,3 +83,29 @@ export function getIceServers(
   const q = deviceId === undefined ? "" : `?deviceId=${seg(deviceId)}`;
   return request<IceServers>("GET", `/api/v1/me/ice-servers${q}`, { signal });
 }
+
+/** The end-of-call quality summary a client posts (S-20); never media. */
+export interface CallQualityReport {
+  codec: string;
+  lossPct: number;
+  jitterMs: number;
+  rttMs: number;
+  candidateLocal: string;
+  candidateRemote: string;
+  video?: { width: number; height: number; fps: number; codec: string };
+  durationMs: number;
+  /** The web device that took the call. */
+  deviceId?: Id;
+}
+
+/** POST /api/v1/me/calls/{callId}/quality; callId is the SIP Call-ID the browser saw. */
+export function postCallQuality(
+  callId: string,
+  report: CallQualityReport,
+): Promise<void> {
+  return request<void>(
+    "POST",
+    `/api/v1/me/calls/${encodeURIComponent(callId)}/quality`,
+    { body: report },
+  );
+}
