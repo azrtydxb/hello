@@ -8660,6 +8660,38 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/webrtc/status": {
+      "get": {
+        "operationId": "getWebRTCStatus",
+        "summary": "Web and mobile clients and their WebRTC media",
+        "description": "Returns the state of the browser (and later mobile) clients for the Diagnostics Clients tab: registered clients by kind and transport, the live WebRTC legs of every hello-sip node with their ICE and DTLS state and whether TURN relays them, each TURN server's reachability, push health, the ICE candidate types clients reported in the last 24 hours, refused REGISTERs of client devices, and the last register, ICE and DTLS errors. A source that cannot be read is listed in unavailable and its part is empty. Contains no credential or secret.",
+        "tags": ["diagnostics"],
+        "responses": {
+          "200": {
+            "description": "The status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebRTCStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/phones": {
       "get": {
         "operationId": "listPhones",
@@ -37636,6 +37668,491 @@
           },
           "limit": {
             "type": "integer"
+          }
+        }
+      },
+      "WebRTCCounters": {
+        "type": "object",
+        "required": ["ice", "dtlsHandshakes", "dtlsFailures", "srtpAuthFailures"],
+        "properties": {
+          "ice": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Legs that reached an ICE state since the node started: connected, restarted, failed."
+          },
+          "dtlsHandshakes": {
+            "type": "integer",
+            "description": "Successful DTLS-SRTP handshakes on WebRTC legs."
+          },
+          "dtlsFailures": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Failed handshakes by reason: timeout, fingerprint, failed."
+          },
+          "srtpAuthFailures": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Inbound packets that failed SRTP authentication on any leg, by side: from_caller, from_callee."
+          }
+        }
+      },
+      "WebRTCLeg": {
+        "type": "object",
+        "required": [
+          "call",
+          "side",
+          "ringing",
+          "ice",
+          "dtls",
+          "iceRestarts",
+          "video",
+          "srtpAuthFailures",
+          "since",
+          "node",
+          "turn"
+        ],
+        "properties": {
+          "call": {
+            "type": "string",
+            "description": "The caller leg's SIP Call-ID (the Call trace tab finds the call by it)."
+          },
+          "side": {
+            "type": "string",
+            "enum": ["caller", "callee"]
+          },
+          "ringing": {
+            "type": "boolean",
+            "description": "An alternate callee leg offered to a browser that has not answered."
+          },
+          "ice": {
+            "type": "string",
+            "enum": ["checking", "connected", "failed"]
+          },
+          "dtls": {
+            "type": "string",
+            "enum": ["new", "connecting", "connected", "failed"]
+          },
+          "dtlsReason": {
+            "type": "string",
+            "enum": ["timeout", "fingerprint", "failed"]
+          },
+          "dtlsMs": {
+            "type": "integer",
+            "description": "How long the DTLS handshake took."
+          },
+          "iceRestarts": {
+            "type": "integer"
+          },
+          "remote": {
+            "type": "string",
+            "description": "The address ICE selected (ip:port), absent before the first check."
+          },
+          "video": {
+            "type": "boolean"
+          },
+          "srtpAuthFailures": {
+            "type": "integer"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "node": {
+            "type": "string",
+            "description": "The hello-sip node carrying the leg."
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "boolean",
+            "description": "The selected address is a TURN server's: the media is relayed."
+          }
+        }
+      },
+      "WebRTCNode": {
+        "type": "object",
+        "required": ["node", "port", "hosts", "legs", "counters", "updatedAt"],
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "description": "The shared WebRTC UDP port."
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The candidate addresses the node advertises."
+          },
+          "legs": {
+            "type": "integer"
+          },
+          "counters": {
+            "$ref": "#/components/schemas/WebRTCCounters"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TurnProbe": {
+        "type": "object",
+        "required": [
+          "url",
+          "transport",
+          "method",
+          "reachable",
+          "latencyMs",
+          "addrs",
+          "checkedAt"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string",
+            "enum": ["udp", "tcp", "tls", ""]
+          },
+          "method": {
+            "type": "string",
+            "enum": ["stun", "connect", ""],
+            "description": "stun: a Binding request was answered; connect: a TCP connection was made (TLS listeners)."
+          },
+          "reachable": {
+            "type": "boolean"
+          },
+          "latencyMs": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "addrs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The server's addresses as hello-control resolves them."
+          },
+          "checkedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ClientCandidateStats": {
+        "type": "object",
+        "required": ["since", "reports", "local", "remote", "relayed"],
+        "properties": {
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reports": {
+            "type": "integer"
+          },
+          "local": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Reports by the client's candidate type: host, srflx, prflx, relay, unknown."
+          },
+          "remote": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Reports by the remote candidate type."
+          },
+          "relayed": {
+            "type": "integer",
+            "description": "Reports whose pair used a relay candidate on either side."
+          }
+        }
+      },
+      "WebRTCStatus": {
+        "type": "object",
+        "required": [
+          "generatedAt",
+          "clients",
+          "registrations",
+          "nodes",
+          "legs",
+          "turn",
+          "push",
+          "candidates",
+          "authFailures",
+          "lastErrors",
+          "unavailable"
+        ],
+        "properties": {
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "clients": {
+            "type": "object",
+            "required": ["enrolled", "registered", "byTransport"],
+            "properties": {
+              "enrolled": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "description": "Enabled client devices by kind: web, mobile."
+              },
+              "registered": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "description": "Bindings by device kind: desk, web, mobile."
+              },
+              "byTransport": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "description": "Client (web and mobile) bindings by transport: udp, tcp, tls, ws, wss."
+              }
+            }
+          },
+          "registrations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "deviceId",
+                "device",
+                "kind",
+                "label",
+                "extension",
+                "transport",
+                "source",
+                "userAgent",
+                "node",
+                "expires"
+              ],
+              "properties": {
+                "deviceId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "device": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "extension": {
+                  "type": "string"
+                },
+                "transport": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "userAgent": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "expires": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "description": "Registered web and mobile clients (at most 200)."
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebRTCNode"
+            }
+          },
+          "legs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebRTCLeg"
+            },
+            "description": "Live WebRTC legs of every node (at most 100 per node)."
+          },
+          "turn": {
+            "type": "object",
+            "required": [
+              "configured",
+              "ttlSeconds",
+              "stun",
+              "servers",
+              "relayedLegs"
+            ],
+            "properties": {
+              "configured": {
+                "type": "boolean",
+                "description": "TURN URIs and the shared secret are set."
+              },
+              "ttlSeconds": {
+                "type": "integer"
+              },
+              "stun": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "servers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TurnProbe"
+                },
+                "description": "Each TURN URI checked from hello-control (reused for 30 s)."
+              },
+              "relayedLegs": {
+                "type": "integer"
+              }
+            }
+          },
+          "push": {
+            "type": "object",
+            "required": ["configured", "detail"],
+            "properties": {
+              "configured": {
+                "type": "boolean"
+              },
+              "detail": {
+                "type": "string"
+              }
+            }
+          },
+          "candidates": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ClientCandidateStats"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Candidate types of the clients' end-of-call reports over the last 24 hours."
+          },
+          "authFailures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "deviceId",
+                "device",
+                "label",
+                "kind",
+                "at",
+                "code",
+                "reason",
+                "source",
+                "node",
+                "credentials"
+              ],
+              "properties": {
+                "deviceId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "device": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "code": {
+                  "type": "integer"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "userAgent": {
+                  "type": "string"
+                },
+                "credentials": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "description": "Refused REGISTERs of client devices in the last hour, newest first (at most 50). A first challenge (401 without credentials) is not a failure."
+          },
+          "lastErrors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["at", "kind", "reason", "detail"],
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["register", "ice", "dtls"]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "call": {
+                  "type": "string"
+                },
+                "device": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The last register, ICE and DTLS errors, newest first (at most 20)."
+          },
+          "unavailable": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["devices", "live", "webrtc", "quality", "register_attempts"]
+            },
+            "description": "Sources that could not be read; their parts are empty."
           }
         }
       },

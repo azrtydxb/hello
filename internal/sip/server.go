@@ -885,6 +885,11 @@ func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 		return snapshot.Device{}, false
 	}
 	if n >= int64(s.cfg.AuthFailLimit) {
+		if h := req.GetHeader("Authorization"); h != nil {
+			if c, err := ParseCredentials(h.Value()); err == nil && isClientName(snap, c.Username) {
+				s.noteClientAuthFailure("throttled")
+			}
+		}
 		s.respond(tx, req, sip.StatusForbidden, "Forbidden")
 		return snapshot.Device{}, false
 	}
@@ -900,6 +905,11 @@ func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 	}
 	dev, known := snap.DeviceByUsername(creds.Username)
 	if !known {
+		if looksDerived(creds.Username) {
+			// A client's expiring name whose device is gone: revoked,
+			// disabled or deleted.
+			s.noteClientAuthFailure("unknown_device")
+		}
 		// Unknown or disabled: no challenge would help.
 		s.authFailed(tx, req, ip, "unknown or disabled device", false)
 		return snapshot.Device{}, false
@@ -919,6 +929,9 @@ func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 	case Stale:
 		s.challenge(tx, req, true)
 	default:
+		if dev.AuthMode == snapshot.AuthDerived {
+			s.noteClientAuthFailure(clientAuthReason(check))
+		}
 		// Never log the response, HA1, nonce or cnonce.
 		s.authFailed(tx, req, ip, "bad credentials", true,
 			"check", check, "digest_uri", creds.URI, "request_uri", req.Recipient.String(),
@@ -1074,14 +1087,20 @@ func (s *Server) recountRegistrations(ctx context.Context) {
 	}
 	n := 0
 	byTransport := map[string]int{"udp": 0, "tcp": 0, "tls": 0, "ws": 0, "wss": 0}
+	byKind := map[string]int{"desk": 0, "web": 0, "mobile": 0}
+	snap := s.deps.Snapshots.Current()
 	for _, b := range bs {
 		if b.ReceivedNode == s.cfg.NodeID {
 			n++
 			byTransport[normTransport(b.Transport)]++
+			byKind[bindingKind(snap, b)]++
 		}
 	}
 	for t, c := range byTransport {
 		s.m.RegistrationsByTransport.WithLabelValues(t).Set(float64(c))
+	}
+	for k, c := range byKind {
+		s.m.ClientRegistrations.WithLabelValues(k).Set(float64(c))
 	}
 	s.m.Registrations.Set(float64(n))
 	s.registrations.Store(int64(n))
