@@ -296,7 +296,7 @@ func TestWebRTCCallToDeskPhone(t *testing.T) {
 		if bytes.Contains(wire, bytes.Repeat([]byte{0x5a}, 160)) {
 			t.Fatal("the browser's packet was in the clear")
 		}
-		b.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		_ = b.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 		buf := make([]byte, 2048)
 		if n, _, err := b.sock.ReadFromUDP(buf); err == nil {
 			got, _ = media.ParseRTP(buf[:n])
@@ -418,7 +418,7 @@ func TestPhoneCallsBrowser(t *testing.T) {
 			var back *media.RTPPacket
 			for i := 0; i < 40 && back == nil; i++ {
 				w.send(t, toBrowserLeg, rtpPacket(uint16(200+i), 0x32))
-				a.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+				_ = a.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 				buf := make([]byte, 2048)
 				if n, _, err := a.sock.ReadFromUDP(buf); err == nil {
 					back, _ = media.ParseRTP(buf[:n])
@@ -445,7 +445,7 @@ func TestPhoneCallsBrowser(t *testing.T) {
 		var got *media.RTPPacket
 		for i := 0; i < 40 && got == nil; i++ {
 			_, _ = a.sock.WriteToUDP(rtpPacket(uint16(i+1), 0x41), toHelloA)
-			desk.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			_ = desk.sock.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 			buf := make([]byte, 2048)
 			if n, _, err := desk.sock.ReadFromUDP(buf); err == nil {
 				got, _ = media.ParseRTP(buf[:n])

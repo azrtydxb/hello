@@ -145,22 +145,21 @@ type videoLeg struct {
 
 	// Outbound: the stream we send into the leg, a constant-offset image of
 	// the other leg's inbound stream.
-	outSSRC       uint32
-	mapped        bool
-	mapSSRC       uint32 // the other leg's inbound SSRC this stream mirrors
-	seqOff        uint16
-	tsOff         uint32
-	lastOutSeq    uint16
-	lastOutTS     uint32
-	lastOutAt     time.Time
-	outPackets    uint32
-	outOctets     uint32
-	remoteEst     float64 // the endpoint's own bandwidth estimate (REMB) for our stream, bit/s; 0 unknown
-	lastKeyReq    time.Time
-	bucket        float64 // rate-cap token bucket, bytes
-	bucketAt      time.Time
-	firSeq        uint8
-	needKeyOnJoin bool
+	outSSRC    uint32
+	mapped     bool
+	mapSSRC    uint32 // the other leg's inbound SSRC this stream mirrors
+	seqOff     uint16
+	tsOff      uint32
+	lastOutSeq uint16
+	lastOutTS  uint32
+	lastOutAt  time.Time
+	outPackets uint32
+	outOctets  uint32
+	remoteEst  float64 // the endpoint's own bandwidth estimate (REMB) for our stream, bit/s; 0 unknown
+	lastKeyReq time.Time
+	bucket     float64 // rate-cap token bucket, bytes
+	bucketAt   time.Time
+	firSeq     uint8
 }
 
 func (v *videoLeg) set(c *VideoLeg) {
@@ -240,7 +239,7 @@ func (v *videoLeg) report(now time.Time) *rtcp.ReceptionReport {
 	}
 	ext := v.cycles + uint32(v.maxSeq)
 	expected := ext - uint32(v.baseSeq) + 1
-	var lost int64 = int64(expected) - int64(v.received)
+	lost := int64(expected) - int64(v.received)
 	if lost < 0 {
 		lost = 0
 	}
@@ -577,8 +576,8 @@ func (r *Relay) videoRTCPLoop() {
 // ntpTime is the 64-bit NTP timestamp of t.
 func ntpTime(t time.Time) uint64 {
 	const unixToNTP = 2208988800
-	sec := uint64(t.Unix()) + unixToNTP //nolint:gosec // after 1970
-	frac := uint64(t.Nanosecond()) << 32 / 1e9
+	sec := uint64(t.Unix()) + unixToNTP        //nolint:gosec // after 1970
+	frac := uint64(t.Nanosecond()) << 32 / 1e9 //nolint:gosec // Nanosecond is 0 to 999999999
 	return sec<<32 | frac
 }
 

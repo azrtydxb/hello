@@ -552,17 +552,6 @@ func hasRemoteSection(r []remoteSection, kind string) bool {
 	return false
 }
 
-// hasOtherSection reports whether the remote's offer had a section that is
-// neither audio nor video (a data channel): the answer rejects it.
-func hasOtherSection(r []remoteSection) bool {
-	for _, s := range r {
-		if s.kind != "audio" && s.kind != "video" {
-			return true
-		}
-	}
-	return false
-}
-
 func ptList(c []SDPCodec) []string {
 	out := make([]string, len(c))
 	for i, cc := range c {
