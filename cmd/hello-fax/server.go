@@ -80,6 +80,10 @@ type session struct {
 func (s *server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.auth(s.healthz))
+	// /readyz is the same answer without the token, for the kubelet's probe
+	// (it sends none). /healthz keeps the token so hello-control's check
+	// also proves its token is right.
+	mux.HandleFunc("GET /readyz", s.healthz)
 	mux.HandleFunc("POST /v1/rasterise", s.auth(s.rasterise))
 	mux.HandleFunc("POST /v1/sessions", s.auth(s.start))
 	mux.HandleFunc("GET /v1/sessions/{id}", s.auth(s.status))

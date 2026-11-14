@@ -22,6 +22,7 @@ import (
 // there.
 //
 //	GET    /healthz                       200 when the engine can run sessions
+//	GET    /readyz                        the same, without the token (kubelet probe)
 //	POST   /v1/rasterise                  body: PDF; 200 {"pages":n} | 422
 //	POST   /v1/sessions?direction=&mode=&ident=&pt=&remote=&t38=
 //	                                      body: PDF when direction=send
