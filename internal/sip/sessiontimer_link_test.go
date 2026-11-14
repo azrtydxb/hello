@@ -25,7 +25,10 @@ func refreshWithin(t *testing.T, ch chan *sip.Request, d time.Duration, what str
 	select {
 	case r := <-ch:
 		if got := headerOfReq(r, "Session-Expires"); got != "2;refresher=uac" {
-			t.Fatalf("%s: Session-Expires = %q, want 2;refresher=uac", what, got)
+			// Name the request: a stray one (not a refresh) is otherwise
+			// indistinguishable from a refresh that lost its header.
+			t.Fatalf("%s: Session-Expires = %q, want 2;refresher=uac (got %s CSeq %q Call-ID %q, %d-byte body, From tag %q)",
+				what, got, r.Method, r.CSeq().Value(), r.CallID().Value(), len(r.Body()), fromTagOf(r))
 		}
 		return r
 	case <-time.After(d):
@@ -520,4 +523,14 @@ func TestSessionTimersParkTakeover(t *testing.T) {
 			t.Fatalf("BYE after %v, want near the 6 s interval, not the node's 2 s default", d)
 		}
 	})
+}
+
+// fromTagOf is a request's From tag ("" when it has none).
+func fromTagOf(r *sip.Request) string {
+	if f := r.From(); f != nil {
+		if tag, ok := f.Params.Get("tag"); ok {
+			return tag
+		}
+	}
+	return ""
 }
