@@ -144,6 +144,21 @@ no zombie is left, and a new call or registration works at once through a
 survivor. Calls between desk phones are unaffected. Re-homing a browser call by an
 ICE restart on the taker is a lab item.
 
+## Video calls and video recording
+
+The video relay is the node's own (its sockets, offsets and SSRCs), like a
+browser's ICE state: a takeover re-homes a call's **audio** and the video ends,
+and a call that was recording video leaves its stream rows for hello-control. A
+stream's row is written when it opens and after every stored fragment (each 10 s
+or 4 MiB), so a node that dies loses at most the fragment it was filling: the
+sweeper ends the rows nobody has written for ten minutes (`failure:
+interrupted`), the finalizer joins what was stored, and the call's audio
+recording continues in the usual way on the taker. A graceful drain stops the
+recording of video at the hand-off after flushing its open fragments. Rooms with
+video: the video of a participant that a takeover re-homes ends and the
+participant rejoins with audio only. See
+[docs/media.md](media.md#recording-video).
+
 ## Conference rooms
 
 A conference room is mixed on one node, its owner, chosen by a lease in Valkey.

@@ -770,6 +770,27 @@ describe("Extensions", () => {
     });
   });
 
+  it("turns video recording off for the extension, on unless the server says otherwise", async () => {
+    const calls = api([EXT], {
+      "GET /api/v1/devices": () => json({ items: [DEVICE] }),
+      "GET /api/v1/registrations": () => json({ items: [] }),
+      "GET /api/v1/presence": () => json({ items: [] }),
+      "PATCH /api/v1/extensions/1": () => json({ ...EXT, recordVideo: false }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer();
+    const sw = within(drawer).getByRole("switch", { name: /Record video/ });
+    expect(sw).toBeChecked();
+    fireEvent.click(sw);
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Extension 100 saved.")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/extensions/1",
+      body: { recordVideo: false },
+    });
+  });
+
   it("turns anonymous outbound on, off by default", async () => {
     const calls = api([EXT], {
       "GET /api/v1/devices": () => json({ items: [DEVICE] }),

@@ -513,6 +513,19 @@ export class JsSipEngine implements PhoneEngine {
           this.emit({ type: "dtmf", id: l.id, tone: e.dtmf.tone });
       },
     );
+    // The PBX says when the call's recording starts and stops, and whether video
+    // is in it (S-42): the dock shows a badge.
+    session.on(
+      "newInfo",
+      (e: {
+        originator: string;
+        info?: { contentType?: string; body?: string };
+      }) => {
+        if (e.originator !== "remote") return;
+        const rec = recordingOf(e.info?.contentType, e.info?.body);
+        if (rec && rec !== l.info.recording) this.update(l, { recording: rec });
+      },
+    );
     // The far end's video can come and go by re-INVITE.
     session.on("sdp", (e) => {
       if (e.originator === "remote") {
@@ -579,6 +592,21 @@ export function ringTagOf(h: string | undefined): string {
   if (!h) return "";
   const m = /info=([\w.-]+)/i.exec(h) ?? /<[^>]*\/([\w.-]+)>/.exec(h);
   return m?.[1] ?? "";
+}
+
+/**
+ * The recording state out of the PBX's recording INFO, undefined for any other
+ * INFO: "off", "audio" (recording, no video) or "video" (recording with video).
+ */
+export function recordingOf(
+  contentType: string | undefined,
+  body: string | undefined,
+): "off" | "audio" | "video" | undefined {
+  if (!contentType || !/^application\/x-hello-recording\b/i.test(contentType))
+    return undefined;
+  const on = /^recording:\s*on\b/im.test(body ?? "");
+  if (!on) return "off";
+  return /^video:\s*yes\b/im.test(body ?? "") ? "video" : "audio";
 }
 
 export type { Anyf };

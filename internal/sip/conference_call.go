@@ -252,7 +252,7 @@ func (c *call) joinConference(req *sip.Request, tx sip.ServerTransaction, snap *
 	room.mu.Lock()
 	room.cfg = cfg
 	room.mu.Unlock()
-	answer, party, err := s.confParty(req.Body(), c.soloPolicy())
+	answer, party, err := c.confJoinParty(room, req.Body(), cfg)
 	if errors.Is(err, media.ErrSRTPRequired) {
 		s.confRelease(room)
 		c.srtpNote("refused")
@@ -294,17 +294,85 @@ func (c *call) joinConference(req *sip.Request, tx sip.ServerTransaction, snap *
 }
 
 // confParty binds the participant's media socket on this node and builds the
-// answer.
+// answer, audio only (a take-over rebuilds a participant this way).
 func (s *Server) confParty(offer []byte, pol media.SecurePolicy) ([]byte, *media.Party, error) {
+	return s.confPartyVideo(offer, pol, nil)
+}
+
+// confPartyVideo is confParty for a participant that may bring video.
+func (s *Server) confPartyVideo(offer []byte, pol media.SecurePolicy, vj *media.VideoJoin) ([]byte, *media.Party, error) {
 	if media.IsWebRTCOffer(offer) {
 		// A browser joins on the shared WebRTC port, keyed by ICE and DTLS.
-		return media.NewPartyWebRTC(media.CurrentWebRTC(), offer)
+		return media.NewPartyWebRTCVideo(media.CurrentWebRTC(), offer, vj)
 	}
 	a := s.voicemailAnchor(offer)
 	if a == nil {
 		return nil, nil, errors.New("no media address to advertise")
 	}
-	return media.NewPartySecure(a.AdvertisedHost(), s.cfg.RTPPortMin, s.cfg.RTPPortMax, offer, pol)
+	return media.NewPartySecureVideo(a.AdvertisedHost(), s.cfg.RTPPortMin, s.cfg.RTPPortMax, offer, pol, vj)
+}
+
+// confJoinParty makes the participant of a call that joins a room: with video
+// when the room allows it, the node's video policy allows it for the call and
+// the offer holds a codec the room can forward (conference-room video, S-45).
+// Anything else is the audio only, with the video line refused in place.
+func (c *call) confJoinParty(room *confRoom, offer []byte, cfg snapshot.Conference) ([]byte, *media.Party, error) {
+	s := c.s
+	pol := c.soloPolicy()
+	if !c.confWantsVideo(offer, cfg) {
+		return s.confPartyVideo(offer, pol, nil)
+	}
+	vj := &media.VideoJoin{Kbps: c.webVideoKbps(), Codec: room.mix.VideoCodec()}
+	answer, party, err := s.confPartyVideo(offer, pol, vj)
+	if err != nil {
+		c.releaseVideoSlot()
+		return answer, party, err
+	}
+	if !party.HasVideo() {
+		c.releaseVideoSlot()
+		media.NoteVideoRefused(media.VideoNoCodec)
+		c.addTrace(fmt.Sprintf("Video not carried: the room's video is %s and this participant offers none it can forward", orWord(room.mix.VideoCodec(), "H.264 or VP8")))
+		return answer, party, nil
+	}
+	room.mix.SetVideoCap(c.webVideoKbps())
+	room.mix.SetVideoCodec(party.VideoCodec())
+	w := c.webState()
+	c.mu.Lock()
+	w.used = true
+	c.mu.Unlock()
+	c.addTrace(fmt.Sprintf("Conference video: the room forwards the active speaker (%s), at most %d kbit/s, not transcoded", party.VideoCodec(), c.webVideoKbps()))
+	return answer, party, nil
+}
+
+func orWord(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
+// confWantsVideo reports whether the participant's offer is to be given video:
+// it has a video section, the room has video on, and the policy (the node's
+// switch, the extension, a trunk, the node's slot) allows it. It takes the
+// call's video slot when it says yes.
+func (c *call) confWantsVideo(offer []byte, cfg snapshot.Conference) bool {
+	if _, has := media.PlainVideoLine(offer); !has {
+		return false
+	}
+	switch {
+	case !cfg.Video:
+		c.addTrace("Video not carried: this room has video switched off")
+		return false
+	case c.inTrunk != nil:
+		c.addTrace("Video not carried: trunks carry audio only")
+		return false
+	}
+	if ok, why := c.videoPolicy(); !ok {
+		media.NoteVideoRefused(why)
+		c.addTrace("Video not carried: " + videoWhy(why))
+		return false
+	}
+	return c.takeVideoSlot()
 }
 
 // confAttach ties a participant to the call.

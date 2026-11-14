@@ -144,11 +144,11 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 2c  | Browsers on kw: WSS, TLS hop, WebRTC media  | wip (#334, held)             |
 | 3   | Web devices and credentials                 | wip (#282)                   |
 | 4   | coturn, ICE servers                         | wip (#282)                   |
-| 5   | Web softphone, audio                        | wip (#343)                   |
-| 6   | Web video                                   | wip (#343)                   |
-| 6b  | Video recording                             | blocked (6)                  |
-| 10  | Video phones and door stations              | todo (code), hw (test)       |
-| 11  | Conference-room video                       | blocked (6)                  |
+| 5   | Web softphone, audio                        | done (#343)                  |
+| 6   | Web video                                   | done (#343)                  |
+| 6b  | Video recording                             | wip (#344)                   |
+| 10  | Video phones and door stations              | wip (#344), hw (test)        |
+| 11  | Conference-room video                       | wip (#344)                   |
 | 13  | Teams SBC-peer trunk profile, docs/teams.md | done (#326)                  |
 | 7-9 | Push gateway, mobile apps, mobile video     | not now                      |
 | 12  | Public reach                                | not now (user decides later) |
@@ -228,5 +228,6 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - CRM connector live checks on real accounts: Pipedrive, Zoho CRM, Odoo, Bitrix24 (docs/crm.md lab checklists)
 - Telnyx and Twilio accounts, messaging item 6 (docs/inbox.md, "Sending through Telnyx", "Sender registration"): a real Telnyx send, delivery receipt and the 40300 STOP block; the field names of Telnyx's 10DLC, campaign-assignment and toll-free reads and of Twilio's UsAppToPerson and Tollfree reads; what a limited key answers for each registration read; a Twilio account with several Messaging Services; a US long code and a toll-free number in each state (approved, pending, rejected, unregistered)
 - Clients 5 and 6: a real browser (Chrome, Edge, Firefox, Safari) calling a G.711 desk phone, a G.722 phone and another browser on the LAN; H.264 and VP8 between browsers with and without hardware encoding and the REMB fallback's quality; DTLS re-handshake and ICE restart on a re-INVITE; a Playwright run with Chromium fake media devices through the lab stack; video capacity per node (the number behind `HELLO_VIDEO_MAX_SESSIONS`)
+- Clients 6b, 10 and 11: a real video desk phone and a real door station (H.264 on RTP/AVP) calling each other, a browser and a conference room, with the picture checked on both ends, the keyframe wait on a speaker switch and REMB behaviour; MP4 (H.264) and WebM (VP8) recordings playing in Chrome, Edge, Firefox and Safari with the video slaved to the audio; the real storage per hour of a typical video call (the number behind the 200 GB quota and the 30-day retention); a node killed during a video recording on kw (the sweeper and finalizer); the vendor video preview keys of `phone-feature-parity` S-49
 - Teams Direct Routing run (item 13, P22): a Microsoft 365 tenant with Teams Phone, a certified SBC or DRaaS contract, and a public SBC name and certificate; the cmdlet steps in docs/teams.md are unverified until then
 - WSS in a browser through the kw Ingress (items 2 and 2c): the kw manifests are in #334 (held); after it deploys, a real browser registering at wss://hello.kw.watteel.lab/sip and calling a desk phone, a `hello_tls` entry in Kamailio's metrics, and whether Kamailio sees ingress-nginx's pod address (10.42.x) so its X-Forwarded-For is believed

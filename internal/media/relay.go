@@ -178,6 +178,9 @@ type relayLeg struct {
 	web *legWeb
 	vid videoLeg
 	vq  chan relayMsg
+	// pv is a plain leg's video transport and SDP state (plainvideo.go).
+	pvMu sync.Mutex
+	pv   *plainVideo
 }
 
 // legStats is one leg's inbound counters; the direction label comes from
@@ -286,26 +289,6 @@ func (r *Relay) AddLeg(name string) (int, error) {
 		func(from *net.UDPAddr, nominated bool) { l.iceVerified(from, nominated) })
 	l.secure.OnFail(func(reason string) { r.secureFailed(l.name, reason) })
 	l.secure.OnReady(func() { r.secureUpCall(l.name) })
-	r.legs = append(r.legs, l)
-	r.used[port] = true
-	return port, nil
-}
-
-// addLegAt is AddLeg on one given port.
-func (r *Relay) addLegAt(name string, port int) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed || len(r.legs) >= 2 {
-		return 0, errors.New("media: relay takes exactly two legs")
-	}
-	if r.used[port] {
-		return 0, fmt.Errorf("media: port %d is in use", port)
-	}
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: port})
-	if err != nil {
-		return 0, fmt.Errorf("media: bind leg %q RTP socket: %w", name, err)
-	}
-	l := newRelayLeg(r, name, conn, port)
 	r.legs = append(r.legs, l)
 	r.used[port] = true
 	return port, nil
@@ -635,6 +618,12 @@ func (r *Relay) Start() {
 	for _, l := range r.legs {
 		go r.runLeg(l)
 	}
+	legs := append([]*relayLeg(nil), r.legs...)
+	go func() {
+		for _, l := range legs {
+			r.startPlainVideo(l)
+		}
+	}()
 	r.wg.Add(1)
 	go r.observeLoop()
 }
@@ -1057,6 +1046,9 @@ func (r *Relay) Close() {
 	for _, l := range legs {
 		l.secure.Close() // a DTLS handshake still running ends with the call
 		_ = l.conn.Close()
+		if pv := l.pvState(false); pv != nil {
+			pv.close()
+		}
 	}
 	r.wg.Wait()
 	r.mu.Lock()

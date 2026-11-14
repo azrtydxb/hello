@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createPhoneLock } from "./lock";
-import { endReasonOf, parseMessageSummary, ringTagOf } from "./jssipEngine";
+import {
+  endReasonOf,
+  parseMessageSummary,
+  recordingOf,
+  ringTagOf,
+} from "./jssipEngine";
 import {
   foldReport,
   gradeOf,
@@ -189,5 +194,21 @@ describe("call quality", () => {
     });
     expect(Object.keys(r ?? {})).not.toContain("bytesReceived");
     expect(foldReport([], 1)).toBeNull();
+  });
+});
+
+describe("recording signal", () => {
+  it("reads the PBX's recording INFO", () => {
+    const t = "application/x-hello-recording";
+    expect(recordingOf(t, "recording: on\r\nvideo: yes\r\n")).toBe("video");
+    expect(recordingOf(t, "recording: on\r\nvideo: no\r\n")).toBe("audio");
+    expect(recordingOf(t, "recording: off\r\nvideo: no\r\n")).toBe("off");
+    expect(recordingOf(t + "; charset=utf-8", "recording: on\r\n")).toBe(
+      "audio",
+    );
+  });
+  it("ignores every other INFO", () => {
+    expect(recordingOf("application/dtmf-relay", "Signal=1")).toBeUndefined();
+    expect(recordingOf(undefined, "recording: on")).toBeUndefined();
   });
 });

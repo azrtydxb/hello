@@ -160,6 +160,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		_ = ln.Close()
 		return fmt.Errorf("MINIO_ENDPOINT: %w", err)
 	}
+	startVideoRecording(ctx, cfg.RecordingVideoQuotaGB, st, objs, metrics.Registry, log)
 	msgMetrics := messaging.NewMetrics(metrics.Registry)
 	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, msgMetrics, log)
 	go runCarrierWorkers(ctx, st, msgMetrics, log)

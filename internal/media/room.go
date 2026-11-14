@@ -22,18 +22,28 @@ type Room struct {
 	stop    chan struct{}
 	done    chan struct{}
 
+	// Video (roomvideo.go): the speaker whose picture is forwarded and the one
+	// before, the room's codec and ceiling.
+	speaker, prevSpeaker string
+	lastSwitch           time.Time
+	vcodec               string
+	vcap                 atomic.Int32
+	switches             atomic.Uint64
+
 	ticks   atomic.Uint64
 	overrun atomic.Uint64 // ticks that took longer than a frame
 	mixed   atomic.Uint64 // frames sent
 }
 
 type roomParty struct {
+	id       string
 	p        *Party
 	muted    bool
 	isolated bool    // waiting for a leader: not mixed in, hears the hold source
 	private  []int16 // sound for this party only (prompts, control tones)
 	hold     []int16 // looping hold source for an isolated party
 	holdPos  int
+	level    float64 // smoothed mean-square level of the party's speech (video rooms)
 }
 
 // NewRoom returns an empty room. Its clock starts with the first party.
@@ -49,8 +59,12 @@ func (r *Room) Add(id string, p *Party, muted, isolated bool) {
 	if _, ok := r.parties[id]; ok {
 		return
 	}
-	r.parties[id] = &roomParty{p: p, muted: muted, isolated: isolated}
+	r.parties[id] = &roomParty{id: id, p: p, muted: muted, isolated: isolated}
 	r.order = append(r.order, id)
+	p.bind(r, id)
+	if p.vid != nil && r.vcodec == "" {
+		r.vcodec = p.vid.codec
+	}
 	if !r.started {
 		r.started = true
 		r.stop = make(chan struct{})
@@ -66,12 +80,29 @@ func (r *Room) Remove(id string) {
 	if _, ok := r.parties[id]; !ok {
 		return
 	}
+	rp := r.parties[id]
 	delete(r.parties, id)
 	for i, v := range r.order {
 		if v == id {
 			r.order = append(r.order[:i], r.order[i+1:]...)
 			break
 		}
+	}
+	rp.p.bind(nil, "")
+	// The picture moves on when its speaker (or the one before) leaves; the room
+	// forgets its codec when nobody has video.
+	if r.speaker == id {
+		r.speaker = r.prevSpeaker
+		r.prevSpeaker = ""
+	} else if r.prevSpeaker == id {
+		r.prevSpeaker = ""
+	}
+	any := false
+	for _, o := range r.parties {
+		any = any || o.p.vid != nil
+	}
+	if !any {
+		r.vcodec, r.speaker, r.prevSpeaker = "", "", ""
 	}
 }
 
@@ -233,6 +264,7 @@ func (r *Room) tick() {
 			break
 		}
 	}
+	r.pickSpeakerLocked(in, time.Now())
 	frames := MixFrames(in, outs, MixFrame)
 	var full []int16
 	if tap != nil && admitted {

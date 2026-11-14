@@ -205,3 +205,13 @@
     opacity: 0;
   }
 }
+
+.sp-rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--az-bad, #c0392b);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}

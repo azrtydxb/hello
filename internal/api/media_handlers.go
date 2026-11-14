@@ -66,6 +66,17 @@ func (s *server) listRecordings(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "list recordings", err)
 		return
 	}
+	corr := make([]string, len(rs))
+	for i, rec := range rs {
+		corr[i] = rec.CorrelationID
+	}
+	if with, err := s.Store.RecordingsWithVideo(r.Context(), corr); err != nil {
+		s.Log.Warn("media: which recordings have video", "error", err)
+	} else {
+		for i := range rs {
+			rs[i].Video = with[rs[i].CorrelationID]
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": rs, "next": next})
 }
 
@@ -77,10 +88,29 @@ func (s *server) deleteRecording(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	rec, err := s.Store.GetRecording(r.Context(), id)
+	if err != nil {
+		s.configError(w, "recording", err)
+		return
+	}
 	object, err := s.Store.DeleteRecording(r.Context(), actor(r).String(), id)
 	if err != nil {
 		s.configError(w, "recording", err)
 		return
+	}
+	// The call's video goes with it: rows first, then the objects (a failed
+	// removal is logged; hello-control's purge never sees the rows again, so
+	// an orphaned object harms nothing but space).
+	if streams, err := s.Store.DeleteVideoStreamsOf(r.Context(), rec.CorrelationID); err != nil {
+		s.Log.Warn("media: delete recording video rows", "error", err)
+	} else if s.Objects != nil {
+		for _, v := range streams {
+			for _, o := range videoStreamObjects(v) {
+				if err := s.Objects.RemoveRecording(r.Context(), o); err != nil {
+					s.Log.Warn("media: remove recording video", "error", err)
+				}
+			}
+		}
 	}
 	if s.Objects != nil && object != "" {
 		if err := s.Objects.RemoveRecording(r.Context(), object); err != nil {
