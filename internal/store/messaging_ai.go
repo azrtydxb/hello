@@ -192,7 +192,7 @@ func (s *Store) RevertConversationAI(ctx context.Context, acc InboxAccess, convI
 func queueAITriage(ctx context.Context, tx *sql.Tx, convID, addressID, msgID int64) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO ai_message_runs (message_id, conversation_id, kind)
-		SELECT $1, $2, 'triage' FROM msg_addresses a JOIN msg_channels ch ON ch.id = a.channel_id, messaging_settings s
+		SELECT $1::bigint, $2::bigint, 'triage' FROM msg_addresses a JOIN msg_channels ch ON ch.id = a.channel_id, messaging_settings s
 		WHERE a.id = $3 AND a.ai_mode <> 'off' AND ch.ai_enabled AND s.ai_enabled
 		ON CONFLICT (message_id, kind) DO NOTHING`, msgID, convID, addressID)
 	return err
