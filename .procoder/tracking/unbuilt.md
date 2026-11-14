@@ -141,6 +141,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 1   | Media foundation (pion)                     | done (#324, #341)            |
 | 2   | WSS on Kamailio                             | done (#326)                  |
 | 2b  | Kamailio to hello-sip TLS hop (S-12)        | done (#340)                  |
+| 2c  | Browsers on kw: WSS, TLS hop, WebRTC media  | wip (#334, held)             |
 | 3   | Web devices and credentials                 | wip (#282)                   |
 | 4   | coturn, ICE servers                         | wip (#282)                   |
 | 5   | Web softphone, audio                        | wip (#343)                   |
@@ -228,4 +229,4 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - Telnyx and Twilio accounts, messaging item 6 (docs/inbox.md, "Sending through Telnyx", "Sender registration"): a real Telnyx send, delivery receipt and the 40300 STOP block; the field names of Telnyx's 10DLC, campaign-assignment and toll-free reads and of Twilio's UsAppToPerson and Tollfree reads; what a limited key answers for each registration read; a Twilio account with several Messaging Services; a US long code and a toll-free number in each state (approved, pending, rejected, unregistered)
 - Clients 5 and 6: a real browser (Chrome, Edge, Firefox, Safari) calling a G.711 desk phone, a G.722 phone and another browser on the LAN; H.264 and VP8 between browsers with and without hardware encoding and the REMB fallback's quality; DTLS re-handshake and ICE restart on a re-INVITE; a Playwright run with Chromium fake media devices through the lab stack; video capacity per node (the number behind `HELLO_VIDEO_MAX_SESSIONS`)
 - Teams Direct Routing run (item 13, P22): a Microsoft 365 tenant with Teams Phone, a certified SBC or DRaaS contract, and a public SBC name and certificate; the cmdlet steps in docs/teams.md are unverified until then
-- WSS in a browser through the kw Ingress (item 2): needs the kw manifests, the image with the websocket module and a real browser
+- WSS in a browser through the kw Ingress (items 2 and 2c): the kw manifests are in #334 (held); after it deploys, a real browser registering at wss://hello.kw.watteel.lab/sip and calling a desk phone, a `hello_tls` entry in Kamailio's metrics, and whether Kamailio sees ingress-nginx's pod address (10.42.x) so its X-Forwarded-For is believed

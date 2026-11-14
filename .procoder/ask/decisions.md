@@ -3555,6 +3555,83 @@ Decided while building, without asking, within the spec and the brief:
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
 
+## kw manifests for fax, coturn and the door camera allow-list (2026-11-13, deploy/kw-fax-coturn-door)
+
+Draft PR "HOLD: kw manifests (deploy when unpaused)": merging to main deploys through Sync, and deploys are paused (registry 503), so it stays a draft until the operator resumes them.
+
+- **hello-fax (#273)**: `kw/fax.yaml`, a Deployment and a ClusterIP Service on 8083, no Ingress. hello-sip-1/2 and hello-control get `HELLO_FAX_ENABLED`, `HELLO_FAX_ADDR=hello-fax.hello.svc.cluster.local:8083` and `HELLO_FAX_TOKEN`. The token is a new sops Secret `hello-fax` (`faxToken`, random), shared by the three callers and the engine.
+- **coturn (#282)**: `kw/coturn.yaml`, `coturn-1` on master-11 (192.168.10.101) and `coturn-2` on master-12 (192.168.10.102), host-networked, Recreate, one replica each, UDP/TCP 3478, TLS 5349 and relay 49152-49999/UDP, the chart's own settings. TLS is a cert-manager Certificate `hello-coturn-tls` from cluster-ca with both addresses as IP SANs. The secret is a new sops Secret `hello-coturn` (`turnSecret`, random), read by both coturn pods and hello-control, so `hello-app` (whose private key would be needed to edit it) is untouched. hello-control gets `HELLO_TURN_URLS` for both servers (UDP, TCP, TLS) and `HELLO_TURN_SECRET`.
+- **`TURN_ALLOWED_PEERS` is 192.168.10.101-192.168.10.108**, every node that can run a hello-sip (master-11 to master-13, worker-21 to worker-25): the two hello-sip Deployments are host-networked but not pinned, and their media address is the node's. Wider than today's two nodes; pinning hello-sip would narrow it. Earlier draft values (scratchpad coturn-values.yaml) were lost with the scratchpad, so these follow the chart's defaults and the cluster's node list.
+- **Not enabled here:** web devices themselves. They need `clientAuthKey` (`HELLO_CLIENT_AUTH_KEY` on hello-control and hello-sip), which the brief did not ask for; coturn and the ICE-server route are deployed without it.
+- **`HELLO_DOOR_CAMERA_ALLOW=192.168.10.0/24`** on hello-control (#285, still open: its config reads the variable and an older binary ignores it). 192.168.10.0/24 is the LAN of the nodes and the phones; narrow it if the cameras sit on a smaller network.
+- **Image tags** of hello-fax and coturn are `sha-<the main commit these files were written at>`; ci.yaml publishes them on push to main. They must be re-pinned to the tags of the release commit when deploys resume (kw has no earlier pin for either).
+- **Test:** `TestChartEnvParityWithKw` renders the chart with fax and coturn on so kw and chart agree; `HELLO_DOOR_CAMERA_ALLOW` is listed as kw-only (the chart sets it through `control.extraEnv`). `TestKwCoturn` and `TestKwFax` pin the manifests.
+- **Validated** with `kubectl --context kw apply --dry-run=server` (the whole rendered set, server-side, field manager kuvryn-sync): every object accepted; the private render was deleted afterwards.
+
+## kw: HELLO_CLIENT_AUTH_KEY for browser softphones (decided: add)
+
+The user decided to add the web-device key to the held kw change (#334). It supersedes the earlier note that web devices stay off.
+
+- A new sops Secret `hello-client-auth` (`clientAuthKey`, `openssl rand -base64 48`, generated straight into the encrypted file and never printed) is read as `HELLO_CLIENT_AUTH_KEY` by hello-control and by hello-sip-1 and hello-sip-2, the same key on all three, because hello-control issues the derived credentials and hello-sip checks them.
+- `HELLO_CLIENT_AUTH_KEY_PREVIOUS` is not set; rotation will add it (docs/webrtc.md).
+- Web devices still need the WSS edge to register (`HELLO_WSS_URL`), which is not part of this; the key and TURN servers are ready for it.
+- #334 stays a HOLD draft; nothing here deploys until it is merged.
+
+## Browsers on kw: TLS hop or cleartext hop (2026-11-14)
+
+- #340 refuses a WebRTC (browser) call whose signalling reached hello-sip over
+  the cleartext UDP hop from Kamailio, unless
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP=true`. kw runs with WSS and the TLS
+  hop off, so the web softphone (#343) cannot call there until one is chosen:
+  turn on the TLS hop for kw (`KAMAILIO_HELLO_TLS_PORT`, hello-sip
+  `HELLO_SIP_TLS_ADDR`, the Hello CA certificate for both) together with WSS,
+  or turn on WSS and allow the cleartext hop (the hop is node-to-node on the
+  kw LAN).
+- The user chose WSS + the TLS hop (2026-11-14). #334 turns on both for kw,
+  with a Hello-CA certificate for Kamailio and hello-sip.
+- Implementation (#334, kw manifests; docs/webrtc.md, "Browsers on kw"):
+  - Kamailio: `KAMAILIO_WSS_PORT=8088`, `KAMAILIO_WS_ORIGINS=https://hello.kw.watteel.lab`,
+    `KAMAILIO_WSS_TRUSTED_PROXIES=^10[.]42[.]`, `KAMAILIO_HELLO_TLS_PORT=5073`,
+    `KAMAILIO_HELLO_SIP_TLS_PORT=5061`; ports `wss` and `hello-tls`; dispatcher
+    set 2 for hello-sip-1 and hello-sip-2; checksum annotation updated.
+    kamailio.cfg, tls-hop.cfg and the kamailio image (kc-5f94d2b0d090316a
+    already has the websocket and tls modules) are unchanged.
+  - Trusted proxies: ingress-nginx is one pod in kw's pod network (not
+    host-networked; Cilium tunnel mode), so the regular expression is the pod
+    CIDR 10.42.0.0/16. If Kamailio sees a node address instead, X-Forwarded-For
+    is not believed and every browser shares the ingress's throttle key (safe;
+    checked after deploy, tracker hardware list).
+  - Browser path: Service and Ingress `kamailio-ws`, `/sip` (Exact) on
+    hello.kw.watteel.lab, the console's `hello-tls`, backend HTTPS, one-hour
+    timeouts, no cluster-issuer annotation (the Ingress `hello` owns
+    hello-tls). `HELLO_WSS_URL=wss://hello.kw.watteel.lab/sip` on hello-control.
+  - hello-sip-1/-2: `HELLO_SIP_TLS_ADDR=:5061` and `_CERT/_KEY/_CA` at
+    /etc/hello-sip-tls, port `sip-tls` (also on the headless Services),
+    `fsGroup: 65532`, and WebRTC media on (`HELLO_MEDIA_WEBRTC_ENABLED`, port
+    21100, `ALLOW_CLEARTEXT_HOP=false`): without it the anchor would refuse
+    browser legs.
+  - Certificates from the existing `cluster-ca` ClusterIssuer (the Hello CA
+    phones and the console's browsers already trust; its Secrets carry
+    ca.crt), no new issuer. `hello-edge-tls` (Kamailio, on every TLS socket as
+    tls-hop.cfg requires, so WSS and the hop share it): IP SANs
+    192.168.10.101, .102 and the VIP .109, the two DNS names, server and
+    client auth. `hello-sip-node-tls` (both nodes): hello-sip-N,
+    hello-sip-N.hello.svc and hello-sip-N.hello.svc.cluster.local, server and
+    client auth. It replaces `hello-sip-tls` (server auth, .101 only) under a
+    new name, and Kamailio's volume is no longer optional, so a new Kamailio
+    pod waits for the new certificate instead of racing cert-manager's
+    reissue of the old Secret. The go-live patch is regenerated for it.
+  - Chart bug fixed: the hello-sip StatefulSet mounted its TLS Secret 0440
+    with no fsGroup, so the image's user 65532 could not read the key; it now
+    gets `fsGroup: 65532` with `sip.tls.enabled` (TestChartTLSHop).
+  - Tests: TestKwBrowsers; TestChartEnvParityWithKw renders WSS, the hop and
+    WebRTC media.
+  - Renewal: Kamailio reads its certificate at start, so it must restart
+    within 30 days of a renewal (docs/tls.md); hello-sip re-reads its own.
+  - hello-fax and coturn are re-pinned to sha-cb5b6da6f7a705e381227870d3133ea566382e42
+    (main's #343 merge, whose publish built both); the other images keep
+    main's pins.
+
 ## TLS hop from Kamailio to hello-sip (2026-11-13)
 
 - S-12 is opt-in at both ends: `KAMAILIO_HELLO_TLS_PORT` on Kamailio and

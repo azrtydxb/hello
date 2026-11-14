@@ -83,6 +83,12 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       {{- end }}
       terminationGracePeriodSeconds: {{ $sip.terminationGracePeriodSeconds }}
+      {{- if $sip.tls.enabled }}
+      securityContext:
+        # The image's user (65532) reads the TLS hop's key: the Secret's
+        # files are 0440, group-owned by fsGroup.
+        fsGroup: 65532
+      {{- end }}
       {{- if ne $sip.antiAffinity "none" }}
       affinity:
         {{- if eq $sip.antiAffinity "required" }}

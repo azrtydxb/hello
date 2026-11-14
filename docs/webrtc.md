@@ -222,8 +222,9 @@ with it off Kamailio and hello-sip behave exactly as before.
   `kamailio.tls.secretName` for Kamailio's own certificate. Both are off by
   default; the chart refuses one without the other's prerequisites. In
   Kamailio it is `KAMAILIO_HELLO_TLS_PORT` and `KAMAILIO_HELLO_SIP_TLS_PORT`.
-  The kw manifests do not set them: turning the hop on there is a manifest
-  change together with the certificate. With `kamailio.wss.enabled` too, WSS
+  kw turns it on ([Browsers on kw](#browsers-on-kw)). The chart's hello-sip
+  pod gets `fsGroup: 65532` with `sip.tls.enabled`, so the image's user can
+  read the 0440 key. With `kamailio.wss.enabled` too, WSS
   presents the same certificate (`tls-hop.cfg` serves one on every TLS
   socket), so `kamailio.wss.secretName` must be empty or equal to
   `kamailio.tls.secretName`; the chart refuses anything else.
@@ -254,6 +255,44 @@ with it off Kamailio and hello-sip behave exactly as before.
   TLS, Kamailio counts Hello's INVITE to the phone on `hello_tls` and the
   phone's connection receives it, and stopping a node marks only its TLS
   destination down through the TLS probes.
+
+## Browsers on kw
+
+kw serves the web softphone with WSS and the TLS hop on
+(`deploy/kuvryn-sync/kw/resources.yaml`); the cleartext-hop escape stays off.
+
+- **Kamailio.** `KAMAILIO_WSS_PORT=8088`, `KAMAILIO_WS_ORIGINS=https://hello.kw.watteel.lab`,
+  `KAMAILIO_WSS_TRUSTED_PROXIES=^10[.]42[.]` (ingress-nginx runs in kw's pod
+  network, 10.42.0.0/16, not on the host network), `KAMAILIO_HELLO_TLS_PORT=5073`
+  and `KAMAILIO_HELLO_SIP_TLS_PORT=5061`, with the `wss` and `hello-tls`
+  container ports. Both bind the node address of master-11 and master-12. The
+  ConfigMap's dispatcher list has set 2 (`hello-sip-1` and `hello-sip-2` on
+  5061 over TLS from `hello_tls`).
+- **Browser path.** The Ingress `kamailio-ws` publishes `/sip` on
+  `hello.kw.watteel.lab` with the console's certificate (`hello-tls`) and
+  forwards to the Service `kamailio-ws` (port `wss`), whose endpoints are the
+  two node addresses on 8088. ingress-nginx speaks TLS to Kamailio and does not
+  verify it. `HELLO_WSS_URL=wss://hello.kw.watteel.lab/sip` on hello-control.
+- **hello-sip.** `HELLO_SIP_TLS_ADDR=:5061` (TCP 5061 on whichever node the
+  pod runs), the certificate at `/etc/hello-sip-tls`, `fsGroup: 65532`, and
+  WebRTC media on (`HELLO_MEDIA_WEBRTC_ENABLED`, UDP 21100 on the node,
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP=false`).
+- **Certificates.** Both come from `cluster-ca`, the CA phones and browsers of
+  kw already trust, so each side verifies the other with the `ca.crt` of its
+  own Secret. `hello-edge-tls` is Kamailio's (WSS, `hello_tls`, its client
+  certificate on the hop, and SIP over TLS for phones later): IP SANs
+  192.168.10.101, 192.168.10.102 (the addresses hello-sip dials) and the VIP
+  192.168.10.109. `hello-sip-node-tls` is the nodes' (the `hello-sip-N`
+  Service names Kamailio dials). Both are server and client certificates.
+  Kamailio's volume is not optional, so a new pod waits for its certificate.
+- **Ports.** Only the ingress controller should reach 8088, and only the
+  Kamailio nodes 5061 on the hello-sip nodes: restrict them with a host
+  firewall or Cilium host policy (the manifests cannot, for host-networked
+  pods). Browsers reach UDP 21100 on the hello-sip node, or relay through
+  coturn.
+- **Rollout.** Kamailio and both hello-sip nodes restart. Until a hello-sip
+  node's TLS listener is up, its set 2 entry is probed down and only browser
+  legs avoid it; UDP phones keep using set 1.
 
 ## The web softphone
 
