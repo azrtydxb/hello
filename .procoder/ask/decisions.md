@@ -3355,3 +3355,16 @@ The user decided to add the web-device key to the held kw change (#334). It supe
 - `HELLO_CLIENT_AUTH_KEY_PREVIOUS` is not set; rotation will add it (docs/webrtc.md).
 - Web devices still need the WSS edge to register (`HELLO_WSS_URL`), which is not part of this; the key and TURN servers are ready for it.
 - #334 stays a HOLD draft; nothing here deploys until it is merged.
+
+## Browsers on kw: TLS hop or cleartext hop (2026-11-14)
+
+- #340 refuses a WebRTC (browser) call whose signalling reached hello-sip over
+  the cleartext UDP hop from Kamailio, unless
+  `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP=true`. kw runs with WSS and the TLS
+  hop off, so the web softphone (#343) cannot call there until one is chosen:
+  turn on the TLS hop for kw (`KAMAILIO_HELLO_TLS_PORT`, hello-sip
+  `HELLO_SIP_TLS_ADDR`, the Hello CA certificate for both) together with WSS,
+  or turn on WSS and allow the cleartext hop (the hop is node-to-node on the
+  kw LAN).
+- The user chose WSS + the TLS hop (2026-11-14). #334 turns on both for kw,
+  with a Hello-CA certificate for Kamailio and hello-sip.
