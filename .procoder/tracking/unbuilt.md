@@ -195,7 +195,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                                                                                      | Status                |
 | --------------------------------------------------------------------------------------------------------- | --------------------- |
-| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-68e9658)    |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-cb5b6da)    |
 | MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
 | Transfer-to-voicemail phone key                                                                           | done (#200)           |
