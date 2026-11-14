@@ -125,10 +125,10 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | #     | Item                                                         | Status      |
 | ----- | ------------------------------------------------------------ | ----------- |
 | 1     | Inbox core                                                   | done (#211) |
-| 2     | Twilio sending                                               | todo        |
-| 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | in review   |
-| 4     | LAN chat widget                                              | todo        |
-| 5     | Message routing and ACD                                      | todo        |
+| 2     | Twilio sending                                               | done (#305) |
+| 3     | Desk-phone texting and SIP-trunk channel into inbox, partial | done (#307) |
+| 4     | LAN chat widget                                              | done (#309) |
+| 5     | Message routing and ACD                                      | done (#311) |
 | 6     | Telnyx, sender registration                                  | wip (#346)  |
 | 7     | AI triage, drafts, auto-reply                                | todo        |
 | 8     | Integrations, reporting, DSAR export, redact                 | todo        |
@@ -193,7 +193,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                                                                                      | Status                |
 | --------------------------------------------------------------------------------------------------------- | --------------------- |
-| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-f1d7e1e)    |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-3514782)    |
 | MCP skills, JSON bodies (#189)                                                                            | done (#189)           |
 | Ring-group voicemail box (#194, deploy pending)                                                           | done (#194)           |
 | Transfer-to-voicemail phone key                                                                           | done (#200)           |

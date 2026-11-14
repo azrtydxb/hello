@@ -13,18 +13,23 @@ This is the first phase of the messaging channels. What works now:
   carrier as supported);
 - the inbox for supervisors and agents, with assignment by hand and claiming,
   notes, tags, states, search, live updates and notifications;
-- Hello's own opt-out handling, retention and erasing a customer.
-
+- routing: a number sends its conversations to a queue, a user, an extension's
+  user, a ring group's users or the pool, with opening hours, and a text queue
+  hands them to its agents by the queue's strategy (see
+  [Routing and queues](#routing-and-queues));
+- Hello's own opt-out handling, retention and erasing a customer;
 - sending SMS through a **Twilio** or **Telnyx** account (see "Sending through
   Twilio", "Sending through Telnyx"): outbound only;
 - reading the state of your US **sender registration** (A2P 10DLC brand and
   campaign, toll-free verification) from the carrier (see "Sender
-  registration").
+  registration");
+- a website chat widget for intranet pages and VPN users, served on the LAN only
+  (see "Website chat" below).
 
 Not yet: receiving texts from a carrier's web API (needs an Internet-facing
-address), WhatsApp, the chat widget, texts on desk phones, queues and
-automatic assignment, and AI. None of the providers that need an
-Internet-facing address is possible while Hello is reachable only on the LAN.
+address), WhatsApp, and AI. None of the providers that need an
+Internet-facing address is possible while Hello is reachable only on the LAN,
+and neither is a widget on a public website.
 
 ## Setting it up
 
@@ -201,8 +206,8 @@ text on a **resolved** conversation reopens it if it was resolved less than
 are open, pending (waiting on the customer), snoozed (until a time), resolved
 and spam.
 
-New conversations arrive **unassigned**: every operator and administrator sees
-them in the pool. Anyone who may see one can **take** it (claim). A claim is a
+New conversations arrive **unassigned** unless the number routes them
+elsewhere (below): every operator and administrator sees them in the pool. Anyone who may see one can **take** it (claim). A claim is a
 compare-and-set in PostgreSQL, so two agents, or two control pods, cannot both
 win: the second gets `409`. **Replying** to an unassigned conversation takes it,
 and replying to a resolved one reopens it. A supervisor can assign any
@@ -287,6 +292,75 @@ Only Grandstream is known to show SIP MESSAGE on the handset (P22650 in the
 built-in template); other vendors are off until a lab check. A user whose phones
 are all of such vendors does not see the profile switch.
 
+## Routing and queues
+
+**Where a number's new conversations go** is set per number (Messaging >
+Channels > Routing, or `PUT /api/v1/messaging/addresses/{id}/routing`):
+
+| Route        | What happens                                                                                               |
+| ------------ | ---------------------------------------------------------------------------------------------------------- |
+| Pool (inbox) | Unassigned; every operator and administrator sees it. The default.                                         |
+| Queue        | The queue's strategy picks an agent (below).                                                               |
+| User         | Assigned to that user.                                                                                     |
+| Extension    | Assigned to the user the extension is linked to.                                                           |
+| Ring group   | A shared pool of the users of the group's extensions: it stays unassigned and the first to reply takes it. |
+
+A target that is deleted, disabled or cannot take conversations (a queue that
+stopped taking texts, an extension nobody is linked to) sends the conversation
+to the pool instead; nothing is lost. Routing is by the number, not the channel:
+every channel that merges later is routed the same way. A conversation is placed
+once, when it starts; a reopened one keeps where it was.
+
+**First contact.** A number may have a first-contact text, sent once to a
+customer who texts it for the first time (never again to the same customer on
+that number, never to one who opted out, and not in addition to the
+closed-hours reply). Like the closed-hours reply it is sent by a SIP trunk
+channel only today.
+
+**Opening hours.** A number may have a weekly schedule (a time zone and
+windows). A conversation that starts outside it gets the **after-hours action**:
+route as usual (the default), send a reply text and then route as usual, or go
+to another target. The reply is sent once, never to a customer who opted out,
+and only a SIP trunk channel can send it today (another channel's conversation
+gets a line in the thread saying it was not sent). The time-conditions engine
+is not used for texts; the number's own schedule is.
+
+**Text queues.** On a queue (Queues > the queue), **Texts** turns it on and sets
+how many open conversations each agent holds (default 3, 1 to 50), after how
+many seconds an unanswered conversation returns (default 300, 0 never) and
+whether an agent on a call is offered none. Existing call queues are unchanged.
+The queue's members are its agents: a member whose extension is linked to a
+user. An agent is offered a conversation when they are **staffed** (a static
+member always; a dynamic member when logged in), not paused, under their limit
+and, if the queue says so, not on a call. This is the call queues' own login
+and pause state, in Valkey: an agent logs in and pauses in the inbox (or with
+the feature codes), and it counts for calls and texts alike. The strategies
+are `queue.Plan`'s (`longest_idle`, `fewest_calls`, `round_robin`, `random`,
+`linear`, with penalties), fed with the number of text conversations the queue
+gave each agent and when; `ring_all` means a shared pool, as above.
+
+A conversation nobody can take waits in the queue, oldest first, and is given
+to an agent as one becomes free (logs in, resumes, resolves one). One an agent
+leaves unanswered for the queue's time returns to the queue and is offered to
+the next agent, not the one who let it lapse; if nobody else can take it, it
+waits and the members can still claim it. A conversation a person assigned or
+took is never taken back. If an agent's extension is unlinked or they leave the
+queue, their conversations return to the queue. Turning a queue's texting off
+sends its unassigned conversations to the pool; a queue that a number routes to
+or that holds an open conversation cannot be deleted (`409`).
+
+Who sees what: a queue's members (and a ring group's users) see the unassigned
+conversations waiting in it and can claim them; nobody else sees them. Operators
+and administrators open **Messaging > Text queues** (`GET /api/v1/inbox/queues`)
+to see each queue's waiting list (position and waiting time, no text or number),
+its agents with their state and open conversations.
+
+The router runs on every control replica every 2 seconds. It claims rows with
+`SKIP LOCKED`, assigns by compare-and-set while counting the agent's open
+conversations under a per-agent advisory lock, and keeps nothing in memory, so
+two pods never assign a conversation twice or give an agent more than the
+limit. If Valkey cannot be read it assigns to static members only.
+
 ## Opt-out (STOP)
 
 Hello handles opt-out itself, whatever the carrier does:
@@ -352,22 +426,131 @@ The page also:
   number**. It needs SMTP ([user-accounts.md](user-accounts.md)); the switch is
   in the settings.
 
+## Website chat
+
+A chat site is a widget an administrator embeds on **intranet pages** (or pages
+reached over a VPN). Visitors are anonymous; their chat arrives in the inbox as
+a conversation, and agents answer it there. It is **LAN only**: the public
+widget needs the public listener, which is not built.
+
+### Turning it on
+
+1. Set `HELLO_MSG_CHAT_LAN_ADDR` (for example `:8087`) on hello-control. Unset,
+   nothing listens and there is no extra port. Helm: `control.chat.lanAddr`.
+   `HELLO_MSG_CHAT_ENABLED=false` is the global kill switch (every `/chat`
+   request answers 503); `HELLO_MSG_CHAT_TRUSTED_PROXIES` lists the proxies whose
+   `X-Forwarded-For` is believed (the UI pods and the ingress controller; without
+   them every visitor shares one address and one set of limits);
+   `HELLO_MSG_CHAT_MAX_INFLIGHT` (500) and `HELLO_MSG_CHAT_MAX_STREAMS` (2000) bound
+   a pod.
+2. The listener has its own `http.Server` and serves only `/chat/*` and
+   `/healthz`; the admin API, the UI, OAuth and MCP are not routed on it. The
+   UI container proxies `/chat/` to it (`HELLO_CHAT_UPSTREAM`), so the widget is
+   on the same LAN host as the console; the Helm chart sets this when the
+   listener is on.
+3. **Messaging, Chat sites**: add a site, list the intranet origins that may
+   embed it (`scheme://host[:port]`), and copy the embed code:
+
+   ```html
+   <script
+     async
+     src="https://hello.lan/chat/v1/widget.js"
+     data-site="SITE_KEY"
+   ></script>
+   ```
+
+   The loader injects a sandboxed iframe on Hello's own origin, so the page's
+   scripts and styles can neither read nor break the chat. The frame is served
+   with `frame-ancestors` set to the site's allowed origins (`'none'` until
+   some are listed) and `default-src 'none'; script-src 'self'; style-src
+'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none';
+form-action 'none'`. A Turnstile site also allows Cloudflare's host for
+   scripts and frames, which its widget needs.
+
+### What a visitor sees
+
+A launcher bubble, an optional pre-chat form (name and email: off, optional or
+required; the retention period and a privacy policy link are shown, and
+consent is recorded), the conversation, a typing indicator and "Support"
+as the agents' name. Outside the site's opening hours, with no supervisor
+holding the inbox open, or with the live queue full, the widget offers to leave
+a message and an email address (or hides itself, per site). A visitor may end
+the chat and, when the site allows it, email themselves a transcript (three a
+day). Messages are plain text everywhere; a link in a visitor's message is
+clickable only in the inbox, with `rel="noopener noreferrer nofollow"` and one
+confirmation per host before it leaves Hello.
+
+### What an agent does
+
+The conversation is an ordinary inbox conversation (peer kind visitor) with the
+visitor's name, email, the page the chat started on and a coarse browser
+family. An agent can **block the visitor** (24 hours by default, 30 days at
+most; the day's network address too), **answer an offline chat by email** (the
+reply and no link are emailed to the address the visitor gave and kept in the
+conversation; the visitor sees it in the widget when they return; needs SMTP),
+and the visitor sees when an agent is typing and when their messages were read.
+
+### Abuse controls
+
+All of them are server-side and none trusts the `Origin` header (anyone can run
+`curl`):
+
+- **Challenge** at session creation: a stateless proof of work (default, 14 to
+  22 bits, no third party), Cloudflare Turnstile with the customer's own keys, or
+  none (the page warns). A solved nonce works once, only for the address it was
+  issued to, and expires in three minutes. The difficulty rises one level for 15
+  minutes while a site gets more than three times its usual session rate
+  (`hello_chat_challenge_raised_total`).
+- **Limits** (Valkey, with the same windows per pod in memory when Valkey does
+  not answer; never open): sessions 5 a minute and 30 an hour per address and 200
+  a minute per site; messages 20 a minute and 300 a day per visitor and 10,000 a
+  day per site; typing, history, event streams and transcripts have their own.
+  Over a limit the answer is `429` with `Retry-After` and no body.
+- **Caps**: 2000 characters a message (valid UTF-8, control and invisible
+  formatting characters removed, normalised), 16 KiB a request, one open
+  conversation per visitor, 200 messages before any agent reply, and the live
+  queue cap per site. A pod answers 503 beyond 500 requests in flight; each
+  request has a 10 second deadline; a pod holds at most 2000 event streams.
+- **Blocklist**: a blocked visitor gets a normal-looking `200` with a closed
+  state and reaches nobody. Addresses are only ever kept as an HMAC under a salt
+  that changes at 00:00 UTC.
+- **Content**: honeypot field, optional link stripping, no cookies, no
+  fingerprinting, the user agent reduced to a browser family, the page to host
+  and path.
+- **Not built**: attachments and the site logo (they need the media pipeline,
+  which is not on main).
+
+Visitors' names, emails, tokens, addresses and text never reach a log, a metric
+label or an audit row. Retention for finished chats is 90 days by default (a
+site can set its own); visitors with no chat left are removed after 30 days;
+erasing `visitor:<id>` removes the visitor's whole record.
+
+Metrics: `hello_chat_sessions_total{result}`, `hello_chat_messages_total{result}`,
+`hello_chat_rate_limited_total{rule}`, `hello_chat_challenge_raised_total`,
+`hello_chat_rejected_total{reason}` and `hello_chat_streams`.
+
 ## API
 
-| Route                                                                | Role and scope        |
-| -------------------------------------------------------------------- | --------------------- |
-| `/api/v1/messaging/channels` (+ `/{id}`, `/{id}/test`)               | admin, `admin`        |
-| `/api/v1/messaging/addresses` (+ `/{id}`)                            | admin, `admin`        |
-| `/api/v1/messaging/settings`                                         | admin, `admin`        |
-| `/api/v1/messaging/optouts` (+ `/{id}/reconsent`)                    | admin, `admin`        |
-| `POST /api/v1/inbox/erase`                                           | admin, `admin`        |
-| `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`              | operator, `messages`  |
-| `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream` | any agent, `messages` |
-| `POST .../conversations/{id}/contact` (add to contacts)              | as the area it is in  |
-| `GET .../conversations/{id}/calls` (the number's recent calls)       | as the area it is in  |
+| Route                                                                                     | Role and scope                |
+| ----------------------------------------------------------------------------------------- | ----------------------------- |
+| `/api/v1/messaging/channels` (+ `/{id}`, `/{id}/test`)                                    | admin, `admin`                |
+| `/api/v1/messaging/addresses` (+ `/{id}`, `/{id}/routing`)                                | admin, `admin`                |
+| `/api/v1/messaging/settings`                                                              | admin, `admin`                |
+| `/api/v1/messaging/optouts` (+ `/{id}/reconsent`)                                         | admin, `admin`                |
+| `POST /api/v1/inbox/erase`                                                                | admin, `admin`                |
+| `/api/v1/messaging/chat/sites` (+ `/{id}`, `/{id}/blocks`), `/chat/blocks/{id}`           | admin, `admin`                |
+| `/api/v1/inbox/conversations/{id}/block`, `/email-reply`, `/typing` (and `/me/inbox/...`) | operator or agent, `messages` |
+| `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`, `/api/v1/inbox/queues`           | operator, `messages`          |
+| `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream`                      | any agent, `messages`         |
+| `/api/v1/me/inbox/agent` (GET, POST: log in, pause)                                       | any agent, `messages`         |
+| `POST .../conversations/{id}/contact` (add to contacts)                                   | as the area it is in          |
+| `GET .../conversations/{id}/calls` (the number's recent calls)                            | as the area it is in          |
+
+Queues take `textEnabled`, `textCapacity`, `textReassignSeconds` and
+`textRequiresIdleVoice`.
 
 Conversations list with `view` (`all`, `mine`, `unassigned`), `status`, `q`
-(number, name or text), `channelId`, and a cursor. Every operation is in
+(number, name or text), `channelId`, `queueId`, and a cursor. Every operation is in
 [the OpenAPI document](../internal/api/openapi.json).
 
 ## Metrics
@@ -375,8 +558,11 @@ Conversations list with `view` (`all`, `mine`, `unassigned`), `status`, `q`
 `hello_msg_inbound_total{provider,result}` (stored, duplicate, not_text,
 failed), `hello_msg_device_replies_total{result}` (sent, refused, failed: texts typed on
 a desk phone), `hello_msg_optout_total{source}`, `hello_msg_purged_total{kind}`,
-`hello_msg_unassigned` and `hello_msg_unassigned_oldest_seconds`. No label
-carries a number, a name or text.
+`hello_msg_unassigned` and `hello_msg_unassigned_oldest_seconds`, and for
+routing `hello_msg_assign_total{result}` (placed, assigned, full, lost,
+returned, after_hours_reply), `hello_msg_first_response_seconds`,
+`hello_msg_queue_text_waiting{queue}` and `hello_msg_assign_live_down_total`.
+No label carries a number, a name or text.
 
 ## HA
 
@@ -385,7 +571,9 @@ one transaction (an event ledger makes a delivery seen once, on any pod; one ope
 conversation per number and customer is made under a unique index), claims and
 assignments are compare-and-set, retention and notification claims use
 `SKIP LOCKED` or a Valkey lease. Nothing is held only in memory, so a pod
-restart loses nothing. Valkey is not needed for the inbox.
+restart loses nothing. Valkey is not needed to receive and answer texts; it
+holds the agents' login and pause, and without it assignment falls back to
+static queue members.
 
 ## Lab checklist (real carrier)
 

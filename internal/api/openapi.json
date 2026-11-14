@@ -1053,7 +1053,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The change would leave no admin (last_admin), disable the caller (self_disable) or take an extension another user has",
+            "description": "The change would leave no admin (last_admin), disable the caller (self_disable), take an extension another user has, or touch a field the user's directory connector manages (managed_by_directory; a directory user also has no local password)",
             "content": {
               "application/json": {
                 "schema": {
@@ -15163,6 +15163,109 @@
         }
       }
     },
+    "/api/v1/messaging/addresses/{id}/routing": {
+      "get": {
+        "operationId": "getMessagingRouting",
+        "summary": "How a messaging number routes",
+        "description": "Returns where the number's new conversations go (the supervisors' pool, a queue, a user, an extension's user or a ring group's users), its weekly schedule and what it does outside it.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The routing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingRouting"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "put": {
+        "operationId": "updateMessagingRouting",
+        "summary": "Change how a messaging number routes",
+        "description": "Sets where new conversations of the number go and when it is open. A queue must take texts (turn on texting on the queue first), a user must be able to take conversations, an extension must be linked to a user. A target that is deleted or stops being usable later sends new conversations to the pool instead. Fields left out keep their value; a new routeKind needs its routeTarget.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingRoutingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The routing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingRouting"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
     "/api/v1/messaging/settings": {
       "get": {
         "operationId": "getMessagingSettings",
@@ -15520,6 +15623,15 @@
               "format": "int64"
             },
             "description": "Only conversations of this channel."
+          },
+          {
+            "name": "queueId",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Only conversations placed in this text queue."
           },
           {
             "name": "cursor",
@@ -16055,124 +16167,6 @@
         }
       }
     },
-    "/api/v1/me/inbox/conversations/{id}/calls": {
-      "get": {
-        "operationId": "listMyInboxConversationCalls",
-        "summary": "A customer's recent calls",
-        "description": "Lists the most recent calls to or from the conversation's number in which one of the caller's own extensions took part (the rule of the caller's own call history), newest first. A conversation with a chat visitor has no number and so no calls. Numbers match by their last nine digits, so a national and an international form are one number.",
-        "tags": ["inbox"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 50
-            },
-            "description": "How many to return, 1-50; 10 when omitted."
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The most recent calls, newest first. next is always empty.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SelfCallPage"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "x-hello-scope": "messages",
-        "x-hello-role": "user",
-        "x-hello-mcp": {
-          "exclude": "the customer's number and call history are private: they are not exposed to an agent",
-          "category": "private-data"
-        }
-      }
-    },
-    "/api/v1/me/inbox/conversations/{id}/contact": {
-      "post": {
-        "operationId": "addMyInboxContact",
-        "summary": "Add the customer to contacts",
-        "description": "Saves the conversation's number as a contact under the given name and returns the conversation with its refreshed name. It goes into the caller's own personal contacts; a user an administrator has not linked to an extension has none (403). The number is the conversation's; the caller cannot choose another. A personal contact names the number for its owner only, at read time; a company contact is shared and its name is kept on the conversation.",
-        "tags": ["inbox"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InboxContactInput"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The conversation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InboxConversation"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "x-hello-scope": "messages",
-        "x-hello-role": "user",
-        "x-hello-mcp": {
-          "exclude": "customer message content is private: it is not exposed to an agent",
-          "category": "private-data"
-        }
-      }
-    },
     "/api/v1/me/inbox/conversations/{id}/read": {
       "post": {
         "operationId": "readMyInboxConversation",
@@ -16263,6 +16257,723 @@
         }
       }
     },
+    "/api/v1/inbox/queues": {
+      "get": {
+        "operationId": "listInboxQueues",
+        "summary": "The text queues: who waits and who answers",
+        "description": "Lists the queues that take customer texts with the conversations waiting in each (oldest first, ids and waiting times only), the agents with their open conversations and live state, and how long the longest has waited. It carries no customer text and no number.",
+        "tags": ["inbox"],
+        "responses": {
+          "200": {
+            "description": "The queues",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxQueueList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer messaging is private: the waiting list belongs to the inbox, not to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/messaging/chat/sites": {
+      "get": {
+        "operationId": "listChatSites",
+        "summary": "List chat sites",
+        "description": "Lists the sites of the LAN chat widget with their settings and what deserves a second look. The Turnstile secret is never returned.",
+        "tags": ["messaging"],
+        "responses": {
+          "200": {
+            "description": "The sites",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSiteList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      },
+      "post": {
+        "operationId": "createChatSite",
+        "summary": "Add a chat site",
+        "description": "Adds a site: a channel of kind webchat with one address, and the widget's settings. The response carries the public site key the embed code names. Every setting has a default, so only the name is required.",
+        "tags": ["messaging"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatSiteInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSite"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/messaging/chat/sites/{id}": {
+      "get": {
+        "operationId": "getChatSite",
+        "summary": "One chat site",
+        "description": "Returns one chat site by id.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSite"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      },
+      "put": {
+        "operationId": "updateChatSite",
+        "summary": "Change a chat site",
+        "description": "Changes the settings a body names and keeps the rest; the site key never changes. Turning the site off stops new sessions and messages at once.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatSiteInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSite"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteChatSite",
+        "summary": "Delete a chat site",
+        "description": "Deletes a site that has no conversations, with its channel and address. A site with history is refused with 409: retention or an erase request removes the conversations first.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/messaging/chat/sites/{id}/blocks": {
+      "get": {
+        "operationId": "listChatBlocks",
+        "summary": "List a site's visitor blocks",
+        "description": "Lists the blocks of a site that still hold, newest first. A block names a visitor, and a block by the day's address hash lasts at most until 00:00 UTC.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The blocks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatBlockList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/messaging/chat/blocks/{id}": {
+      "delete": {
+        "operationId": "deleteChatBlock",
+        "summary": "Lift a visitor block",
+        "description": "Lifts one block, so the visitor or the address can chat again.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Lifted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/block": {
+      "post": {
+        "operationId": "blockChatVisitor",
+        "summary": "Block a chat visitor",
+        "description": "Blocks the visitor of a website chat for the hours given (24 by default, at most 720) and resolves the conversation. The block also covers their network address for the rest of the UTC day. The visitor is not told: they get a normal-looking closed chat.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatBlockInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The block",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatBlock"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/email-reply": {
+      "post": {
+        "operationId": "emailChatReply",
+        "summary": "Answer an offline chat by email",
+        "description": "Answers a chat that was left while nobody was available: the text is emailed to the address the visitor gave, with no link, and kept in the conversation, and the visitor sees it in the widget when they return. A retried client id sends nothing again. Needs email to be configured.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatEmailInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The earlier reply of this client id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The reply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/typing": {
+      "post": {
+        "operationId": "typeInChat",
+        "summary": "Show that an agent is typing",
+        "description": "Tells the visitor of a website chat that an agent is typing; at most one signal every three seconds reaches them. Anything but a website chat is refused with 409.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Signalled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/block": {
+      "post": {
+        "operationId": "blockChatVisitorMine",
+        "summary": "Block a chat visitor",
+        "description": "Blocks the visitor of a website chat for the hours given (24 by default, at most 720) and resolves the conversation. The block also covers their network address for the rest of the UTC day. The visitor is not told: they get a normal-looking closed chat.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatBlockInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The block",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatBlock"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/email-reply": {
+      "post": {
+        "operationId": "emailChatReplyMine",
+        "summary": "Answer an offline chat by email",
+        "description": "Answers a chat that was left while nobody was available: the text is emailed to the address the visitor gave, with no link, and kept in the conversation, and the visitor sees it in the widget when they return. A retried client id sends nothing again. Needs email to be configured.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatEmailInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The earlier reply of this client id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The reply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/typing": {
+      "post": {
+        "operationId": "typeInChatMine",
+        "summary": "Show that an agent is typing",
+        "description": "Tells the visitor of a website chat that an agent is typing; at most one signal every three seconds reaches them. Anything but a website chat is refused with 409.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Signalled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
     "/api/v1/inbox/stats": {
       "get": {
         "operationId": "getInboxStats",
@@ -16340,6 +17051,15 @@
               "format": "int64"
             },
             "description": "Only conversations of this channel."
+          },
+          {
+            "name": "queueId",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Only conversations placed in this text queue."
           },
           {
             "name": "cursor",
@@ -16933,124 +17653,6 @@
         }
       }
     },
-    "/api/v1/inbox/conversations/{id}/calls": {
-      "get": {
-        "operationId": "listInboxConversationCalls",
-        "summary": "A customer's recent calls",
-        "description": "Lists the most recent calls to or from the conversation's number, whoever took them, newest first. A conversation with a chat visitor has no number and so no calls. Numbers match by their last nine digits, so a national and an international form are one number.",
-        "tags": ["inbox"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 50
-            },
-            "description": "How many to return, 1-50; 10 when omitted."
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The most recent calls, newest first. next is always empty.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SelfCallPage"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "x-hello-scope": "messages",
-        "x-hello-role": "operator",
-        "x-hello-mcp": {
-          "exclude": "the customer's number and call history are private: they are not exposed to an agent",
-          "category": "private-data"
-        }
-      }
-    },
-    "/api/v1/inbox/conversations/{id}/contact": {
-      "post": {
-        "operationId": "addInboxContact",
-        "summary": "Add the customer to contacts",
-        "description": "Saves the conversation's number as a contact under the given name and returns the conversation with its refreshed name. The book is personal (the caller's own contacts, the default) or company (the shared book). The number is the conversation's; the caller cannot choose another. A personal contact names the number for its owner only, at read time; a company contact is shared and its name is kept on the conversation.",
-        "tags": ["inbox"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InboxContactInput"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The conversation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InboxConversation"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        },
-        "x-hello-scope": "messages",
-        "x-hello-role": "operator",
-        "x-hello-mcp": {
-          "exclude": "customer message content is private: it is not exposed to an agent",
-          "category": "private-data"
-        }
-      }
-    },
     "/api/v1/inbox/conversations/{id}/read": {
       "post": {
         "operationId": "readInboxConversation",
@@ -17124,6 +17726,96 @@
         "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/agent": {
+      "get": {
+        "operationId": "getMyInboxAgent",
+        "summary": "The caller's availability for the text queues",
+        "description": "Reads whether the caller answers a text queue (one of their extensions is a member) and their login and pause state, which is the call queues' own: one login and one pause per extension. Someone who answers no text queue gets member false.",
+        "tags": ["inbox"],
+        "responses": {
+          "200": {
+            "description": "The availability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxAgentState"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer messaging is private: availability for texts is set from the inbox",
+          "category": "private-data"
+        }
+      },
+      "post": {
+        "operationId": "setMyInboxAgent",
+        "summary": "Log in, log out, pause or resume for the text queues",
+        "description": "Logs the caller's extensions in or out and pauses or resumes them (a pause takes an optional reason). The state is shared with the call queues: pausing for texts pauses calls too. 404 when none of the caller's extensions answers a text queue.",
+        "tags": ["inbox"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxAgentInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The availability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxAgentState"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer messaging is private: availability for texts is set from the inbox",
           "category": "private-data"
         }
       }
@@ -21185,6 +21877,953 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": true
+      }
+    },
+    "/api/v1/directory/connectors": {
+      "get": {
+        "operationId": "listDirectoryConnectors",
+        "summary": "List directory connectors",
+        "description": "Lists the directory connectors (AD/LDAP) with their status and the number of users each manages. Administrators only. The bind password is never returned (hasCredential says whether one is set).",
+        "tags": ["directory"],
+        "responses": {
+          "200": {
+            "description": "The connectors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryConnectorList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createDirectoryConnector",
+        "summary": "Create a directory connector",
+        "description": "Creates a connector, disabled unless enabled is true and a bind password is given. Plain ldap:// without StartTLS is refused (400 tls_required); the filter is parsed on save; certificate verification is always on. Range auto-provisioning cannot be enabled yet. Setting bindPassword needs the secrets scope.",
+        "tags": ["directory"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectoryConnectorCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The connector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryConnector"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Connector setup stays in the console: it carries the bind password and changes how users are managed.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/directory/connectors/{id}": {
+      "get": {
+        "operationId": "getDirectoryConnector",
+        "summary": "Get a directory connector",
+        "description": "Returns one connector. The bind password is never returned.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The connector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryConnector"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "patch": {
+        "operationId": "updateDirectoryConnector",
+        "summary": "Change a directory connector",
+        "description": "Changes the settings. Changing the host or the bind DN requires bindPassword again (400), so a stored password cannot be redirected. Setting bindPassword needs the secrets scope.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectoryConnectorUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The connector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryConnector"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Connector setup stays in the console: it carries the bind password and changes how users are managed.",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteDirectoryConnector",
+        "summary": "Delete a directory connector",
+        "description": "Deletes the connector with its runs. While users are linked to it the answer is 409 connector_in_use; release=true turns them into local users first (they keep their rows, lose the field locks and have no password until one is set).",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "release",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Turn the connector's users into local users instead of refusing."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Users are still linked (connector_in_use)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Connector setup stays in the console: it carries the bind password and changes how users are managed.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/directory/connectors/{id}/test": {
+      "post": {
+        "operationId": "testDirectoryConnector",
+        "summary": "Test a directory connector",
+        "description": "Connects with the stored bind password, verifies the server certificate, binds and reads one page: the answer lists the certificate subject and expiry, the number of users the first page matched, a sample of up to 20 users with their raw and mapped values, and up to 50 groups. A failure is a 200 with ok false and a classified, scrubbed errorCode. Writes an audit row and no data.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The test result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryTestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "The test contacts the customer's directory with the stored bind password.",
+          "category": "credentials"
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectoryTestRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/directory/connectors/{id}/sync": {
+      "post": {
+        "operationId": "syncDirectoryConnector",
+        "summary": "Start a directory sync run",
+        "description": "Queues a run, which the replica holding the connector's lock picks up; poll the run. dryRun (the default) makes a preview that writes only run rows. dryRun false queues a run that applies, unless it would disable more than 20 percent of the linked users (and more than 5) or the source returned no users, when it halts as needs_confirmation and applies nothing.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The queued run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The connector is disabled (connector_disabled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "A sync run, an apply or a confirmation changes, disables or adopts users; a person reviews the preview and decides.",
+          "category": "human-in-the-loop"
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectorySyncRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/directory/connectors/{id}/runs": {
+      "get": {
+        "operationId": "listDirectoryRuns",
+        "summary": "List directory sync runs",
+        "description": "Lists a connector's runs, newest first.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "description": "Most runs to return (default 50)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryRunList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/directory/runs/{id}": {
+      "get": {
+        "operationId": "getDirectoryRun",
+        "summary": "Get a directory sync run",
+        "description": "Returns one run with its counts and status.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryRun"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/directory/runs/{id}/changes": {
+      "get": {
+        "operationId": "listDirectoryChanges",
+        "summary": "List the changes of a sync run",
+        "description": "The rows of a run: what the sync does (a preview) or did (an apply) to each user, with field-level before and after and the reason. Filter by action; page with after and nextAfter. Retained 90 days.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "create",
+                "update",
+                "link",
+                "adopt",
+                "disable",
+                "enable",
+                "conflict",
+                "skip",
+                "error"
+              ]
+            },
+            "description": "Only rows of this action."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "Only rows after this change id."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "description": "Most rows to return (default 200)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The changes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryChangeList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/directory/runs/{id}/apply": {
+      "post": {
+        "operationId": "applyDirectoryRun",
+        "summary": "Apply a directory sync preview",
+        "description": "Applies a preview: it re-reads the source and answers 409 stale_preview with a fresh preview when the preview is older than 15 minutes or the diff hash differs. Adoptions and conflict overrides apply only when listed in the body. Conflicted users stay unchanged; a change that fails becomes an error row and the run goes on. The run halts as needs_confirmation when the mass-deprovision guard trips.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run, now applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The run is not in the right state (not_applicable), another run is in progress (busy), the connector is disabled (connector_disabled), or the preview is out of date (stale_preview: older than 15 minutes or the source changed; the body carries the fresh preview)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DirectoryStalePreview"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "A sync run, an apply or a confirmation changes, disables or adopts users; a person reviews the preview and decides.",
+          "category": "human-in-the-loop"
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectoryDecisions"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/directory/runs/{id}/confirm": {
+      "post": {
+        "operationId": "confirmDirectoryRun",
+        "summary": "Confirm a halted directory sync run",
+        "description": "Applies a run the mass-deprovision or empty-result guard halted (needs_confirmation), after an administrator reviewed its changes. Audited. Answers 409 stale_preview with a fresh preview when the source changed since.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run, now applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The run is not in the right state (not_applicable), another run is in progress (busy), the connector is disabled (connector_disabled), or the preview is out of date (stale_preview: older than 15 minutes or the source changed; the body carries the fresh preview)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DirectoryStalePreview"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "A sync run, an apply or a confirmation changes, disables or adopts users; a person reviews the preview and decides.",
+          "category": "human-in-the-loop"
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectoryDecisions"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/calls": {
+      "get": {
+        "operationId": "listMyInboxConversationCalls",
+        "summary": "A customer's recent calls",
+        "description": "Lists the most recent calls to or from the conversation's number in which one of the caller's own extensions took part (the rule of the caller's own call history), newest first. A conversation with a chat visitor has no number and so no calls. Numbers match by their last nine digits, so a national and an international form are one number.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "description": "How many to return, 1-50; 10 when omitted."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The most recent calls, newest first. next is always empty.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfCallPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "the customer's number and call history are private: they are not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/contact": {
+      "post": {
+        "operationId": "addMyInboxContact",
+        "summary": "Add the customer to contacts",
+        "description": "Saves the conversation's number as a contact under the given name and returns the conversation with its refreshed name. It goes into the caller's own personal contacts; a user an administrator has not linked to an extension has none (403). The number is the conversation's; the caller cannot choose another. A personal contact names the number for its owner only, at read time; a company contact is shared and its name is kept on the conversation.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxContactInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/calls": {
+      "get": {
+        "operationId": "listInboxConversationCalls",
+        "summary": "A customer's recent calls",
+        "description": "Lists the most recent calls to or from the conversation's number, whoever took them, newest first. A conversation with a chat visitor has no number and so no calls. Numbers match by their last nine digits, so a national and an international form are one number.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "description": "How many to return, 1-50; 10 when omitted."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The most recent calls, newest first. next is always empty.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfCallPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "the customer's number and call history are private: they are not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/contact": {
+      "post": {
+        "operationId": "addInboxContact",
+        "summary": "Add the customer to contacts",
+        "description": "Saves the conversation's number as a contact under the given name and returns the conversation with its refreshed name. The book is personal (the caller's own contacts, the default) or company (the shared book). The number is the conversation's; the caller cannot choose another. A personal contact names the number for its owner only, at read time; a company contact is shared and its name is kept on the conversation.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxContactInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
       }
     },
     "/api/v1/messaging/channels/{id}/numbers": {
@@ -31011,6 +32650,8 @@
                   "no_messaging_trunk",
                   "opted_out",
                   "not_agent",
+                  "not_chat",
+                  "no_email",
                   "conversation_state",
                   "channel_unavailable",
                   "validation_failed",
@@ -31024,6 +32665,13 @@
                   "emergency_not_allowed",
                   "caller_id_not_allowed",
                   "route_denied",
+                  "tls_required",
+                  "managed_by_directory",
+                  "connector_in_use",
+                  "connector_disabled",
+                  "busy",
+                  "not_applicable",
+                  "stale_preview",
                   "credentials_rejected",
                   "provider_unreachable",
                   "credentials_unreadable",
@@ -31340,7 +32988,9 @@
           "voicemailEmail",
           "totpEnabled",
           "totpRequired",
-          "createdAt"
+          "createdAt",
+          "managedBy",
+          "disabledAt"
         ],
         "properties": {
           "id": {
@@ -31398,6 +33048,39 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "managedBy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "connectorId": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "connector": {
+                    "type": "string"
+                  },
+                  "fields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "The managed fields: username, email, displayName, extension, role, enabled."
+                  }
+                },
+                "required": ["connectorId", "connector", "fields"]
+              }
+            ],
+            "description": "Set when a directory connector manages this user: its mapped fields are read-only (409 managed_by_directory)."
+          },
+          "disabledAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When directory sync disabled the user; null otherwise."
           }
         }
       },
@@ -33313,6 +34996,63 @@
           }
         },
         "description": "Null times are omitted."
+      },
+      "RTCPXRQuality": {
+        "type": "object",
+        "required": [
+          "device",
+          "extension",
+          "final",
+          "mosLq",
+          "mosCq",
+          "jitterMs",
+          "lossPct",
+          "discardPct",
+          "roundTripMs",
+          "reportedAt"
+        ],
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "The reporting device's SIP user name."
+          },
+          "extension": {
+            "type": "string"
+          },
+          "final": {
+            "type": "boolean",
+            "description": "True for the call-end report, false for an interval report."
+          },
+          "mosLq": {
+            "type": ["number", "null"],
+            "description": "Listening-quality MOS (0 to 5) the phone estimated."
+          },
+          "mosCq": {
+            "type": ["number", "null"],
+            "description": "Conversational-quality MOS (0 to 5)."
+          },
+          "jitterMs": {
+            "type": ["number", "null"],
+            "description": "Inter-arrival jitter the phone measured, ms."
+          },
+          "lossPct": {
+            "type": ["number", "null"],
+            "description": "Network packet loss rate, percent."
+          },
+          "discardPct": {
+            "type": ["number", "null"],
+            "description": "Jitter buffer discard rate, percent."
+          },
+          "roundTripMs": {
+            "type": ["number", "null"],
+            "description": "Round-trip delay, ms."
+          },
+          "reportedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "What one phone reported about its side of a call."
       },
       "CDRPage": {
         "type": "object",
@@ -37090,6 +38830,30 @@
             "type": "string",
             "description": "The name the callee's phone would show."
           },
+          "company": {
+            "type": "string",
+            "description": "The matching entry's company, when it has one."
+          },
+          "crm": {
+            "type": "object",
+            "description": "The contact a CRM connector knows for the number (GET /lookup/number only; absent when no connector knows it). Independent of result: a number can be none in the books and known to the CRM.",
+            "required": ["id"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "company": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string",
+                "description": "Link to the contact in the CRM."
+              }
+            }
+          },
           "matches": {
             "type": "integer",
             "description": "How many entries share the last 9 digits when ambiguous."
@@ -39366,6 +41130,26 @@
             "type": "string",
             "description": "Language of the queue's spoken prompts (callback offer and confirmation). Empty inherits the deployment language, then English. One of the languages with a complete prompt table (en, nl)."
           },
+          "textEnabled": {
+            "type": "boolean",
+            "description": "Whether the queue takes customer texts (the messaging inbox); default false."
+          },
+          "textCapacity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "How many open conversations each agent holds at once; default 3."
+          },
+          "textReassignSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 86400,
+            "description": "How long an assigned conversation may wait for a reply before it returns to the queue; 0 never; default 300."
+          },
+          "textRequiresIdleVoice": {
+            "type": "boolean",
+            "description": "Whether an agent who is on a call is offered no conversation; default false."
+          },
           "members": {
             "type": "array",
             "maxItems": 200,
@@ -39415,6 +41199,10 @@
           "waitPromptName",
           "minutesPromptName",
           "breakoutPromptName",
+          "textEnabled",
+          "textCapacity",
+          "textReassignSeconds",
+          "textRequiresIdleVoice",
           "members",
           "createdAt",
           "updatedAt"
@@ -39580,6 +41368,26 @@
           },
           "breakoutPromptName": {
             "type": "string"
+          },
+          "textEnabled": {
+            "type": "boolean",
+            "description": "Whether the queue takes customer texts (the messaging inbox); default false."
+          },
+          "textCapacity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "How many open conversations each agent holds at once; default 3."
+          },
+          "textReassignSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 86400,
+            "description": "How long an assigned conversation may wait for a reply before it returns to the queue; 0 never; default 300."
+          },
+          "textRequiresIdleVoice": {
+            "type": "boolean",
+            "description": "Whether an agent who is on a call is offered no conversation; default false."
           },
           "members": {
             "type": "array",
@@ -40608,8 +42416,8 @@
           },
           "routeKind": {
             "type": "string",
-            "enum": ["inbox"],
-            "description": "Where a new conversation goes; inbox is the pool every operator sees."
+            "enum": ["inbox", "queue", "user", "extension", "ring_group"],
+            "description": "Where a new conversation goes: inbox is the pool every operator sees. Change it with the number's routing."
           },
           "enabled": {
             "type": "boolean"
@@ -40901,6 +42709,8 @@
           "snoozedUntil",
           "assigneeUserId",
           "assigneeName",
+          "queueId",
+          "queueName",
           "priority",
           "tags",
           "preview",
@@ -40910,7 +42720,8 @@
           "lastInboundAt",
           "firstResponseAt",
           "resolvedAt",
-          "createdAt"
+          "createdAt",
+          "chat"
         ],
         "properties": {
           "id": {
@@ -40965,6 +42776,14 @@
           "assigneeName": {
             "type": "string"
           },
+          "queueId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The text queue the conversation is placed in; null in the pool or once it went to a person."
+          },
+          "queueName": {
+            "type": "string"
+          },
           "priority": {
             "type": "string",
             "enum": ["low", "normal", "high"]
@@ -41006,6 +42825,9 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "chat": {
+            "$ref": "#/components/schemas/ChatInfo"
           }
         }
       },
@@ -41191,29 +43013,6 @@
           }
         }
       },
-      "InboxContactInput": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "firstName": {
-            "type": "string",
-            "description": "At most 100 characters."
-          },
-          "lastName": {
-            "type": "string",
-            "description": "At most 100 characters."
-          },
-          "company": {
-            "type": "string",
-            "description": "At most 100 characters. At least one of the three names is required."
-          },
-          "book": {
-            "type": "string",
-            "enum": ["personal", "company"],
-            "description": "Where to save it: personal (the caller's own contacts, the default) or company (the shared book; supervisors only, and not accepted on the /me route)."
-          }
-        }
-      },
       "InboxTagsInput": {
         "type": "object",
         "additionalProperties": false,
@@ -41270,6 +43069,385 @@
           }
         }
       },
+      "MessagingSchedule": {
+        "type": "object",
+        "required": ["zone", "days"],
+        "description": "A weekly opening schedule. No windows means always open.",
+        "properties": {
+          "zone": {
+            "type": "string",
+            "description": "An IANA time zone such as Europe/Brussels; required with windows."
+          },
+          "days": {
+            "type": "array",
+            "maxItems": 28,
+            "items": {
+              "type": "object",
+              "required": ["day", "from", "to"],
+              "properties": {
+                "day": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 6,
+                  "description": "0 is Sunday."
+                },
+                "from": {
+                  "type": "string",
+                  "description": "HH:MM."
+                },
+                "to": {
+                  "type": "string",
+                  "description": "HH:MM, after from; the number is closed from this minute."
+                }
+              }
+            }
+          }
+        }
+      },
+      "MessagingAfterHours": {
+        "type": "object",
+        "required": ["action", "text", "routeKind", "routeTarget", "routeName"],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["none", "reply", "route"],
+            "description": "none routes as usual; reply sends the text and then routes as usual; route sends the conversation to the after-hours target instead."
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 480,
+            "description": "The text a reply sends. Only a SIP trunk channel can send it today."
+          },
+          "routeKind": {
+            "type": "string",
+            "enum": ["inbox", "queue", "user", "extension", "ring_group"]
+          },
+          "routeTarget": {
+            "type": "string",
+            "description": "The id of the queue, user, extension or ring group; empty for the pool."
+          },
+          "routeName": {
+            "type": "string",
+            "description": "The target's name; empty when it is gone."
+          }
+        }
+      },
+      "MessagingRouting": {
+        "type": "object",
+        "required": [
+          "addressId",
+          "routeKind",
+          "routeTarget",
+          "routeName",
+          "schedule",
+          "afterHours",
+          "firstContactText"
+        ],
+        "properties": {
+          "addressId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "routeKind": {
+            "type": "string",
+            "enum": ["inbox", "queue", "user", "extension", "ring_group"],
+            "description": "inbox is the supervisors' pool; queue assigns by the queue's strategy; user and extension assign to one person; ring_group is a shared pool of the users of the group's extensions."
+          },
+          "routeTarget": {
+            "type": "string",
+            "description": "The id of the queue, user, extension or ring group; empty for the pool."
+          },
+          "routeName": {
+            "type": "string",
+            "description": "The target's name; empty when it is gone, in which case new conversations go to the pool."
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/MessagingSchedule"
+          },
+          "afterHours": {
+            "$ref": "#/components/schemas/MessagingAfterHours"
+          },
+          "firstContactText": {
+            "type": "string",
+            "maxLength": 480,
+            "description": "Sent once to a customer who texts the number for the first time (not when the closed-hours reply already went); empty sends nothing. Only a SIP trunk channel can send it today."
+          }
+        }
+      },
+      "MessagingRoutingInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "routeKind": {
+            "type": "string",
+            "enum": ["inbox", "queue", "user", "extension", "ring_group"],
+            "description": "Where new conversations go: inbox (the supervisors' pool), queue, user, extension (its linked user) or ring_group (a shared pool of its users). Changing it needs a routeTarget."
+          },
+          "routeTarget": {
+            "type": "string",
+            "description": "The id of the queue, user, extension or ring group as text; empty for the pool."
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/MessagingSchedule"
+          },
+          "firstContactText": {
+            "type": "string",
+            "maxLength": 480,
+            "description": "Sent once to a customer who texts the number for the first time; empty sends nothing."
+          },
+          "afterHours": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "What the number does with a conversation that starts outside its schedule; fields left out keep their value.",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": ["none", "reply", "route"]
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 480
+              },
+              "routeKind": {
+                "type": "string",
+                "enum": ["inbox", "queue", "user", "extension", "ring_group"]
+              },
+              "routeTarget": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "InboxQueueWaiting": {
+        "type": "object",
+        "required": ["conversationId", "channel", "position", "waitSeconds"],
+        "properties": {
+          "conversationId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "channel": {
+            "type": "string",
+            "description": "The channel kind."
+          },
+          "position": {
+            "type": "integer",
+            "description": "1 is next."
+          },
+          "waitSeconds": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "InboxQueueAgent": {
+        "type": "object",
+        "required": [
+          "userId",
+          "name",
+          "extension",
+          "dynamic",
+          "open",
+          "answered",
+          "state"
+        ],
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "extension": {
+            "type": "string"
+          },
+          "dynamic": {
+            "type": "boolean"
+          },
+          "open": {
+            "type": "integer",
+            "description": "Open conversations the user holds in all."
+          },
+          "answered": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Conversations the queue has given the user."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "available",
+              "paused",
+              "logged_out",
+              "on_call",
+              "at_capacity",
+              "unknown"
+            ],
+            "description": "unknown when the live agent state cannot be read."
+          }
+        }
+      },
+      "InboxQueue": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "strategy",
+          "capacity",
+          "waiting",
+          "waitingTotal",
+          "assigned",
+          "oldestWaitSeconds",
+          "agents"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "strategy": {
+            "type": "string"
+          },
+          "capacity": {
+            "type": "integer",
+            "description": "Open conversations an agent holds at once."
+          },
+          "waiting": {
+            "type": "array",
+            "description": "The unassigned conversations, longest waiting first, at most 200. With ring_all they are the shared pool.",
+            "items": {
+              "$ref": "#/components/schemas/InboxQueueWaiting"
+            }
+          },
+          "waitingTotal": {
+            "type": "integer"
+          },
+          "assigned": {
+            "type": "integer",
+            "description": "Open conversations agents hold from this queue."
+          },
+          "oldestWaitSeconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxQueueAgent"
+            }
+          }
+        }
+      },
+      "InboxQueueList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxQueue"
+            }
+          }
+        }
+      },
+      "InboxAgentExtension": {
+        "type": "object",
+        "required": [
+          "number",
+          "name",
+          "queues",
+          "dynamic",
+          "loggedIn",
+          "paused"
+        ],
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "queues": {
+            "type": "array",
+            "description": "The text queues the extension is a member of.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dynamic": {
+            "type": "boolean",
+            "description": "Whether a queue needs this extension to log in."
+          },
+          "loggedIn": {
+            "type": "boolean"
+          },
+          "paused": {
+            "type": "boolean"
+          }
+        }
+      },
+      "InboxAgentState": {
+        "type": "object",
+        "required": [
+          "member",
+          "needsLogin",
+          "loggedIn",
+          "paused",
+          "reason",
+          "extensions"
+        ],
+        "properties": {
+          "member": {
+            "type": "boolean",
+            "description": "Whether any of the caller's extensions is a member of a text queue."
+          },
+          "needsLogin": {
+            "type": "boolean",
+            "description": "Whether a queue needs the agent to log in; a static member is always logged in."
+          },
+          "loggedIn": {
+            "type": "boolean"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the agent paused, empty when not paused."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxAgentExtension"
+            }
+          }
+        }
+      },
+      "InboxAgentInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Give loggedIn, paused or both; what is left out keeps its value. Logging out also clears a pause.",
+        "properties": {
+          "loggedIn": {
+            "type": "boolean",
+            "description": "Log in (true) or out (false); logging out also clears a pause."
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "Pause (true) or resume (false)."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "Why the agent pauses; A-Z a-z 0-9 space . _ - only."
+          }
+        }
+      },
       "InboxStats": {
         "type": "object",
         "required": [
@@ -41304,9 +43482,418 @@
           }
         }
       },
+      "ChatHours": {
+        "type": "object",
+        "description": "A weekly schedule; empty means always open.",
+        "required": ["zone", "days"],
+        "additionalProperties": false,
+        "properties": {
+          "zone": {
+            "type": "string",
+            "description": "An IANA time zone such as Europe/Brussels; required when there are windows."
+          },
+          "days": {
+            "type": "array",
+            "maxItems": 28,
+            "description": "The opening windows.",
+            "items": {
+              "type": "object",
+              "required": ["day", "from", "to"],
+              "additionalProperties": false,
+              "properties": {
+                "day": {
+                  "type": "integer",
+                  "description": "0 is Sunday, 6 is Saturday.",
+                  "minimum": 0,
+                  "maximum": 6
+                },
+                "from": {
+                  "type": "string",
+                  "description": "Opening time, HH:MM."
+                },
+                "to": {
+                  "type": "string",
+                  "description": "Closing time, HH:MM, after the opening time."
+                }
+              }
+            }
+          }
+        }
+      },
+      "ChatSite": {
+        "type": "object",
+        "required": [
+          "id",
+          "channelId",
+          "addressId",
+          "name",
+          "enabled",
+          "siteKey",
+          "allowedOrigins",
+          "greeting",
+          "accent",
+          "position",
+          "collect",
+          "hours",
+          "offlineMode",
+          "privacyUrl",
+          "challenge",
+          "powBits",
+          "turnstileSiteKey",
+          "hasTurnstileSecret",
+          "stripLinks",
+          "maxOpenUnassigned",
+          "transcripts",
+          "retentionDays",
+          "conversations",
+          "createdAt",
+          "updatedAt",
+          "warnings"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The site's id.",
+            "format": "int64"
+          },
+          "channelId": {
+            "type": "integer",
+            "description": "The channel of kind webchat the site is.",
+            "format": "int64"
+          },
+          "addressId": {
+            "type": "integer",
+            "description": "The channel's one address, named by the site key.",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "description": "The site's name, shown in the widget's header and the inbox."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "The site's kill switch: off stops new sessions and messages at once."
+          },
+          "siteKey": {
+            "type": "string",
+            "description": "The public site key the embed code names: 96 random bits in hex, not a secret."
+          },
+          "allowedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The LAN origins that may frame the widget (frame-ancestors); none means no page can embed it yet."
+          },
+          "greeting": {
+            "type": "string",
+            "description": "The line the widget opens with."
+          },
+          "accent": {
+            "type": "string",
+            "description": "The widget's accent colour, #rrggbb."
+          },
+          "position": {
+            "type": "string",
+            "enum": ["left", "right"],
+            "description": "Which corner the widget sits in."
+          },
+          "collect": {
+            "type": "string",
+            "enum": ["off", "optional", "required"],
+            "description": "Whether the widget asks for a name and an email address before the first message."
+          },
+          "hours": {
+            "$ref": "#/components/schemas/ChatHours"
+          },
+          "offlineMode": {
+            "type": "string",
+            "enum": ["collect", "hidden"],
+            "description": "Outside the hours or with nobody available: collect a message and an email address, or hide the widget."
+          },
+          "privacyUrl": {
+            "type": "string",
+            "description": "The site's privacy policy, linked from the widget; empty for none."
+          },
+          "challenge": {
+            "type": "string",
+            "enum": ["pow", "turnstile", "none"],
+            "description": "What a new visitor must solve to open a session: a proof of work (default), a Cloudflare Turnstile check with the customer's own keys, or nothing."
+          },
+          "powBits": {
+            "type": "integer",
+            "description": "The proof of work's difficulty in bits, 14 to 22; it rises by one level for 15 minutes while a site is flooded."
+          },
+          "turnstileSiteKey": {
+            "type": "string",
+            "description": "The customer's Turnstile site key (public)."
+          },
+          "hasTurnstileSecret": {
+            "type": "boolean",
+            "description": "Whether a Turnstile secret key is stored; the key itself is never returned."
+          },
+          "stripLinks": {
+            "type": "boolean",
+            "description": "Whether links in a visitor's message are replaced by [link removed]."
+          },
+          "maxOpenUnassigned": {
+            "type": "integer",
+            "description": "How many live chats may wait unassigned before the widget switches to offline mode."
+          },
+          "transcripts": {
+            "type": "boolean",
+            "description": "Whether a visitor may email themselves a transcript at the end of a chat."
+          },
+          "retentionDays": {
+            "type": ["integer", "null"],
+            "description": "Days a finished chat is kept; null follows the messaging settings."
+          },
+          "conversations": {
+            "type": "integer",
+            "description": "How many conversations the site has."
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "When the site was added.",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "When the site last changed.",
+            "format": "date-time"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Settings that work but deserve a second look: a public-looking origin, no challenge, Turnstile on an isolated LAN."
+          }
+        }
+      },
+      "ChatSiteList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatSite"
+            }
+          }
+        }
+      },
+      "ChatSiteInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The site's name, 1 to 100 printable characters; required when creating."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "The site's kill switch: off stops new sessions and messages at once. Left as it is when omitted."
+          },
+          "allowedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The LAN origins that may frame the widget (frame-ancestors); none means no page can embed it yet. Left as it is when omitted."
+          },
+          "greeting": {
+            "type": "string",
+            "description": "The line the widget opens with. Left as it is when omitted."
+          },
+          "accent": {
+            "type": "string",
+            "description": "The widget's accent colour, #rrggbb. Left as it is when omitted."
+          },
+          "position": {
+            "type": "string",
+            "enum": ["left", "right"],
+            "description": "Which corner the widget sits in. Left as it is when omitted."
+          },
+          "collect": {
+            "type": "string",
+            "enum": ["off", "optional", "required"],
+            "description": "Whether the widget asks for a name and an email address before the first message. Left as it is when omitted."
+          },
+          "hours": {
+            "$ref": "#/components/schemas/ChatHours"
+          },
+          "offlineMode": {
+            "type": "string",
+            "enum": ["collect", "hidden"],
+            "description": "Outside the hours or with nobody available: collect a message and an email address, or hide the widget. Left as it is when omitted."
+          },
+          "privacyUrl": {
+            "type": "string",
+            "description": "The site's privacy policy, linked from the widget; empty for none. Left as it is when omitted."
+          },
+          "challenge": {
+            "type": "string",
+            "enum": ["pow", "turnstile", "none"],
+            "description": "What a new visitor must solve to open a session: a proof of work (default), a Cloudflare Turnstile check with the customer's own keys, or nothing. Left as it is when omitted."
+          },
+          "powBits": {
+            "type": "integer",
+            "description": "The proof of work's difficulty in bits, 14 to 22; it rises by one level for 15 minutes while a site is flooded. Left as it is when omitted."
+          },
+          "turnstileSiteKey": {
+            "type": "string",
+            "description": "The customer's Turnstile site key (public). Left as it is when omitted."
+          },
+          "stripLinks": {
+            "type": "boolean",
+            "description": "Whether links in a visitor's message are replaced by [link removed]. Left as it is when omitted."
+          },
+          "maxOpenUnassigned": {
+            "type": "integer",
+            "description": "How many live chats may wait unassigned before the widget switches to offline mode. Left as it is when omitted."
+          },
+          "transcripts": {
+            "type": "boolean",
+            "description": "Whether a visitor may email themselves a transcript at the end of a chat. Left as it is when omitted."
+          },
+          "turnstileSecret": {
+            "type": "string",
+            "description": "The customer's Turnstile secret key, sealed when stored and never returned; omitted keeps the stored one, an empty string removes it. Needed for the turnstile challenge.",
+            "maxLength": 200
+          },
+          "retentionDays": {
+            "type": "integer",
+            "description": "Days a finished chat is kept, 1 to 3650; 0 follows the messaging settings.",
+            "minimum": 0,
+            "maximum": 3650
+          }
+        }
+      },
+      "ChatBlock": {
+        "type": "object",
+        "required": ["id", "siteId", "visitorId", "byIp", "until", "createdAt"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The block's id.",
+            "format": "int64"
+          },
+          "siteId": {
+            "type": "integer",
+            "description": "The site it applies to.",
+            "format": "int64"
+          },
+          "visitorId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The visitor blocked; null for a block by address hash alone."
+          },
+          "byIp": {
+            "type": "boolean",
+            "description": "Whether the day's address hash is blocked too; it stops matching at 00:00 UTC."
+          },
+          "until": {
+            "type": "string",
+            "description": "When the block lapses.",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "When it was made.",
+            "format": "date-time"
+          }
+        }
+      },
+      "ChatBlockList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatBlock"
+            }
+          }
+        }
+      },
+      "ChatBlockInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "hours": {
+            "type": "integer",
+            "description": "How long the block holds, 1 to 720 hours; 24 when omitted.",
+            "minimum": 1,
+            "maximum": 720
+          }
+        }
+      },
+      "ChatEmailInput": {
+        "type": "object",
+        "required": ["body"],
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "The reply, 1 to 2000 bytes of text.",
+            "maxLength": 2000
+          },
+          "clientMsgId": {
+            "type": "string",
+            "description": "A client-chosen id, at most 64 printable characters; a retry with the same id sends nothing again.",
+            "maxLength": 64
+          }
+        }
+      },
+      "ChatInfo": {
+        "type": ["object", "null"],
+        "description": "What an agent sees of a chat visitor; null for a conversation that is not a website chat.",
+        "required": [
+          "siteId",
+          "offline",
+          "email",
+          "page",
+          "browser",
+          "blocked"
+        ],
+        "properties": {
+          "siteId": {
+            "type": "integer",
+            "description": "The chat site.",
+            "format": "int64"
+          },
+          "offline": {
+            "type": "boolean",
+            "description": "The chat was left while nobody was available."
+          },
+          "email": {
+            "type": "string",
+            "description": "The address the visitor gave, empty for none."
+          },
+          "page": {
+            "type": "string",
+            "description": "Hostname and path of the page the chat started on."
+          },
+          "browser": {
+            "type": "string",
+            "description": "A coarse browser family, nothing more."
+          },
+          "blocked": {
+            "type": "boolean",
+            "description": "Whether the visitor is blocked."
+          }
+        }
+      },
       "InboxStatus": {
         "type": "object",
-        "required": ["enabled", "unread", "unassigned", "senders"],
+        "required": [
+          "enabled",
+          "unread",
+          "unassigned",
+          "emailReply",
+          "senders"
+        ],
         "properties": {
           "enabled": {
             "type": "boolean",
@@ -41319,6 +43906,10 @@
           "unassigned": {
             "type": "integer",
             "description": "Active conversations nobody has taken; counted for supervisors only."
+          },
+          "emailReply": {
+            "type": "boolean",
+            "description": "Whether email is configured, so an offline website chat can be answered by email."
           },
           "senders": {
             "type": "array",
@@ -42135,6 +44726,837 @@
           }
         }
       },
+      "DirectoryTransform": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["digits", "last", "regex"]
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32,
+            "description": "For last: how many trailing characters to keep."
+          },
+          "pattern": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "For regex: a pattern with exactly one capture group."
+          }
+        },
+        "required": ["kind"],
+        "description": "One transform step of an attribute mapping: digits strips every non-digit, last keeps the last n characters, regex keeps the first capture group (no match counts as empty)."
+      },
+      "DirectoryAttrMap": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string"
+            },
+            "description": "Source attributes in order; the first non-empty value wins."
+          },
+          "transforms": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "$ref": "#/components/schemas/DirectoryTransform"
+            }
+          }
+        },
+        "description": "Where a Hello field comes from. Empty sources means the field is not mapped (and so not managed)."
+      },
+      "DirectoryActiveMap": {
+        "type": "object",
+        "properties": {
+          "attribute": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["", "always", "uac", "bool", "bool_inverted"],
+            "description": "always: every user is active; uac: userAccountControl bit 2 set means disabled; bool: the attribute reads true or false; bool_inverted: true means disabled. A missing or unreadable value reads as active."
+          }
+        }
+      },
+      "DirectoryMappings": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "$ref": "#/components/schemas/DirectoryAttrMap"
+          },
+          "email": {
+            "$ref": "#/components/schemas/DirectoryAttrMap"
+          },
+          "displayName": {
+            "$ref": "#/components/schemas/DirectoryAttrMap"
+          },
+          "extension": {
+            "$ref": "#/components/schemas/DirectoryAttrMap"
+          },
+          "active": {
+            "$ref": "#/components/schemas/DirectoryActiveMap"
+          }
+        },
+        "description": "Attribute mappings. The fields with a mapping are the managed fields: read-only on the user (409 managed_by_directory). An extension value must match ^[0-9]{2,10}$ or the user is a conflict (extension_invalid)."
+      },
+      "DirectoryGroupRules": {
+        "type": "object",
+        "properties": {
+          "roles": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "properties": {
+                "groupId": {
+                  "type": "string"
+                },
+                "groupName": {
+                  "type": "string"
+                },
+                "role": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              },
+              "required": ["groupId", "role"]
+            },
+            "description": "Members of the source group get the role; the highest matching rule wins, user when none matches. An admin rule applies only when options.allowAdminFromDirectory is on."
+          },
+          "ringGroups": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "properties": {
+                "groupId": {
+                  "type": "string"
+                },
+                "groupName": {
+                  "type": "string"
+                },
+                "ringGroupId": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "required": ["groupId", "ringGroupId"]
+            },
+            "description": "Members of the source group have their extension added to the ring group. Sync removes only rows it added."
+          }
+        },
+        "description": "Group rules, matched on the group's stable id; the name is for display."
+      },
+      "DirectoryOptions": {
+        "type": "object",
+        "properties": {
+          "absenceRuns": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "Consecutive complete runs a user may be absent from before it is disabled (default 2; 0 means the default)."
+          },
+          "disableDevices": {
+            "type": ["boolean", "null"],
+            "description": "Disable a disabled user's devices (default on)."
+          },
+          "allowAdminFromDirectory": {
+            "type": "boolean",
+            "description": "Let a group rule grant admin. Off by default."
+          },
+          "runTimeoutMinutes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 240,
+            "description": "Run timeout (default 15; 0 means the default)."
+          },
+          "userCap": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 200000,
+            "description": "Most users a run may read before it fails user_cap_exceeded (default 20000; 0 means the default)."
+          }
+        },
+        "description": "Engine settings every connector kind shares: the absence rule, device handling, the admin switch and the run limits."
+      },
+      "DirectoryLDAPConfig": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "ldaps://host[:636], or ldap://host[:389] with StartTLS. Plain ldap:// without StartTLS is refused (400 tls_required)."
+          },
+          "startTls": {
+            "type": "boolean",
+            "description": "On for ldap:// and not switchable off outside the lab environment switch."
+          },
+          "bindDn": {
+            "type": "string"
+          },
+          "baseDn": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": ["subtree", "onelevel", "base"]
+          },
+          "userFilter": {
+            "type": "string",
+            "description": "Default (&(objectCategory=person)(objectClass=user)); parsed on save."
+          },
+          "groupBaseDn": {
+            "type": "string"
+          },
+          "groupFilter": {
+            "type": "string"
+          },
+          "caCertPem": {
+            "type": "string",
+            "description": "A PEM bundle of the CA certificates to trust (public certificates, not a secret). Certificate verification is always on."
+          },
+          "serverName": {
+            "type": "string",
+            "description": "The name to verify the server certificate against, when it differs from the host."
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 5000
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "nestedGroups": {
+            "type": "boolean",
+            "description": "Resolve nested membership with the in-chain matching rule; slow on a large forest."
+          },
+          "ldapBindLogin": {
+            "type": "boolean",
+            "description": "Reserved for signing in by an LDAP bind."
+          }
+        },
+        "required": ["url", "bindDn", "baseDn"],
+        "description": "Config of an ldap connector. The bind password is not part of it."
+      },
+      "DirectoryConnector": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["ldap"]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["authoritative", "create_only", "link_only"],
+            "description": "authoritative: the directory overwrites mapped fields on every run; create_only: it seeds a field once and Hello owns it after; link_only: never creates users, links existing local users by email then username and manages them."
+          },
+          "scheduleMinutes": {
+            "type": "integer",
+            "description": "0 is manual only, otherwise 5 to 10080. A schedule starts only after an administrator has applied a run by hand."
+          },
+          "config": {
+            "$ref": "#/components/schemas/DirectoryLDAPConfig"
+          },
+          "mappings": {
+            "$ref": "#/components/schemas/DirectoryMappings"
+          },
+          "groupRules": {
+            "$ref": "#/components/schemas/DirectoryGroupRules"
+          },
+          "options": {
+            "$ref": "#/components/schemas/DirectoryOptions"
+          },
+          "autoProvision": {
+            "type": "object",
+            "description": "Reserved for range auto-provisioning; it cannot be enabled yet."
+          },
+          "hasCredential": {
+            "type": "boolean",
+            "description": "A bind password is stored. It is write-only and never returned."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["new", "ok", "failing"]
+          },
+          "lastRunAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastSuccessAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastErrorCode": {
+            "type": "string",
+            "description": "auth_failed, tls_untrusted, unreachable, timeout, quota, bad_filter, user_cap_exceeded or internal; empty after a success."
+          },
+          "lastErrorDetail": {
+            "type": "string"
+          },
+          "consecutiveFailures": {
+            "type": "integer"
+          },
+          "linkedUsers": {
+            "type": "integer",
+            "description": "Users this connector manages."
+          },
+          "lastFullRunAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the last full run finished. A full run is forced every 24 hours, and when the mapping, rules or config change, because only a full run detects absences."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "enabled",
+          "mode",
+          "scheduleMinutes",
+          "config",
+          "mappings",
+          "groupRules",
+          "options",
+          "autoProvision",
+          "hasCredential",
+          "status",
+          "lastRunAt",
+          "lastSuccessAt",
+          "lastErrorCode",
+          "lastErrorDetail",
+          "consecutiveFailures",
+          "linkedUsers",
+          "lastFullRunAt",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "DirectoryConnectorList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectoryConnector"
+            }
+          }
+        },
+        "required": ["items"]
+      },
+      "DirectoryConnectorCreate": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["ldap"],
+            "description": "The connector kind."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "A unique name (case-insensitive)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Default false; enabling needs a bind password."
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["authoritative", "create_only", "link_only"],
+            "description": "authoritative: the directory overwrites mapped fields on every run; create_only: it seeds a field once and Hello owns it after; link_only: never creates users, links existing local users by email then username and manages them."
+          },
+          "scheduleMinutes": {
+            "type": "integer",
+            "description": "0 is manual only, otherwise 5 to 10080. A schedule starts only after an administrator has applied a run by hand."
+          },
+          "config": {
+            "$ref": "#/components/schemas/DirectoryLDAPConfig"
+          },
+          "mappings": {
+            "$ref": "#/components/schemas/DirectoryMappings"
+          },
+          "groupRules": {
+            "$ref": "#/components/schemas/DirectoryGroupRules"
+          },
+          "options": {
+            "$ref": "#/components/schemas/DirectoryOptions"
+          },
+          "autoProvision": {
+            "type": "object",
+            "description": "Reserved for range auto-provisioning; it cannot be enabled yet."
+          },
+          "bindPassword": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The bind password, sealed at rest and never returned. Needs the secrets scope."
+          }
+        },
+        "required": ["kind", "name"]
+      },
+      "DirectoryConnectorUpdate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "A unique name (case-insensitive)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Switch the connector on or off; off stops every job. Enabling needs a bind password."
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["authoritative", "create_only", "link_only"],
+            "description": "authoritative: the directory overwrites mapped fields on every run; create_only: it seeds a field once and Hello owns it after; link_only: never creates users, links existing local users by email then username and manages them."
+          },
+          "scheduleMinutes": {
+            "type": "integer",
+            "description": "0 is manual only, otherwise 5 to 10080. A schedule starts only after an administrator has applied a run by hand."
+          },
+          "config": {
+            "$ref": "#/components/schemas/DirectoryLDAPConfig"
+          },
+          "mappings": {
+            "$ref": "#/components/schemas/DirectoryMappings"
+          },
+          "groupRules": {
+            "$ref": "#/components/schemas/DirectoryGroupRules"
+          },
+          "options": {
+            "$ref": "#/components/schemas/DirectoryOptions"
+          },
+          "autoProvision": {
+            "type": "object",
+            "description": "Reserved for range auto-provisioning; it cannot be enabled yet."
+          },
+          "bindPassword": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Replaces the stored password. Needs the secrets scope. Required again when the host or the bind DN changes, so a stored password cannot be redirected to another server."
+          }
+        }
+      },
+      "DirectorySourceGroup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "name"]
+      },
+      "DirectoryTestRequest": {
+        "type": "object",
+        "properties": {
+          "mappings": {
+            "$ref": "#/components/schemas/DirectoryMappings"
+          }
+        },
+        "description": "Optional mappings to preview on the sample instead of the stored ones."
+      },
+      "DirectorySampleRow": {
+        "type": "object",
+        "properties": {
+          "externalId": {
+            "type": "string"
+          },
+          "raw": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "The raw attribute values."
+          },
+          "mapped": {
+            "type": "object",
+            "properties": {
+              "username": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "extension": {
+                "type": "string"
+              },
+              "extensionError": {
+                "type": "string"
+              },
+              "active": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "username",
+              "email",
+              "displayName",
+              "extension",
+              "active"
+            ]
+          }
+        },
+        "required": ["externalId", "raw", "mapped"]
+      },
+      "DirectoryTestResult": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "errorCode": {
+            "type": "string",
+            "description": "auth_failed, tls_untrusted, unreachable, timeout, quota, bad_filter or internal; empty when ok."
+          },
+          "errorDetail": {
+            "type": "string"
+          },
+          "serverCertSubject": {
+            "type": "string"
+          },
+          "serverCertExpires": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "matchedUsers": {
+            "type": "integer",
+            "description": "Users the first page matched."
+          },
+          "sample": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectorySampleRow"
+            },
+            "description": "Up to 20 users with their raw and mapped values."
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectorySourceGroup"
+            },
+            "description": "Up to 50 groups under the group base."
+          }
+        },
+        "required": [
+          "ok",
+          "errorCode",
+          "errorDetail",
+          "serverCertSubject",
+          "serverCertExpires",
+          "matchedUsers",
+          "sample",
+          "groups"
+        ]
+      },
+      "DirectorySyncRequest": {
+        "type": "object",
+        "properties": {
+          "dryRun": {
+            "type": "boolean",
+            "description": "Default true: a preview that changes nothing. false queues a run that applies, subject to the guards."
+          }
+        }
+      },
+      "DirectoryRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "connectorId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["preview", "apply", "scheduled", "scim"]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "preview",
+              "succeeded",
+              "failed",
+              "needs_confirmation",
+              "stale"
+            ]
+          },
+          "requestedBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "replica": {
+            "type": "string"
+          },
+          "counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Rows by action (create, update, adopt, disable, enable, conflict, skip, error), plus users (read from the source), linked and conflicts."
+          },
+          "diffHash": {
+            "type": "string"
+          },
+          "incremental": {
+            "type": "boolean",
+            "description": "The run read only the changes since the last run (scheduled runs, when the source supports it). An incremental run never disables or deprovisions a user for being absent; only a full run detects absences."
+          },
+          "fullReason": {
+            "type": "string",
+            "description": "Why a full run was full: manual, no_mark, full_interval (24 hours since the last full run), config_changed, usn_regressed, invocation_changed, clock_regressed, method_changed, groups_changed or unsupported. Empty for an incremental run."
+          },
+          "errorCode": {
+            "type": "string",
+            "description": "For failed: the classified code. For needs_confirmation: needs_confirmation (more than 20 percent of linked users, and more than 5, would be disabled) or empty_result."
+          },
+          "errorDetail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "connectorId",
+          "kind",
+          "status",
+          "requestedBy",
+          "createdAt",
+          "startedAt",
+          "finishedAt",
+          "replica",
+          "counts",
+          "diffHash",
+          "incremental",
+          "fullReason",
+          "errorCode",
+          "errorDetail"
+        ]
+      },
+      "DirectoryRunList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectoryRun"
+            }
+          }
+        },
+        "required": ["items"]
+      },
+      "DirectoryChange": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "runId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "update",
+              "link",
+              "adopt",
+              "disable",
+              "enable",
+              "conflict",
+              "skip",
+              "error"
+            ]
+          },
+          "userId": {
+            "type": ["integer", "null"],
+            "format": "int64"
+          },
+          "externalId": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "fieldDiffs": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "string"
+                },
+                "after": {
+                  "type": "string"
+                }
+              },
+              "required": ["before", "after"]
+            },
+            "description": "Field-level before and after. Never a secret."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why: for conflicts extension_linked, extension_kind, duplicate_extension, email_in_use, username_collision, claimed_by_other_connector, extension_invalid, extension_missing, username_invalid or last_admin; for skips inactive_in_source, absent_pending, link_only_no_match or local_admin_not_adopted; for adopt adopt_not_confirmed or confirmed; for disable inactive_in_source or absent_from_source; for error last_admin, not_found, invalid or apply_failed."
+          },
+          "overridable": {
+            "type": "boolean",
+            "description": "A conflict an administrator may override on apply (extension_linked)."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "runId",
+          "action",
+          "userId",
+          "externalId",
+          "username",
+          "fieldDiffs",
+          "reason",
+          "overridable",
+          "createdAt"
+        ]
+      },
+      "DirectoryChangeList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectoryChange"
+            }
+          },
+          "nextAfter": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Pass as after to read the next page; null at the end."
+          }
+        },
+        "required": ["items", "nextAfter"]
+      },
+      "DirectoryDecisions": {
+        "type": "object",
+        "properties": {
+          "adopt": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "External ids of the adoptions to confirm: local users matched by email, then username, that the connector would take over."
+          },
+          "adoptAll": {
+            "type": "boolean",
+            "description": "Confirm every adoption in the run."
+          },
+          "override": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "External ids of conflicts to override. Only extension_linked can be overridden: the extension moves from its current user."
+          }
+        },
+        "description": "An administrator's choices on an apply; audited."
+      },
+      "DirectoryStalePreview": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["code", "message"]
+          },
+          "run": {
+            "$ref": "#/components/schemas/DirectoryRun"
+          }
+        },
+        "required": ["error", "run"],
+        "description": "The 409 stale_preview answer: the fresh preview to review."
+      },
+      "InboxContactInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "firstName": {
+            "type": "string",
+            "description": "At most 100 characters."
+          },
+          "lastName": {
+            "type": "string",
+            "description": "At most 100 characters."
+          },
+          "company": {
+            "type": "string",
+            "description": "At most 100 characters. At least one of the three names is required."
+          },
+          "book": {
+            "type": "string",
+            "enum": ["personal", "company"],
+            "description": "Where to save it: personal (the caller's own contacts, the default) or company (the shared book; supervisors only, and not accepted on the /me route)."
+          }
+        }
+      },
       "MessagingCarrierNumber": {
         "type": "object",
         "required": ["number", "label", "sms", "mms", "voice"],
@@ -42729,63 +46151,6 @@
             "description": "Id of an existing device of the extension to bind (its secret is rotated); omit to create one."
           }
         }
-      },
-      "RTCPXRQuality": {
-        "type": "object",
-        "required": [
-          "device",
-          "extension",
-          "final",
-          "mosLq",
-          "mosCq",
-          "jitterMs",
-          "lossPct",
-          "discardPct",
-          "roundTripMs",
-          "reportedAt"
-        ],
-        "properties": {
-          "device": {
-            "type": "string",
-            "description": "The reporting device's SIP user name."
-          },
-          "extension": {
-            "type": "string"
-          },
-          "final": {
-            "type": "boolean",
-            "description": "True for the call-end report, false for an interval report."
-          },
-          "mosLq": {
-            "type": ["number", "null"],
-            "description": "Listening-quality MOS (0 to 5) the phone estimated."
-          },
-          "mosCq": {
-            "type": ["number", "null"],
-            "description": "Conversational-quality MOS (0 to 5)."
-          },
-          "jitterMs": {
-            "type": ["number", "null"],
-            "description": "Inter-arrival jitter the phone measured, ms."
-          },
-          "lossPct": {
-            "type": ["number", "null"],
-            "description": "Network packet loss rate, percent."
-          },
-          "discardPct": {
-            "type": ["number", "null"],
-            "description": "Jitter buffer discard rate, percent."
-          },
-          "roundTripMs": {
-            "type": ["number", "null"],
-            "description": "Round-trip delay, ms."
-          },
-          "reportedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "description": "What one phone reported about its side of a call."
       },
       "SettingOverride": {
         "type": "object",

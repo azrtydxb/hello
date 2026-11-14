@@ -3555,6 +3555,158 @@ Decided while building, without asking, within the spec and the brief:
   non-static command, and no supported allow exists for it. The overrides were
   unused: kw does not set them (checked by the user).
 
+## Messaging 4, LAN chat widget: defaults chosen (2026-11-11)
+
+Built from `.procoder/specs/messaging-channels.md` M-28, M-29, M-29a to M-29c.
+Where the spec left a product decision open, the conservative option was chosen
+and is listed here as chosen by default; change one by editing this entry and
+the code it names.
+
+- **Routing.** A chat conversation goes to the unassigned inbox pool, which is
+  what `route_kind = 'inbox'` is today. Queue routing and ACD assignment are
+  item 5, so the "default route (queue)" site setting is not offered yet.
+- **Who is available.** Agent staffing (M-13) is not on main, so a site is
+  online when it is inside its opening hours, a supervisor (operator or admin)
+  has an inbox stream open (seen in the last two minutes, `inbox_presence`), and
+  the unassigned live chats are under the site's cap. Otherwise the widget goes
+  offline: it collects a name, an email address and a message, and the chat is
+  flagged offline.
+- **Opening hours.** The M-14 schedule and the time-conditions engine are not
+  on main, so a site keeps its own weekly schedule (an IANA zone and windows per
+  weekday); empty means always open. A bad schedule counts as open, so a typo
+  never silences the widget.
+- **Agents are anonymous to visitors.** A visitor sees "Support", never an
+  agent's username or display name.
+- **Visitor events** are in `chat_events`, not `conversation_events`: that
+  table is per user and its user id is a required key. Same design (ids in
+  commit order, 7 days, `Last-Event-ID` resume on any pod).
+- **A challenge endpoint.** `GET /chat/v1/challenge?site=` returns the site's
+  public look and the nonce to solve; the spec lists the session call but a
+  proof of work needs its nonce first. Nonces are signed, expire in three
+  minutes, are bound to the client address and the site, are accepted once per
+  pod, and may never carry less difficulty than the site's setting.
+- **Turnstile and the frame's policy.** Turnstile cannot render under
+  `script-src 'self'`, so only a Turnstile site's frame also allows
+  `https://challenges.cloudflare.com` for scripts and frames. Every other site
+  keeps the spec's policy exactly. The admin page warns that Turnstile needs
+  the browser and the server to reach Cloudflare.
+- **Blocks.** A block holds the visitor for the hours chosen (24 by default, at
+  most 720) and the day's address hash until 00:00 UTC at most. A blocked
+  visitor gets a normal 200 with a closed state and a worthless token; nothing is
+  stored. Unblocking is on the sites page.
+- **Daily address salt.** The hash is HMAC-SHA256 under a key derived from
+  `HELLO_SECRET_KEY` and the UTC date, so there is no salt table and the salt
+  rotates at 00:00 UTC on every pod.
+- **One stream per visitor** is enforced per pod (a second stream is refused
+  with 429 after waiting up to a second for the old one to close, so a page
+  reload is not refused); there is no cross-pod stream registry.
+- **Adaptive difficulty** is tracked per pod in memory (this minute against
+  three times the median of the last hour, at least 10 sessions): only a
+  hardening, nothing depends on it.
+- **Email replies** are allowed only for chats the visitor left while nobody was
+  available and gave an address for; a live chat is answered in the widget. The
+  email holds the reply and no link, and the failure is kept as a failed message.
+- **A resolved chat reopens** when the same visitor writes again within
+  `reopen_days` (M-12); after a visitor ends a chat and returns later, a new
+  conversation starts. A chat an agent marked spam stays closed to that visitor.
+- **A site collecting nothing still takes an email address while offline**, so
+  the reply has somewhere to go.
+- **Defaults.** The listener is off until `HELLO_MSG_CHAT_LAN_ADDR` is set; the
+  global switch `HELLO_MSG_CHAT_ENABLED` defaults to true; a new site has the
+  proof-of-work challenge at 16 bits, no contact collection, no transcripts,
+  links kept, and no allowed origins until some are listed (the frame is then
+  not embeddable by any page).
+- **Not built, and why.** Chat attachments (`POST /chat/v1/attachments`, the
+  site's attachment switch) and the site logo from MinIO are not built: the
+  media pipeline and its tables (M-18) are not on main, and the spec has
+  attachments off by default. The route does not exist (404), so nothing is
+  half-wired. They join the media work.
+
+## Integrations P8: directory engine and AD/LDAP sync (2026-11-10)
+
+Built from spec `integrations.md` I-1 to I-10 and I-12 to I-19 (range
+auto-provisioning I-11 stays P12; the Google, Entra, SCIM and OIDC connectors
+build on the same `Driver` and `Store` later). The spec left the points below
+open; each was **chosen by default (the conservative option)**, not by the
+user.
+
+- **Scheduling starts only after a manual apply.** A connector never changes
+  users on its first, unreviewed run: the scheduler skips a connector until one
+  `apply` run (a reviewed preview applied, or "Run now") has succeeded. New
+  connectors are created disabled.
+- **Mass-deprovision threshold.** "More than 20 percent of linked users
+  (minimum 5)" is read as: the run halts when it would disable more than
+  `max(5, 20 percent of the enabled linked users)`. A small install (under 25
+  users) is therefore only guarded by the empty-result guard below 6
+  disables. The empty-result guard is `needs_confirmation` with code
+  `empty_result` (not a hard failure), so an administrator can confirm a
+  genuine emptying.
+- **A created directory user has no usable password and no new login method.**
+  The spec's SSO-only rule for synced users needs the later SSO phase. In P8
+  the sync stores the marker `!` as the password hash (it never matches, "an
+  empty or unknown hash never matches") and keeps `auth_method = 'local'`: the
+  `users_auth_method_check` constraint is left alone, so the later phase adds its
+  own value. A local user an administrator _adopts_ keeps its password, so
+  adopting never locks anyone out; the later phase flips adopted users.
+- **Adoption needs a decision.** Matching is by email, then username (a
+  username match whose email differs is the `username_collision` conflict).
+  Adopt rows are applied only when listed in the apply body (`adopt` /
+  `adoptAll`); otherwise they stay `adopt_not_confirmed`. A local admin is
+  skipped (`local_admin_not_adopted`).
+- **Only `extension_linked` can be overridden**, by moving the extension from
+  its current user, on the administrator's explicit decision (audited). Every
+  other conflict reason is not overridable.
+- **An empty or missing extension value never unlinks.** A user whose mapped
+  extension is empty keeps the link it has; one with no extension value is
+  created without a link (not a conflict). Auto-create is P12.
+- **Disabling is allowed on a managed user, enabling is not.** An
+  administrator may disable a directory user by hand (the safe direction);
+  re-enabling, and every other managed field, is `409 managed_by_directory`.
+  A directory user has no local password: setting one is refused too.
+- **Deleting a connector with linked users is refused** (`409
+connector_in_use`) unless `release=true`, which turns the users into local
+  users (keeping their rows, no password) and the ring-group rows into manual
+  ones.
+- **Reads are admin, not operator.** The spec lists runs and changes as
+  "operator"; the route table ties role to scope (a read scope is viewer), and
+  runs name users, so every directory route is scope `admin`, role admin. The
+  MCP tools are the five read operations; the writes, the test, the sync and
+  the apply and confirm are excluded (credentials, human-in-the-loop).
+- **Incremental runs (I-12).** Only a scheduled run reads incrementally; a
+  preview, a manual apply and a confirm always read everything, so an apply
+  matches its preview. AD reads `uSNChanged>=` the `highestCommittedUSN` taken
+  from the rootDSE before the read, kept per connector with the server's
+  invocation ID; without a USN, `whenChanged>=` (AD) or `modifyTimestamp>=`
+  (other LDAP) from the read's start less 5 minutes for clock skew. The mark is
+  stored only after a run applied with no error row. A full run is forced when
+  there is no mark, 24 h after the last full run, when the config, mappings,
+  group rules or mode changed (a fingerprint), when the invocation ID changed
+  or the USN or clock went backwards, and when a group the rules use changed
+  (AD does not bump a user's USN for a membership change). An incremental run
+  never counts, skips or disables a user for being absent and never trips the
+  empty-result guard; only full runs detect absences. Unchanged users with a
+  conflict are re-examined by the next full run, not before. Stored in
+  `directory_connectors` (`sync_mark`, `sync_fingerprint`, `last_full_run_at`)
+  and shown per run (`incremental`, `fullReason`). `delta_token` stays reserved
+  for Entra.
+- **Stable id.** AD `objectGUID` in its canonical string form, else
+  `entryUUID`, else `nsUniqueId`; an entry with none fails the run
+  (`bad_filter`) instead of being skipped, because a skipped user would read as
+  absent and be disabled.
+- **LDAP servers must be reachable through the SSRF-safe dialer**: public, or in
+  `HELLO_INTEGRATIONS_ALLOWED_CIDRS` (RFC 1918 by default). Loopback and
+  link-local never are.
+- **A failed connection test is a 200** with `ok: false` and a classified
+  code, so the console can show it; a failed run is a run row, not an API
+  error.
+- Devices a sync switches off are marked (`devices.disabled_by_directory`) so
+  that only those come back when the user does. Applying is per user, in its
+  own transaction under the configuration lock when it touches ring groups or
+  devices, so one bad row becomes an `error` row and the run goes on.
+- Live tests against a real Active Directory (certificate chains, paging at
+  1000, nested groups, `userAccountControl` flags) are on the PR's
+  hardware-and-accounts list; the suite uses an in-process LDAP server.
+
 ## Messaging item 3: desk-phone texting and the SIP trunk channel (2026-11-10)
 
 The SIP-trunk adapter, the inbox gateway hand-off (`InboundFromTrunk`), replies
@@ -3629,9 +3781,8 @@ default; each is a one-line change if the user decides otherwise.
 - The page script is registered dynamically only for sites the user lists and
   the browser has granted (`optional_host_permissions`), so there is no
   `<all_urls>` grant and no always-on content script.
-- Not built here: `GET /api/v1/lookup/number` (I-43) is not on main, so the
-  incoming-call notification shows the name in the `call.ringing` event itself.
-  A CRM contact lookup belongs to the connectors.
+- The incoming-call notification looks the caller up through
+  `GET /api/v1/lookup/number` (I-43, #304); see "Extension caller lookup" below.
 
 ## Integrations P17: Slack, n8n and Make (2026-11-13)
 
@@ -4098,6 +4249,93 @@ Not testable without a Twilio account (hardware/accounts list in the PR): a real
 send and delivery receipt, error code mapping against live Twilio, 10DLC and
 toll-free registration state, Messaging Service sends, what carriers do to an
 unregistered sender.
+
+## Extension caller lookup (2026-11-13, feat/extension-lookup)
+
+- **No new scope.** The lookup route needs `read` and the `hello-extension`
+  client already asks for `calls events read`; the preregistered client and the
+  scope rules are unchanged.
+- **The route gains the fields the notification needs.** It returned only a
+  name, so it now also returns `company` (the matching book entry's company)
+  and `crm`: `{id, name, company, url}` from the CRM connectors (organisation
+  connectors first, then the caller's own Outlook/Google), via
+  `crm.Service.FindContact` and the 1.5 s budget and 5 min/60 s cache of the
+  existing CRM lookup. `crm` is independent of `result`: a number can be `none`
+  in the books and known to the CRM. A service account gets only organisation
+  connectors. Additive; no other consumer changes.
+- **Name precedence:** CRM contact, then an address-book match, then the name in
+  the event. An ambiguous or unresolvable answer names nobody.
+- **Quiet failure:** 404, no match, errors and a 2 s timeout all fall back to the
+  event name. Cache in the worker's memory (5 min hit, 60 s miss and 404, 10 s
+  failure); it is not persisted, and sign-out clears it.
+- **CRM link** is an "Open in CRM" notification button (only http and https
+  links), not a click on the body, which still just dismisses.
+
+## Messaging item 5: routing and ACD (2026-11-11)
+
+Built on origin/main so that routing does not depend on which channel created
+the conversation: the router places any conversation whose `routed_at` is NULL,
+so the Twilio (item 2), desk-phone (item 3) and chat (item 4) channels are
+routed once they merge, with no change of their own. Where the spec left a
+product choice open, the conservative one was taken and is listed here as
+chosen by default; change one by editing this entry and the code it names.
+
+- **Wake-up.** The router sweeps every 2 s on every control replica instead of
+  waiting on `pg_notify` plus a 10 s tick (the repo has no LISTEN
+  infrastructure, and the sweep is a few indexed queries). Returning
+  unanswered conversations and releasing orphans run every 10 s
+  (`router.DefaultSlowEvery`). Agent login lives in Valkey, which PostgreSQL
+  cannot wake on either way.
+- **Routing config is a sub-resource.** `GET|PUT /api/v1/messaging/addresses/{id}/routing`
+  carries the route, schedule, after-hours action and first-contact text,
+  rather than more fields on the address PUT, so the address contract of the
+  other open messaging PRs stays as it is. `route_target` is the id of the
+  queue, user, extension or ring group as text; a queue target must take texts
+  when it is set.
+- **Fallback is the supervisors' pool.** A route whose target is deleted,
+  disabled, unlinked or (for a queue) off for texts sends the conversation to
+  the pool. The spec's "the address's fallback route" is read as that pool.
+  Turning a queue's texting off moves its unassigned conversations to the pool;
+  assigned ones stay with their agent.
+- **After-hours.** `none` routes as usual, `reply` sends the text and then
+  routes as usual, `route` goes to the other target. Evaluated by the number's
+  own weekly schedule (the time-conditions engine is not used for texts); an
+  empty schedule is always open and an invalid stored one reads as open. The
+  reply is sent once per conversation, never to an opted-out customer, and only
+  a SIP trunk channel can send it today: another provider gets a system line
+  saying the text was not sent, until its channel adds a send path.
+- **First contact.** The first-contact text (M-14) goes once to a peer with no
+  earlier conversation on that number, not together with the closed-hours
+  reply, never to an opted-out peer.
+- **Capacity.** An agent's open conversations are those assigned to them that
+  are open or pending (snoozed does not count), across every queue and direct
+  assignment. Only the router enforces it; a person who claims or replies is
+  not blocked.
+- **Statistics for the strategies.** Calls and last end come from
+  `msg_agent_stats` in PostgreSQL (answered = conversations the queue gave the
+  user; last end = when it last did), the round robin counter from
+  `msg_queue_rr`, both separate from the voice statistics. A user linked to
+  several member extensions counts once, by their best extension.
+- **Reassign.** Only conversations the router assigned (the latest assignment
+  row is `acd`) and only while open with the customer's last text unanswered
+  by any user reply. The agent who let it lapse is not offered it again; with
+  nobody else eligible it waits in the queue (its members can claim it). A
+  conversation a person assigned, took or answered, or a direct user or
+  extension route, is never taken back. An agent whose extension is unlinked
+  or who leaves the queue loses their router-assigned conversations to the
+  queue.
+- **Shared pool visibility.** The members of a text queue and the users of a
+  ring group see the unassigned conversations waiting there (and are told by
+  the live stream and, with an address, by email); nobody else does.
+- **Availability is the call queues' state.** One login and one pause per
+  extension, so pausing for texts pauses calls too; the inbox sets it on every
+  extension of the user that is a member of a text queue (`/me/inbox/agent`).
+  With Valkey unreadable the router assigns to static members only.
+- **Not offered.** The `ai_triage` route kind waits for the AI item; `desk_phone_delivery`
+  and the owner extension wait for item 3 (the router calls `Store.afterAssign`,
+  where that item's delivery on assignment belongs).
+- **Deleting a queue** is refused (409) while a number routes to it or an open
+  conversation is placed in it.
 
 ## Messaging item 6: Telnyx and sender registration (2026-11-13)
 

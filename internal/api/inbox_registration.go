@@ -341,13 +341,6 @@ func (s *server) getMessagingChannelRegistration(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, rep)
 }
 
-func nonNil[T any](v []T) []T {
-	if v == nil {
-		return []T{}
-	}
-	return v
-}
-
 // channelAdapter builds the adapter of a carrier channel from its stored
 // credentials, answering the failure itself.
 func (s *server) channelAdapter(ctx context.Context, w http.ResponseWriter, is InboxStore, c store.MsgChannel) (provider.SMSProvider, bool) {

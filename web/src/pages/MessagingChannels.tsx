@@ -42,6 +42,8 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
+import { ROUTE_KIND_LABEL } from "../api/inboxRouting";
+import { RoutingDialog } from "./inbox/RoutingDialog";
 
 /** Registration reads by channel id; "error" when the carrier did not answer. */
 type Registrations = Record<number, ChannelRegistration | "error">;
@@ -697,6 +699,9 @@ export function MessagingChannels() {
   >(null);
   const [delChannel, setDelChannel] = useState<MessagingChannel | null>(null);
   const [delAddress, setDelAddress] = useState<MessagingAddress | null>(null);
+  const [routeAddress, setRouteAddress] = useState<MessagingAddress | null>(
+    null,
+  );
   const [test, setTest] = useState<{
     channel: MessagingChannel;
     result: ChannelTest;
@@ -713,8 +718,16 @@ export function MessagingChannels() {
       listAddresses(controller.signal),
       listTrunks(controller.signal),
     ])
-      .then(([channels, addresses, trunks]) => {
-        setData({ channels, addresses, trunks });
+      .then(([all, addresses, trunks]) => {
+        // A website chat is set up on the Chat sites page, not here.
+        const chat = new Set(
+          all.filter((c) => c.kind === "webchat").map((c) => c.id),
+        );
+        setData({
+          channels: all.filter((c) => c.kind !== "webchat"),
+          addresses: addresses.filter((a) => !chat.has(a.channelId)),
+          trunks,
+        });
         setError(null);
       })
       .catch((err: unknown) => {
@@ -920,6 +933,11 @@ export function MessagingChannels() {
                   render: (a) => a.channelName,
                 },
                 {
+                  key: "route",
+                  label: "Goes to",
+                  render: (a) => ROUTE_KIND_LABEL[a.routeKind],
+                },
+                {
                   key: "state",
                   label: "State",
                   render: (a) =>
@@ -952,6 +970,13 @@ export function MessagingChannels() {
                         onClick={() => setEditAddress(a)}
                       >
                         Edit {a.address}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setRouteAddress(a)}
+                      >
+                        Routing {a.address}
                       </Button>
                       <Button
                         size="sm"
@@ -1011,6 +1036,17 @@ export function MessagingChannels() {
             refresh();
           }}
           onClose={() => setDelChannel(null)}
+        />
+      )}
+      {routeAddress && (
+        <RoutingDialog
+          address={routeAddress}
+          onClose={() => setRouteAddress(null)}
+          onSaved={() => {
+            setRouteAddress(null);
+            toast.show(`Routing of ${routeAddress.address} saved.`);
+            refresh();
+          }}
         />
       )}
       {delAddress && (

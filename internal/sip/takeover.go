@@ -24,7 +24,7 @@ import (
 // haReapDelay is how long after a node is first seen OFFLINE its
 // unrecoverable calls are counted: past the dialog TTL, so every taker had
 // its chance. A var so tests can count at once.
-var haReapDelay = livestate.DialogTTL + 15*time.Second
+var haReapDelay = newTunable(livestate.DialogTTL + 15*time.Second)
 
 // haMediaGap is the takeover target: audio restored within 3s of the claim
 // (spec S-4). Exceeding it is logged; the CDR trace records the real gap.
@@ -33,7 +33,7 @@ const haMediaGap = 3 * time.Second
 // haReinviteTimeout bounds one takeover re-INVITE. The whole takeover
 // budget is 3s (spec S-4), so a leg that has not answered by then fails
 // the takeover and takes the one-sided close; a var so tests shrink it.
-var haReinviteTimeout = 3 * time.Second
+var haReinviteTimeout = newTunable(3 * time.Second)
 
 // haLeg is one dialog of a taken-over call, carried from the replicated
 // state. The endpoint's view of the dialog is unchanged: same Call-ID, same
@@ -235,7 +235,7 @@ func (s *Server) haReinvite(l *haLeg, body []byte) (*sip.Response, bool) {
 		return nil, false
 	}
 	l.useCSeq()
-	ctx, cancel := context.WithTimeout(context.Background(), haReinviteTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), haReinviteTimeout.Get())
 	defer cancel()
 	res, err := s.do(ctx, req)
 	if err != nil || res == nil {
@@ -440,7 +440,7 @@ func (s *Server) haClaim(ctx context.Context, callID, stale string) (livestate.D
 // haIncWindow is how long after a node's incarnation is first seen (or
 // changes) its dialogs are scanned for a dead incarnation's: past it, every
 // record the dead process wrote has expired (it cannot refresh them).
-var haIncWindow = livestate.DialogTTL + 5*time.Second
+var haIncWindow = newTunable(livestate.DialogTTL + 5*time.Second)
 
 // haWatchIncarnation reports whether node's dialogs should be scanned for a
 // dead incarnation's: within haIncWindow of its incarnation being first
@@ -455,7 +455,7 @@ func (s *Server) haWatchIncarnation(node, inc string) bool {
 	defer s.haOfflineMu.Unlock()
 	w, ok := s.haIncSeen[node]
 	if !ok || w.inc != inc {
-		w = haIncWatch{inc: inc, until: now.Add(haIncWindow)}
+		w = haIncWatch{inc: inc, until: now.Add(haIncWindow.Get())}
 		s.haIncSeen[node] = w
 	}
 	return now.Before(w.until)
@@ -585,7 +585,7 @@ func (s *Server) haOfflineSee(id string, active int) haOfflineNode {
 		return *e
 	}
 	active = max(active, s.haLastActive[id])
-	e := &haOfflineNode{active: active, deadline: time.Now().Add(haReapDelay)}
+	e := &haOfflineNode{active: active, deadline: time.Now().Add(haReapDelay.Get())}
 	s.haOffline[id] = e
 	return *e
 }
