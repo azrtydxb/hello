@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
@@ -414,16 +415,69 @@ func (s *Server) parkLoop(ctx context.Context) {
 			if err != nil || !ok {
 				break
 			}
-			s.bg.Go(func() {
-				defer contain(s.log, "park command")
-				s.runParkCommand(cmd)
-			})
+			s.dispatchParkCommand(cmd)
 		}
 		if time.Since(lastSync) >= parkSlotSyncEvery {
 			lastSync = time.Now()
 			s.syncSlots(known)
 		}
 	}
+}
+
+// parkQueues holds the park commands waiting for each call (by Call-ID).
+// A key is present while a goroutine drains that call's commands.
+type parkQueues struct {
+	mu sync.Mutex
+	q  map[string][]livestate.ParkCommand
+}
+
+// dispatchParkCommand runs cmd in the background. Commands on one call
+// (hold, resume, retrieve) run one at a time in the order they were sent:
+// each re-INVITEs the same dialog, and a hold then resume taken in one poll
+// must not run concurrently (two re-INVITEs glare, RFC 3261 14.1) nor
+// reorder (the phone would end up held). A hang-up does not queue behind a
+// re-INVITE still waiting for its answer (a BYE may cross one), and
+// commands naming no call (pickup, door open) are independent.
+func (s *Server) dispatchParkCommand(cmd livestate.ParkCommand) {
+	if cmd.CallID == "" || cmd.Op == livestate.ParkOpBye {
+		s.bg.Go(func() { s.runParkCommandContained(cmd) })
+		return
+	}
+	s.parkQ.mu.Lock()
+	if s.parkQ.q == nil {
+		s.parkQ.q = map[string][]livestate.ParkCommand{}
+	}
+	pending, running := s.parkQ.q[cmd.CallID]
+	s.parkQ.q[cmd.CallID] = append(pending, cmd)
+	s.parkQ.mu.Unlock()
+	if running {
+		return
+	}
+	s.bg.Go(func() { s.drainParkCommands(cmd.CallID) })
+}
+
+// drainParkCommands runs a call's queued park commands until none is left.
+func (s *Server) drainParkCommands(callID string) {
+	for {
+		s.parkQ.mu.Lock()
+		pending := s.parkQ.q[callID]
+		if len(pending) == 0 {
+			delete(s.parkQ.q, callID)
+			s.parkQ.mu.Unlock()
+			return
+		}
+		cmd := pending[0]
+		s.parkQ.q[callID] = pending[1:]
+		s.parkQ.mu.Unlock()
+		s.runParkCommandContained(cmd)
+	}
+}
+
+// runParkCommandContained is runParkCommand with a panic contained, so one
+// bad command neither stops the node nor the call's queue.
+func (s *Server) runParkCommandContained(cmd livestate.ParkCommand) {
+	defer contain(s.log, "park command")
+	s.runParkCommand(cmd)
 }
 
 // runParkCommand does what another node asked of a call held here.

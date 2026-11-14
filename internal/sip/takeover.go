@@ -65,6 +65,10 @@ type haLeg struct {
 	sesIdx int
 
 	mu sync.Mutex
+	// inviteMu is held across each INVITE transaction Hello starts on the
+	// leg (and its ACK), so a second re-INVITE waits instead of glaring
+	// (RFC 3261 14.1). Take it before mu, never inside it.
+	inviteMu sync.Mutex
 }
 
 // bindSession ties the leg to dialog idx of the call's session timers.
@@ -187,18 +191,13 @@ func (h *homedCall) setCallee(l *haLeg) {
 	h.mu.Unlock()
 }
 
-// useCSeq spends the leg's next CSeq value.
-func (l *haLeg) useCSeq() {
-	l.mu.Lock()
-	l.localCSeq++
-	l.mu.Unlock()
-}
-
-// request builds an in-dialog request on the leg.
+// request builds an in-dialog request on the leg and spends the leg's next
+// CSeq on it, in one step: two requests built at once never share a CSeq.
 func (l *haLeg) request(s *Server, method sip.RequestMethod, body []byte, contentType string) (*sip.Request, error) {
 	l.mu.Lock()
 	target, cseq, localTag, remoteTag := l.remoteTarget, l.localCSeq, l.localTag, l.remoteTag
 	routes := l.routes
+	l.localCSeq++
 	l.mu.Unlock()
 	var ruri sip.Uri
 	if err := sip.ParseUri(strings.TrimSuffix(strings.TrimPrefix(target, "<"), ">"), &ruri); err != nil {
@@ -310,6 +309,8 @@ func (s *Server) haAck(l *haLeg, inv *sip.Request, res *sip.Response) {
 // the timer goes on refreshing with — and a 422 raises the interval to the
 // phone's Min-SE and tries again, as a refresh does.
 func (s *Server) haReinvite(l *haLeg, body []byte) (*sip.Response, bool) {
+	l.inviteMu.Lock()
+	defer l.inviteMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), haReinviteTimeout.Get())
 	defer cancel()
 	var (
@@ -324,7 +325,6 @@ func (s *Server) haReinvite(l *haLeg, body []byte) (*sip.Response, bool) {
 			return nil, false
 		}
 		timed := l.addSessionTimer(s, req)
-		l.useCSeq()
 		res, err = s.do(ctx, req)
 		if err != nil || res == nil {
 			return nil, false
@@ -347,7 +347,7 @@ func (s *Server) haReinvite(l *haLeg, body []byte) (*sip.Response, bool) {
 		l.remoteTarget = uriString(ct.Address)
 	}
 	if n := res.CSeq(); n != nil {
-		l.localCSeq = n.SeqNo + 1
+		l.localCSeq = max(l.localCSeq, n.SeqNo+1) // a BYE may have spent one since
 	}
 	// The route set is fixed when the dialog forms (RFC 3261 12.2.1.2):
 	// a re-INVITE refreshes only the remote target.
@@ -383,7 +383,6 @@ func (s *Server) haBye(l *haLeg) {
 	if err != nil {
 		return
 	}
-	l.useCSeq()
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
 	// A BYE that failed to go out (a transaction the transport cancelled)
@@ -1090,7 +1089,6 @@ func (s *Server) haReferFailed(l *haLeg) {
 	if err != nil {
 		return
 	}
-	l.useCSeq()
 	req.AppendHeader(sip.NewHeader("Event", "refer"))
 	req.AppendHeader(sip.NewHeader("Subscription-State", "terminated;reason=noresource"))
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)

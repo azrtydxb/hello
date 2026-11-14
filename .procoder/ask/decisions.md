@@ -4911,3 +4911,34 @@ extension` and `create device` rows with the actor `directory:<connector>`;
 - **New read route** `GET /api/v1/directory/connectors/{id}/range` (admin,
   exposed over MCP as `getDirectoryRange` like the other directory reads):
   size, numbers used, next free and the users holding a number.
+
+## One INVITE transaction per dialog; park commands per call in order (2026-11-15)
+
+CI's `-race` run caught `TestCallParkHold/across_nodes` racing inside sipgo:
+two hold commands for one parked call ran in two goroutines, and both
+re-INVITEs read the dialog's stored INVITE, whose Content-Type sipgo parses
+lazily and caches (a write on a shared request). Beyond the memory race this
+was SIP glare (RFC 3261 14.1), a possible duplicate CSeq (sipgo loads,
+increments and stores the dialog CSeq non-atomically), and a hold then resume
+could reach the phone reversed, leaving it held.
+
+- **Park commands for one call run in order.** The park loop queues each
+  call's commands (by Call-ID) and one goroutine drains them. A hang-up does
+  not queue (a BYE may cross a pending re-INVITE), and pickup and door-open,
+  which name no call, run as before.
+- **Hello starts one INVITE transaction per dialog at a time.** `reinvite`
+  and `reinviteA` wait on a gate keyed by the sipgo dialog session; a homed
+  leg (incall-ha) has its own mutex, taken by `haReinvite` and the homed
+  session refresh. A session-timer re-INVITE takes the same gate, and its
+  timeout starts once it may go. Hello queues rather than retrying on 491:
+  the conflict is its own, so waiting is cheaper than a 2 to 4 second backoff.
+- **The ACK goes out before the gate opens** where the 2xx is ACKed without
+  a body (`reinviteAcked`: park retrieve and linked hold). The transfer flows
+  keep their own ACK placement for now; the 3PCC ones ACK with the other
+  party's answer, after a second re-INVITE.
+- **No lazy reads of the shared INVITE.** The re-INVITE and its late ACK set
+  `Content-Type: application/sdp` themselves (every body Hello sends there is
+  SDP) instead of copying the dialog INVITE's header.
+- **A homed leg's CSeq is spent when the request is built,** under the leg's
+  lock, so a BYE or NOTIFY built during a re-INVITE never shares its CSeq, and
+  the re-INVITE's 200 only moves the counter forward.
