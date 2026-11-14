@@ -33569,7 +33569,8 @@
                   "first_contact_off",
                   "device_limit",
                   "derived_device",
-                  "not_your_call"
+                  "not_your_call",
+                  "faq_full"
                 ]
               },
               "message": {
