@@ -378,7 +378,7 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 				s.log.Warn("queue heartbeat failed", "queue", q.Name, "correlation_id", c.id, "error", err)
 			}
 		}
-		if cbID != 0 && now.Sub(lastRenew) >= callbackWatchEvery {
+		if cbID != 0 && now.Sub(lastRenew) >= c.s.callbackWatchEvery() {
 			lastRenew = now
 			if !c.cbRenew() {
 				// An operator cancelled the request: hang up on the caller.
@@ -388,7 +388,7 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 				return
 			}
 		}
-		if !callbackOffered && now.Sub(lastCB) >= callbackOfferCheck && c.callbackOffered(q) {
+		if !callbackOffered && now.Sub(lastCB) >= c.s.callbackOfferCheck() && c.callbackOffered(q) {
 			lastCB = now
 			if c.callbackDue(ctx, snap, q, enteredAt) {
 				callbackOffered = true
