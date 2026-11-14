@@ -62,7 +62,7 @@ func TestMusicOnHoldTakeover(t *testing.T) {
 		return false
 	})
 
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	owner.stop()
 	killMedia(owner)
 	mem.set(
