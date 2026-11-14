@@ -60,6 +60,16 @@ func (s *audioSink) packets() int {
 	return s.n
 }
 
+// await gives the sink's reader up to two seconds to count want packets and
+// returns the count it got.
+func (s *audioSink) await(want int) int {
+	deadline := time.Now().Add(2 * time.Second)
+	for s.packets() < want && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	return s.packets()
+}
+
 // doorHookFeatures installs a door station 900, the Door group 800 with
 // members 200 and 300, an ordinary group 810 and the paging group *60 (200
 // and 300).
@@ -126,7 +136,9 @@ func TestDoorWebhookRing(t *testing.T) {
 	waitReq(t, c.invites, "INVITE to 300")
 	waitReq(t, c.cancels, "CANCEL to the member that did not answer first")
 	waitReq(t, b.byes, "BYE to the winner after the chime")
-	if n := sink.packets(); n < 30 {
+	// The BYE and the chime travel on different sockets: the sink's reader
+	// may still be taking the last frames when the BYE is in.
+	if n := sink.await(30); n < 30 {
 		t.Errorf("the winner got %d audio packets, want the chime (about 50 a second for a second)", n)
 	}
 	cd := pbx.nextCDR(t)
@@ -188,8 +200,8 @@ func TestDoorWebhookChimePage(t *testing.T) {
 		}
 		waitReq(t, ph.byes, "BYE to "+name)
 	}
-	if sinkB.packets() < 30 || sinkC.packets() < 30 {
-		t.Errorf("chime packets %d and %d, want both members to hear it", sinkB.packets(), sinkC.packets())
+	if nb, nc := sinkB.await(30), sinkC.await(30); nb < 30 || nc < 30 {
+		t.Errorf("chime packets %d and %d, want both members to hear it", nb, nc)
 	}
 	cd := pbx.nextCDR(t)
 	if cd.Kind != cdr.KindDoor || cd.Destination != "*60" || cd.FinalStatus != 200 {
