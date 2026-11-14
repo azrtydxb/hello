@@ -328,3 +328,16 @@ func (s *Server) recordingEvents(c *call, recordingID, durMs int64) {
 		c.emit(events.CallRecordingReady, d, strconv.FormatInt(recordingID, 10))
 	}
 }
+
+// voicemailEvent emits voicemail.received for the box extension ext once a
+// message is stored. The event carries who called and how long the message is,
+// never the audio. For a group message it is emitted once per member box.
+func (c *call) voicemailEvent(ext string, dur time.Duration) {
+	if ext == "" || !c.eventsOn() {
+		return
+	}
+	d := c.eventData(ext)
+	d.To = events.Party{Number: ext, Extension: ext, Name: c.s.extName(ext)}
+	d.DurationMs = dur.Milliseconds()
+	c.emit(events.VoicemailReceived, d, "vm")
+}

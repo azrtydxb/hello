@@ -1,0 +1,5 @@
+{
+  "type": "instant_trigger",
+  "webhook": "call-event",
+  "output": "{{body}}"
+}

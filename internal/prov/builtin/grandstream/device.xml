@@ -10,7 +10,7 @@
     <P36>{{xml .Line.AuthName}}</P36>
     <P34>{{xml .Line.Password}}</P34>
     <P3>{{xml .Line.DisplayName}}</P3>
-{{- /* DNS mode and backup server (phone-feature-parity S-20), account 1, keys per Grandstream's own configuration templates (config-template-10212026.zip; 2026-11-09 review). P103 = DNS Mode: 0 A Record, 1 SRV, 2 NAPTR/SRV (3 Use Configured IP takes IPv4 addresses of at most 15 characters in P2308 to P2310, no port, so it cannot carry a backup) in wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83, wp820_config_1.0.7.90 and wp856_config_1.0.3.16. Written always, so a phone taken back out of SRV mode returns to A records. In SRV mode (Server.DNSMode "srv", HELLO_PROV_SIP_SRV) P47 is the name whose _sip._udp SRV records list the servers (no port); P29095 = 1 (Register Before DNS SRV Fail-over, 0 No, 1 Yes) registers with the next server before failing calls over to it; P26040 = 3 (DNS SRV Failover Mode: 0 Default, 1 saved one until DNS TTL, 2 saved one until no response, 3 failback follows the failback expiration timer, in all four templates) makes the phone return to the first server when the timer ends; P60056 = 60 is that Failback Timer in minutes (wp8x6, wp820 and wp856 templates; the WP810/822/825 template lists the Failback Timer under P60055, the retry count's own key, which is a mistake in that template, so P60056 is not written to it and it keeps its default, 60). Otherwise, with a backup server (HELLO_PROV_SIP_BACKUP_SERVERS) three keys name it, each host:port: P2312 = Secondary SIP Server (WP8x6, WP810/822/825 and WP856 templates; the WP820 has none), and P48 = Outbound Proxy repeating the primary with P2333 = Backup Outbound Proxy ("Secondary Outbound Proxy" in the WP8x6, WP820 and WP856 templates), which every template has; the phone uses the backup when the primary fails. With none, P48, P2312 and P2333 are left as they are. Not confirmed on a phone (verify, lab item "failover"). */}}
+{{- /* DNS mode and backup server (phone-feature-parity S-20), account 1, keys per Grandstream's own configuration templates (config-template-10212026.zip; 2026-11-09 review). P103 = DNS Mode: 0 A Record, 1 SRV, 2 NAPTR/SRV (3 Use Configured IP takes IPv4 addresses of at most 15 characters in P2308 to P2310, no port, so it cannot carry a backup) in wp8x6_config_1.0.3.39, wp810_822_825_config_1.0.11.83, wp820_config_1.0.7.90 and wp856_config_1.0.3.16. Written always, so a phone taken back out of SRV mode returns to A records. In SRV mode (Server.DNSMode "srv", HELLO_PROV_SIP_SRV) P47 is the name whose _sip._udp SRV records list the servers (no port); P29095 = 1 (Register Before DNS SRV Fail-over, 0 No, 1 Yes) registers with the next server before failing calls over to it; P26040 = 3 (DNS SRV Failover Mode: 0 Default, 1 saved one until DNS TTL, 2 saved one until no response, 3 failback follows the failback expiration timer, in all four templates) makes the phone return to the first server when the timer ends; P60056 = 60 is that Failback Timer in minutes (wp8x6, wp820 and wp856 templates; the WP810/822/825 template lists the Failback Timer under P60055, the retry count's own key, which is a mistake in that template, so P60056 is not written to it and it keeps its default, 60). Otherwise, with a backup server (HELLO_PROV_SIP_BACKUP_SERVERS) three keys name it, each host:port: P2312 = Secondary SIP Server (WP8x6, WP810/822/825 and WP856 templates; the WP820 template names it P50602), and P48 = Outbound Proxy repeating the primary with P2333 = Backup Outbound Proxy ("Secondary Outbound Proxy" in the WP8x6, WP820 and WP856 templates), which every template has; the phone uses the backup when the primary fails. With none, P48, P2312 and P2333 are left as they are. Not confirmed on a phone (verify, lab item "failover"). */}}
 {{- if eq .Server.DNSMode "srv"}}
     <P103>1</P103>
     <P29095>1</P29095>
@@ -21,7 +21,9 @@
 {{- else}}
     <P103>0</P103>
 {{- with .Server.Backup}}
-{{- if or (eq $.Phone.WP "WP8x6") (eq $.Phone.WP "WP8xx") (eq $.Phone.WP "WP856") (eq $.Phone.WP "")}}
+{{- if eq $.Phone.WP "WP820"}}
+    <P50602>{{xml .Host}}:{{.Port}}</P50602>
+{{- else if or (eq $.Phone.WP "WP8x6") (eq $.Phone.WP "WP8xx") (eq $.Phone.WP "WP856") (eq $.Phone.WP "")}}
     <P2312>{{xml .Host}}:{{.Port}}</P2312>
 {{- end}}
     <P48>{{xml $.Server.Host}}:{{$.Server.Port}}</P48>
@@ -45,6 +47,13 @@
 {{- if or (eq .Phone.WP "WP8x6") (eq .Phone.WP "WP856")}}
     <P60078>0</P60078>
 {{- end}}
+{{- end}}
+{{- /* DTLS-SRTP and ICE (phone-feature-parity S-16). P60078 = SRTP Key Exchange of account 1 (0 SDES, 1 DTLS) and P95002 = Media NAT Traversal of account 1 (0 No, 1 Auto, 2 STUN, 3 TURN, 4 ICE) are from Grandstream's WP8x6 config templates (wp8x6_config 1.0.3.35 and later; the WP856 template has P60078 only). The key exchange is written with P183, on a TLS phone only, because DTLS and SDES both need the signalling to be protected (Server.SRTPKeyEx is empty otherwise); ICE does not need TLS, so it is written for any phone of a model that has the key. Ordinary phones keep Auto (1). Unverified on hardware (verify, lab item 10). */}}
+{{- if .Server.SRTPKeyEx}}
+    <P60078>{{if eq .Server.SRTPKeyEx "dtls"}}1{{else}}0{{end}}</P60078>
+{{- end}}
+{{- if .Server.ICE}}
+    <P95002>{{if eq .Server.ICE "ice"}}4{{else}}1{{end}}</P95002>
 {{- end}}
 {{- /* HD voice: Preferred Vocoder choices 1 to 6 of account 1 (P57, P58, P59, P60, P61, P62; Grandstream config templates, "Preferred Vocoder"): 0 PCMU, 8 PCMA, 9 G.722, 123 Opus (the models that have it; payload type P2385 stays at its default 123). Order Opus (the models that have it), G.722, PCMU, PCMA; the choices after the last codec repeat it, which the phone ignores, so no other codec is offered. Another account of a multi-account model has its own choice keys (account 2 P451 to P456, account 3 P551 to P556, and so on in steps of 100); Hello provisions account 1. Unverified on hardware (verify). */}}
 {{- if .Codecs.Opus}}
@@ -209,6 +218,15 @@
     <P2336>{{xml .Line.ParkRetrieveCode}}</P2336>
 {{- end}}
 {{- end}}
+{{- /* Door systems (S-49): the WP8x6 (wp8x6_config 1.0.3.39, Settings/External Service/Door System) and the WP810/820/822/825 (wp810_822_825_config 1.0.11.83, Settings/External Service) list up to ten door systems, five P-values each from P32000 in steps of five: service type 0 (GDS), the account (0 is the first), the system identification (the name the phone shows), the system number (the station's number, which the phone matches against the caller) and the access password. The password is left empty: Hello sends the sealed door-open code itself when the user dials *50, so the code never reaches a phone's configuration. The WP856 and WP820-only templates use P32001 differently and get none. */}}
+{{- if or (eq .Phone.Family "8x6") (eq .Phone.Family "8xx")}}
+{{- range $i, $d := .DoorStations}}
+    <P{{add 32000 (mul $i 5)}}>0</P{{add 32000 (mul $i 5)}}>
+    <P{{add 32001 (mul $i 5)}}>0</P{{add 32001 (mul $i 5)}}>
+    <P{{add 32002 (mul $i 5)}}>{{xml (or $d.Name $d.Number)}}</P{{add 32002 (mul $i 5)}}>
+    <P{{add 32003 (mul $i 5)}}>{{xml $d.Number}}</P{{add 32003 (mul $i 5)}}>
+{{- end}}
+{{- end}}
 {{- /* BLF keys (CALL-43): the P323 block is defined by none of the WP templates (WP8x6, WP856, WP8xx), so it is written only to a Grandstream phone that is not a WP (Phone.Family empty). prov.SupportsBLF refuses BLF keys on a WP in the API. */}}
 {{- if not .Phone.Family}}
 {{- range $i, $k := .BLF}}
@@ -360,6 +378,38 @@
     <P{{add $b 47}}>1</P{{add $b 47}}>
 {{- else}}
     <P{{add $b 47}}>0</P{{add $b 47}}>
+{{- end}}
+{{- /* Backup server, SRTP, presence and RTCP-XR of account N (per-line keys), the same keys and values as account 1 above, per Grandstream's own templates (config-template-10212026.zip; wp8x6_config_1.0.3.39 accounts 2 and 3, wp810_822_825_config_1.0.11.83 and wp820_config_1.0.7.90 account 2, wp856_config_1.0.3.16 accounts 2 to 6). With k = 100 (N-1) and b the account block base above: Secondary SIP Server P2312+k (P2412, P2512, P2612, P2712, P2812; the WP820 has it at P50602 for account 1 and P51102 for account 2), Outbound Proxy b+2 (P403, P503, P603, P1703, P1803) and Backup Outbound Proxy P2333+k (P2433 and on; "Secondary Outbound Proxy" in the WP820 and WP856 templates). Written in A-record mode with a backup server only, as for account 1; SRV mode needs none. SRTP Mode is b+42 (P443, P543, P643, P1743, P1843), SRTP Key Exchange P60078+k (P60178 and on; WP8x6 and WP856 only), written only for a phone on TLS (Server.SRTP), same values as P183. PUBLISH for Presence is b+87 (P488, P588) and SUBSCRIBE for Registration P2319+k (P2419, P2519), WP8x6 and WP8xx only, both 0. RTCP-XR: VQ RTCP-XR Collector Name P26093+k, Address P26094+k, Port P26095+k (all six WP856 accounts, WP8x6 accounts 2 and 3, WP8xx account 2) and Collector Address Selection P60087+k (P60187, P60287; not in the WP856 template, WP8x6 and WP8xx only), written only when HELLO_PROV_RTCPXR is on. The Session Report P8489 is phone-wide. Send Anonymous is not written for a further line. Not confirmed on a phone (verify). */}}
+{{- if ne $.Server.DNSMode "srv"}}
+{{- with $.Server.Backup}}
+{{- if eq $.Phone.WP "WP820"}}
+    <P{{add 50602 (mul 500 (add $n -1))}}>{{xml .Host}}:{{.Port}}</P{{add 50602 (mul 500 (add $n -1))}}>
+{{- else if or (eq $.Phone.WP "WP8x6") (eq $.Phone.WP "WP8xx") (eq $.Phone.WP "WP856") (eq $.Phone.WP "")}}
+    <P{{add 2312 $k}}>{{xml .Host}}:{{.Port}}</P{{add 2312 $k}}>
+{{- end}}
+    <P{{add $b 2}}>{{xml $.Server.Host}}:{{$.Server.Port}}</P{{add $b 2}}>
+    <P{{add 2333 $k}}>{{xml .Host}}:{{.Port}}</P{{add 2333 $k}}>
+{{- end}}
+{{- end}}
+{{- if $.Server.SRTP}}
+    <P{{add $b 42}}>{{if eq $.Server.SRTP "required"}}2{{else if eq $.Server.SRTP "optional"}}1{{else}}0{{end}}</P{{add $b 42}}>
+{{- if or (eq $.Phone.WP "WP8x6") (eq $.Phone.WP "WP856")}}
+    <P{{add 60078 $k}}>0</P{{add 60078 $k}}>
+{{- end}}
+{{- end}}
+{{- if or (eq $.Phone.WP "WP8x6") (eq $.Phone.WP "WP8xx")}}
+    <P{{add $b 87}}>0</P{{add $b 87}}>
+    <P{{add 2319 $k}}>0</P{{add 2319 $k}}>
+{{- end}}
+{{- if and $.Prov.RTCPXR (or (eq $.Phone.WP "WP8x6") (eq $.Phone.WP "WP8xx") (eq $.Phone.WP "WP856"))}}
+    <P{{add 26093 $k}}>{{xml $.Server.Host}}</P{{add 26093 $k}}>
+{{- if eq $.Phone.WP "WP856"}}
+    <P{{add 26094 $k}}>{{xml $.Server.Host}}</P{{add 26094 $k}}>
+{{- else}}
+    <P{{add 60087 $k}}>1</P{{add 60087 $k}}>
+    <P{{add 26094 $k}}></P{{add 26094 $k}}>
+{{- end}}
+    <P{{add 26095 $k}}>{{$.Server.Port}}</P{{add 26095 $k}}>
 {{- end}}
 {{- if $.Codecs.Opus}}
     <P{{add $b 50}}>123</P{{add $b 50}}>

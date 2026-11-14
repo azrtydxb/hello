@@ -107,12 +107,12 @@ that place calls or follow them:
 `admin` implies `write`, which implies `read`; `secrets`, `calls`, `events`,
 `recordings` and `messages` stand alone.
 
-| Role       | May grant                                                                        |
-| ---------- | -------------------------------------------------------------------------------- |
-| `user`     | `read`, `write` (own extensions only), `messages` (own conversations)            |
-| `viewer`   | `read`, `events`                                                                 |
-| `operator` | `read`, `write`, `calls`, `events`, `recordings`, `messages`                     |
-| `admin`    | `read`, `write`, `admin`, `secrets`, `calls`, `events`, `recordings`, `messages` |
+| Role       | May grant                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------------ |
+| `user`     | `read`, `write`, `calls`, `events`, `recordings` (own extensions only), `messages` (own conversations) |
+| `viewer`   | `read`, `events`                                                                                       |
+| `operator` | `read`, `write`, `calls`, `events`, `recordings`, `messages`                                           |
+| `admin`    | `read`, `write`, `admin`, `secrets`, `calls`, `events`, `recordings`, `messages`                       |
 
 An agent never has more than its user: the role is read on every request,
 so demoting a user (System → Users, admin only) narrows every app they
@@ -252,6 +252,11 @@ current.
 | `listAuthFailures`                  | read       | `GET /api/v1/diagnostics/auth-failures`                     | Source IPs with failed authentications                                                                                                   |
 | `clearAuthFailures`                 | write      | `DELETE /api/v1/diagnostics/auth-failures/{ip}`             | Unblock a source IP                                                                                                                      |
 | `getDeviceDiagnostics`              | read       | `GET /api/v1/diagnostics/devices/{id}`                      | Why a device is or is not registered                                                                                                     |
+| `listDirectoryConnectors`           | admin      | `GET /api/v1/directory/connectors`                          | List directory connectors                                                                                                                |
+| `getDirectoryConnector`             | admin      | `GET /api/v1/directory/connectors/{id}`                     | Get a directory connector                                                                                                                |
+| `listDirectoryRuns`                 | admin      | `GET /api/v1/directory/connectors/{id}/runs`                | List directory sync runs                                                                                                                 |
+| `getDirectoryRun`                   | admin      | `GET /api/v1/directory/runs/{id}`                           | Get a directory sync run                                                                                                                 |
+| `listDirectoryChanges`              | admin      | `GET /api/v1/directory/runs/{id}/changes`                   | List the changes of a sync run                                                                                                           |
 | `listDot1XProfiles`                 | read       | `GET /api/v1/dot1x-profiles`                                | List 802.1X profiles                                                                                                                     |
 | `createDot1XProfile`                | admin      | `POST /api/v1/dot1x-profiles`                               | Create an 802.1X profile                                                                                                                 |
 | `getDot1XProfile`                   | read       | `GET /api/v1/dot1x-profiles/{id}`                           | Get an 802.1X profile                                                                                                                    |
@@ -265,6 +270,7 @@ current.
 | `getExtension`                      | read       | `GET /api/v1/extensions/{id}`                               | One extension                                                                                                                            |
 | `updateExtension`                   | write      | `PATCH /api/v1/extensions/{id}`                             | Change an extension's number or name                                                                                                     |
 | `deleteExtension`                   | write      | `DELETE /api/v1/extensions/{id}`                            | Delete an extension and its devices                                                                                                      |
+| `getDoorOpen`                       | read       | `GET /api/v1/extensions/{id}/door-open`                     | Show a door station's door-open settings                                                                                                 |
 | `getFollowMe`                       | read       | `GET /api/v1/extensions/{id}/follow-me`                     | Get an extension's follow-me profile                                                                                                     |
 | `putFollowMe`                       | write      | `PUT /api/v1/extensions/{id}/follow-me`                     | Change an extension's follow-me profile                                                                                                  |
 | `getExtensionVoicemail`             | read       | `GET /api/v1/extensions/{id}/voicemail`                     | One extension's voicemail box                                                                                                            |
@@ -295,7 +301,10 @@ current.
 | `listCRMConnectors`                 | admin      | `GET /api/v1/integrations/crm`                              | List CRM connectors                                                                                                                      |
 | `getCRMConnector`                   | admin      | `GET /api/v1/integrations/crm/{id}`                         | Get a CRM connector                                                                                                                      |
 | `listCRMLogs`                       | write      | `GET /api/v1/integrations/crm/{id}/logs`                    | List CRM logging jobs                                                                                                                    |
+| `getCRMSetup`                       | admin      | `GET /api/v1/integrations/crm/{id}/setup`                   | What to configure in the CRM                                                                                                             |
 | `listCRMUsers`                      | admin      | `GET /api/v1/integrations/crm/{id}/users`                   | List the CRM user mapping                                                                                                                |
+| `getSlackDestination`               | admin      | `GET /api/v1/integrations/slack/{id}`                       | Get a Slack destination                                                                                                                  |
+| `listSlackPosts`                    | admin      | `GET /api/v1/integrations/slack/{id}/posts`                 | List Slack posts                                                                                                                         |
 | `listIVRMenus`                      | read       | `GET /api/v1/ivr-menus`                                     | List IVR menus                                                                                                                           |
 | `createIVRMenu`                     | write      | `POST /api/v1/ivr-menus`                                    | Create an IVR menu                                                                                                                       |
 | `getIVRMenu`                        | read       | `GET /api/v1/ivr-menus/{id}`                                | One IVR menu                                                                                                                             |
@@ -309,7 +318,9 @@ current.
 | `putLocation`                       | write      | `PUT /api/v1/locations/{id}`                                | Replace a location                                                                                                                       |
 | `deleteLocation`                    | write      | `DELETE /api/v1/locations/{id}`                             | Delete a location                                                                                                                        |
 | `lookupCalls`                       | calls      | `GET /api/v1/lookup/calls`                                  | Find calls                                                                                                                               |
+| `lookupNumber`                      | read       | `GET /api/v1/lookup/number`                                 | Find the contact name for a phone number                                                                                                 |
 | `lookupRecordings`                  | recordings | `GET /api/v1/lookup/recordings`                             | Find recordings                                                                                                                          |
+| `listMyConnections`                 | read       | `GET /api/v1/me/connections`                                | List my connected accounts                                                                                                               |
 | `sendMessage`                       | write      | `POST /api/v1/messages`                                     | Send a text message                                                                                                                      |
 | `getMessageSettings`                | admin      | `GET /api/v1/messages/settings`                             | Get the messaging settings                                                                                                               |
 | `updateMessageSettings`             | admin      | `PUT /api/v1/messages/settings`                             | Replace the messaging settings                                                                                                           |
@@ -483,6 +494,7 @@ current.
 | `evaluateTimeCondition`             | read       | `GET /api/v1/time-conditions/{id}/evaluate`                 | What would the time condition do                                                                                                         |
 | `setTimeConditionOverride`          | write      | `PUT /api/v1/time-conditions/{id}/override`                 | Set the day/night override                                                                                                               |
 | `getTimeSettings`                   | read       | `GET /api/v1/time-settings`                                 | Default time zone                                                                                                                        |
+| `listTrunkProfiles`                 | read       | `GET /api/v1/trunk-profiles`                                | The trunk profiles and the defaults and limits each one applies                                                                          |
 | `listTrunks`                        | read       | `GET /api/v1/trunks`                                        | Every trunk (never its password)                                                                                                         |
 | `createTrunk`                       | write      | `POST /api/v1/trunks`                                       | Create a trunk                                                                                                                           |
 | `listTrunkStatus`                   | read       | `GET /api/v1/trunks/status`                                 | Live registration, destination health and active calls of every trunk                                                                    |
@@ -539,7 +551,8 @@ agents, conferences, park and pickup, paging and multicast, messaging,
 presence, voicemail messages, recordings), `hello-phones` (provisioning,
 bulk import, onboarding, phone groups, firmware, phonebooks),
 `hello-flow-graph` (read and verify the call flow), `hello-crm` (CRM
-connection state, user mapping and logging jobs) and `hello-troubleshoot`
+connection state, user mapping and logging jobs), `hello-directory`
+(read directory sync runs, previews and conflicts) and `hello-troubleshoot`
 (a call that failed, a phone that does not register, cluster and AI
 findings). Download them under **AI access → Agent skills**, or with
 `GET /api/v1/skills/{name}/download` (a zip), and unpack each into:

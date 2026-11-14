@@ -62,6 +62,12 @@ func TestPrackToPhone(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the phone's reliable 180 was never acknowledged with a PRACK")
 	}
+	// The ACK of the 2xx carries the INVITE's CSeq number, not the PRACK's
+	// (RFC 3261 section 13.2.2.4): a strict phone drops it otherwise.
+	ack := waitReq(t, b.acks, "ACK to the phone")
+	if ack.CSeq().SeqNo != inv.CSeq().SeqNo {
+		t.Fatalf("ACK CSeq = %d, want the INVITE's %d", ack.CSeq().SeqNo, inv.CSeq().SeqNo)
+	}
 	hangup(t, r.dcs)
 	pbx.nextCDR(t)
 }

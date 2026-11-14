@@ -23,3 +23,21 @@ func TestPolicy(t *testing.T) {
 		t.Errorf("Normalize off = %q", got)
 	}
 }
+
+// TestKeyExchange fails if a key exchange is not parsed case-insensitively, or
+// an unknown one is accepted, or the default is not SDES.
+func TestKeyExchange(t *testing.T) {
+	for in, want := range map[string]string{"sdes": KeyExSDES, " DTLS ": KeyExDTLS, "Dtls": KeyExDTLS} {
+		if got, ok := ParseKeyEx(in); !ok || got != want {
+			t.Errorf("ParseKeyEx(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
+	for _, in := range []string{"", "zrtp", "dtls-srtp"} {
+		if _, ok := ParseKeyEx(in); ok {
+			t.Errorf("ParseKeyEx(%q) accepted", in)
+		}
+		if got := NormalizeKeyEx(in); got != KeyExSDES {
+			t.Errorf("NormalizeKeyEx(%q) = %q, want sdes", in, got)
+		}
+	}
+}

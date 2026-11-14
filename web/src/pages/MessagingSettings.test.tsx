@@ -7,6 +7,9 @@ const SETTINGS = {
   retentionChatDays: 90,
   reopenDays: 7,
   emailNotify: true,
+  firstContact: "off",
+  firstContactPerUserHour: 20,
+  firstContactPerAddressDay: 200,
 };
 
 function api(more: Routes = {}) {
@@ -45,6 +48,26 @@ describe("Messaging settings", () => {
     expect(
       await screen.findByText("Messaging settings saved."),
     ).toBeInTheDocument();
+  });
+
+  it("allows first contact only when an administrator chooses it", async () => {
+    const calls = api({
+      "PUT /api/v1/messaging/settings": () =>
+        json({ ...SETTINGS, firstContact: "attested" }),
+    });
+    renderApp("/messaging/settings");
+    const choice = await screen.findByLabelText(
+      "Texting a customer who has not texted first",
+    );
+    expect(choice).toHaveValue("off");
+    fireEvent.change(choice, { target: { value: "attested" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PUT")?.body).toEqual({
+        ...SETTINGS,
+        firstContact: "attested",
+      }),
+    );
   });
 
   it("erases a customer after a confirmation and reports counts", async () => {

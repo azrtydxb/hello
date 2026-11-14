@@ -87,6 +87,16 @@ type Relay struct {
 	// onDTMF and onPacket are the tap hooks (nil disables).
 	onDTMF   func(leg string, digit byte)
 	onPacket func(leg string, pkt *RTPPacket)
+	// secureFail is told of a failed DTLS-SRTP handshake (OnSecureFail).
+	secureFail func(leg, reason string)
+	secureUp   func(leg string)
+
+	// alt is the alternate callee leg (AddAltMuxLeg): a browser the call is
+	// offered to while the plain callee leg stays for the other forks. It is
+	// not in legs until PromoteAlt.
+	alt *relayLeg
+	// video is the session's video limits and clock (relayvideo.go).
+	video relayVideo
 
 	started bool
 	// lastRx is when a datagram from a leg's accepted peer last arrived
@@ -105,7 +115,7 @@ type Relay struct {
 type relayLeg struct {
 	name string
 	r    *Relay
-	conn *net.UDPConn
+	conn LegConn
 	port int
 
 	remoteMu sync.Mutex
@@ -153,6 +163,21 @@ type relayLeg struct {
 	// muted drops what this leg receives instead of forwarding it to the
 	// peer (a holder's stream while music plays to the held party).
 	muted atomic.Bool
+
+	// parked drops the media of an alternate callee leg until it is promoted
+	// (Relay.PromoteAlt); its ICE and DTLS run meanwhile.
+	parked atomic.Bool
+	// retired is closed when a promotion replaces the leg: its pump ends.
+	retired chan struct{}
+
+	// web is the leg's browser-profile state (webrtcrelay.go); nil for a
+	// plain or SDES leg. vid is its video relay state (relayvideo.go); the
+	// zero value carries no video. vq carries the video and RTCP packets
+	// bound for this leg, apart from the audio queue so a keyframe burst
+	// never costs audio.
+	web *legWeb
+	vid videoLeg
+	vq  chan relayMsg
 }
 
 // legStats is one leg's inbound counters; the direction label comes from
@@ -170,7 +195,14 @@ type legStats struct {
 }
 
 type relayMsg struct {
-	data []byte // the full RTP packet, copied before queueing
+	data []byte // the full RTP packet (or, with rtcp, RTCP compound packet), copied before queueing
+	// rtcp marks plain RTCP that the leg protects and sends; it is only ever
+	// queued on vq.
+	rtcp bool
+	// own marks a packet of the relay's own stream (SendDTMF): it is sent as
+	// built, not rewritten into the relayed stream. It rides the same queue
+	// so it cannot overtake relayed packets queued before it.
+	own bool
 }
 
 // rewriteState tracks one direction's rewrite: our outbound stream (fresh
@@ -188,6 +220,16 @@ type rewriteState struct {
 	inSeq  uint16
 	inTS   uint32
 	haveIn bool
+}
+
+// newRelayLeg makes a leg around conn with its queues.
+func newRelayLeg(r *Relay, name string, conn LegConn, port int) *relayLeg {
+	return &relayLeg{
+		name: name, r: r, conn: conn, port: port,
+		q:       make(chan relayMsg, relayQueue),
+		vq:      make(chan relayMsg, relayVideoQueue),
+		retired: make(chan struct{}),
+	}
 }
 
 // NewRelay validates the range for the two relay sockets (contract 3). It
@@ -236,16 +278,61 @@ func (r *Relay) AddLeg(name string) (int, error) {
 	if conn == nil {
 		return 0, fmt.Errorf("media: bind leg %q RTP socket: %w", name, lastErr)
 	}
-	l := &relayLeg{
-		name: name, r: r, conn: conn, port: port,
-		q: make(chan relayMsg, relayQueue),
-	}
+	l := newRelayLeg(r, name, conn, port)
 	l.remoteMu.Lock()
 	l.remote = nil
 	l.remoteMu.Unlock()
+	l.secure.Bind(conn.LocalAddr(), func(b []byte, to *net.UDPAddr) { _, _ = conn.WriteToUDP(b, to) },
+		func(from *net.UDPAddr, nominated bool) { l.iceVerified(from, nominated) })
+	l.secure.OnFail(func(reason string) { r.secureFailed(l.name, reason) })
+	l.secure.OnReady(func() { r.secureUpCall(l.name) })
 	r.legs = append(r.legs, l)
 	r.used[port] = true
 	return port, nil
+}
+
+// addLegAt is AddLeg on one given port.
+func (r *Relay) addLegAt(name string, port int) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || len(r.legs) >= 2 {
+		return 0, errors.New("media: relay takes exactly two legs")
+	}
+	if r.used[port] {
+		return 0, fmt.Errorf("media: port %d is in use", port)
+	}
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: port})
+	if err != nil {
+		return 0, fmt.Errorf("media: bind leg %q RTP socket: %w", name, err)
+	}
+	l := newRelayLeg(r, name, conn, port)
+	r.legs = append(r.legs, l)
+	r.used[port] = true
+	return port, nil
+}
+
+// AddMuxLeg adds the next leg on a shared WebRTC port instead of a socket of
+// its own (S-4): the leg reads and writes through ep, an endpoint of mux, and
+// the SDP names the mux's port. The caller names the leg's ICE ufrag with
+// ep.SetUfrag once the leg's ICE-lite credentials exist. Closing the relay
+// closes the endpoint, not the shared socket.
+func (r *Relay) AddMuxLeg(name string, mux *Mux) (port int, ep *MuxEndpoint, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || len(r.legs) >= 2 {
+		return 0, nil, errors.New("media: relay takes exactly two legs")
+	}
+	ep, err = mux.NewEndpoint()
+	if err != nil {
+		return 0, nil, fmt.Errorf("media: leg %q on the WebRTC port: %w", name, err)
+	}
+	l := newRelayLeg(r, name, ep, mux.Port())
+	l.secure.Bind(ep.LocalAddr(), func(b []byte, to *net.UDPAddr) { _, _ = ep.WriteToUDP(b, to) },
+		func(from *net.UDPAddr, nominated bool) { l.iceVerified(from, nominated) })
+	l.secure.OnFail(func(reason string) { r.secureFailed(l.name, reason) })
+	l.secure.OnReady(func() { r.secureUpCall(l.name) })
+	r.legs = append(r.legs, l)
+	return mux.Port(), ep, nil
 }
 
 // SetTarget aims leg at addr: the address from the remote SDP until the
@@ -255,6 +342,13 @@ func (r *Relay) AddLeg(name string) (int, error) {
 func (r *Relay) SetTarget(name string, addr *net.UDPAddr) {
 	l := r.findLeg(name)
 	if l == nil {
+		return
+	}
+	if _, mux := l.conn.(*MuxEndpoint); mux && (addr == nil || addr.IP.IsUnspecified() || addr.Port == 9) {
+		// A browser leg's media address is what ICE verifies, not what an
+		// SDP that names none says (c=0.0.0.0, port 9, or a hold's nothing): a
+		// target like that would only undo the address the first
+		// authenticated check selected.
 		return
 	}
 	l.remoteMu.Lock()
@@ -267,6 +361,66 @@ func (r *Relay) SetTarget(name string, addr *net.UDPAddr) {
 		l.sdpIP = append(net.IP(nil), addr.IP...)
 	}
 	l.remoteMu.Unlock()
+	l.secure.SetPeer(addr)
+}
+
+// iceVerified is called for every authenticated ICE check on the leg: the
+// check proves the peer controls the ICE credentials of this call's SDP
+// exchange, so its address is a source the leg accepts, and the nominated
+// (or first) pair is where media goes.
+func (l *relayLeg) iceVerified(from *net.UDPAddr, selected bool) {
+	l.remoteMu.Lock()
+	defer l.remoteMu.Unlock()
+	known := false
+	for _, v := range l.extraIPs {
+		if v.Equal(from.IP) {
+			known = true
+			break
+		}
+	}
+	if !known {
+		l.extraIPs = append(l.extraIPs, append(net.IP(nil), from.IP...))
+	}
+	if selected {
+		l.pinnedIP = append(net.IP(nil), from.IP...)
+		l.remote = from
+	}
+}
+
+// OnSecureFail registers what runs when a leg's DTLS-SRTP handshake fails
+// (leg is the leg's name, reason a word: timeout, fingerprint, failed). The
+// leg then carries no media, so the call is ended.
+func (r *Relay) OnSecureFail(fn func(leg, reason string)) {
+	r.mu.Lock()
+	r.secureFail = fn
+	r.mu.Unlock()
+}
+
+// OnSecureUp registers what runs when a leg's DTLS-SRTP handshake finishes
+// and the leg is encrypted.
+func (r *Relay) OnSecureUp(fn func(leg string)) {
+	r.mu.Lock()
+	r.secureUp = fn
+	r.mu.Unlock()
+}
+
+func (r *Relay) secureUpCall(leg string) {
+	r.mu.Lock()
+	fn := r.secureUp
+	r.mu.Unlock()
+	if fn != nil {
+		fn(leg)
+	}
+}
+
+func (r *Relay) secureFailed(leg, reason string) {
+	r.mu.Lock()
+	fn := r.secureFail
+	closed := r.closed
+	r.mu.Unlock()
+	if fn != nil && !closed {
+		fn(leg, reason)
+	}
 }
 
 // AllowSource vouches for ip as a source of the leg's media: the address
@@ -314,6 +468,9 @@ func (r *Relay) ResetSources(name string, vouch ...net.IP) {
 func (r *Relay) findLeg(name string) *relayLeg {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if name == AltLeg {
+		return r.alt
+	}
 	for _, l := range r.legs {
 		if l.name == name {
 			return l
@@ -470,6 +627,11 @@ func (r *Relay) Start() {
 	r.started = true
 	r.startedAt.Store(time.Now().UnixNano())
 	r.wg.Add(len(r.legs))
+	if r.alt != nil {
+		r.wg.Add(1)
+		go r.runLeg(r.alt)
+	}
+	r.startVideoLocked()
 	for _, l := range r.legs {
 		go r.runLeg(l)
 	}
@@ -520,6 +682,12 @@ func (r *Relay) recv(l *relayLeg) {
 		if err != nil {
 			return // socket closed by Close
 		}
+		if isSTUN(buf[:n]) {
+			// An ICE check is authenticated by the call's ICE credentials,
+			// not by the source policy: it is what vouches for its source.
+			l.secure.UnprotectFrom(buf[:n], from)
+			continue
+		}
 		if !l.sourceOK(from) {
 			l.rejected.Add(1)
 			continue // not the leg's peer: never counted, tapped or relayed
@@ -527,8 +695,9 @@ func (r *Relay) recv(l *relayLeg) {
 		data := buf[:n]
 		// An SRTP leg: nothing that fails authentication is latched,
 		// counted, tapped or relayed. RTCP on the RTP port (rtcp-mux) is
-		// checked and consumed; Hello sends no RTCP of its own.
-		plain, ok, failed := l.secure.Unprotect(data)
+		// checked and consumed; Hello sends no RTCP of its own. DTLS
+		// records of a DTLS-SRTP leg go to its handshake.
+		plain, isRTCP, ok, failed := l.secure.UnprotectAny(data, from)
 		if failed {
 			l.authFail.Add(1)
 		}
@@ -538,6 +707,13 @@ func (r *Relay) recv(l *relayLeg) {
 		data = plain
 		r.lastRx.Store(time.Now().UnixNano())
 		r.latch(l, from)
+		if l.parked.Load() {
+			continue // an alternate leg carries no media before its promotion
+		}
+		if isRTCP {
+			r.handleRTCP(l, data)
+			continue
+		}
 		if r.udptl.Load() {
 			// UDPTL (T.38) is relayed unmodified except for its addresses:
 			// no sequence rewrite, no payload inspection. The fax endpoint
@@ -551,21 +727,34 @@ func (r *Relay) recv(l *relayLeg) {
 		if !ok {
 			continue // a malformed datagram is a dropped packet, never fatal
 		}
+		if l.vid.carries(pkt.PayloadType) {
+			r.forwardVideo(l, pkt, data)
+			continue
+		}
 		dtmfPT := l.eventType()
 		if l.carries(pkt.PayloadType) && pkt.PayloadType != dtmfPT {
 			r.noteAudio(l, pkt)
 		}
+		var digit byte
+		var digitDelivered bool
 		if dtmfPT != 0 && pkt.PayloadType == dtmfPT {
 			if ev, ok := ParseTelephoneEvent(pkt.Payload); ok {
 				ev.Sequence = pkt.Sequence
-				if code, deliver := l.filter.Observe(ev, pkt.Marker); deliver {
-					r.mu.Lock()
-					h := r.onDTMF
-					r.mu.Unlock()
-					if h != nil {
-						h(l.name, code)
-					}
-				}
+				digit, digitDelivered = l.filter.Observe(ev, pkt.Marker)
+			}
+		}
+		// The digit hook runs after the packet is queued for the peer, so
+		// whatever the hook sends into the peer leg (the door-open code)
+		// lands behind the digit's own packet, never ahead of it.
+		deliverDigit := func() {
+			if !digitDelivered {
+				return
+			}
+			r.mu.Lock()
+			h := r.onDTMF
+			r.mu.Unlock()
+			if h != nil {
+				h(l.name, digit)
 			}
 		}
 		// The hooks are read under the lock: a caller may set them after Start
@@ -576,10 +765,10 @@ func (r *Relay) recv(l *relayLeg) {
 		if tap != nil {
 			tap(l.name, pkt)
 		}
-		if l.muted.Load() {
-			continue
+		if !l.muted.Load() {
+			r.forward(l, data)
 		}
-		r.forward(l, data)
+		deliverDigit()
 	}
 }
 
@@ -732,12 +921,32 @@ func (r *Relay) pump(l *relayLeg) {
 		}
 		select {
 		case m := <-l.q:
-			if out, ok := r.rewrite(l, m.data); ok {
+			if m.own {
+				l.send(m.data)
+			} else if out, ok := r.rewrite(l, m.data); ok {
 				l.send(out)
 			}
+		case m := <-l.vq:
+			r.sendVideoMsg(l, m)
+		case <-l.retired:
+			return
 		case <-r.ctx.Done():
 			return
 		}
+	}
+}
+
+// enqueueOwn queues a packet of the relay's own stream behind everything
+// already queued for the leg, so it is sent in order with the relayed
+// packets. It blocks while the queue is full, never drops.
+func (l *relayLeg) enqueueOwn(ctx context.Context, r *Relay, pkt []byte) error {
+	select {
+	case l.q <- relayMsg{data: pkt, own: true}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.ctx.Done():
+		return errors.New("media: relay closed")
 	}
 }
 
@@ -822,7 +1031,7 @@ func (o *rewriteState) reset() error {
 		return fmt.Errorf("media: generate rewrite state: %w", err)
 	}
 	o.ssrc = binary.BigEndian.Uint32(b[0:4])
-	o.seq = binary.BigEndian.Uint16(b[4:6])
+	o.seq = startSeq(b[4:6])
 	o.ts = binary.BigEndian.Uint32(b[6:10])
 	o.started = true
 	o.haveIn = false
@@ -839,9 +1048,14 @@ func (r *Relay) Close() {
 	}
 	r.closed = true
 	legs := append([]*relayLeg(nil), r.legs...)
+	if r.alt != nil {
+		legs = append(legs, r.alt)
+	}
 	r.mu.Unlock()
 	r.cancel()
+	r.closeVideo()
 	for _, l := range legs {
+		l.secure.Close() // a DTLS handshake still running ends with the call
 		_ = l.conn.Close()
 	}
 	r.wg.Wait()
@@ -980,7 +1194,7 @@ func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate 
 	if _, err := rand.Read(b[:]); err != nil {
 		return fmt.Errorf("media: announcement stream: %w", err)
 	}
-	seq := binary.BigEndian.Uint16(b[0:2])
+	seq := startSeq(b[0:2])
 	ts := binary.BigEndian.Uint32(b[2:6])
 	ssrc := binary.BigEndian.Uint32(b[6:10])
 	frame := 2 * codec.PlaybackFrameSamples()
@@ -1007,6 +1221,127 @@ func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate 
 			return ctx.Err()
 		case <-r.ctx.Done():
 			return errors.New("media: relay closed")
+		}
+	}
+	return nil
+}
+
+// Telephone-event timing of SendDTMF (RFC 4733): a press lasts
+// dtmfPressPackets packets of one frame each, then the end packet is sent
+// dtmfEndRepeats times (RFC 4733 section 2.5.1.4), and digits are
+// dtmfGap apart.
+const (
+	dtmfPressPackets = 5
+	dtmfEndRepeats   = 3
+	dtmfGap          = 60 * time.Millisecond
+	dtmfVolume       = 10 // -10 dBm0, the usual level
+	dtmfClockRate    = 8000
+)
+
+// ErrNoTelephoneEvent is returned by SendDTMF when the leg's SDP negotiated
+// no telephone-event payload type.
+var ErrNoTelephoneEvent = errors.New("media: the leg has no telephone-event payload type")
+
+// telephoneEventCode maps a key to its RFC 4733 event code.
+func telephoneEventCode(d byte) (byte, bool) {
+	switch {
+	case d >= '0' && d <= '9':
+		return d - '0', true
+	case d == '*':
+		return 10, true
+	case d == '#':
+		return 11, true
+	case d >= 'A' && d <= 'D':
+		return 12 + d - 'A', true
+	}
+	return 0, false
+}
+
+// SendDTMF sends digits into one leg as RFC 2833/4733 telephone events, in
+// real time, as an own stream (a fresh SSRC with its own sequence and
+// timestamp space, like PlayPCMTo). Digits are 0-9, *, # and A-D. It returns
+// ErrNoTelephoneEvent when the leg's SDP offered no telephone-event, and
+// ctx.Err() when ctx is cancelled mid-way.
+func (r *Relay) SendDTMF(ctx context.Context, legName, digits string) error {
+	l := r.findLeg(legName)
+	if l == nil {
+		return errors.New("media: unknown relay leg " + legName)
+	}
+	pt := l.eventType()
+	if pt == 0 {
+		return ErrNoTelephoneEvent
+	}
+	codes := make([]byte, 0, len(digits))
+	for i := 0; i < len(digits); i++ {
+		code, ok := telephoneEventCode(digits[i])
+		if !ok {
+			return errors.New("media: not a DTMF digit")
+		}
+		codes = append(codes, code)
+	}
+	var b [10]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Errorf("media: dtmf stream: %w", err)
+	}
+	seq := startSeq(b[0:2])
+	ts := binary.BigEndian.Uint32(b[2:6])
+	ssrc := binary.BigEndian.Uint32(b[6:10])
+	frameTicks := uint16(dtmfClockRate * frameDur / time.Second)
+	ticker := time.NewTicker(frameDur)
+	defer ticker.Stop()
+	wait := func(d time.Duration) error {
+		if d == frameDur {
+			select {
+			case <-ticker.C:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-r.ctx.Done():
+				return errors.New("media: relay closed")
+			}
+		}
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-t.C:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-r.ctx.Done():
+			return errors.New("media: relay closed")
+		}
+	}
+	for _, code := range codes {
+		// Every packet of one press carries the timestamp of its first;
+		// only the duration grows.
+		for i := 0; i < dtmfPressPackets+dtmfEndRepeats; i++ {
+			end := i >= dtmfPressPackets
+			n := min(i+1, dtmfPressPackets)
+			flags := byte(dtmfVolume)
+			if end {
+				flags |= 0x80
+			}
+			payload := make([]byte, 4)
+			payload[0], payload[1] = code, flags
+			binary.BigEndian.PutUint16(payload[2:], uint16(n)*frameTicks)
+			pkt := BuildRTP(pt, seq, ts, ssrc, i == 0, payload)
+			seq++
+			l.remoteMu.Lock()
+			dst := l.remote
+			l.remoteMu.Unlock()
+			if dst == nil {
+				return errors.New("media: the leg has no address yet")
+			}
+			if err := l.enqueueOwn(ctx, r, pkt); err != nil {
+				return err
+			}
+			if err := wait(frameDur); err != nil {
+				return err
+			}
+		}
+		ts += uint32(dtmfPressPackets)*uint32(frameTicks) + uint32(dtmfGap*dtmfClockRate/time.Second)
+		if err := wait(dtmfGap); err != nil {
+			return err
 		}
 	}
 	return nil

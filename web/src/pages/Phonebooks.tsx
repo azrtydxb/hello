@@ -1,3 +1,4 @@
+import { CallButton } from "../softphone/CallButton";
 import {
   useEffect,
   useMemo,
@@ -506,7 +507,11 @@ export function EntriesView({
           {e.numbers.map((n) => (
             <span key={n.label} className="pb-number">
               <small className="prov-muted">{n.label}</small>{" "}
-              <span className="az-table__mono">{n.number}</span>
+              <span className="az-table__mono">{n.number}</span>{" "}
+              <CallButton
+                number={n.number}
+                label={`${entryName(e)} ${n.label}`}
+              />
             </span>
           ))}
         </span>

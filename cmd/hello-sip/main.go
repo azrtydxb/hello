@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,7 +21,21 @@ import (
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/crm"
-	_ "github.com/azrtydxb/hello/internal/crm/hubspot" // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/autotask"    // registers the autotask connector
+	_ "github.com/azrtydxb/hello/internal/crm/bitrix24"    // registers the Bitrix24 connector
+	_ "github.com/azrtydxb/hello/internal/crm/clio"        // registers the clio connector
+	_ "github.com/azrtydxb/hello/internal/crm/connectwise" // registers the connectwise connector
+	_ "github.com/azrtydxb/hello/internal/crm/dynamics"    // registers the Dynamics 365 connector
+	_ "github.com/azrtydxb/hello/internal/crm/freshdesk"   // registers the freshdesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/google"      // registers the Google contacts connector
+	_ "github.com/azrtydxb/hello/internal/crm/halopsa"     // registers the halopsa connector
+	_ "github.com/azrtydxb/hello/internal/crm/hubspot"     // registers the HubSpot connector
+	_ "github.com/azrtydxb/hello/internal/crm/odoo"        // registers the Odoo connector
+	_ "github.com/azrtydxb/hello/internal/crm/outlook"     // registers the Outlook contacts connector
+	_ "github.com/azrtydxb/hello/internal/crm/pipedrive"   // registers the Pipedrive connector
+	_ "github.com/azrtydxb/hello/internal/crm/salesforce"  // registers the Salesforce connector
+	_ "github.com/azrtydxb/hello/internal/crm/zendesk"     // registers the zendesk connector
+	_ "github.com/azrtydxb/hello/internal/crm/zoho"        // registers the Zoho CRM connector
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/lifecycle"
@@ -81,6 +96,19 @@ func run(args []string) error {
 	if err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("sip listen: %w", err)
+	}
+	// SIP over mutual TLS from the edge, for browsers (S-12); optional.
+	var hop *sip.TLSHop
+	transports := []string{"udp"}
+	if cfg.SIPTLSAddr != "" {
+		hop, err = sip.ListenTLS(cfg.SIPTLSAddr, cfg.SIPTLSCert, cfg.SIPTLSKey, cfg.SIPTLSCA)
+		if err != nil {
+			_ = udp.Close()
+			_ = ln.Close()
+			return fmt.Errorf("sip tls listen: %w", err)
+		}
+		transports = append(transports, "tls")
+		log.Info("SIP over TLS from the edge", "addr", cfg.SIPTLSAddr)
 	}
 	// One Valkey or a Sentinel-managed primary (vkconn). A single Valkey
 	// that is down still yields a client that redials, so readiness
@@ -164,7 +192,7 @@ func run(args []string) error {
 	// the SIP path bounds to a few hundred milliseconds. The CRM query runs
 	// in the background, so a slow CRM never holds a call.
 	crmRepo := &crm.PG{DB: sipDB, Box: box}
-	crmTokens := &crm.TokenManager{Repo: crmRepo, Providers: crm.DefaultProvider(safehttp.NewClient(safehttp.Options{Timeout: crm.LookupTimeout})),
+	crmTokens := &crm.TokenManager{Repo: crmRepo, Providers: crm.DefaultProvider(safehttp.NewClient(safehttp.Options{Timeout: crm.LookupTimeout, Allow: cfg.IntegrationsAllowedCIDRs})),
 		Log: log.With("component", "crm")}
 	crmLookup := &crm.Lookup{Repo: crmRepo, Tokens: crmTokens, Cache: crm.ValkeyCache{Client: func() valkey.Client { return vk }}, Log: log.With("component", "crm")}
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
@@ -180,11 +208,13 @@ func run(args []string) error {
 		MaxContacts: cfg.MaxContacts, MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
+		TLSListener: tlsListener(hop), TLSClient: tlsClient(hop), WebRTCAllowCleartextHop: cfg.MediaWebRTCAllowCleartextHop,
 		SessionExpires: cfg.SessionExpires, SessionMinSE: cfg.SessionMinSE, SessionTimersTrunks: cfg.SessionTimersTrunks, MediaDeadAfter: cfg.MediaDeadAfter,
-		PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
+		DoorHangup: cfg.DoorHangup, PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
 		PageMulticastIface: cfg.PageMulticastIface, PageMulticastTTL: cfg.PageMulticastTTL,
 		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax, Dialing: cfg.Dial,
 		MediaForceAnchor: cfg.MediaForceAnchor, MediaRecordingNotice: cfg.MediaRecordingNotice,
+		VideoEnabled: cfg.VideoEnabled, VideoMaxKbps: cfg.VideoMaxKbps, VideoMaxSessions: cfg.VideoMaxSessions,
 		PromptLanguage: cfg.VoicePromptLanguage, Timezone: cfg.Timezone,
 		HADialogHeartbeat: cfg.MemberHeartbeat, HATakeoverEnabled: cfg.HATakeoverEnabled,
 		HATakeoverPoll: cfg.HATakeoverPoll, HATakeoverJitter: cfg.HATakeoverJitter, PushRate: cfg.PushRate,
@@ -212,8 +242,22 @@ func run(args []string) error {
 	// into anchored SDP answers, so LAN phones send RTP to a reachable
 	// node address instead of mirroring the offer's own c= line. Empty
 	// keeps the tests'/lab's offer-mirroring behaviour.
+	media.SetFeatures(cfg.MediaDTLS, cfg.MediaICE)
+	media.SetVideoMaxSessions(cfg.VideoMaxSessions)
 	if cfg.MediaAnchorHost != "" {
 		srv.SetMediaAnchor(media.NewAnchor(cfg.MediaAnchorHost, log.With("component", "media")))
+	}
+	// The WebRTC side of the anchor (clients S-4): one shared UDP port for
+	// browser and app legs, off unless HELLO_MEDIA_WEBRTC_ENABLED.
+	if cfg.MediaWebRTCEnabled {
+		node, err := media.StartWebRTC(cfg.MediaWebRTCPort, cfg.MediaAnchorHost, cfg.MediaWebRTCPublicIP)
+		if err != nil {
+			return err
+		}
+		node.Register(metrics.Registry)
+		media.SetWebRTCNode(node)
+		defer func() { media.SetWebRTCNode(nil); _ = node.Close() }()
+		log.Info("webrtc media enabled", "port", node.Mux().Port(), "candidates", node.Hosts())
 	}
 	watcher.OnReload = srv.SnapshotChanged
 
@@ -224,7 +268,7 @@ func run(args []string) error {
 	}
 	machine := lifecycle.New(lifecycle.Options{
 		Member: cluster.Member{ID: cfg.NodeID, Kind: cluster.KindSIP, SIPAddr: cfg.SIPAdvertisedAddr, HTTPAddr: cfg.HTTPAddr,
-			Transports: []string{"udp"}, Version: version.Version, Incarnation: incarnation},
+			Transports: transports, Version: version.Version, Incarnation: incarnation},
 		Checks: map[string]lifecycle.Check{
 			"valkey": valkeyReady,
 			"sip": func(context.Context) error {
@@ -368,4 +412,19 @@ func faxDeps(cfg config.SIP, st *store.Store) *sip.FaxDeps {
 		return nil
 	}
 	return &sip.FaxDeps{Enabled: true, Client: &fax.Client{Addr: cfg.Fax.Addr, Token: cfg.Fax.Token}, Store: st.Faxes(), Objects: objs}
+}
+
+// tlsListener and tlsClient unpack the optional TLS hop.
+func tlsListener(h *sip.TLSHop) net.Listener {
+	if h == nil {
+		return nil
+	}
+	return h.Listener
+}
+
+func tlsClient(h *sip.TLSHop) *tls.Config {
+	if h == nil {
+		return nil
+	}
+	return h.Client
 }

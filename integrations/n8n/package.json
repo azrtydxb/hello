@@ -1,0 +1,18 @@
+{
+  "name": "n8n-nodes-hello-pbx",
+  "version": "0.1.0",
+  "description": "n8n nodes for the Hello PBX: a trigger for call events and actions to place calls and look things up.",
+  "license": "UNLICENSED",
+  "private": true,
+  "keywords": ["n8n-community-node-package", "hello", "pbx", "voip"],
+  "files": ["credentials", "nodes", "lib"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": ["credentials/HelloApi.credentials.js"],
+    "nodes": ["nodes/Hello/Hello.node.js", "nodes/Hello/HelloTrigger.node.js"]
+  }
+}

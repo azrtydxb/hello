@@ -29,6 +29,17 @@ export interface User {
   totpEnabled?: boolean;
   /** An administrator requires two-factor authentication of the user. */
   totpRequired?: boolean;
+  /**
+   * Set when a directory connector manages the user: the fields it owns are
+   * read-only (409 managed_by_directory).
+   */
+  managedBy?: {
+    connectorId: number;
+    connector: string;
+    fields: string[];
+  } | null;
+  /** When directory sync disabled the user. */
+  disabledAt?: string | null;
   createdAt: string;
 }
 
@@ -103,6 +114,7 @@ export function updateProfile(change: {
   displayName?: string;
   email?: string;
   voicemailEmail?: Partial<VoicemailEmailPrefs>;
+  deskphoneDelivery?: boolean;
   ringWeb?: boolean;
   ringMobile?: boolean;
 }): Promise<void> {

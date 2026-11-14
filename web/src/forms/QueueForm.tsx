@@ -74,6 +74,10 @@ interface Draft {
   callbackOfferAfterSeconds: string;
   callbackDigit: string;
   promptLanguage: string;
+  textEnabled: boolean;
+  textCapacity: string;
+  textReassignSeconds: string;
+  textRequiresIdleVoice: boolean;
   members: QueueMember[];
 }
 
@@ -110,6 +114,10 @@ const draftOf = (q: Queue | null): Draft => ({
   callbackOfferAfterSeconds: String(q?.callbackOfferAfterSeconds ?? 120),
   callbackDigit: q?.callbackDigit ?? "2",
   promptLanguage: q?.promptLanguage ?? "",
+  textEnabled: q?.textEnabled ?? false,
+  textCapacity: String(q?.textCapacity ?? 3),
+  textReassignSeconds: String(q?.textReassignSeconds ?? 300),
+  textRequiresIdleVoice: q?.textRequiresIdleVoice ?? false,
   members: q?.members ?? [],
 });
 
@@ -144,6 +152,10 @@ const KEYS = [
   "callbackOfferAfterSeconds",
   "callbackDigit",
   "promptLanguage",
+  "textEnabled",
+  "textCapacity",
+  "textReassignSeconds",
+  "textRequiresIdleVoice",
   "members",
 ];
 
@@ -217,6 +229,10 @@ function validate(d: Draft): Record<string, string> {
       0,
       3600,
     );
+  }
+  if (d.textEnabled) {
+    range(out, "textCapacity", d.textCapacity, 1, 50);
+    range(out, "textReassignSeconds", d.textReassignSeconds, 0, 86400);
   }
   validateDest(out, "timeout", d.timeout);
   validateDest(out, "full", d.full);
@@ -352,6 +368,12 @@ export function QueueDrawer({
         callbackOfferAfterSeconds: Number(d.callbackOfferAfterSeconds),
         callbackDigit: d.callbackDigit,
         promptLanguage: d.promptLanguage,
+        textEnabled: d.textEnabled,
+        textCapacity: d.textEnabled ? Number(d.textCapacity) : 3,
+        textReassignSeconds: d.textEnabled
+          ? Number(d.textReassignSeconds)
+          : 300,
+        textRequiresIdleVoice: d.textRequiresIdleVoice,
         members: d.members.map((m, i) => ({
           extensionId: m.extensionId,
           dynamic: m.dynamic,
@@ -677,6 +699,50 @@ export function QueueDrawer({
               })),
             ]}
             onChange={(e) => set("promptLanguage", e.target.value)}
+          />
+        </fieldset>
+
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">Texts</legend>
+          <Switch
+            label="Take customer texts in the messaging inbox"
+            labelPosition="end"
+            checked={d.textEnabled}
+            onChange={(e) => set("textEnabled", e.target.checked)}
+          />
+          <p className="az-caption">
+            The agents of this queue answer the conversations a number routes
+            here, by the strategy above. Agents log in and pause the same way as
+            for calls.
+          </p>
+          <div className="cf-two">
+            <Input
+              id="queue-textCapacity"
+              label="Open conversations per agent"
+              mono
+              value={d.textCapacity}
+              error={errors.textCapacity}
+              hint="An agent holding this many is offered no more. 1 to 50."
+              disabled={!d.textEnabled}
+              onChange={(e) => set("textCapacity", e.target.value)}
+            />
+            <Input
+              id="queue-textReassignSeconds"
+              label="Return after (s)"
+              mono
+              value={d.textReassignSeconds}
+              error={errors.textReassignSeconds}
+              hint="An unanswered conversation goes back to the queue after this long. 0 never."
+              disabled={!d.textEnabled}
+              onChange={(e) => set("textReassignSeconds", e.target.value)}
+            />
+          </div>
+          <Switch
+            label="Not while the agent is on a call"
+            labelPosition="end"
+            checked={d.textRequiresIdleVoice}
+            disabled={!d.textEnabled}
+            onChange={(e) => set("textRequiresIdleVoice", e.target.checked)}
           />
         </fieldset>
 

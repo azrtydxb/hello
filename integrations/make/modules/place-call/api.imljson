@@ -1,0 +1,12 @@
+{
+  "url": "/calls/originate",
+  "method": "POST",
+  "body": {
+    "destination": "{{parameters.destination}}",
+    "extension": "{{ifempty(parameters.extension; emptystring)}}",
+    "idempotencyKey": "{{ifempty(parameters.idempotencyKey; emptystring)}}"
+  },
+  "response": {
+    "output": "{{body}}"
+  }
+}

@@ -349,3 +349,46 @@ func (s *Store) RecordingParties(ctx context.Context, id int64) ([]string, error
 	}
 	return out, nil
 }
+
+// CreateConnectorRecordingLink stores a link minted for a CRM connector
+// (recording_links.connector_id), audited as create/recording_link by the
+// connector's actor string. A recording that does not exist is ErrNotFound.
+func (s *Store) CreateConnectorRecordingLink(ctx context.Context, connectorID, recordingID int64, hash []byte, expires time.Time) (RecordingLink, error) {
+	actor := "crm:" + strconv.FormatInt(connectorID, 10)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return RecordingLink{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	l, err := scanLink(tx.QueryRowContext(ctx, `
+		INSERT INTO recording_links (token_hash, recording_id, expires_at, max_uses, created_by, connector_id)
+		VALUES ($1, $2, $3, 0, $4, $5) RETURNING `+linkCols, hash, recordingID, expires.UTC(), actor, connectorID))
+	if err != nil {
+		return RecordingLink{}, mapErr(err)
+	}
+	if err := insertAudit(ctx, tx, actor, "create", "recording_link", strconv.FormatInt(l.ID, 10)); err != nil {
+		return RecordingLink{}, err
+	}
+	return l, tx.Commit()
+}
+
+// RevokeConnectorRecordingLinks revokes every live link a CRM connector
+// minted and audits it once. It returns how many it revoked.
+func (s *Store) RevokeConnectorRecordingLinks(ctx context.Context, connectorID int64) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `UPDATE recording_links SET revoked_at = now() WHERE connector_id = $1 AND revoked_at IS NULL`, connectorID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		if err := insertAudit(ctx, tx, "crm:"+strconv.FormatInt(connectorID, 10), "revoke_all", "recording_link", strconv.FormatInt(connectorID, 10)); err != nil {
+			return 0, err
+		}
+	}
+	return n, tx.Commit()
+}

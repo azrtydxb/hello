@@ -119,6 +119,8 @@ func NewFanoutCodec(minPort, maxPort int, c Codec) (*Fanout, error) {
 		_ = f.caller.Close()
 		return nil, fmt.Errorf("media: bind page member socket: %w", err)
 	}
+	f.callerSec.Bind(f.caller.LocalAddr(), func(b []byte, to *net.UDPAddr) { _, _ = f.caller.WriteToUDP(b, to) },
+		func(from *net.UDPAddr, _ bool) { f.callerAddr.Store(from) })
 	f.wg.Add(2)
 	go f.recvCaller()
 	go f.recvMember()
@@ -248,7 +250,7 @@ func (f *Fanout) recvCaller() {
 		}
 		// An encrypted caller is authenticated first; a packet that fails
 		// is dropped before it is parsed, followed or fanned out.
-		data, ok, _ := f.callerSec.Unprotect(buf[:n])
+		data, ok, _ := f.callerSec.UnprotectFrom(buf[:n], from)
 		if !ok {
 			continue
 		}
@@ -330,6 +332,7 @@ func (f *Fanout) Close() {
 	f.targets = map[string]fanTarget{}
 	f.fallback = map[string]fanTarget{}
 	f.mu.Unlock()
+	f.callerSec.Close()
 	_ = f.caller.Close()
 	_ = f.member.Close()
 	f.wg.Wait()

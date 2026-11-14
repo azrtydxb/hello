@@ -31,7 +31,7 @@ func TestDSCPMarking(t *testing.T) {
 		if _, err := r.AddLeg("a"); err != nil {
 			t.Fatal(err)
 		}
-		if got := tosOf(t, r.legs[0].conn); got != want {
+		if got := tosOf(t, r.legs[0].conn.(*net.UDPConn)); got != want {
 			t.Errorf("relay leg DSCP %d: TOS %#x, want %#x", dscp, got, want)
 		}
 		r.Close()

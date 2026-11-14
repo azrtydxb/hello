@@ -158,6 +158,12 @@ type meView struct {
 	VoicemailEmail store.VoicemailEmailPrefs `json:"voicemailEmail"`
 	// EmailDelivery is whether the system can send email at all.
 	EmailDelivery bool `json:"emailDelivery"`
+	// DeskphoneDelivery is the user's switch for customer texts on their desk
+	// phone; DeskphoneCapable is false when every phone of their extension
+	// is of a vendor without a text UI (an extension with no phone yet is
+	// capable).
+	DeskphoneDelivery bool `json:"deskphoneDelivery"`
+	DeskphoneCapable  bool `json:"deskphoneCapable"`
 	// RingWeb and RingMobile are whether the user's web and mobile clients
 	// ring for calls to their extension.
 	RingWeb    bool `json:"ringWeb"`
@@ -176,6 +182,16 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		v.DisplayName, v.Email, v.AuthMethod, v.VoicemailEmail = u.DisplayName, u.Email, u.AuthMethod, u.VoicemailEmail
+		v.DeskphoneDelivery = u.DeskphoneDelivery
+		vendors, err := s.Store.UserPhoneVendors(r.Context(), a.UserID)
+		if err != nil {
+			s.internal(w, "me: phone vendors", err)
+			return
+		}
+		v.DeskphoneCapable = len(vendors) == 0
+		for _, vd := range vendors {
+			v.DeskphoneCapable = v.DeskphoneCapable || vd.SIPMessage()
+		}
 		v.RingWeb, v.RingMobile = u.RingWeb, u.RingMobile
 		exts, err := s.Store.UserExtensions(r.Context(), a.UserID)
 		if err != nil {
@@ -455,6 +471,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		CallWaiting       *bool   `json:"callWaiting"`
 		AnonymousOutbound *bool   `json:"anonymousOutbound"`
 		PhoneSendAnon     *bool   `json:"phoneSendAnonymous"`
+		VideoAllowed      *bool   `json:"videoAllowed"`
 		// MOHClassID is null to clear (use the global default).
 		MOHClassID    nullable[int64] `json:"mohClassId"`
 		NoAnswerRings *int            `json:"noAnswerRings"`
@@ -468,7 +485,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Number == nil && in.Name == nil && in.ExternalNumber == nil && in.DND == nil && in.NoAnswerRings == nil &&
 		in.ForwardAlways == nil && in.ForwardBusy == nil && in.ForwardNoAnswer == nil &&
-		in.VoicemailEnabled == nil && in.RecordDefault == nil && in.AllowIntercom == nil && in.DirectoryHidden == nil && in.CallWaiting == nil && in.AnonymousOutbound == nil && in.PhoneSendAnon == nil &&
+		in.VoicemailEnabled == nil && in.RecordDefault == nil && in.AllowIntercom == nil && in.DirectoryHidden == nil && in.CallWaiting == nil && in.AnonymousOutbound == nil && in.PhoneSendAnon == nil && in.VideoAllowed == nil &&
 		in.Kind == nil && in.DoorTargets == nil && !in.MOHClassID.Set {
 		badRequest(w, "a field to change is required")
 		return
@@ -499,7 +516,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		Number: in.Number, Name: in.Name, ExternalNumber: in.ExternalNumber,
 		DND: in.DND, ForwardAlways: in.ForwardAlways, ForwardBusy: in.ForwardBusy,
 		ForwardNoAnswer: in.ForwardNoAnswer, VoicemailEnabled: in.VoicemailEnabled,
-		RecordDefault: in.RecordDefault, AllowIntercom: in.AllowIntercom, DirectoryHidden: in.DirectoryHidden, CallWaiting: in.CallWaiting, AnonymousOutbound: in.AnonymousOutbound, PhoneSendAnonymous: in.PhoneSendAnon,
+		RecordDefault: in.RecordDefault, AllowIntercom: in.AllowIntercom, DirectoryHidden: in.DirectoryHidden, CallWaiting: in.CallWaiting, AnonymousOutbound: in.AnonymousOutbound, PhoneSendAnonymous: in.PhoneSendAnon, VideoAllowed: in.VideoAllowed,
 		MOHClassID: in.MOHClassID.Value, ClearMOHClass: in.MOHClassID.Set && in.MOHClassID.Value == nil,
 		NoAnswerRings: in.NoAnswerRings, Kind: in.Kind, DoorTargets: in.DoorTargets,
 	}, s.check())
@@ -599,13 +616,23 @@ func (s *server) updateDevice(w http.ResponseWriter, r *http.Request) {
 		Enabled     *bool   `json:"enabled"`
 		ExtensionID *int64  `json:"extensionId"`
 		SRTP        *string `json:"srtp"`
+		KeyExchange *string `json:"srtpKeyExchange"`
+		MediaICE    *bool   `json:"mediaIce"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.Enabled == nil && in.ExtensionID == nil && in.SRTP == nil {
-		badRequest(w, "enabled, extensionId or srtp is required")
+	if in.Enabled == nil && in.ExtensionID == nil && in.SRTP == nil && in.KeyExchange == nil && in.MediaICE == nil {
+		badRequest(w, "enabled, extensionId, srtp, srtpKeyExchange or mediaIce is required")
 		return
+	}
+	if in.KeyExchange != nil {
+		v, ok := secmedia.ParseKeyEx(*in.KeyExchange)
+		if !ok {
+			badRequest(w, "srtpKeyExchange must be sdes or dtls")
+			return
+		}
+		in.KeyExchange = &v
 	}
 	if in.SRTP != nil && !secmedia.Valid(*in.SRTP) {
 		badRequest(w, "srtp must be off, optional or required")
@@ -620,7 +647,7 @@ func (s *server) updateDevice(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "extensionId must be positive")
 		return
 	}
-	d, err := s.Store.UpdateDevice(r.Context(), actor(r).String(), id, in.Enabled, in.ExtensionID, in.SRTP)
+	d, err := s.Store.UpdateDevice(r.Context(), actor(r).String(), id, in.Enabled, in.ExtensionID, store.DeviceMedia{SRTP: in.SRTP, KeyEx: in.KeyExchange, ICE: in.MediaICE})
 	if errors.Is(err, store.ErrDerivedDevice) {
 		writeError(w, http.StatusConflict, "derived_device", "a web device stays on the extension its owner is linked to; revoke it and enrol again")
 		return

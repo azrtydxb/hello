@@ -175,7 +175,7 @@ type InboundRoute struct {
 	Enabled         bool
 	// MOHClassID is the music on hold class of calls the route delivers
 	// (0 = the global default); MOHRingback plays it to the caller instead
-	// of ringback while the destination rings (migration 00021).
+	// of ringback while the destination rings (migration 00029).
 	MOHClassID  int64
 	MOHRingback bool
 }

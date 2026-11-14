@@ -13,7 +13,7 @@ import (
 	"github.com/azrtydxb/hello/internal/secret"
 )
 
-// Doorbell webhooks (migration 00061, spec phone-feature-parity S-48). The
+// Doorbell webhooks (migration 00078, spec phone-feature-parity S-48). The
 // secret is sealed, returned once on create and rotate, and read back only
 // by DoorWebhookForTrigger.
 

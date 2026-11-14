@@ -59,6 +59,10 @@ type Phone struct {
 	// answer is the SDP the phone last answered a call with (re-INVITEs
 	// get it back, so the relay's target does not move).
 	answer []byte
+
+	// notifies, messages and pracks carry the NOTIFY, MESSAGE and PRACK
+	// requests the phone answered (events.go).
+	notifies, messages, pracks chan *sip.Request
 }
 
 func init() {
@@ -119,6 +123,9 @@ func New(opts Options) (*Phone, error) {
 		contact:   sip.ContactHeader{Address: sip.Uri{User: opts.User, Host: host, Port: port}},
 		incoming:  make(chan *Incoming, 8),
 		reinvites: make(chan *sip.Request, 8),
+		notifies:  make(chan *sip.Request, 32),
+		messages:  make(chan *sip.Request, 32),
+		pracks:    make(chan *sip.Request, 32),
 	}
 	p.dua = &sipgo.DialogUA{Client: client, ContactHDR: p.contact, RewriteContact: true}
 	p.srvDlg = map[string]*sipgo.DialogServerSession{}
@@ -212,6 +219,7 @@ func (p *Phone) routes() {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist", nil))
 		}
 	})
+	p.eventRoutes()
 	p.server.OnOptions(func(req *sip.Request, tx sip.ServerTransaction) {
 		_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusOK, "OK", nil))
 	})

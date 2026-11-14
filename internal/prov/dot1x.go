@@ -28,7 +28,7 @@ package prov
 //     MSCHAPv2), P83011 CA certificate, P83012 anonymous identity, P83014
 //     identity, P83015 password (PEAP); P83007 CA certificate, P83008 client
 //     certificate, P83009 identity, P83010 key password (TLS). Those are the
-//     first network's keys; the Wi-Fi profiles item owns the slot layout.
+//     first network's keys; wifi.go repeats them per network slot.
 
 import (
 	"crypto/x509"

@@ -1,3 +1,4 @@
+import { CallButton } from "../softphone/CallButton";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import {
@@ -175,6 +176,15 @@ export function Extensions() {
       key: "recording",
       label: "Recording",
       render: (e) => (e.recordDefault ? "Default on" : "Off"),
+    },
+    {
+      key: "call",
+      label: "Call",
+      align: "right",
+      render: (e) =>
+        e.kind === "door" ? null : (
+          <CallButton number={e.number} label={`${e.name} (${e.number})`} />
+        ),
     },
   ];
 

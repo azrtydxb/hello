@@ -114,13 +114,15 @@ and the extension that will ring and waits for one click, so a link on another
 site cannot place a call by itself. It then shows the call's state from the event stream (polling only while the
 stream is down), and a hang up button. `hello-dialer` is registered as a
 first-party OAuth client (public, PKCE, redirect
-`/integrations/dialer/callback`) when `HELLO_PUBLIC_URL` is set.
+`/integrations/dialer/callback`) when `HELLO_PUBLIC_URL` is set; so is
+`hello-hubspot` for the HubSpot calling iframe
+([crm.md](crm.md#the-hubspot-calling-iframe)).
 
 **Dial** under _My phone_ has a button, _Use Hello for phone links_, that
 registers the console as the browser's handler for `tel:` links
 (`navigator.registerProtocolHandler`). The browser asks the user to allow it.
 Chrome and Edge support it; Firefox needs a setting; `callto:` is not on the
-HTML safelist and is left to the browser extension (a later phase).
+HTML safelist and is left to the [browser extension](browser-extension.md).
 
 ## How it works
 

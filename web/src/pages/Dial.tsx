@@ -26,6 +26,7 @@ import {
   type BadgeTone,
 } from "../design/azrty/components";
 import { useCan } from "../role";
+import { ExtensionCard } from "./ExtensionCard";
 import "./platform/platform.css";
 
 const POLL_MS = 1000;
@@ -276,6 +277,7 @@ export function Dial() {
         </div>
       )}
       <PhoneLinkHandler />
+      <ExtensionCard />
     </section>
   );
 }

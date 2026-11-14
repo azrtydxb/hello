@@ -1,0 +1,14 @@
+[
+  { "name": "limit", "type": "uinteger", "label": "Limit", "default": 50, "help": "At most 200. The newest calls come first." },
+  {
+    "name": "direction",
+    "type": "select",
+    "label": "Direction",
+    "options": [
+      { "label": "Any", "value": "" },
+      { "label": "Inbound", "value": "inbound" },
+      { "label": "Outbound", "value": "outbound" },
+      { "label": "Internal", "value": "internal" }
+    ]
+  }
+]

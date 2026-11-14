@@ -1,0 +1,13 @@
+{
+  "listTickets": {
+    "schema": {
+      "method": "GET",
+      "host": "<%= iparam.domain %>.freshdesk.com",
+      "path": "/api/v2/tickets?requester_id=<%= context.requesterId %>&per_page=5",
+      "headers": {
+        "Authorization": "Basic <%= encode(iparam.apiKey + ':X') %>",
+        "Content-Type": "application/json"
+      }
+    }
+  }
+}

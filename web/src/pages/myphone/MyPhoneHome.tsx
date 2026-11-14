@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { useAuth } from "../../auth";
 import { Alert, EmptyState, PageHeader } from "../../design/azrty/components";
+import { DoorCalls } from "./DoorCalls";
 
 /** The landing page of a self-service user. */
 export function MyPhoneHome() {
@@ -30,6 +31,7 @@ export function MyPhoneHome() {
               </li>
             ))}
           </ul>
+          <DoorCalls />
           <ul>
             <li>
               <Link to="/me/contacts">Address book</Link>

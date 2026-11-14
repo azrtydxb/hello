@@ -197,29 +197,61 @@ func (p *PG) ClientSecret(ctx context.Context, id int64) (string, error) {
 	return p.Box.Open(sealed, secret.CRMSecretAAD(id))
 }
 
-const connCols = `id, connector_id, scope, COALESCE(user_id, 0), expires_at, granted_scopes, external_account, status, last_error, updated_at`
+const connCols = `id, connector_id, scope, COALESCE(user_id, 0), expires_at, granted_scopes, external_account, status, last_error, updated_at,
+	calendar_dnd, calendar_active, calendar_busy_until, calendar_checked_at, calendar_error`
+
+// scanConn reads connCols.
+func scanConn(r scanner, extra ...any) (ConnectionRow, error) {
+	var c ConnectionRow
+	var expires, busy, checked sql.NullTime
+	dest := append([]any{&c.ID, &c.ConnectorID, &c.Scope, &c.UserID, &expires, &c.GrantedScopes, &c.ExternalAccount, &c.Status, &c.LastError, &c.UpdatedAt,
+		&c.CalendarDND, &c.CalendarActive, &busy, &checked, &c.CalendarError}, extra...)
+	if err := r.Scan(dest...); err != nil {
+		return c, err
+	}
+	c.ExpiresAt, c.CalendarBusyUntil, c.CalendarCheckedAt = expires.Time, busy.Time, checked.Time
+	return c, nil
+}
 
 // OrgConnection implements Repo.
 func (p *PG) OrgConnection(ctx context.Context, connectorID int64) (ConnectionRow, Tokens, error) {
-	var c ConnectionRow
+	return p.connection(ctx, connectorID, 0)
+}
+
+// UserConnection implements Repo.
+func (p *PG) UserConnection(ctx context.Context, connectorID, userID int64) (ConnectionRow, Tokens, error) {
+	if userID == 0 {
+		return ConnectionRow{}, Tokens{}, ErrNotFound
+	}
+	return p.connection(ctx, connectorID, userID)
+}
+
+func tokenAAD(connectorID, userID int64, which string) string {
+	if userID == 0 {
+		return secret.CRMTokenAAD(connectorID, which)
+	}
+	return secret.CRMUserTokenAAD(connectorID, userID, which)
+}
+
+// connection reads the org connection (userID 0) or a user's.
+func (p *PG) connection(ctx context.Context, connectorID, userID int64) (ConnectionRow, Tokens, error) {
 	var access, refresh []byte
-	var expires sql.NullTime
-	err := p.DB.QueryRowContext(ctx, `SELECT `+connCols+`, access_enc, refresh_enc FROM crm_connections
-		WHERE connector_id = $1 AND scope = 'org'`, connectorID).Scan(
-		&c.ID, &c.ConnectorID, &c.Scope, &c.UserID, &expires, &c.GrantedScopes, &c.ExternalAccount, &c.Status, &c.LastError, &c.UpdatedAt,
-		&access, &refresh)
+	where, args := `connector_id = $1 AND scope = 'org'`, []any{connectorID}
+	if userID != 0 {
+		where, args = `connector_id = $1 AND scope = 'user' AND user_id = $2`, []any{connectorID, userID}
+	}
+	c, err := scanConn(p.DB.QueryRowContext(ctx, `SELECT `+connCols+`, access_enc, refresh_enc FROM crm_connections WHERE `+where, args...), &access, &refresh)
 	if err != nil {
 		return c, Tokens{}, notFound(err)
 	}
-	c.ExpiresAt = expires.Time // zero while the CRM issued no expiry
 	t := Tokens{ExpiresAt: c.ExpiresAt, Account: c.ExternalAccount, Scopes: strings.Fields(c.GrantedScopes)}
 	if len(access) > 0 {
-		if t.Access, err = p.Box.Open(access, secret.CRMTokenAAD(connectorID, "access")); err != nil {
+		if t.Access, err = p.Box.Open(access, tokenAAD(connectorID, userID, "access")); err != nil {
 			return c, Tokens{}, err
 		}
 	}
 	if len(refresh) > 0 {
-		if t.Refresh, err = p.Box.Open(refresh, secret.CRMTokenAAD(connectorID, "refresh")); err != nil {
+		if t.Refresh, err = p.Box.Open(refresh, tokenAAD(connectorID, userID, "refresh")); err != nil {
 			return c, Tokens{}, err
 		}
 	}
@@ -228,33 +260,126 @@ func (p *PG) OrgConnection(ctx context.Context, connectorID int64) (ConnectionRo
 
 // SaveOrgConnection implements Repo.
 func (p *PG) SaveOrgConnection(ctx context.Context, connectorID int64, t Tokens) (ConnectionRow, error) {
-	access, err := p.Box.Seal(t.Access, secret.CRMTokenAAD(connectorID, "access"))
+	return p.saveConnection(ctx, connectorID, 0, t)
+}
+
+// SaveUserConnection implements Repo.
+func (p *PG) SaveUserConnection(ctx context.Context, connectorID, userID int64, t Tokens) (ConnectionRow, error) {
+	if userID == 0 {
+		return ConnectionRow{}, ErrNotFound
+	}
+	return p.saveConnection(ctx, connectorID, userID, t)
+}
+
+func (p *PG) saveConnection(ctx context.Context, connectorID, userID int64, t Tokens) (ConnectionRow, error) {
+	access, err := p.Box.Seal(t.Access, tokenAAD(connectorID, userID, "access"))
 	if err != nil {
 		return ConnectionRow{}, err
 	}
 	var refresh any // NULL keeps the stored refresh token
 	if t.Refresh != "" {
-		b, err := p.Box.Seal(t.Refresh, secret.CRMTokenAAD(connectorID, "refresh"))
+		b, err := p.Box.Seal(t.Refresh, tokenAAD(connectorID, userID, "refresh"))
 		if err != nil {
 			return ConnectionRow{}, err
 		}
 		refresh = b
 	}
-	_, err = p.DB.ExecContext(ctx, `
-		INSERT INTO crm_connections (connector_id, scope, access_enc, refresh_enc, expires_at, granted_scopes, external_account, status)
-		VALUES ($1, 'org', $2, $3, $4, $5, $6, 'connected')
-		ON CONFLICT (connector_id) WHERE scope = 'org' DO UPDATE SET access_enc = EXCLUDED.access_enc,
+	const set = ` DO UPDATE SET access_enc = EXCLUDED.access_enc,
 			refresh_enc = CASE WHEN EXCLUDED.refresh_enc IS NULL THEN crm_connections.refresh_enc ELSE EXCLUDED.refresh_enc END,
 			expires_at = EXCLUDED.expires_at,
 			granted_scopes = CASE WHEN EXCLUDED.granted_scopes = '' THEN crm_connections.granted_scopes ELSE EXCLUDED.granted_scopes END,
 			external_account = CASE WHEN EXCLUDED.external_account = '' THEN crm_connections.external_account ELSE EXCLUDED.external_account END,
-			status = 'connected', last_error = '', updated_at = now()`,
-		connectorID, access, refresh, nullTime(t.ExpiresAt), strings.Join(t.Scopes, " "), t.Account)
+			status = 'connected', last_error = '', updated_at = now()`
+	if userID == 0 {
+		_, err = p.DB.ExecContext(ctx, `
+			INSERT INTO crm_connections (connector_id, scope, access_enc, refresh_enc, expires_at, granted_scopes, external_account, status)
+			VALUES ($1, 'org', $2, $3, $4, $5, $6, 'connected')
+			ON CONFLICT (connector_id) WHERE scope = 'org'`+set,
+			connectorID, access, refresh, nullTime(t.ExpiresAt), strings.Join(t.Scopes, " "), t.Account)
+	} else {
+		_, err = p.DB.ExecContext(ctx, `
+			INSERT INTO crm_connections (connector_id, scope, user_id, access_enc, refresh_enc, expires_at, granted_scopes, external_account, status)
+			VALUES ($1, 'user', $7, $2, $3, $4, $5, $6, 'connected')
+			ON CONFLICT (connector_id, user_id) WHERE scope = 'user'`+set,
+			connectorID, access, refresh, nullTime(t.ExpiresAt), strings.Join(t.Scopes, " "), t.Account, userID)
+	}
 	if err != nil {
 		return ConnectionRow{}, err
 	}
-	c, _, err := p.OrgConnection(ctx, connectorID)
+	c, _, err := p.connection(ctx, connectorID, userID)
 	return c, err
+}
+
+// DeleteUserConnection implements Repo.
+func (p *PG) DeleteUserConnection(ctx context.Context, connectorID, userID int64) error {
+	res, err := p.DB.ExecContext(ctx, `DELETE FROM crm_connections WHERE connector_id = $1 AND scope = 'user' AND user_id = $2`, connectorID, userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (p *PG) listConns(ctx context.Context, byUser bool, arg int64) ([]ConnectionRow, error) {
+	const (
+		byConnector = `SELECT ` + connCols + ` FROM crm_connections WHERE scope = 'user' AND connector_id = $1 ORDER BY id`
+		ofUser      = `SELECT ` + connCols + ` FROM crm_connections WHERE scope = 'user' AND user_id = $1 ORDER BY id`
+	)
+	q := byConnector
+	if byUser {
+		q = ofUser
+	}
+	rows, err := p.DB.QueryContext(ctx, q, arg)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ConnectionRow
+	for rows.Next() {
+		c, err := scanConn(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// UserConnections implements Repo.
+func (p *PG) UserConnections(ctx context.Context, connectorID int64) ([]ConnectionRow, error) {
+	return p.listConns(ctx, false, connectorID)
+}
+
+// UserConnectionsOf implements Repo.
+func (p *PG) UserConnectionsOf(ctx context.Context, userID int64) ([]ConnectionRow, error) {
+	return p.listConns(ctx, true, userID)
+}
+
+// SetCalendarSettings implements Repo.
+func (p *PG) SetCalendarSettings(ctx context.Context, id int64, dnd bool) error {
+	res, err := p.DB.ExecContext(ctx, `
+		UPDATE crm_connections SET calendar_dnd = $2,
+			calendar_active = CASE WHEN $2 THEN calendar_active ELSE FALSE END,
+			calendar_busy_until = CASE WHEN $2 THEN calendar_busy_until ELSE NULL END,
+			calendar_error = CASE WHEN $2 THEN calendar_error ELSE '' END, updated_at = now()
+		WHERE id = $1 AND scope = 'user'`, id, dnd)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetCalendarState implements Repo.
+func (p *PG) SetCalendarState(ctx context.Context, id int64, active bool, busyUntil, checkedAt time.Time, lastError string) error {
+	_, err := p.DB.ExecContext(ctx, `
+		UPDATE crm_connections SET calendar_active = $2, calendar_busy_until = $3, calendar_checked_at = $4, calendar_error = $5
+		WHERE id = $1 AND scope = 'user'`, id, active, nullTime(busyUntil), checkedAt, lastError)
+	return err
 }
 
 // jsonArg is a JSON document as a statement argument, NULL for none.
@@ -326,7 +451,7 @@ func (p *PG) PurgeStates(ctx context.Context, now time.Time) error {
 // connection.
 func (p *PG) ActiveConnectors(ctx context.Context, tx *sql.Tx) ([]ConnectorRow, error) {
 	rows, err := p.q(tx).QueryContext(ctx, `SELECT `+connectorCols+` FROM crm_connectors c
-		WHERE enabled AND EXISTS (SELECT 1 FROM crm_connections n WHERE n.connector_id = c.id AND n.scope = 'org' AND n.status <> 'revoked')
+		WHERE enabled AND EXISTS (SELECT 1 FROM crm_connections n WHERE n.connector_id = c.id AND n.status <> 'revoked')
 		ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -394,13 +519,13 @@ func (p *PG) AttachEngagement(ctx context.Context, connectorID int64, callID, re
 }
 
 const logCols = `id, connector_id, call_id, direction, status, external_id, attempts, next_attempt_at, last_error,
-	COALESCE(payload, 'null'::jsonb), event_type, owner_extension, COALESCE(recording_id, 0), link_expires_at, created_at, updated_at`
+	COALESCE(payload, 'null'::jsonb), event_type, owner_extension, COALESCE(recording_id, 0), link_expires_at, created_at, updated_at, state`
 
 func scanLog(r scanner) (LogRow, error) {
 	var l LogRow
 	var payload []byte
 	err := r.Scan(&l.ID, &l.ConnectorID, &l.CallID, &l.Direction, &l.Status, &l.ExternalID, &l.Attempts, &l.NextAttemptAt, &l.LastError,
-		&payload, &l.EventType, &l.OwnerExtension, &l.RecordingID, &l.LinkExpiresAt, &l.CreatedAt, &l.UpdatedAt)
+		&payload, &l.EventType, &l.OwnerExtension, &l.RecordingID, &l.LinkExpiresAt, &l.CreatedAt, &l.UpdatedAt, &l.State)
 	l.Payload = payload
 	return l, err
 }
@@ -442,9 +567,10 @@ func (p *PG) Finish(ctx context.Context, id int64, r LogResult) error {
 			next_attempt_at = CASE WHEN $2::text = 'logged' AND COALESCE(recording_id, 0) <> $9::bigint THEN now() ELSE $5::timestamptz END,
 			last_error = $6::text,
 			link_expires_at = CASE WHEN $8::boolean THEN NULL WHEN $7::timestamptz IS NULL THEN link_expires_at ELSE $7::timestamptz END,
+			state = COALESCE($10::text, state),
 			updated_at = now()
 		WHERE id = $1`,
-		id, r.Status, r.ExternalID, r.Attempts, r.NextAttemptAt, r.LastError, r.LinkExpiresAt, r.ClearLink, r.RecordingSeen)
+		id, r.Status, r.ExternalID, r.Attempts, r.NextAttemptAt, r.LastError, r.LinkExpiresAt, r.ClearLink, r.RecordingSeen, r.State)
 	return err
 }
 

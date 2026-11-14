@@ -130,7 +130,7 @@ func ParseRole(v string) (Role, error) {
 func GrantableScopes(r Role) Scopes {
 	switch r {
 	case RoleUser:
-		return Scopes{ScopeRead, ScopeWrite, ScopeMessages}
+		return Scopes{ScopeRead, ScopeWrite, ScopeCalls, ScopeEvents, ScopeRecordings, ScopeMessages}
 	case RoleViewer:
 		return Scopes{ScopeRead, ScopeEvents}
 	case RoleOperator:

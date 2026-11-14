@@ -2,10 +2,12 @@ package sip
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/snapshot"
 )
@@ -72,7 +74,8 @@ func TestVoicemailGroup(t *testing.T) {
 	t.Run("dial copies to every member", func(t *testing.T) {
 		vm := newVMStore()
 		objs := &fakeObjects{}
-		pbx := startPBX(t, callerDevices(), withFeatures(groupFeatures(testGroup("100", "200"))), withVoicemail(vm, objs))
+		ev := &fakeEvents{}
+		pbx := startPBX(t, callerDevices(), withFeatures(groupFeatures(testGroup("100", "200"))), withVoicemail(vm, objs), withEvents(ev))
 		anchored(pbx)
 		a := newPhone(t, pbx, "a1", "pa")
 		a.register(t)
@@ -81,6 +84,14 @@ func TestVoicemailGroup(t *testing.T) {
 
 		recordGroupCall(t, pbx, a, "700")
 		msgs := waitMessages(t, vm, 2)
+		// One voicemail.received per member box, for the Slack notification.
+		eventually(t, "voicemail.received", func() bool { return len(ev.of(events.VoicemailReceived)) == 2 })
+		if got := sorted(ev.of(events.VoicemailReceived)); !slices.Equal(got, []string{"100", "200"}) {
+			t.Fatalf("voicemail.received for %v, want [100 200]", got)
+		}
+		if e, ok := ev.first(events.VoicemailReceived, "200"); !ok || e.Data.From.Number != "100" || e.Data.DurationMs < 1000 {
+			t.Fatalf("voicemail.received = %+v", e)
+		}
 		if len(msgs) != 2 || msgs[0].MinioObject != msgs[1].MinioObject {
 			t.Fatalf("messages = %+v, want two rows sharing one object", msgs)
 		}

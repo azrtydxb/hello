@@ -344,6 +344,24 @@ func (l *LazyValkey) EnqueueDoorTrigger(ctx context.Context, t livestate.DoorTri
 	return c.live.EnqueueDoorTrigger(ctx, t)
 }
 
+// ParkSend implements DoorControl.
+func (l *LazyValkey) ParkSend(ctx context.Context, node string, cmd livestate.ParkCommand) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.live.ParkSend(ctx, node, cmd)
+}
+
+// ParkGetReply implements DoorControl.
+func (l *LazyValkey) ParkGetReply(ctx context.Context, id string) (livestate.ParkReply, bool, error) {
+	c, err := l.get()
+	if err != nil {
+		return livestate.ParkReply{}, false, err
+	}
+	return c.live.ParkGetReply(ctx, id)
+}
+
 // EnqueuePageTest implements PageTester.
 func (l *LazyValkey) EnqueuePageTest(ctx context.Context, r livestate.PageTestRequest) error {
 	c, err := l.get()

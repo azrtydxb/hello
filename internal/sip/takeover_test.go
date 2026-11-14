@@ -235,7 +235,7 @@ func TestTakeoverClaim(t *testing.T) {
 		cluster.Member{ID: "sip-2", Kind: cluster.KindSIP, State: cluster.Ready},
 		cluster.Member{ID: "sip-dead", Kind: cluster.KindSIP, State: cluster.Offline, ActiveCalls: 1},
 	)
-	haReinviteTimeout = 300 * time.Millisecond // a dead endpoint must fail fast
+	haReinviteTimeout.Set(300 * time.Millisecond) // a dead endpoint must fail fast
 	n1 := startPBX(t, nil, withNodeID("sip-1"), withHA(ha, mem))
 	n2 := startPBX(t, nil, withNodeID("sip-2"), withHA(ha, mem))
 	n1.srv.takeoverPass(t.Context())
@@ -303,7 +303,7 @@ func TestTakeoverReINVITEs(t *testing.T) {
 	}
 
 	// The owner dies; the survivor takes over.
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	owner.stop()
 	mem.set(
 		cluster.Member{ID: "sip-1", Kind: cluster.KindSIP, State: cluster.Offline, ActiveCalls: 1},
@@ -436,7 +436,7 @@ func TestTakeoverOneSidedClose(t *testing.T) {
 	mem := &fakeMembership{}
 	// The caller leg's target is this test PBX itself, so the taker can
 	// reach it; the callee leg points at a dead port.
-	haReinviteTimeout = 300 * time.Millisecond // a dead endpoint must fail fast
+	haReinviteTimeout.Set(300 * time.Millisecond) // a dead endpoint must fail fast
 	taker := startPBX(t, nil, withNodeID("sip-2"), withHA(ha, mem))
 	dead := orphanState("orphan-2", "sip-dead", "sip:x@127.0.0.1:1")
 	ha.put(dead)
@@ -570,7 +570,7 @@ func TestTakeoverScenarioMatrix(t *testing.T) {
 			}
 			return false
 		})
-		haReinviteTimeout = time.Second
+		haReinviteTimeout.Set(time.Second)
 		owner.stop()
 		mem.set(
 			cluster.Member{ID: "sip-1", Kind: cluster.KindSIP, State: cluster.Offline, ActiveCalls: 1},
@@ -647,7 +647,7 @@ func TestTakeoverScenarioMatrix(t *testing.T) {
 			}
 			return false
 		})
-		haReinviteTimeout = time.Second
+		haReinviteTimeout.Set(time.Second)
 		owner.stop()
 		mem.set(
 			cluster.Member{ID: "sip-1", Kind: cluster.KindSIP, State: cluster.Offline, ActiveCalls: 1},

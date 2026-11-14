@@ -420,9 +420,9 @@ func (p *rtpPeer) press(t *testing.T, to media.AudioSDP, code byte) {
 // not connect it, if the prompt is not played before the bridge, or if a
 // target that never presses 1 is not dropped with its result recorded (S-6).
 func TestFollowMeConfirm(t *testing.T) {
-	old := fmAcceptWindow
-	fmAcceptWindow = 400 * time.Millisecond
-	t.Cleanup(func() { fmAcceptWindow = old })
+	old := fmAcceptWindow.Get()
+	fmAcceptWindow.Set(400 * time.Millisecond)
+	t.Cleanup(func() { fmAcceptWindow.Set(old) })
 
 	t.Run("pressing 1 connects the call", func(t *testing.T) {
 		fm := fmProfile(snapshot.FollowMeSimultaneous, fmExternal("0475123456"))

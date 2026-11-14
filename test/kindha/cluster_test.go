@@ -595,15 +595,9 @@ func (l *labEnv) diagnostics(t *testing.T) {
 func (l *labEnv) withStaleVIPNeighbour(t *testing.T, node string, f func()) {
 	t.Helper()
 	mac := strings.TrimSpace(run(t, "docker", "exec", node, "cat", "/sys/class/net/eth0/address"))
-	var dev string
-	fields := strings.Fields(run(t, "ip", "-o", "route", "get", l.vip))
-	for i, w := range fields {
-		if w == "dev" && i+1 < len(fields) {
-			dev = fields[i+1]
-		}
-	}
+	dev := l.vipDevice()
 	if dev == "" {
-		t.Fatalf("no interface towards %s in %v", l.vip, fields)
+		t.Fatalf("no interface towards %s", l.vip)
 	}
 	run(t, "sudo", "-n", "ip", "neigh", "replace", l.vip, "lladdr", mac, "dev", dev, "nud", "permanent")
 	defer func() {

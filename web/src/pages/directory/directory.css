@@ -126,3 +126,12 @@
   margin: 0;
   padding: 0;
 }
+
+/* A door station's camera picture in the extension drawer. */
+.dir-camera {
+  display: block;
+  max-width: 100%;
+  margin-top: var(--az-space-2, 8px);
+  border-radius: 6px;
+  background: #000;
+}

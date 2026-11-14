@@ -11,7 +11,7 @@ import (
 	"github.com/azrtydxb/hello/internal/timecond"
 )
 
-// Time conditions (migration 00020): schedules, calendars and the time
+// Time conditions (migration 00038): schedules, calendars and the time
 // conditions that route by them. Reads are open to a viewer; changes need
 // the write scope, like ring groups and IVR menus.
 

@@ -37,6 +37,9 @@ func (h *Hook) Handle(ctx context.Context, tx *sql.Tx, e events.Entry) error {
 		if !ok {
 			continue
 		}
+		if !serverSide(conn, row.Config) {
+			continue
+		}
 		caps := conn.Capabilities()
 		switch e.Type {
 		case events.CallRecordingReady:

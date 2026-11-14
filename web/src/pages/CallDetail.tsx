@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
-import { errorMessage, listTrunks, type RtcpxrQuality } from "../api";
+import {
+  errorMessage,
+  listTrunks,
+  type ClientQualityReport,
+  type RtcpxrQuality,
+} from "../api";
 import { getCallRecord, type CallRecord } from "../api/calls";
 import {
   Alert,
@@ -210,6 +215,24 @@ function srtpText(srtp: CallRecord["srtp"]): string {
   }
 }
 
+/** How the call's SRTP keys were agreed, and whether ICE-lite ran. */
+function keyExText(cdr: CallRecord): string {
+  const kex = (() => {
+    switch (cdr.srtpKeyEx) {
+      case "sdes":
+        return "SDES (keys in the SDP)";
+      case "dtls":
+        return "DTLS-SRTP";
+      case "mixed":
+        return "SDES on one leg, DTLS-SRTP on the other";
+      default:
+        return "";
+    }
+  })();
+  if (kex === "" && !cdr.ice) return "—";
+  return [kex, cdr.ice ? "ICE-lite" : ""].filter(Boolean).join(" · ");
+}
+
 /** Loss percent and jitter of an anchored call, or "not measured". */
 function qualityText(cdr: CallRecord): string {
   const { rtpPackets: packets, rtpLost: lost, rtpJitterMs: jitter } = cdr;
@@ -217,6 +240,23 @@ function qualityText(cdr: CallRecord): string {
   const total = packets + lost;
   const loss = total > 0 ? (lost / total) * 100 : 0;
   return `${loss.toFixed(2)}% loss · ${jitter.toFixed(1)} ms jitter`;
+}
+
+/** One web client's end-of-call report: codec, loss, jitter, round trip, the path and any video. */
+function clientQualityText(q: ClientQualityReport): string {
+  const parts = [
+    q.codec,
+    `${q.lossPct.toFixed(1)}% loss`,
+    `${q.jitterMs.toFixed(1)} ms jitter`,
+    `${q.rttMs.toFixed(0)} ms round trip`,
+  ];
+  if (q.candidateLocal || q.candidateRemote)
+    parts.push(`${q.candidateLocal || "?"} to ${q.candidateRemote || "?"}`);
+  if (q.video && q.video.width > 0)
+    parts.push(
+      `video ${q.video.width}x${q.video.height} ${q.video.fps} fps ${q.video.codec}`,
+    );
+  return parts.filter(Boolean).join(" · ");
 }
 
 /** One phone's reported figures, e.g. "ext 200: MOS 4.1 · 0.50% loss · 6.0 ms jitter". */
@@ -271,12 +311,21 @@ function Detail({ cdr }: { cdr: CallRecord }) {
     { label: "SIP node", value: cdr.sipNode || "—", mono: true },
     { label: "Media", value: cdr.mediaMode || "—" },
     { label: "Media encryption", value: srtpText(cdr.srtp) },
+    { label: "Key exchange", value: keyExText(cdr) },
     { label: "Caller codec", value: cdr.callerCodec || "—", mono: true },
     { label: "Callee codec", value: cdr.calleeCodec || "—", mono: true },
     { label: "Call quality", value: qualityText(cdr) },
     ...(cdr.rtcpxr ?? []).map((q) => ({
       label: `Phone report (${q.final ? "call end" : "interval"})`,
       value: phoneQualityText(q),
+    })),
+    {
+      label: "Video",
+      value: cdr.video ? "Carried (relayed, not transcoded)" : "—",
+    },
+    ...(cdr.clientQuality ?? []).map((q) => ({
+      label: `Web client report (${q.extension || q.device})`,
+      value: clientQualityText(q),
     })),
     { label: "SIP Call-ID", value: cdr.sipCallId || "—", mono: true },
     { label: "Correlation ID", value: cdr.correlationId || "—", mono: true },

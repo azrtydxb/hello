@@ -1,0 +1,17 @@
+{
+  "name": "hello-pbx-zapier",
+  "version": "1.0.0",
+  "description": "Hello PBX private integration for Zapier: call triggers, place a call, find a contact, find a call.",
+  "private": true,
+  "license": "MIT",
+  "main": "index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "zapier-platform-core": "19.3.0"
+  }
+}

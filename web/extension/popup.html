@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hello</title>
+    <link rel="stylesheet" href="ui.css" />
+  </head>
+  <body class="popup">
+    <main>
+      <h1>Hello</h1>
+      <p id="who" class="muted"></p>
+      <form id="dial" hidden>
+        <label for="number">Number to call</label>
+        <input id="number" inputmode="tel" autocomplete="off" required />
+        <button class="p" id="go" type="submit">Call</button>
+      </form>
+      <section id="call" hidden aria-live="polite">
+        <p id="callnum" class="mono"></p>
+        <p id="calltext"></p>
+        <button id="hangup" class="d" type="button">Hang up</button>
+      </section>
+      <p id="err" class="err" role="alert" hidden></p>
+      <p><a href="#" id="opts">Settings</a></p>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

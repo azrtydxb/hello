@@ -575,9 +575,6 @@ func maskSecrets(d *prov.RenderData) {
 			if w.Profiles[i].PSK != "" {
 				w.Profiles[i].PSK = mask
 			}
-			if w.Profiles[i].Password != "" {
-				w.Profiles[i].Password = mask
-			}
 		}
 		d.Wifi = &w
 	}

@@ -65,7 +65,7 @@ func streamPCM(ctx context.Context, pcm []byte, c Codec, loop bool, send func(pk
 	if _, err := rand.Read(b[:]); err != nil {
 		return fmt.Errorf("media: tone stream: %w", err)
 	}
-	seq := binary.BigEndian.Uint16(b[0:2])
+	seq := startSeq(b[0:2])
 	ts := binary.BigEndian.Uint32(b[2:6])
 	ssrc := binary.BigEndian.Uint32(b[6:10])
 	ticker := time.NewTicker(frameDur)

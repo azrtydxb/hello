@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -50,10 +51,49 @@ func (f *crmFake) Refresh(context.Context, crm.Config, string) (crm.Tokens, erro
 }
 func (f *crmFake) Ping(context.Context, crm.Conn) error { return f.pingErr }
 
+// crmUserFake is a connector every user signs in to (Outlook, Google).
+type crmUserFake struct{ crmFake }
+
+func (f *crmUserFake) Kind() string { return "fakeuser" }
+func (f *crmUserFake) Capabilities() crm.Capabilities {
+	return crm.Capabilities{Lookup: true, UserScope: true, Calendar: true}
+}
+func (f *crmUserFake) Busy(context.Context, crm.Conn, time.Time) (crm.Busy, error) {
+	return crm.Busy{}, nil
+}
+func (f *crmUserFake) Exchange(_ context.Context, _ crm.Config, _, code string) (crm.Tokens, error) {
+	if code != "good" {
+		return crm.Tokens{}, &crm.APIError{Status: 400, Msg: "bad"}
+	}
+	return crm.Tokens{Access: "USER-ACCESS", Refresh: "USER-REFRESH", ExpiresAt: time.Now().Add(time.Hour), Account: "alice@example.com",
+		Scopes: []string{"Contacts.Read", "Calendars.Read"}}, nil
+}
+
+type dndFake struct{ on []int64 }
+
+func (d *dndFake) SetCalendarDND(_ context.Context, uid int64, on bool) (int, error) {
+	if on {
+		d.on = append(d.on, uid)
+	}
+	return 1, nil
+}
+
+// crmStatic is a credential connector (Odoo, Bitrix24 style): the client
+// secret is the credential and Connect verifies it.
+type crmStatic struct{ *crmFake }
+
+func (crmStatic) Authenticate(_ context.Context, c crm.Config) (crm.Tokens, error) {
+	if c.ClientSecret != "good-key" {
+		return crm.Tokens{}, errors.New("the key was refused")
+	}
+	return crm.Tokens{Access: "credential", Account: "uid-7"}, nil
+}
+
 type crmEnv struct {
 	repo *crm.Mem
 	svc  *crm.Service
 	fake *crmFake
+	dnd  *dndFake
 	srv  *httptest.Server
 }
 
@@ -62,13 +102,23 @@ func newCRMEnv(t *testing.T, publicURL string) *crmEnv {
 	repo := crm.NewMem()
 	repo.UsersList = []crm.UserRef{{ID: uAlice, Username: "alice", Email: "alice@example.com", Extension: "101"}}
 	fake := &crmFake{}
-	tm := &crm.TokenManager{Repo: repo, Providers: func(k string) (crm.Connector, bool) { return fake, k == "fakecrm" }}
-	svc := &crm.Service{Repo: repo, Tokens: tm, Lookup: &crm.Lookup{Repo: repo, Tokens: tm}, PublicURL: publicURL}
+	ufake := &crmUserFake{}
+	tm := &crm.TokenManager{Repo: repo, Providers: func(k string) (crm.Connector, bool) {
+		switch k {
+		case "staticcrm":
+			return crmStatic{fake}, true
+		case "fakeuser":
+			return ufake, true
+		}
+		return fake, k == "fakecrm"
+	}}
+	dnd := &dndFake{}
+	svc := &crm.Service{Repo: repo, Tokens: tm, Lookup: &crm.Lookup{Repo: repo, Tokens: tm}, PublicURL: publicURL, DND: dnd}
 	f, _, _, _ := newAcctFake(t)
 	h := Handler(Config{Store: evStore{f}, CRM: svc, Log: slog.New(slog.DiscardHandler), SessionTTL: time.Hour})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &crmEnv{repo: repo, svc: svc, fake: fake, srv: srv}
+	return &crmEnv{repo: repo, svc: svc, fake: fake, dnd: dnd, srv: srv}
 }
 
 // do sends a request as who and returns the status and body; redirects are
@@ -383,6 +433,7 @@ func TestCRMRoutesAnswer503WithoutService(t *testing.T) {
 		{"GET", "/api/v1/integrations/crm/1/logs"}, {"POST", "/api/v1/integrations/crm/logs/1/retry"},
 		{"GET", "/api/v1/integrations/crm/1/users"}, {"PUT", "/api/v1/integrations/crm/1/users/1"},
 		{"POST", "/api/v1/integrations/hubspot/engagements"}, {"GET", "/api/v1/integrations/crm/oauth/callback"},
+		{"POST", "/api/v1/integrations/salesforce/engagements"}, {"GET", "/api/v1/integrations/crm/1/setup"},
 	} {
 		who := "carol"
 		if strings.HasSuffix(rt.p, "engagements") {
@@ -394,5 +445,208 @@ func TestCRMRoutesAnswer503WithoutService(t *testing.T) {
 		if code, b, _ := e.do(t, who, rt.m, rt.p, map[string]any{}); code != 503 {
 			t.Errorf("%s %s = %d %s, want 503", rt.m, rt.p, code, b)
 		}
+	}
+}
+
+// TestPersonalConnections: a user connects an Outlook-like connector with
+// their own account, the callback returns to their own page, the tokens
+// belong to that user alone, and calendar DND needs calendar access. It fails
+// if an administrator's connect works on a per-user connector, if another
+// user sees or shares the connection, if a token appears in a response, or if
+// calendar DND turns on without calendar access.
+func TestPersonalConnections(t *testing.T) {
+	e := newCRMEnv(t, "https://hello.example")
+	c := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "fakeuser", "name": "Outlook",
+		"clientSecret": "CLIENT-SECRET", "config": map[string]string{"clientId": "cid"}})
+	id := c["id"]
+	if caps := c["capabilities"].(map[string]any); caps["userScope"] != true || caps["calendar"] != true {
+		t.Fatalf("capabilities = %v", caps)
+	}
+	// The organisation-level sign-in and test do not apply.
+	e.want(t, 409, "carol", "POST", connPath(id)+"/connect", nil)
+	e.want(t, 409, "carol", "POST", connPath(id)+"/test", nil)
+	// An organisation connector is not a personal one.
+	org := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "fakecrm", "name": "Org"})
+	list := e.want(t, 200, "alice", "GET", "/api/v1/me/connections", nil)
+	items := list["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["kind"] != "fakeuser" || items[0].(map[string]any)["connection"] != nil {
+		t.Fatalf("list = %v", list)
+	}
+	e.want(t, 409, "alice", "POST", "/api/v1/me/connections/"+toS(org["id"])+"/connect", nil)
+	e.want(t, 404, "alice", "POST", "/api/v1/me/connections/999/connect", nil)
+	e.want(t, 401, "", "GET", "/api/v1/me/connections", nil)
+	// A service account has no user of its own: every personal route refuses it.
+	for _, r := range [][2]string{{"GET", "/api/v1/me/connections"}, {"POST", "/api/v1/me/connections/1/connect"},
+		{"DELETE", "/api/v1/me/connections/1"}, {"PUT", "/api/v1/me/connections/1/calendar-dnd"}} {
+		e.want(t, 403, "svc", r[0], r[1], map[string]any{"enabled": true})
+	}
+
+	au := e.want(t, 200, "alice", "POST", "/api/v1/me/connections/"+toS(id)+"/connect", nil)["authorizeUrl"].(string)
+	state := au[strings.Index(au, "state=")+6:]
+	// A declined sign-in returns to the user's page, not the administrators'.
+	if code, _, hdr := e.do(t, "", "GET", "/api/v1/integrations/crm/oauth/callback?error=access_denied&state="+state, nil); code != 302 || hdr.Get("Location") != "/me/connections?error=denied" {
+		t.Fatalf("declined = %d %s", code, hdr.Get("Location"))
+	}
+	au = e.want(t, 200, "alice", "POST", "/api/v1/me/connections/"+toS(id)+"/connect", nil)["authorizeUrl"].(string)
+	state = au[strings.Index(au, "state=")+6:]
+	code, _, hdr := e.do(t, "", "GET", "/api/v1/integrations/crm/oauth/callback?state="+state+"&code=good", nil)
+	if code != 302 || hdr.Get("Location") != "/me/connections?connected="+toS(id) {
+		t.Fatalf("callback = %d %s", code, hdr.Get("Location"))
+	}
+	// The connection is alice's: it is stored under her user id only, and the
+	// organisation's connection of the connector is still absent.
+	if _, _, err := e.repo.OrgConnection(context.Background(), int64(id.(float64))); err == nil {
+		t.Fatal("a personal sign-in created an organisation connection")
+	}
+	if _, _, err := e.repo.UserConnection(context.Background(), int64(id.(float64)), uAlice); err != nil {
+		t.Fatalf("alice's connection: %v", err)
+	}
+	mine := e.want(t, 200, "alice", "GET", "/api/v1/me/connections", nil)["items"].([]any)[0].(map[string]any)["connection"].(map[string]any)
+	if mine["status"] != "connected" || mine["externalAccount"] != "alice@example.com" || mine["calendarDnd"] != false {
+		t.Fatalf("connection = %v", mine)
+	}
+	if bob := e.want(t, 200, "bob", "GET", "/api/v1/me/connections", nil)["items"].([]any)[0].(map[string]any); bob["connection"] != nil {
+		t.Fatalf("bob sees alice's connection: %v", bob)
+	}
+	for _, p := range []string{"/api/v1/me/connections", connPath(id)} {
+		who := "alice"
+		if p == connPath(id) {
+			who = "carol"
+		}
+		_, b, _ := e.do(t, who, "GET", p, nil)
+		for _, s := range []string{"CLIENT-SECRET", "USER-ACCESS", "USER-REFRESH"} {
+			if strings.Contains(string(b), s) {
+				t.Fatalf("%s leaks %q: %s", p, s, b)
+			}
+		}
+	}
+
+	// Calendar DND: not without the calendar feature, then on and off.
+	dnd := "/api/v1/me/connections/" + toS(id) + "/calendar-dnd"
+	e.want(t, 409, "alice", "PUT", dnd, map[string]any{"enabled": true})
+	e.want(t, 400, "alice", "PUT", dnd, map[string]any{})
+	e.want(t, 404, "bob", "PUT", dnd, map[string]any{"enabled": true})
+	e.want(t, 200, "carol", "PATCH", connPath(id), map[string]any{"config": map[string]string{"features": "contacts,calendar"}})
+	on := e.want(t, 200, "alice", "PUT", dnd, map[string]any{"enabled": true})
+	if on["calendarDnd"] != true {
+		t.Fatalf("calendar DND = %v", on)
+	}
+	if off := e.want(t, 200, "alice", "PUT", dnd, map[string]any{"enabled": false}); off["calendarDnd"] != false {
+		t.Fatalf("calendar DND = %v", off)
+	}
+
+	e.want(t, 204, "alice", "DELETE", "/api/v1/me/connections/"+toS(id), nil)
+	e.want(t, 404, "alice", "DELETE", "/api/v1/me/connections/"+toS(id), nil)
+	e.want(t, 409, "alice", "DELETE", "/api/v1/me/connections/"+toS(org["id"]), nil)
+}
+
+// sfFake is a connector that signs in with client credentials, describes its
+// own setup and checks record ids, as the Salesforce connector does.
+type sfFake struct {
+	crmFake
+	authErr error
+}
+
+func (f *sfFake) Kind() string { return "salesforce" }
+func (f *sfFake) Authenticate(context.Context, crm.Config) (crm.Tokens, error) {
+	if f.authErr != nil {
+		return crm.Tokens{}, f.authErr
+	}
+	return crm.Tokens{Access: "ACCESS-SECRET", ExpiresAt: time.Now().Add(time.Hour), Account: "acme.my.salesforce.com"}, nil
+}
+func (f *sfFake) ServerSide(cfg map[string]string) bool { return cfg["serverLogging"] == "true" }
+func (f *sfFake) ValidRef(r string) bool                { return strings.HasPrefix(r, "00T") }
+func (f *sfFake) Setup(_ crm.Config, public string) []crm.SetupItem {
+	return []crm.SetupItem{{Name: "adapterUrl", Label: "CTI adapter URL", Kind: "url", Value: public + "/integrations/salesforce/softphone"}}
+}
+
+// TestSalesforceClientCredentialsAndSetup: a client-credentials connector is
+// connected by the Connect call itself, a refusal is a 400 on the secret, the setup values need the admin, and the softphone's record
+// handshake checks the record id and the caller's ownership. It fails if
+// Connect answers an authorize URL for it, a secret or token leaks, a
+// non-admin reads the setup, or a malformed record id is stored.
+func TestSalesforceClientCredentialsAndSetup(t *testing.T) {
+	e := newCRMEnv(t, "https://hello.example")
+	sf := &sfFake{}
+	e.svc.Tokens.Providers = func(k string) (crm.Connector, bool) { return sf, k == "salesforce" }
+	e.want(t, 404, "alice", "POST", "/api/v1/integrations/salesforce/engagements", map[string]any{"callId": "c1", "recordId": "00T000000000001"}) // no connector yet
+	c := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "salesforce", "name": "Salesforce",
+		"clientSecret": "CLIENT-SECRET", "config": map[string]string{"clientId": "cid", "serverLogging": "true"}})
+	p := connPath(c["id"])
+
+	setup := e.want(t, 200, "carol", "GET", p+"/setup", nil)
+	it := setup["items"].([]any)[0].(map[string]any)
+	if it["name"] != "adapterUrl" || it["value"] != "https://hello.example/integrations/salesforce/softphone" {
+		t.Fatalf("setup = %v", setup)
+	}
+	e.want(t, 403, "alice", "GET", p+"/setup", nil)
+	e.want(t, 404, "carol", "GET", connPath(int64(99))+"/setup", nil)
+
+	sf.authErr = &crm.APIError{Status: 400, Msg: "invalid_client: invalid client credentials"}
+	code, body, _ := e.do(t, "carol", "POST", p+"/connect", nil)
+	if code != 400 || !strings.Contains(string(body), "invalid_client") {
+		t.Fatalf("refused connect = %d %s", code, body)
+	}
+	sf.authErr = nil
+	r := e.want(t, 200, "carol", "POST", p+"/connect", nil)
+	if r["connected"] != true || r["authorizeUrl"] != "" {
+		t.Fatalf("connect = %v", r)
+	}
+	got := e.want(t, 200, "carol", "GET", p, nil)
+	if conn, _ := got["connection"].(map[string]any); conn["status"] != "connected" || conn["externalAccount"] != "acme.my.salesforce.com" {
+		t.Fatalf("connection = %v", got["connection"])
+	}
+	raw, _ := json.Marshal(got)
+	for _, secret := range []string{"ACCESS-SECRET", "CLIENT-SECRET"} {
+		if strings.Contains(string(raw), secret) {
+			t.Fatalf("the connector leaks %q", secret)
+		}
+	}
+
+	hs := "/api/v1/integrations/salesforce/engagements"
+	e.repo.Events = [][2]string{{"c1", "101"}, {"c2", "102"}}
+	e.want(t, 400, "alice", "POST", hs, map[string]any{"callId": "c1"})
+	e.want(t, 400, "alice", "POST", hs, map[string]any{"callId": "c1", "recordId": strings.Repeat("0", 19)})
+	e.want(t, 400, "alice", "POST", hs, map[string]any{"callId": "c1", "recordId": "003AAAAAAAAAAAA"})
+	e.want(t, 403, "alice", "POST", hs, map[string]any{"callId": "c2", "recordId": "00T000000000001"})
+	if r := e.want(t, 200, "alice", "POST", hs, map[string]any{"callId": "c1", "recordId": "00T000000000001"}); r["adopted"] != true {
+		t.Fatalf("own call = %v", r)
+	}
+	if row, ok := e.repo.Log(int64(c["id"].(float64)), "c1"); !ok || row.ExternalID != "00T000000000001" {
+		t.Fatalf("row = %+v", row)
+	}
+}
+
+// TestCRMCredentialConnectorConnectsOnTheSpot fails if a credential
+// connector needs a public URL or a redirect, if a refused key connects, or
+// if the key or a redirect URI appears in the connector's view.
+func TestCRMCredentialConnectorConnectsOnTheSpot(t *testing.T) {
+	e := newCRMEnv(t, "") // no HELLO_PUBLIC_URL
+	c := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "staticcrm", "name": "S", "clientSecret": "bad-key"})
+	if c["auth"] != "direct" || c["redirectUri"] != nil {
+		t.Fatalf("view = %v", c)
+	}
+	code, b, _ := e.do(t, "carol", "POST", connPath(c["id"])+"/connect", nil)
+	if code != 400 && code != 422 || strings.Contains(string(b), "bad-key") {
+		t.Fatalf("refused key = %d %s", code, b)
+	}
+	e.want(t, 200, "carol", "PATCH", connPath(c["id"]), map[string]any{"clientSecret": "good-key"})
+	got := e.want(t, 200, "carol", "POST", connPath(c["id"])+"/connect", nil)
+	if got["authorizeUrl"] != "" {
+		t.Fatalf("connect = %v", got)
+	}
+	v := e.want(t, 200, "carol", "GET", connPath(c["id"]), nil)
+	cn, _ := v["connection"].(map[string]any)
+	if cn["status"] != "connected" || cn["externalAccount"] != "uid-7" {
+		t.Fatalf("connection = %v", v["connection"])
+	}
+	raw, _ := json.Marshal(v)
+	if strings.Contains(string(raw), "good-key") {
+		t.Fatalf("the key leaks: %s", raw)
+	}
+	// OAuth connectors report oauth.
+	o := e.want(t, 201, "carol", "POST", "/api/v1/integrations/crm", map[string]any{"kind": "fakecrm", "name": "O"})
+	if o["auth"] != "oauth" {
+		t.Fatalf("auth = %v", o["auth"])
 	}
 }

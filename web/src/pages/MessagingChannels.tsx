@@ -1,16 +1,27 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { errorMessage, fieldErrors, listTrunks, type Trunk } from "../api";
+import {
+  errorMessage,
+  fieldErrors,
+  listExtensions,
+  listTrunks,
+  type Extension,
+  type Trunk,
+} from "../api";
 import {
   createAddress,
   createChannel,
   deleteAddress,
   deleteChannel,
+  getChannelRegistration,
   listAddresses,
   listChannels,
   testChannel,
   updateAddress,
   updateChannel,
+  type ChannelInput,
+  type ChannelRegistration,
   type ChannelTest,
+  type RegistrationState,
   type MessagingAddress,
   type MessagingChannel,
 } from "../api/inbox";
@@ -31,6 +42,61 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
+import { ROUTE_KIND_LABEL } from "../api/inboxRouting";
+import { RoutingDialog } from "./inbox/RoutingDialog";
+
+/** Registration reads by channel id; "error" when the carrier did not answer. */
+type Registrations = Record<number, ChannelRegistration | "error">;
+
+type Carrier = "sip_trunk" | "twilio" | "telnyx";
+
+const isCarrier = (c: MessagingChannel) => c.provider !== "sip_trunk";
+
+const carrierName = (provider: string) =>
+  provider === "twilio"
+    ? "Twilio"
+    : provider === "telnyx"
+      ? "Telnyx"
+      : provider;
+
+const stateTone = (s: RegistrationState) =>
+  s === "approved"
+    ? "good"
+    : s === "rejected"
+      ? "bad"
+      : s === "unknown"
+        ? "neutral"
+        : "warn";
+
+const stateLabel: Record<string, string> = {
+  approved: "Approved",
+  pending: "Pending",
+  rejected: "Rejected",
+  unregistered: "Not registered",
+  unknown: "Unknown",
+};
+
+const kindLabel = (k: string) =>
+  k === "10dlc" ? "10DLC" : k === "toll_free" ? "Toll-free" : "Other";
+
+const checkTone = (s: string) =>
+  s === "done"
+    ? "good"
+    : s === "attention"
+      ? "bad"
+      : s === "pending" || s === "todo"
+        ? "warn"
+        : "neutral";
+
+const checkLabel: Record<string, string> = {
+  done: "Done",
+  pending: "Waiting",
+  todo: "To do",
+  attention: "Needs attention",
+  unknown: "Unknown",
+  manual: "Check yourself",
+  not_applicable: "Not needed",
+};
 
 type Data = {
   channels: MessagingChannel[];
@@ -51,9 +117,19 @@ function ChannelDialog({
 }) {
   useRestoreFocus();
   const [name, setName] = useState(channel?.name ?? "");
+  const [carrier, setCarrier] = useState<Carrier>(
+    channel?.provider === "twilio" || channel?.provider === "telnyx"
+      ? channel.provider
+      : "sip_trunk",
+  );
   const [trunkId, setTrunkId] = useState(
     channel?.trunkId ? String(channel.trunkId) : "",
   );
+  const [accountSid, setAccountSid] = useState("");
+  const [authToken, setAuthToken] = useState("");
+  const [serviceSid, setServiceSid] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [profileId, setProfileId] = useState("");
   const [enabled, setEnabled] = useState(channel?.enabled ?? true);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -66,19 +142,23 @@ function ChannelDialog({
     setError(null);
     setFields({});
     try {
-      const body = {
-        name: name.trim(),
-        enabled,
-        trunkId: trunkId ? Number(trunkId) : undefined,
-      };
+      const body: ChannelInput = { name: name.trim(), enabled };
+      if (carrier === "sip_trunk") {
+        body.trunkId = trunkId ? Number(trunkId) : undefined;
+      } else if (accountSid.trim() || authToken.trim() || serviceSid.trim()) {
+        // Credentials are sent together and replace the stored ones.
+        body.accountSid = accountSid.trim();
+        body.authToken = authToken.trim();
+        body.messagingServiceSid = serviceSid.trim();
+      } else if (carrier === "telnyx" && (apiKey.trim() || profileId.trim())) {
+        // The key and profile are sent together and replace the stored ones.
+        body.apiKey = apiKey.trim();
+        body.messagingProfileId = profileId.trim();
+      }
       onSaved(
         channel
           ? await updateChannel(channel.id, body)
-          : await createChannel({
-              ...body,
-              kind: "sms",
-              provider: "sip_trunk",
-            }),
+          : await createChannel({ ...body, kind: "sms", provider: carrier }),
       );
     } catch (err: unknown) {
       setFields(
@@ -92,7 +172,13 @@ function ChannelDialog({
   return (
     <Modal
       title={channel ? `Edit ${channel.name}` : "Add a messaging channel"}
-      description="A channel reads customer texts from a SIP trunk that carries SMS as SIP MESSAGE, and sends replies through it. It works only where your carrier supports that."
+      description={
+        carrier === "twilio"
+          ? "A Twilio channel sends texts through your own Twilio account. A Twilio number cannot receive texts while Hello has no public address, so conversations on it start with a first-contact text."
+          : carrier === "telnyx"
+            ? "A Telnyx channel sends texts through your own Telnyx account. A Telnyx number cannot receive texts while Hello has no public address, so conversations on it start with a first-contact text."
+            : "A channel reads customer texts from a SIP trunk that carries SMS as SIP MESSAGE, and sends replies through it. It works only where your carrier supports that."
+      }
       onClose={onClose}
       actions={
         <>
@@ -118,20 +204,96 @@ function ChannelDialog({
           autoFocus
           onChange={(e) => setName(e.target.value)}
         />
-        <Select
-          label="SIP trunk"
-          value={trunkId}
-          error={fields.trunkId}
-          options={[
-            { value: "", label: "Choose a trunk…" },
-            ...trunks.map((t) => ({
-              value: String(t.id),
-              label: t.messaging ? t.name : `${t.name} (SMS over SIP is off)`,
-            })),
-          ]}
-          onChange={(e) => setTrunkId(e.target.value)}
-        />
-        {chosen && !chosen.messaging && (
+        {!channel && (
+          <Select
+            label="Carrier"
+            value={carrier}
+            options={[
+              { value: "sip_trunk", label: "A SIP trunk (SMS over SIP)" },
+              { value: "twilio", label: "Twilio" },
+              { value: "telnyx", label: "Telnyx" },
+            ]}
+            onChange={(e) => setCarrier(e.target.value as Carrier)}
+          />
+        )}
+        {carrier === "twilio" && (
+          <>
+            <Input
+              label="Account SID"
+              hint={
+                channel
+                  ? `Stored account ends in ${channel.accountHint}. Leave the account fields empty to keep it.`
+                  : "From the Twilio console: AC followed by 32 characters."
+              }
+              value={accountSid}
+              error={fields.accountSid}
+              autoComplete="off"
+              onChange={(e) => setAccountSid(e.target.value)}
+            />
+            <Input
+              label="Auth token"
+              type="password"
+              hint="Checked with Twilio, then stored sealed. It is never shown again."
+              value={authToken}
+              error={fields.authToken}
+              autoComplete="new-password"
+              onChange={(e) => setAuthToken(e.target.value)}
+            />
+            <Input
+              label="Messaging Service SID (optional)"
+              hint="Send through a Twilio Messaging Service's sender pool instead of the number the text belongs to."
+              value={serviceSid}
+              error={fields.messagingServiceSid}
+              autoComplete="off"
+              onChange={(e) => setServiceSid(e.target.value)}
+            />
+          </>
+        )}
+        {carrier === "telnyx" && (
+          <>
+            <Input
+              label="API key"
+              type="password"
+              hint={
+                channel
+                  ? "Leave the key empty to keep the stored one. Checked with Telnyx, then stored sealed; it is never shown again."
+                  : "A Telnyx v2 API key from the Telnyx portal. Checked with Telnyx, then stored sealed; it is never shown again."
+              }
+              value={apiKey}
+              error={fields.apiKey}
+              autoComplete="new-password"
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+            <Input
+              label="Messaging profile ID (optional)"
+              hint={
+                channel?.messagingService
+                  ? `A profile ending in ${channel.accountHint} is stored. Enter the key and the profile together to change them.`
+                  : "Send through a Telnyx messaging profile's sender pool and settings instead of the number alone."
+              }
+              value={profileId}
+              error={fields.messagingProfileId}
+              autoComplete="off"
+              onChange={(e) => setProfileId(e.target.value)}
+            />
+          </>
+        )}
+        {carrier === "sip_trunk" && (
+          <Select
+            label="SIP trunk"
+            value={trunkId}
+            error={fields.trunkId}
+            options={[
+              { value: "", label: "Choose a trunk…" },
+              ...trunks.map((t) => ({
+                value: String(t.id),
+                label: t.messaging ? t.name : `${t.name} (SMS over SIP is off)`,
+              })),
+            ]}
+            onChange={(e) => setTrunkId(e.target.value)}
+          />
+        )}
+        {carrier === "sip_trunk" && chosen && !chosen.messaging && (
           <Alert tone="warn" title="SMS over SIP is off on this trunk">
             Turn it on in the trunk's settings, or no text arrives.
           </Alert>
@@ -144,6 +306,177 @@ function ChannelDialog({
           onChange={(e) => setEnabled(e.target.checked)}
         />
       </form>
+    </Modal>
+  );
+}
+
+/** One carrier account's sender registration and what is left to do. */
+function RegistrationDialog({
+  channel,
+  onClose,
+  onRead,
+}: {
+  channel: MessagingChannel;
+  onClose: () => void;
+  onRead: (id: number, r: ChannelRegistration | "error") => void;
+}) {
+  const [reg, setReg] = useState<ChannelRegistration | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    getChannelRegistration(channel.id, controller.signal).then(
+      (r) => {
+        if (controller.signal.aborted) return;
+        setReg(r);
+        onRead(channel.id, r);
+      },
+      (err: unknown) => {
+        if (controller.signal.aborted) return;
+        setError(errorMessage(err));
+        onRead(channel.id, "error");
+      },
+    );
+    return () => controller.abort();
+    // The read is made once per opening.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channel.id]);
+
+  return (
+    <Modal
+      title={`Sender registration of ${channel.name}`}
+      description={`What ${carrierName(channel.provider)} reports about your US sender registration. Hello only reads it; you register in the carrier's own console. Unregistered US traffic is filtered or surcharged by carriers.`}
+      onClose={onClose}
+      actions={<Button onClick={onClose}>Close</Button>}
+    >
+      {error && (
+        <Alert tone="bad" title="Could not read the registration">
+          {error}
+        </Alert>
+      )}
+      {!reg && !error && <Spinner label="Reading the registration…" />}
+      {reg && (
+        <div className="cf-stack">
+          {reg.unavailable.length > 0 && (
+            <Alert tone="warn" title="Part of the registration cannot be read">
+              {carrierName(channel.provider)} did not answer for:{" "}
+              {reg.unavailable.join(", ")}. The numbers that depend on it show
+              as unknown.
+            </Alert>
+          )}
+          <Table
+            caption="Checklist"
+            rows={reg.checklist}
+            rowKey={(c) => c.id}
+            columns={[
+              {
+                key: "state",
+                label: "State",
+                render: (c) => (
+                  <Badge tone={checkTone(c.state)}>{checkLabel[c.state]}</Badge>
+                ),
+              },
+              { key: "title", label: "Step", render: (c) => c.title },
+              { key: "detail", label: "Detail", render: (c) => c.detail },
+              {
+                key: "link",
+                label: "",
+                render: (c) => (
+                  <a href={c.link} target="_blank" rel="noopener noreferrer">
+                    Guide<span className="sr-only"> for {c.title}</span>
+                  </a>
+                ),
+              },
+            ]}
+          />
+          {reg.brands.length > 0 && (
+            <Table
+              caption="Brands"
+              rows={reg.brands}
+              rowKey={(b) => b.id}
+              columns={[
+                { key: "name", label: "Brand", render: (b) => b.name },
+                { key: "type", label: "Type", render: (b) => b.type || "—" },
+                {
+                  key: "state",
+                  label: "State",
+                  render: (b) => (
+                    <Badge tone={stateTone(b.state)}>
+                      {stateLabel[b.state]}
+                    </Badge>
+                  ),
+                },
+                { key: "detail", label: "Detail", render: (b) => b.detail },
+              ]}
+            />
+          )}
+          {reg.campaigns.length > 0 && (
+            <Table
+              caption="Campaigns"
+              rows={reg.campaigns}
+              rowKey={(c) => c.id}
+              columns={[
+                {
+                  key: "id",
+                  label: "Campaign",
+                  mono: true,
+                  render: (c) => c.id,
+                },
+                {
+                  key: "use",
+                  label: "Use case",
+                  render: (c) => c.useCase || "—",
+                },
+                {
+                  key: "state",
+                  label: "State",
+                  render: (c) => (
+                    <Badge tone={stateTone(c.state)}>
+                      {stateLabel[c.state]}
+                    </Badge>
+                  ),
+                },
+                { key: "detail", label: "Detail", render: (c) => c.detail },
+              ]}
+            />
+          )}
+          {reg.numbers.length > 0 && (
+            <Table
+              caption="Carrier numbers"
+              rows={reg.numbers}
+              rowKey={(n) => n.number}
+              columns={[
+                {
+                  key: "number",
+                  label: "Number",
+                  mono: true,
+                  render: (n) => n.number,
+                },
+                {
+                  key: "kind",
+                  label: "Registration",
+                  render: (n) => kindLabel(n.kind),
+                },
+                {
+                  key: "state",
+                  label: "State",
+                  render: (n) => (
+                    <Badge tone={stateTone(n.state)}>
+                      {stateLabel[n.state]}
+                    </Badge>
+                  ),
+                },
+                {
+                  key: "added",
+                  label: "In Hello",
+                  render: (n) => (n.added ? "Yes" : "No"),
+                },
+                { key: "detail", label: "Detail", render: (n) => n.detail },
+              ]}
+            />
+          )}
+        </div>
+      )}
     </Modal>
   );
 }
@@ -169,9 +502,32 @@ function AddressDialog({
   const [words, setWords] = useState(address?.optOutKeywords.join(", ") ?? "");
   const [help, setHelp] = useState(address?.helpText ?? "");
   const [optOut, setOptOut] = useState(address?.optOutText ?? "");
+  const [desk, setDesk] = useState(address?.deskPhoneDelivery ?? false);
+  const [owner, setOwner] = useState(
+    address?.ownerExtensionId == null ? "" : String(address.ownerExtensionId),
+  );
+  const [extensions, setExtensions] = useState<Extension[]>([]);
+  const [perMinute, setPerMinute] = useState(
+    String(address?.sendsPerMinute ?? 60),
+  );
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const chosenChannel = channels.find((c) => String(c.id) === channelId);
+  const carrierNumber =
+    chosenChannel?.provider === "twilio" ||
+    chosenChannel?.provider === "telnyx";
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listExtensions(controller.signal).then(
+      (list) => {
+        if (!controller.signal.aborted) setExtensions(list);
+      },
+      () => undefined,
+    );
+    return () => controller.abort();
+  }, []);
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -180,6 +536,9 @@ function AddressDialog({
     setFields({});
     try {
       const body = {
+        deskPhoneDelivery: desk,
+        ownerExtensionId: owner === "" ? null : Number(owner),
+        sendsPerMinute: carrierNumber ? Number(perMinute) : undefined,
         label: label.trim(),
         enabled,
         optOutKeywords: words
@@ -243,7 +602,11 @@ function AddressDialog({
             />
             <Input
               label="Number"
-              hint="The number customers text, as the carrier dials it to you, such as +3270123456."
+              hint={
+                carrierNumber
+                  ? `The ${carrierName(chosenChannel?.provider ?? "")} number in international format, such as +3270123456.`
+                  : "The number customers text, as the carrier dials it to you, such as +3270123456."
+              }
               value={number}
               error={fields.address}
               autoFocus
@@ -278,6 +641,37 @@ function AddressDialog({
           error={fields.optOutText}
           onChange={(e) => setOptOut(e.target.value)}
         />
+        {carrierNumber && (
+          <Input
+            label="Texts per minute"
+            hint="The most texts this number sends in a minute; the rest wait."
+            inputMode="numeric"
+            value={perMinute}
+            error={fields.sendsPerMinute}
+            onChange={(e) => setPerMinute(e.target.value)}
+          />
+        )}
+        <Switch
+          label="Deliver to desk phones"
+          hint="A customer text of a conversation assigned to a user who turned this on in their profile is also sent to the phones of their extension. Replies typed there go back to the customer."
+          labelPosition="end"
+          checked={desk}
+          onChange={(e) => setDesk(e.target.checked)}
+        />
+        <Select
+          label="Owner extension"
+          hint="Its phone may reply into an existing conversation on this number that is unassigned or its user's."
+          value={owner}
+          error={fields.ownerExtensionId}
+          options={[
+            { value: "", label: "None" },
+            ...extensions.map((x) => ({
+              value: String(x.id),
+              label: `${x.number} ${x.name}`.trim(),
+            })),
+          ]}
+          onChange={(e) => setOwner(e.target.value)}
+        />
         <Switch
           label="Number on"
           hint="Off hands texts to this number back to the normal extension route."
@@ -305,11 +699,16 @@ export function MessagingChannels() {
   >(null);
   const [delChannel, setDelChannel] = useState<MessagingChannel | null>(null);
   const [delAddress, setDelAddress] = useState<MessagingAddress | null>(null);
+  const [routeAddress, setRouteAddress] = useState<MessagingAddress | null>(
+    null,
+  );
   const [test, setTest] = useState<{
     channel: MessagingChannel;
     result: ChannelTest;
   } | null>(null);
   const [reload, setReload] = useState(0);
+  const [regs, setRegs] = useState<Registrations>({});
+  const [regOf, setRegOf] = useState<MessagingChannel | null>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -319,8 +718,16 @@ export function MessagingChannels() {
       listAddresses(controller.signal),
       listTrunks(controller.signal),
     ])
-      .then(([channels, addresses, trunks]) => {
-        setData({ channels, addresses, trunks });
+      .then(([all, addresses, trunks]) => {
+        // A website chat is set up on the Chat sites page, not here.
+        const chat = new Set(
+          all.filter((c) => c.kind === "webchat").map((c) => c.id),
+        );
+        setData({
+          channels: all.filter((c) => c.kind !== "webchat"),
+          addresses: addresses.filter((a) => !chat.has(a.channelId)),
+          trunks,
+        });
         setError(null);
       })
       .catch((err: unknown) => {
@@ -329,6 +736,51 @@ export function MessagingChannels() {
     return () => controller.abort();
   }, [reload]);
   const refresh = () => setReload((n) => n + 1);
+
+  // The registration state of each carrier channel, for the numbers table. A
+  // carrier that does not answer leaves its numbers "Unknown".
+  useEffect(() => {
+    if (!data) return;
+    const controller = new AbortController();
+    for (const c of data.channels) {
+      if (!isCarrier(c) || !c.enabled || c.status === "credentials_invalid") {
+        continue;
+      }
+      getChannelRegistration(c.id, controller.signal).then(
+        (r) => {
+          if (!controller.signal.aborted) setRegs((m) => ({ ...m, [c.id]: r }));
+        },
+        () => {
+          if (!controller.signal.aborted) {
+            setRegs((m) => ({ ...m, [c.id]: "error" }));
+          }
+        },
+      );
+    }
+    return () => controller.abort();
+  }, [data]);
+
+  /** A number's registration, as a short label for the numbers table. */
+  function registrationOf(a: MessagingAddress) {
+    const ch = data?.channels.find((c) => c.id === a.channelId);
+    if (!ch || !isCarrier(ch)) return "—";
+    const r = regs[a.channelId];
+    if (!r) {
+      return !ch.enabled || ch.status === "credentials_invalid" ? (
+        <Badge tone="neutral">Unknown</Badge>
+      ) : (
+        "Checking…"
+      );
+    }
+    const n =
+      r === "error" ? undefined : r.numbers.find((x) => x.number === a.address);
+    if (!n) return <Badge tone="neutral">Unknown</Badge>;
+    return (
+      <Badge tone={stateTone(n.state)}>
+        {kindLabel(n.kind)} {(stateLabel[n.state] ?? n.state).toLowerCase()}
+      </Badge>
+    );
+  }
 
   async function runTest(c: MessagingChannel) {
     try {
@@ -343,7 +795,7 @@ export function MessagingChannels() {
       <PageHeader
         eyebrow="Messaging"
         title="Channels"
-        description="Where customer texts come from. A channel reads texts from a SIP trunk that carries SMS as SIP MESSAGE and sends replies through it; each number a customer texts becomes conversations in the inbox. Texts through a carrier's web interface and WhatsApp are not available yet."
+        description="Where customer texts come from. A channel reads texts from a SIP trunk that carries SMS as SIP MESSAGE and sends replies through it; each number a customer texts becomes conversations in the inbox. A Twilio or Telnyx channel sends texts through your own carrier account; WhatsApp is not available yet."
         actions={
           <Button icon="plus" onClick={() => setEditChannel("new")}>
             Add channel
@@ -373,8 +825,11 @@ export function MessagingChannels() {
               { key: "name", label: "Channel", render: (c) => c.name },
               {
                 key: "trunk",
-                label: "SIP trunk",
-                render: (c) => c.trunkName || "Deleted",
+                label: "SIP trunk or carrier",
+                render: (c) =>
+                  isCarrier(c)
+                    ? `${carrierName(c.provider)}${c.accountHint ? ` …${c.accountHint}` : ""}`
+                    : c.trunkName || "Deleted",
               },
               {
                 key: "state",
@@ -412,6 +867,15 @@ export function MessagingChannels() {
                     >
                       Test {c.name}
                     </Button>
+                    {isCarrier(c) && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setRegOf(c)}
+                      >
+                        Registration of {c.name}
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant="secondary"
@@ -469,6 +933,11 @@ export function MessagingChannels() {
                   render: (a) => a.channelName,
                 },
                 {
+                  key: "route",
+                  label: "Goes to",
+                  render: (a) => ROUTE_KIND_LABEL[a.routeKind],
+                },
+                {
                   key: "state",
                   label: "State",
                   render: (a) =>
@@ -477,6 +946,11 @@ export function MessagingChannels() {
                     ) : (
                       <Badge tone="neutral">Off</Badge>
                     ),
+                },
+                {
+                  key: "registration",
+                  label: "Registration",
+                  render: (a) => registrationOf(a),
                 },
                 {
                   key: "conversations",
@@ -496,6 +970,13 @@ export function MessagingChannels() {
                         onClick={() => setEditAddress(a)}
                       >
                         Edit {a.address}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setRouteAddress(a)}
+                      >
+                        Routing {a.address}
                       </Button>
                       <Button
                         size="sm"
@@ -536,6 +1017,13 @@ export function MessagingChannels() {
           }}
         />
       )}
+      {regOf && (
+        <RegistrationDialog
+          channel={regOf}
+          onClose={() => setRegOf(null)}
+          onRead={(id, r) => setRegs((m) => ({ ...m, [id]: r }))}
+        />
+      )}
       {delChannel && (
         <ConfirmDialog
           title={`Delete channel ${delChannel.name}?`}
@@ -548,6 +1036,17 @@ export function MessagingChannels() {
             refresh();
           }}
           onClose={() => setDelChannel(null)}
+        />
+      )}
+      {routeAddress && (
+        <RoutingDialog
+          address={routeAddress}
+          onClose={() => setRouteAddress(null)}
+          onSaved={() => {
+            setRouteAddress(null);
+            toast.show(`Routing of ${routeAddress.address} saved.`);
+            refresh();
+          }}
         />
       )}
       {delAddress && (

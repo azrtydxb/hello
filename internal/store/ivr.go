@@ -43,7 +43,7 @@ const (
 	// caller spells a name on the keypad and is connected to the extension.
 	// It names no object, so its target is empty.
 	IVRDirectory = "directory"
-	// IVRFax names a fax destination (migration 00072): the call is answered
+	// IVRFax names a fax destination (migration 00073): the call is answered
 	// by the fax engine and the PDF goes to the destination's owner.
 	IVRFax = "fax"
 )

@@ -71,6 +71,10 @@ const (
 	// put on hold (Dir sendonly or inactive) or resumed (sendrecv), so the
 	// peer's phone is re-INVITEd the same way.
 	ParkOpHold = "hold"
+	// ParkOpDoorOpen asks the node holding the call Correlation to send the
+	// door station's door-open code to its door leg, on behalf of the
+	// extension Retriever (the API's POST /calls/{id}/door-open).
+	ParkOpDoorOpen = "door_open"
 )
 
 // ParkCommand asks the node holding a call to do something to it.

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -107,5 +108,58 @@ func TestDoorStationStore(t *testing.T) {
 	}
 	if _, err := s.GetVoicemailBox(ctx, free.ID); err != nil {
 		t.Errorf("voicemail box after turning back into a user: %v", err)
+	}
+}
+
+// TestDoorStationsFor fails if a phone's door systems miss a station that can
+// call its extension (through a Door group it belongs to, a direct target or a
+// listed group), list one that cannot, or are not ordered by number (spec
+// S-49).
+func TestDoorStationsFor(t *testing.T) {
+	s := scratchStore(t)
+	ctx := context.Background()
+	inDoor, direct, viaGroup, nobody := mustExtension(t, s, "200"), mustExtension(t, s, "201"), mustExtension(t, s, "202"), mustExtension(t, s, "203")
+	mk := func(name string, isDoor bool, m Extension) RingGroup {
+		g, err := s.CreateRingGroup(ctx, "t", RingGroupInput{Name: name, Strategy: "ring-all", RingTimeout: 30, FailureKind: "none", IsDoor: isDoor,
+			Members: []RingGroupMember{{ExtensionID: m.ID, Position: 1, Weight: 1}}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	mk("800", true, inDoor)
+	plain := mk("810", false, viaGroup)
+	station := func(number, name string, t DoorTargets) {
+		if _, err := s.CreateExtensionKind(ctx, "t", number, name, "", ExtensionDoor, t, nil); err != nil {
+			panic(err)
+		}
+	}
+	station("902", "Side gate", DoorTargets{RingGroups: []int64{plain.ID}})
+	station("901", "Back door", DoorTargets{Extensions: []int64{direct.ID}})
+	station("900", "Front door", DoorTargets{})
+
+	names := func(n string) string {
+		got, err := s.DoorStationsFor(ctx, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, d := range got {
+			out = append(out, d.Number+"="+d.Name)
+		}
+		return strings.Join(out, ",")
+	}
+	for number, want := range map[string]string{
+		"200": "900=Front door,901=Back door,902=Side gate", // a Door group's member can be called by every station
+		"201": "901=Back door",                              // a direct target
+		"202": "902=Side gate",                              // a member of a listed group
+		"203": "",
+		"999": "",
+		"":    "",
+	} {
+		_ = nobody
+		if got := names(number); got != want {
+			t.Errorf("stations for %q = %q, want %q", number, got, want)
+		}
 	}
 }

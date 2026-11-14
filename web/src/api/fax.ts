@@ -1,4 +1,4 @@
-// Fax client (migration 00072, docs/fax.md): received and sent faxes, the PDF
+// Fax client (migration 00073, docs/fax.md): received and sent faxes, the PDF
 // download and the fax destinations routes and IVR keys name.
 
 import { list, request, type Id } from "../api";

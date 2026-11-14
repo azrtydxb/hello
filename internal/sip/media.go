@@ -229,7 +229,14 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 		c.anchorFailed("port range", err)
 		return
 	}
-	portA, err := relay.AddLeg(legCaller)
+	var portA int
+	if c.webCaller() {
+		// A browser's leg is on the shared WebRTC port, keyed by ICE and DTLS.
+		err = c.webAnchorCaller(relay, offer)
+		portA = relay.LegPort(legCaller)
+	} else {
+		portA, err = relay.AddLeg(legCaller)
+	}
 	if err != nil {
 		relay.Close()
 		c.anchorFailed("bind leg a", err)
@@ -240,7 +247,9 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	offered := off.Filter(nil)
 	relay.SetCodecs(legCaller, offered.Codecs, offered.DTMFPayloadType)
 	relay.SetTarget(legCaller, udpAddr(off.Address, off.Port))
-	allowSignalSource(relay, legCaller, c.inv.Source())
+	if !c.webCaller() {
+		allowSignalSource(relay, legCaller, c.inv.Source())
+	}
 	portB, err := relay.AddLeg(legCallee)
 	if err != nil {
 		relay.Close()
@@ -250,6 +259,10 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	relay.SetCodecs(legCallee, offered.Codecs, offered.DTMFPayloadType)
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
+	c.startVideo(offer)
+	if c.webCaller() {
+		c.noteWebVideoOffer(offer)
+	}
 	c.mu.Lock()
 	c.anchored = true
 	c.anchorReason = reason
@@ -342,7 +355,7 @@ func (c *call) anchoredAnswerAs(app string, offer, calleeAnswer media.AudioSDP) 
 		app = "hello"
 	}
 	c.applyNegotiated(ans, "answer", app)
-	return c.cryptoAnswer(ans, offer).Build(c.anchorHost, r.LegPort(legCaller), "sendrecv")
+	return c.withVideo(c.cryptoAnswer(ans, offer).Build(c.anchorHost, r.LegPort(legCaller), "sendrecv"), legCaller)
 }
 
 // applyNegotiated records the codecs the call settled on: the relay's two
@@ -511,7 +524,10 @@ func (c *call) anchoredOfferB(offer media.AudioSDP, allow []string, l *leg) []by
 	if r == nil {
 		return nil
 	}
-	return c.cryptoOffer(filteredOffer(offer, allow).PlainOffer(), l).Build(c.anchorHost, r.LegPort(legCallee), "sendrecv")
+	if c.legIsWeb(l) {
+		return c.webOfferB(offer, allow, l)
+	}
+	return c.withVideo(c.cryptoOffer(filteredOffer(offer, allow).PlainOffer(), l).Build(c.anchorHost, r.LegPort(legCallee), "sendrecv"), legCallee)
 }
 
 // calleeCryptoOK applies a fork's 200 OK to the callee leg's SRTP state and
@@ -555,6 +571,7 @@ func (c *call) isAnchored() bool {
 // S-5.1). The callback runs on the relay's stats ticker and at Close, never
 // on the RTP path.
 func (c *call) observeRelay(relay *media.Relay) {
+	c.watchSecure(relay)
 	m := c.s.deps.Media
 	relay.Observe(func(st media.RelayStats) {
 		if m != nil {
@@ -607,6 +624,8 @@ func (c *call) closeMedia() {
 	c.anchored = false
 	c.mu.Unlock()
 	c.confLeave()
+	c.closeVideo()
+	c.releaseVideoSlot()
 	if rec != nil {
 		if r, by := rec.stop(); r != nil {
 			c.storeRecording(r, by)
@@ -773,6 +792,11 @@ func (c *call) startRecordingFlow(by string) {
 		return // already recording (spec: one recording per call)
 	}
 	c.addTrace("Recording started")
+	if c.webVideoCarried() {
+		// Video recording is a later piece (clients 6b); the relay forwards
+		// the video, it does not keep it.
+		c.addTrace("Video not recorded: the recording is audio only")
+	}
 	c.noteHAState(haPhaseRecording, "")
 	// The notice announcement plays before the capture becomes a kept
 	// recording, matching the voicemail beep discipline.
@@ -966,6 +990,7 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	// A new media address after a roam (a handset on another AP or subnet)
 	// re-learns the leg's address before anything is relayed (S-9).
 	c.relearnMedia(fromCaller, req.Source(), off)
+	c.webInDialog(fromCaller, body, dir)
 	c.setHADirs(fromCaller, dir)
 	// An inactive hold stays inactive toward the holder, but the held peer
 	// is offered sendonly so it can hear the music (S-33).
@@ -985,13 +1010,14 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	relay := c.anchorRelay()
 	learnCrypto(relay, legName(fromCaller), off) // a rekey on this leg
 	ans := keepSecurity(relay, legName(fromCaller), off).Build(c.anchorHost, c.legPortFor(fromCaller), ansDir)
+	ans = c.withVideo(ans, sideOf(fromCaller))
 	res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", ans)
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.HeaderClone(&s.contact))
 	s.send(tx, res)
 	// The peer gets our SDP in the same direction (a held side hears
 	// silence because the held side stopped sending).
-	peer := keepSecurity(relay, legName(!fromCaller), off).Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir)
+	peer := c.withVideo(keepSecurity(relay, legName(!fromCaller), off).Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir), sideOf(!fromCaller))
 	if fromCaller {
 		c.noteSDP(sessCaller, ans)
 		c.noteSDP(sessCallee, peer)
@@ -1266,4 +1292,12 @@ func moveLeg(relay *media.Relay, leg string, target *net.UDPAddr, source string)
 		relay.ResetSources(leg)
 	}
 	relay.SetTarget(leg, target)
+}
+
+// sideOf names the relay leg of the caller's side (true) or the callee's.
+func sideOf(caller bool) string {
+	if caller {
+		return legCaller
+	}
+	return legCallee
 }

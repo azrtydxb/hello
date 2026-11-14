@@ -788,7 +788,12 @@ func TestRetentionAndErase(t *testing.T) {
 		t.Error("a purge left message rows")
 	}
 	// A shorter retention applies at the next run.
-	if _, err := r.st.PutMessagingSettings(ctx, "user:admin", store.MessagingSettings{RetentionSMSDays: 30, RetentionChatDays: 30, ReopenDays: 7, EmailNotify: true}); err != nil {
+	cur, err := r.st.GetMessagingSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cur.RetentionSMSDays, cur.RetentionChatDays, cur.ReopenDays = 30, 30, 7
+	if _, err := r.st.PutMessagingSettings(ctx, "user:admin", cur); err != nil {
 		t.Fatal(err)
 	}
 	if m, err := r.st.MaintainMessaging(ctx); err != nil || m.Conversations != 1 {

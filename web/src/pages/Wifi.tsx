@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { errorMessage, fieldErrors, type Id } from "../api";
 import { listGroups } from "../api/phonebook";
 import { listPhones } from "../api/prov";
+import { listDot1XProfiles, type Dot1XProfile } from "../api/scep";
 import {
   createWifiProfile,
   deleteWifiProfile,
@@ -14,7 +15,6 @@ import {
   updateWifiProfile,
   usesPSK,
   WIFI_SECURITIES,
-  type WifiCACert,
   type WifiProfile,
   type WifiProfileInput,
   type WifiRadio,
@@ -43,12 +43,6 @@ import { mapFieldErrors, type ErrorMap } from "../forms";
 import { Can, useCan } from "../role";
 import { useQuietList } from "./timecond/shared";
 import { PhonesTabs } from "./phones/ui";
-
-const CA_OPTIONS = [
-  { value: "system", label: "System certificates" },
-  { value: "tofu", label: "Trust on first use" },
-  { value: "skip", label: "Skip verification (insecure)" },
-];
 
 const securityLabel = (s: string) =>
   WIFI_SECURITIES.find((x) => x.value === s)?.label ?? s;
@@ -229,10 +223,7 @@ const PROFILE_FIELDS = [
   "ssid",
   "security",
   "psk",
-  "identity",
-  "anonymousIdentity",
-  "password",
-  "caCert",
+  "dot1xProfileId",
   "priority",
   "preferAccount",
 ];
@@ -253,10 +244,11 @@ function ProfileModal({
   );
   // A stored secret is never shown; empty keeps it.
   const [psk, setPsk] = useState("");
-  const [identity, setIdentity] = useState(profile?.identity ?? "");
-  const [anonymous, setAnonymous] = useState(profile?.anonymousIdentity ?? "");
-  const [password, setPassword] = useState("");
-  const [caCert, setCaCert] = useState<WifiCACert>(profile?.caCert ?? "system");
+  // The 802.1X profiles (shared with the wired ports) an enterprise network can use.
+  const [dot1x, setDot1x] = useState<Dot1XProfile[] | null>(null);
+  const [dot1xId, setDot1xId] = useState(
+    profile?.dot1xProfileId == null ? "" : String(profile.dot1xProfileId),
+  );
   const [priority, setPriority] = useState(String(profile?.priority ?? 0));
   const [prefer, setPrefer] = useState(String(profile?.preferAccount ?? 0));
   const [hidden, setHidden] = useState(profile?.hidden ?? false);
@@ -264,6 +256,17 @@ function ProfileModal({
   const [errors, setErrors] = useState<ErrorMap>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!isEnterprise(security) || dot1x !== null) return;
+    const ctl = new AbortController();
+    listDot1XProfiles(ctl.signal)
+      .then((r) => setDot1x(r))
+      .catch((err) => {
+        if (!ctl.signal.aborted) setFormError(errorMessage(err));
+      });
+    return () => ctl.abort();
+  }, [security, dot1x]);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -279,12 +282,8 @@ function ProfileModal({
       verified,
     };
     if (usesPSK(security) && psk !== "") body.psk = psk;
-    if (isEnterprise(security)) {
-      body.eapMethod = "peap";
-      body.identity = identity;
-      body.anonymousIdentity = anonymous;
-      body.caCert = caCert;
-      if (password !== "") body.password = password;
+    if (isEnterprise(security) && dot1xId !== "") {
+      body.dot1xProfileId = Number(dot1xId);
     }
     setBusy(true);
     try {
@@ -310,7 +309,15 @@ function ProfileModal({
 
   const title = profile ? `Edit ${profile.name}` : "New Wi-Fi profile";
   const keyStored = profile?.pskSet && usesPSK(profile.security);
-  const passStored = profile?.passwordSet && isEnterprise(profile.security);
+  const dot1xOptions = [
+    { value: "", label: "Choose an 802.1X profile" },
+    ...(dot1x ?? [])
+      .filter((d) => d.method !== "eap-md5")
+      .map((d) => ({
+        value: String(d.id),
+        label: `${d.name} (${d.method === "peap" ? "PEAP" : "EAP-TLS"})`,
+      })),
+  ];
   return (
     <Modal
       title={title}
@@ -376,43 +383,14 @@ function ProfileModal({
           />
         )}
         {isEnterprise(security) && (
-          <>
-            <Input
-              label="Identity"
-              value={identity}
-              error={errors.identity}
-              autoComplete="off"
-              onChange={(e) => setIdentity(e.target.value)}
-            />
-            <Input
-              label="Anonymous identity"
-              value={anonymous}
-              error={errors.anonymousIdentity}
-              autoComplete="off"
-              onChange={(e) => setAnonymous(e.target.value)}
-            />
-            <Input
-              label="Identity password"
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              error={errors.password}
-              placeholder={passStored ? "•••••••• (stored)" : ""}
-              hint={
-                passStored
-                  ? "A password is stored and never shown. Leave empty to keep it."
-                  : "PEAP with MSCHAPv2. It is stored sealed and never shown again."
-              }
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <Select
-              label="Server certificate"
-              value={caCert}
-              error={errors.caCert}
-              options={CA_OPTIONS}
-              onChange={(e) => setCaCert(e.target.value as WifiCACert)}
-            />
-          </>
+          <Select
+            label="802.1X profile"
+            value={dot1xId}
+            error={errors.dot1xProfileId}
+            options={dot1xOptions}
+            hint="The EAP method, identity, password and server certificate come from this profile, the same one a wired port can use. Add one under Certificates; EAP-MD5 is wired only."
+            onChange={(e) => setDot1xId(e.target.value)}
+          />
         )}
         <Input
           label="Priority"

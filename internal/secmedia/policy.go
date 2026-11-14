@@ -46,3 +46,28 @@ func Normalize(s string, def Policy) Policy {
 
 // Values lists the policies in order of strength.
 func Values() []string { return []string{string(Off), string(Optional), string(Required)} }
+
+// Key exchange methods for a device's SRTP (phone-feature-parity S-16): SDES
+// keys in the SDP (S-15, TLS legs only), or a DTLS-SRTP handshake on the media
+// path (also only on a TLS leg, so the fingerprint in the SDP is protected).
+const (
+	KeyExSDES = "sdes"
+	KeyExDTLS = "dtls"
+)
+
+// ParseKeyEx maps a stored or submitted key exchange to its value.
+func ParseKeyEx(s string) (string, bool) {
+	switch v := strings.ToLower(strings.TrimSpace(s)); v {
+	case KeyExSDES, KeyExDTLS:
+		return v, true
+	}
+	return "", false
+}
+
+// NormalizeKeyEx returns the stored key exchange, SDES for anything unknown.
+func NormalizeKeyEx(s string) string {
+	if v, ok := ParseKeyEx(s); ok {
+		return v
+	}
+	return KeyExSDES
+}

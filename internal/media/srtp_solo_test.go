@@ -383,3 +383,65 @@ func (a AudioSDP) asAnswer(key Crypto) AudioSDP {
 	parsed.SRTPOnly, parsed.Crypto = true, []Crypto{key}
 	return parsed
 }
+
+// TestSRTPStreamStartsBelowWrap fails if an outbound stream may begin within
+// reach of the 16-bit sequence wrap. SRTP's rollover counter is learned as 0
+// by a receiver; one that misses the packets before the wrap never
+// authenticates the stream again (the CI flake of TestSRTPConferenceRoom).
+func TestSRTPStreamStartsBelowWrap(t *testing.T) {
+	for range 4096 {
+		ph := newSoloPhone(t)
+		_, party, err := NewPartySecure("127.0.0.1", 0, 0, ph.offer(false), SecurePolicy{Allow: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		seq := party.seq
+		party.Close()
+		if seq >= 0x8000 {
+			t.Fatalf("party stream starts at sequence %d, in the upper half", seq)
+		}
+	}
+	var o rewriteState
+	for range 4096 {
+		if err := o.reset(); err != nil {
+			t.Fatal(err)
+		}
+		if o.seq >= 0x8000 {
+			t.Fatalf("relay stream starts at sequence %d, in the upper half", o.seq)
+		}
+	}
+}
+
+// TestSRTPLateReceiverAfterWrap documents why: a receiver whose first packet
+// follows the wrap reads it under rollover 0 and the sender used 1.
+func TestSRTPLateReceiverAfterWrap(t *testing.T) {
+	ph := newSoloPhone(t)
+	ans, party, err := NewPartySecure("127.0.0.1", 0, 0, ph.offer(false), SecurePolicy{Allow: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(party.Close)
+	ph.settle(t, ans, false)
+	party.seq = 65534
+	for range 6 {
+		if err := party.send(make([]int16, MixFrame)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var heard int
+	for i := 0; ; i++ {
+		raw, ok := ph.read(300 * time.Millisecond)
+		if !ok {
+			break
+		}
+		if i < 4 {
+			continue // the receiver was not listening yet
+		}
+		if _, err := ph.proto.Unprotect(raw); err == nil {
+			heard++
+		}
+	}
+	if heard != 0 {
+		t.Fatalf("a receiver that missed the packets before the wrap decrypted %d, the premise of startSeq is gone", heard)
+	}
+}

@@ -188,16 +188,17 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 		d                          prov.RenderData
 		tokenEnc, adminEnc, secEnc []byte
 		devID, tplID, groupID      sql.NullInt64
+		srtpPolicy, srtpKeyEx      string
+		mediaICE                   bool
 		blfJSON                    []byte
-		srtpPolicy                 string
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT p.mac, p.vendor, p.model, p.label, p.token_enc, p.admin_password_enc, p.template_id, p.blf, p.group_id,
 		       d.id, d.sip_username, d.secret_enc, e.name, e.number, COALESCE(e.call_waiting, TRUE), NOT COALESCE(e.voicemail_enabled, TRUE), COALESCE(e.phone_send_anonymous, FALSE),
-		       COALESCE(d.srtp, 'optional')
+		       COALESCE(d.srtp, 'optional'), COALESCE(d.srtp_keyex, 'sdes'), COALESCE(d.media_ice, false)
 		FROM phones p LEFT JOIN devices d ON d.id = p.device_id LEFT JOIN extensions e ON e.id = d.extension_id
 		WHERE p.id = $1`, phoneID).Scan(&d.Phone.MAC, &d.Phone.Vendor, &d.Phone.Model, &d.Phone.Label, &tokenEnc, &adminEnc,
-		&tplID, &blfJSON, &groupID, &devID, nullStr(&d.Line.Username), &secEnc, nullStr(&d.Line.DisplayName), nullStr(&d.Line.Label), &d.Line.CallWaiting, &d.Line.NoVoicemail, &d.Line.SendAnonymous, &srtpPolicy)
+		&tplID, &blfJSON, &groupID, &devID, nullStr(&d.Line.Username), &secEnc, nullStr(&d.Line.DisplayName), nullStr(&d.Line.Label), &d.Line.CallWaiting, &d.Line.NoVoicemail, &d.Line.SendAnonymous, &srtpPolicy, &srtpKeyEx, &mediaICE)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, prov.Template{}, prov.ErrNotFound
 	}
@@ -244,6 +245,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Emergency, err = s.emergencyNumbers(ctx); err != nil {
 		return d, prov.Template{}, err
 	}
+	if d.DoorStations, err = s.DoorStationsFor(ctx, d.Line.Label); err != nil {
+		return d, prov.Template{}, err
+	}
 	if d.Codes, err = s.featureCodes(ctx); err != nil {
 		return d, prov.Template{}, err
 	}
@@ -256,6 +260,15 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	d.Server = s.prov.server(d.Phone.Vendor, d.Phone.Model)
 	if d.Server.Transport == "tls" {
 		d.Server.SRTP = string(secmedia.Normalize(srtpPolicy, secmedia.Optional))
+		if prov.GrandstreamDTLSKey(d.Phone.Vendor, d.Phone.Model) {
+			d.Server.SRTPKeyEx = secmedia.NormalizeKeyEx(srtpKeyEx)
+		}
+	}
+	if prov.GrandstreamICEKey(d.Phone.Vendor, d.Phone.Model) {
+		d.Server.ICE = "auto"
+		if mediaICE {
+			d.Server.ICE = "ice"
+		}
 	}
 	d.Prov = s.prov.info(token, d.Phone.MAC)
 	if d.E911, d.AlarmNumber, err = s.emergencyInfo(ctx, phoneID, d); err != nil {

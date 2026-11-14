@@ -287,3 +287,40 @@ func TestCSVRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestPersonalMatch fails if a personal contact is not found by the exact
+// key, by the last 9 digits when only one entry has them, or if an ambiguous
+// suffix names somebody or an empty key matches.
+func TestPersonalMatch(t *testing.T) {
+	mk := func(id int64, last string, keys ...string) Entry {
+		e := Entry{ID: id, EntryInput: EntryInput{LastName: last}}
+		for _, k := range keys {
+			e.Numbers = append(e.Numbers, Number{Label: LabelWork, Number: k, Key: k})
+		}
+		return e
+	}
+	book := []Entry{
+		mk(1, "Exact", "+41791234567"),
+		mk(2, "Twin A", "+33612345678"),
+		mk(3, "Twin B", "+49612345678", "+49000000001"),
+		mk(4, "Short", "5551234"),
+	}
+	if e, via, _, ok := PersonalMatch(book, "+41791234567"); !ok || e.ID != 1 || via != "exact" {
+		t.Errorf("exact: %v %v %v", e.ID, via, ok)
+	}
+	if e, via, _, ok := PersonalMatch(book, "+39791234567"); !ok || e.ID != 1 || via != "suffix" {
+		t.Errorf("suffix: %v %v %v", e.ID, via, ok)
+	}
+	if _, _, n, ok := PersonalMatch(book, "+34612345678"); ok || n != 2 {
+		t.Errorf("ambiguous: found %v, matches %d", ok, n)
+	}
+	if _, _, _, ok := PersonalMatch(book, "+41000000000"); ok {
+		t.Error("an unknown number matched")
+	}
+	if _, _, _, ok := PersonalMatch(book, "5551234"); !ok {
+		t.Error("a short stored key is still an exact match")
+	}
+	if _, _, _, ok := PersonalMatch(book, ""); ok {
+		t.Error("an empty key matched")
+	}
+}

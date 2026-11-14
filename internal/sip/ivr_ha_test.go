@@ -44,7 +44,7 @@ func TestIVRTakeoverDialsOut(t *testing.T) {
 	st := waitRecord(t, ha, "the menu call is replicated", "sip-1", func(s livestate.DialogState) bool {
 		return s.State == haPhaseIVR && s.Legs[1].CallID == "" && s.StateDetail == haIVRDetailPrefix+"main" && s.Legs[0].RemoteSDP != ""
 	})
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	ra := waitReq(t, a.reinvites, "takeover re-INVITE to the caller")
@@ -102,7 +102,7 @@ func TestIVRTakeoverUnrecoverableFallsBack(t *testing.T) {
 	waitRecord(t, ha, "the menu call is replicated", "sip-1", func(s livestate.DialogState) bool {
 		return s.State == haPhaseIVR && s.Legs[0].RemoteSDP != ""
 	})
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	ra := waitReq(t, a.reinvites, "takeover re-INVITE to the caller")
@@ -153,7 +153,7 @@ func TestDirectoryTakeover(t *testing.T) {
 	st := waitRecord(t, ha, "the directory call is replicated", "sip-1", func(s livestate.DialogState) bool {
 		return s.State == haPhaseDirectory && s.Legs[1].CallID == "" && s.Legs[0].RemoteSDP != ""
 	})
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	ra := waitReq(t, a.reinvites, "takeover re-INVITE to the caller")

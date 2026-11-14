@@ -6,7 +6,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { errorMessage } from "../api";
+import { errorMessage, fieldErrors } from "../api";
 import {
   getInboxStatus,
   listInboxAgents,
@@ -16,6 +16,7 @@ import {
   type ConversationStatus,
   type InboxAgent,
   type InboxApi,
+  type InboxCall,
   type InboxMessage,
   type StatusFilter,
 } from "../api/inbox";
@@ -23,6 +24,7 @@ import {
   Alert,
   Badge,
   Button,
+  ConfirmDialog,
   EmptyState,
   Input,
   LinkButton,
@@ -33,9 +35,12 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
+import { AgentAvailability } from "./inbox/AgentAvailability";
 import { Can } from "../role";
 import { usePolling } from "../usePolling";
+import { LinkedText } from "./inbox/Linkified";
 import { peerLabel, smsSegments } from "./inbox/sms";
+import { StartConversation } from "./inbox/StartConversation";
 import { useInboxStream, type InboxEvent } from "./inbox/useInboxStream";
 import "./inbox/inbox.css";
 
@@ -43,14 +48,14 @@ const REFRESH_MS = 30_000;
 const SOUND_KEY = "hello.inbox.sound";
 
 /** What a reply's delivery state says, in words (never colour alone). */
-function deliveryText(m: InboxMessage): string {
+function deliveryText(m: InboxMessage, chat: boolean): string {
   switch (m.status) {
     case "queued":
       return "Queued";
     case "sending":
-      return "Sending";
+      return chat ? "Sending the email" : "Sending";
     case "sent":
-      return "Sent to the carrier";
+      return chat ? "Sent" : "Sent to the carrier";
     case "delivered":
     case "read":
       return "Delivered";
@@ -136,6 +141,10 @@ interface ThreadProps {
   /** Called when the conversation or its thread changed here. */
   onChanged: () => void;
   refreshKey: number;
+  /** Whether email is configured, so an offline chat can be answered by it. */
+  emailReady: boolean;
+  /** The visitor of this chat is typing. */
+  visitorTyping: boolean;
 }
 
 /** The thread, its composer and the details of one conversation. */
@@ -146,6 +155,8 @@ function Thread({
   supervisor,
   onChanged,
   refreshKey,
+  emailReady,
+  visitorTyping,
 }: ThreadProps) {
   const id = conversation.id;
   const [conv, setConv] = useState(conversation);
@@ -158,7 +169,13 @@ function Thread({
   const [busy, setBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [tags, setTags] = useState(conversation.tags.join(", "));
+  const [calls, setCalls] = useState<InboxCall[] | null>(null);
+  const [callsFailed, setCallsFailed] = useState(false);
   const clientId = useRef(newClientId());
+  const lastTyping = useRef(0);
+  const trusted = useRef(new Set<string>());
+  const [leaving, setLeaving] = useState<URL | null>(null);
+  const [blocking, setBlocking] = useState(false);
   const toast = useToast();
 
   const apply = useCallback(
@@ -198,6 +215,24 @@ function Thread({
       });
     return () => controller.abort();
   }, [api, id, refreshKey, apply]);
+
+  // The customer's recent calls, for a number (a chat visitor has none).
+  const isPhone = conv.peerKind === "phone";
+  useEffect(() => {
+    if (!isPhone) return;
+    const controller = new AbortController();
+    api
+      .calls(id, controller.signal)
+      .then((r) => {
+        if (controller.signal.aborted) return;
+        setCalls(r.items);
+        setCallsFailed(false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCallsFailed(true);
+      });
+    return () => controller.abort();
+  }, [api, id, isPhone, refreshKey]);
 
   async function loadOlder() {
     try {
@@ -243,8 +278,46 @@ function Thread({
     }
   }
 
+  const chat = conv.channelKind === "webchat";
   const sms = smsSegments(draft);
   const canReply = !conv.optedOut && conv.status !== "spam";
+
+  /** A link in a visitor's message leaves Hello: ask once per host. */
+  function openLink(url: URL) {
+    if (trusted.current.has(url.host)) {
+      window.open(url.href, "_blank", "noopener,noreferrer");
+    } else {
+      setLeaving(url);
+    }
+  }
+
+  /** Tells the visitor an agent is typing, at most every three seconds. */
+  function typingPing() {
+    const now = Date.now();
+    if (!chat || mode !== "reply" || now - lastTyping.current < 3000) return;
+    lastTyping.current = now;
+    void api.typing(id).catch(() => undefined);
+  }
+
+  async function sendByEmail() {
+    const text = draft.trim();
+    if (!text) return;
+    setBusy(true);
+    setSendError(null);
+    try {
+      await api.emailReply(id, text, clientId.current);
+      clientId.current = newClientId();
+      setDraft("");
+      onChanged();
+      await load();
+      toast.show("Emailed.");
+    } catch (err: unknown) {
+      setSendError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const unassigned = conv.assigneeUserId === null;
   const tomorrow = () => {
     const d = new Date();
@@ -262,7 +335,9 @@ function Thread({
               {peerLabel(conv)}
             </h2>
             <span className="az-caption">
-              to {conv.address} · {conv.channelName}
+              {chat
+                ? `Website chat · ${conv.channelName}`
+                : `to ${conv.address} · ${conv.channelName}`}
             </span>
           </div>
           <Badge tone={statusTone(conv.status)}>{conv.status}</Badge>
@@ -271,6 +346,19 @@ function Thread({
           <Alert tone="warn" title="The customer opted out">
             Nobody can text this customer until they reply START. You can still
             write internal notes.
+          </Alert>
+        )}
+        {conv.chat?.offline && (
+          <Alert tone="info" title="Left while nobody was available">
+            {conv.chat.email
+              ? "Answer by email: the visitor sees the reply in the widget when they return."
+              : "The visitor left no email address, so there is nobody to email."}
+          </Alert>
+        )}
+        {conv.chat?.blocked && (
+          <Alert tone="warn" title="This visitor is blocked">
+            They can no longer chat. A supervisor can lift the block on the Chat
+            sites page.
           </Alert>
         )}
         {error && (
@@ -305,17 +393,29 @@ function Thread({
                     <span>{formatTime(m.createdAt)}</span>
                     {m.kind === "message" && m.direction === "out" && (
                       <Badge tone={m.status === "failed" ? "bad" : "neutral"}>
-                        {deliveryText(m)}
+                        {deliveryText(m, chat)}
                       </Badge>
                     )}
                   </div>
                 )}
-                {/* Customer text is shown as text, never as markup. */}
-                <p className="inbox-msg__body">{m.body}</p>
+                {/* Customer text is shown as text, never as markup; in a chat
+                    its links are made clickable, asking before one leaves Hello. */}
+                <p className="inbox-msg__body">
+                  {chat && m.kind === "message" && m.direction === "in" ? (
+                    <LinkedText text={m.body} onOpen={openLink} />
+                  ) : (
+                    m.body
+                  )}
+                </p>
               </li>
             );
           })}
         </ol>
+        {visitorTyping && (
+          <p className="az-caption" role="status" style={{ margin: "0 16px" }}>
+            The visitor is typing…
+          </p>
+        )}
         <form className="inbox-composer" onSubmit={(e) => void submit(e)}>
           <div className="inbox-actions" role="group" aria-label="Compose">
             <Button
@@ -350,7 +450,10 @@ function Thread({
                 : "Write a reply"
             }
             disabled={mode === "reply" && !canReply}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              typingPing();
+            }}
           />
           {sendError && (
             <Alert tone="bad" title="Not sent">
@@ -360,9 +463,33 @@ function Thread({
           <div className="inbox-composer__foot">
             <span className="az-caption">
               {mode === "reply"
-                ? `${sms.chars} characters, ${sms.segments} ${sms.segments === 1 ? "text" : "texts"}${sms.unicode ? " (non-GSM characters)" : ""}`
+                ? chat
+                  ? `${[...draft].length} characters`
+                  : `${sms.chars} characters, ${sms.segments} ${sms.segments === 1 ? "text" : "texts"}${sms.unicode ? " (non-GSM characters)" : ""}`
                 : "Never sent to the customer"}
             </span>
+            {chat && conv.chat?.offline && mode === "reply" && (
+              <Button
+                type="button"
+                variant="secondary"
+                icon="mail"
+                disabled={
+                  busy ||
+                  draft.trim() === "" ||
+                  !emailReady ||
+                  !conv.chat.email ||
+                  !canReply
+                }
+                title={
+                  emailReady
+                    ? undefined
+                    : "Email is not set up: an administrator configures it under Settings, Email."
+                }
+                onClick={() => void sendByEmail()}
+              >
+                Reply by email
+              </Button>
+            )}
             <Button
               type="submit"
               icon="send"
@@ -381,12 +508,65 @@ function Thread({
           Details
         </h3>
         <dl style={{ margin: 0 }}>
-          <dt className="az-caption">Customer</dt>
-          <dd style={{ margin: 0 }}>{conv.peer}</dd>
+          <dt className="az-caption">{chat ? "Visitor" : "Customer"}</dt>
+          <dd style={{ margin: 0 }}>
+            {chat ? peerLabel({ ...conv, peerName: "" }) : conv.peer}
+          </dd>
+          {chat && conv.chat?.email && (
+            <>
+              <dt className="az-caption">Email</dt>
+              <dd style={{ margin: 0 }}>{conv.chat.email}</dd>
+            </>
+          )}
+          {chat && conv.chat?.page && (
+            <>
+              <dt className="az-caption">Started on</dt>
+              <dd style={{ margin: 0 }}>{conv.chat.page}</dd>
+            </>
+          )}
+          {chat && conv.chat?.browser && (
+            <>
+              <dt className="az-caption">Browser</dt>
+              <dd style={{ margin: 0 }}>{conv.chat.browser}</dd>
+            </>
+          )}
           {conv.peerName && (
             <>
               <dt className="az-caption">Name</dt>
               <dd style={{ margin: 0 }}>{conv.peerName}</dd>
+            </>
+          )}
+          <dt className="az-caption">Contact</dt>
+          <dd style={{ margin: 0 }}>
+            <AddContact
+              api={api}
+              id={id}
+              supervisor={supervisor}
+              named={conv.peerName !== ""}
+              onSaved={(c) => {
+                setConv(c);
+                toast.show("Saved to contacts.");
+                onChanged();
+              }}
+            />
+          </dd>
+          {isPhone && (
+            <>
+              <dt className="az-caption">Call</dt>
+              <dd style={{ margin: 0 }}>
+                {/* The existing click-to-call page: it rings your phone first. */}
+                <LinkButton
+                  to={`/dial?n=${encodeURIComponent(conv.peer)}`}
+                  size="sm"
+                  icon="phone-outgoing"
+                >
+                  Call {conv.peer}
+                </LinkButton>
+              </dd>
+              <dt className="az-caption">Recent calls</dt>
+              <dd style={{ margin: 0 }}>
+                <RecentCalls calls={calls} failed={callsFailed} />
+              </dd>
             </>
           )}
           <dt className="az-caption">Assigned to</dt>
@@ -465,6 +645,18 @@ function Thread({
             </>
           )}
         </div>
+        {chat && conv.chat && !conv.chat.blocked && (
+          <div className="inbox-actions">
+            <Button
+              size="sm"
+              variant="ghost"
+              icon="ban"
+              onClick={() => setBlocking(true)}
+            >
+              Block visitor
+            </Button>
+          </div>
+        )}
         {conv.status !== "resolved" && conv.status !== "spam" && (
           <Select
             label="Hand over to"
@@ -511,8 +703,187 @@ function Thread({
           </Button>
         </form>
       </div>
+      {leaving && (
+        <ConfirmDialog
+          title="This link leaves Hello"
+          description={`The visitor wrote a link to ${leaving.host}. Open it only if you trust it.`}
+          confirmLabel="Open the link"
+          confirmIcon="external-link"
+          confirmVariant="primary"
+          errorTitle="Could not open the link"
+          onClose={() => setLeaving(null)}
+          onConfirm={() => {
+            trusted.current.add(leaving.host);
+            window.open(leaving.href, "_blank", "noopener,noreferrer");
+            setLeaving(null);
+            return Promise.resolve();
+          }}
+        >
+          <p className="az-caption" style={{ overflowWrap: "anywhere" }}>
+            {leaving.href}
+          </p>
+        </ConfirmDialog>
+      )}
+      {blocking && (
+        <ConfirmDialog
+          title="Block this visitor?"
+          description="They can no longer chat for 24 hours, from this device or, today, from this network address. They are not told, and the conversation is resolved."
+          confirmLabel="Block visitor"
+          confirmIcon="ban"
+          errorTitle="Could not block the visitor"
+          onClose={() => setBlocking(false)}
+          onConfirm={async () => {
+            await api.block(id);
+            setBlocking(false);
+            toast.show("Visitor blocked.");
+            onChanged();
+            await load();
+          }}
+        />
+      )}
       {toast.node}
     </>
+  );
+}
+
+/** The customer's recent calls, newest first. */
+function RecentCalls({
+  calls,
+  failed,
+}: {
+  calls: InboxCall[] | null;
+  failed: boolean;
+}) {
+  if (failed) return <span className="az-caption">Calls unavailable.</span>;
+  if (calls === null) return <Spinner />;
+  if (calls.length === 0)
+    return <span className="az-caption">No recent calls.</span>;
+  return (
+    <ul style={{ margin: 0, paddingLeft: "1.1em" }} aria-label="Recent calls">
+      {calls.map((c) => (
+        <li key={c.id}>
+          {c.direction === "inbound" ? "Incoming" : "Outgoing"},{" "}
+          {c.answered
+            ? `${Math.max(1, Math.round(c.durationMs / 1000))} s`
+            : "not answered"}
+          , {formatTime(c.startTime)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * "Add to contacts": names the customer's number. A personal contact names it
+ * for the person who saves it; a supervisor may save it to the shared company
+ * book instead.
+ */
+function AddContact({
+  api,
+  id,
+  supervisor,
+  named,
+  onSaved,
+}: {
+  api: InboxApi;
+  id: number;
+  supervisor: boolean;
+  named: boolean;
+  onSaved: (c: Conversation) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [first, setFirst] = useState("");
+  const [last, setLast] = useState("");
+  const [company, setCompany] = useState("");
+  const [book, setBook] = useState<"personal" | "company">("personal");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <Button
+        size="sm"
+        variant="secondary"
+        icon="user-plus"
+        onClick={() => setOpen(true)}
+      >
+        {named ? "Add another contact" : "Add to contacts"}
+      </Button>
+    );
+  }
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const c = await api.addContact(id, {
+        firstName: first.trim(),
+        lastName: last.trim(),
+        company: company.trim(),
+        book,
+      });
+      setOpen(false);
+      setFirst("");
+      setLast("");
+      setCompany("");
+      onSaved(c);
+    } catch (err: unknown) {
+      const f = fieldErrors(err)[0];
+      setError(f ? `${f.path}: ${f.message}` : errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form
+      className="cf-stack"
+      onSubmit={(e) => void save(e)}
+      aria-label="Add to contacts"
+    >
+      {error && <Alert tone="bad">{error}</Alert>}
+      <Input
+        label="First name"
+        value={first}
+        onChange={(e) => setFirst(e.target.value)}
+      />
+      <Input
+        label="Last name"
+        value={last}
+        onChange={(e) => setLast(e.target.value)}
+      />
+      <Input
+        label="Company"
+        value={company}
+        onChange={(e) => setCompany(e.target.value)}
+      />
+      {supervisor && (
+        <Select
+          label="Save to"
+          value={book}
+          options={[
+            { value: "personal", label: "My contacts" },
+            { value: "company", label: "Company book (everyone)" },
+          ]}
+          onChange={(e) => setBook(e.target.value as "personal" | "company")}
+        />
+      )}
+      <div className="inbox-actions">
+        <Button type="submit" size="sm" disabled={busy}>
+          Save contact
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => setOpen(false)}
+        >
+          Cancel
+        </Button>
+      </div>
+    </form>
   );
 }
 
@@ -534,7 +905,11 @@ interface ViewProps {
   supervisor: boolean;
 }
 
-function InboxView({ api, supervisor }: ViewProps) {
+function InboxView({
+  api,
+  supervisor,
+  emailReady,
+}: ViewProps & { emailReady: boolean }) {
   const [view, setView] = useState<"all" | "mine" | "unassigned">(
     supervisor ? "all" : "mine",
   );
@@ -551,9 +926,12 @@ function InboxView({ api, supervisor }: ViewProps) {
     typeof Notification === "undefined" ? "none" : Notification.permission,
   );
   const selectedRef = useRef<number | null>(null);
+  const [typing, setTyping] = useState<number | null>(null);
+  const typingTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => {
     selectedRef.current = selected;
   }, [selected]);
+  useEffect(() => () => clearTimeout(typingTimer.current), []);
 
   const load = useCallback(
     (signal: AbortSignal) =>
@@ -576,6 +954,13 @@ function InboxView({ api, supervisor }: ViewProps) {
 
   const onEvent = useCallback(
     (e: InboxEvent) => {
+      if (e.type === "typing") {
+        // A visitor typing changes nothing to read: show it for a moment.
+        setTyping(e.conversationId);
+        clearTimeout(typingTimer.current);
+        typingTimer.current = setTimeout(() => setTyping(null), 4000);
+        return;
+      }
       reload();
       if (e.conversationId === selectedRef.current) {
         setRefreshKey((k) => k + 1);
@@ -715,7 +1100,11 @@ function InboxView({ api, supervisor }: ViewProps) {
                   {c.assigneeUserId === null && c.status !== "resolved" && (
                     <Badge tone="warn">Unassigned</Badge>
                   )}
+                  {c.queueName && <Badge tone="neutral">{c.queueName}</Badge>}
                   {c.optedOut && <Badge tone="bad">Opted out</Badge>}
+                  {c.channelKind === "webchat" && (
+                    <Badge tone="neutral">Chat</Badge>
+                  )}
                 </span>
               </button>
             </li>
@@ -731,6 +1120,8 @@ function InboxView({ api, supervisor }: ViewProps) {
           supervisor={supervisor}
           onChanged={changed}
           refreshKey={refreshKey}
+          emailReady={emailReady}
+          visitorTyping={typing === current.id}
         />
       ) : (
         <div style={{ gridColumn: "span 2" }}>
@@ -747,6 +1138,9 @@ function InboxView({ api, supervisor }: ViewProps) {
 
 function Shell({ api, supervisor }: ViewProps) {
   const status = usePolling(getInboxStatus, REFRESH_MS);
+  const toast = useToast();
+  const [starting, setStarting] = useState(false);
+  const senders = status.status === "ready" ? (status.data.senders ?? []) : [];
   return (
     <section aria-labelledby="page-title">
       <PageHeader
@@ -756,6 +1150,13 @@ function Shell({ api, supervisor }: ViewProps) {
           supervisor
             ? "Every customer text conversation. Reading one that is not yours is recorded in the audit log."
             : "The customer text conversations assigned to you, and those you answered."
+        }
+        actions={
+          supervisor ? (
+            <LinkButton to="/inbox/queues" variant="secondary">
+              Text queues
+            </LinkButton>
+          ) : undefined
         }
       />
       {status.status === "ready" && !status.data.enabled ? (
@@ -770,8 +1171,35 @@ function Shell({ api, supervisor }: ViewProps) {
           }
         />
       ) : (
-        <InboxView api={api} supervisor={supervisor} />
+        <>
+          <AgentAvailability />
+          {supervisor && senders.length > 0 && (
+            <div className="msg-toolbar">
+              <Button icon="send" onClick={() => setStarting(true)}>
+                Text a customer
+              </Button>
+            </div>
+          )}
+          <InboxView
+            api={api}
+            supervisor={supervisor}
+            emailReady={
+              status.status === "ready" && status.data.emailReply === true
+            }
+          />
+        </>
       )}
+      {starting && (
+        <StartConversation
+          senders={senders}
+          onClose={() => setStarting(false)}
+          onStarted={() => {
+            setStarting(false);
+            toast.show("The text is queued and will be sent in a moment.");
+          }}
+        />
+      )}
+      {toast.node}
     </section>
   );
 }

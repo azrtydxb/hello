@@ -81,7 +81,7 @@ func TestRoles(t *testing.T) {
 	if _, err := ParseRole("root"); err == nil {
 		t.Fatal("unknown role parsed")
 	}
-	for r, want := range map[Role]string{RoleViewer: "read events", RoleOperator: "read write calls events recordings messages", RoleAdmin: "read write admin secrets calls events recordings messages", "root": ""} {
+	for r, want := range map[Role]string{RoleUser: "read write calls events recordings messages", RoleViewer: "read events", RoleOperator: "read write calls events recordings messages", RoleAdmin: "read write admin secrets calls events recordings messages", "root": ""} {
 		if got := GrantableScopes(r).String(); got != want {
 			t.Errorf("GrantableScopes(%s) = %q, want %q", r, got, want)
 		}

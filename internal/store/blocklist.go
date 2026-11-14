@@ -1,6 +1,6 @@
 package store
 
-// The call blocklist (migration 00042, pbx-gaps S-7): numbers an operator
+// The call blocklist (migration 00062, pbx-gaps S-7): numbers an operator
 // blocks or allows, globally or for one trunk. Every mutation runs through
 // configChange, so it is audited (ids only), bumps the configuration
 // revision and reaches every hello-sip node as a snapshot; the SIP path never

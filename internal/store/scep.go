@@ -1,6 +1,6 @@
 package store
 
-// SCEP and 802.1X (migration 00052, spec phone-feature-parity S-25): the
+// SCEP and 802.1X (migration 00076, spec phone-feature-parity S-25): the
 // Hello device CA with its sealed key, the per-phone one-time challenge
 // passwords, the issued certificates and their revocation, the reusable
 // 802.1X profiles and each phone group's SCEP switch and wired profile.
@@ -69,16 +69,18 @@ var RevokeReasons = []string{"unspecified", "key_compromise", "superseded", "ces
 // Dot1XProfile is an 802.1X profile as the API shows it: the password is
 // write-only (HasPassword says whether one is stored).
 type Dot1XProfile struct {
-	ID                int64     `json:"id"`
-	Name              string    `json:"name"`
-	Method            string    `json:"method"`
-	Identity          string    `json:"identity"`
-	AnonymousIdentity string    `json:"anonymousIdentity"`
-	HasPassword       bool      `json:"hasPassword"`
-	CACertPEM         string    `json:"caCertPem"`
-	ServerDomain      string    `json:"serverDomain"`
-	UsedBy            []int64   `json:"usedByGroups"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ID                int64   `json:"id"`
+	Name              string  `json:"name"`
+	Method            string  `json:"method"`
+	Identity          string  `json:"identity"`
+	AnonymousIdentity string  `json:"anonymousIdentity"`
+	HasPassword       bool    `json:"hasPassword"`
+	CACertPEM         string  `json:"caCertPem"`
+	ServerDomain      string  `json:"serverDomain"`
+	UsedBy            []int64 `json:"usedByGroups"`
+	// UsedByWifi are the enterprise Wi-Fi profiles (S-23) that authenticate with it.
+	UsedByWifi []int64   `json:"usedByWifiProfiles"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 // Dot1XInput is a profile create or replace. Password nil keeps the stored
@@ -492,18 +494,22 @@ func (s *Store) scepChallenge(ctx context.Context, phoneID int64) (string, error
 // --- 802.1X profiles ---
 
 const dot1xCols = `d.id, d.name, d.method, d.identity, d.anonymous_identity, d.password_enc IS NOT NULL, d.ca_cert_pem, d.server_domain, d.updated_at,
-	COALESCE((SELECT json_agg(g.id ORDER BY g.id) FROM phone_groups g WHERE g.wired_dot1x_id = d.id), '[]')`
+	COALESCE((SELECT json_agg(g.id ORDER BY g.id) FROM phone_groups g WHERE g.wired_dot1x_id = d.id), '[]'),
+	COALESCE((SELECT json_agg(w.id ORDER BY w.id) FROM wifi_profiles w WHERE w.dot1x_id = d.id), '[]')`
 
 func scanDot1X(sc interface{ Scan(...any) error }) (Dot1XProfile, error) {
 	var (
-		p    Dot1XProfile
-		used []byte
+		p        Dot1XProfile
+		used, wf []byte
 	)
-	if err := sc.Scan(&p.ID, &p.Name, &p.Method, &p.Identity, &p.AnonymousIdentity, &p.HasPassword, &p.CACertPEM, &p.ServerDomain, &p.UpdatedAt, &used); err != nil {
+	if err := sc.Scan(&p.ID, &p.Name, &p.Method, &p.Identity, &p.AnonymousIdentity, &p.HasPassword, &p.CACertPEM, &p.ServerDomain, &p.UpdatedAt, &used, &wf); err != nil {
 		return p, err
 	}
-	p.UsedBy = []int64{}
-	return p, json.Unmarshal(used, &p.UsedBy)
+	p.UsedBy, p.UsedByWifi = []int64{}, []int64{}
+	if err := json.Unmarshal(used, &p.UsedBy); err != nil {
+		return p, err
+	}
+	return p, json.Unmarshal(wf, &p.UsedByWifi)
 }
 
 // ListDot1XProfiles lists the profiles by name.
@@ -576,6 +582,15 @@ func (s *Store) UpdateDot1XProfile(ctx context.Context, actor string, id int64, 
 		if err := s.checkDot1X(in, has); err != nil {
 			return rid, false, err
 		}
+		if in.Method == prov.Dot1XEAPMD5 {
+			var n int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM wifi_profiles WHERE dot1x_id = $1`, id).Scan(&n); err != nil {
+				return rid, false, err
+			}
+			if n > 0 {
+				return rid, false, conflict("the profile authenticates %d Wi-Fi profiles, and EAP-MD5 is a wired method", n)
+			}
+		}
 		if err := dot1xNameFree(ctx, tx, in.Name, id); err != nil {
 			return rid, false, err
 		}
@@ -602,7 +617,7 @@ func (s *Store) UpdateDot1XProfile(ctx context.Context, actor string, id int64, 
 	return s.GetDot1XProfile(ctx, id)
 }
 
-// DeleteDot1XProfile removes a profile no phone group uses. ErrNotFound for
+// DeleteDot1XProfile removes a profile no phone group or Wi-Fi profile uses. ErrNotFound for
 // an unknown id; a conflict naming the groups otherwise.
 func (s *Store) DeleteDot1XProfile(ctx context.Context, actor string, id int64) error {
 	return s.provChange(ctx, actor, "delete", "dot1x_profile", func(tx *sql.Tx) (string, bool, error) {
@@ -633,6 +648,26 @@ func (s *Store) DeleteDot1XProfile(ctx context.Context, actor string, id int64) 
 		}
 		if len(names) > 0 {
 			return rid, false, conflict("the profile is the wired 802.1X profile of phone group %s", strings.Join(names, ", "))
+		}
+		var wifi []string
+		wrows, err := tx.QueryContext(ctx, `SELECT name FROM wifi_profiles WHERE dot1x_id = $1 ORDER BY lower(name)`, id)
+		if err != nil {
+			return rid, false, err
+		}
+		for wrows.Next() {
+			var n string
+			if err := wrows.Scan(&n); err != nil {
+				_ = wrows.Close()
+				return rid, false, err
+			}
+			wifi = append(wifi, n)
+		}
+		_ = wrows.Close()
+		if err := wrows.Err(); err != nil {
+			return rid, false, err
+		}
+		if len(wifi) > 0 {
+			return rid, false, conflict("the profile authenticates the Wi-Fi profile %s", strings.Join(wifi, ", "))
 		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM dot1x_profiles WHERE id = $1`, id)
 		return rid, false, err

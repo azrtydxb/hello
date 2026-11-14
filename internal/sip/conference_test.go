@@ -213,6 +213,17 @@ type confSeat struct {
 	seq  uint32
 }
 
+// mustJoin is seatJoin for a join that must succeed: a refused or timed-out
+// join fails the test with its cause instead of handing back a nil seat.
+func mustJoin(t *testing.T, p *phone, room string) *confSeat {
+	t.Helper()
+	s, err := seatJoin(t, p, room)
+	if err != nil {
+		t.Fatalf("join %s: %v", room, err)
+	}
+	return s
+}
+
 // seatJoin dials the room and, once answered, opens the participant's RTP.
 func seatJoin(t *testing.T, p *phone, room string) (*confSeat, error) {
 	t.Helper()
@@ -503,9 +514,9 @@ func TestConferenceControls(t *testing.T) {
 	b.register(t)
 	c.register(t)
 
-	lead, _ := seatJoin(t, a, "800")
+	lead := mustJoin(t, a, "800")
 	lead.keys("9999#")
-	user, _ := seatJoin(t, b, "800")
+	user := mustJoin(t, b, "800")
 	user.keys("#") // a room with only a leader PIN lets others in with #
 	waitState(t, f, "800", "two in", func(s livestate.ConfRoomState) bool { return len(s.Participants) == 2 })
 	time.Sleep(400 * time.Millisecond)
@@ -547,13 +558,13 @@ func TestConferenceControls(t *testing.T) {
 	// The leader locks; a plain joiner is refused, the leader PIN gets in.
 	lead.keys("*7")
 	waitState(t, f, "800", "locked", func(s livestate.ConfRoomState) bool { return s.Locked })
-	late, _ := seatJoin(t, c, "800")
+	late := mustJoin(t, c, "800")
 	late.keys("#")
 	waitReq(t, c.byes, "BYE for a joiner of a locked room")
 	if v := pbx.metric(t, "hello_conference_joins_total", map[string]string{"result": "locked"}); v != 1 {
 		t.Fatalf("locked joins = %v, want 1", v)
 	}
-	lead2, _ := seatJoin(t, c, "800")
+	lead2 := mustJoin(t, c, "800")
 	lead2.keys("9999#")
 	waitState(t, f, "800", "leader joined a locked room", func(s livestate.ConfRoomState) bool { return len(s.Participants) == 3 })
 
@@ -608,7 +619,7 @@ func TestConferenceWaitForLeader(t *testing.T) {
 	a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
 	a.register(t)
 	b.register(t)
-	w, _ := seatJoin(t, a, "800")
+	w := mustJoin(t, a, "800")
 	w.keys("#")
 	st := waitState(t, f, "800", "waiting", func(s livestate.ConfRoomState) bool {
 		return len(s.Participants) == 1 && s.Participants[0].Waiting
@@ -617,7 +628,7 @@ func TestConferenceWaitForLeader(t *testing.T) {
 	if got := w.hear(600 * time.Millisecond); got < 1500 {
 		t.Fatalf("the waiting participant hears peak %d, want the hold source", got)
 	}
-	l, _ := seatJoin(t, b, "800")
+	l := mustJoin(t, b, "800")
 	l.keys("9999#")
 	waitState(t, f, "800", "waiter admitted", func(s livestate.ConfRoomState) bool {
 		if len(s.Participants) != 2 {
@@ -656,8 +667,8 @@ func TestConferenceMuteOnEntry(t *testing.T) {
 	a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
 	a.register(t)
 	b.register(t)
-	x, _ := seatJoin(t, a, "800")
-	y, _ := seatJoin(t, b, "800")
+	x := mustJoin(t, a, "800")
+	y := mustJoin(t, b, "800")
 	time.Sleep(600 * time.Millisecond)
 	if got := speaks(x, y); got > 600 {
 		t.Fatalf("a participant was heard despite mute-on-entry (peak %d)", got)
@@ -775,7 +786,7 @@ func TestConferenceTakeover(t *testing.T) {
 	if f.ownerNow("800") != "sip-1" {
 		t.Fatalf("owner = %q before the crash", f.ownerNow("800"))
 	}
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	ra := waitReq(t, a.reinvites, "takeover re-INVITE to the participant")
@@ -870,7 +881,7 @@ func TestConferenceWaitMusic(t *testing.T) {
 	pbx := startPBX(t, confDevices(), withRooms(room), withConferences(f, nil))
 	a := newPhone(t, pbx, "a1", "pa")
 	a.register(t)
-	w, _ := seatJoin(t, a, "800")
+	w := mustJoin(t, a, "800")
 	w.keys("#")
 	waitState(t, f, "800", "waiting", func(s livestate.ConfRoomState) bool {
 		return len(s.Participants) == 1 && s.Participants[0].Waiting

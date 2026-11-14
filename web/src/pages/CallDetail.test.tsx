@@ -155,6 +155,44 @@ describe("CallDetail", () => {
     expect(await screen.findByText("not measured")).toBeVisible();
   });
 
+  it("says how a call's SRTP keys were agreed and whether ICE ran", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/93": () =>
+        json({
+          ...BASE,
+          id: 93,
+          finalStatus: 200,
+          srtp: "both",
+          srtpKeyEx: "dtls",
+          ice: true,
+          trace: [],
+        }),
+      "GET /api/v1/cdrs/94": () =>
+        json({
+          ...BASE,
+          id: 94,
+          finalStatus: 200,
+          srtp: "both",
+          srtpKeyEx: "mixed",
+          trace: [],
+        }),
+      "GET /api/v1/cdrs/95": () =>
+        json({ ...BASE, id: 95, finalStatus: 200, trace: [] }),
+    });
+    const first = renderApp("/history/93");
+    expect(await screen.findByText("DTLS-SRTP · ICE-lite")).toBeVisible();
+    first.unmount();
+    const second = renderApp("/history/94");
+    expect(
+      await screen.findByText("SDES on one leg, DTLS-SRTP on the other"),
+    ).toBeVisible();
+    second.unmount();
+    renderApp("/history/95");
+    expect(await screen.findByText("Key exchange")).toBeVisible();
+    expect(screen.queryByText("DTLS-SRTP")).toBeNull();
+  });
+
   it("says which legs of a call carried SRTP", async () => {
     mockApi({
       ...ME,
@@ -213,6 +251,45 @@ describe("CallDetail", () => {
     expect(screen.getByText("Phone report (call end)")).toBeVisible();
     expect(
       screen.getByText("200: MOS 4.1 · 0.50% loss · 6.0 ms jitter"),
+    ).toBeVisible();
+  });
+
+  it("shows that a call carried video and what the web clients reported", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/90": () =>
+        json({
+          ...BASE,
+          id: 90,
+          finalStatus: 200,
+          mediaMode: "anchored",
+          video: true,
+          clientQuality: [
+            {
+              device: "w7",
+              extension: "100",
+              codec: "opus",
+              lossPct: 1.25,
+              jitterMs: 9.5,
+              rttMs: 42,
+              candidateLocal: "host",
+              candidateRemote: "relay",
+              video: { width: 1280, height: 720, fps: 30, codec: "H264" },
+              durationMs: 61000,
+            },
+          ],
+          trace: [],
+        }),
+    });
+    renderApp("/history/90");
+    expect(
+      await screen.findByText("Carried (relayed, not transcoded)"),
+    ).toBeVisible();
+    expect(screen.getByText("Web client report (100)")).toBeVisible();
+    expect(
+      screen.getByText(
+        "opus · 1.3% loss · 9.5 ms jitter · 42 ms round trip · host to relay · video 1280x720 30 fps H264",
+      ),
     ).toBeVisible();
   });
 
