@@ -673,7 +673,9 @@ func (r *Relay) AddAltMuxLeg(node *WebRTCNode) (port int, err error) {
 		return 0, fmt.Errorf("media: alternate leg on the WebRTC port: %w", err)
 	}
 	l := newRelayLeg(r, r.legs[1].name, ep, node.Mux().Port())
+	l.side = 1
 	l.parked.Store(true)
+	l.trackWeb()
 	l.secure.Bind(ep.LocalAddr(), func(b []byte, to *net.UDPAddr) { _, _ = ep.WriteToUDP(b, to) },
 		func(from *net.UDPAddr, nominated bool) { l.iceVerified(from, nominated) })
 	l.secure.OnFail(func(reason string) { r.secureFailed(l.name, reason) })
@@ -704,6 +706,7 @@ func (r *Relay) PromoteAlt() bool {
 	alt.muted.Store(old.muted.Load())
 	alt.parked.Store(false)
 	close(old.retired)
+	old.untrackWeb(false)
 	old.secure.Close()
 	_ = old.conn.Close()
 	if pv := old.pvState(false); pv != nil {
@@ -723,6 +726,8 @@ func (r *Relay) DropAlt() {
 		return
 	}
 	close(alt.retired)
+	// A browser fork that lost to another answer is not a failure.
+	alt.untrackWeb(false)
 	alt.secure.Close()
 	_ = alt.conn.Close()
 }

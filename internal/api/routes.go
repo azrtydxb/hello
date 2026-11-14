@@ -595,6 +595,7 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/diagnostics/devices/{id}", auth.ScopeRead, auth.RoleViewer, false, s.deviceDiagnostics},
 		{"GET", "/api/v1/diagnostics/auth-failures", auth.ScopeRead, auth.RoleViewer, false, s.listAuthFailures},
 		{"DELETE", "/api/v1/diagnostics/auth-failures/{ip}", auth.ScopeWrite, auth.RoleOperator, false, s.clearAuthFailures},
+		{"GET", "/api/v1/webrtc/status", auth.ScopeRead, auth.RoleViewer, false, s.getWebRTCStatus},
 
 		// External AI access (spec ai-external-access). The rows are fixed
 		// here; each stream replaces s.pending with its handler.

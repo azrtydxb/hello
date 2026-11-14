@@ -33,7 +33,7 @@ var prompts = []prompt{
 			default:
 				return "", fmt.Errorf("troubleshoot-call needs number or cdrId")
 			}
-			b.WriteString(" Then check the parties: read hello://registrations for the device, `getDeviceDiagnostics` (or hello://diagnostics/devices/{id}) for its registration attempts, and `listAuthFailures` for blocked addresses; for an external call read hello://trunks/status. " +
+			b.WriteString(" Then check the parties: read hello://registrations for the device, `getDeviceDiagnostics` (or hello://diagnostics/devices/{id}) for its registration attempts, and `listAuthFailures` for blocked addresses; for an external call read hello://trunks/status; for a browser call read hello://webrtc/status (its legs' ICE and DTLS state and the recent client errors). " +
 				"Explain the cause from the trace's SIP status codes and say what to change; follow the hello-troubleshoot skill.")
 			return b.String(), nil
 		},

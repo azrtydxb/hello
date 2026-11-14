@@ -51,9 +51,14 @@ type ClientConfig struct {
 	WebLifetime time.Duration
 	// ICE is the STUN and TURN settings behind /me/ice-servers.
 	ICE turn.Config
-	// ICEIssued counts the TURN credentials handed out; nil counts nothing.
-	// Issuing is audited by this count, not per credential.
-	ICEIssued prometheus.Counter
+	// TURNIssued counts the TURN credentials handed out
+	// (hello_turn_credentials_issued_total); nil counts nothing. Issuing is
+	// audited by this count, not per credential.
+	TURNIssued prometheus.Counter
+	// CandidateTypes counts the local candidate type of each client's
+	// end-of-call report (hello_webrtc_candidate_type_total{type}); nil
+	// counts nothing.
+	CandidateTypes *prometheus.CounterVec
 	// Now replaces the clock in tests.
 	Now func() time.Time
 }
@@ -255,7 +260,7 @@ func (s *server) createMyDevice(w http.ResponseWriter, r *http.Request) {
 		deviceCredentials
 		Device deviceView  `json:"device"`
 		ICE    turn.Result `json:"ice"`
-	}{s.mintCredentials(d), s.deviceViews(r.Context(), []store.ClientDevice{d})[0], s.ClientAuth.ICE.Servers(strconv.FormatInt(d.ID, 10))})
+	}{s.mintCredentials(d), s.deviceViews(r.Context(), []store.ClientDevice{d})[0], s.iceServers(strconv.FormatInt(d.ID, 10))})
 }
 
 // refreshMyDevice mints new credentials for one of the caller's devices.
@@ -332,10 +337,22 @@ func (s *server) getICEServers(w http.ResponseWriter, r *http.Request) {
 		}
 		name = v
 	}
-	if s.ClientAuth.ICEIssued != nil {
-		s.ClientAuth.ICEIssued.Inc()
+	writeJSON(w, http.StatusOK, s.iceServers(name))
+}
+
+// iceServers is the ICE server list for name, counting the TURN credential
+// when it carries one.
+func (s *server) iceServers(name string) turn.Result {
+	res := s.ClientAuth.ICE.Servers(name)
+	if s.ClientAuth.TURNIssued != nil {
+		for _, sv := range res.IceServers {
+			if sv.Credential != "" {
+				s.ClientAuth.TURNIssued.Inc()
+				break
+			}
+		}
 	}
-	writeJSON(w, http.StatusOK, s.ClientAuth.ICE.Servers(name))
+	return res
 }
 
 // qualityBody is what a web client posts at the end of a call (S-20): numbers
@@ -410,6 +427,9 @@ func (s *server) postCallQuality(w http.ResponseWriter, r *http.Request) {
 	if err := s.Clients.RecordClientQuality(r.Context(), uid, in.DeviceID, callID, q); err != nil {
 		s.storeError(w, "device", err)
 		return
+	}
+	if s.ClientAuth.CandidateTypes != nil {
+		s.ClientAuth.CandidateTypes.WithLabelValues(store.NormalizeCandidateType(in.CandidateLocal)).Inc()
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

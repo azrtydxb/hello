@@ -88,6 +88,26 @@ extension (`listDevices` with `kind=web` no longer shows it enabled).
 
 See [registration verdicts](references/registration.md).
 
+## A browser call without audio, or a web client that fails
+
+`getWebRTCStatus` (viewer) is the console's Diagnostics "Clients" tab:
+
+- `clients` counts web and mobile devices enrolled and registered, and the
+  transports they registered over (a browser uses WSS). Web devices enrolled
+  but none registered points at the WSS edge (Kamailio).
+- `legs` are the live browser media legs: `ice` `checking` that never turns
+  `connected` means the browser's checks never reached the node (firewall,
+  no TURN); `dtls` `failed` with `fingerprint` means the certificate did not
+  match the SDP, with `timeout` that the handshake never finished. `turn` is
+  true when the media is relayed through TURN; `call` is the SIP Call-ID to
+  find the call with `lookupCalls`.
+- `turn.servers` says whether each TURN server answered a check from
+  hello-control; an unreachable TURN breaks calls from outside the LAN only.
+- `candidates` counts how clients connected over the last day (`relay` is
+  TURN); `authFailures` lists refused REGISTERs of web devices (then follow
+  the registration steps above for the device), and `lastErrors` the latest
+  REGISTER, ICE and DTLS errors.
+
 ## A trunk that is down
 
 `listTrunkStatus` shows each trunk's registration state (registered,
