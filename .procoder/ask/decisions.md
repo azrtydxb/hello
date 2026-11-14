@@ -4911,3 +4911,57 @@ extension` and `create device` rows with the actor `directory:<connector>`;
 - **New read route** `GET /api/v1/directory/connectors/{id}/range` (admin,
   exposed over MCP as `getDirectoryRange` like the other directory reads):
   size, numbers used, next free and the users holding a number.
+
+## Clients item 3: Diagnostics Clients tab, WebRTC status and the S-52 series (2026-11-14)
+
+Builds on the web devices of #282 and the WebRTC legs of #324, #341 and #343.
+Choices:
+
+- **The live legs reach hello-control through Valkey, per node.** A call with a
+  browser leg is not replicated (its ICE and DTLS state is the node's own), so
+  no existing record holds it. Each hello-sip node with WebRTC media publishes
+  its legs (at most 100), its last 20 ICE and DTLS failures and its counters
+  every 10 s under `hello:webrtc:node:<id>` with a 30 s TTL, and removes the
+  key when it stops. `GET /api/v1/webrtc/status` reads every node's.
+- **The status answers 200 with the parts it could read.** It combines
+  PostgreSQL, Valkey and the TURN servers; one that cannot be read is named in
+  `unavailable` and its part is empty, instead of a 503 for the whole answer.
+- **TURN reachability is a STUN Binding request from hello-control** (UDP or
+  TCP; coturn answers it without credentials), and a TCP connection for a
+  `turns:` URI, whose certificate may come from a private CA hello-control
+  does not hold. The result is reused for 30 s. A leg counts as relayed
+  through TURN when ICE selected an address of a TURN server.
+- **Push is shown as not configured** with a sentence: the push gateway is
+  "not now" (decision 2026-10-25), so its series and alerts are documented as
+  coming with it, not stubbed.
+- **Labels.** `hello_srtp_auth_failures_total{direction}` uses the side of the
+  call the failing packet came from (`from_caller`, `from_callee`), since an
+  authentication failure only exists on receive. It counts every encrypted
+  leg (SDES phones too), so it is registered with the media series, not only
+  when WebRTC is on. `hello_webrtc_ice_state_total{state}` counts `connected`
+  (first authenticated check), `restarted` (new remote ufrag) and `failed` (no
+  check before the DTLS handshake gave up, or by the end of a call at least
+  5 s after its DTLS session started; a browser fork that lost is not a
+  failure). `hello_webrtc_candidate_type_total{type}` counts the client's own
+  (local) candidate type of each end-of-call report; the status endpoint shows
+  both sides from the stored reports. `hello_client_auth_failures_total{reason}`
+  has `expired`, `username`, `credentials`, `unknown_device` (a client name
+  whose device is gone: revoked, disabled or deleted) and `throttled`.
+- **`hello_webrtc_dtls_handshake_seconds` is a series of its own** next to the
+  existing `hello_dtls_handshake_seconds` (all DTLS-SRTP legs, phones too), so
+  the browser handshakes can be watched apart.
+- **`hello_ice_credentials_issued_total` is renamed
+  `hello_turn_credentials_issued_total`** (the spec's name), and now counts
+  only answers that carry a TURN credential, from `/me/ice-servers` and from an
+  enrolment (which also returns ICE servers). It was not on a dashboard yet.
+- **`hello_client_registrations{kind}` is per receiving node** (like
+  `hello_sip_registrations`), so the cluster value is the sum. To back the
+  spec's alert "zero registered WSS clients while some are enrolled",
+  hello-control adds `hello_client_devices{kind}` (enabled web and mobile
+  devices, read at scrape time).
+- **MCP:** `getWebRTCStatus` is a read tool (viewer) and
+  `hello://webrtc/status` a resource; the troubleshoot-call prompt points to it
+  for browser calls. The answer carries no credential or secret.
+- **`TestClientMetrics`** moves the registration, auth-failure, video-slot and
+  WebRTC leg series with real calls through hello-sip; the push part of S-52's
+  test comes with the push gateway.

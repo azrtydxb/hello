@@ -395,6 +395,9 @@ type Config struct {
 	// the Diagnostics view; nil answers 503. AuthFailLimit is hello-sip's
 	// HELLO_SIP_AUTH_FAIL_LIMIT (0 means its default, 10).
 	Diagnostics DiagnosticsLive
+	// WebRTC reads the WebRTC status the hello-sip nodes publish for
+	// GET /api/v1/webrtc/status; nil leaves the legs out.
+	WebRTC WebRTCLive
 	// Syslog reads the lines of the phone syslog sink; nil answers 503.
 	Syslog        SyslogLive
 	AuthFailLimit int
@@ -475,6 +478,8 @@ type Config struct {
 	prewarmMu *sync.Mutex
 	// credLimit bounds how often a user mints device credentials.
 	credLimit *rateLimiter
+	// turnProbe checks the TURN servers for the WebRTC status.
+	turnProbe *turnProber
 	// prewarmKick asks the background worker to pre-generate the prompts of a
 	// language a queue just set. Batchable handlers kick it rather than call
 	// the pre-generation, which uses the speech cache and must not run inside a
@@ -500,6 +505,9 @@ func Handler(c Config) http.Handler {
 		c.TTS = &tts.Client{}
 	}
 	c.credLimit = &rateLimiter{}
+	if c.turnProbe == nil {
+		c.turnProbe = &turnProber{}
+	}
 	c.speech, c.prewarmMu = newSpeechCache(c), &sync.Mutex{}
 	c.prewarmKick = make(chan struct{}, 1)
 	c.self = new(atomic.Pointer[http.Handler])
