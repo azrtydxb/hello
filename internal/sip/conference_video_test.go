@@ -43,14 +43,26 @@ func TestConferenceVideoPhones(t *testing.T) {
 		t.Errorf("video slots = %d, want 2", media.VideoSessions())
 	}
 	// A keyframe and some deltas from A reach B, untouched, and not A itself.
+	// A talks while it sends its picture: each join's first packet (PCMU 0x00)
+	// is loud, so B may have taken the picture when it joined; A is then the
+	// speaker once the room's dwell is over.
 	var got *media.RTPPacket
-	for i := 0; i < 60 && got == nil; i++ {
-		for _, p := range h264Pictures(1, 4001) {
-			for _, raw := range p {
-				_, _ = aRTP.WriteToUDP(raw, loopbackTo(ansA.Port))
+	for i := 0; i < 250 && got == nil; i++ {
+		pcm := make([]byte, 320)
+		for j := range 160 {
+			v := int16(9000 * math.Sin(2*math.Pi*500*float64(i*160+j)/8000))
+			pcm[2*j], pcm[2*j+1] = byte(v), byte(v>>8)
+		}
+		sa.feed.packet(sa.feed.audio, media.EncodePCMU(pcm), false)
+		sa.feed.ts += 160
+		if i%3 == 0 {
+			for _, p := range h264Pictures(1, 4001) {
+				for _, raw := range p {
+					_, _ = aRTP.WriteToUDP(raw, loopbackTo(ansA.Port))
+				}
 			}
 		}
-		if raw, ok := readUDPWithin(t, bRTP, 50*time.Millisecond); ok {
+		if raw, ok := readUDPWithin(t, bRTP, 20*time.Millisecond); ok {
 			if p, ok := media.ParseRTP(raw); ok && len(p.Payload) > 100 {
 				got = p
 			}
