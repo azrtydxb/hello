@@ -264,3 +264,29 @@ func TestRasteriseEndpoint(t *testing.T) {
 	}
 	var _ = json.Marshal
 }
+
+// TestReadyzWithoutToken fails if the probe endpoint demands the bearer token
+// (the kubelet sends none, so a node with a token would never become Ready),
+// if it does not report a missing engine, or if /healthz stops requiring it.
+func TestReadyzWithoutToken(t *testing.T) {
+	for _, ready := range []bool{true, false} {
+		s := newServer(stubEngineForTest{}, fax.Rasteriser{}, "s3cret", 41000, 41999, slog.New(slog.DiscardHandler))
+		s.ready = ready
+		ts := httptest.NewServer(s.handler())
+		want := http.StatusOK
+		if !ready {
+			want = http.StatusServiceUnavailable
+		}
+		for path, code := range map[string]int{"/readyz": want, "/healthz": http.StatusUnauthorized} {
+			resp, err := http.Get(ts.URL + path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != code {
+				t.Fatalf("ready=%v: %s without a token = %d, want %d", ready, path, resp.StatusCode, code)
+			}
+		}
+		ts.Close()
+	}
+}
