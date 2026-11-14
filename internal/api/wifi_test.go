@@ -28,7 +28,7 @@ func TestWifiAPI(t *testing.T) {
 		"name": "Office", "ssid": "corp-wifi", "security": "wpa2-psk", "psk": wifiTestKey, "priority": 5,
 	}).json(t)
 	id := fmt.Sprint(office["id"])
-	if office["pskSet"] != true || office["passwordSet"] != false || office["verified"] != false {
+	if office["pskSet"] != true || office["dot1xProfileId"] != nil || office["verified"] != false {
 		t.Fatalf("created = %v", office)
 	}
 	if _, ok := office["psk"]; ok {
@@ -64,28 +64,34 @@ func TestWifiAPI(t *testing.T) {
 	c.must(http.StatusConflict, "POST", "/api/v1/wifi-profiles", map[string]any{
 		"name": "office", "ssid": "other", "security": "open"})
 	for name, body := range map[string]map[string]any{
-		"no name":         {"ssid": "a", "security": "open"},
-		"short key":       {"name": "x", "ssid": "a", "security": "wpa2-psk", "psk": "short"},
-		"no key":          {"name": "x", "ssid": "a", "security": "wpa3-sae"},
-		"key on open":     {"name": "x", "ssid": "a", "security": "open", "psk": wifiTestKey},
-		"long ssid":       {"name": "x", "ssid": strings.Repeat("s", 33), "security": "open"},
-		"unknown":         {"name": "x", "ssid": "a", "security": "wep"},
-		"priority":        {"name": "x", "ssid": "a", "security": "open", "priority": 11},
-		"no eap password": {"name": "x", "ssid": "a", "security": "wpa2-enterprise", "identity": "u"},
-		"extra field":     {"name": "x", "ssid": "a", "security": "open", "x": 1},
+		"no name":        {"ssid": "a", "security": "open"},
+		"short key":      {"name": "x", "ssid": "a", "security": "wpa2-psk", "psk": "short"},
+		"no key":         {"name": "x", "ssid": "a", "security": "wpa3-sae"},
+		"key on open":    {"name": "x", "ssid": "a", "security": "open", "psk": wifiTestKey},
+		"long ssid":      {"name": "x", "ssid": strings.Repeat("s", 33), "security": "open"},
+		"unknown":        {"name": "x", "ssid": "a", "security": "wep"},
+		"priority":       {"name": "x", "ssid": "a", "security": "open", "priority": 11},
+		"no 802.1X":      {"name": "x", "ssid": "a", "security": "wpa2-enterprise"},
+		"unknown 802.1X": {"name": "x", "ssid": "a", "security": "wpa2-enterprise", "dot1xProfileId": 9999},
+		"802.1X on open": {"name": "x", "ssid": "a", "security": "open", "dot1xProfileId": 1},
+		"old eap field":  {"name": "x", "ssid": "a", "security": "wpa2-enterprise", "identity": "u"},
+		"extra field":    {"name": "x", "ssid": "a", "security": "open", "x": 1},
 	} {
 		if r := c.do("POST", "/api/v1/wifi-profiles", body); r.code != http.StatusBadRequest {
 			t.Errorf("%s: status %d %s, want 400", name, r.code, r.body)
 		}
 	}
 
-	// An enterprise profile seals its password and shows only the flag.
+	// An enterprise profile names an 802.1X profile; the credentials live there.
+	dx := c.must(http.StatusCreated, "POST", "/api/v1/dot1x-profiles", map[string]any{
+		"name": "Radius", "method": "peap", "identity": "phones", "password": "radius-secret-pw"}).json(t)
 	corp := c.must(http.StatusCreated, "POST", "/api/v1/wifi-profiles", map[string]any{
-		"name": "Corp", "ssid": "corp-dot1x", "security": "wpa2-enterprise", "identity": "phones", "password": "radius-secret-pw",
+		"name": "Corp", "ssid": "corp-dot1x", "security": "wpa2-enterprise", "dot1xProfileId": dx["id"],
 	}).json(t)
-	if corp["passwordSet"] != true || corp["eapMethod"] != "peap" || corp["caCert"] != "system" || corp["pskSet"] != false {
+	if corp["dot1xProfileId"] != dx["id"] || corp["pskSet"] != false || corp["password"] != nil || corp["passwordSet"] != nil {
 		t.Fatalf("enterprise = %v", corp)
 	}
+	c.must(http.StatusConflict, "DELETE", "/api/v1/dot1x-profiles/"+fmt.Sprint(dx["id"]), nil)
 
 	// PATCH keeps the key when it is left out, and replaces or clears it.
 	up := c.must(http.StatusOK, "PATCH", "/api/v1/wifi-profiles/"+id, map[string]any{"verified": true, "priority": 7}).json(t)
@@ -180,23 +186,24 @@ func TestWifiAPI(t *testing.T) {
 	c.must(http.StatusNoContent, "DELETE", "/api/v1/wifi-profiles/"+id, nil)
 	c.must(http.StatusNotFound, "DELETE", "/api/v1/wifi-profiles/"+id, nil)
 	c.must(http.StatusNoContent, "DELETE", "/api/v1/wifi-profiles/"+fmt.Sprint(corp["id"]), nil)
+	c.must(http.StatusNoContent, "DELETE", "/api/v1/dot1x-profiles/"+fmt.Sprint(dx["id"]), nil)
 }
 
-// TestWifiPreviewMask fails if a Wi-Fi key or 802.1X password survives the
+// TestWifiPreviewMask fails if a Wi-Fi key survives the
 // preview masking (no database needed).
 func TestWifiPreviewMask(t *testing.T) {
 	d := prov.RenderData{Wifi: &prov.WifiInfo{Profiles: []prov.WifiProfile{
 		{ID: 1, SSID: "a", Security: "wpa2-psk", PSK: wifiTestKey},
-		{ID: 2, SSID: "b", Security: "wpa2-enterprise", Password: "radius-secret-pw", Identity: "u"},
+		{ID: 2, SSID: "b", Security: "wpa2-enterprise", Dot1XID: 7},
 		{ID: 3, SSID: "c", Security: "open"},
 	}}}
 	maskSecrets(&d)
 	for _, p := range d.Wifi.Profiles {
-		if p.PSK == wifiTestKey || p.Password == "radius-secret-pw" {
+		if p.PSK == wifiTestKey {
 			t.Fatalf("profile %d keeps a secret: %+v", p.ID, p)
 		}
 	}
-	if d.Wifi.Profiles[0].PSK != mask || d.Wifi.Profiles[1].Password != mask || d.Wifi.Profiles[2].PSK != "" {
+	if d.Wifi.Profiles[0].PSK != mask || d.Wifi.Profiles[2].PSK != "" {
 		t.Fatalf("masked = %+v", d.Wifi.Profiles)
 	}
 }

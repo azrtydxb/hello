@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/azrtydxb/hello/internal/crm/sidebar"
 )
 
 // Errors the API maps to statuses.
@@ -20,6 +22,15 @@ var (
 	ErrBadState      = errors.New("crm: unknown or expired state")
 	ErrRateLimited   = errors.New("crm: too many tests")
 	ErrForbidden     = errors.New("crm: not allowed")
+	// ErrUserScope is an organisation-level action on a connector every user
+	// signs in to with their own account (Outlook, Google).
+	ErrUserScope = errors.New("crm: the connector signs in per user")
+	// ErrNotUserScope is a personal sign-in on an organisation connector.
+	ErrNotUserScope = errors.New("crm: the connector does not sign in per user")
+	// ErrNoCalendar is a calendar setting on a connector or connection
+	// without calendar access.
+	ErrNoCalendar = errors.New("crm: the connection has no calendar access")
+	ErrNoApp      = sidebar.ErrNoApp
 )
 
 // ValidationError lists the fields of a request that failed validation.
@@ -42,7 +53,43 @@ type (
 	Revoker interface {
 		RevokeToken(ctx context.Context, c Config, refresh string) error
 	}
+	// ServerSide tells whether a connector's settings let the server itself
+	// write to the CRM. A connector that is only the CRM's embedded softphone
+	// (Salesforce without a connected app) has nothing to log or look up.
+	ServerSide interface {
+		ServerSide(cfg map[string]string) bool
+	}
+	// RefValidator checks the CRM record id a softphone reports for a call.
+	RefValidator interface {
+		ValidRef(ref string) bool
+	}
+	// SetupProvider describes what the customer configures in the CRM: the
+	// values to paste and the files to import.
+	SetupProvider interface {
+		Setup(cfg Config, publicURL string) []SetupItem
+	}
 )
+
+// SetupItem is one thing the customer configures in the CRM.
+type SetupItem struct {
+	// Name is a stable key; Label is what the console shows.
+	Name  string `json:"name"`
+	Label string `json:"label"`
+	// Kind is text, url or file; a file carries Filename and is offered as a
+	// download.
+	Kind     string `json:"kind"`
+	Value    string `json:"value"`
+	Filename string `json:"filename,omitempty"`
+	Hint     string `json:"hint,omitempty"`
+}
+
+// serverSide reports whether the connector of row writes to the CRM itself.
+func serverSide(c Connector, cfg map[string]string) bool {
+	if ss, ok := c.(ServerSide); ok {
+		return ss.ServerSide(cfg)
+	}
+	return true
+}
 
 // CallbackPath is the OAuth redirect URI path shared by every connector.
 const CallbackPath = "/api/v1/integrations/crm/oauth/callback"
@@ -57,6 +104,9 @@ type Service struct {
 	Tokens *TokenManager
 	Lookup *Lookup
 	Links  LinkMinter
+	// DND switches a user's DND for the calendar (spec I-56); nil leaves
+	// the calendar setting unavailable.
+	DND DNDSetter
 	// PublicURL is HELLO_PUBLIC_URL; without it the OAuth flow is off.
 	PublicURL string
 	Log       *slog.Logger
@@ -97,6 +147,10 @@ type ConnectorView struct {
 	Capabilities Capabilities `json:"capabilities"`
 	Connection   *Connection  `json:"connection"`
 	RedirectURI  string       `json:"redirectUri,omitempty"`
+	// Auth is how the connector signs in: "oauth" sends the administrator to
+	// the CRM to approve the app, "direct" signs in with the credentials the
+	// administrator typed.
+	Auth string `json:"auth"`
 }
 
 func (s *Service) redirectURI() string {
@@ -110,6 +164,7 @@ func (s *Service) view(ctx context.Context, r ConnectorRow) (ConnectorView, erro
 	v := ConnectorView{ConnectorRow: r, RedirectURI: s.redirectURI()}
 	if c, ok := s.Tokens.Providers(r.Kind); ok {
 		v.Capabilities = c.Capabilities()
+		v.Auth = authKind(c)
 	}
 	cr, _, err := s.Repo.OrgConnection(ctx, r.ID)
 	switch {
@@ -124,6 +179,21 @@ func (s *Service) view(ctx context.Context, r ConnectorRow) (ConnectorView, erro
 		}
 	}
 	return v, nil
+}
+
+func authKind(c Connector) string {
+	if _, ok := c.(Direct); ok {
+		return "direct"
+	}
+	return "oauth"
+}
+
+// secretBound lists the settings whose change asks for the secret again.
+func secretBound(c Connector) []string {
+	if sb, ok := c.(SecretBound); ok {
+		return sb.SecretBoundKeys()
+	}
+	return []string{"clientId"}
 }
 
 // List returns every connector.
@@ -266,12 +336,34 @@ func (s *Service) Update(ctx context.Context, actor string, id int64, in Setting
 	if verr != nil {
 		return ConnectorView{}, verr
 	}
-	if ci.Config["clientId"] != cur.Config["clientId"] && in.ClientSecret == nil {
-		return ConnectorView{}, &ValidationError{map[string]string{"clientSecret": "required when the client id changes"}}
+	conn, _ := s.Tokens.Providers(cur.Kind)
+	if in.ClientSecret == nil && (cur.HasSecret || ci.Config["clientId"] != cur.Config["clientId"]) {
+		for _, k := range secretBound(conn) {
+			if ci.Config[k] != cur.Config[k] {
+				return ConnectorView{}, &ValidationError{map[string]string{"clientSecret": "required when the " + k + " changes"}}
+			}
+		}
+	}
+	// A direct connector signs in again with the new credentials before they
+	// are stored, so a typo never replaces a working connection.
+	var fresh *Tokens
+	if d, ok := conn.(Direct); ok && in.ClientSecret != nil {
+		if _, _, cerr := s.Repo.OrgConnection(ctx, id); cerr == nil {
+			t, aerr := d.Authenticate(ctx, Config{Kind: ci.Kind, ClientID: ci.Config["clientId"], ClientSecret: *in.ClientSecret, Extra: ci.Config})
+			if aerr != nil {
+				return ConnectorView{}, &ValidationError{map[string]string{"clientSecret": scrub(aerr.Error())}}
+			}
+			fresh = &t
+		}
 	}
 	r, err := s.Repo.UpdateConnector(ctx, id, ci, in.ClientSecret)
 	if err != nil {
 		return ConnectorView{}, err
+	}
+	if fresh != nil {
+		if _, err := s.Repo.SaveOrgConnection(ctx, id, *fresh); err != nil {
+			return ConnectorView{}, err
+		}
 	}
 	if (cur.Enabled && !r.Enabled) || (cur.Recordings && !r.Recordings) {
 		s.revokeLinks(ctx, id)
@@ -328,19 +420,27 @@ func (s *Service) revokeToken(ctx context.Context, cur ConnectorRow) {
 	}
 }
 
-// Connect starts the OAuth flow and returns where to send the browser.
+// Connect starts the OAuth flow and returns where to send the browser. A
+// direct connector has no browser step: Connect signs in with the stored
+// credentials, stores the connection and returns an empty address.
 func (s *Service) Connect(ctx context.Context, actor string, id int64) (string, error) {
 	cur, err := s.Repo.GetConnector(ctx, id)
 	if err != nil {
 		return "", err
 	}
+	conn, ok := s.Tokens.Providers(cur.Kind)
+	if da, isDA := conn.(Direct); ok && isDA {
+		return "", s.connectDirect(ctx, actor, cur, da)
+	}
 	if s.PublicURL == "" {
 		return "", ErrNoPublicURL
 	}
-	conn, ok := s.Tokens.Providers(cur.Kind)
 	oa, isOA := conn.(OAuth)
-	if !ok || !isOA {
+	if !isOA {
 		return "", ErrNotOAuth
+	}
+	if conn.Capabilities().UserScope {
+		return "", ErrUserScope
 	}
 	cfg, err := s.Tokens.Config(ctx, cur)
 	if err != nil {
@@ -356,37 +456,97 @@ func (s *Service) Connect(ctx context.Context, actor string, id int64) (string, 
 	return oa.AuthURL(cfg, s.redirectURI(), state), nil
 }
 
-// Callback completes the OAuth flow: the state names the connector and the
-// administrator who started it. It returns the connector id.
-func (s *Service) Callback(ctx context.Context, state, code string) (int64, error) {
-	id, actor, err := s.Repo.TakeState(ctx, state)
+// connectDirect signs in with the connector's client credentials.
+func (s *Service) connectDirect(ctx context.Context, actor string, cur ConnectorRow, da Direct) error {
+	cfg, err := s.Tokens.Config(ctx, cur)
 	if err != nil {
-		return 0, ErrBadState
+		return err
 	}
+	if !cur.HasSecret {
+		return ErrNoCredentials
+	}
+	id := strconv.FormatInt(cur.ID, 10)
+	actx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	t, err := da.Authenticate(actx, cfg)
+	if err != nil {
+		_ = s.Repo.Audit(ctx, actor, "connect_failed", "crm_connector", id)
+		// A refused credential is a validation error naming the secret, never
+		// the CRM's raw answer.
+		return &ValidationError{map[string]string{"clientSecret": scrub(err.Error())}}
+	}
+	if _, err := s.Repo.SaveOrgConnection(ctx, cur.ID, t); err != nil {
+		return err
+	}
+	_ = s.Repo.Audit(ctx, actor, "connect", "crm_connector", id)
+	s.Lookup.Invalidate()
+	return nil
+}
+
+// Setup returns what the customer configures in the CRM for a connector.
+func (s *Service) Setup(ctx context.Context, id int64) ([]SetupItem, error) {
 	cur, err := s.Repo.GetConnector(ctx, id)
 	if err != nil {
-		return 0, ErrBadState
+		return nil, err
+	}
+	conn, ok := s.Tokens.Providers(cur.Kind)
+	sp, isSP := conn.(SetupProvider)
+	if !ok || !isSP {
+		return []SetupItem{}, nil
+	}
+	if s.PublicURL == "" {
+		return nil, ErrNoPublicURL
+	}
+	cfg, err := s.Tokens.Config(ctx, cur)
+	if err != nil {
+		return nil, err
+	}
+	return sp.Setup(cfg, strings.TrimRight(s.PublicURL, "/")), nil
+}
+
+// Callback completes the OAuth flow: the state names the connector and who
+// started it. personal is set when a user signed in to their own account
+// (Outlook, Google); the handler then returns to the user's page, not the
+// administrators'. It returns the connector id.
+func (s *Service) Callback(ctx context.Context, state, code string) (id int64, personal bool, err error) {
+	id, actor, err := s.Repo.TakeState(ctx, state)
+	if err != nil {
+		return 0, false, ErrBadState
+	}
+	userID, actor := parseActor(actor)
+	personal = userID != 0
+	cur, err := s.Repo.GetConnector(ctx, id)
+	if err != nil {
+		return 0, false, ErrBadState
 	}
 	conn, ok := s.Tokens.Providers(cur.Kind)
 	oa, isOA := conn.(OAuth)
 	if !ok || !isOA {
-		return id, ErrNotOAuth
+		return id, personal, ErrNotOAuth
+	}
+	if conn.Capabilities().UserScope != personal {
+		return id, personal, ErrBadState
 	}
 	cfg, err := s.Tokens.Config(ctx, cur)
 	if err != nil {
-		return id, err
+		return id, personal, err
 	}
 	t, err := oa.Exchange(ctx, cfg, s.redirectURI(), code)
 	if err != nil {
 		_ = s.Repo.Audit(ctx, actor, "connect_failed", "crm_connector", strconv.FormatInt(id, 10))
-		return id, err
+		return id, personal, err
 	}
-	if _, err := s.Repo.SaveOrgConnection(ctx, id, t); err != nil {
-		return id, err
+	if personal {
+		_, err = s.Repo.SaveUserConnection(ctx, id, userID, t)
+	} else {
+		_, err = s.Repo.SaveOrgConnection(ctx, id, t)
+	}
+	if err != nil {
+		return id, personal, err
 	}
 	_ = s.Repo.Audit(ctx, actor, "connect", "crm_connector", strconv.FormatInt(id, 10))
 	s.Lookup.Invalidate()
-	return id, nil
+	return id, personal, nil
 }
 
 // Disconnect removes the connection, revokes the token at the CRM when it
@@ -578,6 +738,15 @@ func (s *Service) Engagement(ctx context.Context, actor, kind, callID, ref strin
 	if conn == nil {
 		return false, ErrNotFound
 	}
+	prov, known := s.Tokens.Providers(conn.Kind)
+	if rv, ok := prov.(RefValidator); known && ok && !rv.ValidRef(ref) {
+		return false, &ValidationError{map[string]string{"recordId": "is not a " + conn.Kind + " record id"}}
+	}
+	if known && !serverSide(prov, conn.Config) {
+		// Nothing on the server writes this call to the CRM, so there is no
+		// duplicate to avoid; the softphone's own record is the log.
+		return true, nil
+	}
 	if restricted {
 		ok, err := s.Repo.CallInvolves(ctx, callID, exts)
 		if err != nil {
@@ -593,4 +762,26 @@ func (s *Service) Engagement(ctx context.Context, actor, kind, callID, ref strin
 	}
 	_ = s.Repo.Audit(ctx, actor, "engagement", "crm_connector", strconv.FormatInt(conn.ID, 10))
 	return adopted, nil
+}
+
+// SidebarApp builds the ticket-sidebar app of a helpdesk connector (Zendesk,
+// Freshdesk) for the customer to upload to their own account. It needs
+// HELLO_PUBLIC_URL: the app's Call button opens Hello's dialer there.
+func (s *Service) SidebarApp(ctx context.Context, actor string, id int64) (name string, data []byte, err error) {
+	cur, err := s.Repo.GetConnector(ctx, id)
+	if err != nil {
+		return "", nil, err
+	}
+	if !sidebar.Supported(cur.Kind) {
+		return "", nil, ErrNoApp
+	}
+	if s.PublicURL == "" {
+		return "", nil, ErrNoPublicURL
+	}
+	name, data, err = sidebar.Build(cur.Kind, s.PublicURL)
+	if err != nil {
+		return "", nil, err
+	}
+	_ = s.Repo.Audit(ctx, actor, "download_app", "crm_connector", strconv.FormatInt(id, 10))
+	return name, data, nil
 }

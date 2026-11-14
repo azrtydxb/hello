@@ -242,7 +242,7 @@ func TestSessionTimersIVRTakeover(t *testing.T) {
 	if l := rec.Session.Legs[sessCaller]; l.IntervalSecs != 2 || !l.Local || rec.Session.Legs[sessCallee] != nil {
 		t.Fatalf("replicated session = %+v", rec.Session)
 	}
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	waitReq(t, a.reinvites, "takeover re-INVITE to the caller")

@@ -311,6 +311,32 @@ services:
       { <<: [*db-env, *prov-env, *ai-env], HELLO_NODE_ID: hello-control-2 }
     volumes: [provcerts:/etc/hello/prov:ro]
 
+  # The WP sweep's provisioning listener (TestWPPhonesAsVendors, phone
+  # feature parity S-38). A third control replica whose provisioning
+  # settings differ from the other two's, so the server-wide transport
+  # choices that are environment variables are rendered into the WP files
+  # without touching any other test's phones: the WP822 registers over TCP
+  # (HELLO_PROV_SIP_TCP_MODELS) with a backup registrar, the WP836 over TLS
+  # (HELLO_PROV_SIP_TLS_MODELS, with the SRTP policy that carries), and both
+  # are told to send RTCP-XR reports. Phones are bound through the API on
+  # hello-control-1 and fetch their files here (host 8444).
+  hello-control-wp:
+    <<: *control
+    depends_on:
+      <<: *control-deps
+      prov-certs: { condition: service_completed_successfully }
+    environment:
+      <<: [*db-env, *prov-env]
+      HELLO_NODE_ID: hello-control-wp
+      HELLO_PROV_PUBLIC_URL: https://localhost:8444
+      HELLO_PROV_SIP_TLS_SERVER: 127.0.0.1:5081
+      HELLO_PROV_SIP_TLS_MODELS: grandstream:WP836
+      HELLO_PROV_SIP_TCP_MODELS: grandstream:WP822
+      HELLO_PROV_SIP_BACKUP_SERVERS: 127.0.0.1:5082
+      HELLO_PROV_RTCPXR: "true"
+    volumes: [provcerts:/etc/hello/prov:ro]
+    ports: ["8444:8083"]
+
   hello-sip-1:
     <<: *sip
     environment:

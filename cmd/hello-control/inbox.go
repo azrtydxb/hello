@@ -14,6 +14,10 @@ import (
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
+	_ "github.com/azrtydxb/hello/internal/messaging/provider/telnyx" // registers the Telnyx adapter
+	_ "github.com/azrtydxb/hello/internal/messaging/provider/twilio" // registers the Twilio adapter
+	"github.com/azrtydxb/hello/internal/messaging/router"
+	acdqueue "github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -39,6 +43,15 @@ func runInboxMaintenance(ctx context.Context, st *store.Store, l lease, node str
 			} else if r.Conversations > 0 {
 				m.Purged.WithLabelValues("conversations").Add(float64(r.Conversations))
 				log.Info("inbox retention purged conversations", "count", r.Conversations)
+			}
+		}
+		if held || err != nil {
+			if unknown, failed, err := st.SettleCarrierTexts(ctx); err != nil {
+				if ctx.Err() == nil {
+					log.Warn("carrier text settle", "error", err)
+				}
+			} else if unknown+failed > 0 {
+				log.Info("carrier texts settled", "unknown", unknown, "failed", failed)
 			}
 		}
 		// Every replica reports the pool, whoever ran the maintenance.
@@ -93,6 +106,93 @@ func runInboxNotifier(ctx context.Context, env mailer.Settings, st *store.Store,
 			}
 			if err := mailer.Deliver(ctx, s, n.To, msg); err != nil && ctx.Err() == nil {
 				log.Warn("inbox notice email", "conversation", n.ConversationID, "error", err)
+			}
+		}
+	}
+}
+
+// routerEvery is how often the router looks for conversations to place and
+// agents to give them to. Every replica runs it: the store claims rows with
+// SKIP LOCKED and assigns by compare-and-set, so none is placed or assigned
+// twice (spec messaging-channels M-13).
+const routerEvery = 2 * time.Second
+
+// routerLive reads the call queues' shared state for the router: who is
+// logged in or paused, and which extensions have a call.
+type routerLive struct{ vk *api.LazyValkey }
+
+func (l routerLive) Agents(ctx context.Context) (map[string]acdqueue.AgentState, error) {
+	return l.vk.Agents(ctx)
+}
+
+func (l routerLive) BusyExtensions(ctx context.Context) (map[string]bool, error) {
+	states, err := l.vk.DeviceStates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	busy := map[string]bool{}
+	for _, d := range states {
+		if d.State == "on-call" {
+			busy[d.Extension] = true
+		}
+	}
+	return busy, nil
+}
+
+// runMessageRouter places new conversations by their number's route and
+// hands the waiting ones to the agents of their text queue.
+func runMessageRouter(ctx context.Context, st *store.Store, live router.Live, m *router.Metrics, log *slog.Logger) {
+	r := &router.Router{Store: st.MessageRouter(), Live: live, Metrics: m, Log: log}
+	t := time.NewTicker(routerEvery)
+	defer t.Stop()
+	for {
+		if err := r.Tick(ctx, time.Now()); err != nil && ctx.Err() == nil {
+			log.Warn("message routing", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+const (
+	carrierSendEvery = 2 * time.Second
+	carrierPollEvery = 5 * time.Second
+)
+
+// runCarrierWorkers sends the texts agents queued on carrier channels and
+// follows their delivery (spec M-9a). Every replica runs it: the store hands
+// each queued text to one attempt, so a text is never sent twice, and a
+// status read claimed by one replica is not read by another meanwhile. It
+// never logs a message, a number or a credential.
+func runCarrierWorkers(ctx context.Context, st *store.Store, m *messaging.Metrics, log *slog.Logger) {
+	w := &messaging.Worker{Store: st, Metrics: m, Log: log.With("component", "carrier")}
+	send := time.NewTicker(carrierSendEvery)
+	poll := time.NewTicker(carrierPollEvery)
+	defer send.Stop()
+	defer poll.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-send.C:
+			for {
+				n, err := w.SendOnce(ctx, 20)
+				if err != nil {
+					if ctx.Err() == nil {
+						log.Warn("carrier send", "error", err)
+					}
+					break
+				}
+				if n < 20 {
+					break
+				}
+			}
+		case <-poll.C:
+			if _, err := w.PollOnce(ctx, 50); err != nil && ctx.Err() == nil {
+				log.Warn("carrier status", "error", err)
 			}
 		}
 	}

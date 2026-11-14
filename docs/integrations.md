@@ -1,4 +1,4 @@
-# Integrations: call events and webhooks
+# Integrations: call events, webhooks and directory sync
 
 Hello publishes what happens to every call as small, ordered **call events**.
 An integration reads them from a live stream or from the stored history and
@@ -10,15 +10,16 @@ later phases. [Webhooks](#webhooks) push the events to your server.
 
 ## What is emitted
 
-| Event                     | When                                                                                                                                   |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `call.ringing`            | An extension starts ringing. A call that rings several extensions (a ring group) yields one event per ringing extension.               |
-| `call.answered`           | An extension answered. The calling extension of an internal or outbound call gets one too.                                             |
-| `call.ended`              | The call ended, for each extension it involved.                                                                                        |
-| `call.missed`             | The call reached an extension and nobody answered. A call answered by another member of a ring group is not missed for the others.     |
-| `call.recording.ready`    | A recording of the call was stored. It is stored after the call ends, so it follows `call.ended`. Carries `recordingId`, `durationMs`. |
-| `call.completed`          | The call detail record was stored. Carries `cdrId`; this is the point to log the call elsewhere.                                       |
-| `call.originate.progress` | A click-to-call changed state ([click-to-call](click-to-call.md)). Carries `originateId`, `state` and, for a failure, `reason`.        |
+| Event                     | When                                                                                                                                                                                                                                    |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `call.ringing`            | An extension starts ringing. A call that rings several extensions (a ring group) yields one event per ringing extension.                                                                                                                |
+| `call.answered`           | An extension answered. The calling extension of an internal or outbound call gets one too.                                                                                                                                              |
+| `call.ended`              | The call ended, for each extension it involved.                                                                                                                                                                                         |
+| `call.missed`             | The call reached an extension and nobody answered. A call answered by another member of a ring group is not missed for the others.                                                                                                      |
+| `call.recording.ready`    | A recording of the call was stored. It is stored after the call ends, so it follows `call.ended`. Carries `recordingId`, `durationMs`.                                                                                                  |
+| `call.completed`          | The call detail record was stored. Carries `cdrId`; this is the point to log the call elsewhere.                                                                                                                                        |
+| `call.originate.progress` | A click-to-call changed state ([click-to-call](click-to-call.md)). Carries `originateId`, `state` and, for a failure, `reason`.                                                                                                         |
+| `voicemail.received`      | A caller left a voicemail message in the box of an extension (one event per box for a voicemail group). Carries the caller in `from`, the box extension in `extension` and `to`, and `durationMs`. The audio is never part of an event. |
 
 Pages, intercoms and conference legs do not produce call events.
 
@@ -490,10 +491,144 @@ listed). Creating or changing such an endpoint is audited.
 Webhook tables are in migration `00058`; finished deliveries are purged with
 the event retention, dead letters after 30 days, by one replica at a time.
 
+## Directory sync (Active Directory and LDAP)
+
+A directory connector reads users from an Active Directory or LDAP server and
+keeps Hello's users in step with them: it creates a user, links it to the
+extension an attribute names, sets the role and ring-group membership from
+group rules, and disables the user when the directory drops or disables the
+account. Hello never writes to the directory and never deletes a user.
+Everything is under **Integrations > Directory** (administrators only) and
+`/api/v1/directory/*`.
+
+### Setting up a connector
+
+1. Create the connector with the server URL (`ldaps://host:636`, or
+   `ldap://host:389`, which always uses StartTLS), a bind DN with read access,
+   the bind password, the base DN and, if needed, a user filter. The default
+   filter is `(&(objectCategory=person)(objectClass=user))`; it must also match
+   disabled accounts, which are decided from `userAccountControl`.
+2. **Test** it: Hello connects, verifies the certificate, binds and reads one
+   page, and shows the certificate, the user count, a sample of 20 users with
+   their raw and mapped values, and the groups under the group base.
+3. **Preview** a sync. Nothing changes; the run lists, for every user, what
+   would happen (`create`, `update`, `adopt`, `disable`, `enable`, `conflict`,
+   `skip`) with the before and after of each field.
+4. **Apply** the preview. A schedule (default 60 minutes, 0 for manual only)
+   starts only after a run has been applied by hand.
+
+The bind password is sealed with `HELLO_SECRET_KEY` (bound to the connector)
+and is never returned, logged, audited or put in an error. Changing the server
+or the bind DN requires entering it again, so a stored password cannot be sent
+to another host. Setting it needs the `secrets` scope. Certificate verification
+is always on: a private CA goes in the connector's CA certificate (a public
+certificate), a different certificate name in the server name. Plain `ldap://`
+without StartTLS is refused (`400 tls_required`); the lab switch
+`HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP=true` allows it and logs a warning on
+every use. The server must be inside `HELLO_INTEGRATIONS_ALLOWED_CIDRS` (RFC
+1918 by default) or public; loopback and link-local addresses are never
+reachable. Referrals are not followed; TLS 1.2 is the minimum.
+
+### Mapping
+
+Each of username, email, display name and extension reads an ordered list of
+source attributes (the first value wins) through optional transforms: keep only
+digits, keep the last N characters, or a regular expression with one capture
+group. The extension must come out as 2 to 10 digits or the user is reported as
+a conflict (`extension_invalid`); it is not an error for the run. The defaults
+are the Active Directory ones (`userPrincipalName`, `mail`, `displayName`,
+`ipPhone` then `telephoneNumber`, `userAccountControl` bit 2 for disabled). A
+user is linked by the directory's stable id (the AD `objectGUID`, shown in its
+canonical form), never by email.
+
+The mapped fields are the managed fields: on a user the connector manages they
+are read-only in the console and the API (`409 managed_by_directory`), with a
+lock and the connector's name. Unmapped fields stay editable. A directory user
+has no local password.
+
+### Modes
+
+- **authoritative** (default): the directory overwrites the mapped fields on
+  every run.
+- **create_only**: the directory seeds a field once; Hello owns it afterwards.
+- **link_only**: never creates users; links existing local users by email, then
+  username, and manages them.
+
+### Groups
+
+Group rules give members of a source group (matched on its stable id) a role or
+a ring group. The highest matching role wins and users matching none are plain
+`user`s. A rule granting `admin` is ignored unless the connector's **allow admin
+from directory** switch is on. Ring-group rows a sync adds are tagged with the
+connector; it removes only those and never touches a manual member. Nested
+membership uses the AD in-chain matching rule and is off by default (slow on
+large forests).
+
+### What a run never does
+
+- It never deletes a user. A user that is inactive in the directory is disabled
+  at once; one that is absent from two complete runs in a row (1 to 10,
+  configurable) is disabled. Disabling ends the user's sessions, revokes their
+  tokens and grants, and by default switches off their devices; the extension,
+  voicemail and call records stay. A user that comes back is enabled again, with
+  those devices.
+- It never adopts, demotes or disables a local admin, and never leaves the PBX
+  without an enabled admin (`last_admin`).
+- It never adopts a local user by itself: a local user matched by email, then
+  username, is listed as `adopt` and changed only when the administrator ticks
+  it on apply.
+- It leaves a conflicted user unchanged and goes on with the rest. Conflicts
+  are `extension_linked` (the administrator may override it on apply, which
+  moves the extension), `duplicate_extension`, `extension_missing`,
+  `extension_invalid`, `extension_kind` (a door station), `email_in_use`,
+  `username_collision`, `username_invalid`, `claimed_by_other_connector` and
+  `last_admin`.
+- It halts as `needs_confirmation`, applying nothing, when it would disable more
+  than 20 percent of the linked users (and more than 5), or when the source
+  returns no users although users are linked. A person reviews the changes and
+  confirms.
+- Applying a preview re-reads the directory; if the preview is older than 15
+  minutes or the diff hash differs it answers `409 stale_preview` with a fresh
+  preview.
+
+### Running it
+
+One replica runs a connector: every `hello-control` replica ticks, and the one
+that takes the session advisory lock `hello:dirsync:<id>` runs it; the lock goes
+with its connection, so another replica takes over. A run left `running` by a
+dead replica is closed as `failed: replica_lost`. A run has a timeout (15 min)
+and a user cap (20,000) after which it fails visibly. A failure is classified
+(`auth_failed`, `tls_untrusted`, `unreachable`, `timeout`, `quota`,
+`bad_filter`, `user_cap_exceeded`) with a short detail that never echoes a
+credential or the server's text; after three in a row the administrators are
+e-mailed when SMTP is set up. Nothing is changed by a failed run. Changes are
+kept 90 days. Each user-level change is audited with the actor
+`directory:<connector name>`; each run, test, apply and confirmation with the
+administrator.
+
+| Setting                                | Default  | Meaning                                                    |
+| -------------------------------------- | -------- | ---------------------------------------------------------- |
+| `HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP` | off      | lab only: allow `ldap://` without StartTLS, with a warning |
+| `HELLO_INTEGRATIONS_ALLOWED_CIDRS`     | RFC 1918 | private ranges a directory server may be in                |
+
+| Metric                                                      | Meaning                                        |
+| ----------------------------------------------------------- | ---------------------------------------------- |
+| `hello_directory_sync_runs_total{kind,result}`              | runs by kind and result                        |
+| `hello_directory_sync_duration_seconds{kind}`               | duration of a run                              |
+| `hello_directory_changes_total{kind,action}`                | changes by action                              |
+| `hello_directory_conflicts{connector_kind}`                 | conflicts of the latest run                    |
+| `hello_directory_last_success_timestamp_seconds{connector}` | alert when older than three schedule intervals |
+
+Tables are in migration `00093`.
+
 ## What comes next
 
 Click-to-call (P3), recording links (P4) and the CRM connectors build on these
-events.
+events. [Zapier and other automation tools](zapier.md) use the webhooks above.
+
+[Slack notifications](slack.md), [n8n and Make](n8n-make.md) and
+[Outlook and Google contacts and calendar](contacts-calendar.md) use the events
+and the connector framework above.
 
 ## Microsoft Teams
 

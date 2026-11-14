@@ -1,0 +1,15 @@
+{
+  "baseUrl": "{{connection.url}}/api/v1",
+  "headers": {
+    "Authorization": "Bearer {{connection.token}}",
+    "Accept": "application/json"
+  },
+  "log": {
+    "sanitize": ["request.headers.authorization"]
+  },
+  "response": {
+    "error": {
+      "message": "[{{statusCode}}] {{body.error.message}}"
+    }
+  }
+}

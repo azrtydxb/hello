@@ -443,6 +443,7 @@ func (c *call) vmLeave(ctx context.Context, sess media.Session, box VoicemailBox
 	c.s.m.VoicemailMessages.WithLabelValues(VMStored).Inc()
 	c.addTrace(fmt.Sprintf("Voicemail message %d stored (%d ms)", box.ID, dur.Milliseconds()))
 	c.sendMWI(c.mailboxExt(vmLeave))
+	c.voicemailEvent(box.Extension, dur)
 }
 
 // customGreeting is the object of the box's own greeting for reason: the

@@ -53,7 +53,7 @@ func TestTakeoverEdgeRouteSet(t *testing.T) {
 	if rs := st.Legs[1].RouteSet; len(rs) != 2 || rs[0] != helloFacing || rs[1] != phoneFacing {
 		t.Fatalf("callee leg route set = %v, want [%s %s] (the 200's Record-Route reversed)", rs, helloFacing, phoneFacing)
 	}
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
 	rb := waitReq(t, b.reinvites, "takeover re-INVITE through the Hello-facing hop")
@@ -113,8 +113,8 @@ func TestSymmetricResponse(t *testing.T) {
 // the edge retries them on the taker, and end up with no live call so its
 // drain completes.
 func TestHandoffOnDrain(t *testing.T) {
-	defer func(d time.Duration) { handoffPoll = d }(handoffPoll)
-	handoffPoll = 20 * time.Millisecond
+	defer func(d time.Duration) { handoffPoll.Set(d) }(handoffPoll.Get())
+	handoffPoll.Set(20 * time.Millisecond)
 	ha, mem, owner, taker := haPair(t, ringAllDevices())
 	a, b := newPhone(t, owner, "a1", "pa"), newPhone(t, owner, "b1", "pb1")
 	a.register(t)
@@ -131,7 +131,7 @@ func TestHandoffOnDrain(t *testing.T) {
 	taker.srv.takeoverPass(t.Context())
 	noReq(t, a.reinvites, 150*time.Millisecond, "a takeover of a call nobody handed off")
 
-	haReinviteTimeout = time.Second
+	haReinviteTimeout.Set(time.Second)
 	owner.srv.Drain()
 	waitRecord(t, ha, "the call is marked for handoff", "sip-1", func(s livestate.DialogState) bool { return s.Handoff })
 	taker.srv.takeoverPass(t.Context())
@@ -196,9 +196,9 @@ func TestHandoffCancelledDrain(t *testing.T) {
 // during it) is not handed off too; it would hold the drained node until
 // the drain timeout.
 func TestHandoffAnsweredDuringDrain(t *testing.T) {
-	defer func(d time.Duration) { handoffPoll = d }(handoffPoll)
-	handoffPoll = 20 * time.Millisecond
-	haReinviteTimeout = time.Second
+	defer func(d time.Duration) { handoffPoll.Set(d) }(handoffPoll.Get())
+	handoffPoll.Set(20 * time.Millisecond)
+	haReinviteTimeout.Set(time.Second)
 	ha, mem, owner, taker := haPair(t, ringAllDevices())
 	a, b := newPhone(t, owner, "a1", "pa"), newPhone(t, owner, "b1", "pb1")
 	a.register(t)

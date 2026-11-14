@@ -14,11 +14,16 @@ import (
 // targets and VoicemailEnabled are the Phase 4 per-extension call features;
 // RecordDefault is the Phase 5 default-recording switch.
 type Extension struct {
-	ID               int64  `json:"id"`
-	Number           string `json:"number"`
-	Name             string `json:"name"`
-	ExternalNumber   string `json:"externalNumber"`
-	DND              bool   `json:"dnd"`
+	ID             int64  `json:"id"`
+	Number         string `json:"number"`
+	Name           string `json:"name"`
+	ExternalNumber string `json:"externalNumber"`
+	DND            bool   `json:"dnd"`
+	// DNDSource is who set DND: manual (the user, the API or a feature
+	// code) or calendar (the calendar of a connected Outlook or Google
+	// account, migration 00090). A calendar DND ends with the event; a
+	// manual one never does.
+	DNDSource        string `json:"dndSource"`
 	ForwardAlways    string `json:"forwardAlways"`
 	ForwardBusy      string `json:"forwardBusy"`
 	ForwardNoAnswer  string `json:"forwardNoAnswer"`
@@ -32,7 +37,7 @@ type Extension struct {
 	// 486 (migration 00026, spec S-18).
 	CallWaiting bool `json:"callWaiting"`
 	// AnonymousOutbound makes every trunk call from the extension anonymous
-	// (migration 00051, spec S-19): Privacy: id and an anonymous From, the
+	// (migration 00067, spec S-19): Privacy: id and an anonymous From, the
 	// identity asserted by the trunk.
 	AnonymousOutbound bool `json:"anonymousOutbound"`
 	// PhoneSendAnonymous is the phone's own "Send Anonymous" setting
@@ -47,7 +52,7 @@ type Extension struct {
 	// book (spec P-1).
 	DirectoryHidden bool `json:"directoryHidden"`
 	// MOHClassID is the music on hold class callers hear while this
-	// extension holds them (migration 00021); nil uses the global default.
+	// extension holds them (migration 00029); nil uses the global default.
 	MOHClassID *int64 `json:"mohClassId"`
 	// Kind is user (default) or door (migration 00053, spec S-45): a door
 	// station has no voicemail, joins no group, receives no pickup, page,
@@ -58,14 +63,14 @@ type Extension struct {
 	UpdatedAt   time.Time   `json:"updatedAt"`
 }
 
-const extensionCols = `id, number, name, external_number, dnd, forward_always, forward_busy, forward_no_answer,
+const extensionCols = `id, number, name, external_number, dnd, dnd_source, forward_always, forward_busy, forward_no_answer,
 	voicemail_enabled, record_default, allow_intercom, call_waiting, no_answer_rings, directory_hidden, moh_class_id, anonymous_outbound, phone_send_anonymous, kind, door_targets, created_at, updated_at`
 
 func scanExtension(r interface{ Scan(...any) error }) (Extension, error) {
 	var e Extension
 	var moh sql.NullInt64
 	var targets []byte
-	err := r.Scan(&e.ID, &e.Number, &e.Name, &e.ExternalNumber, &e.DND, &e.ForwardAlways, &e.ForwardBusy,
+	err := r.Scan(&e.ID, &e.Number, &e.Name, &e.ExternalNumber, &e.DND, &e.DNDSource, &e.ForwardAlways, &e.ForwardBusy,
 		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.CallWaiting, &e.NoAnswerRings, &e.DirectoryHidden, &moh, &e.AnonymousOutbound, &e.PhoneSendAnonymous,
 		&e.Kind, &targets, &e.CreatedAt, &e.UpdatedAt)
 	if moh.Valid {
@@ -200,6 +205,7 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 		e, err = scanExtension(tx.QueryRowContext(ctx, `
 			UPDATE extensions SET number = COALESCE($2, number), name = COALESCE($3, name),
 			       external_number = COALESCE($4, external_number), dnd = COALESCE($5, dnd),
+			       dnd_source = CASE WHEN $5::boolean IS NULL THEN dnd_source ELSE 'manual' END,
 			       forward_always = COALESCE($6, forward_always), forward_busy = COALESCE($7, forward_busy),
 			       forward_no_answer = COALESCE($8, forward_no_answer), voicemail_enabled = COALESCE($9, voicemail_enabled),
 			       record_default = COALESCE($10, record_default), allow_intercom = COALESCE($11, allow_intercom),
@@ -268,15 +274,20 @@ type Device struct {
 	LastSeenAt *time.Time `json:"lastSeenAt"`
 	// SRTP is the media-encryption policy: off, optional or required.
 	SRTP string `json:"srtp"`
+	// SRTPKeyEx is how Hello offers the device SRTP keys: sdes (the default)
+	// or dtls; MediaICE makes Hello offer it ICE-lite and provisions its ICE
+	// setting (migration 00079).
+	SRTPKeyEx string `json:"srtpKeyExchange"`
+	MediaICE  bool   `json:"mediaIce"`
 }
 
 const deviceCols = `id, extension_id, sip_username, enabled, created_at, updated_at, kind, auth_mode, user_id, label,
-	coalesce(platform, ''), coalesce(app_version, ''), last_seen_at, srtp`
+	coalesce(platform, ''), coalesce(app_version, ''), last_seen_at, srtp, srtp_keyex, media_ice`
 
 func scanDevice(r interface{ Scan(...any) error }) (Device, error) {
 	var d Device
 	err := r.Scan(&d.ID, &d.ExtensionID, &d.SIPUsername, &d.Enabled, &d.CreatedAt, &d.UpdatedAt,
-		&d.Kind, &d.AuthMode, &d.UserID, &d.Label, &d.Platform, &d.AppVersion, &d.LastSeenAt, &d.SRTP)
+		&d.Kind, &d.AuthMode, &d.UserID, &d.Label, &d.Platform, &d.AppVersion, &d.LastSeenAt, &d.SRTP, &d.SRTPKeyEx, &d.MediaICE)
 	return d, err
 }
 
@@ -330,9 +341,17 @@ func (s *Store) CreateDevice(ctx context.Context, actor string, in NewDevice) (D
 	return d, err
 }
 
-// UpdateDevice changes the fields that are not nil. srtp is a media-
-// encryption policy (secmedia); the caller has validated it.
-func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, srtp *string) (Device, error) {
+// DeviceMedia is the media-security part of a device update: the SRTP policy
+// (secmedia), how keys are agreed when Hello offers them (sdes or dtls) and
+// the ICE-lite setting. A nil field is left alone; the caller has validated
+// the values.
+type DeviceMedia struct {
+	SRTP, KeyEx *string
+	ICE         *bool
+}
+
+// UpdateDevice changes the fields that are not nil.
+func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64, m DeviceMedia) (Device, error) {
 	var d Device
 	err := s.configChange(ctx, actor, "update", "device", nil, func(tx *sql.Tx) (int64, error) {
 		if extensionID != nil {
@@ -348,8 +367,9 @@ func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enable
 		var err error
 		d, err = scanDevice(tx.QueryRowContext(ctx, `
 			UPDATE devices SET enabled = COALESCE($2, enabled), extension_id = COALESCE($3, extension_id),
-			       srtp = COALESCE($4, srtp), updated_at = now()
-			WHERE id = $1 RETURNING `+deviceCols, id, enabled, extensionID, srtp))
+			       srtp = COALESCE($4, srtp), srtp_keyex = COALESCE($5, srtp_keyex),
+			       media_ice = COALESCE($6, media_ice), updated_at = now()
+			WHERE id = $1 RETURNING `+deviceCols, id, enabled, extensionID, m.SRTP, m.KeyEx, m.ICE))
 		return id, err
 	})
 	return d, err

@@ -73,10 +73,10 @@ type Trunk struct {
 	// SessionTimers is the trunk's RFC 4028 setting: "default" (follow
 	// Hello's own), "on" or "off".
 	SessionTimers string `json:"sessionTimers"`
-	// FaxMode is passthrough (default), t38 or off (migration 00072).
+	// FaxMode is passthrough (default), t38 or off (migration 00073).
 	FaxMode string `json:"faxMode"`
 	// Profile is the trunk's profile: "generic" or "sbc-peer" (migration
-	// 00110; docs/teams.md). A profile is a set of defaults and limits the
+	// 00096; docs/teams.md). A profile is a set of defaults and limits the
 	// API enforces, never read by hello-sip.
 	Profile   string    `json:"profile"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -762,7 +762,7 @@ type InboundRoute struct {
 	Enabled           bool              `json:"enabled"`
 	// MOHClassID is the music on hold class of calls this route delivers
 	// (nil uses the global default); MOHRingback plays it to the caller
-	// instead of ringback while the destination rings (migration 00021).
+	// instead of ringback while the destination rings (migration 00029).
 	MOHClassID  *int64 `json:"mohClassId"`
 	MOHRingback bool   `json:"mohRingback"`
 }

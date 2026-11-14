@@ -55,6 +55,12 @@ type ConnectionRow struct {
 	Status          string
 	LastError       string
 	UpdatedAt       time.Time
+	// Calendar state of a user connection (migration 00090).
+	CalendarDND       bool
+	CalendarActive    bool
+	CalendarBusyUntil time.Time
+	CalendarCheckedAt time.Time
+	CalendarError     string
 }
 
 // LogRow is one call logging job.
@@ -72,9 +78,12 @@ type LogRow struct {
 	EventType      string          `json:"eventType"`
 	OwnerExtension string          `json:"ownerExtension"`
 	RecordingID    int64           `json:"recordingId,omitempty"`
-	LinkExpiresAt  *time.Time      `json:"linkExpiresAt,omitempty"`
-	CreatedAt      time.Time       `json:"createdAt"`
-	UpdatedAt      time.Time       `json:"updatedAt"`
+	// State is what a multi-step connector already did for this call (see
+	// PartialError); never shown in the API.
+	State         string     `json:"-"`
+	LinkExpiresAt *time.Time `json:"linkExpiresAt,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 // LogJob is a call to log, as the event hook enqueues it.
@@ -96,6 +105,9 @@ type LogResult struct {
 	LinkExpiresAt *time.Time
 	// ClearLink drops link_expires_at (a recording that no longer applies).
 	ClearLink bool
+	// State replaces the job's saved connector state when not nil (an empty
+	// string clears it).
+	State *string
 	// RecordingSeen is the recording id the attempt worked from: a recording
 	// that arrived meanwhile turns a logged job into an update.
 	RecordingSeen int64
@@ -142,6 +154,23 @@ type Repo interface {
 	SaveOrgConnection(ctx context.Context, connectorID int64, t Tokens) (ConnectionRow, error)
 	SetConnectionStatus(ctx context.Context, connectionID int64, status, lastError string) error
 	DeleteOrgConnection(ctx context.Context, connectorID int64) error
+
+	// Per-user connections (spec P18): a user signs in to an Outlook or
+	// Google connector with their own account. Tokens are sealed under an
+	// AAD that names the user.
+	UserConnection(ctx context.Context, connectorID, userID int64) (ConnectionRow, Tokens, error)
+	SaveUserConnection(ctx context.Context, connectorID, userID int64, t Tokens) (ConnectionRow, error)
+	DeleteUserConnection(ctx context.Context, connectorID, userID int64) error
+	// UserConnections lists the user connections of a connector (any
+	// status), without tokens.
+	UserConnections(ctx context.Context, connectorID int64) ([]ConnectionRow, error)
+	// UserConnectionsOf lists one user's connections across connectors.
+	UserConnectionsOf(ctx context.Context, userID int64) ([]ConnectionRow, error)
+	// SetCalendarSettings turns the calendar DND of a user connection on or
+	// off; turning it off also clears the poller's state.
+	SetCalendarSettings(ctx context.Context, connectionID int64, dnd bool) error
+	// SetCalendarState records what the poller saw.
+	SetCalendarState(ctx context.Context, connectionID int64, active bool, busyUntil, checkedAt time.Time, lastError string) error
 
 	NewState(ctx context.Context, connectorID int64, actor string, ttl time.Duration) (string, error)
 	TakeState(ctx context.Context, state string) (connectorID int64, actor string, err error)

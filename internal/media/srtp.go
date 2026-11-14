@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +42,10 @@ const (
 	SuiteAES128SHA1_80 CryptoSuite = "AES_CM_128_HMAC_SHA1_80"
 	SuiteAES128SHA1_32 CryptoSuite = "AES_CM_128_HMAC_SHA1_32"
 	SuiteAES256SHA1_80 CryptoSuite = "AES_256_CM_HMAC_SHA1_80"
+	// SuiteAEADGCM128 is AEAD_AES_128_GCM (RFC 7714). It is only ever the
+	// result of a DTLS-SRTP handshake (S-16); SDES neither offers nor accepts
+	// it.
+	SuiteAEADGCM128 CryptoSuite = "AEAD_AES_128_GCM"
 )
 
 // OfferedSuites is what Hello offers, in preference order.
@@ -56,6 +61,8 @@ func (s CryptoSuite) profile() (p srtp.ProtectionProfile, keyLen, saltLen int, o
 		return srtp.ProtectionProfileAes128CmHmacSha1_32, 16, 14, true
 	case SuiteAES256SHA1_80:
 		return srtp.ProtectionProfileAes256CmHmacSha1_80, 32, 14, true
+	case SuiteAEADGCM128:
+		return srtp.ProtectionProfileAeadAes128Gcm, 16, 12, true
 	}
 	return 0, 0, 0, false
 }
@@ -128,7 +135,7 @@ func ParseCrypto(attr string) (Crypto, error) {
 	}
 	suite := CryptoSuite(fields[1])
 	_, kl, sl, ok := suite.profile()
-	if !ok {
+	if !ok || suite == SuiteAEADGCM128 {
 		return Crypto{}, fmt.Errorf("media: unsupported SRTP suite %q", suite)
 	}
 	method, ok := strings.CutPrefix(fields[2], "inline:")
@@ -179,7 +186,10 @@ type legKeys struct {
 	// savp is the media profile the leg negotiated: RTP/SAVP (true) or
 	// RTP/AVP with crypto lines. Later SDPs for the leg keep it, since a
 	// transport profile must not change inside a dialog.
-	savp   bool
+	savp bool
+	// dtls is true when the keys came from a DTLS-SRTP handshake (S-16)
+	// and not from SDES.
+	dtls   bool
 	suite  CryptoSuite
 	local  Crypto
 	remote Crypto
@@ -318,6 +328,13 @@ type legSecurity struct {
 type Secure struct {
 	sec    legSecurity
 	active atomic.Pointer[legKeys]
+	// pending is true while a DTLS-SRTP endpoint has negotiated but has no
+	// keys yet (handshake running or failed): nothing is sent or accepted,
+	// since the endpoint must never fall back to plain RTP.
+	pending atomic.Bool
+	// xp is the endpoint's ICE-lite and DTLS transport (secxport.go); nil
+	// until the host binds the endpoint's socket with Bind.
+	xp atomic.Pointer[xport]
 }
 
 // Local returns the keys Hello offers, generating them on first use. Once a
@@ -434,6 +451,9 @@ func (s *Secure) Profile() (savp, on bool) {
 	if k := s.active.Load(); k != nil {
 		return k.savp, true
 	}
+	if s.pending.Load() {
+		return true, true // DTLS-SRTP negotiated, handshake not finished
+	}
 	return false, false
 }
 
@@ -495,6 +515,8 @@ func (s *Secure) Reset() {
 	s.sec.keys = nil
 	s.sec.offered = nil
 	s.active.Store(nil)
+	s.pending.Store(false)
+	s.resetTransport()
 	s.sec.mu.Unlock()
 }
 
@@ -504,6 +526,9 @@ func (s *Secure) Reset() {
 func (s *Secure) Protect(pkt []byte) (out []byte, ok bool) {
 	k := s.active.Load()
 	if k == nil {
+		if s.pending.Load() {
+			return nil, false
+		}
 		return pkt, true
 	}
 	enc, err := k.protect(pkt)
@@ -521,8 +546,34 @@ func (s *Secure) Protect(pkt []byte) (out []byte, ok bool) {
 // that did not authenticate. The result may alias an internal buffer: use it
 // before the next call, from one goroutine only.
 func (s *Secure) Unprotect(data []byte) (plain []byte, ok, authFailed bool) {
+	return s.UnprotectFrom(data, nil)
+}
+
+// UnprotectFrom is Unprotect for an endpoint whose socket may also carry
+// STUN and DTLS (RFC 7983): the datagram's first byte tells them from RTP.
+// STUN goes to the ICE-lite agent and DTLS to the handshake, both answered
+// from here and never returned as media (ok is false). from is where the
+// datagram came from; the host has already vetted it as a source. An endpoint
+// that negotiated DTLS-SRTP and has no keys yet drops all media.
+func (s *Secure) UnprotectFrom(data []byte, from *net.UDPAddr) (plain []byte, ok, authFailed bool) {
+	if x := s.xp.Load(); x != nil && from != nil {
+		switch {
+		case isSTUN(data):
+			s.stunIn(x, data, from)
+			return nil, false, false
+		case isDTLS(data):
+			s.dtlsIn(x, data, from)
+			return nil, false, false
+		}
+	}
 	k := s.active.Load()
 	if k == nil {
+		if s.pending.Load() {
+			return nil, false, false
+		}
+		if x := s.xp.Load(); x != nil && x.muxed() && isRTCP(data) {
+			return nil, false, false // plain RTCP on a muxed port is consumed
+		}
 		return data, true, false
 	}
 	if isRTCP(data) {
@@ -621,4 +672,89 @@ func (r *Relay) ResetCrypto(leg string) {
 	if l := r.findLeg(leg); l != nil {
 		l.secure.Reset()
 	}
+}
+
+// AnswerSDP negotiates the leg's security for an offer Hello answers (SDES,
+// DTLS-SRTP, ICE-lite); see Secure.AnswerSDP.
+func (r *Relay) AnswerSDP(leg string, offer, ans AudioSDP, p SecurePolicy) (AudioSDP, error) {
+	l := r.findLeg(leg)
+	if l == nil {
+		return ans, errors.New("media: unknown relay leg " + leg)
+	}
+	return l.secure.AnswerSDP(offer, ans, p)
+}
+
+// OfferSDP adds the leg's security to an offer Hello makes; see
+// Secure.OfferSDP.
+func (r *Relay) OfferSDP(leg string, off AudioSDP, p SecurePolicy) (AudioSDP, error) {
+	l := r.findLeg(leg)
+	if l == nil {
+		return off, errors.New("media: unknown relay leg " + leg)
+	}
+	return l.secure.OfferSDP(off, p)
+}
+
+// KeepSDP repeats the leg's security in a later SDP of the dialog; see
+// Secure.KeepSDP.
+func (r *Relay) KeepSDP(leg string, a AudioSDP) AudioSDP {
+	if l := r.findLeg(leg); l != nil {
+		return l.secure.KeepSDP(a)
+	}
+	return a
+}
+
+// LearnAnswer applies the far end's answer to an offer on leg and reports
+// whether the leg is now encrypted; see Secure.LearnAnswer.
+func (r *Relay) LearnAnswer(leg string, a AudioSDP, savp bool) bool {
+	l := r.findLeg(leg)
+	return l != nil && l.secure.LearnAnswer(a, savp)
+}
+
+// LearnSDP applies an SDP that arrived from the far end of leg (a re-INVITE
+// or the answer to one); see Secure.LearnSDP.
+func (r *Relay) LearnSDP(leg string, a AudioSDP) {
+	if l := r.findLeg(leg); l != nil {
+		l.secure.LearnSDP(a)
+	}
+}
+
+// SecureMode is the leg's replicated mode: "", "avp", "savp" or "dtls".
+func (r *Relay) SecureMode(leg string) string {
+	if l := r.findLeg(leg); l != nil {
+		return l.secure.Mode()
+	}
+	return ""
+}
+
+// KeyExchange reports how the leg's keys were agreed: "sdes", "dtls" or ""
+// while plain or before a handshake ends.
+func (r *Relay) KeyExchange(leg string) string {
+	if l := r.findLeg(leg); l != nil {
+		return l.secure.KeyExchange()
+	}
+	return ""
+}
+
+// ICEActive reports whether leg runs ICE-lite.
+func (r *Relay) ICEActive(leg string) bool {
+	l := r.findLeg(leg)
+	return l != nil && l.secure.ICEActive()
+}
+
+// ReOffer rebuilds off with the leg's security for an HA takeover re-INVITE,
+// in the replicated mode the leg had ("avp", "savp" or "dtls"), with fresh
+// keys; ICE-lite follows when the leg ran it.
+func (r *Relay) ReOffer(leg string, off AudioSDP, mode string) (AudioSDP, error) {
+	l := r.findLeg(leg)
+	if l == nil {
+		return off, errors.New("media: unknown relay leg " + leg)
+	}
+	if mode == "dtls" {
+		return l.secure.OfferSDP(off, SecurePolicy{Allow: true, Require: true, DTLS: true, ICE: l.secure.ICEActive()})
+	}
+	keys, err := l.secure.Local()
+	if err != nil {
+		return off, err
+	}
+	return off.WithCrypto(mode == "savp", keys...), nil
 }

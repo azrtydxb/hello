@@ -231,3 +231,38 @@ func TestGetCDRRecordingID(t *testing.T) {
 		}
 	}
 }
+
+// TestConnectorRecordingLinks fails if a CRM connector's links are not
+// revoked together, if another connector's or a person's link is touched, or
+// if a revoked link still plays.
+func TestConnectorRecordingLinks(t *testing.T) {
+	st, ids := linkFixture(t)
+	ctx := context.Background()
+	hash := func(s string) []byte { return []byte("hash-" + s + "-0123456789abcdef0123456789") }
+	exp := time.Now().Add(time.Hour)
+	for _, c := range []struct {
+		name string
+		conn int64
+	}{{"a1", 1}, {"a2", 1}, {"b1", 2}} {
+		if _, err := st.CreateConnectorRecordingLink(ctx, c.conn, ids["c1"], hash(c.name), exp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.CreateRecordingLink(ctx, "user:tester", ids["c1"], hash("person"), exp, 0); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := st.RevokeConnectorRecordingLinks(ctx, 1); err != nil || n != 2 {
+		t.Fatalf("revoked %d (%v), want 2", n, err)
+	}
+	if n, err := st.RevokeConnectorRecordingLinks(ctx, 1); err != nil || n != 0 {
+		t.Fatalf("second pass revoked %d (%v)", n, err)
+	}
+	for name, want := range map[string]LinkResult{"a1": LinkRevoked, "a2": LinkRevoked, "b1": LinkOK, "person": LinkOK} {
+		if _, _, res, err := st.UseRecordingLink(ctx, hash(name)); err != nil || res != want {
+			t.Errorf("%s = %s (%v), want %s", name, res, err, want)
+		}
+	}
+	if _, err := st.CreateConnectorRecordingLink(ctx, 1, 999999, hash("none"), exp); !errors.Is(err, ErrNotFound) {
+		t.Errorf("link for a missing recording: %v", err)
+	}
+}

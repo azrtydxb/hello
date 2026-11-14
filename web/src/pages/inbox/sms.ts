@@ -40,7 +40,18 @@ export function smsSegments(text: string): {
   };
 }
 
-/** The customer's name when a shared source has one, else their number. */
-export function peerLabel(c: { peer: string; peerName: string }): string {
+/**
+ * The customer's name when a shared source has one, else their number. A
+ * website chat visitor has no number: their name, or a number of their own.
+ */
+export function peerLabel(c: {
+  peer: string;
+  peerName: string;
+  peerKind?: string;
+}): string {
+  if (c.peerKind === "visitor") {
+    const n = c.peer.replace(/^visitor:/, "#");
+    return c.peerName ? `${c.peerName} (visitor ${n})` : `Visitor ${n}`;
+  }
   return c.peerName ? `${c.peerName} (${c.peer})` : c.peer;
 }
