@@ -43,10 +43,15 @@ type ProvSettings struct {
 	SIPTLSServer string
 	SIPTLSModels []string
 	// SIPBackupServers (HELLO_PROV_SIP_BACKUP_SERVERS) are backup registrars
-	// and SIPSRV (HELLO_PROV_SIP_SRV) the DNS name Grandstream phones
-	// resolve by SRV; see config.Prov (S-20).
+	// and SIPSRV (HELLO_PROV_SIP_SRV) the DNS name Grandstream, Yealink and
+	// Poly phones resolve by SRV; see config.Prov (S-20).
 	SIPBackupServers []string
 	SIPSRV           string
+	// SIPNodes returns the phone-facing SIP addresses (host:port) of the
+	// READY hello-sip nodes, in node order: the HA node list backups come
+	// from when HELLO_PROV_SIP_BACKUP_SERVERS is empty (see BackupServers).
+	// Nil without a cluster view.
+	SIPNodes func() []string
 	// SIPTCPModels is HELLO_PROV_SIP_TCP_MODELS: the phones
 	// prov.TLSModelMatch selects register over TCP with SIPServer (S-13).
 	// A model also in SIPTLSModels (with SIPTLSServer set) uses TLS.
@@ -85,7 +90,8 @@ type ProvSettings struct {
 
 // server is the registrar a phone of vendor and model registers with: the
 // TLS address for a model HELLO_PROV_SIP_TLS_MODELS selects while
-// HELLO_PROV_SIP_TLS_SERVER is set, the UDP address otherwise.
+// HELLO_PROV_SIP_TLS_SERVER is set, the UDP (or TCP) address otherwise, by
+// SRV name in SRV mode, else with the backup servers (S-20).
 func (p ProvSettings) server(v prov.Vendor, model string) prov.Server {
 	srv := prov.Server{Transport: "udp", DNSMode: prov.DNSA, Expiry: int(p.Expiry / time.Second)}
 	if p.SIPTLSServer != "" && prov.TLSModelMatch(p.SIPTLSModels, v, model) {
@@ -94,20 +100,93 @@ func (p ProvSettings) server(v prov.Vendor, model string) prov.Server {
 		return srv
 	}
 	srv.Host, srv.Port = splitHostPort(p.SIPServer)
-	if len(p.SIPBackupServers) > 0 {
-		h, port := splitHostPort(p.SIPBackupServers[0])
-		srv.Backup = &prov.Backup{Host: h, Port: port}
-	}
-	if p.SIPSRV != "" && v == prov.Grandstream {
-		// SRV mode: the phone resolves the SIP servers from the name's SRV
-		// records, so it needs the name and no port; the backup proxy is
-		// then the SRV set's job.
-		srv.DNSMode, srv.Host, srv.Port, srv.Backup = prov.DNSSRV, p.SIPSRV, 0, nil
-	}
 	if prov.TLSModelMatch(p.SIPTCPModels, v, model) {
 		srv.Transport = "tcp"
 	}
+	if p.SIPSRV != "" && SRVCapable(v, srv.Transport) {
+		// SRV mode: the phone resolves the SIP servers from the name's SRV
+		// records, so it needs the name and no port; the backup is then
+		// the SRV set's job.
+		srv.DNSMode, srv.Host, srv.Port = prov.DNSSRV, p.SIPSRV, 0
+		return srv
+	}
+	backups, _ := p.BackupServers()
+	for _, b := range backups {
+		h, port := splitHostPort(b)
+		srv.Backups = append(srv.Backups, prov.Backup{Host: h, Port: port})
+	}
+	if len(srv.Backups) > 0 {
+		srv.Backup = &srv.Backups[0]
+	}
 	return srv
+}
+
+// SRVCapable reports whether a phone of vendor v on transport registers by
+// SRV name in SRV mode: Grandstream on UDP or TCP (DNS Mode SRV, P103), and
+// Yealink and Poly on UDP through their DNS-NAPTR transport, which takes
+// the place of the UDP or TCP choice (S-20). Every other phone keeps the
+// address and its backups.
+func SRVCapable(v prov.Vendor, transport string) bool {
+	switch v {
+	case prov.Grandstream:
+		return transport != "tls"
+	case prov.Yealink, prov.Poly:
+		return transport == "udp"
+	}
+	return false
+}
+
+// The sources of the backup servers (BackupServers).
+const (
+	BackupFromEnv   = "env"   // HELLO_PROV_SIP_BACKUP_SERVERS
+	BackupFromNodes = "nodes" // the HA node list
+	BackupNone      = "none"
+)
+
+// maxBackups is how many backup servers a phone is given.
+const maxBackups = 2
+
+// BackupServers are the backup registrars rendered configs name, as
+// host:port, and where they come from (S-20). HELLO_PROV_SIP_BACKUP_SERVERS
+// wins when it is set (an override, and the way to name the second edge of
+// a Kamailio pair). Otherwise they come from the HA node list: when the SIP
+// server phones register with is itself a hello-sip node (its advertised
+// address, the default HELLO_PROV_SIP_SERVER), the other READY hello-sip
+// nodes are its backups, in node order. Behind an edge (Kamailio, a VIP or
+// a load balancer) the nodes are not the phones' to reach, so there are
+// none.
+func (p ProvSettings) BackupServers() ([]string, string) {
+	if len(p.SIPBackupServers) > 0 {
+		return p.SIPBackupServers, BackupFromEnv
+	}
+	if p.SIPNodes == nil {
+		return nil, BackupNone
+	}
+	nodes := p.SIPNodes()
+	primary := normHostPort(p.SIPServer)
+	if !slices.ContainsFunc(nodes, func(n string) bool { return normHostPort(n) == primary }) {
+		return nil, BackupNone
+	}
+	var out []string
+	for _, n := range nodes {
+		if normHostPort(n) == primary || slices.ContainsFunc(out, func(o string) bool { return normHostPort(o) == normHostPort(n) }) {
+			continue
+		}
+		if out = append(out, n); len(out) == maxBackups {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return nil, BackupNone
+	}
+	return out, BackupFromNodes
+}
+
+// normHostPort is a host:port with the default SIP port filled in and the
+// host lowercased, so two spellings of one address compare equal.
+func normHostPort(hp string) string {
+	h, port := splitHostPort(strings.TrimSpace(hp))
+	return net.JoinHostPort(strings.ToLower(h), strconv.Itoa(port))
 }
 
 // WithProv sets the provisioning settings and returns s.
@@ -200,10 +279,19 @@ type Phone struct {
 	// MaxLines is how many the model takes (S-10). SharingRole is host or
 	// guest, and matters only while the phone's group has account sharing
 	// on (S-11).
-	Lines          []PhoneLine     `json:"lines"`
-	MaxLines       int             `json:"maxLines"`
-	SharingRole    string          `json:"sharingRole"`
-	BLF            []string        `json:"blf"`
+	Lines       []PhoneLine `json:"lines"`
+	MaxLines    int         `json:"maxLines"`
+	SharingRole string      `json:"sharingRole"`
+	// BLF are the phone's BLF entries (extension numbers); a Grandstream
+	// WP takes them as speed dials, at most SpeedDialSlots (0 for a phone
+	// with BLF keys) (phone-feature-parity S-12).
+	BLF            []string `json:"blf"`
+	SpeedDialSlots int      `json:"speedDialSlots"`
+	// SideKey is the phone's own side key function (ptt, alarm or none),
+	// nil to use its group's; SideKeyChoices are the functions the model
+	// takes, empty for a phone without a side key (S-12).
+	SideKey        *string         `json:"sideKey"`
+	SideKeyChoices []string        `json:"sideKeyChoices"`
 	Enabled        bool            `json:"enabled"`
 	TokenExposed   bool            `json:"tokenExposed"`
 	UAMismatch     bool            `json:"uaMismatch"`
@@ -235,7 +323,7 @@ const phoneSelect = `
 	       COALESCE(p.firmware_seen, ''),
 	       COALESCE((SELECT f.result = 'render_error' FROM prov_fetches f WHERE f.phone_id = p.id
 	                 ORDER BY f.at DESC, f.id DESC LIMIT 1), FALSE),
-	       p.created_at, p.updated_at, p.group_id, p.ptt_channel_id, p.sharing_role
+	       p.created_at, p.updated_at, p.group_id, p.ptt_channel_id, p.sharing_role, p.side_key
 	FROM phones p LEFT JOIN devices d ON d.id = p.device_id LEFT JOIN extensions e ON e.id = d.extension_id`
 
 func scanPhone(r interface{ Scan(...any) error }) (Phone, error) {
@@ -245,15 +333,19 @@ func scanPhone(r interface{ Scan(...any) error }) (Phone, error) {
 		group, ptt    sql.NullInt64
 		blf, status   []byte
 		first, last   sql.NullTime
+		sideKey       sql.NullString
 	)
 	err := r.Scan(&p.ID, &p.MAC, &p.Serial, &p.Vendor, &p.Model, &p.Label, &dev, &ext, &p.ExtensionNumber, &tpl,
 		&blf, &p.Enabled, &p.TokenExposed, &p.UAMismatch, &p.BootArmed, &p.BootReclaimed, &status, &first, &last,
-		&p.LastFetchIP, &p.LastFetchUA, &p.LastFetchFile, &p.FirmwareSeen, &p.RenderError, &p.CreatedAt, &p.UpdatedAt, &group, &ptt, &p.SharingRole)
+		&p.LastFetchIP, &p.LastFetchUA, &p.LastFetchFile, &p.FirmwareSeen, &p.RenderError, &p.CreatedAt, &p.UpdatedAt, &group, &ptt, &p.SharingRole, &sideKey)
 	if err != nil {
 		return p, err
 	}
 	p.DeviceID, p.ExtensionID, p.TemplateID, p.GroupID = nullInt(dev), nullInt(ext), nullInt(tpl), nullInt(group)
 	p.PTTChannelID = nullInt(ptt)
+	if sideKey.Valid {
+		p.SideKey = &sideKey.String
+	}
 	p.FirstFetchAt, p.LastFetchAt = nullTime(first), nullTime(last)
 	if err := json.Unmarshal(blf, &p.BLF); err != nil {
 		return p, fmt.Errorf("phone %d blf: %w", p.ID, err)
@@ -695,9 +787,12 @@ type PhoneChange struct {
 	PTTChannelID **int64
 	// SharingRole is host or guest (account sharing, S-11).
 	SharingRole *string
-	Bind        *Binding
-	Unbind      bool
-	Realm       string
+	// SideKey sets the phone's side key function (S-12); a pointer to nil
+	// returns it to the group's.
+	SideKey **string
+	Bind    *Binding
+	Unbind  bool
+	Realm   string
 }
 
 // Binding names the device a phone provisions: an existing one, or 0 to
@@ -831,6 +926,10 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 		if c.Serial != nil {
 			serial = *c.Serial
 		}
+		setSide, sideArg := c.SideKey != nil, any(nil)
+		if setSide && *c.SideKey != nil {
+			sideArg = **c.SideKey
+		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE phones SET serial = CASE WHEN $2::text IS NULL THEN serial ELSE NULLIF($2, '') END,
 			       vendor = $3, model = COALESCE($4, model), label = COALESCE($5, label),
@@ -839,9 +938,10 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 			       group_id = CASE WHEN $11 THEN $12::bigint ELSE group_id END,
 			       ptt_channel_id = CASE WHEN $13 THEN $14::bigint ELSE ptt_channel_id END,
 			       sharing_role = COALESCE($15, sharing_role),
+			       side_key = CASE WHEN $16 THEN $17::text ELSE side_key END,
 			       device_id = $10, updated_at = now()
 			WHERE id = $1`, id, serial, vendor, c.Model, c.Label, blfArg, enabled, setTpl, tplArg, device,
-			setGroup, groupArg, setPTT, pttArg, c.SharingRole); err != nil {
+			setGroup, groupArg, setPTT, pttArg, c.SharingRole, setSide, sideArg); err != nil {
 			return sid, false, err
 		}
 		p, err = getPhone(ctx, tx, id)

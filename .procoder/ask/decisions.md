@@ -4773,3 +4773,88 @@ Stacked on #343 (items 5 and 6); merges after it. Choices:
   ConfigMap copy and its checksum annotation: deploy/kuvryn-sync/kw changes.
   Regression guard: TestKamailioInvite100AfterRelay; the kamailio-ha job
   (KINDHA_GRACEFUL_REPEAT=n repeats the graceful loss) shows it end to end.
+
+## Provisioning parity items 15 and 29 finished: WP side key and speed dials, backups from the HA node list, Snom/Fanvil backups, Yealink/Poly SRV (2026-11-14)
+
+Spec `.procoder/specs/phone-feature-parity.md` S-12 and S-20, following #259,
+#262 and #312.
+
+### Item 15 (S-12): side key and speed dials as first-class fields
+
+- **Side key.** `phone_groups.side_key` (ptt, alarm, none; default ptt) and
+  `phones.side_key` (NULL inherits), migration placeholder `00180_side_key.sql`.
+  API `PUT /api/v1/phone-groups/{id}/side-key` (MCP `setPhoneGroupSideKey`) and
+  `sideKey` on `PATCH /api/v1/phones/{id}`; the phone view carries
+  `sideKeyChoices`. Console: phone group editor and phone form.
+- PTT and paging are one firmware value ("PTT/Paging", 0), so Hello offers one
+  choice for both rather than a "paging" value that would write the same 0.
+- Keys per model, from Grandstream's templates (config-template-10212026.zip):
+  WP8x6 `P82317` 0/2/4 (PTT/paging, alarm, none); WP856 `P82317` 0/4 (its
+  "PTT Button" has no alarm value); WP820 multi-function button `P22258` 0/4
+  (its 2, SAFE/Panic call, needs the WP820 panic-call keys, which Hello does not
+  write, so alarm is not offered); WP810/822/825 none. The key is now written
+  always (before: `P82317 = 0` only with PTT or a paging key), so a changed
+  choice reverts. A choice the model lacks, or alarm without the group's alarm
+  destination, renders PTT/paging (the factory default); the API refuses a
+  phone-level choice its model lacks. A raw override of the same P-value still
+  wins (overrides are applied after the template).
+- **Speed dials.** A WP's BLF entries are no longer refused: they are written as
+  speed dials (spec: "Hello BLF entries on a WP phone are offered as speed
+  dials"). Slots: WP8x6 number keys 2 to 9 and 0 (long press; key 0 mode/
+  account/label/value `P8682` to `P8685`, key n `P8690 + 4 (n-2)` on; mode 0
+  Speed Dial, -1 None); WP810/822/825 and WP820 speed dial keys 2 to 9 and 0
+  (`P23011 + 5 (n-2)` account, `P23013 + 5 (n-2)` number; key 0 `P23001`,
+  `P23003`); WP856 multi-purpose keys 1 to 30 (`P23000 + 5 (n-1)` mode 0, then
+  account, description, value). Correction to the 2026-11-09 note "The WP8x6
+  template has no speed dial key": it has the number keys above (section
+  "Number Keys", commented out with mode -1 default). Every slot is written,
+  empty when unused, so a removed entry is cleared; the WP856 is capped at 30 so
+  that clearing stays bounded (the template has 160 MPKs). The WP856 MPK also
+  has a BLF mode (1): the spec asks for speed dials on every WP, so mode 0 is
+  written; switching the WP856 to real BLF lamps is a one-value change if the
+  user wants it. The API refuses more entries than the model's slots
+  (`speedDialSlots` on the phone view).
+- Unconfirmed on hardware (hardware list): every side key and speed dial key
+  above on a WP8x6, WP822, WP820 and WP856; in particular the WP820 speed dial
+  keys (commented out in its template) and whether the WP8x6 number keys are
+  the long-press digits the "Number Keys" section suggests.
+
+### Item 29 (S-20): backups from the HA node list, Snom and Fanvil, Yealink and Poly SRV
+
+- **HA node list.** hello-control's cluster poller (every heartbeat) keeps the
+  SIP addresses (`HELLO_SIP_ADVERTISED_ADDR`) of the READY hello-sip members,
+  by node ID (`api.SIPNodeList`). When `HELLO_PROV_SIP_SERVER` is one of them
+  (phones register with a node directly; it is also the default of that
+  setting) the other nodes, at most two, are the phones' backups. Behind an
+  edge (Kamailio, a VIP, a load balancer; kw and Helm) the member addresses are
+  in-cluster names phones cannot reach, so there are none from the list: the
+  edges are not in the membership and hello-control has no runtime list of
+  them. `HELLO_PROV_SIP_BACKUP_SERVERS` stays as an override (the spec allows
+  it) and is how the second Kamailio of a VIP-less pair is named. The source is
+  shown on the Provisioning settings page (`sipBackupServers`,
+  `sipBackupSource`, `sipSrv` on `GET /api/v1/prov/settings`).
+- **Snom**: `user_outbound` per identity lists the primary, then every backup,
+  `host:port;transport=udp|tcp`, comma separated (Snom Service Hub,
+  user_outbound: "Starting version 8.7.x multiple comma separated values are
+  supported for e.g. failover scenarios"; registrar_whitelist stays empty, its
+  default, which user_outbound must otherwise match). Written empty without a
+  backup, so removing them reverts. This replaces the earlier "no Snom key".
+- **Fanvil**: `SIPn Backup Addr`, `Backup Port`, `Backup Transport` (0 UDP, 1
+  TCP), `Backup TTL`. Key names from a Fanvil X5 configuration export as copied
+  in Nethesis' Tancredi template `fanvil-X5.tmpl` (third party; no Fanvil
+  document with the export names could be fetched). Backup Addr is written
+  empty without a backup. Unconfirmed: on the hardware list.
+- **Yealink and Poly SRV**: with `HELLO_PROV_SIP_SRV`, a Yealink or Poly on UDP
+  registers with the name, port 0 and the DNS-NAPTR transport (Yealink
+  `transport_type = 3`; Poly `transport = "DNSnaptr"`, which the UC Software
+  guide defines as "address a host name and port 0 or Null: NAPTR then SRV
+  look-ups, RFC 3263"). The earlier objection ("DNS-NAPTR is not plain SRV")
+  does not hold: with no NAPTR records, RFC 3263 clients fall back to SRV, and
+  Hello's documented record set is SRV only. TCP and TLS phones of those vendors
+  keep the address and backups (DNS-NAPTR replaces the transport choice).
+  Yealink's port 0 and its UDP-only SRV fallback (`naptr_build` default 0,
+  not written) are from the administrator guide: hardware list.
+- Also fixed in passing: further lines (2 and up) now get the backup on
+  Yealink, Poly, Snom and Fanvil, and a backup follows the primary's transport
+  (it was UDP only); a Yealink or Poly further line on a TCP phone now
+  registers over TCP like line 1 (it was written UDP).

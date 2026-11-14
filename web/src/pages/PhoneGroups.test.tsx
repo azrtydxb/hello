@@ -323,6 +323,28 @@ describe("Phone groups", () => {
     });
   });
 
+  it("sets the WP side key with its own call", async () => {
+    const calls = api("admin", {
+      "PUT /api/v1/phone-groups/9": () => json(group()),
+      "PUT /api/v1/phone-groups/9/side-key": () =>
+        json(group({ sideKey: "alarm" })),
+    });
+    renderApp("/phones/groups");
+    await groupsTable();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Site A" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Site A" });
+    const side = within(dialog).getByLabelText("Side key");
+    expect(side).toHaveValue("ptt");
+    fireEvent.change(side, { target: { value: "alarm" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls).toContainEqual({
+      method: "PUT",
+      url: "/api/v1/phone-groups/9/side-key",
+      body: { sideKey: "alarm" },
+    });
+  });
+
   it("regenerates the sharing password after a confirmation", async () => {
     const calls = api("admin", {
       "POST /api/v1/phone-groups/9/account-sharing/regenerate": () =>
@@ -364,6 +386,7 @@ describe("Phone groups", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(calls.some((c) => c.url.endsWith("/account-sharing"))).toBe(false);
+    expect(calls.some((c) => c.url.endsWith("/side-key"))).toBe(false);
   });
 
   it("saves group paging channels and the paging options", async () => {

@@ -569,6 +569,7 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/syslog/unknown", auth.ScopeRead, auth.RoleViewer, false, s.unknownSyslog},
 		{"GET", "/api/v1/phone-groups/{id}/ldap", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneGroupLDAP},
 		{"PUT", "/api/v1/phone-groups/{id}/ldap", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupLDAP},
+		{"PUT", "/api/v1/phone-groups/{id}/side-key", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupSideKey},
 
 		{"GET", "/api/v1/prov/templates", auth.ScopeRead, auth.RoleViewer, false, s.listTemplates},
 		{"POST", "/api/v1/prov/templates", auth.ScopeWrite, auth.RoleOperator, false, s.createTemplate},

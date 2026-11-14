@@ -221,6 +221,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - Real carrier trunk check; load test window
 - Phone checks: Grandstream P4428, P22650, P2325; WP822 PTT; BLF lamps; voicemail audio and DTMF; key sync and messaging keys on Poly/Fanvil/Snom/Yealink; vendor phonebook keys; every "(verify)" template key
 - WP836 text message retest after reboot
+- Parity 15 and 29 (S-12, S-20): WP side key (WP8x6 `P82317` 0/2/4 with an alarm destination, WP856 `P82317`, WP820 `P22258`) and speed dials (WP8x6 number keys `P8682`/`P8690`+, WP822 and WP820 `P23001`/`P23011`+, WP856 MPK `P23000`+) on real handsets; Snom `user_outbound` failover list; Fanvil `SIPn Backup Addr/Port/Transport/TTL` (key names from a third-party export copy); Yealink DNS-NAPTR with port 0 and Poly `DNSnaptr` against an SRV-only record set; a node killed under each in backup and SRV mode
 - Parity lab items 1-7 and 14
 - Hello MCP "Connected apps" end-to-end (after #189)
 - Real-account lab lists for integrations, messaging, clients (after those phases)

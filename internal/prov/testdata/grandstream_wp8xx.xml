@@ -35,6 +35,24 @@
     <P191>0</P191>
     <P207>syslog.hello.example:5514</P207>
     <P208>2</P208>
+    <P23011>0</P23011>
+    <P23013>1002</P23013>
+    <P23016>0</P23016>
+    <P23018>1003</P23018>
+    <P23021>0</P23021>
+    <P23023>1004</P23023>
+    <P23026>0</P23026>
+    <P23028>1005</P23028>
+    <P23031>0</P23031>
+    <P23033>1006</P23033>
+    <P23036>0</P23036>
+    <P23038>1007</P23038>
+    <P23041>0</P23041>
+    <P23043>1008</P23043>
+    <P23046>0</P23046>
+    <P23048>1009</P23048>
+    <P23001>0</P23001>
+    <P23003>1010</P23003>
     <!-- Paging and intercom (Kuvryn Hello phonebooks-ptt spec P-12, P-13): answer by itself, on
          the speaker after a short beep, when Hello sends Call-Info answer-after=0. The WP8xx
          Administration Guide names this setting "Account > Call Settings > Allow Auto Answer by

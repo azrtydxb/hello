@@ -3059,9 +3059,17 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["name", "description", "defaults", "limits"],
+                        "required": [
+                          "name",
+                          "description",
+                          "defaults",
+                          "limits"
+                        ],
                         "properties": {
-                          "name": { "type": "string", "enum": ["generic", "sbc-peer"] },
+                          "name": {
+                            "type": "string",
+                            "enum": ["generic", "sbc-peer"]
+                          },
                           "description": { "type": "string" },
                           "defaults": {
                             "type": "object",
@@ -21933,6 +21941,70 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/phone-groups/{id}/side-key": {
+      "put": {
+        "operationId": "setPhoneGroupSideKey",
+        "summary": "Set a phone group's side key",
+        "description": "Sets what the side key of the group's Grandstream WP phones does (phone-feature-parity S-12): ptt (PTT/paging, the default), alarm (the WP8x6 alarm call to the group's alarm destination; a WP8x6 without one, and a WP856 or WP820, keep PTT/paging) or none. The template writes P82317 (WP8x6, WP856) or P22258 (WP820); the WP810/822/825 has no side key. A phone's own sideKey wins over the group's. Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["sideKey"],
+                "properties": {
+                  "sideKey": {
+                    "type": "string",
+                    "enum": ["ptt", "alarm", "none"],
+                    "description": "ptt (PTT/paging), alarm (the WP8x6 alarm call) or none."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/phones/{id}/syslog": {
       "get": {
         "operationId": "listPhoneSyslog",
@@ -29413,7 +29485,24 @@
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Extension numbers shown as busy-lamp-field keys; a Grandstream WP takes them as speed dials (see speedDialSlots)."
+          },
+          "speedDialSlots": {
+            "type": "integer",
+            "description": "How many speed dials the model takes for its BLF entries: a Grandstream WP (WP8x6, WP810/820/822/825: 9; WP856: 30), which has no BLF keys; 0 for a phone with BLF keys."
+          },
+          "sideKey": {
+            "type": ["string", "null"],
+            "enum": ["ptt", "alarm", "none", null],
+            "description": "The phone's own side key function (Grandstream WP); null uses its group's."
+          },
+          "sideKeyChoices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The side key functions the model takes (WP8x6: ptt, alarm, none; WP856 and WP820: ptt, none); empty for a phone without a side key Hello can set."
           },
           "redirectStatus": {
             "$ref": "#/components/schemas/RedirectStatus"
@@ -29867,7 +29956,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Extension numbers shown as busy-lamp-field keys."
+            "description": "Extension numbers shown as busy-lamp-field keys. A Grandstream WP has no BLF keys and takes them as speed dials, at most its speedDialSlots."
           },
           "enabled": {
             "type": "boolean",
@@ -29885,6 +29974,11 @@
             "type": "string",
             "enum": ["host", "guest"],
             "description": "The phone's role when its group has account sharing on (Grandstream WP8x6 only)."
+          },
+          "sideKey": {
+            "type": ["string", "null"],
+            "enum": ["ptt", "alarm", "none", null],
+            "description": "The phone's own side key function (Grandstream WP; one of its sideKeyChoices); null returns it to its group's."
           }
         }
       },
@@ -30180,6 +30274,22 @@
           },
           "sipServer": {
             "type": "string"
+          },
+          "sipBackupServers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The backup registrars (host:port) phones are given (phone-feature-parity S-20), at most two."
+          },
+          "sipBackupSource": {
+            "type": "string",
+            "enum": ["env", "nodes", "none"],
+            "description": "Where the backups come from: HELLO_PROV_SIP_BACKUP_SERVERS (env, an override), the HA node list (nodes: the other READY hello-sip nodes, when phones register with a node directly), or none."
+          },
+          "sipSrv": {
+            "type": "string",
+            "description": "HELLO_PROV_SIP_SRV: the DNS name Grandstream phones, and Yealink and Poly phones on UDP, resolve the SIP servers from by SRV; empty in A-record mode."
           },
           "dhcp": {
             "type": "array",
@@ -34636,7 +34746,24 @@
       },
       "RecordingVideoStream": {
         "type": "object",
-        "required": ["id", "part", "leg", "direction", "codec", "container", "segments", "bytes", "width", "height", "offsetMs", "durationMs", "startedAt", "state", "finalized", "mediaType"],
+        "required": [
+          "id",
+          "part",
+          "leg",
+          "direction",
+          "codec",
+          "container",
+          "segments",
+          "bytes",
+          "width",
+          "height",
+          "offsetMs",
+          "durationMs",
+          "startedAt",
+          "state",
+          "finalized",
+          "mediaType"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -39957,6 +40084,11 @@
           "ldapEnabled": {
             "type": "boolean",
             "description": "The group's phones are given the LDAP directory (see PUT /phone-groups/{id}/ldap)."
+          },
+          "sideKey": {
+            "type": "string",
+            "enum": ["ptt", "alarm", "none"],
+            "description": "What the side key of the group's Grandstream WP phones does: ptt (PTT/paging, the default), alarm (the group's alarm call; WP8x6 with an alarm destination, otherwise PTT/paging) or none. A phone may override it (see PUT /phone-groups/{id}/side-key)."
           },
           "syslog": {
             "$ref": "#/components/schemas/PhoneGroupSyslog"
