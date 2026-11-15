@@ -62,6 +62,15 @@ type Store interface {
 	Apply(ctx context.Context, actor string, c Connector, op Op) (Applied, error)
 	PruneChanges(ctx context.Context, before time.Time) (int64, error)
 	TryLock(ctx context.Context, key string) (unlock func(), ok bool, err error)
+
+	// RecordPush appends the changes of a push to the connector's SCIM run
+	// of the hour (created when missing) and adds them to its counts.
+	RecordPush(ctx context.Context, connectorID int64, cs []Change, at time.Time) error
+	// PushDisables counts the users pushes disabled since the time.
+	PushDisables(ctx context.Context, connectorID int64, since time.Time) (int, error)
+	// SetPaused pauses or resumes a push connector; resuming restarts the
+	// guard's window at the time (guard_since).
+	SetPaused(ctx context.Context, connectorID int64, paused bool, at time.Time) error
 }
 
 // ChangeRetention is how long sync changes are kept (spec Data).
@@ -166,7 +175,11 @@ func (e *Engine) Create(ctx context.Context, actor string, in ConnectorInput) (C
 	if err != nil {
 		return Connector{}, err
 	}
-	c := Connector{Kind: in.Kind, Mode: ModeAuthoritative, ScheduleMinutes: 60, Mappings: d.DefaultMappings(),
+	schedule := 60
+	if isPush(d) {
+		schedule = 0
+	}
+	c := Connector{Kind: in.Kind, Mode: ModeAuthoritative, ScheduleMinutes: schedule, Mappings: d.DefaultMappings(),
 		GroupRules: GroupRules{Roles: []RoleRule{}, RingGroups: []RingGroupRule{}}, AutoProvision: DefaultAutoProvision()}
 	// A cloud directory's users sign in at that cloud's IdP by default.
 	switch in.Kind {
@@ -224,7 +237,11 @@ func (e *Engine) save(ctx context.Context, actor string, d Driver, c Connector, 
 	if in.ScheduleMinutes != nil {
 		c.ScheduleMinutes = *in.ScheduleMinutes
 	}
-	if c.ScheduleMinutes != 0 && (c.ScheduleMinutes < 5 || c.ScheduleMinutes > 10080) {
+	push := isPush(d)
+	switch {
+	case push && c.ScheduleMinutes != 0:
+		v.Fields = append(v.Fields, FieldError{"scheduleMinutes", "must be 0: the identity provider pushes the changes"})
+	case c.ScheduleMinutes != 0 && (c.ScheduleMinutes < 5 || c.ScheduleMinutes > 10080):
 		v.Fields = append(v.Fields, FieldError{"scheduleMinutes", "must be 0 (manual only) or 5 to 10080"})
 	}
 	if in.Mappings != nil {
@@ -307,7 +324,9 @@ func (e *Engine) save(ctx context.Context, actor string, d Driver, c Connector, 
 	fp := ""
 	field := secretField(d)
 	sd, custom := d.(SecretDriver)
-	if in.Secret != nil {
+	if in.Secret != nil && push {
+		v.Fields = append(v.Fields, FieldError{field, "a SCIM connector has no password: issue a SCIM token instead"})
+	} else if in.Secret != nil {
 		switch {
 		case *in.Secret == "" && !custom:
 			v.Fields = append(v.Fields, FieldError{field, "must not be empty: an empty password is an anonymous bind"})
@@ -319,7 +338,7 @@ func (e *Engine) save(ctx context.Context, actor string, d Driver, c Connector, 
 			}
 		}
 	}
-	if cerr == nil {
+	if cerr == nil && !push {
 		fp = Fingerprint(d.Identity(c.Config))
 		if c.ID != 0 && in.Secret == nil && c.HasCredential && Fingerprint(oldIdentity) != fp {
 			msg := "enter the bind password again: the host or bind DN changed"
@@ -428,7 +447,7 @@ func (m Mappings) Attributes() []string {
 
 func (e *Engine) fetchOptions(c Connector) FetchOptions {
 	return FetchOptions{Limit: c.Options.userCap(), NeedGroups: c.needGroups(), Attributes: c.Mappings.Attributes(), Allow: e.Allow, Dial: e.Dial,
-		HTTP: e.HTTP, AllowPlaintext: e.AllowPlaintext, Now: e.now()}
+		HTTP: e.HTTP, AllowPlaintext: e.AllowPlaintext, Now: e.now(), ConnectorID: c.ID}
 }
 
 // Test connects with the stored credential and reads a small page (I-19). The
@@ -456,9 +475,9 @@ func (e *Engine) Test(ctx context.Context, actor string, id int64, mappings *Map
 		ce := classify(err)
 		return &TestResult{OK: false, ErrorCode: ce.Code, ErrorDetail: ce.Detail, Sample: []SampleRow{}, Groups: []SourceGroup{}}
 	}
-	secret, err := e.Store.Secret(ctx, id)
+	secret, err := e.secret(ctx, d, id)
 	if err != nil {
-		return failed(&Error{Code: CodeAuthFailed, Detail: "no credential is set"}), nil
+		return failed(err), nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -470,6 +489,18 @@ func (e *Engine) Test(ctx context.Context, actor string, id int64, mappings *Map
 		res.Sample[i].Mapped = c.Mappings.Apply(SourceUser{ExternalID: res.Sample[i].ExternalID, Attrs: res.Sample[i].Raw})
 	}
 	return res, nil
+}
+
+// secret opens a connector's credential; a push connector has none.
+func (e *Engine) secret(ctx context.Context, d Driver, id int64) (string, error) {
+	if isPush(d) {
+		return "", nil
+	}
+	s, err := e.Store.Secret(ctx, id)
+	if err != nil {
+		return "", &Error{Code: CodeAuthFailed, Detail: "no credential is set"}
+	}
+	return s, nil
 }
 
 // classify turns any error into a scrubbed, classified one.
@@ -553,6 +584,12 @@ func (e *Engine) applyRun(ctx context.Context, actor string, runID int64, dec De
 	run, err := e.Store.GetRun(ctx, runID)
 	if err != nil {
 		return Run{}, err
+	}
+	if run.Kind == RunSCIM {
+		if !confirmed || run.Status != StatusNeedsConfirmation {
+			return run, ErrNotApplicable
+		}
+		return e.resumePush(ctx, actor, run)
 	}
 	if run.Status != want {
 		return run, ErrNotApplicable
@@ -675,9 +712,9 @@ func (e *Engine) fetch(ctx context.Context, c Connector, since *SyncMark) (*Resu
 	if err != nil {
 		return nil, err
 	}
-	secret, err := e.Store.Secret(ctx, c.ID)
+	secret, err := e.secret(ctx, d, c.ID)
 	if err != nil {
-		return nil, &Error{Code: CodeAuthFailed, Detail: "no credential is set"}
+		return nil, err
 	}
 	o := e.fetchOptions(c)
 	o.Since = since

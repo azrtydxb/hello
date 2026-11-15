@@ -4774,6 +4774,74 @@ Stacked on #343 (items 5 and 6); merges after it. Choices:
   Regression guard: TestKamailioInvite100AfterRelay; the kamailio-ha job
   (KINDHA_GRACEFUL_REPEAT=n repeats the graceful loss) shows it end to end.
 
+## Integrations P10: SCIM 2.0 server (2026-11-14, feat/scim)
+
+- **One engine for push and pull.** A SCIM connector is a directory connector
+  of kind `scim` whose driver reads the resources identity providers pushed.
+  Every SCIM write runs the directory planner on that one user (absence rule
+  off: a push says nothing about other users) and applies the plan at once
+  (`Engine.Push`); a manual preview or apply on a SCIM connector re-maps every
+  stored resource, which is how a changed mapping or rule reaches users pushed
+  earlier. A SCIM connector has no schedule and no credential.
+- **Resources are kept as sent** (`scim_resources`, data in canonical
+  attribute case, never a password; members in `scim_group_members`), so a GET
+  answers what the IdP set. Hello assigns the SCIM `id` (a UUID); it is also
+  `users.external_id`, the stable link. The IdP's `externalId` is stored and
+  filterable but is not the link (Okta does not always send one).
+- **A push that would be a conflict is refused** (409 uniqueness or 400
+  invalidValue/mutability by the planner's reason), recorded on the SCIM run,
+  and nothing is stored, so the IdP shows the error and retries after a fix.
+  A user created with `active: false` is stored without a Hello user until it
+  is active.
+- **Adopting local users** needs the connector switch `adoptExisting` (default
+  off): a push has no preview to tick, so the switch is the administrator's
+  confirmation (I-6). Local admins are never adopted.
+- **DELETE** marks the resource deleted (404 to SCIM) and disables the Hello
+  user; the same userName or externalId pushed again revives the resource with
+  its id, so it re-links and re-enables the same Hello user.
+- **Guard (I-25):** disables counted per rolling hour from the SCIM runs'
+  `disable` rows against 20 percent of the linked users, at least 5. Over it:
+  429, nothing applied, the connector paused (`paused_at`), and a `scim` run
+  with status `needs_confirmation` holding the halted rows. Confirming that run
+  (existing confirm route, or Resume SCIM in the console) clears the pause and
+  restarts the window (`guard_since`); the refused requests are not replayed,
+  the IdP sends them again.
+- **Changes are recorded on one SCIM run per connector and hour**, so the Runs
+  view shows what the IdP did with the existing change table.
+- **Tokens:** a `scim_tokens` table (SHA-256 only, `hello_scim_` prefix), at
+  most two active per connector so a token can be rotated without a gap (the
+  spec says "one bearer token"; two is a superset for rotation). Issue needs
+  `secrets` (route `POST .../scim-token` as specced), list/status/revoke are
+  admin; issue and revoke are excluded from MCP (credentials), list and status
+  are MCP tools.
+- **Group rules** match a pushed group by its Hello id or its externalId
+  (Entra's object id), so a rule can be written before the group is pushed.
+  Membership changes re-plan only the affected members, and only when a rule
+  names the group.
+- **Groups also accept PUT** (spec lists GET/PATCH/DELETE): Okta's group push
+  may PUT; additive. `/Bulk`, `/Me` and `/.search` answer 501.
+- **ETags** are supported (meta.version, If-Match 412, If-None-Match 304),
+  though not required by the spec, as they cost one version column.
+- **Rate limit** 600/min per token is kept in memory per replica, like the
+  recording-link limiter.
+- **Writes of one connector are serialised** with the engine's advisory lock
+  key `hello:dirsync:<id>` (blocking, 15 s, then 503), so a SCIM write never
+  interleaves with a manual apply.
+- **Default extension mapping** is only Hello's pbx extension attribute: the
+  spec's `phoneNumbers[type eq "work"]` fallback would turn every full phone
+  number into an `extension_invalid` refusal; it is documented as an opt-in
+  (`phoneNumbers[work]` with the digit transforms).
+- `/scim/v2` is mounted only with `HELLO_PUBLIC_URL` (meta.location needs it);
+  without it `/scim/` answers a SCIM 404 and the token routes 503.
+- **Sign-in after P11.** Merged with P9/P11/P12: an enabled SCIM connector
+  needs `options.loginMethod` `oidc` with `oidcProvider` `entra` or `google`
+  (ldap_bind stays LDAP-only); the SCIM form asks for it. No default is
+  guessed from the IdP, since Okta or JumpCloud may push users who sign in with
+  Microsoft or Google. A push applies range auto-provisioning like a sync run
+  when the connector has it on.
+- Not tested: real Entra ID, Okta and JumpCloud tenants (lab list in
+  docs/scim.md and the tracker).
+
 ## Takeover re-INVITE restates the session timer (2026-11-15)
 
 - Context: #348 follow-up. `haReinvite` sent no `Session-Expires`, so a phone

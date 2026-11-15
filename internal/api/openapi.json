@@ -3679,7 +3679,9 @@
                             "type": "string",
                             "enum": ["generic", "sbc-peer"]
                           },
-                          "description": { "type": "string" },
+                          "description": {
+                            "type": "string"
+                          },
                           "defaults": {
                             "type": "object",
                             "additionalProperties": true,
@@ -3687,7 +3689,9 @@
                           },
                           "limits": {
                             "type": "array",
-                            "items": { "type": "string" },
+                            "items": {
+                              "type": "string"
+                            },
                             "description": "What the profile requires of the trunk, one sentence each."
                           }
                         }
@@ -24176,6 +24180,207 @@
         }
       }
     },
+    "/api/v1/directory/connectors/{id}/scim-token": {
+      "post": {
+        "operationId": "issueSCIMToken",
+        "summary": "Issue a SCIM token",
+        "description": "Issues a bearer token (hello_scim_ followed by 256 random bits) for a scim connector. The token is in this response only; Hello keeps its SHA-256. It is valid for /scim/v2 of this connector only and carries no API scope. A connector has at most two active tokens, so one can be replaced without a gap: issue the new one, put it in the identity provider, then revoke the old one. Audited. Needs HELLO_PUBLIC_URL (503 without).",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The token, shown this once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMTokenCreated"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The connector is not a SCIM connector (not_scim), or it has two active tokens already (too_many_tokens)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Issues a credential an identity provider uses to create and disable users.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/directory/connectors/{id}/scim-tokens": {
+      "get": {
+        "operationId": "listSCIMTokens",
+        "summary": "List SCIM tokens",
+        "description": "Lists a scim connector's tokens, newest first: when each was issued and by whom, when it was last used and whether it is revoked. Never the token.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tokens",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMTokenList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The connector is not a SCIM connector (not_scim)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/directory/connectors/{id}/scim": {
+      "get": {
+        "operationId": "getSCIMStatus",
+        "summary": "SCIM status of a connector",
+        "description": "The state of a scim connector: the base URL to give the identity provider, whether the mass-deprovision guard paused it (and the run to confirm to resume it), the guard's count of disables in the rolling hour and its limit, the pushed users and groups, when a token was last used and how many tokens are active.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The connector is not a SCIM connector (not_scim)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/directory/scim-tokens/{id}": {
+      "delete": {
+        "operationId": "revokeSCIMToken",
+        "summary": "Revoke a SCIM token",
+        "description": "Revokes a SCIM token at once: the identity provider's next request with it gets 401. Revoking a revoked token is not an error. Audited.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Revoking stops an identity provider's provisioning; a person decides.",
+          "category": "credentials"
+        }
+      }
+    },
     "/api/v1/me/inbox/conversations/{id}/calls": {
       "get": {
         "operationId": "listMyInboxConversationCalls",
@@ -26621,7 +26826,11 @@
             "name": "callId",
             "in": "path",
             "required": true,
-            "schema": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
             "description": "The SIP Call-ID of the client's own dialog, as the browser saw it."
           }
         ],
@@ -26629,19 +26838,37 @@
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/CallQualityReport" }
+              "schema": {
+                "$ref": "#/components/schemas/CallQualityReport"
+              }
             }
           }
         },
         "responses": {
-          "204": { "description": "Stored" },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "429": { "$ref": "#/components/responses/RateLimited" },
-          "500": { "$ref": "#/components/responses/Internal" },
-          "503": { "$ref": "#/components/responses/Unavailable" }
+          "204": {
+            "description": "Stored"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
         },
         "x-hello-scope": "session",
         "x-hello-role": "user",
@@ -35600,6 +35827,8 @@
                   "break_glass_local_admin",
                   "provider_disabled",
                   "already_linked",
+                  "not_scim",
+                  "too_many_tokens",
                   "not_redactable"
                 ]
               },
@@ -35894,7 +36123,24 @@
       },
       "User": {
         "type": "object",
-        "required": ["id", "username", "displayName", "email", "authMethod", "role", "enabled", "mustChangePassword", "extensionId", "extensionIds", "voicemailEmail", "totpEnabled", "totpRequired", "createdAt", "managedBy", "disabledAt"],
+        "required": [
+          "id",
+          "username",
+          "displayName",
+          "email",
+          "authMethod",
+          "role",
+          "enabled",
+          "mustChangePassword",
+          "extensionId",
+          "extensionIds",
+          "voicemailEmail",
+          "totpEnabled",
+          "totpRequired",
+          "createdAt",
+          "managedBy",
+          "disabledAt"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -40256,7 +40502,12 @@
       },
       "WebRTCCounters": {
         "type": "object",
-        "required": ["ice", "dtlsHandshakes", "dtlsFailures", "srtpAuthFailures"],
+        "required": [
+          "ice",
+          "dtlsHandshakes",
+          "dtlsFailures",
+          "srtpAuthFailures"
+        ],
         "properties": {
           "ice": {
             "type": "object",
@@ -40733,7 +40984,13 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["devices", "live", "webrtc", "quality", "register_attempts"]
+              "enum": [
+                "devices",
+                "live",
+                "webrtc",
+                "quality",
+                "register_attempts"
+              ]
             },
             "description": "Sources that could not be read; their parts are empty."
           }
@@ -45871,9 +46128,15 @@
               "type": "object",
               "required": ["id", "name", "type", "state", "detail"],
               "properties": {
-                "id": { "type": "string" },
-                "name": { "type": "string" },
-                "type": { "type": "string" },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
                 "state": {
                   "type": "string",
                   "enum": [
@@ -45884,7 +46147,9 @@
                     "unknown"
                   ]
                 },
-                "detail": { "type": "string" }
+                "detail": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -45894,9 +46159,15 @@
               "type": "object",
               "required": ["id", "brandId", "useCase", "state", "detail"],
               "properties": {
-                "id": { "type": "string" },
-                "brandId": { "type": "string" },
-                "useCase": { "type": "string" },
+                "id": {
+                  "type": "string"
+                },
+                "brandId": {
+                  "type": "string"
+                },
+                "useCase": {
+                  "type": "string"
+                },
                 "state": {
                   "type": "string",
                   "enum": [
@@ -45907,7 +46178,9 @@
                     "unknown"
                   ]
                 },
-                "detail": { "type": "string" }
+                "detail": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -45917,7 +46190,9 @@
               "type": "object",
               "required": ["number", "kind", "state", "detail", "added"],
               "properties": {
-                "number": { "type": "string" },
+                "number": {
+                  "type": "string"
+                },
                 "kind": {
                   "type": "string",
                   "enum": ["10dlc", "toll_free", "other"],
@@ -45933,7 +46208,9 @@
                     "unknown"
                   ]
                 },
-                "detail": { "type": "string" },
+                "detail": {
+                  "type": "string"
+                },
                 "added": {
                   "type": "boolean",
                   "description": "Whether the number is one of the channel's numbers in Hello."
@@ -45944,7 +46221,9 @@
           "unavailable": {
             "type": "array",
             "description": "Sections the carrier would not answer: brands, campaigns or tollfree.",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "checklist": {
             "type": "array",
@@ -45963,7 +46242,9 @@
                     "stophelp"
                   ]
                 },
-                "title": { "type": "string" },
+                "title": {
+                  "type": "string"
+                },
                 "state": {
                   "type": "string",
                   "enum": [
@@ -45976,7 +46257,9 @@
                     "not_applicable"
                   ]
                 },
-                "detail": { "type": "string" },
+                "detail": {
+                  "type": "string"
+                },
                 "link": {
                   "type": "string",
                   "description": "The carrier's documentation of the step."
@@ -49296,7 +49579,7 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["ldap", "google", "entra"]
+            "enum": ["ldap", "google", "entra", "scim"]
           },
           "name": {
             "type": "string",
@@ -49325,9 +49608,12 @@
               },
               {
                 "$ref": "#/components/schemas/DirectoryEntraConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectorySCIMConfig"
               }
             ],
-            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig or DirectoryEntraConfig."
+            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig, DirectoryEntraConfig or DirectorySCIMConfig."
           },
           "mappings": {
             "$ref": "#/components/schemas/DirectoryMappings"
@@ -49343,7 +49629,7 @@
           },
           "hasCredential": {
             "type": "boolean",
-            "description": "A credential (bind password, key file, client secret or private key) is stored. It is write-only and never returned."
+            "description": "A credential (bind password, key file, client secret or private key) is stored. It is write-only and never returned. Always false for a scim connector, which uses SCIM tokens."
           },
           "status": {
             "type": "string",
@@ -49376,6 +49662,11 @@
             "format": "date-time",
             "description": "When the last full run finished. A full run is forced every 24 hours, and when the mapping, rules or config change, because only a full run detects absences."
           },
+          "pausedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "scim connectors: set while the mass-deprovision guard holds the connector (SCIM writes answer 429); confirming its halted run resumes it."
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -49385,7 +49676,30 @@
             "format": "date-time"
           }
         },
-        "required": ["id", "kind", "name", "enabled", "mode", "scheduleMinutes", "config", "mappings", "groupRules", "options", "autoProvision", "hasCredential", "status", "lastRunAt", "lastSuccessAt", "lastErrorCode", "lastErrorDetail", "consecutiveFailures", "linkedUsers", "lastFullRunAt", "createdAt", "updatedAt"]
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "enabled",
+          "mode",
+          "scheduleMinutes",
+          "config",
+          "mappings",
+          "groupRules",
+          "options",
+          "autoProvision",
+          "hasCredential",
+          "status",
+          "lastRunAt",
+          "lastSuccessAt",
+          "lastErrorCode",
+          "lastErrorDetail",
+          "consecutiveFailures",
+          "linkedUsers",
+          "lastFullRunAt",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "DirectoryConnectorList": {
         "type": "object",
@@ -49404,7 +49718,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["ldap", "google", "entra"],
+            "enum": ["ldap", "google", "entra", "scim"],
             "description": "The connector kind."
           },
           "name": {
@@ -49436,9 +49750,12 @@
               },
               {
                 "$ref": "#/components/schemas/DirectoryEntraConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectorySCIMConfig"
               }
             ],
-            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig or DirectoryEntraConfig."
+            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig, DirectoryEntraConfig or DirectorySCIMConfig."
           },
           "mappings": {
             "$ref": "#/components/schemas/DirectoryMappings"
@@ -49497,9 +49814,12 @@
               },
               {
                 "$ref": "#/components/schemas/DirectoryEntraConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectorySCIMConfig"
               }
             ],
-            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig or DirectoryEntraConfig."
+            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig, DirectoryEntraConfig or DirectorySCIMConfig."
           },
           "mappings": {
             "$ref": "#/components/schemas/DirectoryMappings"
@@ -50003,6 +50323,208 @@
         },
         "required": ["error", "run"],
         "description": "The 409 stale_preview answer: the fresh preview to review."
+      },
+      "DirectorySCIMConfig": {
+        "type": "object",
+        "properties": {
+          "adoptExisting": {
+            "type": "boolean",
+            "description": "A pushed user may take over a local (non-admin) Hello user with the same e-mail address or username. There is no preview for a push, so turning this on is the confirmation; off, such a push is refused with 409 uniqueness."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Config of a scim connector. It has no credential: identity providers authenticate with SCIM tokens."
+      },
+      "SCIMToken": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "connectorId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "hint": {
+            "type": "string",
+            "description": "The prefix and the first characters, to tell tokens apart; not enough to use."
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the token last authenticated a request (recorded at most once a minute)."
+          },
+          "revokedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "connectorId",
+          "hint",
+          "createdBy",
+          "createdAt",
+          "lastUsedAt",
+          "revokedAt"
+        ]
+      },
+      "SCIMTokenCreated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "connectorId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "hint": {
+            "type": "string",
+            "description": "The prefix and the first characters, to tell tokens apart; not enough to use."
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the token last authenticated a request (recorded at most once a minute)."
+          },
+          "revokedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "token": {
+            "type": "string",
+            "description": "The bearer token for the identity provider. Shown in this response only.",
+            "x-hello-secret": true
+          },
+          "baseUrl": {
+            "type": "string",
+            "description": "The SCIM base URL (Tenant URL in Entra, SCIM connector base URL in Okta)."
+          }
+        },
+        "required": [
+          "id",
+          "connectorId",
+          "hint",
+          "createdBy",
+          "createdAt",
+          "lastUsedAt",
+          "revokedAt",
+          "token",
+          "baseUrl"
+        ]
+      },
+      "SCIMTokenList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SCIMToken"
+            }
+          }
+        },
+        "required": ["items"]
+      },
+      "SCIMStatus": {
+        "type": "object",
+        "properties": {
+          "connectorId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "baseUrl": {
+            "type": "string",
+            "description": "The SCIM base URL, HELLO_PUBLIC_URL/scim/v2."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "pausedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Set while the mass-deprovision guard holds the connector: SCIM writes answer 429 until an administrator confirms the run pausedRunId."
+          },
+          "pausedRunId": {
+            "type": ["integer", "null"],
+            "format": "int64"
+          },
+          "guard": {
+            "type": "object",
+            "properties": {
+              "disables": {
+                "type": "integer",
+                "description": "Users SCIM disabled in the rolling hour."
+              },
+              "limit": {
+                "type": "integer",
+                "description": "How many the guard allows: 20 percent of the linked users, at least 5."
+              },
+              "linked": {
+                "type": "integer",
+                "description": "Enabled users the connector manages."
+              }
+            },
+            "required": ["disables", "limit", "linked"]
+          },
+          "resources": {
+            "type": "object",
+            "properties": {
+              "users": {
+                "type": "integer"
+              },
+              "activeUsers": {
+                "type": "integer"
+              },
+              "deletedUsers": {
+                "type": "integer",
+                "description": "Users the identity provider deleted (their Hello users are disabled, not deleted)."
+              },
+              "groups": {
+                "type": "integer"
+              }
+            },
+            "required": ["users", "activeUsers", "deletedUsers", "groups"]
+          },
+          "lastRequestAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "activeTokens": {
+            "type": "integer"
+          },
+          "adoptExisting": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "connectorId",
+          "baseUrl",
+          "enabled",
+          "pausedAt",
+          "pausedRunId",
+          "guard",
+          "resources",
+          "lastRequestAt",
+          "activeTokens",
+          "adoptExisting"
+        ]
       },
       "InboxContactInput": {
         "type": "object",
@@ -51296,10 +51818,26 @@
             "description": "The video the client received, when the call had some.",
             "required": ["width", "height", "fps", "codec"],
             "properties": {
-              "width": { "type": "integer", "minimum": 0, "maximum": 16384 },
-              "height": { "type": "integer", "minimum": 0, "maximum": 16384 },
-              "fps": { "type": "integer", "minimum": 0, "maximum": 1000 },
-              "codec": { "type": "string", "maxLength": 32, "example": "H264" }
+              "width": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16384
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16384
+              },
+              "fps": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              },
+              "codec": {
+                "type": "string",
+                "maxLength": 32,
+                "example": "H264"
+              }
             }
           },
           "durationMs": {

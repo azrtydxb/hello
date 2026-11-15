@@ -152,6 +152,21 @@ server {
         proxy_read_timeout 300s;
     }
 
+    # SCIM 2.0 (docs/scim.md): identity providers push users and groups to
+    # /scim/v2 with a hello_scim_ bearer token; hello-control checks it. A
+    # PUT of a large group carries its whole member list, hence 2 MB.
+    location /scim/ {
+        set $hello_control ${HELLO_CONTROL_UPSTREAM};
+        proxy_pass $hello_control;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $hello_forwarded_proto;
+        client_max_body_size 2m;
+        proxy_read_timeout 60s;
+    }
+
     location /api/ {
         set $hello_control ${HELLO_CONTROL_UPSTREAM};
         proxy_pass $hello_control;

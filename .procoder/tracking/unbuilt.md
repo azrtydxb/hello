@@ -48,7 +48,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P7  | Zapier                                         | done (#304)       |
 | P8  | Directory engine, AD/LDAP                      | done (#306)       |
 | P9  | Google Workspace and Entra connectors          | wip (#358)        |
-| P10 | SCIM 2.0                                       | todo              |
+| P10 | SCIM 2.0                                       | wip (#356)        |
 | P11 | OIDC SSO, LDAP bind login                      | wip (#358)        |
 | P12 | Auto-provisioning extensions from a range      | wip (#353)        |
 | P13 | Salesforce Open CTI                            | done (#331)       |
@@ -168,6 +168,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 - Parity lab items 1-7 and 14
 - Hello MCP "Connected apps" end-to-end (after #189)
 - Real-account lab lists for integrations, messaging, clients (after those phases)
+- SCIM (P10, docs/scim.md "Lab checklist"): Entra ID provisioning (test connection, on-demand provision, group cycle with a role rule, soft and hard delete, restore, the Microsoft SCIM validator), Okta (Test Connector Configuration, push users, profile PUT, deactivate and reactivate, push groups, the Okta SCIM test suite), JumpCloud user and group push, and the mass-deprovision guard pausing on a real unassignment
 - Salesforce (Developer Edition) and Dynamics 365 (trial) live checks: docs/crm.md, "Lab checklist: Salesforce" and "Lab checklist: Dynamics 365"
 - CRM connector live checks on real accounts: Pipedrive, Zoho CRM, Odoo, Bitrix24 (docs/crm.md lab checklists)
 - Telnyx and Twilio accounts, messaging item 6 (docs/inbox.md, "Sending through Telnyx", "Sender registration"): a real Telnyx send, delivery receipt and the 40300 STOP block; the field names of Telnyx's 10DLC, campaign-assignment and toll-free reads and of Twilio's UsAppToPerson and Tollfree reads; what a limited key answers for each registration read; a Twilio account with several Messaging Services; a US long code and a toll-free number in each state (approved, pending, rejected, unregistered)
