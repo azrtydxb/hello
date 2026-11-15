@@ -21,6 +21,9 @@ const (
 	KindLDAP   = "ldap"
 	KindGoogle = "google"
 	KindEntra  = "entra"
+	// KindSCIM is pushed to by identity providers (I-23 to I-25): its
+	// driver reads the resources they pushed.
+	KindSCIM = "scim"
 )
 
 // Sign-in methods of a connector's users (I-29, I-30): synced users have no
@@ -42,6 +45,9 @@ const (
 	RunPreview   = "preview"
 	RunApply     = "apply"
 	RunScheduled = "scheduled"
+	// RunSCIM collects the changes SCIM requests made, one run per connector
+	// and hour, and is the run a paused SCIM connector is confirmed on.
+	RunSCIM = "scim"
 
 	StatusQueued            = "queued"
 	StatusRunning           = "running"
@@ -128,6 +134,9 @@ var (
 	ErrProtected = errors.New("directory: protected local admin")
 	// ErrDisabled is a run asked of a disabled connector.
 	ErrDisabled = errors.New("directory: connector is disabled")
+	// ErrPaused is a push to a connector the mass-deprovision guard paused
+	// (I-25); an administrator confirms its halted run to resume it.
+	ErrPaused = errors.New("directory: connector is paused until an administrator confirms")
 )
 
 // Error is a classified, scrubbed failure: Detail is short and never echoes a
@@ -286,6 +295,20 @@ type Driver interface {
 	Test(ctx context.Context, cfg json.RawMessage, secret string, o FetchOptions) (*TestResult, error)
 }
 
+// PushDriver is a Driver whose source pushes to Hello (SCIM): it has no
+// credential to open and no schedule. Its Fetch reads what was pushed, so a
+// manual preview and apply re-map every pushed user with the current
+// mappings and rules.
+type PushDriver interface {
+	Driver
+	Push() bool
+}
+
+func isPush(d Driver) bool {
+	p, ok := d.(PushDriver)
+	return ok && p.Push()
+}
+
 // SecretDriver is a Driver whose credential is not a bind password: it names
 // the field and checks the value against the config before it is sealed.
 type SecretDriver interface {
@@ -335,6 +358,9 @@ type FetchOptions struct {
 	Since *SyncMark
 	// Now is the run's clock.
 	Now time.Time
+	// ConnectorID names the connector, for a driver that keeps its source
+	// itself (SCIM).
+	ConnectorID int64
 }
 
 // Connector is a directory connection with its mapping, rules and state. The
@@ -366,8 +392,13 @@ type Connector struct {
 	// the state kept for incremental runs (not exposed).
 	LastFullRunAt *time.Time `json:"lastFullRunAt"`
 	Sync          SyncState  `json:"-"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
+	// PausedAt is set while the SCIM mass-deprovision guard holds the
+	// connector (I-25); GuardSince restarts the guard's rolling hour after a
+	// confirmation.
+	PausedAt   *time.Time `json:"pausedAt"`
+	GuardSince *time.Time `json:"-"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
 }
 
 // Options are the engine settings every kind shares.

@@ -40,6 +40,8 @@ func TestRoutesTable(t *testing.T) {
 		// A webhook's signing secret is shown at creation and at rotation.
 		"POST /api/v1/webhooks":                    true,
 		"POST /api/v1/webhooks/{id}/rotate-secret": true,
+		// A SCIM token is shown when it is issued (spec integrations I-24).
+		"POST /api/v1/directory/connectors/{id}/scim-token": true,
 		// The Google administrator consent stores a refresh token.
 		"POST /api/v1/directory/connectors/{id}/consent": true,
 	}
