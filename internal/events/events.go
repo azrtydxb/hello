@@ -17,6 +17,7 @@ package events
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -40,7 +41,33 @@ const (
 	VoicemailReceived = "voicemail.received"
 	// CallOriginateProgress is a state change of a click-to-call (spec I-37).
 	CallOriginateProgress = "call.originate.progress"
+
+	// The messaging inbox's events (spec messaging-channels M-23). Their
+	// data is an InboxData: ids and states, the customer's number only as a
+	// keyed hash, never message text.
+	ConversationCreated  = "conversation.created"
+	ConversationAssigned = "conversation.assigned"
+	ConversationResolved = "conversation.resolved"
+	MessageReceived      = "message.received"
+	MessageSent          = "message.sent"
+	MessageStatus        = "message.status"
+	MessageOptOut        = "message.optout"
 )
+
+// InboxPrefixes are the type prefixes of the inbox's events. Reading them
+// needs the messages scope and the operator role: they say who texts the
+// business and when, if not what.
+var InboxPrefixes = []string{"conversation.", "message."}
+
+// IsInboxType reports whether t is an inbox event type.
+func IsInboxType(t string) bool {
+	for _, p := range InboxPrefixes {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	return false
+}
 
 // TypeInfo describes one event type for the console, the documentation and
 // filter validation.
@@ -60,6 +87,13 @@ var Registry = []TypeInfo{
 	{CallCompleted, "The call detail record was stored; carries cdrId."},
 	{VoicemailReceived, "A caller left a voicemail message in the box of an extension; carries the caller, the box extension and durationMs. The audio is never part of an event."},
 	{CallOriginateProgress, "A click-to-call changed state (queued, ringing_agent, agent_answered, dialing_target, connected, ended or failed); carries originateId, state and, for a failure, reason."},
+	{ConversationCreated, "A customer conversation started in the messaging inbox (an inbound text or chat, or an agent's first contact); carries conversationId, channel, number and the hashed peerKey."},
+	{ConversationAssigned, "A conversation was assigned to an agent (by the router, a claim or a supervisor) or returned to the pool; carries assigneeUserId (absent when unassigned) and queueId."},
+	{ConversationResolved, "A conversation was resolved."},
+	{MessageReceived, "A customer's text or chat message arrived; carries messageId. The text is included only for a webhook endpoint with includeMessageBody."},
+	{MessageSent, "An agent's reply was queued for sending; carries messageId and status."},
+	{MessageStatus, "A sent message changed delivery state (sent, delivered, failed or unknown); carries status and, for a failure, errorCode."},
+	{MessageOptOut, "A customer opted out (STOP) or the carrier reported them opted out."},
 }
 
 // KnownType reports whether t is a registered event type.
@@ -110,6 +144,79 @@ type Data struct {
 	State       string `json:"state,omitempty"`
 	CDRID       int64  `json:"cdrId,omitempty"`
 	RecordingID int64  `json:"recordingId,omitempty"`
+
+	// Inbox is the data of an inbox event (conversation.*, message.*). When
+	// it is set the event's data is the InboxData alone: the call fields
+	// above are not part of it.
+	Inbox *InboxData `json:"-"`
+}
+
+// InboxData is the data of an inbox event. It holds ids, states and times;
+// the customer's number appears only as PeerKey, a keyed hash that tells
+// customers apart without naming them. Peer and Body are filled in at
+// delivery for a webhook endpoint that asked for them (includePeer,
+// includeMessageBody) and are never stored with the event.
+type InboxData struct {
+	ConversationID int64 `json:"conversationId"`
+	MessageID      int64 `json:"messageId,omitempty"`
+	ChannelID      int64 `json:"channelId,omitempty"`
+	// ChannelKind is sms, whatsapp or webchat; Provider the carrier.
+	ChannelKind string `json:"channelKind,omitempty"`
+	Provider    string `json:"provider,omitempty"`
+	AddressID   int64  `json:"addressId,omitempty"`
+	// Address is the business's own number or chat site the conversation is
+	// on.
+	Address string `json:"address,omitempty"`
+	// Direction is in or out (message events).
+	Direction string `json:"direction,omitempty"`
+	// Status is the message's delivery state (message events) or the
+	// conversation's state (conversation events).
+	Status    string `json:"status,omitempty"`
+	ErrorCode string `json:"errorCode,omitempty"`
+	// AssigneeUserID is the agent the conversation is assigned to.
+	AssigneeUserID int64 `json:"assigneeUserId,omitempty"`
+	QueueID        int64 `json:"queueId,omitempty"`
+	// PeerKind is phone or visitor.
+	PeerKind string `json:"peerKind,omitempty"`
+	// PeerKey is a keyed hash of the customer's number or chat visitor id.
+	PeerKey string `json:"peerKey,omitempty"`
+	// Peer is the customer's number (or visitor:<id>), only for an endpoint
+	// with includePeer.
+	Peer string `json:"peer,omitempty"`
+	// Body is the message text, only for an endpoint with
+	// includeMessageBody and only on message.received and message.sent.
+	Body string `json:"body,omitempty"`
+}
+
+// MarshalJSON writes the inbox data for an inbox event and the call fields
+// otherwise.
+func (d Data) MarshalJSON() ([]byte, error) {
+	if d.Inbox != nil {
+		return json.Marshal(d.Inbox)
+	}
+	type plain Data
+	return json.Marshal(plain(d))
+}
+
+// UnmarshalJSON reads either form: data with a conversationId is inbox data.
+func (d *Data) UnmarshalJSON(b []byte) error {
+	type plain Data
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	*d = Data(p)
+	var probe struct {
+		ConversationID int64 `json:"conversationId"`
+	}
+	if json.Unmarshal(b, &probe) == nil && probe.ConversationID != 0 {
+		var in InboxData
+		if err := json.Unmarshal(b, &in); err != nil {
+			return err
+		}
+		d.Inbox = &in
+	}
+	return nil
 }
 
 // Event is one call event as emitted and delivered.

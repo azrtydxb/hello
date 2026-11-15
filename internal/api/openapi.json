@@ -3679,7 +3679,9 @@
                             "type": "string",
                             "enum": ["generic", "sbc-peer"]
                           },
-                          "description": { "type": "string" },
+                          "description": {
+                            "type": "string"
+                          },
                           "defaults": {
                             "type": "object",
                             "additionalProperties": true,
@@ -3687,7 +3689,9 @@
                           },
                           "limits": {
                             "type": "array",
-                            "items": { "type": "string" },
+                            "items": {
+                              "type": "string"
+                            },
                             "description": "What the profile requires of the trunk, one sentence each."
                           }
                         }
@@ -23145,6 +23149,70 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/phone-groups/{id}/side-key": {
+      "put": {
+        "operationId": "setPhoneGroupSideKey",
+        "summary": "Set a phone group's side key",
+        "description": "Sets what the side key of the group's Grandstream WP phones does (phone-feature-parity S-12): ptt (PTT/paging, the default), alarm (the WP8x6 alarm call to the group's alarm destination; a WP8x6 without one, and a WP856 or WP820, keep PTT/paging) or none. The template writes P82317 (WP8x6, WP856) or P22258 (WP820); the WP810/822/825 has no side key. A phone's own sideKey wins over the group's. Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["sideKey"],
+                "properties": {
+                  "sideKey": {
+                    "type": "string",
+                    "enum": ["ptt", "alarm", "none"],
+                    "description": "ptt (PTT/paging), alarm (the WP8x6 alarm call) or none."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/phones/{id}/syslog": {
       "get": {
         "operationId": "listPhoneSyslog",
@@ -24109,6 +24177,207 @@
               }
             }
           }
+        }
+      }
+    },
+    "/api/v1/directory/connectors/{id}/scim-token": {
+      "post": {
+        "operationId": "issueSCIMToken",
+        "summary": "Issue a SCIM token",
+        "description": "Issues a bearer token (hello_scim_ followed by 256 random bits) for a scim connector. The token is in this response only; Hello keeps its SHA-256. It is valid for /scim/v2 of this connector only and carries no API scope. A connector has at most two active tokens, so one can be replaced without a gap: issue the new one, put it in the identity provider, then revoke the old one. Audited. Needs HELLO_PUBLIC_URL (503 without).",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The token, shown this once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMTokenCreated"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The connector is not a SCIM connector (not_scim), or it has two active tokens already (too_many_tokens)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Issues a credential an identity provider uses to create and disable users.",
+          "category": "credentials"
+        }
+      }
+    },
+    "/api/v1/directory/connectors/{id}/scim-tokens": {
+      "get": {
+        "operationId": "listSCIMTokens",
+        "summary": "List SCIM tokens",
+        "description": "Lists a scim connector's tokens, newest first: when each was issued and by whom, when it was last used and whether it is revoked. Never the token.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tokens",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMTokenList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The connector is not a SCIM connector (not_scim)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/directory/connectors/{id}/scim": {
+      "get": {
+        "operationId": "getSCIMStatus",
+        "summary": "SCIM status of a connector",
+        "description": "The state of a scim connector: the base URL to give the identity provider, whether the mass-deprovision guard paused it (and the run to confirm to resume it), the guard's count of disables in the rolling hour and its limit, the pushed users and groups, when a token was last used and how many tokens are active.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SCIMStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The connector is not a SCIM connector (not_scim)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/directory/scim-tokens/{id}": {
+      "delete": {
+        "operationId": "revokeSCIMToken",
+        "summary": "Revoke a SCIM token",
+        "description": "Revokes a SCIM token at once: the identity provider's next request with it gets 401. Revoking a revoked token is not an error. Audited.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Revoking stops an identity provider's provisioning; a person decides.",
+          "category": "credentials"
         }
       }
     },
@@ -26557,7 +26826,11 @@
             "name": "callId",
             "in": "path",
             "required": true,
-            "schema": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
             "description": "The SIP Call-ID of the client's own dialog, as the browser saw it."
           }
         ],
@@ -26565,19 +26838,37 @@
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/CallQualityReport" }
+              "schema": {
+                "$ref": "#/components/schemas/CallQualityReport"
+              }
             }
           }
         },
         "responses": {
-          "204": { "description": "Stored" },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "429": { "$ref": "#/components/responses/RateLimited" },
-          "500": { "$ref": "#/components/responses/Internal" },
-          "503": { "$ref": "#/components/responses/Unavailable" }
+          "204": {
+            "description": "Stored"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
         },
         "x-hello-scope": "session",
         "x-hello-role": "user",
@@ -30092,6 +30383,498 @@
         }
       }
     },
+    "/api/v1/inbox/reports": {
+      "get": {
+        "operationId": "getInboxReport",
+        "summary": "Inbox report",
+        "description": "Volumes, first response and resolution times (average, median, 90th percentile) and service-level breaches of the messaging inbox for a period, in total and by channel, queue, agent or day. Counts and durations only: no customer text or number. Spam is left out, and conversations past their retention are no longer counted.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Start of the period (RFC 3339); default 7 days before to. Conversations count by when they started, messages by when they were written.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "End of the period, exclusive (RFC 3339); default now. The period is at most 366 days.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "groupBy",
+            "in": "query",
+            "description": "Split the report by channel, queue, agent (the assignee; a reply counts for its writer) or day; absent gives the totals only.",
+            "schema": {
+              "type": "string",
+              "enum": ["channel", "queue", "agent", "day"]
+            }
+          },
+          {
+            "name": "timeZone",
+            "in": "query",
+            "description": "IANA zone the days are counted in (groupBy=day); default the system's zone.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/inbox/reports/export": {
+      "get": {
+        "operationId": "exportInboxReport",
+        "summary": "Inbox report as CSV",
+        "description": "The inbox report as a CSV download: a totals line, then one line per group. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Start of the period (RFC 3339); default 7 days before to. Conversations count by when they started, messages by when they were written.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "End of the period, exclusive (RFC 3339); default now. The period is at most 366 days.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "groupBy",
+            "in": "query",
+            "description": "Split the report by channel, queue, agent (the assignee; a reply counts for its writer) or day; absent gives the totals only.",
+            "schema": {
+              "type": "string",
+              "enum": ["channel", "queue", "agent", "day"]
+            }
+          },
+          {
+            "name": "timeZone",
+            "in": "query",
+            "description": "IANA zone the days are counted in (groupBy=day); default the system's zone.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV with a header row",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "CSV download",
+          "category": "binary-download"
+        }
+      }
+    },
+    "/api/v1/messaging/sla": {
+      "get": {
+        "operationId": "getMessagingSLA",
+        "summary": "Inbox service-level targets",
+        "description": "The first-response and resolution targets the inbox report counts breaches against, in seconds after a conversation started; 0 is off.",
+        "tags": ["messaging"],
+        "responses": {
+          "200": {
+            "description": "The targets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxSLA"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "put": {
+        "operationId": "putMessagingSLA",
+        "summary": "Set the inbox service-level targets",
+        "description": "Replaces the first-response and resolution targets. Audited.",
+        "tags": ["messaging"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxSLAInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The targets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxSLA"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/export": {
+      "get": {
+        "operationId": "exportMessagingPeer",
+        "summary": "Export a customer's conversations (DSAR)",
+        "description": "Streams a zip of everything the messaging inbox holds of one customer across every channel, for a data subject access request. The archive holds README.txt, conversations.json (the conversations and the opt-out records) and messages/<conversation>/<message>.json with each message's text, times, delivery state and attachments (metadata, and the path of the file), the attachment files under media/<conversation>/, and uploads.json with a chat visitor's files not sent yet (files under media/uploads/). Without the media store (MinIO) while the customer has files, it answers 503. Internal notes are included only with notes=true. The audit row records who exported and the counts, never content.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "name": "peer",
+            "in": "query",
+            "description": "The customer's phone number, or a chat visitor (visitor:<id>).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "notes",
+            "in": "query",
+            "description": "Include the agents' internal notes about the customer.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The zip archive",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/messages/{messageId}/redact": {
+      "post": {
+        "operationId": "redactInboxMessage",
+        "summary": "Redact a message",
+        "description": "Removes the text of one message or internal note: the body is emptied and marked redacted, its copies in the SIP text queue are deleted, its attachments are taken off it and their files removed from the media store and checked gone (the media sweeper removes any it cannot reach now), and a message sent through a carrier API (Twilio) is deleted at the carrier too, best effort; the carrier keeps its own logs. Redacting a message twice changes nothing. Audited without content.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Id of the message, as the message list returns it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The redacted message and the provider-side result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxRedactReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/messaging/redactions": {
+      "get": {
+        "operationId": "listMessagingRedactions",
+        "summary": "Provider-side deletions",
+        "description": "Counts the deletions at carriers that erases and redactions queued in the last 30 days, and every one still being retried, by provider and state. Ids only are kept, never text or numbers.",
+        "tags": ["messaging"],
+        "responses": {
+          "200": {
+            "description": "The counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingRedactionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/audit/supervisor-views": {
+      "get": {
+        "operationId": "listSupervisorViews",
+        "summary": "Supervisor-view audit report",
+        "description": "Who opened conversations that were not assigned to them (one audit row per person and conversation per hour), newest first, with the totals per person for the period. Ids and names only, never content.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Start of the period (RFC 3339); default 30 days ago.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "End of the period, exclusive (RFC 3339); default now.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "description": "Only this person (user:<username>, as in the audit log).",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Return rows older than this id (the nextBefore of the previous page).",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 500 (default 100).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of views and the totals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupervisorViewReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "the supervision of staff is reviewed by an administrator in the console",
+          "category": "private-data"
+        }
+      }
+    },
     "/api/v1/inbox/media": {
       "post": {
         "operationId": "uploadInboxMedia",
@@ -31410,7 +32193,24 @@
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Extension numbers shown as busy-lamp-field keys; a Grandstream WP takes them as speed dials (see speedDialSlots)."
+          },
+          "speedDialSlots": {
+            "type": "integer",
+            "description": "How many speed dials the model takes for its BLF entries: a Grandstream WP (WP8x6, WP810/820/822/825: 9; WP856: 30), which has no BLF keys; 0 for a phone with BLF keys."
+          },
+          "sideKey": {
+            "type": ["string", "null"],
+            "enum": ["ptt", "alarm", "none", null],
+            "description": "The phone's own side key function (Grandstream WP); null uses its group's."
+          },
+          "sideKeyChoices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The side key functions the model takes (WP8x6: ptt, alarm, none; WP856 and WP820: ptt, none); empty for a phone without a side key Hello can set."
           },
           "redirectStatus": {
             "$ref": "#/components/schemas/RedirectStatus"
@@ -31864,7 +32664,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Extension numbers shown as busy-lamp-field keys."
+            "description": "Extension numbers shown as busy-lamp-field keys. A Grandstream WP has no BLF keys and takes them as speed dials, at most its speedDialSlots."
           },
           "enabled": {
             "type": "boolean",
@@ -31882,6 +32682,11 @@
             "type": "string",
             "enum": ["host", "guest"],
             "description": "The phone's role when its group has account sharing on (Grandstream WP8x6 only)."
+          },
+          "sideKey": {
+            "type": ["string", "null"],
+            "enum": ["ptt", "alarm", "none", null],
+            "description": "The phone's own side key function (Grandstream WP; one of its sideKeyChoices); null returns it to its group's."
           }
         }
       },
@@ -32177,6 +32982,22 @@
           },
           "sipServer": {
             "type": "string"
+          },
+          "sipBackupServers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The backup registrars (host:port) phones are given (phone-feature-parity S-20), at most two."
+          },
+          "sipBackupSource": {
+            "type": "string",
+            "enum": ["env", "nodes", "none"],
+            "description": "Where the backups come from: HELLO_PROV_SIP_BACKUP_SERVERS (env, an override), the HA node list (nodes: the other READY hello-sip nodes, when phones register with a node directly), or none."
+          },
+          "sipSrv": {
+            "type": "string",
+            "description": "HELLO_PROV_SIP_SRV: the DNS name Grandstream phones, and Yealink and Poly phones on UDP, resolve the SIP servers from by SRV; empty in A-record mode."
           },
           "dhcp": {
             "type": "array",
@@ -35005,7 +35826,10 @@
                   "last_break_glass",
                   "break_glass_local_admin",
                   "provider_disabled",
-                  "already_linked"
+                  "already_linked",
+                  "not_scim",
+                  "too_many_tokens",
+                  "not_redactable"
                 ]
               },
               "message": {
@@ -35299,7 +36123,24 @@
       },
       "User": {
         "type": "object",
-        "required": ["id", "username", "displayName", "email", "authMethod", "role", "enabled", "mustChangePassword", "extensionId", "extensionIds", "voicemailEmail", "totpEnabled", "totpRequired", "createdAt", "managedBy", "disabledAt"],
+        "required": [
+          "id",
+          "username",
+          "displayName",
+          "email",
+          "authMethod",
+          "role",
+          "enabled",
+          "mustChangePassword",
+          "extensionId",
+          "extensionIds",
+          "voicemailEmail",
+          "totpEnabled",
+          "totpRequired",
+          "createdAt",
+          "managedBy",
+          "disabledAt"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -39661,7 +40502,12 @@
       },
       "WebRTCCounters": {
         "type": "object",
-        "required": ["ice", "dtlsHandshakes", "dtlsFailures", "srtpAuthFailures"],
+        "required": [
+          "ice",
+          "dtlsHandshakes",
+          "dtlsFailures",
+          "srtpAuthFailures"
+        ],
         "properties": {
           "ice": {
             "type": "object",
@@ -40138,7 +40984,13 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["devices", "live", "webrtc", "quality", "register_attempts"]
+              "enum": [
+                "devices",
+                "live",
+                "webrtc",
+                "quality",
+                "register_attempts"
+              ]
             },
             "description": "Sources that could not be read; their parts are empty."
           }
@@ -42462,6 +43314,11 @@
           "ldapEnabled": {
             "type": "boolean",
             "description": "The group's phones are given the LDAP directory (see PUT /phone-groups/{id}/ldap)."
+          },
+          "sideKey": {
+            "type": "string",
+            "enum": ["ptt", "alarm", "none"],
+            "description": "What the side key of the group's Grandstream WP phones does: ptt (PTT/paging, the default), alarm (the group's alarm call; WP8x6 with an alarm destination, otherwise PTT/paging) or none. A phone may override it (see PUT /phone-groups/{id}/side-key)."
           },
           "syslog": {
             "$ref": "#/components/schemas/PhoneGroupSyslog"
@@ -44853,7 +45710,7 @@
       },
       "Event": {
         "type": "object",
-        "description": "A call event. Delivery is at least once: the id identifies an event and receivers dedupe on it.",
+        "description": "A call or messaging inbox event. Delivery is at least once: the id identifies an event and receivers dedupe on it.",
         "required": ["apiVersion", "id", "type", "createdAt", "data"],
         "properties": {
           "apiVersion": {
@@ -44874,7 +45731,14 @@
               "call.missed",
               "call.recording.ready",
               "call.completed",
-              "voicemail.received"
+              "voicemail.received",
+              "conversation.created",
+              "conversation.assigned",
+              "conversation.resolved",
+              "message.received",
+              "message.sent",
+              "message.status",
+              "message.optout"
             ]
           },
           "createdAt": {
@@ -44882,7 +45746,15 @@
             "format": "date-time"
           },
           "data": {
-            "$ref": "#/components/schemas/EventData"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventData"
+              },
+              {
+                "$ref": "#/components/schemas/InboxEventData"
+              }
+            ],
+            "description": "EventData for call.* and voicemail.* events, InboxEventData for conversation.* and message.* events."
           }
         }
       },
@@ -45256,9 +46128,15 @@
               "type": "object",
               "required": ["id", "name", "type", "state", "detail"],
               "properties": {
-                "id": { "type": "string" },
-                "name": { "type": "string" },
-                "type": { "type": "string" },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
                 "state": {
                   "type": "string",
                   "enum": [
@@ -45269,7 +46147,9 @@
                     "unknown"
                   ]
                 },
-                "detail": { "type": "string" }
+                "detail": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -45279,9 +46159,15 @@
               "type": "object",
               "required": ["id", "brandId", "useCase", "state", "detail"],
               "properties": {
-                "id": { "type": "string" },
-                "brandId": { "type": "string" },
-                "useCase": { "type": "string" },
+                "id": {
+                  "type": "string"
+                },
+                "brandId": {
+                  "type": "string"
+                },
+                "useCase": {
+                  "type": "string"
+                },
                 "state": {
                   "type": "string",
                   "enum": [
@@ -45292,7 +46178,9 @@
                     "unknown"
                   ]
                 },
-                "detail": { "type": "string" }
+                "detail": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -45302,7 +46190,9 @@
               "type": "object",
               "required": ["number", "kind", "state", "detail", "added"],
               "properties": {
-                "number": { "type": "string" },
+                "number": {
+                  "type": "string"
+                },
                 "kind": {
                   "type": "string",
                   "enum": ["10dlc", "toll_free", "other"],
@@ -45318,7 +46208,9 @@
                     "unknown"
                   ]
                 },
-                "detail": { "type": "string" },
+                "detail": {
+                  "type": "string"
+                },
                 "added": {
                   "type": "boolean",
                   "description": "Whether the number is one of the channel's numbers in Hello."
@@ -45329,7 +46221,9 @@
           "unavailable": {
             "type": "array",
             "description": "Sections the carrier would not answer: brands, campaigns or tollfree.",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "checklist": {
             "type": "array",
@@ -45348,7 +46242,9 @@
                     "stophelp"
                   ]
                 },
-                "title": { "type": "string" },
+                "title": {
+                  "type": "string"
+                },
                 "state": {
                   "type": "string",
                   "enum": [
@@ -45361,7 +46257,9 @@
                     "not_applicable"
                   ]
                 },
-                "detail": { "type": "string" },
+                "detail": {
+                  "type": "string"
+                },
                 "link": {
                   "type": "string",
                   "description": "The carrier's documentation of the step."
@@ -45671,6 +46569,7 @@
         "required": [
           "conversations",
           "messages",
+          "sipMessages",
           "optOutsKept",
           "providers",
           "mediaObjects",
@@ -45690,20 +46589,13 @@
           "providers": {
             "type": "array",
             "items": {
-              "type": "object",
-              "required": ["provider", "redacted", "detail"],
-              "properties": {
-                "provider": {
-                  "type": "string"
-                },
-                "redacted": {
-                  "type": "boolean"
-                },
-                "detail": {
-                  "type": "string"
-                }
-              }
-            }
+              "$ref": "#/components/schemas/MessagingProviderRedaction"
+            },
+            "description": "Per provider, what the provider-side deletion did. The carrier keeps its own logs under its own terms."
+          },
+          "sipMessages": {
+            "type": "integer",
+            "description": "Copies in the SIP text queue (desk-phone and SIP-trunk parts) that went too."
           },
           "mediaObjects": {
             "type": "integer",
@@ -45892,7 +46784,8 @@
           "sentAt",
           "deliveredAt",
           "readAt",
-          "media"
+          "media",
+          "redactedAt"
         ],
         "properties": {
           "id": {
@@ -45967,6 +46860,11 @@
               "$ref": "#/components/schemas/InboxMedia"
             },
             "description": "The message's attachments, oldest first."
+          },
+          "redactedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When an administrator redacted the line; its body is empty."
           }
         }
       },
@@ -47700,7 +48598,9 @@
           "createdAt",
           "updatedAt",
           "pending",
-          "dead"
+          "dead",
+          "includePeer",
+          "includeMessageBody"
         ],
         "properties": {
           "id": {
@@ -47781,6 +48681,14 @@
           "dead": {
             "type": "integer",
             "description": "Dead letters."
+          },
+          "includePeer": {
+            "type": "boolean",
+            "description": "Messaging inbox events carry the customer's number (peer); otherwise only a keyed hash (peerKey). Default false; audited."
+          },
+          "includeMessageBody": {
+            "type": "boolean",
+            "description": "message.received and message.sent carry the message text (body). Default false; administrators only, audited."
           }
         }
       },
@@ -47817,7 +48725,9 @@
           "updatedAt",
           "pending",
           "dead",
-          "secret"
+          "secret",
+          "includePeer",
+          "includeMessageBody"
         ],
         "properties": {
           "id": {
@@ -47903,6 +48813,14 @@
             "type": ["string", "null"],
             "description": "The signing secret (whsec_...). Shown once, at creation and at rotation; null when the endpoint already existed.",
             "x-hello-secret": true
+          },
+          "includePeer": {
+            "type": "boolean",
+            "description": "Messaging inbox events carry the customer's number (peer); otherwise only a keyed hash (peerKey). Default false; audited."
+          },
+          "includeMessageBody": {
+            "type": "boolean",
+            "description": "message.received and message.sent carry the message text (body). Default false; administrators only, audited."
           }
         }
       },
@@ -47943,6 +48861,14 @@
           "allowPrivate": {
             "type": "boolean",
             "description": "Default false."
+          },
+          "includePeer": {
+            "type": "boolean",
+            "description": "Messaging inbox events carry the customer's number (peer); otherwise only a keyed hash (peerKey). Default false; audited."
+          },
+          "includeMessageBody": {
+            "type": "boolean",
+            "description": "message.received and message.sent carry the message text (body). Default false; administrators only, audited."
           }
         }
       },
@@ -47982,6 +48908,14 @@
           "allowPrivate": {
             "type": "boolean",
             "description": "Whether the endpoint may use http and a private address inside HELLO_INTEGRATIONS_ALLOWED_CIDRS."
+          },
+          "includePeer": {
+            "type": "boolean",
+            "description": "Messaging inbox events carry the customer's number (peer); otherwise only a keyed hash (peerKey). Default false; audited."
+          },
+          "includeMessageBody": {
+            "type": "boolean",
+            "description": "message.received and message.sent carry the message text (body). Default false; administrators only, audited."
           }
         }
       },
@@ -48645,7 +49579,7 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["ldap", "google", "entra"]
+            "enum": ["ldap", "google", "entra", "scim"]
           },
           "name": {
             "type": "string",
@@ -48674,9 +49608,12 @@
               },
               {
                 "$ref": "#/components/schemas/DirectoryEntraConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectorySCIMConfig"
               }
             ],
-            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig or DirectoryEntraConfig."
+            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig, DirectoryEntraConfig or DirectorySCIMConfig."
           },
           "mappings": {
             "$ref": "#/components/schemas/DirectoryMappings"
@@ -48692,7 +49629,7 @@
           },
           "hasCredential": {
             "type": "boolean",
-            "description": "A credential (bind password, key file, client secret or private key) is stored. It is write-only and never returned."
+            "description": "A credential (bind password, key file, client secret or private key) is stored. It is write-only and never returned. Always false for a scim connector, which uses SCIM tokens."
           },
           "status": {
             "type": "string",
@@ -48725,6 +49662,11 @@
             "format": "date-time",
             "description": "When the last full run finished. A full run is forced every 24 hours, and when the mapping, rules or config change, because only a full run detects absences."
           },
+          "pausedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "scim connectors: set while the mass-deprovision guard holds the connector (SCIM writes answer 429); confirming its halted run resumes it."
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -48734,7 +49676,30 @@
             "format": "date-time"
           }
         },
-        "required": ["id", "kind", "name", "enabled", "mode", "scheduleMinutes", "config", "mappings", "groupRules", "options", "autoProvision", "hasCredential", "status", "lastRunAt", "lastSuccessAt", "lastErrorCode", "lastErrorDetail", "consecutiveFailures", "linkedUsers", "lastFullRunAt", "createdAt", "updatedAt"]
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "enabled",
+          "mode",
+          "scheduleMinutes",
+          "config",
+          "mappings",
+          "groupRules",
+          "options",
+          "autoProvision",
+          "hasCredential",
+          "status",
+          "lastRunAt",
+          "lastSuccessAt",
+          "lastErrorCode",
+          "lastErrorDetail",
+          "consecutiveFailures",
+          "linkedUsers",
+          "lastFullRunAt",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "DirectoryConnectorList": {
         "type": "object",
@@ -48753,7 +49718,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["ldap", "google", "entra"],
+            "enum": ["ldap", "google", "entra", "scim"],
             "description": "The connector kind."
           },
           "name": {
@@ -48785,9 +49750,12 @@
               },
               {
                 "$ref": "#/components/schemas/DirectoryEntraConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectorySCIMConfig"
               }
             ],
-            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig or DirectoryEntraConfig."
+            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig, DirectoryEntraConfig or DirectorySCIMConfig."
           },
           "mappings": {
             "$ref": "#/components/schemas/DirectoryMappings"
@@ -48846,9 +49814,12 @@
               },
               {
                 "$ref": "#/components/schemas/DirectoryEntraConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectorySCIMConfig"
               }
             ],
-            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig or DirectoryEntraConfig."
+            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig, DirectoryEntraConfig or DirectorySCIMConfig."
           },
           "mappings": {
             "$ref": "#/components/schemas/DirectoryMappings"
@@ -49352,6 +50323,208 @@
         },
         "required": ["error", "run"],
         "description": "The 409 stale_preview answer: the fresh preview to review."
+      },
+      "DirectorySCIMConfig": {
+        "type": "object",
+        "properties": {
+          "adoptExisting": {
+            "type": "boolean",
+            "description": "A pushed user may take over a local (non-admin) Hello user with the same e-mail address or username. There is no preview for a push, so turning this on is the confirmation; off, such a push is refused with 409 uniqueness."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Config of a scim connector. It has no credential: identity providers authenticate with SCIM tokens."
+      },
+      "SCIMToken": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "connectorId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "hint": {
+            "type": "string",
+            "description": "The prefix and the first characters, to tell tokens apart; not enough to use."
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the token last authenticated a request (recorded at most once a minute)."
+          },
+          "revokedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "connectorId",
+          "hint",
+          "createdBy",
+          "createdAt",
+          "lastUsedAt",
+          "revokedAt"
+        ]
+      },
+      "SCIMTokenCreated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "connectorId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "hint": {
+            "type": "string",
+            "description": "The prefix and the first characters, to tell tokens apart; not enough to use."
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the token last authenticated a request (recorded at most once a minute)."
+          },
+          "revokedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "token": {
+            "type": "string",
+            "description": "The bearer token for the identity provider. Shown in this response only.",
+            "x-hello-secret": true
+          },
+          "baseUrl": {
+            "type": "string",
+            "description": "The SCIM base URL (Tenant URL in Entra, SCIM connector base URL in Okta)."
+          }
+        },
+        "required": [
+          "id",
+          "connectorId",
+          "hint",
+          "createdBy",
+          "createdAt",
+          "lastUsedAt",
+          "revokedAt",
+          "token",
+          "baseUrl"
+        ]
+      },
+      "SCIMTokenList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SCIMToken"
+            }
+          }
+        },
+        "required": ["items"]
+      },
+      "SCIMStatus": {
+        "type": "object",
+        "properties": {
+          "connectorId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "baseUrl": {
+            "type": "string",
+            "description": "The SCIM base URL, HELLO_PUBLIC_URL/scim/v2."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "pausedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Set while the mass-deprovision guard holds the connector: SCIM writes answer 429 until an administrator confirms the run pausedRunId."
+          },
+          "pausedRunId": {
+            "type": ["integer", "null"],
+            "format": "int64"
+          },
+          "guard": {
+            "type": "object",
+            "properties": {
+              "disables": {
+                "type": "integer",
+                "description": "Users SCIM disabled in the rolling hour."
+              },
+              "limit": {
+                "type": "integer",
+                "description": "How many the guard allows: 20 percent of the linked users, at least 5."
+              },
+              "linked": {
+                "type": "integer",
+                "description": "Enabled users the connector manages."
+              }
+            },
+            "required": ["disables", "limit", "linked"]
+          },
+          "resources": {
+            "type": "object",
+            "properties": {
+              "users": {
+                "type": "integer"
+              },
+              "activeUsers": {
+                "type": "integer"
+              },
+              "deletedUsers": {
+                "type": "integer",
+                "description": "Users the identity provider deleted (their Hello users are disabled, not deleted)."
+              },
+              "groups": {
+                "type": "integer"
+              }
+            },
+            "required": ["users", "activeUsers", "deletedUsers", "groups"]
+          },
+          "lastRequestAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "activeTokens": {
+            "type": "integer"
+          },
+          "adoptExisting": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "connectorId",
+          "baseUrl",
+          "enabled",
+          "pausedAt",
+          "pausedRunId",
+          "guard",
+          "resources",
+          "lastRequestAt",
+          "activeTokens",
+          "adoptExisting"
+        ]
       },
       "InboxContactInput": {
         "type": "object",
@@ -50645,10 +51818,26 @@
             "description": "The video the client received, when the call had some.",
             "required": ["width", "height", "fps", "codec"],
             "properties": {
-              "width": { "type": "integer", "minimum": 0, "maximum": 16384 },
-              "height": { "type": "integer", "minimum": 0, "maximum": 16384 },
-              "fps": { "type": "integer", "minimum": 0, "maximum": 1000 },
-              "codec": { "type": "string", "maxLength": 32, "example": "H264" }
+              "width": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16384
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16384
+              },
+              "fps": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              },
+              "codec": {
+                "type": "string",
+                "maxLength": 32,
+                "example": "H264"
+              }
             }
           },
           "durationMs": {
@@ -52686,6 +53875,424 @@
             "type": "string",
             "maxLength": 18,
             "description": "The id of the Salesforce Task the softphone created."
+          }
+        }
+      },
+      "InboxDurations": {
+        "type": "object",
+        "required": ["count", "avgSeconds", "p50Seconds", "p90Seconds"],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "How many durations the figures are over."
+          },
+          "avgSeconds": {
+            "type": "number"
+          },
+          "p50Seconds": {
+            "type": "number"
+          },
+          "p90Seconds": {
+            "type": "number"
+          }
+        }
+      },
+      "InboxReportRow": {
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "conversations",
+          "inboundConversations",
+          "outboundConversations",
+          "resolved",
+          "messagesIn",
+          "messagesOut",
+          "firstResponse",
+          "resolution",
+          "slaFirstResponseBreaches",
+          "slaResolutionBreaches"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The group: a channel, queue or user id, or a day (YYYY-MM-DD); empty for the totals, no queue or nobody."
+          },
+          "label": {
+            "type": "string"
+          },
+          "conversations": {
+            "type": "integer",
+            "description": "Conversations started in the period."
+          },
+          "inboundConversations": {
+            "type": "integer",
+            "description": "Started by a customer."
+          },
+          "outboundConversations": {
+            "type": "integer",
+            "description": "Started by an agent (first contact)."
+          },
+          "resolved": {
+            "type": "integer",
+            "description": "Of those, resolved now."
+          },
+          "messagesIn": {
+            "type": "integer",
+            "description": "Customer messages written in the period."
+          },
+          "messagesOut": {
+            "type": "integer",
+            "description": "Replies written in the period."
+          },
+          "firstResponse": {
+            "$ref": "#/components/schemas/InboxDurations",
+            "description": "Time from a customer's first text to the first answer."
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/InboxDurations",
+            "description": "Time from the start to the resolution."
+          },
+          "slaFirstResponseBreaches": {
+            "type": "integer",
+            "description": "Customer conversations answered after the target, or still unanswered past it."
+          },
+          "slaResolutionBreaches": {
+            "type": "integer",
+            "description": "Conversations resolved after the target, or still open past it."
+          }
+        }
+      },
+      "InboxSLA": {
+        "type": "object",
+        "required": ["firstResponseSeconds", "resolutionSeconds"],
+        "properties": {
+          "firstResponseSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 604800,
+            "description": "First-response target; 0 is off. Default 900."
+          },
+          "resolutionSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2592000,
+            "description": "Resolution target; 0 is off. Default 86400."
+          }
+        }
+      },
+      "InboxSLAInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["firstResponseSeconds", "resolutionSeconds"],
+        "properties": {
+          "firstResponseSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 604800,
+            "description": "First-response target; 0 is off. Default 900."
+          },
+          "resolutionSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2592000,
+            "description": "Resolution target; 0 is off. Default 86400."
+          }
+        }
+      },
+      "InboxReport": {
+        "type": "object",
+        "required": [
+          "from",
+          "to",
+          "groupBy",
+          "timeZone",
+          "sla",
+          "totals",
+          "rows"
+        ],
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "groupBy": {
+            "type": "string",
+            "enum": ["", "channel", "queue", "agent", "day"]
+          },
+          "timeZone": {
+            "type": "string"
+          },
+          "sla": {
+            "$ref": "#/components/schemas/InboxSLA"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/InboxReportRow"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxReportRow"
+            }
+          }
+        }
+      },
+      "MessagingProviderRedaction": {
+        "type": "object",
+        "required": [
+          "provider",
+          "redacted",
+          "messages",
+          "done",
+          "pending",
+          "failed",
+          "detail"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "redacted": {
+            "type": "boolean",
+            "description": "Every message sent through the provider is gone from it."
+          },
+          "messages": {
+            "type": "integer",
+            "description": "Messages queued for deletion at the provider."
+          },
+          "done": {
+            "type": "integer"
+          },
+          "pending": {
+            "type": "integer",
+            "description": "Still being retried in the background, for up to a day."
+          },
+          "failed": {
+            "type": "integer",
+            "description": "Refused, or the provider cannot delete a single message."
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "InboxRedactReport": {
+        "type": "object",
+        "required": [
+          "message",
+          "providers",
+          "mediaObjects",
+          "mediaObjectsPending"
+        ],
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/InboxMessage"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessagingProviderRedaction"
+            },
+            "description": "Empty when the message never went through a carrier API."
+          },
+          "mediaObjects": {
+            "type": "integer",
+            "description": "The message's attachment files removed from the media store and checked gone; the attachments are no longer part of the message."
+          },
+          "mediaObjectsPending": {
+            "type": "integer",
+            "description": "Attachment files the media store could not remove now; the media sweeper removes them within minutes."
+          }
+        }
+      },
+      "MessagingRedactionCount": {
+        "type": "object",
+        "required": ["provider", "pending", "done", "failed", "unsupported"],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "pending": {
+            "type": "integer"
+          },
+          "done": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "unsupported": {
+            "type": "integer",
+            "description": "The provider has no API to delete one message (Telnyx: turn on the messaging profile's redaction)."
+          }
+        }
+      },
+      "MessagingRedactionList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessagingRedactionCount"
+            }
+          }
+        }
+      },
+      "SupervisorView": {
+        "type": "object",
+        "required": [
+          "id",
+          "at",
+          "actor",
+          "userId",
+          "userName",
+          "conversationId",
+          "via"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actor": {
+            "type": "string",
+            "description": "user:<username>, or the token or client that read it."
+          },
+          "userId": {
+            "type": ["integer", "null"],
+            "format": "int64"
+          },
+          "userName": {
+            "type": "string"
+          },
+          "conversationId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "via": {
+            "type": "string",
+            "description": "The OAuth client or tool, when not the console."
+          }
+        }
+      },
+      "SupervisorViewTotal": {
+        "type": "object",
+        "required": ["actor", "userName", "views", "conversations"],
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "userName": {
+            "type": "string"
+          },
+          "views": {
+            "type": "integer"
+          },
+          "conversations": {
+            "type": "integer",
+            "description": "Distinct conversations."
+          }
+        }
+      },
+      "SupervisorViewReport": {
+        "type": "object",
+        "required": ["items", "nextBefore", "totals"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupervisorView"
+            }
+          },
+          "nextBefore": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Pass as before for the next page; 0 on the last."
+          },
+          "totals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupervisorViewTotal"
+            }
+          }
+        }
+      },
+      "InboxEventData": {
+        "type": "object",
+        "description": "The payload of a messaging inbox event: ids, states and times, never text or numbers unless the webhook endpoint asked for them.",
+        "required": ["conversationId"],
+        "properties": {
+          "conversationId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "messageId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "channelId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "channelKind": {
+            "type": "string",
+            "enum": ["sms", "whatsapp", "webchat"]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "addressId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "address": {
+            "type": "string",
+            "description": "The business's own number or chat site the conversation is on."
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["in", "out"]
+          },
+          "status": {
+            "type": "string",
+            "description": "The message's delivery state (message events) or the conversation's state (conversation events)."
+          },
+          "errorCode": {
+            "type": "string"
+          },
+          "assigneeUserId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Absent when unassigned (conversation.assigned back to the pool)."
+          },
+          "queueId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "peerKind": {
+            "type": "string",
+            "enum": ["phone", "visitor"]
+          },
+          "peerKey": {
+            "type": "string",
+            "description": "A keyed hash of the customer: stable on this deployment, meaningless elsewhere."
+          },
+          "peer": {
+            "type": "string",
+            "description": "The customer's number or visitor:<id>; only in a webhook delivery to an endpoint with includePeer."
+          },
+          "body": {
+            "type": "string",
+            "description": "The message text; only in a webhook delivery of message.received or message.sent to an endpoint with includeMessageBody."
           }
         }
       },

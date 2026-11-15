@@ -185,6 +185,14 @@ func (s *server) uploadInboxMediaCommon(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	m, err := ms.FinishMediaUpload(r.Context(), up.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		// An erase took the upload while its file was being stored: no row
+		// names the file now, so it goes too (the orphan sweep removes it
+		// if MinIO refuses now).
+		if err := media.RemoveVerified(context.WithoutCancel(r.Context()), objs, up.Key); err != nil {
+			s.Log.Warn("attachment of an erased upload not removed yet", "media", up.ID, "error", err)
+		}
+	}
 	if err != nil {
 		s.inboxError(w, "attachment", err)
 		return
@@ -233,26 +241,34 @@ func (s *server) getMyInboxMedia(w http.ResponseWriter, r *http.Request) {
 // checks each is gone and drops its row (spec M-20). A file the store could
 // not remove now stays for the media sweeper, and the report says so.
 func (s *server) eraseMediaObjects(ctx context.Context, is InboxStore, rep *store.EraseReport) {
+	rep.MediaObjects, rep.MediaObjectsPending = s.removeMediaObjects(ctx, is, rep.Media, "erase")
+}
+
+// removeMediaObjects removes the files of attachments an erase or a
+// redaction detached, checks each is gone and drops its row. It returns how
+// many files went and how many the media sweeper removes later.
+func (s *server) removeMediaObjects(ctx context.Context, is InboxStore, gs []media.Garbage, what string) (removed, pending int) {
 	ms, ok := is.(MediaStore)
-	for _, g := range rep.Media {
+	for _, g := range gs {
 		if g.Key != "" {
 			if s.MediaObjects == nil || !ok {
-				rep.MediaObjectsPending++
+				pending++
 				continue
 			}
 			if err := media.RemoveVerified(ctx, s.MediaObjects, g.Key); err != nil {
-				s.Log.Warn("erase: attachment not removed yet", "media", g.ID, "error", err)
-				rep.MediaObjectsPending++
+				s.Log.Warn(what+": attachment not removed yet", "media", g.ID, "error", err)
+				pending++
 				continue
 			}
-			rep.MediaObjects++
+			removed++
 		}
 		if ok {
 			if err := ms.DropMedia(ctx, g); err != nil {
-				s.Log.Warn("erase: attachment row not dropped", "media", g.ID, "error", err)
+				s.Log.Warn(what+": attachment row not dropped", "media", g.ID, "error", err)
 			}
 		}
 	}
+	return removed, pending
 }
 
 // Chat site logos.

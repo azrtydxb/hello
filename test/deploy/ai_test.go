@@ -64,7 +64,7 @@ func TestKwAIAccess(t *testing.T) {
 		t.Errorf("HELLO_OAUTH_DCR = %q", got)
 	}
 
-	for _, head := range []string{"= /mcp", "/oauth/", "/.well-known/oauth-"} {
+	for _, head := range []string{"= /mcp", "/oauth/", "/.well-known/oauth-", "/scim/"} {
 		body := nginxLocation(t, head)
 		if !strings.Contains(body, "set $hello_control ${HELLO_CONTROL_UPSTREAM};") || !strings.Contains(body, "proxy_pass $hello_control;") {
 			t.Errorf("nginx: location %s does not proxy to hello-control", head)

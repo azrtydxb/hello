@@ -25,15 +25,12 @@ type elsewhereRequester struct {
 }
 
 func (r elsewhereRequester) Request(ctx context.Context, req *sip.Request) (sip.ClientTransaction, error) {
-	if req.IsAck() {
-		// A late 2xx on a cancelled leg is ACKed and hung up through the
-		// same dialog: an ACK is no transaction (Client.WriteRequest).
-		return nil, r.ua.TransportLayer().WriteMsg(req)
-	}
 	if req.IsCancel() && r.elsewhere.Load() && req.GetHeader("Reason") == nil {
 		req.AppendHeader(sip.NewHeader("Reason", reasonElsewhere))
 	}
-	return r.ua.TransactionLayer().Request(ctx, req)
+	// A late 2xx on a cancelled leg is ACKed and hung up through the same
+	// dialog, and the leg may be on the TLS hop: send as the server's client.
+	return hopRequester{ua: r.ua}.Request(ctx, req)
 }
 
 // newElsewhereUA is a copy of the fork dialog UA whose CANCELs carry

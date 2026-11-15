@@ -214,8 +214,9 @@ func CleanTags(in []string) (out []string, ok bool) {
 }
 
 // Event is one thing that happened in the inbox, for the integrations event
-// pipeline of a later phase. It carries ids and states, never text or
-// numbers.
+// pipeline (spec M-23). It carries ids and states, never text or numbers;
+// the sink reads the rest (channel, number, queue, hashed peer) when it
+// emits.
 type Event struct {
 	Type           string // conversation.created, conversation.assigned, conversation.resolved, message.received, message.sent, message.status, message.optout
 	ConversationID int64
@@ -224,10 +225,14 @@ type Event struct {
 	Direction      string
 	Status         string
 	AssigneeUserID int64
+	// NewConversation says the same action created the conversation: the
+	// sink emits conversation.created before the event itself.
+	NewConversation bool
 }
 
-// EventSink receives inbox events. The no-op sink is the default until the
-// integrations pipeline lands, so the swap is one line.
+// EventSink receives inbox events. hello-control connects it to the
+// integrations event pipeline (webhooks, automation triggers, the event
+// stream); NopSink drops them (tests, and a store without a pipeline).
 type EventSink interface {
 	Emit(ctx context.Context, e Event)
 }

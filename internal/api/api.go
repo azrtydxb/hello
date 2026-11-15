@@ -369,6 +369,10 @@ type Config struct {
 	// Directory is the directory engine (AD/LDAP sync); nil answers 503 on
 	// the directory routes.
 	Directory DirectoryService
+	// SCIM is the SCIM 2.0 service provider (spec integrations I-23 to
+	// I-25): /scim/v2 and its token administration; nil answers 404 on
+	// /scim/v2 and 503 on the token routes.
+	SCIM SCIMService
 	// SSO is single sign-on (spec integrations P11); nil hides the login
 	// page's providers and answers 503 on the SSO routes.
 	SSO SSOService
@@ -454,6 +458,10 @@ type Config struct {
 	// Inbox is the messaging inbox persistence (spec messaging-channels);
 	// nil answers 503 on the inbox and messaging routes.
 	Inbox InboxStore
+	// MsgRedactor deletes an erased customer's or a redacted message's
+	// texts at the carrier while the request waits; nil leaves them to the
+	// background worker.
+	MsgRedactor MsgRedactor
 	// MessagingAIAuto is HELLO_MSG_AI_AUTO, shown with the inbox AI
 	// settings: false stops every auto-reply.
 	MessagingAIAuto bool
@@ -554,6 +562,14 @@ func Handler(c Config) http.Handler {
 	// The recording link route is public (the token is the credential) and
 	// outside /api/v1, so it is not in the route table or the OpenAPI document.
 	mux.HandleFunc("GET /r/{token}", s.publicRecording)
+	// SCIM (spec integrations I-23) is outside /api/v1 too: its bearer token
+	// is a SCIM token, valid there only, and the protocol is RFC 7644's.
+	if c.SCIM != nil {
+		mux.Handle("/scim/v2/", c.SCIM)
+		mux.Handle("/scim/v2", c.SCIM)
+	} else {
+		mux.HandleFunc("/scim/", scimNotConfigured)
+	}
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.

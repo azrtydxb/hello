@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
@@ -208,12 +209,51 @@ func validatePhoneFields(f *fieldErrs, serial *string, vendor *prov.Vendor, mode
 			}
 		}
 	}
-	if blf != nil && len(*blf) > 0 && vendor != nil && model != nil && !prov.SupportsBLF(*vendor, *model) {
-		f.add("blf", "the %s %s has no BLF keys", *vendor, *model)
+	if blf != nil && len(*blf) > 0 && vendor != nil && model != nil {
+		if msg := blfFits(*vendor, *model, len(*blf)); msg != "" {
+			f.add("blf", "%s", msg)
+		}
 	}
 	if templateID != nil && *templateID <= 0 {
 		f.add("templateId", "must be a template id")
 	}
+}
+
+// phoneModel is the vendor and model a phone change leaves: the change's,
+// else the stored phone's.
+func (s *server) phoneModel(r *http.Request, id int64, vendor *prov.Vendor, model *string) (prov.Vendor, string, error) {
+	if vendor != nil && model != nil {
+		return *vendor, *model, nil
+	}
+	cur, err := s.ProvStore.GetPhone(r.Context(), id)
+	if err != nil {
+		return "", "", err
+	}
+	if vendor != nil {
+		cur.Vendor = *vendor
+	}
+	if model != nil {
+		cur.Model = *model
+	}
+	return cur.Vendor, cur.Model, nil
+}
+
+// blfFits is why n BLF entries do not fit the model, "" when they do: a
+// phone with BLF keys takes them (up to maxBLFKeys, checked above); a
+// Grandstream WP has no BLF keys and takes them as speed dials, as many as
+// it has slots (phone-feature-parity S-12).
+func blfFits(v prov.Vendor, model string, n int) string {
+	if prov.SupportsBLF(v, model) {
+		return ""
+	}
+	slots := prov.SpeedDialSlots(v, model)
+	switch {
+	case slots == 0:
+		return fmt.Sprintf("the %s %s has no BLF keys", v, model)
+	case n > slots:
+		return fmt.Sprintf("the %s %s takes BLF entries as speed dials, at most %d", v, model, slots)
+	}
+	return ""
 }
 
 func (s *server) createPhone(w http.ResponseWriter, r *http.Request) {
@@ -291,6 +331,7 @@ func (s *server) updatePhone(w http.ResponseWriter, r *http.Request) {
 		BLF         *[]string       `json:"blf"`
 		Enabled     *bool           `json:"enabled"`
 		SharingRole *string         `json:"sharingRole"`
+		SideKey     json.RawMessage `json:"sideKey"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -346,24 +387,42 @@ func (s *server) updatePhone(w http.ResponseWriter, r *http.Request) {
 			c.Bind = &store.Binding{ExtensionID: *in.ExtensionID, DeviceID: dev}
 		}
 	}
+	if in.SideKey != nil {
+		var side *string
+		if string(in.SideKey) != "null" {
+			side = new(string)
+			if err := json.Unmarshal(in.SideKey, side); err != nil || !prov.ValidSideKey(*side) {
+				f.add("sideKey", "must be ptt, alarm, none or null")
+			}
+		}
+		c.SideKey = &side
+	}
 	validatePhoneFields(&f, in.Serial, in.Vendor, in.Model, in.Label, in.BLF, tpl)
-	if len(f) == 0 && in.BLF != nil && len(*in.BLF) > 0 && (in.Vendor == nil || in.Model == nil) {
-		// The change names the keys but not the model: check them against
-		// the phone's stored vendor and model.
-		cur, err := s.ProvStore.GetPhone(r.Context(), id)
+	if len(f) == 0 && c.SideKey != nil && *c.SideKey != nil {
+		// A side key function the model has no value for is refused.
+		v, m, err := s.phoneModel(r, id, in.Vendor, in.Model)
 		if err != nil {
 			s.provError(w, "phone", err)
 			return
 		}
-		v, m := cur.Vendor, cur.Model
-		if in.Vendor != nil {
-			v = *in.Vendor
+		if fn := **c.SideKey; !slices.Contains(prov.SideKeyChoices(v, m), fn) {
+			if len(prov.SideKeyChoices(v, m)) == 0 {
+				f.add("sideKey", "the %s %s has no side key Hello can set", v, m)
+			} else {
+				f.add("sideKey", "the %s %s has no %s side key", v, m, fn)
+			}
 		}
-		if in.Model != nil {
-			m = *in.Model
+	}
+	if len(f) == 0 && in.BLF != nil && len(*in.BLF) > 0 && (in.Vendor == nil || in.Model == nil) {
+		// The change names the keys but not the model: check them against
+		// the phone's stored vendor and model.
+		v, m, err := s.phoneModel(r, id, in.Vendor, in.Model)
+		if err != nil {
+			s.provError(w, "phone", err)
+			return
 		}
-		if !prov.SupportsBLF(v, m) {
-			f.add("blf", "the %s %s has no BLF keys", v, m)
+		if msg := blfFits(v, m, len(*in.BLF)); msg != "" {
+			f.add("blf", "%s", msg)
 		}
 	}
 	if len(f) > 0 {

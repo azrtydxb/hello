@@ -95,6 +95,20 @@ returned no users although users are linked (`errorCode` `empty_result`). That
 usually means a wrong base DN, an empty filter or a partial outage: tell the
 administrator to look at the changes first and confirm only if they are right.
 
+## SCIM connectors
+
+A connector of kind `scim` is not read: Entra ID, Okta or JumpCloud push users
+and groups to `/scim/v2` and each request is applied at once with the same
+mapping, rules and reasons. Its changes appear on one run of kind `scim` per
+hour. `getSCIMStatus` shows the base URL, what was pushed, the last request and
+the guard: SCIM disables are counted per rolling hour, and over 20 percent of
+the linked users (at least 5) the connector is paused (`pausedAt`), every SCIM
+write answers 429 and `pausedRunId` is the run an administrator confirms in the
+console to resume. A push the engine would turn into a conflict is refused to
+the identity provider (409 or 400), so its provisioning log shows the reason;
+the conflict row is on the scim run. `listSCIMTokens` lists the tokens; an old
+`lastUsedAt` on the only active token means the provider stopped pushing.
+
 ## Which fields a directory owns
 
 A user managed by a connector carries `managedBy` with the connector and the

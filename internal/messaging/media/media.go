@@ -44,6 +44,11 @@ const (
 	// FetchWindow is how long Hello keeps trying to download an inbound
 	// attachment before it is marked expired (spec "Failure modes").
 	FetchWindow = 24 * time.Hour
+	// OrphanAge is how old an object under msg/ that no attachment row
+	// names must be before the orphan sweep removes it: far past a
+	// download's lease and an upload's request, so an object whose row is
+	// about to name it is never taken.
+	OrphanAge = time.Hour
 )
 
 // Attachment states.
@@ -342,6 +347,35 @@ func MessageKey(channelID int64, at time.Time, messageID int64, sha string) stri
 // made, so the attachment's own id stands in for the message's.
 func UploadKey(channelID int64, at time.Time, mediaID int64, sha string) string {
 	return fmt.Sprintf("msg/%d/%04d/upload-%d/%s", channelID, at.UTC().Year(), mediaID, sha)
+}
+
+// ParseKey reads an attachment's object key: the message of a MessageKey,
+// or the attachment of an UploadKey (the other is 0). ok is false for any
+// other key under msg/ (a chat site's logo), which the orphan sweep leaves
+// alone.
+func ParseKey(key string) (messageID, mediaID int64, ok bool) {
+	p := strings.Split(key, "/")
+	if len(p) != 5 || p[0] != "msg" || p[4] == "" {
+		return 0, 0, false
+	}
+	if ch, err := strconv.ParseInt(p[1], 10, 64); err != nil || ch <= 0 {
+		return 0, 0, false
+	}
+	if y, err := strconv.Atoi(p[2]); err != nil || len(p[2]) != 4 || y <= 0 {
+		return 0, 0, false
+	}
+	if id, found := strings.CutPrefix(p[3], "upload-"); found {
+		n, err := strconv.ParseInt(id, 10, 64)
+		if err != nil || n <= 0 {
+			return 0, 0, false
+		}
+		return 0, n, true
+	}
+	n, err := strconv.ParseInt(p[3], 10, 64)
+	if err != nil || n <= 0 {
+		return 0, 0, false
+	}
+	return n, 0, true
 }
 
 // LogoKey is where a chat site's logo is kept.

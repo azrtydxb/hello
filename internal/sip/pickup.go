@@ -168,6 +168,11 @@ func (c *call) answerPickup(req *pickupReq) {
 	s.m.response(sip.StatusOK)
 	c.settleReliable(true)
 	if err := c.dss.WriteResponse(res); err != nil {
+		if s.callerHungUpUnacked(c.dss) {
+			// The caller's BYE overtook its ACK: handleBye has accepted it
+			// and hangs the picked-up call up as the caller's.
+			return
+		}
 		s.log.Info("caller did not acknowledge the picked-up call", "correlation_id", c.id, "error", err)
 		c.linkedHangup(cdr.SideSystem, "no ACK from caller")
 		return

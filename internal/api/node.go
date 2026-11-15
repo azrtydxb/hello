@@ -1,10 +1,12 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -96,6 +98,9 @@ type ClusterPoller struct {
 	Revision func(context.Context) (int64, error)
 	Members  func(context.Context) ([]cluster.Member, error)
 	Metrics  *ClusterMetrics
+	// SIPNodes, when set, is given every membership read (the HA node list
+	// phones' backup servers come from, S-20).
+	SIPNodes *SIPNodeList
 
 	revision atomic.Int64
 }
@@ -128,6 +133,38 @@ func (p *ClusterPoller) Poll(ctx context.Context) {
 	if merr == nil && p.Metrics != nil {
 		p.Metrics.update(ms, rev)
 	}
+	if merr == nil && p.SIPNodes != nil {
+		p.SIPNodes.Update(ms)
+	}
+}
+
+// SIPNodeList is the HA node list as provisioning sees it: the SIP
+// addresses (HELLO_SIP_ADVERTISED_ADDR) of the READY hello-sip nodes, by
+// node ID, from the last membership read (phone-feature-parity S-20). The
+// zero value is an empty list; it is safe for concurrent use.
+type SIPNodeList struct {
+	addrs atomic.Pointer[[]string]
+}
+
+// Update replaces the list from a membership read.
+func (l *SIPNodeList) Update(ms []cluster.Member) {
+	sorted := slices.Clone(ms)
+	slices.SortFunc(sorted, func(a, b cluster.Member) int { return cmp.Compare(a.ID, b.ID) })
+	out := []string{}
+	for _, m := range sorted {
+		if m.Kind == cluster.KindSIP && m.State == cluster.Ready && m.SIPAddr != "" {
+			out = append(out, m.SIPAddr)
+		}
+	}
+	l.addrs.Store(&out)
+}
+
+// Addrs returns the list (nil before the first read).
+func (l *SIPNodeList) Addrs() []string {
+	if p := l.addrs.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // Run polls until ctx ends.
@@ -175,6 +212,8 @@ type NodeOptions struct {
 	// and replace them.
 	Heartbeat, CheckEvery time.Duration
 	Drainer               lifecycle.Drainer
+	// SIPNodes receives the HA node list from the cluster poller (S-20).
+	SIPNodes *SIPNodeList
 }
 
 // Node is hello-control's lifecycle: JOINING until PostgreSQL first
@@ -198,7 +237,7 @@ func NewNode(o NodeOptions) *Node {
 	n := &Node{o: o}
 	n.Poller = &ClusterPoller{
 		Every: o.Heartbeat, Revision: o.Revision, Members: o.Valkey.Members,
-		Metrics: NewClusterMetrics(o.Metrics.Registry),
+		Metrics: NewClusterMetrics(o.Metrics.Registry), SIPNodes: o.SIPNodes,
 	}
 	n.Machine = lifecycle.New(lifecycle.Options{
 		Member:    cluster.Member{ID: o.ID, Kind: cluster.KindControl, HTTPAddr: o.HTTPAddr, Version: o.Version},

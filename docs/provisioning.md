@@ -1230,8 +1230,9 @@ cutting in).
 **Grandstream paging button.** The WP822 and the WP8x6 report "not configured
 on the phone" when you press the PTT/paging button until multicast paging has
 a listening address (the button sends to it). The WP8x6 side key also needs
-the PTT/Paging feature on: Hello writes `P22556 = 1` (WP8x6 only) and the side
-key function `P82317 = 0` (PTT/Paging; WP8x6 and WP856).
+the PTT/Paging feature on: Hello writes `P22556 = 1` (WP8x6 only). The side key
+function itself is a phone group setting, PTT/paging by default (see "Side key
+and speed dials (Grandstream WP)").
 
 **Push-to-talk and group paging (Grandstream WP).** Every Grandstream WP gets
 a working PTT key with no setup. The keys per family:
@@ -1758,8 +1759,10 @@ page), or with `putPhoneGroupSettings` and `putPhoneSettings`.
   phone knows it: use only a key from the vendor's documentation or
   configuration template.
 
-The spec names some one-off Grandstream WP keys for this. Hello does not give
-them a field of their own; these are the numbers and values in Grandstream's own
+The spec names some one-off Grandstream WP keys for this. The side key and the
+speed dials have fields of their own (next section); an override of the same
+key still wins, since overrides are applied last. The others have no field;
+these are the numbers and values in Grandstream's own
 configuration templates (`wp8x6_config_1.0.3.39`,
 `wp810_822_825_config_1.0.11.83`, `wp820_config_1.0.7.90`,
 `wp856_config_1.0.3.16`), and which models have them:
@@ -1779,40 +1782,114 @@ configuration templates (`wp8x6_config_1.0.3.39`,
 The WP856's `P23001`/`P23003` are the account and user ID of an expansion key,
 not the handset speed dial. Check the model's template before you set a key.
 
+## Side key and speed dials (Grandstream WP)
+
+**Side key.** A phone group sets what the side key of its WP phones does
+(console: phone group, "Side key"; API `PUT /api/v1/phone-groups/{id}/side-key`,
+MCP `setPhoneGroupSideKey`): `ptt` (PTT/paging, the default and the phones' own
+default), `alarm` (the alarm call, S-29) or `none`. A phone may override its
+group (phone form, "Side key"; `PATCH /api/v1/phones/{id}` with `sideKey`, or
+`null` for the group's). The key is written to every WP that has one:
+
+| Model               | Key      | PTT/paging | Alarm | None |
+| ------------------- | -------- | ---------- | ----- | ---- |
+| WP816, WP826, WP836 | `P82317` | 0          | 2     | 4    |
+| WP856               | `P82317` | 0          | —     | 4    |
+| WP820               | `P22258` | 0          | —     | 4    |
+| WP810, WP822, WP825 | none     |            |       |      |
+
+Alarm is offered on the WP8x6 only (`sideKeyChoices` on a phone lists what its
+model takes). It dials the group's alarm destination (`*55`, the Emergency Call
+keys `P22269` to `P22602`); a WP8x6 whose group has no alarm destination keeps
+PTT/paging, since the key would have nothing to dial. Values from
+`wp8x6_config_1.0.3.39` ("Side Key Funtions"), `wp856_config_1.0.3.16` ("PTT
+Button") and `wp820_config_1.0.7.90` (multi-function button). Not confirmed on
+a phone.
+
+**Speed dials.** A WP has no BLF keys, so its BLF entries (the phone form's
+list, shown as "Speed dials" for a WP; the API's `blf`) are written as speed
+dials, in order. `speedDialSlots` on a phone is how many its model takes, and
+the API refuses more:
+
+| Model                       | Slots | Keys                                                                                                                                         |
+| --------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| WP816, WP826, WP836         | 9     | number keys 2 to 9, then 0 (long press): mode `P8690 + 4 (n - 2)` (key 0 `P8682`), then account, label and value; mode 0 Speed Dial, -1 None |
+| WP810, WP822, WP825 (WP820) | 9     | speed dial keys 2 to 9, then 0: account `P23011 + 5 (n - 2)` and number `P23013 + 5 (n - 2)` (key 0 `P23001`, `P23003`)                      |
+| WP856                       | 30    | multi-purpose keys 1 to 30: mode `P23000 + 5 (n - 1)` (0 Speed Dial), then account, description and value                                    |
+
+Every slot is written, empty when unused, so an entry you remove is cleared at
+the next resync. The WP820 template lists its speed dial keys commented out;
+they are written to it all the same. Keys from the same Grandstream templates;
+not confirmed on a phone.
+
 ## SRV records and backup servers
 
-By default every phone registers with one address (`HELLO_PROV_SIP_SERVER`). Two
-optional settings add failover. Neither changes what a phone does until it is
-set, and the failover has not yet passed a lab test (a node killed under a
-Wi-Fi handset), so leave both off until it has.
+By default every phone registers with one address (`HELLO_PROV_SIP_SERVER`).
+Two things add failover: backup servers and DNS SRV mode. SRV mode stays off
+until it is set, and the failover has not yet passed a lab test (a node killed
+under a Wi-Fi handset).
 
-**Backup servers (A-record mode).** `HELLO_PROV_SIP_BACKUP_SERVERS` (chart value
-`control.provisioning.sipBackupServers`) is a comma separated list of `host:port`
-registrars, at most two; the first is written to the phones that take one. List
-the other HA nodes here.
+**Backup servers (A-record mode).** The backups come from the HA node list or
+from the environment:
+
+- **The HA node list (default).** When the SIP server phones register with is
+  itself a hello-sip node (its `HELLO_SIP_ADVERTISED_ADDR`, which is also the
+  default of `HELLO_PROV_SIP_SERVER`), hello-control gives phones the other
+  READY hello-sip nodes as backups, at most two, in node order. It reads them
+  from the cluster membership on every heartbeat, so a node that joins or
+  leaves reaches the phones at their next resync. Behind an edge (Kamailio, a
+  VIP or a load balancer: the kw and Helm setups) the nodes are not the phones'
+  to reach, so they get none from the list.
+- **`HELLO_PROV_SIP_BACKUP_SERVERS`** (chart value
+  `control.provisioning.sipBackupServers`), a comma separated list of
+  `host:port`, at most two, overrides the node list. Use it to name the second
+  edge of a Kamailio pair that runs without a VIP. With the VIP (docs/ha.md,
+  "Kamailio pair") phones need no backup.
+
+The Provisioning settings page shows the backups phones are given and where
+they come from (`GET /api/v1/prov/settings`: `sipBackupServers`,
+`sipBackupSource`). Each backup is on the primary's transport (UDP or TCP); a
+phone on TLS gets none (the TLS registrar has no backup setting). Every further
+line gets the same.
 
 | Vendor      | Keys written                                                                                                                                                                                                                 |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.1.sip_server.2.address`, `.port`, `.transport_type = 0`, `.expires`                                                                                                                                                 |
-| Poly        | `reg.1.server.2.address`, `.port`, `.transport = "UDPOnly"`, `.expires`                                                                                                                                                      |
+| Yealink     | `account.N.sip_server.2.address`, `.port`, `.transport_type` (0 UDP, 1 TCP), `.expires`                                                                                                                                      |
+| Poly        | `reg.N.server.2.address`, `.port`, `.transport` (`UDPOnly`, `TCPOnly`), `.expires`                                                                                                                                           |
 | Grandstream | `P48` Outbound Proxy (the primary, `host:port`), `P2333` Backup Outbound Proxy (the backup) and `P2312` Secondary SIP Server (the backup; `P50602` on the WP820); the phone uses the backup when the primary does not answer |
+| Snom        | `user_outbound` (per identity): the primary, then every backup, `host:port;transport=udp`, comma separated; the phone tries them left to right (firmware 8.7 and later). Written empty without a backup                      |
+| Fanvil      | `SIPN Backup Addr`, `Backup Port`, `Backup Transport` (0 UDP, 1 TCP) and `Backup TTL`. `Backup Addr` is written empty without a backup                                                                                       |
 
-Snom and Fanvil get none: no key for a second registrar is in a vendor
-document Hello was checked against. A phone that registers over TLS gets none
-(the TLS registrar has no backup setting). Taking the setting away later does
-not clear `P2333` or `P2312` on a Grandstream phone: put them with an empty value
-in the phone group's setting overrides, then resync.
+Sources: Snom's Service Hub (`user_outbound`: "multiple comma separated values
+are supported for e.g. failover scenarios", and `registrar_whitelist`, which
+Hello leaves empty); the Fanvil key names are from a Fanvil X5 configuration
+export (the copy in the Tancredi provisioning templates), as no Fanvil document
+with them could be fetched. Neither is confirmed on a phone. Removing every
+backup clears them on Snom and Fanvil, but not `P2333` or `P2312` on a
+Grandstream phone: put those with an empty value in the phone group's setting
+overrides, then resync.
 
-**DNS SRV (Grandstream).** `HELLO_PROV_SIP_SRV` (chart value
-`control.provisioning.sipSrv`) is a DNS name. Grandstream phones are then
-written `P103 = 1` (DNS Mode: SRV), register with that name (`P47`, no port),
-`P29095 = 1` (register with the next server before failing calls over to it),
-`P26040 = 3` (failback follows the failback timer) and `P60056 = 60` (failback
-timer, minutes; the WP810/822/825 template has no such key, so those phones keep
-their default of 60). Every Grandstream file carries
-`P103 = 0` otherwise, so a phone taken out of SRV mode goes back to A records.
-Other vendors keep the A-record address: their SRV settings (DNS-NAPTR) are not
-plain SRV.
+**DNS SRV.** `HELLO_PROV_SIP_SRV` (chart value `control.provisioning.sipSrv`) is
+a DNS name. Phones in SRV mode register with that name and no port, get no
+backup server (the SRV records list the servers) and fail over between the
+servers the records list:
+
+- **Grandstream** (UDP and TCP): `P103 = 1` (DNS Mode: SRV), the name in
+  `P47`, `P29095 = 1` (register with the next server before failing calls over
+  to it), `P26040 = 3` (failback follows the failback timer) and `P60056 = 60`
+  (failback timer, minutes; the WP810/822/825 template has no such key, so those
+  phones keep their default of 60). Every Grandstream file carries `P103 = 0`
+  otherwise, so a phone taken out of SRV mode goes back to A records.
+- **Yealink** (UDP): `account.N.sip_server.1.address` is the name, `.port = 0`
+  and `.transport_type = 3` (DNS-NAPTR).
+- **Poly** (UDP): `reg.N.server.1.address` is the name, `.port = "0"` and
+  `.transport = "DNSnaptr"`.
+
+Yealink and Poly have no plain SRV mode: DNS-NAPTR asks for NAPTR records and,
+finding none, for the SRV records (RFC 3263), so the record set below is enough.
+A Yealink or Poly on TCP or TLS, and Snom and Fanvil phones, keep the address
+and its backups. Yealink's port 0 with DNS-NAPTR and its UDP-only SRV fallback
+are from the administrator guide and not confirmed on a phone.
 
 Hello does not manage DNS. Publish the records for the name yourself, one target
 per SIP node (Kamailio's public address and port from the chart: `kamailio.publicPort`
@@ -1830,9 +1907,9 @@ _sips._tcp.sip.example.com.  300 IN SRV 10 50 5061 sip-b.example.com.
 Use a lower priority number for the node that should be preferred. On the kw
 cluster the SIP node port is 30508, not 5060.
 
-The keys are from Grandstream's GRP261x and WP810/822/825 configuration
-templates (the WP8x6 template has the same settings under the same names); see
-`.procoder/ask/decisions.md` for the source. Not confirmed on a phone.
+The Grandstream keys are from Grandstream's own WP configuration templates, the
+Yealink and Poly keys from their administrator guides and templates; see
+`.procoder/ask/decisions.md` for the sources. Not confirmed on a phone.
 
 ## Provisioning hardening (Grandstream WP, Yealink TR-069)
 

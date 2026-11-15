@@ -248,6 +248,10 @@ type fakeStore struct {
 	garbage  []Garbage
 	dropped  []Garbage
 	claimErr error
+	// finishErr answers FinishMediaFetch per attachment; known answers
+	// KnownMediaKeys.
+	finishErr map[int64]error
+	known     map[string]bool
 }
 
 func (f *fakeStore) ClaimMediaFetch(context.Context, int) ([]FetchJob, error) {
@@ -264,7 +268,14 @@ func (f *fakeStore) FinishMediaFetch(_ context.Context, j FetchJob, r FetchResul
 		f.results = map[int64]FetchResult{}
 	}
 	f.results[j.ID] = r
-	return nil
+	return f.finishErr[j.ID]
+}
+func (f *fakeStore) KnownMediaKeys(_ context.Context, keys []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, k := range keys {
+		out[k] = f.known[k]
+	}
+	return out, nil
 }
 func (f *fakeStore) ChannelProviderConfig(context.Context, int64) (provider.Config, error) {
 	return provider.Config{AccountSID: "AC1"}, nil
@@ -375,5 +386,94 @@ func TestMediaWorker(t *testing.T) {
 	st.garbage, st.dropped = []Garbage{{ID: 3, Key: "msg/3/2026/1/x", Drop: true}}, nil
 	if n, err := w.CollectOnce(context.Background(), 10); err != nil || n != 0 || len(st.dropped) != 0 {
 		t.Fatalf("a failed removal settled the row: %d, %v, %v", n, err, st.dropped)
+	}
+}
+
+// TestMediaWorkerErasedDuringDownload fails if a file stored for an
+// attachment an erase or a redaction took meanwhile (the store answers
+// ErrGone) stays in the media store, or if a file whose result merely could
+// not be saved is removed.
+func TestMediaWorkerErasedDuringDownload(t *testing.T) {
+	now := time.Now()
+	carrier := fakeCarrier{files: map[string][]byte{"https://m/a": jpegBytes, "https://m/b": pngBytes}}
+	st := &fakeStore{jobs: []FetchJob{
+		{ID: 1, MessageID: 11, ChannelID: 3, Provider: "fake", Ref: provider.MediaRef{URL: "https://m/a"}, CreatedAt: now},
+		{ID: 2, MessageID: 12, ChannelID: 3, Provider: "fake", Ref: provider.MediaRef{URL: "https://m/b"}, CreatedAt: now},
+	}, finishErr: map[int64]error{1: ErrGone, 2: errors.New("database down")}}
+	objs := &MemObjects{}
+	w := &Worker{Store: st, Objects: objs, Max: DefaultMax,
+		New: func(string, provider.Config) (provider.SMSProvider, error) { return carrier, nil }}
+	if n, err := w.FetchOnce(context.Background(), 10); err != nil || n != 2 {
+		t.Fatalf("FetchOnce = %d, %v", n, err)
+	}
+	if ok, _ := objs.Exists(context.Background(), st.results[1].Key); ok {
+		t.Fatal("the file of an erased attachment stays in the media store")
+	}
+	if ok, _ := objs.Exists(context.Background(), st.results[2].Key); !ok {
+		t.Fatal("a file whose result was not saved was removed; the next try records it")
+	}
+}
+
+// TestSweepOrphans fails if the orphan sweep keeps an old object no row
+// names, removes one a row names, one younger than OrphanAge, a chat site's
+// logo or anything outside msg/, or counts a removal that failed.
+func TestSweepOrphans(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)
+	sha := strings.Repeat("a", 64)
+	orphan, upload := MessageKey(3, now, 11, sha), UploadKey(3, now, 7, sha)
+	named, young, logo := MessageKey(3, now, 12, sha), MessageKey(3, now, 13, sha), LogoKey(2)
+	objs := &MemObjects{}
+	for _, k := range []string{orphan, upload, named, young, logo} {
+		if err := objs.Put(ctx, k, strings.NewReader("x"), 1, "image/png"); err != nil {
+			t.Fatal(err)
+		}
+		objs.Modified[k] = now.Add(-OrphanAge - time.Minute)
+	}
+	objs.Modified[young] = now.Add(-OrphanAge + time.Minute)
+	st := &fakeStore{known: map[string]bool{named: true}}
+	w := &Worker{Store: st, Objects: objs, Now: func() time.Time { return now }}
+
+	objs.FailRemove = errors.New("minio down")
+	if n, err := w.SweepOrphans(ctx); err != nil || n != 0 || objs.Len() != 5 {
+		t.Fatalf("sweep with MinIO refusing = %d, %v; %d objects", n, err, objs.Len())
+	}
+	objs.FailRemove = nil
+	if n, err := w.SweepOrphans(ctx); err != nil || n != 2 {
+		t.Fatalf("sweep = %d, %v", n, err)
+	}
+	for k, want := range map[string]bool{orphan: false, upload: false, named: true, young: true, logo: true} {
+		if ok, _ := objs.Exists(ctx, k); ok != want {
+			t.Errorf("%s present = %v, want %v", k, ok, want)
+		}
+	}
+}
+
+// TestParseKey fails if an attachment's key is not read back to its message
+// or upload, or a key of another shape is taken for one.
+func TestParseKey(t *testing.T) {
+	at := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	sha := strings.Repeat("f", 64)
+	for _, tc := range []struct {
+		key      string
+		msg, mid int64
+		ok       bool
+	}{
+		{MessageKey(4, at, 99, sha), 99, 0, true},
+		{UploadKey(4, at, 17, sha), 0, 17, true},
+		{LogoKey(3), 0, 0, false},
+		{"msg/4/2026/99", 0, 0, false},
+		{"msg/4/2026/99/", 0, 0, false},
+		{"msg/x/2026/99/" + sha, 0, 0, false},
+		{"msg/4/26/99/" + sha, 0, 0, false},
+		{"msg/4/2026/upload-x/" + sha, 0, 0, false},
+		{"msg/4/2026/0/" + sha, 0, 0, false},
+		{"rec/4/2026/99/" + sha, 0, 0, false},
+		{"msg/4/2026/99/" + sha + "/x", 0, 0, false},
+	} {
+		msg, mid, ok := ParseKey(tc.key)
+		if msg != tc.msg || mid != tc.mid || ok != tc.ok {
+			t.Errorf("ParseKey(%q) = %d, %d, %v; want %d, %d, %v", tc.key, msg, mid, ok, tc.msg, tc.mid, tc.ok)
+		}
 	}
 }

@@ -172,3 +172,99 @@ func TestSRVWP856SixLines(t *testing.T) {
 		}
 	}
 }
+
+// TestBackupSnomFanvil fails if a Snom's user_outbound does not list the
+// primary and then every backup on the primary's transport, or a Fanvil's
+// SIP1 Backup keys do not name the backup, for line 1 and further lines; or
+// if a phone without a backup keeps a stale outbound list or backup address.
+func TestBackupSnomFanvil(t *testing.T) {
+	withBackups := udpServer
+	withBackups.Backups = []Backup{{Host: "192.0.2.21", Port: 5062}, {Host: "192.0.2.22", Port: 5060}}
+	withBackups.Backup = &withBackups.Backups[0]
+
+	d := linesSample(Snom, "D785", 1)
+	d.Server = withBackups
+	sn := renderFor(t, Snom, linesFile(Snom, d), d)
+	list := "192.0.2.10:5060;transport=udp,192.0.2.21:5062;transport=udp,192.0.2.22:5060;transport=udp"
+	for _, want := range []string{`<user_outbound idx="1" perm="R">` + list + `</user_outbound>`, `<user_outbound idx="2" perm="R">` + list + `</user_outbound>`} {
+		if !strings.Contains(sn, want) {
+			t.Errorf("snom lacks %s", want)
+		}
+	}
+	d.Server = udpServer
+	if sn := renderFor(t, Snom, linesFile(Snom, d), d); !strings.Contains(sn, `<user_outbound idx="1" perm="R"></user_outbound>`) || strings.Contains(sn, "192.0.2.21") {
+		t.Error("snom without a backup keeps an outbound list")
+	}
+	tcp := withBackups
+	tcp.Transport = "tcp"
+	d.Server = tcp
+	if sn := renderFor(t, Snom, linesFile(Snom, d), d); !strings.Contains(sn, "192.0.2.21:5062;transport=tcp") {
+		t.Error("snom backup is not on the primary's transport")
+	}
+
+	d = linesSample(Fanvil, "X6U", 1)
+	d.Server = withBackups
+	fv := renderFor(t, Fanvil, linesFile(Fanvil, d), d)
+	for _, want := range []string{"SIP1 Backup Addr   :192.0.2.21\n", "SIP1 Backup Port   :5062\n", "SIP1 Backup Transport :0\n", "SIP1 Backup TTL    :3600\n",
+		"SIP2 Backup Addr   :192.0.2.21\n", "SIP2 Backup Port   :5062\n"} {
+		if !strings.Contains(fv, want) {
+			t.Errorf("fanvil lacks %q", want)
+		}
+	}
+	d.Server = udpServer
+	fv = renderFor(t, Fanvil, linesFile(Fanvil, d), d)
+	if !strings.Contains(fv, "SIP1 Backup Addr   :\n") || strings.Contains(fv, "Backup Port") {
+		t.Error("fanvil without a backup keeps a backup server")
+	}
+}
+
+// TestSRVYealinkPoly fails if a Yealink or Poly phone in SRV mode does not
+// register with the SRV name, port 0 and the DNS-NAPTR transport on every
+// line, if it keeps a backup server, or if A-record mode keeps DNS-NAPTR; or
+// if a backup is not written for further lines.
+func TestSRVYealinkPoly(t *testing.T) {
+	srv := Server{Host: "sip.hello.example.com", Port: 0, Transport: "udp", DNSMode: DNSSRV, Expiry: 3600}
+
+	d := linesSample(Yealink, "T54W", 1)
+	d.Server = srv
+	yl := renderFor(t, Yealink, linesFile(Yealink, d), d)
+	for _, want := range []string{"account.1.sip_server.1.address = sip.hello.example.com\n", "account.1.sip_server.1.port = 0\n",
+		"account.1.sip_server.1.transport_type = 3\n", "account.2.sip_server.1.transport_type = 3\n"} {
+		if !strings.Contains(yl, want) {
+			t.Errorf("yealink SRV lacks %q", want)
+		}
+	}
+	if strings.Contains(yl, "sip_server.2") {
+		t.Error("yealink SRV has a second server")
+	}
+	d.Server = udpServer
+	d.Server.Backup = &Backup{Host: "192.0.2.21", Port: 5062}
+	yl = renderFor(t, Yealink, linesFile(Yealink, d), d)
+	if strings.Contains(yl, "transport_type = 3") || !strings.Contains(yl, "account.2.sip_server.2.address = 192.0.2.21\n") {
+		t.Error("yealink A-record mode keeps DNS-NAPTR, or line 2 lacks the backup")
+	}
+	d.Server.Transport = "tcp"
+	yl = renderFor(t, Yealink, linesFile(Yealink, d), d)
+	if !strings.Contains(yl, "account.1.sip_server.2.transport_type = 1\n") || !strings.Contains(yl, "account.2.sip_server.1.transport_type = 1\n") {
+		t.Error("yealink TCP backup or line 2 is not on TCP")
+	}
+
+	d = linesSample(Poly, "VVX 450", 1)
+	d.Server = srv
+	pl := renderFor(t, Poly, linesFile(Poly, d), d)
+	for _, want := range []string{`reg.1.server.1.address="sip.hello.example.com"`, `reg.1.server.1.port="0"`, `reg.1.server.1.transport="DNSnaptr"`,
+		`reg.2.server.1.transport="DNSnaptr"`} {
+		if !strings.Contains(pl, want) {
+			t.Errorf("poly SRV lacks %s", want)
+		}
+	}
+	if strings.Contains(pl, "server.2") {
+		t.Error("poly SRV has a second server")
+	}
+	d.Server = udpServer
+	d.Server.Backup = &Backup{Host: "192.0.2.21", Port: 5062}
+	pl = renderFor(t, Poly, linesFile(Poly, d), d)
+	if strings.Contains(pl, "DNSnaptr") || !strings.Contains(pl, `reg.2.server.2.address="192.0.2.21"`) {
+		t.Error("poly A-record mode keeps DNSnaptr, or line 2 lacks the backup")
+	}
+}

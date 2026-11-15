@@ -27,6 +27,7 @@ import (
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/inboxevents"
 	"github.com/azrtydxb/hello/internal/messaging/media"
 	"github.com/azrtydxb/hello/internal/messaging/msgai"
 	"github.com/azrtydxb/hello/internal/messaging/router"
@@ -36,6 +37,7 @@ import (
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/prov/redirect"
 	"github.com/azrtydxb/hello/internal/safehttp"
+	"github.com/azrtydxb/hello/internal/scim"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/slack"
 	"github.com/azrtydxb/hello/internal/sso"
@@ -133,6 +135,10 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	deployment := redirect.Deployment(cfg.Prov.Redirect)
 	settings := provSettings(cfg, deployment)
+	// The HA node list (S-20): the cluster poller fills it, and phones that
+	// register with a hello-sip node directly get the other nodes as backups.
+	sipNodes := &api.SIPNodeList{}
+	settings.SIPNodes = sipNodes.Addrs
 	st := store.New(db).WithSecretBox(box).WithProv(settings)
 	go bootstrap(ctx, st, cfg.BootstrapAdminPassword, log)
 	go pruneSessions(ctx, st, log)
@@ -166,6 +172,18 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	startVideoRecording(ctx, cfg.RecordingVideoQuotaGB, st, objs, metrics.Registry, log)
 	msgMetrics := messaging.NewMetrics(metrics.Registry)
+	// The inbox's events join the integrations pipeline (spec
+	// messaging-channels M-23): they go on the event stream this replica's
+	// event service ingests, and so to webhooks, automation triggers and
+	// the event stream.
+	inboxEmitter := events.NewEmitter(events.LazyAppender{Client: vk.Client}, events.NewEmitterMetrics(metrics.Registry),
+		log.With("component", "inbox-events"))
+	go inboxEmitter.Run(ctx)
+	st.WithMessagingEvents(&inboxevents.Sink{Data: st, Out: inboxEmitter, Log: log.With("component", "inbox-events")})
+	// Provider-side deletions of erased or redacted texts (spec M-20): an
+	// erase tries them at once, this worker retries what is left.
+	msgRedactor := &messaging.Redactor{Store: st, Metrics: messaging.NewRedactMetrics(metrics.Registry), Log: log.With("component", "redact")}
+	go msgRedactor.Run(ctx)
 	// The inbox's attachments (spec messaging-channels M-18) live in the
 	// media bucket under msg/.
 	msgObjects, err := media.NewObjects(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioSecure)
@@ -245,7 +263,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// the dispatcher on each replica sends the due ones.
 	hooks := &webhook.Service{
 		Store: &webhook.PG{DB: db}, Box: box, AllowedCIDRs: cfg.IntegrationsAllowedCIDRs,
-		Log: log.With("component", "webhooks"),
+		Log: log.With("component", "webhooks"), Enrich: inboxWebhookEnricher(st),
 	}
 	evSvc.Hooks = append(evSvc.Hooks, hooks.Hook())
 	// Slack notifications (spec integrations P17): queued in the same
@@ -268,12 +286,16 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	go dispatcher.Run(ctx)
 	// Directory sync (spec integrations P8): connectors read their source and
 	// sync users; one replica runs a connector, the one holding its lock.
+	// SCIM (spec integrations P10): identity providers push to /scim/v2; the
+	// pushed resources are the source of the scim connector kind.
+	scimStore := &scim.PG{DB: db}
 	dirEngine := &directory.Engine{
 		// Range auto-provisioning (P12) creates extensions through the
 		// configuration store, with its numbering rules and routing check.
 		Store: &directory.PG{DB: db, Box: box, Provisioner: &dirstore.Provisioner{Store: st, Realm: cfg.SIPDomain}},
 		Drivers: map[string]directory.Driver{
 			directory.KindLDAP: directory.LDAP{}, directory.KindGoogle: directory.Google{}, directory.KindEntra: directory.Entra{},
+			directory.KindSCIM: scim.Driver{Store: scimStore},
 		},
 		Metrics:        directory.NewMetrics(metrics.Registry),
 		Log:            log.With("component", "directory"),
@@ -298,6 +320,11 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	dirEngine.LoginCheck = ssoSvc.ProviderEnabled
 	go dirEngine.Run(ctx)
+	var scimSvc api.SCIMService
+	if cfg.AI.PublicURL != "" {
+		scimSvc = &scim.Service{Store: scimStore, Engine: dirEngine, PublicURL: cfg.AI.PublicURL,
+			Metrics: scim.NewMetrics(metrics.Registry), Log: log.With("component", "scim")}
+	}
 	go evSvc.Run(ctx)
 	go crmSvc.Run(ctx)
 	if err := startSyslog(ctx, cfg.Syslog, st, vk, metrics.Registry, log); err != nil {
@@ -313,6 +340,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		CRM:          crmSvc.Service,
 		Slack:        slackSvc,
 		Directory:    dirEngine,
+		SCIM:         scimSvc,
 		SSO:          ssoSvc,
 		Events:       evSvc,
 		Webhooks:     hooks,
@@ -358,6 +386,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Clients:         st,
 		ClientAuth:      clientConfig(cfg, metrics.Registry),
 		Inbox:           st,
+		MsgRedactor:     msgRedactor,
 		MessagingAIAuto: cfg.MsgAIAuto,
 		Blocklist:       st,
 		Dialing:         cfg.Dial,
@@ -459,6 +488,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Log:             log,
 		DrainDelay:      cfg.DrainDelay,
 		ShutdownTimeout: cfg.ShutdownTimeout,
+		SIPNodes:        sipNodes,
 	})
 	err = node.Run(ctx.Done(), ln)
 	log.Info("stopped", "error", err)

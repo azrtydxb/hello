@@ -64,6 +64,23 @@ func TestSettingOverrides(t *testing.T) {
 	if renderDevice(t, Grandstream, plain) == got {
 		t.Error("overrides changed nothing")
 	}
+
+	// The first-class side key and speed dial fields write their P-values
+	// (TestWPSideKey and TestWPSpeedDials cover every family), and a raw
+	// override of the same key still has the last word.
+	fields := gsFamilyData("WP836")
+	fields.SideKey = SideKey{Function: SideKeyNone}
+	fields.BLF = []BLFKey{{Number: "301", Label: "Desk"}}
+	f := renderDevice(t, Grandstream, fields)
+	for _, want := range []string{"<P82317>4</P82317>", "<P8690>0</P8690>", "<P8692>Desk</P8692>", "<P8693>301</P8693>"} {
+		if !strings.Contains(f, want) {
+			t.Errorf("side key or speed dial field: missing %s", want)
+		}
+	}
+	fields.Overrides = ResolveOverrides(Grandstream, nil, []Override{{Key: "P82317", Value: "2"}})
+	if f := renderDevice(t, Grandstream, fields); !strings.Contains(f, "<P82317>2</P82317>") || strings.Count(f, "<P82317>") != 1 {
+		t.Error("a phone override of P82317 does not replace the side key field")
+	}
 }
 
 func TestSettingOverridesYealink(t *testing.T) {

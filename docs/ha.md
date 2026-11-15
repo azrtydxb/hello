@@ -451,6 +451,11 @@ the node dies is abandoned, as in the table.
   - DNS SRV also works for phones that support it, but when one Kamailio dies
     its phones are unreachable until their next REGISTER, and its dialogs lose
     in-dialog signalling (re-INVITE, BYE).
+  - Without the VIP, give phones the second Kamailio as their backup server
+    with `HELLO_PROV_SIP_BACKUP_SERVERS` (provisioning writes it to every
+    vendor that takes one). Phones that register with a hello-sip node
+    directly, with no edge, get the other READY nodes as backups on their own
+    (docs/provisioning.md, "SRV records and backup servers").
   - Keep phone registration intervals short (300–600 s) so phones recover
     quickly from any edge failure.
   - Set `KAMAILIO_PIKE_DENSITY` (requests per source IP per 2 s, default 200)

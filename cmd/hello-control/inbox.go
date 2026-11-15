@@ -13,6 +13,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/api"
+	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/messaging/media"
@@ -22,12 +23,16 @@ import (
 	"github.com/azrtydxb/hello/internal/messaging/router"
 	acdqueue "github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/store"
+	"github.com/azrtydxb/hello/internal/webhook"
 )
 
 const (
 	inboxLeaseKey      = "hello:msg:lease:maintain"
 	inboxMaintainEvery = 30 * time.Second
 	inboxNoticeEvery   = 30 * time.Second
+	// mediaOrphanEvery is how often the lease holder lists the media
+	// prefix for objects no attachment row names.
+	mediaOrphanEvery = time.Hour
 )
 
 // runInboxMaintenance wakes snoozed conversations and purges what retention
@@ -36,6 +41,7 @@ const (
 func runInboxMaintenance(ctx context.Context, st *store.Store, l lease, node string, m *messaging.Metrics, mw *media.Worker, log *slog.Logger) {
 	t := time.NewTicker(inboxMaintainEvery)
 	defer t.Stop()
+	var orphansAt time.Time
 	for {
 		held, err := l.AcquireLease(ctx, inboxLeaseKey, node, 3*inboxMaintainEvery)
 		if held || err != nil {
@@ -62,6 +68,19 @@ func runInboxMaintenance(ctx context.Context, st *store.Store, l lease, node str
 				}
 				if err != nil || n < 200 {
 					break
+				}
+			}
+			// Files a download or an upload stored after an erase or a
+			// redaction took its row, which could not be removed then.
+			if time.Since(orphansAt) >= mediaOrphanEvery {
+				orphansAt = time.Now()
+				n, err := mw.SweepOrphans(ctx)
+				if err != nil && ctx.Err() == nil {
+					log.Warn("inbox media orphan sweep", "error", err)
+				}
+				if n > 0 {
+					m.Purged.WithLabelValues("media").Add(float64(n))
+					log.Info("inbox media orphans removed", "count", n)
 				}
 			}
 			if unknown, failed, err := st.SettleCarrierTexts(ctx); err != nil {
@@ -213,6 +232,21 @@ func runCarrierWorkers(ctx context.Context, st *store.Store, m *messaging.Metric
 				log.Warn("carrier status", "error", err)
 			}
 		}
+	}
+}
+
+// inboxWebhookEnricher adds the customer's number and the message text to an
+// inbox event at webhook delivery, for an endpoint that asked for them
+// (includePeer, includeMessageBody). They are read when the delivery is
+// sent and never stored with the event.
+func inboxWebhookEnricher(st *store.Store) webhook.Enricher {
+	return func(ctx context.Context, d *events.InboxData, peer, body bool) error {
+		p, b, err := st.InboxEventContent(ctx, d.ConversationID, d.MessageID, peer, body)
+		if err != nil {
+			return err
+		}
+		d.Peer, d.Body = p, b
+		return nil
 	}
 }
 
