@@ -48,6 +48,17 @@ func TestMusicOnHoldTakeover(t *testing.T) {
 	if res, err := r.dcs.Do(t.Context(), re); err != nil || res.StatusCode != 200 {
 		t.Fatalf("hold re-INVITE = %v, %v", res, err)
 	}
+	// The holder ACKs the 200 as a phone does; the owner relays that ACK
+	// to the callee along with the hold.
+	if err := r.dcs.WriteAck(t.Context(), sip.NewRequest(sip.ACK, r.dcs.InviteResponse.Contact().Address)); err != nil {
+		t.Fatalf("hold ACK: %v", err)
+	}
+	// The relayed hold re-INVITE and its ACK sit in b's queues: left there,
+	// the takeover waits below would take them for the taker's, and the
+	// music would be looked for from the dead owner's relay port, which
+	// the taker's relay only sometimes reuses.
+	holdInv := waitReq(t, b.reinvites, "hold relayed to the callee")
+	waitReq(t, b.acks, "ACK of the relayed hold")
 	if n, _ := rtpCount(bRTP, time.Second); n < 20 {
 		t.Fatalf("the held callee heard %d packets on the owner, want music", n)
 	}
@@ -72,6 +83,9 @@ func TestMusicOnHoldTakeover(t *testing.T) {
 	taker.srv.takeoverPass(t.Context())
 	waitReq(t, a.reinvites, "takeover re-INVITE to the holder")
 	bInv := waitReq(t, b.reinvites, "takeover re-INVITE to the held callee")
+	if bInv.CSeq().SeqNo <= holdInv.CSeq().SeqNo {
+		t.Fatalf("takeover re-INVITE CSeq %d, want past the relayed hold's %d", bInv.CSeq().SeqNo, holdInv.CSeq().SeqNo)
+	}
 	takerSDP, err := media.ParseAudioSDP(bInv.Body())
 	if err != nil {
 		t.Fatalf("takeover re-INVITE SDP: %v", err)
@@ -90,16 +104,31 @@ func TestMusicOnHoldTakeover(t *testing.T) {
 // would stop. Cancelling a test PBX's Serve context leaves its calls' relays
 // running, and a surviving music stream keeps sending RTP to the phone's
 // port (and, once that port closes, to whichever test binds it next).
-func killMedia(p *testPBX) {
-	p.srv.mu.Lock()
-	calls := make([]*call, 0, len(p.srv.calls))
-	for c := range p.srv.calls {
+func killMedia(p *testPBX) { releaseCallMedia(p.srv) }
+
+// releaseCallMedia closes the relays and conference sockets of every call s
+// still holds. A test PBX's teardown runs it once Serve has returned: the
+// process outlives the node there, unlike a real crash, and a call left up
+// (a dead owner's, one the test never hung up) would otherwise keep its RTP
+// ports for the rest of the run. Every test PBX shares the default range
+// 20000-21000, so enough of them exhausted it ("bind: address already in
+// use") under -count, and their streams reached ports other tests reused.
+func releaseCallMedia(s *Server) {
+	s.mu.Lock()
+	calls := make([]*call, 0, len(s.calls))
+	for c := range s.calls {
 		calls = append(calls, c)
 	}
-	p.srv.mu.Unlock()
+	s.mu.Unlock()
 	for _, c := range calls {
 		if r := c.anchorRelay(); r != nil {
 			r.Close()
+		}
+		c.mu.Lock()
+		p := c.conf
+		c.mu.Unlock()
+		if p != nil {
+			p.party.Close()
 		}
 	}
 }
