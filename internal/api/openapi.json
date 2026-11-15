@@ -14,6 +14,612 @@
     }
   ],
   "paths": {
+    "/api/v1/auth/oidc/providers": {
+      "get": {
+        "operationId": "listSSOProviders",
+        "summary": "List the single sign-on providers",
+        "description": "The enabled identity providers, for the login page's buttons. Public; empty without HELLO_PUBLIC_URL.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "The providers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSOPublicProviderList"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "the login page's buttons; an agent never signs in",
+          "category": "session"
+        },
+        "security": []
+      }
+    },
+    "/api/v1/auth/oidc/{provider}/start": {
+      "get": {
+        "operationId": "startSSO",
+        "summary": "Start a single sign-on",
+        "description": "A top-level navigation from the login page: it redirects to the provider with the authorization code flow (PKCE S256, state and nonce kept server-side for 10 minutes, single use) and sets the hello_oidc cookie (SameSite=Lax) that binds the callback to this browser. Limited to 20 per minute per address. A refusal redirects to /login?sso_error=<unavailable|throttled|retry|failed>.",
+        "tags": ["auth"],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The identity provider: google or entra."
+          },
+          {
+            "name": "next",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "A console path to return to after the sign-in."
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "To the identity provider, or back to the login page",
+            "headers": {
+              "Location": {
+                "description": "Where the browser goes next.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "starts a browser sign-in",
+          "category": "session"
+        },
+        "security": []
+      }
+    },
+    "/api/v1/auth/oidc/{provider}/callback": {
+      "get": {
+        "operationId": "ssoCallback",
+        "summary": "Single sign-on callback",
+        "description": "Where the provider returns the browser. The state is taken once (a replay fails), the hello_oidc cookie must match, the code is redeemed with the PKCE verifier and the ID token is checked: signature from the pinned issuer's keys, iss, aud, exp, nonce, azp when present, and the tenant (Entra tid; Google hd with a verified email). The identity maps to a user by an existing link, else on first sign-in to the user a connector of the same provider synced under the same stable id, else (Google) to the one synced non-admin user with that email; local users are never matched by email. Success sets the hello_session cookie exactly as a password login does and redirects to the console (or to /login#mfa=<token> when the user has two-factor authentication). A linking started from the profile redirects to /me/profile?sso_linked=<provider>. Every refusal redirects to /login?sso_error=<code> without saying why.",
+        "tags": ["auth"],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The identity provider: google or entra."
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The single-use state the round trip was started with."
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The authorization code the provider issued."
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Set by the provider when the person declined or the request failed."
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "To the console, the second step or the login page",
+            "headers": {
+              "Location": {
+                "description": "Where the browser goes next.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "a browser redirect target of the sign-in",
+          "category": "session"
+        },
+        "security": []
+      }
+    },
+    "/api/v1/auth/sso": {
+      "get": {
+        "operationId": "getSSOSettings",
+        "summary": "Get the single sign-on settings",
+        "description": "The providers (client secrets never returned), sso_required, the break-glass admins and the redirect URIs to register.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSOSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "sign-in configuration: an agent never manages access",
+          "category": "credentials"
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin"
+      },
+      "put": {
+        "operationId": "putSSOSettings",
+        "summary": "Change the single sign-on settings",
+        "description": "Changes providers and the sso_required policy, audited. Setting a clientSecret needs the secrets scope. Enabling Google needs a client id, a secret and at least one domain; Entra a client id, a secret and the tenant id. ssoRequired needs an enabled break-glass admin (409 no_break_glass).",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SSOSettingsUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSOSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "sign-in configuration with client secrets",
+          "category": "credentials"
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin"
+      }
+    },
+    "/api/v1/auth/sso/{provider}/test": {
+      "post": {
+        "operationId": "testSSOProvider",
+        "summary": "Test a single sign-on provider",
+        "description": "Reads the discovery document from the provider's pinned issuer and its signing keys. A failure is a 200 with ok false. Audited.",
+        "tags": ["auth"],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The identity provider: google or entra."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The test result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSOTestResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "sign-in configuration: an agent never manages access",
+          "category": "credentials"
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin"
+      }
+    },
+    "/api/v1/me/identities": {
+      "get": {
+        "operationId": "listMyIdentities",
+        "summary": "List my linked identities",
+        "description": "The signed-in user's identities at the single sign-on providers. Browser sessions only.",
+        "tags": ["me"],
+        "responses": {
+          "200": {
+            "description": "The identities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "the signed-in user's own sign-in identities",
+          "category": "credentials"
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user"
+      }
+    },
+    "/api/v1/me/identities/{provider}/link": {
+      "post": {
+        "operationId": "linkMyIdentity",
+        "summary": "Link my identity at a provider",
+        "description": "Starts a sign-in at the provider that links the identity to the signed-in user instead of signing in: the answer is the URL to navigate to, and the hello_oidc cookie is set. This is how a local user, an administrator included, gets single sign-on; nobody is ever linked by email alone. The callback returns to /me/profile.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The identity provider: google or entra."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Where to send the browser",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedirectURL"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "links a sign-in identity",
+          "category": "credentials"
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user"
+      }
+    },
+    "/api/v1/me/identities/{provider}": {
+      "delete": {
+        "operationId": "unlinkMyIdentity",
+        "summary": "Unlink my identity at a provider",
+        "description": "Removes the signed-in user's identity at the provider, audited.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The identity provider: google or entra."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Unlinked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "removes a sign-in identity",
+          "category": "credentials"
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user"
+      }
+    },
+    "/api/v1/users/{id}/identities": {
+      "get": {
+        "operationId": "listUserIdentities",
+        "summary": "List a user's linked identities",
+        "description": "The user's identities at the single sign-on providers.",
+        "tags": ["users"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The identities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "users' sign-in identities: an agent never manages access",
+          "category": "credentials"
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin"
+      }
+    },
+    "/api/v1/users/{id}/identities/{provider}": {
+      "delete": {
+        "operationId": "unlinkUserIdentity",
+        "summary": "Unlink a user's identity",
+        "description": "Removes the user's identity at the provider, audited. The next single sign-on maps it again from scratch.",
+        "tags": ["users"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The identity provider: google or entra."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Unlinked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "removes a sign-in identity",
+          "category": "credentials"
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin"
+      }
+    },
+    "/api/v1/directory/connectors/{id}/consent": {
+      "post": {
+        "operationId": "startDirectoryConsent",
+        "summary": "Grant a Google connector's consent",
+        "description": "For a google connector with authMode oauth_admin and its client secret set: answers the Google URL where an administrator grants Hello read-only access once (offline, PKCE). The callback stores the refresh token and returns to /integrations/directory?consent=ok|failed. A grant with any scope outside the read-only allow-list is refused and not stored. Browser sessions only.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Where to send the browser",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedirectURL"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "stores a directory credential",
+          "category": "credentials"
+        },
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin"
+      }
+    },
+    "/api/v1/directory/oauth/callback": {
+      "get": {
+        "operationId": "directoryConsentCallback",
+        "summary": "Google connector consent callback",
+        "description": "Where Google returns the administrator's browser after the consent. The single-use state and the hello_oidc cookie are the only credential. Redirects to /integrations/directory with consent=ok or consent=failed and the connector id.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The single-use state the round trip was started with."
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The authorization code the provider issued."
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Set by the provider when the person declined or the request failed."
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "To the directory page",
+            "headers": {
+              "Location": {
+                "description": "Where the browser goes next.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-mcp": {
+          "exclude": "a browser redirect target of the consent",
+          "category": "session"
+        },
+        "security": []
+      }
+    },
     "/api/v1/version": {
       "get": {
         "operationId": "getVersion",
@@ -68,7 +674,7 @@
       "post": {
         "operationId": "login",
         "summary": "Start a session; sets the hello_session cookie",
-        "description": "Starts a browser session for a username and password and sets the hello_session cookie. Used by the console; API clients use bearer tokens instead. For a user with two-factor authentication the password alone starts no session: the answer is 202 with an mfaToken, and login/2fa completes the login.",
+        "description": "Starts a browser session for a username and password and sets the hello_session cookie. Used by the console; API clients use bearer tokens instead. For a user with two-factor authentication the password alone starts no session: the answer is 202 with an mfaToken, and login/2fa completes the login. A directory-synced user has no local password: the users of an LDAP connector with loginMethod ldap_bind are checked by an LDAP bind as themselves (5 failures per user and per address in 10 minutes lock the form for them), every other synced user is refused. While single sign-on is required only break-glass admins may use this form. Every refusal is the same 401.",
         "tags": ["auth"],
         "requestBody": {
           "required": true,
@@ -852,7 +1458,7 @@
       "post": {
         "operationId": "changePassword",
         "summary": "Change my password",
-        "description": "Sets a new password for the signed-in user after checking the current one. Only a browser session may do it, not a token, and it ends the user's other sessions. Clears the forced-change flag an administrator set, which blocks every other operation until it is changed. Needs a password of 10 to 128 characters that differs from the current one.",
+        "description": "Sets a new password for the signed-in user after checking the current one. Only a browser session may do it, not a token, and it ends the user's other sessions. Clears the forced-change flag an administrator set, which blocks every other operation until it is changed. Needs a password of 10 to 128 characters that differs from the current one. A directory-synced user has no local password and gets 409 managed_by_directory.",
         "tags": ["auth"],
         "requestBody": {
           "required": true,
@@ -879,6 +1485,9 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           }
         },
         "x-hello-scope": "session",
@@ -1018,7 +1627,7 @@
       "patch": {
         "operationId": "updateUser",
         "summary": "Change a user",
-        "description": "Admin only, audited. Changes the role, display name, email, enabled state, extensions, voicemail email options or password. The new role applies on the user's next request, whatever credential it carries. A disabled user cannot sign in, their sessions end and their tokens stop working. Setting password resets it (10 to 128 characters) and makes the user choose a new one at next login unless mustChangePassword is false. Demoting or disabling the last enabled admin answers 409 last_admin, and an administrator cannot disable their own account (409 self_disable). extensionIds replaces the user's extensions (409 when another user has one, 400 when one does not exist); the legacy extensionId links exactly one extension or, with null, none; give one of them, not both.",
+        "description": "Admin only, audited. Changes the role, display name, email, enabled state, extensions, voicemail email options or password. The new role applies on the user's next request, whatever credential it carries. A disabled user cannot sign in, their sessions end and their tokens stop working. Setting password resets it (10 to 128 characters) and makes the user choose a new one at next login unless mustChangePassword is false. Demoting or disabling the last enabled admin answers 409 last_admin, and an administrator cannot disable their own account (409 self_disable). extensionIds replaces the user's extensions (409 when another user has one, 400 when one does not exist); the legacy extensionId links exactly one extension or, with null, none; give one of them, not both. breakGlass flags an enabled local admin who may always use the password form (409 break_glass_local_admin otherwise); the last enabled break-glass admin cannot be disabled, demoted or unflagged (409 last_break_glass).",
         "tags": ["users"],
         "parameters": [
           {
@@ -1082,7 +1691,7 @@
       "delete": {
         "operationId": "deleteUser",
         "summary": "Delete a user",
-        "description": "Admin only, audited. Deletes the user with their sessions, tokens and personal contacts. Deleting the last enabled admin answers 409 last_admin and an administrator cannot delete their own account (409 self_delete).",
+        "description": "Admin only, audited. Deletes the user with their sessions, tokens and personal contacts. Deleting the last enabled admin answers 409 last_admin and an administrator cannot delete their own account (409 self_delete). Deleting the last enabled break-glass admin answers 409 last_break_glass.",
         "tags": ["users"],
         "parameters": [
           {
@@ -8668,6 +9277,38 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/webrtc/status": {
+      "get": {
+        "operationId": "getWebRTCStatus",
+        "summary": "Web and mobile clients and their WebRTC media",
+        "description": "Returns the state of the browser (and later mobile) clients for the Diagnostics Clients tab: registered clients by kind and transport, the live WebRTC legs of every hello-sip node with their ICE and DTLS state and whether TURN relays them, each TURN server's reachability, push health, the ICE candidate types clients reported in the last 24 hours, refused REGISTERs of client devices, and the last register, ICE and DTLS errors. A source that cannot be read is listed in unavailable and its part is empty. Contains no credential or secret.",
+        "tags": ["diagnostics"],
+        "responses": {
+          "200": {
+            "description": "The status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebRTCStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/phones": {
       "get": {
         "operationId": "listPhones",
@@ -16077,7 +16718,7 @@
       "post": {
         "operationId": "sendMyInboxMessage",
         "summary": "Reply to the customer",
-        "description": "Sends a reply to the customer through the conversation's channel. A long text is split into several. Replying to an unassigned conversation takes it and replying to a resolved one reopens it. A customer who opted out cannot be texted (422). Sending the same clientMsgId again returns the first message with 200 and sends nothing.",
+        "description": "Sends a reply to the customer through the conversation's channel. A long text is split into several. Replying to an unassigned conversation takes it and replying to a resolved one reopens it. A customer who opted out cannot be texted (422). Sending the same clientMsgId again returns the first message with 200 and sends nothing. Attachments uploaded first (POST /api/v1/inbox/media) go in mediaIds; only a website chat carries them, any other channel answers 409 media_unsupported.",
         "tags": ["inbox"],
         "parameters": [
           {
@@ -17249,6 +17890,569 @@
         }
       }
     },
+    "/api/v1/messaging/ai": {
+      "get": {
+        "operationId": "getMessagingAI",
+        "summary": "Inbox AI settings",
+        "description": "Returns the inbox AI's inbox-wide settings and kill switches (all AI, auto-replies), the intents the triage picks from, the sensitive topics the AI never answers, each channel's AI switch, each number's mode, and whether the in-product AI is available, its endpoint is public and HELLO_MSG_AI_AUTO allows auto-replies.",
+        "tags": ["messaging"],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingAI"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "put": {
+        "operationId": "updateMessagingAI",
+        "summary": "Change the inbox AI settings",
+        "description": "Changes the inbox-wide AI settings; fields left out keep their value. enabled false stops every triage, draft and auto-reply; autoEnabled false stops the auto-replies. channels sets the AI switch of the channels it names. Changing a channel's switch is audited.",
+        "tags": ["messaging"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingAIInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingAI"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/messaging/addresses/{id}/ai": {
+      "get": {
+        "operationId": "getMessagingAddressAI",
+        "summary": "A messaging number's AI",
+        "description": "Returns a number's (or chat site's) AI mode (off, triage, draft, auto) and the auto-reply guardrails: disclosure, holding line, reply cap, hourly cap, least confidence, allowed intents and handoff words.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The number's AI",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingAddressAI"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "put": {
+        "operationId": "updateMessagingAddressAI",
+        "summary": "Change a messaging number's AI",
+        "description": "Changes a number's AI mode and guardrails; fields left out keep their value. auto lets the AI answer customers from the number's FAQ, within the guardrails; turning it on or off is audited. A customer can always reach a person: handoffWords cannot be empty.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingAddressAIInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The number's AI",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingAddressAI"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/messaging/faq": {
+      "get": {
+        "operationId": "listMessagingFAQ",
+        "summary": "List FAQ snippets",
+        "description": "Lists the FAQ snippets auto-replies answer from, of one number with addressId, else of every number.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "name": "addressId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Only this number's snippets."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The snippets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingFAQList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "post": {
+        "operationId": "createMessagingFAQ",
+        "summary": "Add a FAQ snippet",
+        "description": "Adds a snippet to a number's FAQ: a title and up to 4096 bytes of text, at most 50 per number (409 faq_full). An auto-reply may only say what a snippet says, and only contain a link that is in a snippet.",
+        "tags": ["messaging"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingFAQInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The snippet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingFAQ"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/messaging/faq/{id}": {
+      "get": {
+        "operationId": "getMessagingFAQ",
+        "summary": "A FAQ snippet",
+        "description": "Returns one FAQ snippet.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The snippet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingFAQ"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "put": {
+        "operationId": "updateMessagingFAQ",
+        "summary": "Change a FAQ snippet",
+        "description": "Changes a snippet's title, text or switch; fields left out keep their value. A snippet stays on its number.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingFAQInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The snippet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingFAQ"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      },
+      "delete": {
+        "operationId": "deleteMessagingFAQ",
+        "summary": "Delete a FAQ snippet",
+        "description": "Deletes a snippet.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/ai/revert": {
+      "post": {
+        "operationId": "revertInboxAI",
+        "summary": "Undo the AI triage's suggestions",
+        "description": "Removes the tags the AI triage added (those still there), lowers the priority it raised (while still high) and clears its spam flag. The triage stays visible, marked reverted.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/ai/revert": {
+      "post": {
+        "operationId": "revertMyInboxAI",
+        "summary": "Undo the AI triage's suggestions on one of my conversations",
+        "description": "Undoes what the AI triage changed (the tags it added, the priority it raised, its spam flag) on a conversation the caller reaches. The triage stays visible, marked reverted.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/ai/stats": {
+      "get": {
+        "operationId": "getInboxAIStats",
+        "summary": "Inbox AI counts",
+        "description": "Counts what the inbox AI did in the last 24 hours: runs by kind (triage, draft, autoreply) and state, auto-replies sent, conversations handed to a person, active conversations flagged as spam, and the numbers by AI mode. It carries no customer text.",
+        "tags": ["inbox"],
+        "responses": {
+          "200": {
+            "description": "The counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxAIStats"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/inbox/stats": {
       "get": {
         "operationId": "getInboxStats",
@@ -17563,7 +18767,7 @@
       "post": {
         "operationId": "sendInboxMessage",
         "summary": "Reply to the customer",
-        "description": "Sends a reply to the customer through the conversation's channel. A long text is split into several. Replying to an unassigned conversation takes it and replying to a resolved one reopens it. A customer who opted out cannot be texted (422). Sending the same clientMsgId again returns the first message with 200 and sends nothing.",
+        "description": "Sends a reply to the customer through the conversation's channel. A long text is split into several. Replying to an unassigned conversation takes it and replying to a resolved one reopens it. A customer who opted out cannot be texted (422). Sending the same clientMsgId again returns the first message with 200 and sends nothing. Attachments uploaded first (POST /api/v1/inbox/media) go in mediaIds; only a website chat carries them, any other channel answers 409 media_unsupported.",
         "tags": ["inbox"],
         "parameters": [
           {
@@ -22191,7 +23395,7 @@
       "post": {
         "operationId": "createDirectoryConnector",
         "summary": "Create a directory connector",
-        "description": "Creates a connector, disabled unless enabled is true and a bind password is given. Plain ldap:// without StartTLS is refused (400 tls_required); the filter is parsed on save; certificate verification is always on. Range auto-provisioning cannot be enabled yet. Setting bindPassword needs the secrets scope.",
+        "description": "Creates a connector, disabled unless enabled is true and a bind password is given. Plain ldap:// without StartTLS is refused (400 tls_required); the filter is parsed on save; certificate verification is always on. Range auto-provisioning cannot be enabled yet. Setting bindPassword needs the secrets scope. Kinds: ldap (bindPassword), google and entra (credential). Enabling a connector needs a login method for its users (options.loginMethod; 400 no_login_method).",
         "tags": ["directory"],
         "requestBody": {
           "required": true,
@@ -22560,6 +23764,49 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/directory/connectors/{id}/range": {
+      "get": {
+        "operationId": "getDirectoryRange",
+        "summary": "Get a connector's auto-provisioning range usage",
+        "description": "How the connector's auto-provisioning range is used: its size, how many numbers something already claims (an extension, a group or room number, a park slot, a number a feature code overlaps), the next number an allocation takes, and the users of this connector that have a number from it. A number stays with its user: a re-run never renumbers.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The range usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryRangeUsage"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -28844,6 +30091,435 @@
           "category": "credentials"
         }
       }
+    },
+    "/api/v1/inbox/media": {
+      "post": {
+        "operationId": "uploadInboxMedia",
+        "summary": "Upload an attachment",
+        "description": "Uploads a file to send with a reply in any conversation. Send multipart/form-data with `file` and `conversationId`. The type is sniffed from the bytes: images (JPEG, PNG, GIF, WebP) and PDF, at most 5 MiB; SVG, HTML and files that also carry markup are refused (422). Only a website chat carries attachments in this build; any other conversation answers 409 media_unsupported. The upload is yours until you send it: name it in mediaIds of the reply. An upload not sent within 24 hours is deleted.",
+        "tags": ["inbox"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file", "conversationId"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The file, at most 5 MiB."
+                  },
+                  "conversationId": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "The conversation the file will be sent in."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The upload, ready to send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMedia"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/media/{id}": {
+      "get": {
+        "operationId": "getInboxMedia",
+        "summary": "Download an attachment",
+        "description": "Streams an attachment of any conversation, or the caller's own upload not sent yet. It is served with the type sniffed from its bytes, X-Content-Type-Options: nosniff, Cache-Control: private, no-store and a sandboxing Content-Security-Policy; images, audio and video are inline, everything else is a download. Range requests work. An attachment still downloading from the carrier, refused or expired answers 409 media_not_ready.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested range of the file",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/media": {
+      "post": {
+        "operationId": "uploadMyInboxMedia",
+        "summary": "Upload an attachment",
+        "description": "Uploads a file to send with a reply in an agent's own conversations (assigned to them, replied to, or waiting in their queue). Send multipart/form-data with `file` and `conversationId`. The type is sniffed from the bytes: images (JPEG, PNG, GIF, WebP) and PDF, at most 5 MiB; SVG, HTML and files that also carry markup are refused (422). Only a website chat carries attachments in this build; any other conversation answers 409 media_unsupported. The upload is yours until you send it: name it in mediaIds of the reply. An upload not sent within 24 hours is deleted.",
+        "tags": ["inbox"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file", "conversationId"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The file, at most 5 MiB."
+                  },
+                  "conversationId": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "The conversation the file will be sent in."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The upload, ready to send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMedia"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/media/{id}": {
+      "get": {
+        "operationId": "getMyInboxMedia",
+        "summary": "Download an attachment",
+        "description": "Streams an attachment of the conversations the caller can see (assigned to them, replied to, or waiting in their queue), or the caller's own upload not sent yet. It is served with the type sniffed from its bytes, X-Content-Type-Options: nosniff, Cache-Control: private, no-store and a sandboxing Content-Security-Policy; images, audio and video are inline, everything else is a download. Range requests work. An attachment still downloading from the carrier, refused or expired answers 409 media_not_ready.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested range of the file",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/messaging/chat/sites/{id}/logo": {
+      "get": {
+        "operationId": "getChatSiteLogo",
+        "summary": "Read a chat site's logo",
+        "description": "Streams the site's logo image, as the widget shows it. A site without a logo answers 404.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The logo",
+            "content": {
+              "image/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "an image for a person, not data for an agent",
+          "category": "binary-download"
+        }
+      },
+      "put": {
+        "operationId": "putChatSiteLogo",
+        "summary": "Set a chat site's logo",
+        "description": "Replaces the site's logo, which the widget shows in its header. Send multipart/form-data with `file`: a PNG, JPEG, GIF or WebP image of at most 256 KiB; the type is sniffed from the bytes and SVG is refused (422). The logo is kept in the media store under msg/site/<id>/logo.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The image, at most 256 KiB."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSite"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteChatSiteLogo",
+        "summary": "Remove a chat site's logo",
+        "description": "Removes the site's logo; the widget shows the site's name alone. A site without a logo answers 404.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      }
     }
   },
   "components": {
@@ -29057,6 +30733,319 @@
       }
     },
     "schemas": {
+      "SSOPublicProvider": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["google", "entra"]
+          },
+          "name": {
+            "type": "string",
+            "description": "The button label: Google or Microsoft."
+          }
+        },
+        "required": ["provider", "name"]
+      },
+      "SSOPublicProviderList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SSOPublicProvider"
+            }
+          }
+        },
+        "required": ["items"]
+      },
+      "SSOProvider": {
+        "type": "object",
+        "description": "One OIDC provider: the customer's own OAuth client. The client secret is write-only.",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["google", "entra"]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "clientId": {
+            "type": "string",
+            "description": "Google: the OAuth client id (ends in .apps.googleusercontent.com). Entra: the application (client) id."
+          },
+          "hasClientSecret": {
+            "type": "boolean",
+            "description": "A client secret is stored; it is never returned."
+          },
+          "tenant": {
+            "type": "string",
+            "description": "Entra only: the directory (tenant) id, a GUID. common, organizations and consumers are refused; the issuer is pinned to https://login.microsoftonline.com/<tenant>/v2.0."
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Google only: the Workspace domains whose hd claim is accepted (at least one before enabling)."
+          },
+          "jit": {
+            "type": "boolean",
+            "description": "Create a user (role user, no local password) on a first sign-in that no link and no synced user matches. Off by default."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SSOBreakGlassUser": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "username": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SSOSettings": {
+        "type": "object",
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SSOProvider"
+            },
+            "description": "google and entra, configured or not."
+          },
+          "ssoRequired": {
+            "type": "boolean",
+            "description": "Only break-glass users may use the password form; everyone else signs in through an identity provider or an LDAP bind."
+          },
+          "breakGlass": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SSOBreakGlassUser"
+            },
+            "description": "The break-glass admins (flag them on the user with breakGlass)."
+          },
+          "redirectUris": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The callback URL to register at each provider (google, entra) and for a directory connector's Google consent (directoryConsent)."
+          },
+          "available": {
+            "type": "boolean",
+            "description": "False without HELLO_PUBLIC_URL: single sign-on is off."
+          }
+        }
+      },
+      "SSOProviderInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["google", "entra"]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "clientSecret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Replaces the stored client secret; sealed at rest, never returned. Needs the secrets scope."
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "jit": {
+            "type": "boolean"
+          }
+        },
+        "required": ["provider"]
+      },
+      "SSOSettingsUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SSOProviderInput"
+            },
+            "description": "The providers to change; a missing field keeps its value."
+          },
+          "ssoRequired": {
+            "type": "boolean",
+            "description": "Turning it on needs an enabled break-glass admin (409 no_break_glass)."
+          }
+        }
+      },
+      "SSOTestResult": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "issuer": {
+            "type": "string",
+            "description": "The pinned issuer that was asked."
+          },
+          "keys": {
+            "type": "integer",
+            "description": "Signing keys in the issuer's key set."
+          },
+          "errorDetail": {
+            "type": "string"
+          }
+        }
+      },
+      "Identity": {
+        "type": "object",
+        "description": "An identity at a provider linked to a user.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "provider": {
+            "type": "string",
+            "enum": ["google", "entra"]
+          },
+          "subject": {
+            "type": "string",
+            "description": "The stable id at the provider: Google's sub, Entra's object id (oid)."
+          },
+          "tenant": {
+            "type": "string",
+            "description": "The Google Workspace domain (hd) or the Entra tenant id (tid)."
+          },
+          "email": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastLoginAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "IdentityList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Identity"
+            }
+          }
+        },
+        "required": ["items"]
+      },
+      "RedirectURL": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The identity provider URL the browser navigates to. The response also sets the short-lived hello_oidc cookie that binds the callback to this browser."
+          }
+        },
+        "required": ["url"]
+      },
+      "DirectoryGoogleConfig": {
+        "type": "object",
+        "description": "Config of a google connector (Google Workspace, Admin SDK Directory API). The credential (credential field) is the service account's JSON key file, or for oauth_admin the OAuth client secret; the refresh token comes from the consent.",
+        "properties": {
+          "authMode": {
+            "type": "string",
+            "enum": ["service_account", "oauth_admin", "delegation"],
+            "description": "service_account (default): a service account holding a custom read-only admin role, no impersonation. oauth_admin: your OAuth client, consented once by an administrator. delegation: domain-wide delegation impersonating subject (discouraged). Only read-only scopes are ever requested."
+          },
+          "customer": {
+            "type": "string",
+            "description": "my_customer (default) or a customer id."
+          },
+          "domain": {
+            "type": "string",
+            "description": "List only this domain's users."
+          },
+          "subject": {
+            "type": "string",
+            "description": "delegation only: the administrator to impersonate."
+          },
+          "clientId": {
+            "type": "string",
+            "description": "oauth_admin only: the OAuth client id."
+          },
+          "query": {
+            "type": "string",
+            "description": "An optional users.list query, for example orgUnitPath='/Sales'."
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          }
+        }
+      },
+      "DirectoryEntraConfig": {
+        "type": "object",
+        "description": "Config of an entra connector (Microsoft Graph). The credential is the client secret, or for certificate the PEM RSA private key of certificatePem.",
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "description": "The directory (tenant) id or a verified domain; common, organizations and consumers are refused."
+          },
+          "clientId": {
+            "type": "string",
+            "description": "The application (client) id."
+          },
+          "authMethod": {
+            "type": "string",
+            "enum": ["secret", "certificate"]
+          },
+          "certificatePem": {
+            "type": "string",
+            "description": "certificate only: the public certificate uploaded to the app registration (not a secret)."
+          },
+          "includeGuests": {
+            "type": "boolean",
+            "description": "Also list guest (B2B) accounts. Off by default."
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          }
+        },
+        "required": ["tenantId", "clientId"]
+      },
       "MessageSend": {
         "type": "object",
         "additionalProperties": false,
@@ -33006,7 +34995,17 @@
                   "first_contact_off",
                   "device_limit",
                   "derived_device",
-                  "not_your_call"
+                  "not_your_call",
+                  "media_unsupported",
+                  "media_not_ready",
+                  "unsupported_media",
+                  "faq_full",
+                  "no_login_method",
+                  "no_break_glass",
+                  "last_break_glass",
+                  "break_glass_local_admin",
+                  "provider_disabled",
+                  "already_linked"
                 ]
               },
               "message": {
@@ -33300,24 +35299,7 @@
       },
       "User": {
         "type": "object",
-        "required": [
-          "id",
-          "username",
-          "displayName",
-          "email",
-          "authMethod",
-          "role",
-          "enabled",
-          "mustChangePassword",
-          "extensionId",
-          "extensionIds",
-          "voicemailEmail",
-          "totpEnabled",
-          "totpRequired",
-          "createdAt",
-          "managedBy",
-          "disabledAt"
-        ],
+        "required": ["id", "username", "displayName", "email", "authMethod", "role", "enabled", "mustChangePassword", "extensionId", "extensionIds", "voicemailEmail", "totpEnabled", "totpRequired", "createdAt", "managedBy", "disabledAt"],
         "properties": {
           "id": {
             "type": "integer",
@@ -33407,6 +35389,10 @@
             "type": ["string", "null"],
             "format": "date-time",
             "description": "When directory sync disabled the user; null otherwise."
+          },
+          "breakGlass": {
+            "type": "boolean",
+            "description": "A local admin who may always sign in with a password, also while single sign-on is required. The last enabled one cannot be disabled, demoted, deleted or unflagged (409 last_break_glass)."
           }
         }
       },
@@ -33567,6 +35553,10 @@
           "totpRequired": {
             "type": "boolean",
             "description": "Require two-factor authentication of this user. Setting it on an admin answers 409 two_factor_required unless the caller has active 2FA."
+          },
+          "breakGlass": {
+            "type": "boolean",
+            "description": "Flag or unflag a break-glass admin: only an enabled local admin (409 break_glass_local_admin); removing the last enabled one is 409 last_break_glass."
           }
         },
         "description": "At least one field."
@@ -37666,6 +39656,491 @@
           },
           "limit": {
             "type": "integer"
+          }
+        }
+      },
+      "WebRTCCounters": {
+        "type": "object",
+        "required": ["ice", "dtlsHandshakes", "dtlsFailures", "srtpAuthFailures"],
+        "properties": {
+          "ice": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Legs that reached an ICE state since the node started: connected, restarted, failed."
+          },
+          "dtlsHandshakes": {
+            "type": "integer",
+            "description": "Successful DTLS-SRTP handshakes on WebRTC legs."
+          },
+          "dtlsFailures": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Failed handshakes by reason: timeout, fingerprint, failed."
+          },
+          "srtpAuthFailures": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Inbound packets that failed SRTP authentication on any leg, by side: from_caller, from_callee."
+          }
+        }
+      },
+      "WebRTCLeg": {
+        "type": "object",
+        "required": [
+          "call",
+          "side",
+          "ringing",
+          "ice",
+          "dtls",
+          "iceRestarts",
+          "video",
+          "srtpAuthFailures",
+          "since",
+          "node",
+          "turn"
+        ],
+        "properties": {
+          "call": {
+            "type": "string",
+            "description": "The caller leg's SIP Call-ID (the Call trace tab finds the call by it)."
+          },
+          "side": {
+            "type": "string",
+            "enum": ["caller", "callee"]
+          },
+          "ringing": {
+            "type": "boolean",
+            "description": "An alternate callee leg offered to a browser that has not answered."
+          },
+          "ice": {
+            "type": "string",
+            "enum": ["checking", "connected", "failed"]
+          },
+          "dtls": {
+            "type": "string",
+            "enum": ["new", "connecting", "connected", "failed"]
+          },
+          "dtlsReason": {
+            "type": "string",
+            "enum": ["timeout", "fingerprint", "failed"]
+          },
+          "dtlsMs": {
+            "type": "integer",
+            "description": "How long the DTLS handshake took."
+          },
+          "iceRestarts": {
+            "type": "integer"
+          },
+          "remote": {
+            "type": "string",
+            "description": "The address ICE selected (ip:port), absent before the first check."
+          },
+          "video": {
+            "type": "boolean"
+          },
+          "srtpAuthFailures": {
+            "type": "integer"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "node": {
+            "type": "string",
+            "description": "The hello-sip node carrying the leg."
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "boolean",
+            "description": "The selected address is a TURN server's: the media is relayed."
+          }
+        }
+      },
+      "WebRTCNode": {
+        "type": "object",
+        "required": ["node", "port", "hosts", "legs", "counters", "updatedAt"],
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "description": "The shared WebRTC UDP port."
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The candidate addresses the node advertises."
+          },
+          "legs": {
+            "type": "integer"
+          },
+          "counters": {
+            "$ref": "#/components/schemas/WebRTCCounters"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TurnProbe": {
+        "type": "object",
+        "required": [
+          "url",
+          "transport",
+          "method",
+          "reachable",
+          "latencyMs",
+          "addrs",
+          "checkedAt"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string",
+            "enum": ["udp", "tcp", "tls", ""]
+          },
+          "method": {
+            "type": "string",
+            "enum": ["stun", "connect", ""],
+            "description": "stun: a Binding request was answered; connect: a TCP connection was made (TLS listeners)."
+          },
+          "reachable": {
+            "type": "boolean"
+          },
+          "latencyMs": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "addrs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The server's addresses as hello-control resolves them."
+          },
+          "checkedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ClientCandidateStats": {
+        "type": "object",
+        "required": ["since", "reports", "local", "remote", "relayed"],
+        "properties": {
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reports": {
+            "type": "integer"
+          },
+          "local": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Reports by the client's candidate type: host, srflx, prflx, relay, unknown."
+          },
+          "remote": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Reports by the remote candidate type."
+          },
+          "relayed": {
+            "type": "integer",
+            "description": "Reports whose pair used a relay candidate on either side."
+          }
+        }
+      },
+      "WebRTCStatus": {
+        "type": "object",
+        "required": [
+          "generatedAt",
+          "clients",
+          "registrations",
+          "nodes",
+          "legs",
+          "turn",
+          "push",
+          "candidates",
+          "authFailures",
+          "lastErrors",
+          "unavailable"
+        ],
+        "properties": {
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "clients": {
+            "type": "object",
+            "required": ["enrolled", "registered", "byTransport"],
+            "properties": {
+              "enrolled": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "description": "Enabled client devices by kind: web, mobile."
+              },
+              "registered": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "description": "Bindings by device kind: desk, web, mobile."
+              },
+              "byTransport": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "description": "Client (web and mobile) bindings by transport: udp, tcp, tls, ws, wss."
+              }
+            }
+          },
+          "registrations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "deviceId",
+                "device",
+                "kind",
+                "label",
+                "extension",
+                "transport",
+                "source",
+                "userAgent",
+                "node",
+                "expires"
+              ],
+              "properties": {
+                "deviceId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "device": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "extension": {
+                  "type": "string"
+                },
+                "transport": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "userAgent": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "expires": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "description": "Registered web and mobile clients (at most 200)."
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebRTCNode"
+            }
+          },
+          "legs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebRTCLeg"
+            },
+            "description": "Live WebRTC legs of every node (at most 100 per node)."
+          },
+          "turn": {
+            "type": "object",
+            "required": [
+              "configured",
+              "ttlSeconds",
+              "stun",
+              "servers",
+              "relayedLegs"
+            ],
+            "properties": {
+              "configured": {
+                "type": "boolean",
+                "description": "TURN URIs and the shared secret are set."
+              },
+              "ttlSeconds": {
+                "type": "integer"
+              },
+              "stun": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "servers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TurnProbe"
+                },
+                "description": "Each TURN URI checked from hello-control (reused for 30 s)."
+              },
+              "relayedLegs": {
+                "type": "integer"
+              }
+            }
+          },
+          "push": {
+            "type": "object",
+            "required": ["configured", "detail"],
+            "properties": {
+              "configured": {
+                "type": "boolean"
+              },
+              "detail": {
+                "type": "string"
+              }
+            }
+          },
+          "candidates": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ClientCandidateStats"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Candidate types of the clients' end-of-call reports over the last 24 hours."
+          },
+          "authFailures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "deviceId",
+                "device",
+                "label",
+                "kind",
+                "at",
+                "code",
+                "reason",
+                "source",
+                "node",
+                "credentials"
+              ],
+              "properties": {
+                "deviceId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "device": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "code": {
+                  "type": "integer"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "userAgent": {
+                  "type": "string"
+                },
+                "credentials": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "description": "Refused REGISTERs of client devices in the last hour, newest first (at most 50). A first challenge (401 without credentials) is not a failure."
+          },
+          "lastErrors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["at", "kind", "reason", "detail"],
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["register", "ice", "dtls"]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "call": {
+                  "type": "string"
+                },
+                "device": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The last register, ICE and DTLS errors, newest first (at most 20)."
+          },
+          "unavailable": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["devices", "live", "webrtc", "quality", "register_attempts"]
+            },
+            "description": "Sources that could not be read; their parts are empty."
           }
         }
       },
@@ -42936,7 +45411,14 @@
           },
           "routeKind": {
             "type": "string",
-            "enum": ["inbox", "queue", "user", "extension", "ring_group"],
+            "enum": [
+              "inbox",
+              "queue",
+              "user",
+              "extension",
+              "ring_group",
+              "ai_triage"
+            ],
             "description": "Where a new conversation goes: inbox is the pool every operator sees. Change it with the number's routing."
           },
           "enabled": {
@@ -43080,6 +45562,12 @@
             "minimum": 1,
             "maximum": 10000,
             "description": "The most conversations one number may start per 24 hours (default 200)."
+          },
+          "retentionMediaDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650,
+            "description": "How long an attachment's file is kept after it arrived or was sent (default 90 days). The message stays and shows the file expired."
           }
         }
       },
@@ -43180,7 +45668,14 @@
       },
       "MessagingEraseReport": {
         "type": "object",
-        "required": ["conversations", "messages", "optOutsKept", "providers"],
+        "required": [
+          "conversations",
+          "messages",
+          "optOutsKept",
+          "providers",
+          "mediaObjects",
+          "mediaObjectsPending"
+        ],
         "properties": {
           "conversations": {
             "type": "integer"
@@ -43209,6 +45704,14 @@
                 }
               }
             }
+          },
+          "mediaObjects": {
+            "type": "integer",
+            "description": "Attachment files removed from the media store and checked gone."
+          },
+          "mediaObjectsPending": {
+            "type": "integer",
+            "description": "Attachment files the media store could not remove now; the media sweeper removes them within minutes, and their rows hold nothing else."
           }
         }
       },
@@ -43241,7 +45744,8 @@
           "firstResponseAt",
           "resolvedAt",
           "createdAt",
-          "chat"
+          "chat",
+          "ai"
         ],
         "properties": {
           "id": {
@@ -43348,6 +45852,9 @@
           },
           "chat": {
             "$ref": "#/components/schemas/ChatInfo"
+          },
+          "ai": {
+            "$ref": "#/components/schemas/InboxConversationAI"
           }
         }
       },
@@ -43384,7 +45891,8 @@
           "createdAt",
           "sentAt",
           "deliveredAt",
-          "readAt"
+          "readAt",
+          "media"
         ],
         "properties": {
           "id": {
@@ -43452,6 +45960,13 @@
           "readAt": {
             "type": ["string", "null"],
             "format": "date-time"
+          },
+          "media": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxMedia"
+            },
+            "description": "The message's attachments, oldest first."
           }
         }
       },
@@ -43475,18 +45990,26 @@
       "InboxSendInput": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["body"],
+        "required": [],
         "properties": {
           "body": {
             "type": "string",
-            "description": "The text to send, 1-2000 bytes; a long one is split into several texts.",
-            "minLength": 1,
-            "maxLength": 2000
+            "maxLength": 2000,
+            "description": "The text to send, at most 2000 bytes; a long one is split into several texts. It may be empty only when mediaIds names attachments."
           },
           "clientMsgId": {
             "type": "string",
             "description": "A value the client makes up for this send; sending it again with the same value returns the first message and sends nothing more.",
             "maxLength": 64
+          },
+          "mediaIds": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Your uploads to this conversation (POST /api/v1/inbox/media) to send with the text. Only a website chat carries attachments; any other channel answers 409 media_unsupported."
           }
         }
       },
@@ -43670,7 +46193,14 @@
           },
           "routeKind": {
             "type": "string",
-            "enum": ["inbox", "queue", "user", "extension", "ring_group"],
+            "enum": [
+              "inbox",
+              "queue",
+              "user",
+              "extension",
+              "ring_group",
+              "ai_triage"
+            ],
             "description": "inbox is the supervisors' pool; queue assigns by the queue's strategy; user and extension assign to one person; ring_group is a shared pool of the users of the group's extensions."
           },
           "routeTarget": {
@@ -43700,7 +46230,14 @@
         "properties": {
           "routeKind": {
             "type": "string",
-            "enum": ["inbox", "queue", "user", "extension", "ring_group"],
+            "enum": [
+              "inbox",
+              "queue",
+              "user",
+              "extension",
+              "ring_group",
+              "ai_triage"
+            ],
             "description": "Where new conversations go: inbox (the supervisors' pool), queue, user, extension (its linked user) or ring_group (a shared pool of its users). Changing it needs a routeTarget."
           },
           "routeTarget": {
@@ -43968,6 +46505,639 @@
           }
         }
       },
+      "MessagingAI": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "autoEnabled",
+          "businessName",
+          "intents",
+          "sensitiveTopics",
+          "channels",
+          "addresses",
+          "status"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "The kill switch of all the inbox AI (triage, drafts, auto-replies)."
+          },
+          "autoEnabled": {
+            "type": "boolean",
+            "description": "The kill switch of the auto-replies."
+          },
+          "businessName": {
+            "type": "string",
+            "description": "The name the AI answers for."
+          },
+          "intents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The intents the triage picks from; other is always allowed."
+          },
+          "sensitiveTopics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Topics the AI never answers: a text about one goes to a person."
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "kind", "aiEnabled"],
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "aiEnabled": {
+                  "type": "boolean",
+                  "description": "The channel's AI kill switch."
+                }
+              }
+            }
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "channelId",
+                "address",
+                "label",
+                "mode",
+                "faqCount"
+              ],
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "channelId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "address": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": ["off", "triage", "draft", "auto"]
+                },
+                "faqCount": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "status": {
+            "type": "object",
+            "required": [
+              "available",
+              "reason",
+              "endpointPublic",
+              "autoAllowed"
+            ],
+            "properties": {
+              "available": {
+                "type": "boolean",
+                "description": "The in-product AI (HELLO_AI_*) is on."
+              },
+              "reason": {
+                "type": "string",
+                "description": "Why it is not; empty when it is."
+              },
+              "endpointPublic": {
+                "type": "boolean",
+                "description": "The model's endpoint is not on a private network: customer texts leave it."
+              },
+              "autoAllowed": {
+                "type": "boolean",
+                "description": "HELLO_MSG_AI_AUTO: false stops every auto-reply."
+              }
+            }
+          }
+        }
+      },
+      "MessagingAIInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "The kill switch of all the inbox AI: false stops every triage, draft and auto-reply."
+          },
+          "autoEnabled": {
+            "type": "boolean",
+            "description": "The kill switch of the auto-replies: false stops them; triage and drafts go on."
+          },
+          "businessName": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "The name the AI answers for."
+          },
+          "intents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "maxItems": 30,
+            "description": "The intents the triage picks from, at least one; do not list other.",
+            "minItems": 1
+          },
+          "sensitiveTopics": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "maxItems": 30,
+            "description": "Topics the AI never answers."
+          },
+          "channels": {
+            "type": "array",
+            "description": "The channels whose AI switch to set.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "aiEnabled"],
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "The channel."
+                },
+                "aiEnabled": {
+                  "type": "boolean",
+                  "description": "The channel's AI kill switch."
+                }
+              }
+            }
+          }
+        }
+      },
+      "MessagingAddressAI": {
+        "type": "object",
+        "required": [
+          "addressId",
+          "mode",
+          "redact",
+          "disclosure",
+          "disclosureText",
+          "holdingText",
+          "maxReplies",
+          "hourlyCap",
+          "minConfidence",
+          "autoIntents",
+          "handoffWords",
+          "faqCount"
+        ],
+        "properties": {
+          "addressId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["off", "triage", "draft", "auto"],
+            "description": "off; triage (classify and summarise, nothing the customer sees); draft (triage plus a reply an agent must click to use); auto (the AI may answer from the FAQ, within the guardrails)."
+          },
+          "redact": {
+            "type": "boolean",
+            "description": "Replace phone numbers and email addresses before a model call."
+          },
+          "disclosure": {
+            "type": "boolean",
+            "description": "The first AI reply of a conversation starts with disclosureText."
+          },
+          "disclosureText": {
+            "type": "string"
+          },
+          "holdingText": {
+            "type": "string",
+            "description": "Sent once, until a person replies, when the AI hands a conversation to a person; empty sends nothing."
+          },
+          "maxReplies": {
+            "type": "integer",
+            "description": "AI replies before a person must answer."
+          },
+          "hourlyCap": {
+            "type": "integer",
+            "description": "AI messages the number sends per hour at most."
+          },
+          "minConfidence": {
+            "type": "number",
+            "description": "The least confidence of the triage and the answer."
+          },
+          "autoIntents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The intents the AI may answer; empty allows every intent but other."
+          },
+          "handoffWords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "A customer text with one of these words goes to a person."
+          },
+          "faqCount": {
+            "type": "integer"
+          }
+        }
+      },
+      "MessagingAddressAIInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["off", "triage", "draft", "auto"],
+            "description": "off, triage, draft or auto (the AI may answer from the FAQ)."
+          },
+          "redact": {
+            "type": "boolean",
+            "description": "Replace phone numbers and email addresses before a model call (default true)."
+          },
+          "disclosure": {
+            "type": "boolean",
+            "description": "Start the first AI reply of a conversation with disclosureText (default true)."
+          },
+          "disclosureText": {
+            "type": "string",
+            "maxLength": 160,
+            "description": "The disclosure line; required while disclosure is on."
+          },
+          "holdingText": {
+            "type": "string",
+            "maxLength": 480,
+            "description": "Sent once, until a person replies, when the AI hands a conversation to a person; empty sends nothing."
+          },
+          "maxReplies": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "AI replies before a person must answer (default 3)."
+          },
+          "hourlyCap": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "AI messages the number sends per hour at most (default 60)."
+          },
+          "minConfidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The least confidence of the triage and of the answer (default 0.8)."
+          },
+          "autoIntents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "maxItems": 30,
+            "description": "The intents the AI may answer; empty allows every intent but other."
+          },
+          "handoffWords": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "maxItems": 30,
+            "description": "Words that send a customer text to a person; at least one.",
+            "minItems": 1
+          }
+        }
+      },
+      "MessagingFAQ": {
+        "type": "object",
+        "required": [
+          "id",
+          "addressId",
+          "title",
+          "body",
+          "enabled",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "addressId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingFAQInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "addressId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The number; required to create, fixed after."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "One line naming the question it answers."
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "The answer; an auto-reply may only use what it says, and only links it contains."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "An auto-reply may use it (default true)."
+          }
+        }
+      },
+      "MessagingFAQList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessagingFAQ"
+            }
+          }
+        }
+      },
+      "InboxAIStats": {
+        "type": "object",
+        "required": ["runs", "autoReplies", "handoffs", "spam", "modes"],
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["kind", "state", "count"],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["triage", "draft", "autoreply"]
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed",
+                    "skipped",
+                    "stale"
+                  ]
+                },
+                "count": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "autoReplies": {
+            "type": "integer",
+            "description": "AI messages sent in the last 24 hours."
+          },
+          "handoffs": {
+            "type": "integer",
+            "description": "Conversations the AI handed to a person in the last 24 hours."
+          },
+          "spam": {
+            "type": "integer",
+            "description": "Active conversations the triage flagged as spam."
+          },
+          "modes": {
+            "type": "object",
+            "required": ["off", "triage", "draft", "auto"],
+            "properties": {
+              "off": {
+                "type": "integer"
+              },
+              "triage": {
+                "type": "integer"
+              },
+              "draft": {
+                "type": "integer"
+              },
+              "auto": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "InboxConversationAI": {
+        "type": "object",
+        "required": [
+          "mode",
+          "triage",
+          "applied",
+          "spam",
+          "handoff",
+          "handoffReason",
+          "draft",
+          "pending"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["off", "triage", "draft", "auto"],
+            "description": "The number's AI mode; auto shows an auto-reply indicator."
+          },
+          "triage": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "language",
+                  "intent",
+                  "urgency",
+                  "sentiment",
+                  "spam",
+                  "sensitive",
+                  "confidence",
+                  "summary",
+                  "suggestedQueue",
+                  "suggestedTags",
+                  "handoffRecommended",
+                  "messageId",
+                  "reverted"
+                ],
+                "properties": {
+                  "language": {
+                    "type": "string",
+                    "description": "ISO 639-1 code of the customer's text."
+                  },
+                  "intent": {
+                    "type": "string",
+                    "description": "One of the intents of the inbox AI settings, or other."
+                  },
+                  "urgency": {
+                    "type": "string",
+                    "enum": ["low", "normal", "high"]
+                  },
+                  "sentiment": {
+                    "type": "string",
+                    "enum": ["positive", "neutral", "negative"]
+                  },
+                  "spam": {
+                    "type": "boolean"
+                  },
+                  "sensitive": {
+                    "type": "boolean",
+                    "description": "The text touches a sensitive topic."
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "summary": {
+                    "type": "string",
+                    "maxLength": 280,
+                    "description": "The model's one-sentence summary for the agent."
+                  },
+                  "suggestedQueue": {
+                    "type": "string",
+                    "description": "A text queue's name; empty for none."
+                  },
+                  "suggestedTags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "handoffRecommended": {
+                    "type": "boolean"
+                  },
+                  "messageId": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "The customer text it read."
+                  },
+                  "reverted": {
+                    "type": "boolean",
+                    "description": "An agent undid what it changed."
+                  }
+                }
+              }
+            ],
+            "description": "The last triage applied; null when none."
+          },
+          "applied": {
+            "type": "object",
+            "required": ["tags", "priority"],
+            "properties": {
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Tags the AI added."
+              },
+              "priority": {
+                "type": "string",
+                "description": "The priority before the AI raised it; empty when it did not."
+              }
+            }
+          },
+          "spam": {
+            "type": "boolean",
+            "description": "The triage flagged spam (supervisors decide; nothing is deleted)."
+          },
+          "handoff": {
+            "type": "boolean",
+            "description": "The AI asked for a person and nobody replied since."
+          },
+          "handoffReason": {
+            "type": "string"
+          },
+          "draft": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": ["runId", "messageId", "text", "createdAt"],
+                "properties": {
+                  "runId": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "messageId": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            ],
+            "description": "The reply the AI suggests for the latest customer text; only when one conversation is read. An agent must click to use it."
+          },
+          "pending": {
+            "type": "boolean",
+            "description": "An AI run is queued or running; only when one conversation is read."
+          }
+        }
+      },
       "InboxStats": {
         "type": "object",
         "required": [
@@ -44030,7 +47200,9 @@
           "conversations",
           "createdAt",
           "updatedAt",
-          "warnings"
+          "warnings",
+          "attachments",
+          "logo"
         ],
         "properties": {
           "id": {
@@ -44167,6 +47339,14 @@
                 "description": "Why it is offline: outside the hours with no after-hours route, nobody staffs where a chat would go, or the cap of unassigned live chats is reached. Absent when online."
               }
             }
+          },
+          "attachments": {
+            "type": "boolean",
+            "description": "Whether visitors may send images and PDFs (at most 5 MiB, at most 5 per hour). Off by default: Hello bundles no virus scanner."
+          },
+          "logo": {
+            "type": "boolean",
+            "description": "Whether the site has a logo (PUT /api/v1/messaging/chat/sites/{id}/logo); the widget shows it in its header."
           }
         }
       },
@@ -44266,6 +47446,10 @@
             "description": "Days a finished chat is kept, 1 to 3650; 0 follows the messaging settings.",
             "minimum": 0,
             "maximum": 3650
+          },
+          "attachments": {
+            "type": "boolean",
+            "description": "Whether visitors may send images and PDFs. Left as it is when omitted."
           }
         }
       },
@@ -45377,6 +48561,16 @@
             "minimum": 0,
             "maximum": 200000,
             "description": "Most users a run may read before it fails user_cap_exceeded (default 20000; 0 means the default)."
+          },
+          "loginMethod": {
+            "type": "string",
+            "enum": ["", "oidc", "ldap_bind"],
+            "description": "How the connector's users sign in; synced users have no local password, so an enabled connector needs one (400 no_login_method). oidc through oidcProvider; ldap_bind for LDAP connectors. Google and Entra connectors default to oidc with their own provider."
+          },
+          "oidcProvider": {
+            "type": "string",
+            "enum": ["", "google", "entra"],
+            "description": "The single sign-on provider of loginMethod oidc; it must be configured and enabled before the connector is enabled."
           }
         },
         "description": "Engine settings every connector kind shares: the absence rule, device handling, the admin switch and the run limits."
@@ -45436,7 +48630,7 @@
           },
           "ldapBindLogin": {
             "type": "boolean",
-            "description": "Reserved for signing in by an LDAP bind."
+            "description": "The earlier spelling of options.loginMethod ldap_bind: a connector saved with it true and no loginMethod gets ldap_bind."
           }
         },
         "required": ["url", "bindDn", "baseDn"],
@@ -45451,7 +48645,7 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["ldap"]
+            "enum": ["ldap", "google", "entra"]
           },
           "name": {
             "type": "string",
@@ -45471,7 +48665,18 @@
             "description": "0 is manual only, otherwise 5 to 10080. A schedule starts only after an administrator has applied a run by hand."
           },
           "config": {
-            "$ref": "#/components/schemas/DirectoryLDAPConfig"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DirectoryLDAPConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectoryGoogleConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectoryEntraConfig"
+              }
+            ],
+            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig or DirectoryEntraConfig."
           },
           "mappings": {
             "$ref": "#/components/schemas/DirectoryMappings"
@@ -45483,12 +48688,11 @@
             "$ref": "#/components/schemas/DirectoryOptions"
           },
           "autoProvision": {
-            "type": "object",
-            "description": "Reserved for range auto-provisioning; it cannot be enabled yet."
+            "$ref": "#/components/schemas/DirectoryAutoProvision"
           },
           "hasCredential": {
             "type": "boolean",
-            "description": "A bind password is stored. It is write-only and never returned."
+            "description": "A credential (bind password, key file, client secret or private key) is stored. It is write-only and never returned."
           },
           "status": {
             "type": "string",
@@ -45530,30 +48734,7 @@
             "format": "date-time"
           }
         },
-        "required": [
-          "id",
-          "kind",
-          "name",
-          "enabled",
-          "mode",
-          "scheduleMinutes",
-          "config",
-          "mappings",
-          "groupRules",
-          "options",
-          "autoProvision",
-          "hasCredential",
-          "status",
-          "lastRunAt",
-          "lastSuccessAt",
-          "lastErrorCode",
-          "lastErrorDetail",
-          "consecutiveFailures",
-          "linkedUsers",
-          "lastFullRunAt",
-          "createdAt",
-          "updatedAt"
-        ]
+        "required": ["id", "kind", "name", "enabled", "mode", "scheduleMinutes", "config", "mappings", "groupRules", "options", "autoProvision", "hasCredential", "status", "lastRunAt", "lastSuccessAt", "lastErrorCode", "lastErrorDetail", "consecutiveFailures", "linkedUsers", "lastFullRunAt", "createdAt", "updatedAt"]
       },
       "DirectoryConnectorList": {
         "type": "object",
@@ -45572,7 +48753,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["ldap"],
+            "enum": ["ldap", "google", "entra"],
             "description": "The connector kind."
           },
           "name": {
@@ -45595,7 +48776,18 @@
             "description": "0 is manual only, otherwise 5 to 10080. A schedule starts only after an administrator has applied a run by hand."
           },
           "config": {
-            "$ref": "#/components/schemas/DirectoryLDAPConfig"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DirectoryLDAPConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectoryGoogleConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectoryEntraConfig"
+              }
+            ],
+            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig or DirectoryEntraConfig."
           },
           "mappings": {
             "$ref": "#/components/schemas/DirectoryMappings"
@@ -45607,13 +48799,17 @@
             "$ref": "#/components/schemas/DirectoryOptions"
           },
           "autoProvision": {
-            "type": "object",
-            "description": "Reserved for range auto-provisioning; it cannot be enabled yet."
+            "$ref": "#/components/schemas/DirectoryAutoProvision"
           },
           "bindPassword": {
             "type": "string",
             "minLength": 1,
             "description": "The bind password, sealed at rest and never returned. Needs the secrets scope."
+          },
+          "credential": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The google or entra credential: a service account JSON key file, an OAuth client secret, an Entra client secret or the certificate's PEM private key. Sealed at rest, never returned; needs the secrets scope. Give bindPassword or credential, not both."
           }
         },
         "required": ["kind", "name"]
@@ -45641,7 +48837,18 @@
             "description": "0 is manual only, otherwise 5 to 10080. A schedule starts only after an administrator has applied a run by hand."
           },
           "config": {
-            "$ref": "#/components/schemas/DirectoryLDAPConfig"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DirectoryLDAPConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectoryGoogleConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DirectoryEntraConfig"
+              }
+            ],
+            "description": "The kind's config: DirectoryLDAPConfig, DirectoryGoogleConfig or DirectoryEntraConfig."
           },
           "mappings": {
             "$ref": "#/components/schemas/DirectoryMappings"
@@ -45653,13 +48860,17 @@
             "$ref": "#/components/schemas/DirectoryOptions"
           },
           "autoProvision": {
-            "type": "object",
-            "description": "Reserved for range auto-provisioning; it cannot be enabled yet."
+            "$ref": "#/components/schemas/DirectoryAutoProvision"
           },
           "bindPassword": {
             "type": "string",
             "minLength": 1,
             "description": "Replaces the stored password. Needs the secrets scope. Required again when the host or the bind DN changes, so a stored password cannot be redirected to another server."
+          },
+          "credential": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The google or entra credential: a service account JSON key file, an OAuth client secret, an Entra client secret or the certificate's PEM private key. Sealed at rest, never returned; needs the secrets scope. Give bindPassword or credential, not both."
           }
         }
       },
@@ -45893,6 +49104,115 @@
         },
         "required": ["items"]
       },
+      "DirectoryAutoProvision": {
+        "type": "object",
+        "description": "Range auto-provisioning (off by default): a user with no extension value, or one that names no extension, gets the next free number of the range, an extension named after the user, a voicemail box that mails the user and one SIP device whose generated secret is shown nowhere (rotate it from the device page to set up a phone). Allocation happens under the configuration lock; a user's number is kept and never renumbered. A disabled user keeps the extension and its voicemail.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Provision from the range. Needs rangeStart and rangeEnd."
+          },
+          "rangeStart": {
+            "type": "string",
+            "pattern": "^([0-9]{2,10})?$",
+            "description": "The first number of the range, for example 2000 (2 to 10 digits; empty while no range is set)."
+          },
+          "rangeEnd": {
+            "type": "string",
+            "pattern": "^([0-9]{2,10})?$",
+            "description": "The last number, inclusive, with as many digits as rangeStart; at most 100000 numbers."
+          },
+          "device": {
+            "type": "boolean",
+            "description": "Create one SIP device on the extension (default true)."
+          },
+          "voicemail": {
+            "type": "boolean",
+            "description": "Turn voicemail on and mail it to the user's email (default true)."
+          },
+          "groups": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "description": "Stable ids of source groups; when set, only their members are provisioned. Needs the group base DN."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DirectoryRangeUsage": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "rangeStart": {
+            "type": "string"
+          },
+          "rangeEnd": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "description": "How many numbers the range holds (0 without a range)."
+          },
+          "used": {
+            "type": "integer",
+            "description": "Numbers of the range something already claims."
+          },
+          "free": {
+            "type": "integer"
+          },
+          "nextFree": {
+            "type": "string",
+            "description": "The number the next allocation takes; empty when the range is full."
+          },
+          "provisioned": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectoryProvisionedUser"
+            }
+          }
+        },
+        "required": [
+          "enabled",
+          "rangeStart",
+          "rangeEnd",
+          "size",
+          "used",
+          "free",
+          "nextFree",
+          "provisioned"
+        ]
+      },
+      "DirectoryProvisionedUser": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "username": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string",
+            "description": "The number allocated to the user."
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The extension of that number; 0 when it was deleted (the next full run creates it again with the same number)."
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": ["userId", "username", "number", "extensionId", "enabled"]
+      },
       "DirectoryChange": {
         "type": "object",
         "properties": {
@@ -45946,7 +49266,7 @@
           },
           "reason": {
             "type": "string",
-            "description": "Why: for conflicts extension_linked, extension_kind, duplicate_extension, email_in_use, username_collision, claimed_by_other_connector, extension_invalid, extension_missing, username_invalid or last_admin; for skips inactive_in_source, absent_pending, link_only_no_match or local_admin_not_adopted; for adopt adopt_not_confirmed or confirmed; for disable inactive_in_source or absent_from_source; for error last_admin, not_found, invalid or apply_failed."
+            "description": "Why: for create and update auto_provisioned (an extension from the connector's range, with its device and voicemail in fieldDiffs; after an apply the number actually allocated); for conflicts extension_linked, extension_kind, duplicate_extension, email_in_use, username_collision, claimed_by_other_connector, extension_invalid, extension_missing, username_invalid, range_exhausted or last_admin; for skips inactive_in_source, absent_pending, link_only_no_match or local_admin_not_adopted; for adopt adopt_not_confirmed or confirmed; for disable inactive_in_source or absent_from_source; for error last_admin, not_found, invalid, range_exhausted or apply_failed."
           },
           "overridable": {
             "type": "boolean",
@@ -49366,6 +52686,60 @@
             "type": "string",
             "maxLength": 18,
             "description": "The id of the Salesforce Task the softphone created."
+          }
+        }
+      },
+      "InboxMedia": {
+        "type": "object",
+        "required": [
+          "id",
+          "messageId",
+          "direction",
+          "status",
+          "contentType",
+          "size",
+          "filename",
+          "reason",
+          "createdAt"
+        ],
+        "description": "An attachment of a message. Its file is read from GET /api/v1/inbox/media/{id} (or the /me form) by anyone who can see the conversation.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "messageId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The message it belongs to; null for an upload not sent yet."
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["in", "out"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "ready", "rejected", "expired"],
+            "description": "pending: still downloading from the carrier; ready: the file can be read; rejected: refused (see reason); expired: the carrier no longer had it, or the file passed the media retention."
+          },
+          "contentType": {
+            "type": "string",
+            "description": "The type sniffed from the file's bytes, which it is served with; empty until downloaded."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why a file was refused or expired: too_large, type_not_allowed, type_mismatch, active_content, media_host, provider_cannot_fetch, gone_at_provider, download_window_passed, retention."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }

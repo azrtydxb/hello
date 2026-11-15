@@ -21,10 +21,15 @@ const (
 	// RouteRingGroup is a shared pool of the users of a ring group's
 	// extensions (target: ring group id).
 	RouteRingGroup = "ring_group"
+	// RouteAITriage waits a few seconds for the AI triage of the first text
+	// (spec M-30), then places the conversation in the text queue the triage
+	// suggests, or in the target queue (target: queue id) when it suggests
+	// none, fails or the AI is off.
+	RouteAITriage = "ai_triage"
 )
 
 // RouteKinds lists the route kinds in the order a console shows them.
-var RouteKinds = []string{RouteInbox, RouteQueue, RouteUser, RouteExtension, RouteRingGroup}
+var RouteKinds = []string{RouteInbox, RouteQueue, RouteUser, RouteExtension, RouteRingGroup, RouteAITriage}
 
 // ValidRouteKind reports whether k is a route kind.
 func ValidRouteKind(k string) bool { return slices.Contains(RouteKinds, k) }

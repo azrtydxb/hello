@@ -72,7 +72,7 @@ func newRig(t *testing.T) *rig {
 	r.e = &Engine{Store: r.m, Drivers: map[string]Driver{KindLDAP: r.d}, Replica: "r1", Now: func() time.Time { return r.now }}
 	pw := "s3cret-bind-pw"
 	c, err := r.e.Create(context.Background(), "admin", ConnectorInput{Kind: KindLDAP, Name: strPtr("AD"), Secret: &pw, Enabled: boolPtr(true),
-		Config: json.RawMessage(`{"url":"ldaps://dc"}`)})
+		Config: json.RawMessage(`{"url":"ldaps://dc","ldapBindLogin":true}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -683,7 +683,9 @@ func TestConnectorValidation(t *testing.T) {
 		{"name", ConnectorInput{Name: strPtr(" ")}, "name"},
 		{"mode", ConnectorInput{Mode: strPtr("x")}, "mode"},
 		{"schedule", ConnectorInput{ScheduleMinutes: intPtr(3)}, "scheduleMinutes"},
-		{"auto-provision", ConnectorInput{AutoProvision: json.RawMessage(`{"enabled":true}`)}, "autoProvision.enabled"},
+		{"auto-provision without a range", ConnectorInput{AutoProvision: &AutoProvision{Enabled: true}}, "autoProvision.rangeStart"},
+		{"auto-provision range order", ConnectorInput{AutoProvision: &AutoProvision{Enabled: true, RangeStart: "2999", RangeEnd: "2000"}}, "autoProvision.rangeEnd"},
+		{"auto-provision range width", ConnectorInput{AutoProvision: &AutoProvision{Enabled: true, RangeStart: "200", RangeEnd: "2999"}}, "autoProvision.rangeEnd"},
 		{"empty secret", ConnectorInput{Secret: strPtr("")}, "bindPassword"},
 		{"identity change needs the secret", ConnectorInput{Config: json.RawMessage(`{"url":"ldaps://evil"}`)}, "bindPassword"},
 		{"driver config", ConnectorInput{Config: json.RawMessage(`{"url":"bad"}`)}, "config.url"},

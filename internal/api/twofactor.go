@@ -66,17 +66,27 @@ func (s *server) twoFactor(w http.ResponseWriter) bool {
 // startMFA answers a password-verified login of a 2FA user: 202 and a
 // challenge token, no session. It fails closed without the 2FA store.
 func (s *server) startMFA(w http.ResponseWriter, r *http.Request, userID int64) {
+	plain, ok := s.createMFAChallenge(w, r, userID)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"mfa": "required", "mfaToken": plain})
+}
+
+// createMFAChallenge stores a second-factor challenge for userID and returns
+// its token; on failure it has answered and returns false.
+func (s *server) createMFAChallenge(w http.ResponseWriter, r *http.Request, userID int64) (string, bool) {
 	if s.TwoFactor == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "two-factor authentication is not available")
-		return
+		return "", false
 	}
 	plain, hash := auth.NewToken()
 	if err := s.TwoFactor.CreateMFAChallenge(r.Context(), userID, hash, twoFactorNow().Add(store.MFAChallengeTTL)); err != nil {
 		s.internal(w, "login: create mfa challenge", err)
-		return
+		return "", false
 	}
 	s.twoFactorMetric("challenge")
-	writeJSON(w, http.StatusAccepted, map[string]string{"mfa": "required", "mfaToken": plain})
+	return plain, true
 }
 
 // login2FA is POST /api/v1/auth/login/2fa. An unknown, expired or spent

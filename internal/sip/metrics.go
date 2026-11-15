@@ -100,6 +100,13 @@ type Metrics struct {
 	// (cleartext_hop: the offer did not arrive over the TLS hop).
 	WebRTCRefused *prometheus.CounterVec // reason
 	SecureRefused *prometheus.CounterVec // reason
+	// ClientRegistrations is this node's bindings by the kind of device
+	// (desk, web, mobile; clients S-52); summed over nodes it is the
+	// cluster's. ClientAuthFailures counts failed authentications of web
+	// and mobile devices (derived credentials) by reason: expired,
+	// username, credentials, unknown_device, throttled.
+	ClientRegistrations *prometheus.GaugeVec   // kind
+	ClientAuthFailures  *prometheus.CounterVec // reason
 
 	// Phase E (spec P-12, P-13): server pages and intercom calls.
 	PagingTotal   *prometheus.CounterVec // result
@@ -323,6 +330,18 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.RegistrationsByTransport = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "hello_sip_registrations_by_transport", Help: "Bindings last registered through this node, by the phone's transport (udp, tcp, tls, ws, wss).",
 	}, []string{"transport"})
+	m.ClientRegistrations = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hello_client_registrations", Help: "Bindings last registered through this node, by device kind (desk, web, mobile).",
+	}, []string{"kind"})
+	m.ClientAuthFailures = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_client_auth_failures_total", Help: "Failed authentications of web and mobile devices, by reason (expired, username, credentials, unknown_device, throttled).",
+	}, []string{"reason"})
+	for _, k := range clientKinds {
+		m.ClientRegistrations.WithLabelValues(k)
+	}
+	for _, r := range clientAuthReasons {
+		m.ClientAuthFailures.WithLabelValues(r)
+	}
 	m.SecureRefused = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_sip_sips_refused_total", Help: "sips: requests refused because no TLS path exists, by reason.",
 	}, []string{"reason"})
@@ -390,7 +409,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailGroupDeliveries, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Originates, m.OriginateSetup, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags, m.Emergency,
-		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.PhoneChallenges, m.Replaces, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.RequestsByWire, m.WebRTCRefused, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.BossDivert, m.DirectoryTotal, m.TimeConditionTotal, m.BlockedCalls,
+		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.PhoneChallenges, m.Replaces, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.RequestsByWire, m.WebRTCRefused, m.SecureRefused, m.ClientRegistrations, m.ClientAuthFailures, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.BossDivert, m.DirectoryTotal, m.TimeConditionTotal, m.BlockedCalls,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents, m.CallbackTotal, m.FaxTotal, m.FollowMeLegs,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	m.Conf = newConfMetrics(reg)
@@ -416,3 +435,10 @@ func methodLabel(m string) string {
 func (m *Metrics) request(method string) { m.Requests.WithLabelValues(methodLabel(method)).Inc() }
 
 func (m *Metrics) response(code int) { m.Responses.WithLabelValues(strconv.Itoa(code)).Inc() }
+
+// The label values of hello_client_registrations and
+// hello_client_auth_failures_total.
+var (
+	clientKinds       = []string{"desk", "web", "mobile"}
+	clientAuthReasons = []string{"expired", "username", "credentials", "unknown_device", "throttled"}
+)

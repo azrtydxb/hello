@@ -45,7 +45,7 @@ const (
 // presencePollInterval is how often reg and presence subscriptions are
 // re-read from the shared state: a registration or a PUBLISH handled by the
 // other node reaches this node's subscribers within it. Tests shorten it.
-var presencePollInterval = 5 * time.Second
+var presencePollInterval = newTunable(5 * time.Second)
 
 // PublishedPresence is the shared event state of PUBLISHed presence (Valkey);
 // *livestate.Store satisfies it. Nil makes PUBLISH answer 503.
@@ -471,7 +471,7 @@ func (s *Server) sendDocNotify(sub *subscription, event, ctype string, body []by
 // elsewhere reaches reg subscribers, a PUBLISH handled elsewhere reaches
 // presence subscribers.
 func (s *Server) presencePollLoop(ctx context.Context) {
-	t := time.NewTicker(presencePollInterval)
+	t := time.NewTicker(presencePollInterval.Get())
 	defer t.Stop()
 	for {
 		select {

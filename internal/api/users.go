@@ -161,11 +161,12 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 		ExtensionIDs   *[]int64        `json:"extensionIds"`
 		VoicemailEmail *vmPrefsIn      `json:"voicemailEmail"`
 		TOTPRequired   *bool           `json:"totpRequired"`
+		BreakGlass     *bool           `json:"breakGlass"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.TOTPRequired == nil && in.Role == nil && in.DisplayName == nil && in.Email == nil && in.Enabled == nil && in.Password == nil &&
+	if in.TOTPRequired == nil && in.BreakGlass == nil && in.Role == nil && in.DisplayName == nil && in.Email == nil && in.Enabled == nil && in.Password == nil &&
 		in.ExtensionID == nil && in.ExtensionIDs == nil && in.VoicemailEmail == nil {
 		badRequest(w, "a field to change is required")
 		return
@@ -223,7 +224,7 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 		c.Email = in.Email
 	}
 	c.Enabled = in.Enabled
-	c.TOTPRequired, c.SetterID = in.TOTPRequired, actor(r).UserID
+	c.TOTPRequired, c.SetterID, c.BreakGlass = in.TOTPRequired, actor(r).UserID, in.BreakGlass
 	if in.Password != nil {
 		if err := auth.ValidatePassword(*in.Password); err != nil {
 			f.add("password", "%s", strings.TrimPrefix(err.Error(), auth.ErrPasswordPolicy.Error()+": "))
@@ -285,11 +286,30 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "two_factor_required", "enrol two-factor authentication yourself before requiring it for an admin")
 		return
 	}
+	if s.breakGlassError(w, err) {
+		return
+	}
 	if err != nil {
 		s.configError(w, "user", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, u)
+}
+
+// breakGlassError answers the break-glass refusals (spec integrations
+// AC-10c) and reports whether it did.
+func (s *server) breakGlassError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, store.ErrLastBreakGlass):
+		writeError(w, http.StatusConflict, "last_break_glass", "at least one enabled break-glass admin must remain; flag another admin first")
+	case errors.Is(err, store.ErrBreakGlassLocalAdmin):
+		writeError(w, http.StatusConflict, "break_glass_local_admin", "only an enabled local admin (not managed by a directory) can be break-glass")
+	case errors.Is(err, store.ErrManagedByDirectory):
+		writeError(w, http.StatusConflict, "managed_by_directory", "this user is managed by a directory and has no local password")
+	default:
+		return false
+	}
+	return true
 }
 
 // managedTouched lists the fields of an edit that the connector owns. The
@@ -320,6 +340,9 @@ func (s *server) deleteUser(w http.ResponseWriter, r *http.Request) {
 	err := s.Store.DeleteUser(r.Context(), actor(r).String(), id)
 	if errors.Is(err, store.ErrLastAdmin) {
 		writeError(w, http.StatusConflict, "last_admin", "at least one enabled user must remain admin")
+		return
+	}
+	if s.breakGlassError(w, err) {
 		return
 	}
 	if err != nil {

@@ -153,12 +153,12 @@ func checkSyncEventOf(t *testing.T, r *sip.Request) string {
 // reported as not_registered, timeout or auth_failed, or if the configured
 // push rate is not passed to the queue.
 func TestCheckSyncNotify(t *testing.T) {
-	old := checkSyncTimeout
-	checkSyncTimeout = 600 * time.Millisecond
-	t.Cleanup(func() { checkSyncTimeout = old })
-	oldPoll := pushPollInterval
-	pushPollInterval = 20 * time.Millisecond
-	t.Cleanup(func() { pushPollInterval = oldPoll })
+	old := checkSyncTimeout.Get()
+	checkSyncTimeout.Set(600 * time.Millisecond)
+	t.Cleanup(func() { checkSyncTimeout.Set(old) })
+	oldPoll := pushPollInterval.Get()
+	pushPollInterval.Set(20 * time.Millisecond)
+	t.Cleanup(func() { pushPollInterval.Set(oldPoll) })
 
 	q := newFakePushes()
 	pbx := startPBX(t, callerDevices(), withPushes(q, 7))
@@ -321,12 +321,12 @@ func (f fakePushesWithSecrets) DeviceSecret(_ context.Context, _ string) (string
 // from the device password, if a wrong password is accepted, or if a queue
 // without the password still answers a foreign realm.
 func TestCheckSyncChallengeInPhoneRealm(t *testing.T) {
-	old := checkSyncTimeout
-	checkSyncTimeout = 600 * time.Millisecond
-	t.Cleanup(func() { checkSyncTimeout = old })
-	oldPoll := pushPollInterval
-	pushPollInterval = 20 * time.Millisecond
-	t.Cleanup(func() { pushPollInterval = oldPoll })
+	old := checkSyncTimeout.Get()
+	checkSyncTimeout.Set(600 * time.Millisecond)
+	t.Cleanup(func() { checkSyncTimeout.Set(old) })
+	oldPoll := pushPollInterval.Get()
+	pushPollInterval.Set(20 * time.Millisecond)
+	t.Cleanup(func() { pushPollInterval.Set(oldPoll) })
 
 	const phoneRealm = "192.168.10.101:30508"
 	for _, tc := range []struct {
@@ -360,12 +360,12 @@ func TestCheckSyncChallengeInPhoneRealm(t *testing.T) {
 // is notified on more than one of them, or if a phone with no line
 // registered is not reported as not registered (phone-feature-parity S-10).
 func TestCheckSyncLines(t *testing.T) {
-	old := checkSyncTimeout
-	checkSyncTimeout = 600 * time.Millisecond
-	t.Cleanup(func() { checkSyncTimeout = old })
-	oldPoll := pushPollInterval
-	pushPollInterval = 20 * time.Millisecond
-	t.Cleanup(func() { pushPollInterval = oldPoll })
+	old := checkSyncTimeout.Get()
+	checkSyncTimeout.Set(600 * time.Millisecond)
+	t.Cleanup(func() { checkSyncTimeout.Set(old) })
+	oldPoll := pushPollInterval.Get()
+	pushPollInterval.Set(20 * time.Millisecond)
+	t.Cleanup(func() { pushPollInterval.Set(oldPoll) })
 
 	q := newFakePushes()
 	pbx := startPBX(t, callerDevices(), withPushes(q, 7))

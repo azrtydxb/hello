@@ -43,6 +43,7 @@ import {
 } from "../design/azrty/components";
 import { mapFieldErrors } from "../forms";
 import { ROLES, useCan, type Role } from "../role";
+import { UserIdentities } from "./UserIdentities";
 
 /** Whether a directory connector owns a field of the user. */
 function owns(u: User, field: string): boolean {
@@ -188,6 +189,12 @@ function UserList() {
                   {u.username}
                   {u.displayName && (
                     <span className="az-field__hint"> {u.displayName}</span>
+                  )}
+                  {u.breakGlass && (
+                    <>
+                      {" "}
+                      <Badge tone="warn">break-glass</Badge>
+                    </>
                   )}
                   {u.managedBy && (
                     <>
@@ -377,6 +384,12 @@ function userError(err: unknown): string {
       return "You cannot delete your own account.";
     if (err.code === "two_factor_required")
       return "Set up two-factor authentication for your own account first.";
+    if (err.code === "last_break_glass")
+      return "Single sign-on is required and this is the last break-glass administrator: flag another one first, or stop requiring single sign-on.";
+    if (err.code === "break_glass_local_admin")
+      return "Only an enabled local administrator can be break-glass.";
+    if (err.code === "managed_by_directory")
+      return "The directory manages this user: it has no local password.";
     if (err.code === "last_enrolled_admin")
       return "This is the only administrator with two-factor authentication. Use hello-control user 2fa-reset on the control plane instead.";
   }
@@ -416,6 +429,7 @@ function UserDialog({
   const [password, setPassword] = useState("");
   const [must, setMust] = useState(true);
   const [totpRequired, setTotpRequired] = useState(user?.totpRequired ?? false);
+  const [breakGlass, setBreakGlass] = useState(user?.breakGlass ?? false);
   const [exts, setExts] = useState<Set<string>>(
     new Set((user?.extensionIds ?? []).map(String)),
   );
@@ -486,6 +500,8 @@ function UserDialog({
         if (!owned("extension")) change.extensionIds = extensionIds;
         if (totpRequired !== (user.totpRequired ?? false))
           change.totpRequired = totpRequired;
+        if (breakGlass !== (user.breakGlass ?? false))
+          change.breakGlass = breakGlass;
         if (password !== "" && !user.managedBy) {
           change.password = password;
           change.mustChangePassword = must;
@@ -651,6 +667,15 @@ function UserDialog({
             onChange={(e) => setTotpRequired(e.target.checked)}
           />
         )}
+        {!isNew && !user.managedBy && (role === "admin" || breakGlass) && (
+          <Switch
+            label="Break-glass administrator"
+            hint="May still sign in with a password when single sign-on is required, for when the identity provider is down. Give the account a long password and two-factor authentication."
+            checked={breakGlass}
+            onChange={(e) => setBreakGlass(e.target.checked)}
+          />
+        )}
+        {!isNew && <UserIdentities userId={user.id} />}
         <fieldset className="pf-stack">
           <legend className="az-field__label">Voicemail to email</legend>
           <Switch

@@ -65,12 +65,12 @@ func TestValidAfterHours(t *testing.T) {
 	if ValidAfterHours("ignore") || ValidAfterHours("") {
 		t.Error("accepted an unknown action")
 	}
-	for _, k := range []string{RouteInbox, RouteQueue, RouteUser, RouteExtension, RouteRingGroup} {
+	for _, k := range []string{RouteInbox, RouteQueue, RouteUser, RouteExtension, RouteRingGroup, RouteAITriage} {
 		if !ValidRouteKind(k) {
 			t.Errorf("%q is a route kind", k)
 		}
 	}
-	if ValidRouteKind("ai_triage") || ValidRouteKind("") {
+	if ValidRouteKind("carrier_pigeon") || ValidRouteKind("") {
 		t.Error("accepted an unknown route kind")
 	}
 }

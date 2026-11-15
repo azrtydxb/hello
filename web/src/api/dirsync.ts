@@ -1,5 +1,6 @@
-// Directory sync (docs/integrations.md, "Directory sync"): AD/LDAP
-// connectors, their runs, previews and changes. Administrators only.
+// Directory sync (docs/integrations.md, "Directory sync"): AD/LDAP, Google
+// Workspace and Microsoft Entra connectors, their runs, previews and
+// changes. Administrators only.
 import { request } from "../api";
 
 export type ConnectorMode = "authoritative" | "create_only" | "link_only";
@@ -45,13 +46,52 @@ export interface GroupRules {
   ringGroups: RingGroupRule[];
 }
 
+/** How a connector's users sign in: they have no local password. */
+export type LoginMethod = "" | "oidc" | "ldap_bind";
+
 export interface Options {
   absenceRuns: number;
   disableDevices: boolean | null;
   allowAdminFromDirectory: boolean;
   runTimeoutMinutes: number;
   userCap: number;
+  loginMethod: LoginMethod;
+  oidcProvider: "" | "google" | "entra";
 }
+
+export type ConnectorKind = "ldap" | "google" | "entra";
+
+export type GoogleAuthMode = "service_account" | "oauth_admin" | "delegation";
+
+/** Config of a Google Workspace connector. */
+export interface GoogleConfig {
+  authMode: GoogleAuthMode;
+  customer?: string;
+  domain?: string;
+  /** delegation only: the administrator to impersonate. */
+  subject?: string;
+  /** oauth_admin only: the customer's OAuth client id. */
+  clientId?: string;
+  query?: string;
+  timeoutSeconds?: number;
+}
+
+/** Config of a Microsoft Entra connector. */
+export interface EntraConfig {
+  tenantId: string;
+  clientId: string;
+  authMethod: "secret" | "certificate";
+  certificatePem?: string;
+  includeGuests?: boolean;
+  timeoutSeconds?: number;
+}
+
+/** The read-only Google scopes Hello asks for (and a delegated client must be authorised for). */
+export const GOOGLE_SCOPES = [
+  "https://www.googleapis.com/auth/admin.directory.user.readonly",
+  "https://www.googleapis.com/auth/admin.directory.group.readonly",
+  "https://www.googleapis.com/auth/admin.directory.group.member.readonly",
+];
 
 export interface LdapConfig {
   url: string;
@@ -69,18 +109,62 @@ export interface LdapConfig {
   nestedGroups?: boolean;
 }
 
+/** A connector's config: the fields of its kind. */
+export type ConnectorConfig = Partial<LdapConfig> &
+  Partial<GoogleConfig> &
+  Partial<EntraConfig>;
+
+/**
+ * Range auto-provisioning (off by default): a user with no extension, or one
+ * that names no extension, gets the next free number of the range with an
+ * extension, a voicemail box and a SIP device. A number is never renumbered.
+ */
+export interface AutoProvision {
+  enabled: boolean;
+  /** First and last number, inclusive, with the same number of digits. */
+  rangeStart: string;
+  rangeEnd: string;
+  /** Create one SIP device (its secret is generated and shown nowhere). */
+  device: boolean;
+  /** Turn voicemail on and mail it to the user's email. */
+  voicemail: boolean;
+  /** Only members of these source groups (stable ids); empty: everyone. */
+  groups: string[];
+}
+
+/** GET /directory/connectors/{id}/range: how full the range is. */
+export interface RangeUsage {
+  enabled: boolean;
+  rangeStart: string;
+  rangeEnd: string;
+  size: number;
+  used: number;
+  free: number;
+  /** The number the next allocation takes; "" when the range is full. */
+  nextFree: string;
+  provisioned: {
+    userId: number;
+    username: string;
+    number: string;
+    /** 0 when the extension was deleted (the next full run recreates it). */
+    extensionId: number;
+    enabled: boolean;
+  }[];
+}
+
 export interface Connector {
   id: number;
-  kind: "ldap";
+  kind: ConnectorKind;
   name: string;
   enabled: boolean;
   mode: ConnectorMode;
   scheduleMinutes: number;
-  config: LdapConfig;
+  config: ConnectorConfig;
   mappings: Mappings;
   groupRules: GroupRules;
   options: Options;
-  /** A bind password is stored. It is write-only. */
+  autoProvision: AutoProvision;
+  /** A credential (bind password, key file, client secret or private key) is stored. It is write-only. */
   hasCredential: boolean;
   status: "new" | "ok" | "failing";
   lastRunAt: string | null;
@@ -97,16 +181,20 @@ export interface Connector {
 
 /** POST and PATCH /directory/connectors body (every field optional on PATCH). */
 export interface ConnectorInput {
-  kind?: "ldap";
+  kind?: ConnectorKind;
   name?: string;
   enabled?: boolean;
   mode?: ConnectorMode;
   scheduleMinutes?: number;
-  config?: LdapConfig;
+  config?: ConnectorConfig;
   mappings?: Mappings;
   groupRules?: GroupRules;
   options?: Partial<Options>;
+  autoProvision?: AutoProvision;
+  /** The LDAP bind password. */
   bindPassword?: string;
+  /** The Google or Entra credential. */
+  credential?: string;
 }
 
 export interface SampleRow {
@@ -221,6 +309,9 @@ export const testConnector = (id: number, mappings?: Mappings) =>
     body: mappings ? { mappings } : {},
   });
 
+export const getRange = (id: number, signal?: AbortSignal) =>
+  request<RangeUsage>("GET", `${conn(id)}/range`, { signal });
+
 export const startRun = (id: number, dryRun: boolean) =>
   request<Run>("POST", `${conn(id)}/sync`, { body: { dryRun } });
 
@@ -255,3 +346,7 @@ export const applyRun = (id: number, decisions: Decisions) =>
 
 export const confirmRun = (id: number) =>
   request<Run>("POST", `${run(id)}/confirm`, { body: {} });
+
+/** Starts a Google OAuth-admin connector's consent: the URL to send the browser to. */
+export const startConsent = (id: number) =>
+  request<{ url: string }>("POST", `${conn(id)}/consent`);

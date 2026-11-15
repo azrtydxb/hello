@@ -23,6 +23,9 @@ type Metrics struct {
 	UnassignedOldest prometheus.Gauge
 	// Unassigned is the size of the pool; set by hello-control.
 	Unassigned prometheus.Gauge
+	// Media counts inbound attachment downloads by result: ready,
+	// rejected, expired or pending (to be tried again).
+	Media *prometheus.CounterVec // result
 }
 
 // NewMetrics registers the metrics on reg.
@@ -49,7 +52,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Unassigned: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "hello_msg_unassigned", Help: "Active conversations nobody has taken.",
 		}),
+		Media: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "hello_msg_media_total", Help: "Inbound attachment downloads by result.",
+		}, []string{"result"}),
 	}
-	reg.MustRegister(m.Inbound, m.DeviceReplies, m.Outbound, m.OptOut, m.Purged, m.UnassignedOldest, m.Unassigned)
+	reg.MustRegister(m.Inbound, m.DeviceReplies, m.Outbound, m.OptOut, m.Purged, m.UnassignedOldest, m.Unassigned, m.Media)
 	return m
 }

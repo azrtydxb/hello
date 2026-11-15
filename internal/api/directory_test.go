@@ -85,7 +85,8 @@ func (e *dirEnv) admin(method, path string, body any) *httptest.ResponseRecorder
 
 func (e *dirEnv) connector(t *testing.T, extra map[string]any) map[string]any {
 	t.Helper()
-	body := map[string]any{"kind": "ldap", "name": "AD", "bindPassword": "s3cret-bind-pw", "enabled": true, "config": json.RawMessage(dirCfg)}
+	body := map[string]any{"kind": "ldap", "name": "AD", "bindPassword": "s3cret-bind-pw", "enabled": true, "config": json.RawMessage(dirCfg),
+		"options": map[string]any{"loginMethod": "ldap_bind"}}
 	for k, v := range extra {
 		body[k] = v
 	}

@@ -57,7 +57,83 @@ type haLeg struct {
 	uas          bool     // we are the dialog's UAS side (the caller leg)
 	failed       bool     // the takeover re-INVITE got no answer
 
+	// ses and sesIdx name the call's session timer for this dialog
+	// (bindSession): an in-dialog re-INVITE on the leg restates it, so the
+	// phone does not take the header's absence for the timer being off
+	// (RFC 4028 section 9). Nil: the leg has no timer to restate.
+	ses    *sessionState
+	sesIdx int
+
 	mu sync.Mutex
+}
+
+// bindSession ties the leg to dialog idx of the call's session timers.
+// A nil leg is a no-op.
+func (l *haLeg) bindSession(ses *sessionState, idx int) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.ses, l.sesIdx = ses, idx
+	l.mu.Unlock()
+}
+
+// sessionTimer is the leg's negotiated session timer: its interval and
+// whether Hello is the refresher; ok is false when the dialog has none.
+func (l *haLeg) sessionTimer() (interval time.Duration, local, ok bool) {
+	l.mu.Lock()
+	ses, idx := l.ses, l.sesIdx
+	l.mu.Unlock()
+	if ses == nil {
+		return 0, false, false
+	}
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	st := ses.leg[idx]
+	if st == nil || st.interval <= 0 {
+		return 0, false, false
+	}
+	return st.interval, st.local, true
+}
+
+// updateSessionTimer applies an answer to a re-INVITE that restated the
+// leg's timer: a 422's Min-SE raises the interval (raise), and a 2xx's
+// Session-Expires (RFC 4028 section 7.2) sets the interval it grants and
+// who refreshes. A 2xx without one leaves the timer as it was, as a
+// refresh's does: Hello covers a phone without RFC 4028 support anyway.
+// It reports whether a 422 raised the interval.
+func (l *haLeg) updateSessionTimer(s *Server, res *sip.Response) bool {
+	l.mu.Lock()
+	ses, idx := l.ses, l.sesIdx
+	l.mu.Unlock()
+	if ses == nil || res == nil {
+		return false
+	}
+	ses.mu.Lock()
+	defer ses.mu.Unlock()
+	st := ses.leg[idx]
+	if st == nil {
+		return false
+	}
+	switch {
+	case res.StatusCode == 422:
+		m, ok := minSEOf(res.GetHeader)
+		if !ok || time.Duration(m)*time.Second <= st.interval {
+			return false
+		}
+		st.interval = time.Duration(m) * time.Second
+		return true
+	case res.IsSuccess():
+		secs, refresher, ok := sessionExpires(res.GetHeader)
+		if !ok {
+			return false
+		}
+		if iv := time.Duration(secs) * time.Second; iv >= s.cfg.SessionMinSE {
+			st.interval = max(st.interval, iv)
+		}
+		st.local = refresher != "uas"
+	}
+	return false
 }
 
 // haLegFrom copies a replicated leg; nil when it cannot carry a dialog.
@@ -244,21 +320,41 @@ func (s *Server) haAck(l *haLeg, inv *sip.Request, res *sip.Response) {
 // haReinvite re-INVITEs a leg with a new offer and re-learns the dialog
 // locals from the 200: the endpoint's tags come back unchanged and its
 // Contact may have moved.
+//
+// A leg whose dialog has a session timer (RFC 4028) restates it — Supported:
+// timer, Session-Expires with the current refresher and Min-SE, the values
+// the timer goes on refreshing with — and a 422 raises the interval to the
+// phone's Min-SE and tries again, as a refresh does.
 func (s *Server) haReinvite(l *haLeg, body []byte) (*sip.Response, bool) {
-	req, err := l.request(s, sip.INVITE, body, "application/sdp")
-	if err != nil {
-		s.log.Debug("takeover re-INVITE build failed", "error", err)
-		return nil, false
-	}
-	l.useCSeq()
 	ctx, cancel := context.WithTimeout(context.Background(), haReinviteTimeout.Get())
 	defer cancel()
-	res, err := s.doOn(ctx, l, req)
-	if err != nil || res == nil {
-		return nil, false
-	}
-	if !res.IsSuccess() {
+	var (
+		req *sip.Request
+		res *sip.Response
+	)
+	for attempt := 0; ; attempt++ {
+		var err error
+		req, err = l.request(s, sip.INVITE, body, "application/sdp")
+		if err != nil {
+			s.log.Debug("takeover re-INVITE build failed", "error", err)
+			return nil, false
+		}
+		timed := l.addSessionTimer(s, req)
+		l.useCSeq()
+		res, err = s.doOn(ctx, l, req)
+		if err != nil || res == nil {
+			return nil, false
+		}
+		if res.IsSuccess() {
+			if timed {
+				l.updateSessionTimer(s, res)
+			}
+			break
+		}
 		s.haAck(l, req, res) // a final response to an INVITE must be ACKed
+		if timed && res.StatusCode == 422 && attempt < sessionMaxRetries && l.updateSessionTimer(s, res) {
+			continue
+		}
 		return res, false
 	}
 	s.haAck(l, req, res)
@@ -273,6 +369,24 @@ func (s *Server) haReinvite(l *haLeg, body []byte) (*sip.Response, bool) {
 	// a re-INVITE refreshes only the remote target.
 	l.mu.Unlock()
 	return res, true
+}
+
+// addSessionTimer puts the leg's session timer on an in-dialog request
+// Hello sends: Hello is the UAC, so refresher=uac when Hello refreshes and
+// uas when the phone does. It reports whether the leg had a timer.
+func (l *haLeg) addSessionTimer(s *Server, req *sip.Request) bool {
+	interval, local, ok := l.sessionTimer()
+	if !ok {
+		return false
+	}
+	refresher := "uas"
+	if local {
+		refresher = "uac"
+	}
+	req.AppendHeader(sip.NewHeader("Supported", "timer"))
+	req.AppendHeader(sip.NewHeader("Session-Expires", secondsOf(interval)+";refresher="+refresher))
+	req.AppendHeader(sip.NewHeader("Min-SE", secondsOf(s.cfg.SessionMinSE)))
+	return true
 }
 
 // haBye ends a homed leg's dialog (CSeq continuity, route set honoured).
@@ -1243,6 +1357,8 @@ func (s *Server) haNewCall(st livestate.DialogState, from string, a, b *haLeg, t
 	c.connected = true
 	c.answerTime = orTime(st.AnsweredAt, takenAt)
 	c.ses.carry(st.Session)
+	a.bindSession(&c.ses, sessCaller)
+	b.bindSession(&c.ses, sessCallee)
 	c.homedCall = &homedCall{takenFrom: from, takenAt: takenAt, legs: [2]*haLeg{a, b}}
 	c.restoreEvents(st.Events)
 	if b != nil {

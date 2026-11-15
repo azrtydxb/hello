@@ -348,6 +348,16 @@ func run(args []string) error {
 	defer stopEvents()
 	eventsDone := make(chan struct{})
 	go func() { emitter.Run(eventsCtx); close(eventsDone) }()
+	// The WebRTC status of this node for the Diagnostics "Clients" tab.
+	webrtcDone := make(chan struct{})
+	if node := media.CurrentWebRTC(); node != nil {
+		go func() {
+			runWebRTCStatus(bg, live, node, cfg.NodeID, log.With("component", "webrtc"))
+			close(webrtcDone)
+		}()
+	} else {
+		close(webrtcDone)
+	}
 	sipCtx, stopSIP := context.WithCancel(context.Background())
 	defer stopSIP()
 	// A SIP listener that dies on its own takes the node down: readiness
@@ -386,6 +396,7 @@ func run(args []string) error {
 	<-lcDone
 	stopBG()
 	<-watchDone
+	<-webrtcDone
 	<-resolveDone
 	<-cdrDone
 	stopEvents()

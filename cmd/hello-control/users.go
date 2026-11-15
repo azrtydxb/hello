@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/store"
 )
 
 // userCreator is the store method user add needs.
@@ -47,6 +48,11 @@ func userAdd(ctx context.Context, st userCreator, args []string, stdin io.Reader
 		return err
 	}
 	id, err := st.CreateUser(ctx, "cli", fs.Arg(0), hash, r)
+	if errors.Is(err, store.ErrManagedByDirectory) {
+		// A synced user has no local password and cannot get one (spec
+		// integrations I-29).
+		return fmt.Errorf("user add: managed_by_directory: %s is managed by a directory connector and signs in only through its directory", fs.Arg(0))
+	}
 	if err != nil {
 		return fmt.Errorf("user add: %w", err)
 	}

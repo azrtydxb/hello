@@ -317,7 +317,11 @@ func TestAuthRequired(t *testing.T) {
 		method, path, _ := strings.Cut(op, " ")
 		path = concrete(path)
 		if want, public := publicOps[op]; public {
-			if r := e.client().do(method, path, nil); r.code != want {
+			// A public redirect (the sign-in flows) is checked as sent, not
+			// followed to a page this API server does not serve.
+			c := e.client()
+			c.hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+			if r := c.do(method, path, nil); r.code != want {
 				t.Errorf("public %s = %d, want %d", op, r.code, want)
 			}
 			continue
