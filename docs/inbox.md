@@ -511,9 +511,20 @@ conversation, its attachments' rows stay, without the conversation, until the
 sweeper has removed their files, so no file is ever left without a row that
 names it. An upload an agent never sent is removed after 24 hours.
 
+An erase or a redaction can land while an attachment is still being downloaded
+from the carrier, or while an upload's file is being stored. The download or
+upload then finds its attachment gone (or taken off its message) and removes
+the file it just stored, and checks it is gone. If MinIO refuses at that
+moment, the **orphan sweep** removes the file later: once an hour the replica
+that runs the sweeper lists `msg/` in the media bucket and removes, and checks
+gone, every attachment file older than an hour that no attachment row names (a
+chat site's logo is left alone).
+
 **Erase a customer** (Messaging settings, or `POST /api/v1/inbox/erase`)
 deletes every conversation, message and note with a number on every channel,
-and the copies of those texts in the SIP text queue, in one transaction; keeps
+with everything the inbox AI derived from them (its runs and their output, the
+triage), and the copies of those texts in the SIP text queue, in one
+transaction (an AI run still working on them stores nothing); keeps
 only the opt-out hash; then removes every attachment file of that customer
 from MinIO and checks each is gone; asks the carriers to delete what Hello sent
 through their API ([carrier deletion](#deletion-at-the-carrier)); and returns a
@@ -619,8 +630,13 @@ customer has files and the media store is not configured the export answers
 503 rather than leave them out, and a MinIO error mid-archive breaks the
 download (and is logged) instead of producing an export without them.
 Attachments of internal notes follow the notes. Agents' internal notes are
-left out unless `notes=true`. One export holds at most 50,000 messages. The
-export is in the audit log (counts, including `media=`, never the content).
+left out unless `notes=true`. What the [inbox AI](#ai)
+holds of the customer is part of it: each conversation's `ai` (its last triage,
+with the summary written for the agent, what the triage changed, the spam flag
+and the handoff to a person) and each message's `aiRuns` (every triage, draft
+and auto-reply run on it, with its state and the output it produced). One
+export holds at most 50,000 messages. The export is in the audit log (counts,
+including `media=` and `ai_runs=`, never the content).
 
 ### Redacting one message
 
@@ -634,8 +650,16 @@ transaction they are taken off the message (and any public link to them stops
 working), then each file is removed from MinIO and checked gone and its row
 dropped. The report counts `mediaObjects` removed and `mediaObjectsPending`,
 files MinIO could not remove now, which the media sweeper removes within
-minutes. System lines cannot be redacted. The audit log records who redacted
-which message.
+minutes. What the inbox AI derived from the text goes in the same transaction:
+an AI run reads the conversation up to its own message, so the output of every
+run from the redacted message on (triage summaries, reply drafts, auto-reply
+decisions) is cleared, and so is the run that wrote the message when the AI
+wrote it; the conversation's triage summary is blanked when its triage read
+the message or a later one (its intent, tags and queue stay: they hold no
+text). A run still working on the old text is marked stale (`redacted`) and
+stores and sends nothing. Redacting an internal note leaves the AI alone (the
+AI never reads notes). System lines cannot be redacted. The audit log records
+who redacted which message.
 
 ### Deletion at the carrier
 

@@ -1111,6 +1111,14 @@ func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.cfg.Backend.FinishMediaUpload(r.Context(), up.ID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			// The visitor was erased while the file was being stored: no
+			// row names it now, so it goes too (the orphan sweep removes it
+			// if MinIO refuses now).
+			if err := media.RemoveVerified(context.WithoutCancel(r.Context()), s.cfg.Objects, up.Key); err != nil {
+				s.cfg.Log.Warn("chat: attachment of an erased upload not removed yet", "error", err)
+			}
+		}
 		s.fail(w, "attachment", err)
 		return
 	}

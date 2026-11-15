@@ -406,12 +406,30 @@ func (s *Store) FinishMediaFetch(ctx context.Context, job media.FetchJob, res me
 		var err error
 		switch res.Status {
 		case media.StatusReady:
+			// Only a row still on its message takes the file: one an erase
+			// or a redaction dropped or took off its message meanwhile
+			// (message_id NULL) never names it, and the worker removes the
+			// file it just stored (media.ErrGone).
 			err = tx.QueryRowContext(ctx, `
 				UPDATE message_media SET status = 'ready', object_key = $2, content_type = $3, size = $4, sha256 = $5,
 					declared_type = $6, filename = $7, reason = '', source_ref = '{}'
-				WHERE id = $1 AND status = 'pending' RETURNING conversation_id`,
+				WHERE id = $1 AND status = 'pending' AND message_id IS NOT NULL RETURNING conversation_id`,
 				job.ID, res.Key, res.ContentType, res.Size, res.SHA256, clip(res.Declared, 100),
 				"attachment"+media.Extension(res.ContentType)).Scan(&convID)
+			if errors.Is(err, sql.ErrNoRows) {
+				// Another worker whose lease lapsed may have stored the same
+				// file under the same key; it stays while a row of the
+				// message names it.
+				var named bool
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM message_media WHERE message_id = $1 AND object_key = $2)`,
+					job.MessageID, res.Key).Scan(&named); err != nil {
+					return err
+				}
+				if named {
+					return nil
+				}
+				return media.ErrGone
+			}
 		case media.StatusRejected, media.StatusExpired:
 			// The carrier's URL is dropped with the attempt: nothing is
 			// fetched from it again.
@@ -425,7 +443,7 @@ func (s *Store) FinishMediaFetch(ctx context.Context, job media.FetchJob, res me
 			return err
 		}
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil // erased or purged meanwhile; the sweeper has the object
+			return nil // a refusal or an expiry of a row erased meanwhile: no file
 		}
 		if err != nil || !convID.Valid {
 			return err
@@ -458,6 +476,39 @@ func (s *Store) MediaGarbage(ctx context.Context, limit int) ([]media.Garbage, e
 			return nil, err
 		}
 		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+// KnownMediaKeys returns which of keys an attachment row names (the orphan
+// sweep's lookup). Each key is looked up through the row it would belong to
+// (media.ParseKey): an upload's attachment by id, a download's by its
+// message, and the rows already off their message, which wait for the
+// sweeper; a key of another shape counts as known.
+func (s *Store) KnownMediaKeys(ctx context.Context, keys []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(keys))
+	msgs, ids := make([]int64, len(keys)), make([]int64, len(keys))
+	for i, k := range keys {
+		var ok bool
+		if msgs[i], ids[i], ok = media.ParseKey(k); !ok {
+			out[k] = true
+		}
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT k.key FROM unnest($1::text[], $2::bigint[], $3::bigint[]) AS k(key, msg, mid)
+		WHERE (k.mid > 0 AND EXISTS (SELECT 1 FROM message_media mm WHERE mm.id = k.mid AND mm.object_key = k.key))
+		   OR (k.msg > 0 AND EXISTS (SELECT 1 FROM message_media mm WHERE mm.message_id = k.msg AND mm.object_key = k.key))
+		   OR EXISTS (SELECT 1 FROM message_media mm WHERE mm.message_id IS NULL AND mm.object_key = k.key)`, keys, msgs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out[k] = true
 	}
 	return out, rows.Err()
 }

@@ -5388,3 +5388,57 @@ could reach the phone reversed, leaving it held.
   bare OPTIONS, now sends it as a client transaction from the listener.
 - **Regression test.** TestSIPCallsPhonesBehindTwoTLSEdges: phones of one
   extension registered through two edge TLS sockets must each get an INVITE.
+
+## Messaging privacy follow-ups: AI output on redaction, media race (2026-11-15, fix/msg-redaction-followups)
+
+- **What a redaction clears of the AI.** An AI run reads the conversation's
+  texts up to its own message, so the result of every run of the
+  conversation from the redacted message on is cleared (`result = NULL`),
+  plus the run that wrote the message when the AI wrote it
+  (`conversation_messages.ai_run_id`). Conservative on purpose: a later run
+  whose context window no longer held the message loses its result too.
+  The conversation's `ai_triage` keeps its classification (intent, urgency,
+  sentiment, tags, queue) and loses only its `summary`, when its triage read
+  the message or a later one: the summary is model-written text from the
+  customer's words, the labels are not, and routing still reads the queue.
+  Tags already applied to the conversation stay (agents edit them). The AI
+  message itself (an auto-reply) is not redacted with the customer's text:
+  it is what was sent, and an administrator redacts it separately.
+  Redacting a note touches no AI output (the AI never reads notes).
+- **Runs in flight.** In the redaction's transaction, a running run of the
+  conversation from the message on is marked `stale` with error `redacted`
+  (FinishAIRun then stores and sends nothing); queued ones are row-locked
+  (the claim skips locked rows), so they run after the commit on the
+  blanked text. FinishAIRun also marks a run stale when a message it may
+  have read (`id <= message_id`) has `redacted_at` later than one minute
+  before the run was created, which covers a run queued while the
+  redaction was committing (`redacted_at` is the redaction's start time).
+  The redaction locks its message `FOR NO KEY UPDATE` (not `FOR UPDATE`) so
+  a FinishAIRun inserting a run for that message does not wait on it while
+  holding the run and conversation rows the redaction wants next.
+- **Erase.** Already complete for the AI: runs cascade with the
+  conversations, the triage lives on the conversation row, and a run in
+  flight finds its row gone and stores nothing. Logs, audit rows, events
+  and webhook payloads hold no message text (webhook bodies are read at
+  delivery); the full-text search index is an expression index on the body
+  and follows it. No other AI-derived copy exists (no FAQ suggestions; the
+  FAQ is written by administrators; MCP has no inbox text tools).
+- **Export.** `conversations.json` gets each conversation's `ai` (triage
+  with summary, applied changes, spam, handoff) and each message file its
+  `aiRuns` (kind, state, result, times); the audit row counts `ai_runs=`.
+- **Media race, no migration.** The tombstone is the existing state: an
+  erased attachment's row is gone, a redacted one has `message_id NULL`.
+  FinishMediaFetch only records a file on a row still on its message;
+  otherwise it answers `media.ErrGone` and the worker removes (and checks)
+  the file it stored, unless another row of the same message names the same
+  key (a worker whose lease lapsed finishing after the one that recorded it).
+  An upload whose FinishMediaUpload finds no row (inbox API and chat) removes
+  its file the same way.
+- **Orphan sweep.** `Worker.SweepOrphans` lists `msg/` (new
+  `Objects.List`) hourly on the maintenance lease holder and removes files
+  older than `media.OrphanAge` (1 hour, far past the 5-minute download lease
+  and an upload request) that no row names. Keys are looked up through the
+  row they belong to (`media.ParseKey`: an upload by attachment id, a
+  download by message id, plus the rows off their message), so the lookup
+  uses indexes; a key of another shape (a chat site's logo) is never
+  removed. Counted in `hello_msg_purged_total{kind="media"}`.

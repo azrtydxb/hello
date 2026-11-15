@@ -422,8 +422,20 @@ func draftAfter(d *msgai.Decision) bool {
 func (as aiStore) FinishAIRun(ctx context.Context, job msgai.Job, res msgai.Result) error {
 	s := as.s
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		var state string
-		err := tx.QueryRowContext(ctx, `SELECT state FROM ai_message_runs WHERE id = $1 FOR UPDATE`, job.RunID).Scan(&state)
+		var (
+			state    string
+			redacted bool
+		)
+		// A text of the conversation the run may have read that was
+		// redacted since the run was queued makes the result stale: it may
+		// hold some of the text. redactAIOutput marks a running run stale
+		// and locks the queued ones; this also covers a run queued while
+		// the redaction was committing (redacted_at is when the redaction
+		// began, hence the margin).
+		err := tx.QueryRowContext(ctx, `
+			SELECT r.state, EXISTS (SELECT 1 FROM conversation_messages x WHERE x.conversation_id = r.conversation_id
+				AND x.id <= r.message_id AND x.redacted_at > r.created_at - interval '1 minute')
+			FROM ai_message_runs r WHERE r.id = $1 FOR UPDATE OF r`, job.RunID).Scan(&state, &redacted)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil // erased with its conversation
 		}
@@ -432,6 +444,11 @@ func (as aiStore) FinishAIRun(ctx context.Context, job msgai.Job, res msgai.Resu
 		}
 		if state != msgai.StateRunning {
 			return nil // given up meanwhile
+		}
+		if redacted {
+			_, err := tx.ExecContext(ctx, `UPDATE ai_message_runs SET state = 'stale', result = NULL, error = 'redacted', finished_at = now()
+				WHERE id = $1`, job.RunID)
+			return err
 		}
 		var c convRow
 		var mode string

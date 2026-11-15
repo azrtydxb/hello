@@ -185,6 +185,14 @@ func (s *server) uploadInboxMediaCommon(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	m, err := ms.FinishMediaUpload(r.Context(), up.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		// An erase took the upload while its file was being stored: no row
+		// names the file now, so it goes too (the orphan sweep removes it
+		// if MinIO refuses now).
+		if err := media.RemoveVerified(context.WithoutCancel(r.Context()), objs, up.Key); err != nil {
+			s.Log.Warn("attachment of an erased upload not removed yet", "media", up.ID, "error", err)
+		}
+	}
 	if err != nil {
 		s.inboxError(w, "attachment", err)
 		return

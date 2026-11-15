@@ -168,3 +168,20 @@ func TestChatAttachments(t *testing.T) {
 		}
 	})
 }
+
+// TestChatAttachmentErasedMeanwhile fails if the file of an upload whose row
+// an erase removed while the file was being stored stays in the media store.
+func TestChatAttachmentErasedMeanwhile(t *testing.T) {
+	objs := &media.MemObjects{}
+	g := newRig(t, func(s *store.ChatSite) { s.Attachments = true }, func(c *Config) { c.Objects = objs })
+	tok := g.token()
+	g.fake.mu.Lock()
+	g.fake.finishErr = store.ErrNotFound
+	g.fake.mu.Unlock()
+	if r := g.attach(tok, "photo.png", "image/png", testPNG, map[string]string{"clientMsgId": "e1"}); r.Code == http.StatusCreated {
+		t.Fatalf("an erased upload was taken: %d", r.Code)
+	}
+	if n := objs.Len(); n != 0 {
+		t.Fatalf("%d files left in the media store after the erase", n)
+	}
+}
