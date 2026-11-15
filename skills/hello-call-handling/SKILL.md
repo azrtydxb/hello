@@ -223,6 +223,14 @@ unavailable` in a call's trace mean a 488; a fax on a trunk with `faxMode`
   the unassigned pool, and how long the longest-waiting one has waited. It
   carries no customer text; conversations and messages are never exposed
   through MCP.
+- `getInboxReport` for how the inbox performed over a period (`from`, `to`,
+  at most 366 days; the last 7 days by default): conversations and messages
+  in and out, first response and resolution times (average, median, 90th
+  percentile) and the breaches of the service-level targets, in total and,
+  with `groupBy`, by `channel`, `queue`, `agent` or `day` (in `timeZone`).
+  It is counts and durations only. To answer "who is slow to answer", group
+  by agent and compare `firstResponse.p50Seconds`; a breach count names
+  conversations answered late or still waiting past the target in `sla`.
 - `getInboxAIStats` for what the inbox AI did in the last 24 hours: its runs
   by kind (`triage`, `draft`, `autoreply`) and state (`failed` many times
   means the AI endpoint is down or over budget), the auto-replies it sent,

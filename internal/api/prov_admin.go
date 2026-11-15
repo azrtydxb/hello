@@ -822,7 +822,9 @@ type dhcpValue struct {
 
 // provSettings is the computed provisioning setup: the URLs, the CA
 // fingerprint and the DHCP option values per vendor (spec S-10: option 66
-// for every vendor; Poly also reads 160 and Yealink 43).
+// for every vendor; Poly also reads 160 and Yealink 43), and the SIP server
+// phones register with, its backups and their source, and the SRV name
+// (phone-feature-parity S-20).
 func (s *server) provSettings(w http.ResponseWriter, _ *http.Request) {
 	ps := s.Prov.Settings
 	boot := ps.BootURL()
@@ -842,9 +844,14 @@ func (s *server) provSettings(w http.ResponseWriter, _ *http.Request) {
 	if ps.PublicURL != "" {
 		public = ps.PublicURL + "/"
 	}
+	backups, source := ps.BackupServers()
+	if backups == nil {
+		backups = []string{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"publicUrl": public, "bootUrl": boot, "caUrl": ps.CAURL(), "caSha256": s.Prov.CASHA256,
 		"dhcp": dhcp, "sipServer": ps.SIPServer,
+		"sipBackupServers": backups, "sipBackupSource": source, "sipSrv": ps.SIPSRV,
 	})
 }
 

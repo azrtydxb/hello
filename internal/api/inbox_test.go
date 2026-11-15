@@ -46,12 +46,22 @@ type inboxRig struct {
 
 func newInboxRig(t *testing.T) *inboxRig {
 	t.Helper()
+	return newInboxRigConfig(t, Config{Live: noLive{}})
+}
+
+// newInboxRigConfig is newInboxRig with more of the API's dependencies.
+func newInboxRigConfig(t *testing.T, cfg Config) *inboxRig {
+	t.Helper()
 	box, err := secret.New(base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	objs := &media.MemObjects{}
-	e := newEnvConfig(t, Config{Live: noLive{}, MediaObjects: objs}, box)
+	objs, _ := cfg.MediaObjects.(*media.MemObjects)
+	if objs == nil && cfg.MediaObjects == nil {
+		objs = &media.MemObjects{}
+		cfg.MediaObjects = objs
+	}
+	e := newEnvConfig(t, cfg, box)
 	r := &inboxRig{env: e, objects: objs}
 	ctx := context.Background()
 	r.admin = e.login()

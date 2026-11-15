@@ -336,6 +336,9 @@ type Server struct {
 	bg            sync.WaitGroup
 	// emMarks is the node-local record of emergency calls (emergency.go).
 	emMarks emergencyMarks
+	// parkQ runs the park commands for one call in the order they were
+	// sent (pickup.go).
+	parkQ parkQueues
 	// bgMu guards bgClosed: once shutdown waits for bg, a late call event
 	// (a call ending as the node stops) must not start more work on it.
 	bgMu     sync.Mutex
@@ -603,6 +606,8 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	if err != nil {
 		return err
 	}
+	// TLS requests leave from an ephemeral port, not the UDP socket's.
+	client.TxRequester = hopRequester{ua: ua}
 	s.ua, s.client = ua, client
 	if host, port, err := sip.ParseAddr(conn.LocalAddr().String()); err == nil {
 		s.laddr = sip.Addr{IP: net.ParseIP(host), Port: port, Hostname: host}

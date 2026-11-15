@@ -201,6 +201,56 @@ describe("Inbox", () => {
     );
   });
 
+  it("lets an administrator redact a message, after a confirmation", async () => {
+    let redacted = false;
+    const calls = inbox("admin", {
+      "GET /api/v1/inbox/conversations/7/messages": () =>
+        json({
+          items: [
+            msg(
+              redacted
+                ? { id: 1, body: "", redactedAt: "2026-10-02T08:00:00Z" }
+                : { id: 1, body: "my card is 4111" },
+            ),
+          ],
+          next: "",
+        }),
+      "POST /api/v1/inbox/conversations/7/messages/1/redact": () => {
+        redacted = true;
+        return json({
+          message: msg({ id: 1, body: "", redactedAt: "2026-10-02T08:00:00Z" }),
+          providers: [],
+          mediaObjects: 1,
+          mediaObjectsPending: 0,
+        });
+      },
+    });
+    const thread = await open();
+    expect(within(thread).getByText("my card is 4111")).toBeInTheDocument();
+    fireEvent.click(within(thread).getByRole("button", { name: /Redact/ }));
+    const dialog = await screen.findByRole("dialog", {
+      name: /Redact this message/,
+    });
+    expect(calls.some((c) => c.url.endsWith("/redact"))).toBe(false);
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Redact message" }),
+    );
+    await waitFor(() =>
+      expect(within(thread).queryByText("my card is 4111")).toBeNull(),
+    );
+    expect(within(thread).getByText(/^Redacted/)).toBeInTheDocument();
+    expect(
+      calls.filter((c) => c.method === "POST" && c.url.endsWith("/redact")),
+    ).toHaveLength(1);
+    expect(within(thread).queryByRole("button", { name: /Redact/ })).toBeNull();
+  });
+
+  it("offers no redaction to an operator", async () => {
+    inbox("operator");
+    const thread = await open();
+    expect(within(thread).queryByRole("button", { name: /Redact/ })).toBeNull();
+  });
+
   it("names the router's automatic texts as such", async () => {
     inbox("operator", {
       "GET /api/v1/inbox/conversations/7/messages": () =>

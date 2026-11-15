@@ -894,10 +894,7 @@ func (c *call) parkVoicemail(ctx context.Context, pk *parkState, relay *media.Re
 	case pk.parkedIsCaller:
 		ansBody, ok = reinviteA(c.s, c.dss, answer)
 	default:
-		ansBody, ok = reinvite(c.s, w.session(), answer)
-		if ok {
-			ackLate(w.session(), nil)
-		}
+		ansBody, ok = reinviteAcked(c.s, w.session(), answer)
 	}
 	if !ok {
 		_ = sess.Close()
@@ -942,6 +939,11 @@ func (c *call) parkVoicemail(ctx context.Context, pk *parkState, relay *media.Re
 // party is re-INVITEd in the same direction, as an anchored bridged call
 // does (handleAnchoredInDialog), so the other phone shows the hold too.
 func (s *Server) linkedReinvite(c *call, req *sip.Request, tx sip.ServerTransaction) {
+	// The party's next re-INVITE can arrive as soon as the 200 below is
+	// out; it waits until this one's hold has reached the peer, so a hold
+	// then resume is passed on in that order and exactly once each.
+	c.linkedInMu.Lock()
+	defer c.linkedInMu.Unlock()
 	c.mu.Lock()
 	lk := c.link
 	c.mu.Unlock()
@@ -1072,10 +1074,7 @@ func (c *call) holdParty(dir string) {
 	case lk.selfSide == cdr.SideCaller:
 		_, ok = reinviteA(c.s, dss, body)
 	case w != nil:
-		_, ok = reinvite(c.s, w.session(), body)
-		if ok {
-			ackLate(w.session(), nil)
-		}
+		_, ok = reinviteAcked(c.s, w.session(), body)
 	}
 	if !ok {
 		c.addTrace("The other party's hold could not be signalled to this phone")

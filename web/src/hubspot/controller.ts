@@ -152,7 +152,7 @@ export class CallController {
       !d.originateId
     ) {
       this.cur = {
-        externalId: d.callId,
+        externalId: d.callId ?? "",
         inbound: true,
         callId: d.callId,
         handshakeSent: false,
@@ -162,9 +162,9 @@ export class CallController {
         completedSent: false,
       };
       this.d.sdk.incomingCall({
-        externalCallId: d.callId,
-        fromNumber: d.from.number ?? "",
-        toNumber: d.to.number ?? d.extension ?? "",
+        externalCallId: d.callId ?? "",
+        fromNumber: d.from?.number ?? "",
+        toNumber: d.to?.number ?? d.extension ?? "",
         createEngagement: true,
       });
       return;

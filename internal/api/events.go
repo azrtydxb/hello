@@ -98,7 +98,14 @@ func (s *server) eventFilter(w http.ResponseWriter, r *http.Request) (events.Fil
 		s.internal(w, "events: extensions of the caller", err)
 		return events.Filter{}, false
 	}
-	return events.Filter{Types: types, Extension: ext, Allowed: allowed}, true
+	f := events.Filter{Types: types, Extension: ext, Allowed: allowed}
+	// The inbox's events say who texts the business and when: they are for
+	// a reader who may see the inbox (the messages scope, operator or
+	// above), like the inbox's own stats.
+	if a := actor(r); !a.Scopes.Has(auth.ScopeMessages) || !a.Role.AtLeast(auth.RoleOperator) {
+		f.Hide = events.InboxPrefixes
+	}
+	return f, true
 }
 
 // eventFrame is one server-sent event.
@@ -287,10 +294,15 @@ func (s *server) createEventTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ticket := "hello_tkt_" + hex.EncodeToString(raw)
-	// Only the events scope travels: the ticket opens one stream and nothing
-	// else.
+	// Only the events scope travels, and the messages scope when the caller
+	// has it so the stream keeps the inbox's events: the ticket opens one
+	// stream and nothing else.
+	scopes := auth.Scopes{auth.ScopeEvents}
+	if a.Scopes.Has(auth.ScopeMessages) {
+		scopes = append(scopes, auth.ScopeMessages)
+	}
 	payload, _ := json.Marshal(ticketActor{UserID: a.UserID, Username: a.Username, TokenID: a.TokenID, Role: a.Role,
-		Kind: a.Kind, Scopes: auth.Scopes{auth.ScopeEvents}, ClientID: a.ClientID, ServiceName: a.ServiceName,
+		Kind: a.Kind, Scopes: scopes, ClientID: a.ClientID, ServiceName: a.ServiceName,
 		ExtensionScope: a.ExtensionScope, Via: a.Via})
 	if err := s.Events.PutTicket(r.Context(), hashTicket(ticket), payload); err != nil {
 		s.internal(w, "events: store ticket", err)

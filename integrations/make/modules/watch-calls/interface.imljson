@@ -5,7 +5,7 @@
   {
     "name": "data",
     "type": "collection",
-    "label": "Call",
+    "label": "Data",
     "spec": [
       { "name": "callId", "type": "text", "label": "Call ID" },
       { "name": "direction", "type": "text", "label": "Direction" },
@@ -15,7 +15,18 @@
       { "name": "durationMs", "type": "number", "label": "Duration (ms)" },
       { "name": "reason", "type": "text", "label": "Missed reason" },
       { "name": "cdrId", "type": "number", "label": "CDR ID" },
-      { "name": "recordingId", "type": "number", "label": "Recording ID" }
+      { "name": "recordingId", "type": "number", "label": "Recording ID" },
+      { "name": "conversationId", "type": "number", "label": "Inbox conversation ID" },
+      { "name": "messageId", "type": "number", "label": "Inbox message ID" },
+      { "name": "channelId", "type": "number", "label": "Inbox channel ID" },
+      { "name": "channelKind", "type": "text", "label": "Channel kind" },
+      { "name": "address", "type": "text", "label": "Our number or widget" },
+      { "name": "status", "type": "text", "label": "Delivery status" },
+      { "name": "assigneeUserId", "type": "number", "label": "Assigned user ID" },
+      { "name": "queueId", "type": "number", "label": "Queue ID" },
+      { "name": "peerKey", "type": "text", "label": "Customer key (hashed)" },
+      { "name": "peer", "type": "text", "label": "Customer's number", "help": "Only when the webhook includes the customer's number." },
+      { "name": "body", "type": "text", "label": "Message text", "help": "Only when the webhook includes the message text." }
     ]
   }
 ]

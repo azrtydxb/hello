@@ -11,6 +11,7 @@ import {
   pushPhone,
   revealAdminPassword,
   rotateAdminPassword,
+  SIDE_KEY_LABELS,
   vendorLabel,
   type Fetch,
   type Phone,
@@ -279,10 +280,21 @@ export function PhoneDetail() {
                     ),
                 },
                 {
-                  label: "BLF keys",
+                  // A Grandstream WP takes its BLF entries as speed dials (S-12).
+                  label: phone.speedDialSlots ? "Speed dials" : "BLF keys",
                   value: phone.blf.length ? phone.blf.join(", ") : "—",
                   mono: true,
                 },
+                ...(phone.sideKeyChoices?.length
+                  ? [
+                      {
+                        label: "Side key",
+                        value: phone.sideKey
+                          ? SIDE_KEY_LABELS[phone.sideKey]
+                          : "Group setting",
+                      },
+                    ]
+                  : []),
                 {
                   label: "Enabled",
                   value: phone.enabled ? "Enabled" : "Disabled",

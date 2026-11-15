@@ -50,6 +50,12 @@ type Endpoint struct {
 	Extensions   []string `json:"extensions"`
 	Enabled      bool     `json:"enabled"`
 	AllowPrivate bool     `json:"allowPrivate"`
+	// IncludePeer adds the customer's number (peer) to the messaging
+	// inbox's events; without it they carry only a keyed hash (peerKey).
+	IncludePeer bool `json:"includePeer"`
+	// IncludeMessageBody adds the message text (body) to message.received
+	// and message.sent. Off by default; setting it is audited.
+	IncludeMessageBody bool `json:"includeMessageBody"`
 	// DisabledReason is why the endpoint is off: manual, consecutive_failures
 	// or endpoint_gone; empty while enabled.
 	DisabledReason      string `json:"disabledReason"`
@@ -129,6 +135,9 @@ type Claim struct {
 	SeriesAttempt int
 	URL           string
 	AllowPrivate  bool
+	// IncludePeer and IncludeMessageBody are the endpoint's inbox options:
+	// the delivery adds the number and the text when it is sent.
+	IncludePeer, IncludeMessageBody bool
 	// Sealed secrets and the end of the previous one's window.
 	SecretEnc, PreviousSecretEnc []byte
 	PreviousSecretExpires        *time.Time

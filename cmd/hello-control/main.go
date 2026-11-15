@@ -27,6 +27,7 @@ import (
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/inboxevents"
 	"github.com/azrtydxb/hello/internal/messaging/media"
 	"github.com/azrtydxb/hello/internal/messaging/msgai"
 	"github.com/azrtydxb/hello/internal/messaging/router"
@@ -134,6 +135,10 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	deployment := redirect.Deployment(cfg.Prov.Redirect)
 	settings := provSettings(cfg, deployment)
+	// The HA node list (S-20): the cluster poller fills it, and phones that
+	// register with a hello-sip node directly get the other nodes as backups.
+	sipNodes := &api.SIPNodeList{}
+	settings.SIPNodes = sipNodes.Addrs
 	st := store.New(db).WithSecretBox(box).WithProv(settings)
 	go bootstrap(ctx, st, cfg.BootstrapAdminPassword, log)
 	go pruneSessions(ctx, st, log)
@@ -167,6 +172,18 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	startVideoRecording(ctx, cfg.RecordingVideoQuotaGB, st, objs, metrics.Registry, log)
 	msgMetrics := messaging.NewMetrics(metrics.Registry)
+	// The inbox's events join the integrations pipeline (spec
+	// messaging-channels M-23): they go on the event stream this replica's
+	// event service ingests, and so to webhooks, automation triggers and
+	// the event stream.
+	inboxEmitter := events.NewEmitter(events.LazyAppender{Client: vk.Client}, events.NewEmitterMetrics(metrics.Registry),
+		log.With("component", "inbox-events"))
+	go inboxEmitter.Run(ctx)
+	st.WithMessagingEvents(&inboxevents.Sink{Data: st, Out: inboxEmitter, Log: log.With("component", "inbox-events")})
+	// Provider-side deletions of erased or redacted texts (spec M-20): an
+	// erase tries them at once, this worker retries what is left.
+	msgRedactor := &messaging.Redactor{Store: st, Metrics: messaging.NewRedactMetrics(metrics.Registry), Log: log.With("component", "redact")}
+	go msgRedactor.Run(ctx)
 	// The inbox's attachments (spec messaging-channels M-18) live in the
 	// media bucket under msg/.
 	msgObjects, err := media.NewObjects(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioSecure)
@@ -246,7 +263,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// the dispatcher on each replica sends the due ones.
 	hooks := &webhook.Service{
 		Store: &webhook.PG{DB: db}, Box: box, AllowedCIDRs: cfg.IntegrationsAllowedCIDRs,
-		Log: log.With("component", "webhooks"),
+		Log: log.With("component", "webhooks"), Enrich: inboxWebhookEnricher(st),
 	}
 	evSvc.Hooks = append(evSvc.Hooks, hooks.Hook())
 	// Slack notifications (spec integrations P17): queued in the same
@@ -369,6 +386,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Clients:         st,
 		ClientAuth:      clientConfig(cfg, metrics.Registry),
 		Inbox:           st,
+		MsgRedactor:     msgRedactor,
 		MessagingAIAuto: cfg.MsgAIAuto,
 		Blocklist:       st,
 		Dialing:         cfg.Dial,
@@ -470,6 +488,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Log:             log,
 		DrainDelay:      cfg.DrainDelay,
 		ShutdownTimeout: cfg.ShutdownTimeout,
+		SIPNodes:        sipNodes,
 	})
 	err = node.Run(ctx.Done(), ln)
 	log.Info("stopped", "error", err)

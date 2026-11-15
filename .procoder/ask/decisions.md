@@ -5235,6 +5235,103 @@ media_unsupported`, and the composer offers **Attach** only in a chat. An
   logo is a binary download and chat site settings stay excluded), so the
   doctable is unchanged.
 
+## Messaging item 8: events, reports, export, redaction (2026-11-15, feat/messaging-8-reporting)
+
+- **Events carry a hash, delivery adds the content.** The inbox's `EventSink`
+  writes `conversation.created`, `conversation.assigned`,
+  `conversation.resolved`, `message.received`, `message.sent`,
+  `message.status` and `message.optout` into the integrations pipeline
+  (`integration_events`, the stream, webhooks, CRM and Slack hooks). A stored
+  event has ids, channel, direction, state, assignee, queue and `peerKey`, a
+  keyed MAC of the number (`HELLO_SECRET_KEY`, purpose
+  `messaging-event-peer`, 16 bytes hex), never a number or a text. An
+  endpoint's `includePeer` and `includeMessageBody` (migration 00105, admin,
+  audited per change, off by default) are applied at delivery by reading the
+  inbox, so an erase or a redaction between the event and the delivery is
+  honoured and the history and stream never hold content. The body is only
+  added to `message.received` and `message.sent`. A failed read retries the
+  delivery as an internal failure (`enrich_failed`, no strike against the
+  endpoint).
+- **Inbox events are not for every event reader.** The stream, the history
+  and tickets hide `conversation.*` and `message.*` from credentials without
+  the `messages` scope or below the operator role, the inbox's own access
+  rule. An endpoint with an extension list gets none (they are about no
+  extension).
+- **Emit points fixed while wiring.** `conversation.created` is emitted before
+  the first message event of a new conversation (ingest, chat, first contact);
+  claims, routing placements and assignments, a reply that claims, and returns
+  to the queue (stale or orphaned) emit `conversation.assigned` (no assignee
+  for a return); `FinishPoll` emits the real final status.
+- **Reports.** Totals and groups by channel, queue, agent (assignee) or day
+  (system zone or `timeZone`), at most 366 days. First response counts only
+  conversations a customer started (`origin` inbound), measured to the first
+  agent reply (`first_response_at`); automatic texts do not count. Resolution is start to `resolved_at`.
+  Spam is excluded. Durations are count, average, p50, p90. An open
+  conversation already over a target counts as a breach. CSV export, csv-safe
+  cells. `getInboxReport` is exposed to MCP (counts only); the CSV is not.
+- **SLA targets on their own endpoint.** `GET/PUT /api/v1/messaging/sla`
+  (`messaging_settings.sla_first_response_seconds` default 900,
+  `sla_resolution_seconds` default 86400, 0 off), not in
+  `/messaging/settings`, so item 7's settings changes do not collide.
+- **DSAR export.** `GET /api/v1/inbox/export?peer=` (admin), a zip of
+  README, `conversations.json` (with opt-outs) and one JSON per message.
+  Notes are excluded unless `notes=true`. At most 50,000 messages (422
+  `too_large`). Audited with counts (`media=` too).
+- **The export carries M-18 attachments, files included.** The export
+  bundles the message bodies, so it bundles the attachments' files too: each
+  message JSON lists its `media` (id, direction, status, type, size, file
+  name, SHA-256, `file`), and each file Hello holds is copied from MinIO into
+  `media/<conversation>/<id>.<ext>`, named by id and sniffed type, never by
+  the sender's file name (no path tricks in the archive). Attachments of
+  notes follow `notes`. A chat visitor's uploads not sent yet are part of
+  their data (an erase removes them), so `uploads.json` and
+  `media/uploads/` hold them. Without a media store and with files to export
+  the route answers 503 instead of a silently incomplete archive; a file the
+  sweeper removed meanwhile (`ErrNoObject`) is listed with an empty `file`;
+  any other MinIO error breaks the stream (headers are out) and is logged.
+- **Redaction.** `POST .../messages/{messageId}/redact` (admin) blanks the
+  body, sets `redacted_at`, deletes the SIP text-queue copies, queues the
+  carrier deletion, emits `conversation.updated` and audits. System lines are
+  refused (409 `not_redactable`); a second redaction is a no-op.
+- **Redaction removes the message's attachments the way an erase does.** In
+  the redaction's transaction the attachments are detached (`message_id`,
+  `conversation_id` NULL, `attached_at` set, `source_ref` cleared so nothing
+  is fetched again) and their public `media_links` deleted; after commit the
+  API removes each file, checks it is gone (`media.RemoveVerified`) and drops
+  the row, the erase's helper. A file MinIO cannot remove now stays an orphan
+  for the media sweeper. The report adds `mediaObjects` and
+  `mediaObjectsPending`; the message comes back with `media: []`. An
+  attachment is removed rather than kept with a "redacted" mark: its row has
+  no customer content once the file is gone, and the message already says it
+  was redacted. The erase now deletes the `media_links` of erased files in
+  its transaction too, so a link stops working before the file is gone.
+- **Erase also deletes the SIP text-queue copies** (`messages` rows linked to
+  the conversation's messages or to the number), which it left behind.
+- **Carrier deletion is a durable queue.** `msg_provider_redactions` (unique
+  per channel and carrier id); the request works its batch for 20 s and
+  reports counts; `messaging.Redactor.Run` retries on every control replica
+  (row leases), back-off one minute doubling to six hours, 12 tries (about a
+  day); refusals fail at once; finished rows are kept 30 days.
+  `hello_msg_provider_redactions_total{provider,result}`.
+- **Twilio deletes, Telnyx cannot.** Twilio: `DELETE Messages/{sid}`; 404 is
+  done; a refusal to delete a message still in flight falls back to blanking
+  the body (`POST Body=""`). Telnyx's API has no per-message delete
+  (`DELETE /messages/{id}` only cancels a scheduled send), so its rows are
+  `unsupported` and the report reads the messaging profile's
+  `redaction_enabled` to say whether Telnyx masks its own records. Both wait
+  for a real-account check.
+- **Supervisor-view report.** `GET /api/v1/inbox/audit/supervisor-views`
+  (admin) reads the existing `supervisor_view` audit rows: per-person totals
+  and the rows newest first, paged by id. Excluded from MCP: staff supervision
+  is reviewed by an administrator in the console.
+- **UI.** Inbox reports page (operators; targets form for admins), Messaging →
+  Privacy page (export, carrier deletions, supervisor views), a Redact action
+  in the conversation view (admins), webhook inbox options, inbox events on
+  the integration events page. Zapier gets seven inbox triggers with the two
+  options as Zap inputs; n8n and Make get the events and both options.
+- **Migration 00105** (after main's 00104 media): the webhook options, the SLA
+  targets, `redacted_at`, the redaction queue and three report indexes.
+
 ## Items 26 and 27: Replaces of confirmed dialogs, authenticated INVITEs to phones (2026-11-14)
 
 - Who may replace a confirmed dialog (S-17 leaves it open): only a phone of the
@@ -5293,3 +5390,154 @@ media_unsupported`, and the composer offers **Attach** only in a chat. An
   check: a WP836, WP822 and WP856 with P2346 = 1 ring, hold and transfer). The
   Poly, Snom and Fanvil TR-069/SSH keys stay a hardware item: no vendor
   document on hand confirms them.
+
+## One INVITE transaction per dialog; park commands per call in order (2026-11-15)
+
+CI's `-race` run caught `TestCallParkHold/across_nodes` racing inside sipgo:
+two hold commands for one parked call ran in two goroutines, and both
+re-INVITEs read the dialog's stored INVITE, whose Content-Type sipgo parses
+lazily and caches (a write on a shared request). Beyond the memory race this
+was SIP glare (RFC 3261 14.1), a possible duplicate CSeq (sipgo loads,
+increments and stores the dialog CSeq non-atomically), and a hold then resume
+could reach the phone reversed, leaving it held.
+
+- **Park commands for one call run in order.** The park loop queues each
+  call's commands (by Call-ID) and one goroutine drains them. A hang-up does
+  not queue (a BYE may cross a pending re-INVITE), and pickup and door-open,
+  which name no call, run as before.
+- **Hello starts one INVITE transaction per dialog at a time.** `reinvite`
+  and `reinviteA` wait on a gate keyed by the sipgo dialog session; a homed
+  leg (incall-ha) has its own mutex, taken by `haReinvite` and the homed
+  session refresh. A session-timer re-INVITE takes the same gate, and its
+  timeout starts once it may go. A phone's re-INVITE relayed onto the other
+  dialog (direct and anchored-without-SDP paths) is Hello's INVITE there too
+  and takes that dialog's gate. Hello queues rather than retrying on 491:
+  the conflict is its own, so waiting is cheaper than a 2 to 4 second backoff.
+- **The ACK goes out before the gate opens** where the 2xx is ACKed without
+  a body (`reinviteAcked`: park retrieve and linked hold). The transfer flows
+  keep their own ACK placement for now; the 3PCC ones ACK with the other
+  party's answer, after a second re-INVITE.
+- **No lazy reads of the shared INVITE.** The re-INVITE and its late ACK set
+  `Content-Type: application/sdp` themselves (every body Hello sends there is
+  SDP) instead of copying the dialog INVITE's header.
+- **A linked party's re-INVITEs are handled one at a time.** Its next
+  re-INVITE can arrive as soon as the previous 200 is out, while the previous
+  handler is still telling the peer. `linkedReinvite` holds a per-call lock
+  from first look to `holdPeer`, so a hold then resume is sent to the peer's
+  node in that order, once each (CI caught the reversal through the new test).
+- **A homed leg's CSeq is spent when the request is built,** under the leg's
+  lock, so a BYE or NOTIFY built during a re-INVITE never shares its CSeq, and
+  the re-INVITE's 200 only moves the counter forward. `doOn` (#357) still
+  moves it past a re-sent challenged request's CSeq; the challenge re-send
+  stays inside the gate, as one INVITE attempt.
+
+## TLS hop: outbound TLS requests leave from an ephemeral port (2026-11-15, fix/tls-path-test-isolation)
+
+- **Product bug, not test isolation.** Hello pins the requests its client
+  originates to the SIP UDP listening address (`WithClientConnectionAddr`,
+  `fromListener`, for DSCP and NAT). sipgo applied that address to TLS
+  requests too: it bound the TCP dial to the UDP socket's IP:port and looked
+  the connection up by that local address. The first TLS connection to one
+  edge then carried every later TLS request whatever the Path named, a second
+  connection could not bind while the first (or its TIME_WAIT) held the port,
+  and the dial failed with `bind: address already in use` whenever an
+  unrelated TCP socket held that port number (the flaky
+  TestSIPCallsPhoneThroughTLSPath).
+- **Fix.** The server's client has a `hopRequester` TxRequester (also used by
+  the pickup "elsewhere" requester) that clears `Laddr` on requests over a
+  reliable transport. UDP requests stay pinned to the marked SIP socket; TLS
+  requests dial from an ephemeral port and sipgo reuses the connection by
+  destination. Via is unchanged (the advertised address). DSCP is unchanged:
+  the mark was only ever on the UDP socket, never on a TLS connection.
+- **WriteRequest is for ACKs only.** With a TxRequester set, sipgo's
+  `Client.WriteRequest` goes through it; `hopRequester` writes an ACK
+  straight to the transport and sends anything else as a transaction. Hello
+  only writes ACKs that way; TestDSCPOutboundOnMarkedSocket, which wrote a
+  bare OPTIONS, now sends it as a client transaction from the listener.
+- **Regression test.** TestSIPCallsPhonesBehindTwoTLSEdges: phones of one
+  extension registered through two edge TLS sockets must each get an INVITE.
+
+## Provisioning parity items 15 and 29 finished: WP side key and speed dials, backups from the HA node list, Snom/Fanvil backups, Yealink/Poly SRV (2026-11-14)
+
+Spec `.procoder/specs/phone-feature-parity.md` S-12 and S-20, following #259,
+#262 and #312.
+
+### Item 15 (S-12): side key and speed dials as first-class fields
+
+- **Side key.** `phone_groups.side_key` (ptt, alarm, none; default ptt) and
+  `phones.side_key` (NULL inherits), migration `00106_side_key.sql`.
+  API `PUT /api/v1/phone-groups/{id}/side-key` (MCP `setPhoneGroupSideKey`) and
+  `sideKey` on `PATCH /api/v1/phones/{id}`; the phone view carries
+  `sideKeyChoices`. Console: phone group editor and phone form.
+- PTT and paging are one firmware value ("PTT/Paging", 0), so Hello offers one
+  choice for both rather than a "paging" value that would write the same 0.
+- Keys per model, from Grandstream's templates (config-template-10212026.zip):
+  WP8x6 `P82317` 0/2/4 (PTT/paging, alarm, none); WP856 `P82317` 0/4 (its
+  "PTT Button" has no alarm value); WP820 multi-function button `P22258` 0/4
+  (its 2, SAFE/Panic call, needs the WP820 panic-call keys, which Hello does not
+  write, so alarm is not offered); WP810/822/825 none. The key is now written
+  always (before: `P82317 = 0` only with PTT or a paging key), so a changed
+  choice reverts. A choice the model lacks, or alarm without the group's alarm
+  destination, renders PTT/paging (the factory default); the API refuses a
+  phone-level choice its model lacks. A raw override of the same P-value still
+  wins (overrides are applied after the template).
+- **Speed dials.** A WP's BLF entries are no longer refused: they are written as
+  speed dials (spec: "Hello BLF entries on a WP phone are offered as speed
+  dials"). Slots: WP8x6 number keys 2 to 9 and 0 (long press; key 0 mode/
+  account/label/value `P8682` to `P8685`, key n `P8690 + 4 (n-2)` on; mode 0
+  Speed Dial, -1 None); WP810/822/825 and WP820 speed dial keys 2 to 9 and 0
+  (`P23011 + 5 (n-2)` account, `P23013 + 5 (n-2)` number; key 0 `P23001`,
+  `P23003`); WP856 multi-purpose keys 1 to 30 (`P23000 + 5 (n-1)` mode 0, then
+  account, description, value). Correction to the 2026-11-09 note "The WP8x6
+  template has no speed dial key": it has the number keys above (section
+  "Number Keys", commented out with mode -1 default). Every slot is written,
+  empty when unused, so a removed entry is cleared; the WP856 is capped at 30 so
+  that clearing stays bounded (the template has 160 MPKs). The WP856 MPK also
+  has a BLF mode (1): the spec asks for speed dials on every WP, so mode 0 is
+  written; switching the WP856 to real BLF lamps is a one-value change if the
+  user wants it. The API refuses more entries than the model's slots
+  (`speedDialSlots` on the phone view).
+- Unconfirmed on hardware (hardware list): every side key and speed dial key
+  above on a WP8x6, WP822, WP820 and WP856; in particular the WP820 speed dial
+  keys (commented out in its template) and whether the WP8x6 number keys are
+  the long-press digits the "Number Keys" section suggests.
+
+### Item 29 (S-20): backups from the HA node list, Snom and Fanvil, Yealink and Poly SRV
+
+- **HA node list.** hello-control's cluster poller (every heartbeat) keeps the
+  SIP addresses (`HELLO_SIP_ADVERTISED_ADDR`) of the READY hello-sip members,
+  by node ID (`api.SIPNodeList`). When `HELLO_PROV_SIP_SERVER` is one of them
+  (phones register with a node directly; it is also the default of that
+  setting) the other nodes, at most two, are the phones' backups. Behind an
+  edge (Kamailio, a VIP, a load balancer; kw and Helm) the member addresses are
+  in-cluster names phones cannot reach, so there are none from the list: the
+  edges are not in the membership and hello-control has no runtime list of
+  them. `HELLO_PROV_SIP_BACKUP_SERVERS` stays as an override (the spec allows
+  it) and is how the second Kamailio of a VIP-less pair is named. The source is
+  shown on the Provisioning settings page (`sipBackupServers`,
+  `sipBackupSource`, `sipSrv` on `GET /api/v1/prov/settings`).
+- **Snom**: `user_outbound` per identity lists the primary, then every backup,
+  `host:port;transport=udp|tcp`, comma separated (Snom Service Hub,
+  user_outbound: "Starting version 8.7.x multiple comma separated values are
+  supported for e.g. failover scenarios"; registrar_whitelist stays empty, its
+  default, which user_outbound must otherwise match). Written empty without a
+  backup, so removing them reverts. This replaces the earlier "no Snom key".
+- **Fanvil**: `SIPn Backup Addr`, `Backup Port`, `Backup Transport` (0 UDP, 1
+  TCP), `Backup TTL`. Key names from a Fanvil X5 configuration export as copied
+  in Nethesis' Tancredi template `fanvil-X5.tmpl` (third party; no Fanvil
+  document with the export names could be fetched). Backup Addr is written
+  empty without a backup. Unconfirmed: on the hardware list.
+- **Yealink and Poly SRV**: with `HELLO_PROV_SIP_SRV`, a Yealink or Poly on UDP
+  registers with the name, port 0 and the DNS-NAPTR transport (Yealink
+  `transport_type = 3`; Poly `transport = "DNSnaptr"`, which the UC Software
+  guide defines as "address a host name and port 0 or Null: NAPTR then SRV
+  look-ups, RFC 3263"). The earlier objection ("DNS-NAPTR is not plain SRV")
+  does not hold: with no NAPTR records, RFC 3263 clients fall back to SRV, and
+  Hello's documented record set is SRV only. TCP and TLS phones of those vendors
+  keep the address and backups (DNS-NAPTR replaces the transport choice).
+  Yealink's port 0 and its UDP-only SRV fallback (`naptr_build` default 0,
+  not written) are from the administrator guide: hardware list.
+- Also fixed in passing: further lines (2 and up) now get the backup on
+  Yealink, Poly, Snom and Fanvil, and a backup follows the primary's transport
+  (it was UDP only); a Yealink or Poly further line on a TCP phone now
+  registers over TCP like line 1 (it was written UDP).

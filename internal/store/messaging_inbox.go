@@ -98,6 +98,9 @@ type ConvMessage struct {
 	SentAt         *time.Time `json:"sentAt"`
 	DeliveredAt    *time.Time `json:"deliveredAt"`
 	ReadAt         *time.Time `json:"readAt"`
+	// RedactedAt is when an administrator redacted the line; its body is
+	// empty from then on.
+	RedactedAt *time.Time `json:"redactedAt"`
 	// Media are the message's attachments (spec M-18), oldest first.
 	Media []ConvMedia `json:"media"`
 }
@@ -309,18 +312,20 @@ func (s *Store) auditSupervisorView(ctx context.Context, acc InboxAccess, c Conv
 }
 
 const convMessageCols = `id, conversation_id, direction, kind, sender_kind, sender_user_id, sender_name, body, status, error_code,
-	coalesce(client_msg_id, ''), created_at, sent_at, delivered_at, read_at`
+	coalesce(client_msg_id, ''), created_at, sent_at, delivered_at, read_at, redacted_at`
 
 func scanConvMessage(r interface{ Scan(...any) error }) (ConvMessage, error) {
 	var (
 		m                 ConvMessage
 		user              sql.NullInt64
 		sent, deliv, read sql.NullTime
+		redacted          sql.NullTime
 	)
 	if err := r.Scan(&m.ID, &m.ConversationID, &m.Direction, &m.Kind, &m.SenderKind, &user, &m.SenderName, &m.Body,
-		&m.Status, &m.ErrorCode, &m.ClientMsgID, &m.CreatedAt, &sent, &deliv, &read); err != nil {
+		&m.Status, &m.ErrorCode, &m.ClientMsgID, &m.CreatedAt, &sent, &deliv, &read, &redacted); err != nil {
 		return m, err
 	}
+	m.RedactedAt = nullTime(redacted)
 	if user.Valid {
 		m.SenderUserID = &user.Int64
 	}
@@ -472,9 +477,12 @@ type SendInput struct {
 // returned and nothing is sent again. A customer who opted out is refused
 // (ErrOptedOut) before anything is queued; no one can override it.
 func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in SendInput) (msg ConvMessage, created bool, err error) {
-	var sinkEvent *messaging.Event
+	var (
+		sinkEvent *messaging.Event
+		claimedBy int64
+	)
 	err = s.tx(ctx, func(tx *sql.Tx) error {
-		sinkEvent = nil
+		sinkEvent, claimedBy = nil, 0
 		c, err := lockConversation(ctx, tx, acc, in.ConversationID)
 		if err != nil {
 			return err
@@ -592,6 +600,7 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 			return err
 		}
 		if claimed {
+			claimedBy = acc.UserID
 			if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_assignments (conversation_id, to_user_id, reason) VALUES ($1, $2, 'reply')`,
 				c.ID, acc.UserID); err != nil {
 				return err
@@ -609,6 +618,9 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 			Direction: messaging.DirOut, Status: m.Status}
 		return nil
 	})
+	if err == nil && claimedBy != 0 {
+		s.emit(ctx, messaging.Event{Type: "conversation.assigned", ConversationID: in.ConversationID, AssigneeUserID: claimedBy})
+	}
 	if err == nil && sinkEvent != nil {
 		s.emit(ctx, *sinkEvent)
 	}
@@ -630,13 +642,17 @@ func optedOut(ctx context.Context, tx *sql.Tx, s *Store, addressID int64, peerKe
 // WithMessagingEvents sets where the inbox's events go (the integrations
 // pipeline, when it lands) and returns s. The default drops them.
 func (s *Store) WithMessagingEvents(e messaging.EventSink) *Store {
-	s.msgEvents = e
+	if e == nil {
+		s.msgEvents.Store(nil)
+		return s
+	}
+	s.msgEvents.Store(&e)
 	return s
 }
 
 func (s *Store) emit(ctx context.Context, e messaging.Event) {
-	if s.msgEvents != nil {
-		s.msgEvents.Emit(ctx, e)
+	if p := s.msgEvents.Load(); p != nil {
+		(*p).Emit(ctx, e)
 	}
 }
 
@@ -687,6 +703,7 @@ func (s *Store) ClaimConversation(ctx context.Context, acc InboxAccess, convID i
 	if err != nil {
 		return Conversation{}, err
 	}
+	s.emit(ctx, messaging.Event{Type: "conversation.assigned", ConversationID: convID, AssigneeUserID: acc.UserID})
 	return s.GetConversation(ctx, acc, convID)
 }
 
@@ -1308,6 +1325,7 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *sql.Tx, in TrunkText, r
 	if *ev == nil {
 		*ev = &messaging.Event{Type: "message.received", ConversationID: conv, MessageID: msgID, ChannelKind: kind, Direction: messaging.DirIn}
 	}
+	(*ev).NewConversation = newConversation
 	if newConversation {
 		if err := emitConversationEvent(ctx, tx, conv, msgID, "conversation.new", nil); err != nil {
 			return err

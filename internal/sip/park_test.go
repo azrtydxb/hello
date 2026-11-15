@@ -2,6 +2,7 @@ package sip
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"slices"
@@ -844,5 +845,105 @@ func TestCallParkMusic(t *testing.T) {
 		t.Fatalf("music continued after the retrieve: %d packets, peak %d", n, peak)
 	}
 	hangup(t, r2.dcs)
+	waitReq(t, b.byes, "BYE to the parked party")
+}
+
+// TestCallParkHoldSerialized: hold commands that reach a parked call's node
+// together are run one at a time, in order. The retriever on another node
+// holds and resumes three times in quick succession, so the park loop takes
+// several commands in one poll. It fails if a second re-INVITE reaches the
+// parked party while the first is unanswered (glare, RFC 3261 14.1, and a
+// data race on the dialog's stored INVITE under -race), if one is sent
+// before the previous one's ACK, if the directions arrive out of order, or
+// if two share a CSeq.
+func TestCallParkHoldSerialized(t *testing.T) {
+	st := parkStore(t)
+	pbx1 := startPBX(t, threeDevices(), withMedia(false), withPark(st, "sip-a", testLot))
+	pbx2 := startPBX(t, threeDevices(), withMedia(false), withPark(st, "sip-b", testLot))
+	a, b := newPhone(t, pbx1, "a1", "pa"), newPhone(t, pbx1, "b1", "pb1")
+	c := newPhone(t, pbx2, "c1", "pc")
+	for _, p := range []*phone{a, b, c} {
+		p.register(t)
+		p.setCallee(answerAfter(nil))
+	}
+	pc := establish(t, a, b)
+	parkBy(t, a, pc, "*74")
+	occupied(t, st, "701", "100")
+	r := waitCall(t, dial(t.Context(), c, "*75701"))
+	if r.err != nil {
+		t.Fatalf("retrieve: %v", r.err)
+	}
+	// The retrieve's own re-INVITE and ACK are done once it answered.
+	drain := func(ch chan *sip.Request) {
+		for {
+			select {
+			case <-ch:
+			default:
+				return
+			}
+		}
+	}
+	drain(b.reinvites)
+	drain(b.acks)
+
+	// The parked party answers each re-INVITE only when the test says so.
+	hold := make(chan struct{})
+	b.mu.Lock()
+	b.reinviteHold = hold
+	b.mu.Unlock()
+	var once sync.Once
+	release := func() { once.Do(func() { close(hold) }) }
+	t.Cleanup(release)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	dirs := []string{"sendonly", "sendrecv", "sendonly", "sendrecv", "sendonly", "sendrecv"}
+	for _, dir := range dirs {
+		re := sip.NewRequest(sip.INVITE, r.dcs.InviteResponse.Contact().Address)
+		re.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+		re.SetBody([]byte(c.sdp + "a=" + dir + "\r\n"))
+		res, err := r.dcs.Do(ctx, re)
+		if err != nil || res.StatusCode != 200 {
+			t.Fatalf("%s re-INVITE = %v, %v", dir, res, err)
+		}
+		if err := r.dcs.WriteRequest(sip.NewRequest(sip.ACK, r.dcs.InviteResponse.Contact().Address)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var lastCSeq uint32
+	for i, want := range dirs {
+		got := waitReq(t, b.reinvites, fmt.Sprintf("re-INVITE %d (%s) to the parked party", i+1, want))
+		if dir := media.SDPDirection(got.Body()); dir != want {
+			t.Fatalf("re-INVITE %d to the parked party is %q, want %s (out of order)", i+1, dir, want)
+		}
+		if n := got.CSeq().SeqNo; n <= lastCSeq {
+			t.Fatalf("re-INVITE %d has CSeq %d after %d", i+1, n, lastCSeq)
+		} else {
+			lastCSeq = n
+		}
+		// While this one is unanswered no other may be sent.
+		select {
+		case extra := <-b.reinvites:
+			t.Fatalf("re-INVITE %q sent while re-INVITE %d was unanswered (glare)", media.SDPDirection(extra.Body()), i+1)
+		case <-time.After(300 * time.Millisecond):
+		}
+		select {
+		case hold <- struct{}{}:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("re-INVITE %d never waited for its answer", i+1)
+		}
+		ack := waitReq(t, b.acks, fmt.Sprintf("ACK of re-INVITE %d", i+1))
+		if n := ack.CSeq().SeqNo; n != lastCSeq {
+			t.Fatalf("ACK CSeq %d, want %d", n, lastCSeq)
+		}
+	}
+	select {
+	case extra := <-b.reinvites:
+		t.Fatalf("unexpected re-INVITE %q after the last command", media.SDPDirection(extra.Body()))
+	case <-time.After(300 * time.Millisecond):
+	}
+	release()
+	hangup(t, r.dcs)
 	waitReq(t, b.byes, "BYE to the parked party")
 }

@@ -17,6 +17,10 @@ export interface WebhookEndpoint {
   extensions: string[];
   enabled: boolean;
   allowPrivate: boolean;
+  /** Messaging inbox events carry the customer's number, not only a hash. */
+  includePeer: boolean;
+  /** message.received and message.sent carry the message text. */
+  includeMessageBody: boolean;
   disabledReason: DisabledReason;
   consecutiveFailures: number;
   /** While set, the secret before the last rotation still signs. */
@@ -45,6 +49,8 @@ export interface WebhookFields {
   extensions: string[];
   enabled: boolean;
   allowPrivate: boolean;
+  includePeer: boolean;
+  includeMessageBody: boolean;
 }
 
 export type DeliveryStatus = "pending" | "retrying" | "succeeded" | "dead";

@@ -493,6 +493,18 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/messaging/optouts", auth.ScopeAdmin, auth.RoleAdmin, false, s.recordMessagingOptOut},
 		{"POST", "/api/v1/messaging/optouts/{id}/reconsent", auth.ScopeAdmin, auth.RoleAdmin, false, s.reconsentMessagingOptOut},
 		{"POST", "/api/v1/inbox/erase", auth.ScopeAdmin, auth.RoleAdmin, false, s.eraseMessagingPeer},
+		// Reports and privacy tooling (spec messaging-channels phase 8): the
+		// reports are supervisors'; their targets, the export of a customer,
+		// redaction, the provider-side deletions and the supervisor-view
+		// audit report are administrators'.
+		{"GET", "/api/v1/inbox/reports", auth.ScopeMessages, auth.RoleOperator, false, s.getInboxReport},
+		{"GET", "/api/v1/inbox/reports/export", auth.ScopeMessages, auth.RoleOperator, false, s.exportInboxReport},
+		{"GET", "/api/v1/messaging/sla", auth.ScopeAdmin, auth.RoleAdmin, false, s.getInboxSLA},
+		{"PUT", "/api/v1/messaging/sla", auth.ScopeAdmin, auth.RoleAdmin, false, s.putInboxSLA},
+		{"GET", "/api/v1/inbox/export", auth.ScopeAdmin, auth.RoleAdmin, false, s.exportMessagingPeer},
+		{"POST", "/api/v1/inbox/conversations/{id}/messages/{messageId}/redact", auth.ScopeAdmin, auth.RoleAdmin, false, s.redactInboxMessage},
+		{"GET", "/api/v1/messaging/redactions", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessagingRedactions},
+		{"GET", "/api/v1/inbox/audit/supervisor-views", auth.ScopeAdmin, auth.RoleAdmin, false, s.listSupervisorViews},
 		// The inbox AI (spec messaging-channels M-30, M-30a): settings, kill
 		// switches, each number's mode and guardrails, and its FAQ.
 		{"GET", "/api/v1/messaging/ai", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessagingAI},
@@ -603,6 +615,7 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/syslog/unknown", auth.ScopeRead, auth.RoleViewer, false, s.unknownSyslog},
 		{"GET", "/api/v1/phone-groups/{id}/ldap", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneGroupLDAP},
 		{"PUT", "/api/v1/phone-groups/{id}/ldap", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupLDAP},
+		{"PUT", "/api/v1/phone-groups/{id}/side-key", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupSideKey},
 
 		{"GET", "/api/v1/prov/templates", auth.ScopeRead, auth.RoleViewer, false, s.listTemplates},
 		{"POST", "/api/v1/prov/templates", auth.ScopeWrite, auth.RoleOperator, false, s.createTemplate},

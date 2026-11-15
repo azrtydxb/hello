@@ -15,6 +15,8 @@ function endpoint(over: Partial<WebhookEndpoint> = {}): WebhookEndpoint {
     extensions: [],
     enabled: true,
     allowPrivate: false,
+    includePeer: false,
+    includeMessageBody: false,
     disabledReason: "",
     consecutiveFailures: 0,
     previousSecretExpiresAt: null,
@@ -165,6 +167,8 @@ describe("Webhooks (spec integrations P2)", () => {
       extensions: ["101", "102"],
       enabled: true,
       allowPrivate: false,
+      includePeer: false,
+      includeMessageBody: false,
     });
     fireEvent.click(
       within(dialog).getByRole("button", { name: /I have copied it/ }),
@@ -172,6 +176,59 @@ describe("Webhooks (spec integrations P2)", () => {
     await waitFor(() =>
       expect(screen.queryByText("whsec_shownonce")).toBeNull(),
     );
+  });
+
+  it("offers the inbox events and posts the inbox options when asked", async () => {
+    const calls = setup({
+      "POST /api/v1/webhooks": () =>
+        json(
+          {
+            ...endpoint({ id: 9, name: "Helpdesk", includePeer: true }),
+            secret: "whsec_once",
+          },
+          201,
+        ),
+    });
+    renderApp("/integrations/webhooks");
+    fireEvent.click(
+      await screen.findByRole("button", { name: /New endpoint/ }),
+    );
+    const form = await screen.findByRole("form", {
+      name: "New webhook endpoint",
+    });
+    fireEvent.change(within(form).getByLabelText("Name"), {
+      target: { value: "Helpdesk" },
+    });
+    fireEvent.change(within(form).getByLabelText("URL"), {
+      target: { value: "https://desk.example.com/hook" },
+    });
+    fireEvent.click(
+      within(form).getByRole("switch", { name: /Every event type/ }),
+    );
+    fireEvent.click(
+      within(form).getByRole("checkbox", { name: "message.received" }),
+    );
+    // Both are off until an administrator turns them on.
+    const peer = within(form).getByRole("switch", {
+      name: /Include the customer's number/,
+    });
+    const text = within(form).getByRole("switch", {
+      name: /Include the message text/,
+    });
+    expect(peer).not.toBeChecked();
+    expect(text).not.toBeChecked();
+    fireEvent.click(peer);
+    fireEvent.click(text);
+    fireEvent.submit(form);
+    await screen.findByRole("dialog", { name: /Signing secret of Helpdesk/ });
+    const post = calls.find(
+      (c) => c.method === "POST" && c.url === "/api/v1/webhooks",
+    );
+    expect(post?.body).toMatchObject({
+      events: ["message.received"],
+      includePeer: true,
+      includeMessageBody: true,
+    });
   });
 
   it("checks the form before posting: https, extensions, at least one type", async () => {
