@@ -23,6 +23,13 @@ func holdCallerBye(pbx *testPBX) {
 // never sending the ACK.
 func byeWithoutAck(t *testing.T, p *phone, ext string) {
 	t.Helper()
+	byeBeforeAck(t, p, ext)
+}
+
+// byeBeforeAck is byeWithoutAck returning the caller's dialog, so a test
+// can still send the ACK after the BYE.
+func byeBeforeAck(t *testing.T, p *phone, ext string) *sipgo.DialogClientSession {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	dcs, err := p.dua.WriteInvite(ctx, p.inviteReq(ext))
@@ -49,6 +56,7 @@ func byeWithoutAck(t *testing.T, p *phone, ext string) {
 	if res := p.do(bye); res.StatusCode != sip.StatusOK {
 		t.Fatalf("BYE before ACK: %d", res.StatusCode)
 	}
+	return dcs
 }
 
 // TestCallByeBeforeAck: a caller whose BYE reaches Hello before its ACK
@@ -67,6 +75,46 @@ func TestCallByeBeforeAck(t *testing.T) {
 	cd := pbx.nextCDR(t)
 	if cd.TerminationSide != cdr.SideCaller || cd.FinalStatus != sip.StatusOK {
 		t.Fatalf("CDR = side %q status %d reason %q, want the caller's hangup", cd.TerminationSide, cd.FinalStatus, cd.FailureReason)
+	}
+	eventually(t, "no live calls", func() bool { return len(liveCalls(t, pbx)) == 0 })
+}
+
+// TestCallByeBeforeLateAck: a caller's ACK that Hello processes after the
+// BYE that overtook it (sipgo's ReadAck sets the ended dialog back to
+// confirmed) must not turn the caller's hangup into a "no ACK" failure:
+// the CDR stays answered, with its billable time and codecs.
+// Mutation: checking only the dialog state for the BYE (not its context)
+// ends the call as a system failure and fails every assertion here.
+func TestCallByeBeforeLateAck(t *testing.T) {
+	pbx := startPBX(t, []snapshot.Device{dev(1, "a1", "100", "pa"), dev(2, "b1", "200", "pb1")})
+	a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
+	a.register(t)
+	b.register(t)
+	b.setCallee(answerAfter(nil))
+	holdCallerBye(pbx)
+	acked := make(chan struct{})
+	wait := func() {
+		select {
+		case <-acked:
+			time.Sleep(100 * time.Millisecond) // the ACK's handler runs ReadAck
+		case <-time.After(5 * time.Second):
+		}
+	}
+	pbx.srv.unackedHook.Store(&wait)
+	dcs := byeBeforeAck(t, a, "200")
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := dcs.Ack(ctx); err != nil {
+		t.Fatalf("late ACK: %v", err)
+	}
+	close(acked)
+	waitReq(t, b.byes, "BYE to the callee")
+	cd := pbx.nextCDR(t)
+	if cd.TerminationSide != cdr.SideCaller || cd.FinalStatus != sip.StatusOK || cd.FailureReason != "" {
+		t.Fatalf("CDR = side %q status %d reason %q, want the caller's hangup", cd.TerminationSide, cd.FinalStatus, cd.FailureReason)
+	}
+	if cd.AnswerTime.IsZero() || cd.CallerCodec == "" || cd.CalleeCodec == "" {
+		t.Fatalf("CDR answer %v codecs %q / %q, want an answered call with its codecs", cd.AnswerTime, cd.CallerCodec, cd.CalleeCodec)
 	}
 	eventually(t, "no live calls", func() bool { return len(liveCalls(t, pbx)) == 0 })
 }

@@ -349,6 +349,10 @@ type Server struct {
 	// been accepted on the dialog and before the call is hung up, so a
 	// test can hold the BYE/ACK race open.
 	callerByeHook atomic.Pointer[func()]
+	// unackedHook, when set (tests only), runs when a caller's 2xx
+	// WriteResponse returns without an ACK, before the dialog is checked
+	// for the caller's BYE, so a test can land a late ACK in between.
+	unackedHook atomic.Pointer[func()]
 	// abortHook, when set (tests only), runs inside abort after it has
 	// taken the setup's ownership before it signals the setup goroutine, so
 	// a test can inject the fork failure that races the abort.

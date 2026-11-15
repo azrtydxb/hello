@@ -1171,7 +1171,7 @@ func (c *call) answer(w *leg) {
 		}
 		return
 	}
-	if c.dss.LoadState() == sip.DialogStateEnded {
+	if c.s.callerHungUpUnacked(c.dss) {
 		// The caller's BYE overtook its ACK: handleBye has accepted it and
 		// ends the call (and the callee's leg) as the caller's hangup.
 		c.addTrace("Caller hung up before acknowledging the answer")
@@ -1189,6 +1189,21 @@ func (c *call) answer(w *leg) {
 	c.s.log.Info("caller did not acknowledge answer", "correlation_id", c.id, "error", err)
 	c.byeA()
 	c.end(sip.StatusOK, cdr.SideSystem, "no ACK from caller", ResultFailed)
+}
+
+// callerHungUpUnacked reports, after the caller's 2xx went unacknowledged,
+// whether the caller's BYE overtook its ACK (handleBye accepted it and ends
+// the call as the caller's hangup). The dialog's context is the test, not
+// its state: ReadBye sets the state Ended, but an ACK processed after the
+// BYE sets it back to Confirmed (sipgo's ReadAck does not check), and the
+// answer would then end an answered call as "no ACK from caller" - a CDR
+// without its answer time or codecs. The context, cancelled when the
+// dialog ends, stays cancelled.
+func (s *Server) callerHungUpUnacked(dss *sipgo.DialogServerSession) bool {
+	if h := s.unackedHook.Load(); h != nil {
+		(*h)()
+	}
+	return dss.LoadState() == sip.DialogStateEnded || dss.Context().Err() != nil
 }
 
 // callerByeHeld runs the test-only callerByeHook, if one is set.
