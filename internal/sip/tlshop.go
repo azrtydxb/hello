@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 )
 
@@ -28,6 +29,31 @@ func (s *Server) closeTLS() {
 	if s.cfg.TLSListener != nil {
 		_ = s.cfg.TLSListener.Close()
 	}
+}
+
+// hopRequester is the TxRequester of the server's client: it sends requests
+// through sipgo's transaction layer as the default client does, except that a
+// request over a connection-oriented transport (the TLS hop to the edge, S-12)
+// is not pinned to the SIP UDP listening address. Hello pins its UDP requests
+// to that socket (WithClientConnectionAddr, fromListener) for DSCP and NAT;
+// sipgo applies the same address to a TCP or TLS request, binds the dial to
+// that IP:port and looks the connection up by it. The first TLS connection to
+// one edge then carried every later TLS request whatever its destination, a
+// second connection could not bind while the first, or its TIME_WAIT, held the
+// port, and the bind also failed whenever the port was taken by an unrelated
+// TCP socket. Unpinned, sipgo dials from an ephemeral port and reuses the
+// connection by destination.
+type hopRequester struct{ ua *sipgo.UserAgent }
+
+func (r hopRequester) Request(ctx context.Context, req *sip.Request) (sip.ClientTransaction, error) {
+	if sip.IsReliable(req.Transport()) {
+		req.Laddr = sip.Addr{}
+	}
+	if req.IsAck() {
+		// An ACK is no transaction (Client.WriteRequest).
+		return nil, r.ua.TransportLayer().WriteMsg(req)
+	}
+	return r.ua.TransactionLayer().Request(ctx, req)
 }
 
 // reloadingCert serves the certificate in two files and re-reads them when
