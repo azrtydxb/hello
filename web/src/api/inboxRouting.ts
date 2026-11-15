@@ -4,7 +4,8 @@
 
 import { request, type Id } from "../api";
 
-export type RouteKind = "inbox" | "queue" | "user" | "extension" | "ring_group";
+export type RouteKind =
+  "inbox" | "queue" | "user" | "extension" | "ring_group" | "ai_triage";
 
 export const ROUTE_KIND_LABEL: Record<RouteKind, string> = {
   inbox: "The supervisors' pool",
@@ -12,6 +13,7 @@ export const ROUTE_KIND_LABEL: Record<RouteKind, string> = {
   user: "One user",
   extension: "The user of an extension",
   ring_group: "The users of a ring group",
+  ai_triage: "The queue the AI triage picks",
 };
 
 export interface ScheduleDay {

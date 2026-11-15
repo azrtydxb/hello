@@ -682,7 +682,7 @@ func listPartCID(member, _ string) string { return "i" + member + "@rl" }
 // dialogCompact is dialogXML without the declaration and line breaks, for the
 // parts of a list NOTIFY, where every byte counts against the datagram.
 func dialogCompact(ext, domain string, version uint64, state string) string {
-	full := string(dialogXML(ext, domain, version, state))
+	full := string(dialogXML(ext, domain, version, state, nil))
 	full = strings.TrimPrefix(full, `<?xml version="1.0"?>`+"\r\n")
 	return strings.ReplaceAll(full, "\r\n", "") + "\r\n"
 }

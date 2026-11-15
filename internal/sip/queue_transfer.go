@@ -57,7 +57,7 @@ func (c *call) transferIntoQueue(snap *snapshot.Snapshot, q snapshot.Queue, w *l
 	// The transferor's hold, if any, is over: the caller sends to the relay
 	// again, and hears the queue's music from here.
 	aOffer := media.BuildAudioSDP(host, relay.LegPort(legCaller), off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
-	if aAns, ok := reinviteA(dss, aOffer); ok {
+	if aAns, ok := reinviteA(c.s, dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
 	}
 	c.mu.Lock()

@@ -72,7 +72,7 @@ func newRig(t *testing.T) *rig {
 	r.e = &Engine{Store: r.m, Drivers: map[string]Driver{KindLDAP: r.d}, Replica: "r1", Now: func() time.Time { return r.now }}
 	pw := "s3cret-bind-pw"
 	c, err := r.e.Create(context.Background(), "admin", ConnectorInput{Kind: KindLDAP, Name: strPtr("AD"), Secret: &pw, Enabled: boolPtr(true),
-		Config: json.RawMessage(`{"url":"ldaps://dc"}`)})
+		Config: json.RawMessage(`{"url":"ldaps://dc","ldapBindLogin":true}`)})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -88,8 +88,8 @@ func routingInput(b routingBody, cur store.MsgRouting) (store.MsgRoutingInput, f
 	if ah.Action == messaging.AfterReply && ah.Text == "" {
 		f.add("afterHours.text", "is required to reply after hours")
 	}
-	if !messaging.ValidRouteKind(ah.RouteKind) {
-		f.add("afterHours.routeKind", "must be one of %v", messaging.RouteKinds)
+	if !messaging.ValidRouteKind(ah.RouteKind) || ah.RouteKind == messaging.RouteAITriage {
+		f.add("afterHours.routeKind", "must be one of %v but ai_triage", messaging.RouteKinds)
 	} else if ah.RouteKind == messaging.RouteInbox {
 		ah.RouteTarget = ""
 	}

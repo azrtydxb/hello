@@ -38,6 +38,11 @@ export interface User {
     connector: string;
     fields: string[];
   } | null;
+  /**
+   * A break-glass administrator may use the password form while single
+   * sign-on is required. Only an enabled local administrator can be one.
+   */
+  breakGlass?: boolean;
   /** When directory sync disabled the user. */
   disabledAt?: string | null;
   createdAt: string;
@@ -69,6 +74,8 @@ export interface UserChange {
   voicemailEmail?: Partial<VoicemailEmailPrefs>;
   /** Require two-factor authentication of the user. */
   totpRequired?: boolean;
+  /** Flag or unflag the user as a break-glass administrator. */
+  breakGlass?: boolean;
 }
 
 /** GET /api/v1/users (admin). */

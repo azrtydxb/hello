@@ -365,6 +365,85 @@ describe("Users", () => {
     expect(patch).toHaveProperty("voicemailEmail");
   });
 
+  it("flags an administrator as break-glass and lists and unlinks their identities", async () => {
+    const calls = api("admin", {
+      "GET /api/v1/users/1/identities": () =>
+        json({
+          items: [
+            {
+              id: 3,
+              userId: 1,
+              provider: "entra",
+              subject: "oid-1",
+              tenant: "t1",
+              email: "pat@corp.test",
+              createdAt: "2026-11-01T00:00:00Z",
+              lastLoginAt: null,
+            },
+          ],
+        }),
+      "DELETE /api/v1/users/1/identities/entra": () => noContent(),
+      "PATCH /api/v1/users/1": () =>
+        json(
+          user({
+            id: 1,
+            username: "pat",
+            role: "admin",
+            breakGlass: true,
+            extensionId: null,
+            extensionIds: [],
+          }),
+        ),
+    });
+    renderApp("/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Edit pat" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit pat" });
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: "Unlink Microsoft" }),
+    );
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "DELETE",
+        url: "/api/v1/users/1/identities/entra",
+        body: undefined,
+      }),
+    );
+    fireEvent.click(
+      within(dialog).getByRole("switch", { name: /Break-glass administrator/ }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+        breakGlass: true,
+      }),
+    );
+    expect(await screen.findByText("break-glass")).toBeInTheDocument();
+  });
+
+  it("offers break-glass only to administrators and explains the last one", async () => {
+    api("admin", {
+      "PATCH /api/v1/users/1": () => apiError(409, "last_break_glass", "no"),
+    });
+    renderApp("/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Edit sam" }));
+    expect(
+      within(screen.getByRole("dialog", { name: "Edit sam" })).queryByRole(
+        "switch",
+        { name: /Break-glass/ },
+      ),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit pat" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit pat" });
+    fireEvent.click(
+      within(dialog).getByRole("switch", { name: /Break-glass administrator/ }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(
+      await within(dialog).findByText(/last break-glass administrator/),
+    ).toBeInTheDocument();
+  });
+
   it("is for administrators only", async () => {
     const calls = api("operator");
     renderApp("/users");

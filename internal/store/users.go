@@ -15,6 +15,18 @@ import (
 // ErrLastAdmin rejects a change that would leave no enabled admin.
 var ErrLastAdmin = errors.New("store: last admin")
 
+// ErrLastBreakGlass rejects a change that would leave no enabled break-glass
+// admin once one exists (spec integrations AC-10c).
+var ErrLastBreakGlass = errors.New("store: last break-glass admin")
+
+// ErrBreakGlassLocalAdmin rejects flagging a user who is not an enabled,
+// local (not directory-synced) admin as break-glass.
+var ErrBreakGlassLocalAdmin = errors.New("store: break-glass needs an enabled local admin")
+
+// ErrManagedByDirectory rejects setting a password or reusing the name of a
+// user a directory connector manages (spec integrations I-29).
+var ErrManagedByDirectory = errors.New("store: managed by directory")
+
 // VoicemailEmailPrefs are a user's voicemail-to-email options.
 type VoicemailEmailPrefs struct {
 	// Notify turns the email on or off for this user.
@@ -55,6 +67,9 @@ type User struct {
 	ManagedBy *ManagedBy `json:"managedBy"`
 	// DisabledAt is when directory sync disabled the user, nil otherwise.
 	DisabledAt *time.Time `json:"disabledAt"`
+	// BreakGlass is a local admin who may always sign in with a password,
+	// also while single sign-on is required (spec integrations I-29).
+	BreakGlass bool `json:"breakGlass"`
 	// DeskphoneDelivery sends the customer texts of conversations assigned to
 	// the user to the phones of their extension (spec messaging-channels
 	// M-26); it also needs the number's own switch.
@@ -77,7 +92,7 @@ const userCols = `id, username, display_name, email, auth_method, role, enabled,
 	coalesce((SELECT json_agg(extension_id ORDER BY position, extension_id) FROM user_extensions WHERE user_id = users.id), '[]'::json)::text,
 	vm_email_notify, vm_email_attach, vm_email_after, totp_enabled_at IS NOT NULL, totp_required, created_at, ring_web, ring_mobile, deskphone_delivery,
 	source_connector_id, coalesce((SELECT name FROM directory_connectors WHERE id = users.source_connector_id), ''),
-	to_json(managed_fields)::text, disabled_at`
+	to_json(managed_fields)::text, disabled_at, break_glass`
 
 func scanUser(r interface{ Scan(...any) error }) (User, error) {
 	var (
@@ -90,7 +105,7 @@ func scanUser(r interface{ Scan(...any) error }) (User, error) {
 	)
 	err := r.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.AuthMethod, &u.Role, &u.Enabled, &u.MustChangePassword,
 		&u.ExtensionID, &exts, &u.VoicemailEmail.Notify, &u.VoicemailEmail.Attach, &u.VoicemailEmail.After, &u.TOTPEnabled, &u.TOTPRequired, &u.CreatedAt, &u.RingWeb, &u.RingMobile, &u.DeskphoneDelivery,
-		&connector, &cname, &managed, &disabled)
+		&connector, &cname, &managed, &disabled, &u.BreakGlass)
 	if err != nil {
 		return u, err
 	}
@@ -121,6 +136,13 @@ func scanUser(r interface{ Scan(...any) error }) (User, error) {
 func (s *Store) CreateUser(ctx context.Context, actor, username, passwordHash string, role auth.Role) (int64, error) {
 	var id int64
 	err := s.tx(ctx, func(tx *sql.Tx) error {
+		var managed bool
+		switch err := tx.QueryRowContext(ctx, `SELECT source_connector_id IS NOT NULL FROM users WHERE username = $1`, username).Scan(&managed); {
+		case err == nil && managed:
+			return ErrManagedByDirectory
+		case err != nil && !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO users (username, password_hash, role)
 			VALUES ($1, $2, CASE WHEN EXISTS (SELECT 1 FROM users) THEN $3 ELSE 'admin' END)
@@ -217,6 +239,8 @@ type AccountChange struct {
 	// of an admin needs SetterID to have active 2FA (ErrTwoFactorRequired).
 	TOTPRequired *bool
 	SetterID     int64
+	// BreakGlass flags or unflags a break-glass admin.
+	BreakGlass *bool
 }
 
 // UpdateAccount changes a user. Demoting or disabling the last enabled admin
@@ -244,6 +268,29 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 		if wasAdmin && (role != auth.RoleAdmin || !enabled) && admins <= 1 {
 			return ErrLastAdmin
 		}
+		if c.PasswordHash != nil && cur.ManagedBy != nil {
+			return ErrManagedByDirectory
+		}
+		breakGlass := cur.BreakGlass
+		if c.BreakGlass != nil {
+			breakGlass = *c.BreakGlass
+		}
+		if breakGlass && (role != auth.RoleAdmin || !enabled || cur.ManagedBy != nil) {
+			if c.BreakGlass != nil && *c.BreakGlass {
+				return ErrBreakGlassLocalAdmin
+			}
+			// Demoting or disabling a break-glass admin unflags it.
+			breakGlass = false
+		}
+		if cur.BreakGlass && cur.Enabled && cur.Role == auth.RoleAdmin && !breakGlass {
+			n, err := countBreakGlass(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if n <= 1 {
+				return ErrLastBreakGlass
+			}
+		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE users SET
 				display_name = COALESCE($2, display_name),
@@ -255,10 +302,11 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 				vm_email_notify = COALESCE($8, vm_email_notify),
 				vm_email_attach = COALESCE($9, vm_email_attach),
 				vm_email_after = COALESCE($10, vm_email_after),
-				totp_required = COALESCE($11, totp_required)
+				totp_required = COALESCE($11, totp_required),
+				break_glass = $12
 			WHERE id = $1`,
 			id, c.DisplayName, c.Email, string(role), enabled, c.PasswordHash, c.MustChange,
-			prefNotify(c.Voicemail), prefAttach(c.Voicemail), prefAfter(c.Voicemail), c.TOTPRequired); err != nil {
+			prefNotify(c.Voicemail), prefAttach(c.Voicemail), prefAfter(c.Voicemail), c.TOTPRequired, breakGlass); err != nil {
 			return err
 		}
 		if c.TOTPRequired != nil && *c.TOTPRequired && role == auth.RoleAdmin {
@@ -296,6 +344,11 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 			action = "require-2fa"
 			if !*c.TOTPRequired {
 				action = "unrequire-2fa"
+			}
+		case cur.BreakGlass != breakGlass:
+			action = "set-break-glass"
+			if !breakGlass {
+				action = "unset-break-glass"
 			}
 		}
 		// A change of extensions alone is audited as the link event only.
@@ -369,12 +422,21 @@ func (s *Store) DeleteUser(ctx context.Context, actor string, id int64) error {
 			return err
 		}
 		var role auth.Role
-		var enabled bool
-		if err := tx.QueryRowContext(ctx, `SELECT role, enabled FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&role, &enabled); err != nil {
+		var enabled, breakGlass bool
+		if err := tx.QueryRowContext(ctx, `SELECT role, enabled, break_glass FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&role, &enabled, &breakGlass); err != nil {
 			return mapErr(err)
 		}
 		if role == auth.RoleAdmin && enabled && admins <= 1 {
 			return ErrLastAdmin
+		}
+		if role == auth.RoleAdmin && enabled && breakGlass {
+			n, err := countBreakGlass(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if n <= 1 {
+				return ErrLastBreakGlass
+			}
 		}
 		// The devices cascade with the user; revoking first moves the
 		// revision, so hello-sip drops their registrations now.
@@ -403,6 +465,14 @@ func (s *Store) SetUserExtension(ctx context.Context, actor string, id int64, ex
 		ids = append(ids, *extension)
 	}
 	return s.UpdateAccount(ctx, actor, id, AccountChange{ExtensionIDs: &ids})
+}
+
+// countBreakGlass counts the enabled break-glass admins; the caller holds the
+// admin rows (lockAdmins), so concurrent changes serialise.
+func countBreakGlass(ctx context.Context, tx *sql.Tx) (int, error) {
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE role = 'admin' AND enabled AND break_glass`).Scan(&n)
+	return n, err
 }
 
 // lockAdmins locks every enabled admin row and counts them.
@@ -474,6 +544,12 @@ type Login struct {
 	Role    auth.Role
 	// TOTPEnabled is whether the login needs a second factor.
 	TOTPEnabled bool
+	// ConnectorID and ExternalID are set for a directory-synced user, who
+	// has no local password (spec integrations I-29); BreakGlass may use the
+	// password form while single sign-on is required.
+	ConnectorID int64
+	ExternalID  string
+	BreakGlass  bool
 }
 
 // UserForLogin returns the user named username with its password hash; the
@@ -481,9 +557,25 @@ type Login struct {
 func (s *Store) UserForLogin(ctx context.Context, username string) (Login, error) {
 	var l Login
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, password_hash, enabled, role, totp_enabled_at IS NOT NULL FROM users WHERE username = $1 AND auth_method = 'local'`, username).
-		Scan(&l.ID, &l.Hash, &l.Enabled, &l.Role, &l.TOTPEnabled)
+		`SELECT id, password_hash, enabled, role, totp_enabled_at IS NOT NULL, coalesce(source_connector_id, 0), coalesce(external_id, ''), break_glass
+		 FROM users WHERE username = $1 AND auth_method = 'local'`, username).
+		Scan(&l.ID, &l.Hash, &l.Enabled, &l.Role, &l.TOTPEnabled, &l.ConnectorID, &l.ExternalID, &l.BreakGlass)
 	return l, mapErr(err)
+}
+
+// SSORequired reports whether single sign-on is required, so only
+// break-glass users may use the password form (spec integrations I-29).
+func (s *Store) SSORequired(ctx context.Context) (bool, error) {
+	var on bool
+	err := s.db.QueryRowContext(ctx, `SELECT sso_required FROM auth_settings`).Scan(&on)
+	return on, err
+}
+
+// UserManagedByDirectory reports whether user id is directory-synced.
+func (s *Store) UserManagedByDirectory(ctx context.Context, id int64) (bool, error) {
+	var managed bool
+	err := s.db.QueryRowContext(ctx, `SELECT source_connector_id IS NOT NULL FROM users WHERE id = $1`, id).Scan(&managed)
+	return managed, mapErr(err)
 }
 
 // UserPasswordHash returns a user's password hash for re-verification at a

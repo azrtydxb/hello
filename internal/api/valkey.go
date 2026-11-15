@@ -272,6 +272,15 @@ func (l *LazyValkey) Bindings(ctx context.Context, aor string) ([]livestate.Bind
 	return c.live.Bindings(ctx, aor)
 }
 
+// WebRTCStatuses implements WebRTCLive.
+func (l *LazyValkey) WebRTCStatuses(ctx context.Context) ([]livestate.WebRTCNodeStatus, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.WebRTCStatuses(ctx)
+}
+
 // RegisterAttempts implements DiagnosticsLive.
 func (l *LazyValkey) RegisterAttempts(ctx context.Context, device string) ([]livestate.RegisterAttempt, error) {
 	c, err := l.get()

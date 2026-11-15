@@ -892,9 +892,9 @@ func (c *call) parkVoicemail(ctx context.Context, pk *parkState, relay *media.Re
 			ansBody = res.Body()
 		}
 	case pk.parkedIsCaller:
-		ansBody, ok = reinviteA(c.dss, answer)
+		ansBody, ok = reinviteA(c.s, c.dss, answer)
 	default:
-		ansBody, ok = reinviteAcked(w.session(), answer)
+		ansBody, ok = reinviteAcked(c.s, w.session(), answer)
 	}
 	if !ok {
 		_ = sess.Close()
@@ -1072,9 +1072,9 @@ func (c *call) holdParty(dir string) {
 	case hom != nil:
 		_, ok = s.haReinvite(hom.leg(false), body)
 	case lk.selfSide == cdr.SideCaller:
-		_, ok = reinviteA(dss, body)
+		_, ok = reinviteA(c.s, dss, body)
 	case w != nil:
-		_, ok = reinviteAcked(w.session(), body)
+		_, ok = reinviteAcked(c.s, w.session(), body)
 	}
 	if !ok {
 		c.addTrace("The other party's hold could not be signalled to this phone")

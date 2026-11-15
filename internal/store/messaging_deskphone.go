@@ -259,6 +259,13 @@ func (s *Store) deliverToDeskPhone(ctx context.Context, tx *sql.Tx, convID, cm, 
 	if err != nil {
 		return err
 	}
+	var files int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM message_media WHERE message_id = $1`, cm).Scan(&files); err != nil {
+		return err
+	}
+	// A phone cannot show an attachment: it is told there is one (spec
+	// M-26), and the inbox has the file.
+	body = messaging.WithMediaNote(body, files)
 	if !addrOn || !userOn || extKind == ExtensionDoor || strings.TrimSpace(body) == "" {
 		return nil
 	}

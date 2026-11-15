@@ -121,3 +121,60 @@ func (s *Store) clientQualityOf(ctx context.Context, cdrID int64) ([]ClientQuali
 	}
 	return out, rows.Err()
 }
+
+// CandidateTypes are the ICE candidate types a client can report for its
+// selected pair; anything else (or nothing) counts as unknown.
+var CandidateTypes = []string{"host", "srflx", "prflx", "relay", "unknown"}
+
+// NormalizeCandidateType maps a reported candidate type to one of
+// CandidateTypes.
+func NormalizeCandidateType(t string) string {
+	switch t {
+	case "host", "srflx", "prflx", "relay":
+		return t
+	}
+	return "unknown"
+}
+
+// ClientCandidateStats is how the selected ICE pairs of client calls were
+// made, from the clients' own end-of-call reports since a time: the counts of
+// the local (the client's) and remote (Hello's side as the client saw it)
+// candidate types, and how many calls went through TURN (a relay candidate on
+// either side).
+type ClientCandidateStats struct {
+	Since   time.Time      `json:"since"`
+	Reports int            `json:"reports"`
+	Local   map[string]int `json:"local"`
+	Remote  map[string]int `json:"remote"`
+	Relayed int            `json:"relayed"`
+}
+
+// ClientCandidateStats counts the candidate types of the reports filed since
+// since.
+func (s *Store) ClientCandidateStats(ctx context.Context, since time.Time) (ClientCandidateStats, error) {
+	out := ClientCandidateStats{Since: since.UTC(), Local: map[string]int{}, Remote: map[string]int{}}
+	for _, t := range CandidateTypes {
+		out.Local[t], out.Remote[t] = 0, 0
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT candidate_local, candidate_remote, count(*) FROM cdr_client_quality
+		WHERE reported_at >= $1 GROUP BY 1, 2`, since)
+	if err != nil {
+		return out, fmt.Errorf("store: client candidate stats: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var local, remote string
+		var n int
+		if err := rows.Scan(&local, &remote, &n); err != nil {
+			return out, err
+		}
+		local, remote = NormalizeCandidateType(local), NormalizeCandidateType(remote)
+		out.Reports += n
+		out.Local[local] += n
+		out.Remote[remote] += n
+		if local == "relay" || remote == "relay" {
+			out.Relayed += n
+		}
+	}
+	return out, rows.Err()
+}

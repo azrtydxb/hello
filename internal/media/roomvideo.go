@@ -608,8 +608,8 @@ func (p *Party) requestKeyframeGap(gap time.Duration) {
 		x = &rtcp.FullIntraRequest{SenderSSRC: self, MediaSSRC: media, FIR: []rtcp.FIREntry{{SSRC: media, SequenceNumber: seq}}}
 	}
 	if raw, err := rtcp.Marshal([]rtcp.Packet{x}); err == nil {
+		noteVideoKeyframeRequest() // counted before the sender loop can send it
 		p.vid.enqueue(relayMsg{data: raw, rtcp: true})
-		noteVideoKeyframeRequest()
 	}
 }
 

@@ -273,3 +273,20 @@ func DeskPhoneParts(channelKind, body string) []string {
 	}
 	return out
 }
+
+// WithMediaNote adds to a customer text shown on a desk phone that it came
+// with n attachments, which the phone cannot show (spec M-18, M-26): the
+// person reads them in the inbox.
+func WithMediaNote(body string, n int) string {
+	if n <= 0 {
+		return body
+	}
+	note := "[1 attachment: open the inbox to see it]"
+	if n > 1 {
+		note = "[" + strconv.Itoa(n) + " attachments: open the inbox to see them]"
+	}
+	if strings.TrimSpace(body) == "" {
+		return note
+	}
+	return body + "\n" + note
+}

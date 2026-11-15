@@ -298,6 +298,7 @@ current.
 | `getFlowGraph`                      | read       | `GET /api/v1/flow/graph`                                    | Read the call flow as a graph                                                                                                            |
 | `getFlowRevision`                   | read       | `GET /api/v1/flow/revision`                                 | Read the configuration revision                                                                                                          |
 | `traceFlow`                         | read       | `GET /api/v1/flow/trace`                                    | Trace the path a call would take through the call flow                                                                                   |
+| `getInboxAIStats`                   | messages   | `GET /api/v1/inbox/ai/stats`                                | Inbox AI counts                                                                                                                          |
 | `getInboxStats`                     | messages   | `GET /api/v1/inbox/stats`                                   | Inbox counts                                                                                                                             |
 | `listCRMConnectors`                 | admin      | `GET /api/v1/integrations/crm`                              | List CRM connectors                                                                                                                      |
 | `getCRMConnector`                   | admin      | `GET /api/v1/integrations/crm/{id}`                         | Get a CRM connector                                                                                                                      |
@@ -520,22 +521,24 @@ current.
 | `listVoicemailMessages`             | read       | `GET /api/v1/voicemail/messages`                            | List a box's voicemail messages                                                                                                          |
 | `deleteVoicemailMessage`            | write      | `DELETE /api/v1/voicemail/messages/{id}`                    | Delete a voicemail message                                                                                                               |
 | `markVoicemailMessageHeard`         | write      | `POST /api/v1/voicemail/messages/{id}/heard`                | Mark a voicemail message heard                                                                                                           |
+| `getWebRTCStatus`                   | read       | `GET /api/v1/webrtc/status`                                 | Web and mobile clients and their WebRTC media                                                                                            |
 | `listWifiProfiles`                  | read       | `GET /api/v1/wifi-profiles`                                 | List Wi-Fi profiles                                                                                                                      |
 | `createWifiProfile`                 | admin      | `POST /api/v1/wifi-profiles`                                | Create a Wi-Fi profile                                                                                                                   |
 | `getWifiProfile`                    | read       | `GET /api/v1/wifi-profiles/{id}`                            | One Wi-Fi profile                                                                                                                        |
 | `updateWifiProfile`                 | admin      | `PATCH /api/v1/wifi-profiles/{id}`                          | Change a Wi-Fi profile                                                                                                                   |
 | `deleteWifiProfile`                 | admin      | `DELETE /api/v1/wifi-profiles/{id}`                         | Delete a Wi-Fi profile                                                                                                                   |
 
-| Resource                           | Scope | What it holds                                    |
-| ---------------------------------- | ----- | ------------------------------------------------ |
-| `hello://calls`                    | read  | The calls in progress across the cluster.        |
-| `hello://registrations`            | read  | The devices registered now, with their contacts. |
-| `hello://cdrs/recent`              | read  | The last 50 call detail records.                 |
-| `hello://trunks/status`            | read  | Each trunk's registration and reachability.      |
-| `hello://cluster`                  | read  | The cluster's nodes, leases and health.          |
-| `hello://cdrs/{id}`                | read  | One CDR with its trace.                          |
-| `hello://extensions/{id}`          | read  | One extension.                                   |
-| `hello://diagnostics/devices/{id}` | read  | A device's registration attempts and failures.   |
+| Resource                           | Scope | What it holds                                                                         |
+| ---------------------------------- | ----- | ------------------------------------------------------------------------------------- |
+| `hello://calls`                    | read  | The calls in progress across the cluster.                                             |
+| `hello://registrations`            | read  | The devices registered now, with their contacts.                                      |
+| `hello://cdrs/recent`              | read  | The last 50 call detail records.                                                      |
+| `hello://trunks/status`            | read  | Each trunk's registration and reachability.                                           |
+| `hello://cluster`                  | read  | The cluster's nodes, leases and health.                                               |
+| `hello://webrtc/status`            | read  | Web and mobile clients, their WebRTC legs (ICE, DTLS, TURN) and recent client errors. |
+| `hello://cdrs/{id}`                | read  | One CDR with its trace.                                                               |
+| `hello://extensions/{id}`          | read  | One extension.                                                                        |
+| `hello://diagnostics/devices/{id}` | read  | A device's registration attempts and failures.                                        |
 
 <!-- doctable:end -->
 

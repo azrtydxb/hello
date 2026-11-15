@@ -191,6 +191,22 @@ func (h *homedCall) setCallee(l *haLeg) {
 	h.mu.Unlock()
 }
 
+// doOn sends a request built on the leg (s.do). A phone that challenges it
+// (S-22) is answered as the leg's device, and the leg's next CSeq follows the
+// re-sent request's.
+func (s *Server) doOn(ctx context.Context, l *haLeg, req *sip.Request) (*sip.Response, error) {
+	l.mu.Lock()
+	device := s.endpointDevice(deviceOfAOR(l.endpoint))
+	l.mu.Unlock()
+	res, err := s.doDevice(ctx, req, device)
+	if cs := req.CSeq(); cs != nil {
+		l.mu.Lock()
+		l.localCSeq = max(l.localCSeq, cs.SeqNo+1)
+		l.mu.Unlock()
+	}
+	return res, err
+}
+
 // request builds an in-dialog request on the leg and spends the leg's next
 // CSeq on it, in one step: two requests built at once never share a CSeq.
 func (l *haLeg) request(s *Server, method sip.RequestMethod, body []byte, contentType string) (*sip.Request, error) {
@@ -325,7 +341,7 @@ func (s *Server) haReinvite(l *haLeg, body []byte) (*sip.Response, bool) {
 			return nil, false
 		}
 		timed := l.addSessionTimer(s, req)
-		res, err = s.do(ctx, req)
+		res, err = s.doOn(ctx, l, req)
 		if err != nil || res == nil {
 			return nil, false
 		}

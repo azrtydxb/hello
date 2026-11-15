@@ -1,9 +1,13 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { errorMessage, fieldErrors } from "../api";
 import {
+  CHAT_LOGO_MAX,
+  chatSiteLogoUrl,
   createChatSite,
   deleteChatBlock,
   deleteChatSite,
+  deleteChatSiteLogo,
+  putChatSiteLogo,
   listChatBlocks,
   listChatSites,
   updateChatSite,
@@ -52,14 +56,122 @@ function availabilityBadge(s: ChatSite) {
   );
 }
 
+/**
+ * A site's logo (spec messaging-channels M-18): uploaded on its own, kept in
+ * the media store, shown in the widget's header. SVG is refused: only PNG,
+ * JPEG, GIF and WebP, at most 256 KB.
+ */
+function LogoField({
+  site,
+  onChanged,
+}: {
+  site: ChatSite;
+  onChanged: (s: ChatSite) => void;
+}) {
+  const [current, setCurrent] = useState(site);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+
+  async function upload(f: File | undefined) {
+    if (input.current) input.current.value = "";
+    if (!f) return;
+    if (f.size > CHAT_LOGO_MAX) {
+      setError("The logo is larger than 256 KB.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const s = await putChatSiteLogo(current.id, f);
+      setCurrent(s);
+      onChanged(s);
+    } catch (err: unknown) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteChatSiteLogo(current.id);
+      const s = { ...current, logo: false };
+      setCurrent(s);
+      onChanged(s);
+    } catch (err: unknown) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="az-field">
+      <span className="az-field__label">Logo</span>
+      {current.logo ? (
+        <img
+          src={chatSiteLogoUrl(current.id, current.updatedAt)}
+          alt={`Logo of ${current.name}`}
+          style={{ maxHeight: 40, maxWidth: 160, display: "block" }}
+        />
+      ) : (
+        <span className="az-caption">No logo: the widget shows the name.</span>
+      )}
+      <input
+        ref={input}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        hidden
+        aria-label="Logo file"
+        onChange={(e) => void upload(e.target.files?.[0])}
+      />
+      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={busy}
+          onClick={() => input.current?.click()}
+        >
+          {current.logo ? "Replace logo" : "Upload logo"}
+        </Button>
+        {current.logo && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => void remove()}
+          >
+            Remove logo
+          </Button>
+        )}
+      </div>
+      <span className="az-caption">
+        PNG, JPEG, GIF or WebP, at most 256 KB.
+      </span>
+      {error && (
+        <Alert tone="bad" title="Logo not saved">
+          {error}
+        </Alert>
+      )}
+    </div>
+  );
+}
+
 function SiteDialog({
   site,
   onClose,
   onSaved,
+  onLogo,
 }: {
   site: ChatSite | null;
   onClose: () => void;
   onSaved: (s: ChatSite) => void;
+  onLogo: (s: ChatSite) => void;
 }) {
   useRestoreFocus();
   const [name, setName] = useState(site?.name ?? "");
@@ -79,6 +191,7 @@ function SiteDialog({
   const [tsSecret, setTsSecret] = useState("");
   const [stripLinks, setStripLinks] = useState(site?.stripLinks ?? false);
   const [transcripts, setTranscripts] = useState(site?.transcripts ?? false);
+  const [attachments, setAttachments] = useState(site?.attachments ?? false);
   const [cap, setCap] = useState(String(site?.maxOpenUnassigned ?? 200));
   const [retention, setRetention] = useState(
     site?.retentionDays ? String(site.retentionDays) : "",
@@ -110,6 +223,7 @@ function SiteDialog({
       turnstileSiteKey: tsKey.trim(),
       stripLinks,
       transcripts,
+      attachments,
       maxOpenUnassigned: Number(cap),
       retentionDays: retention.trim() === "" ? 0 : Number(retention),
     };
@@ -287,6 +401,20 @@ function SiteDialog({
           checked={transcripts}
           onChange={(e) => setTranscripts(e.target.checked)}
         />
+        <Switch
+          label="Let visitors send images and PDFs"
+          hint="At most 5 MB each and 5 an hour; SVG and anything else is refused. Hello has no virus scanner: leave this off for sites anyone can open."
+          labelPosition="end"
+          checked={attachments}
+          onChange={(e) => setAttachments(e.target.checked)}
+        />
+        {site ? (
+          <LogoField site={site} onChanged={onLogo} />
+        ) : (
+          <span className="az-caption">
+            Save the site first, then add a logo.
+          </span>
+        )}
         <Input
           label="Live chats that may wait"
           hint="Beyond this many unassigned live chats the widget switches to leaving a message."
@@ -591,6 +719,7 @@ export function MessagingWebchat() {
             toast.show(`Chat site ${s.name} saved.`);
             refresh();
           }}
+          onLogo={() => refresh()}
         />
       )}
       {embed && <EmbedDialog site={embed} onClose={() => setEmbed(null)} />}

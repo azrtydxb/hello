@@ -75,6 +75,10 @@ type Conversation struct {
 	// Chat is what an agent sees of a chat visitor; nil for any other
 	// conversation. Set when one conversation is read.
 	Chat *ChatInfo `json:"chat"`
+	// AI is what the inbox AI made of it (spec M-30): the number's mode,
+	// the last triage, what it changed, the flags and, when one
+	// conversation is read, the reply draft for its latest text.
+	AI ConvAI `json:"ai"`
 }
 
 // ConvMessage is one line of a conversation.
@@ -94,6 +98,8 @@ type ConvMessage struct {
 	SentAt         *time.Time `json:"sentAt"`
 	DeliveredAt    *time.Time `json:"deliveredAt"`
 	ReadAt         *time.Time `json:"readAt"`
+	// Media are the message's attachments (spec M-18), oldest first.
+	Media []ConvMedia `json:"media"`
 }
 
 const convSelect = `SELECT c.id, c.channel_id, ch.kind, ch.name, c.address_id, a.address, c.peer_key, c.peer_kind,
@@ -104,7 +110,11 @@ const convSelect = `SELECT c.id, c.channel_id, ch.kind, ch.name, c.address_id, a
 		AND x.kind = 'message' AND x.id > coalesce(r.last_read_message_id, 0)),
 	EXISTS (SELECT 1 FROM sms_opt_outs o WHERE o.address_id = c.address_id AND o.peer_key = c.peer_key AND o.state = 'out'),
 	c.last_message_at, c.last_inbound_at, c.first_response_at, c.resolved_at, c.created_at,
-	c.queue_id, coalesce(qq.name, '')
+	c.queue_id, coalesce(qq.name, ''),
+	a.ai_mode, coalesce(c.ai_triage::text, ''), c.ai_applied::text, c.ai_spam,
+	(c.ai_handoff_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM conversation_messages hx WHERE hx.conversation_id = c.id
+		AND hx.direction = 'out' AND hx.kind = 'message' AND hx.sender_kind = 'user' AND hx.created_at >= c.ai_handoff_at)),
+	c.ai_handoff_reason
 	FROM conversations c
 	JOIN msg_channels ch ON ch.id = c.channel_id
 	LEFT JOIN queues qq ON qq.id = c.queue_id
@@ -123,10 +133,16 @@ func scanConversation(r interface{ Scan(...any) error }) (Conversation, error) {
 		resolved sql.NullTime
 		queueID  sql.NullInt64
 		tags     string
+		triage   string
+		applied  string
 	)
 	if err := r.Scan(&c.ID, &c.ChannelID, &c.ChannelKind, &c.ChannelName, &c.AddressID, &c.Address, &c.Peer, &c.PeerKind,
 		&c.PeerName, &c.PeerNameSource, &c.Status, &snoozed, &assignee, &c.AssigneeName, &c.Priority, &tags,
-		&c.Preview, &c.Unread, &c.OptedOut, &c.LastMessageAt, &lastIn, &first, &resolved, &c.CreatedAt, &queueID, &c.QueueName); err != nil {
+		&c.Preview, &c.Unread, &c.OptedOut, &c.LastMessageAt, &lastIn, &first, &resolved, &c.CreatedAt, &queueID, &c.QueueName,
+		&c.AI.Mode, &triage, &applied, &c.AI.Spam, &c.AI.Handoff, &c.AI.HandoffReason); err != nil {
+		return c, err
+	}
+	if err := c.AI.decode(triage, applied); err != nil {
 		return c, err
 	}
 	if queueID.Valid {
@@ -258,6 +274,9 @@ func (s *Store) GetConversation(ctx context.Context, acc InboxAccess, id int64) 
 		return c, mapErr(err)
 	}
 	s.auditSupervisorView(ctx, acc, c)
+	if c.AI.Draft, c.AI.Pending, err = s.convDraft(ctx, c.ID); err != nil {
+		return c, err
+	}
 	if c.ChannelKind == messaging.KindWebchat {
 		if c.Chat, err = s.chatInfo(ctx, c.ID); err != nil {
 			return c, err
@@ -306,6 +325,7 @@ func scanConvMessage(r interface{ Scan(...any) error }) (ConvMessage, error) {
 		m.SenderUserID = &user.Int64
 	}
 	m.SentAt, m.DeliveredAt, m.ReadAt = nullTime(sent), nullTime(deliv), nullTime(read)
+	m.Media = []ConvMedia{}
 	return m, nil
 }
 
@@ -338,6 +358,9 @@ func (s *Store) ListConversationMessages(ctx context.Context, acc InboxAccess, c
 	if len(out) > limit {
 		out = out[:limit]
 		next = out[limit-1].ID
+	}
+	if err := loadMedia(ctx, s.db, out); err != nil {
+		return nil, 0, err
 	}
 	return out, next, nil
 }
@@ -433,6 +456,9 @@ type SendInput struct {
 	Body           string
 	// ClientMsgID makes a retried send idempotent; empty means none.
 	ClientMsgID string
+	// MediaIDs are the caller's uploads to this conversation that go with
+	// the text (spec M-18); only a website chat carries them in this build.
+	MediaIDs []int64
 }
 
 // SendConversationText sends an agent's reply through the conversation's
@@ -457,7 +483,11 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 			m, err := scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+`
 				FROM conversation_messages WHERE conversation_id = $1 AND client_msg_id = $2`, c.ID, in.ClientMsgID))
 			if err == nil {
-				msg, created = m, false
+				ms := []ConvMessage{m}
+				if err := loadMedia(ctx, tx, ms); err != nil {
+					return err
+				}
+				msg, created = ms[0], false
 				return nil
 			}
 			if !errors.Is(err, sql.ErrNoRows) {
@@ -466,6 +496,9 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 		}
 		if c.Status == messaging.StatusSpam {
 			return ErrConversationState
+		}
+		if err := cleanMediaIDs(in.MediaIDs); err != nil {
+			return err
 		}
 		var (
 			prov, address, kind, chStatus string
@@ -489,6 +522,11 @@ func (s *Store) SendConversationText(ctx context.Context, acc InboxAccess, in Se
 			sinkEvent = &messaging.Event{Type: "message.sent", ConversationID: c.ID, MessageID: m.ID, ChannelKind: kind,
 				Direction: messaging.DirOut, Status: m.Status}
 			return nil
+		}
+		if len(in.MediaIDs) > 0 {
+			// A SIP trunk carries no media, and a carrier needs the public
+			// listener's links to fetch it (spec M-18, not in this build).
+			return ErrMediaUnsupported
 		}
 		carrier := prov != messaging.ProviderSIPTrunk
 		switch {
@@ -1209,7 +1247,15 @@ func (s *Store) ingestTrunkText(ctx context.Context, tx *sql.Tx, in TrunkText, r
 	}
 	row := convRow{ID: conv, ChannelID: channelID, AddressID: addressID, PeerKey: in.FromKey}
 
-	switch messaging.ClassifyKeyword(in.Body, words) {
+	kw := messaging.ClassifyKeyword(in.Body, words)
+	if kw == messaging.KeywordNone {
+		// The AI reads the text after it is stored (spec M-30); the opt-out
+		// keywords are the opt-out engine's.
+		if err := queueAITriage(ctx, tx, conv, addressID, msgID); err != nil {
+			return err
+		}
+	}
+	switch kw {
 	case messaging.KeywordOptOut:
 		h, err := s.peerHash(in.FromKey)
 		if err != nil {

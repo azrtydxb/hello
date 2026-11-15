@@ -384,13 +384,13 @@ func (c2 *call) handOver(from *call, l *leg) bool {
 	if len(aSDP) == 0 {
 		aSDP = l.session().InviteResponse.Body()
 	}
-	cSDP, ok := reinvite(l.session(), aSDP)
+	cSDP, ok := reinvite(c2.s, l.session(), aSDP)
 	if !ok {
 		c2.addTrace("Transferred caller re-INVITE failed; media follows the old path")
 		return true
 	}
 	c2.noteSDP(sessCallee, aSDP) // the SDP last sent on each dialog, for a refresh
-	aAns, ok := reinviteA(from.dss, cSDP)
+	aAns, ok := reinviteA(c2.s, from.dss, cSDP)
 	if !ok {
 		return true
 	}
@@ -526,9 +526,23 @@ func (c *call) attendedReplaces(w *leg, target, replaces string, viaCaller bool)
 		return
 	}
 	if !oConnected || oWinner == nil {
-		// The second call was never answered: treated as a blind transfer
-		// (spec edge case).
+		// The second call was never answered (attended transfer before
+		// answer, S-17): treated as a blind transfer (spec edge case). The
+		// transferor's own consultation call, still ringing the target, is
+		// cancelled first, so the target rings once, for the transferee,
+		// and the transferor is left with no call up.
 		c.addTrace("Attended transfer: second call unanswered; blind transfer")
+		transferor := c.callerNum
+		if !viaCaller && w != nil {
+			transferor = w.binding.Extension
+		}
+		other.mu.Lock()
+		consultation := other.callerNum == transferor && !other.connected
+		other.mu.Unlock()
+		if consultation {
+			other.addTrace("Consultation call cancelled: transferred before answer")
+			other.abortCancel("transferred before answer")
+		}
 		if viaCaller {
 			c.transferBlindVia(c.callerNum, target, TransferAttended, nil)
 		} else {
@@ -576,13 +590,13 @@ func (c *call) bridge(other *call) bool {
 			aSDP = wA.session().InviteResponse.Body()
 		}
 		// 1. re-INVITE C (the second party's leg) with A's SDP as the offer.
-		cSDP, ok := reinvite(wB.session(), aSDP)
+		cSDP, ok := reinvite(c.s, wB.session(), aSDP)
 		if !ok {
 			return false
 		}
 		other.noteBridgeSDP(sessCallee, aSDP)
 		// 2. re-INVITE A (the original caller) with C's answer.
-		aAns, ok := reinviteA(other.dss, cSDP)
+		aAns, ok := reinviteA(c.s, other.dss, cSDP)
 		if !ok {
 			return false
 		}
@@ -654,23 +668,23 @@ func (c *call) bridge(other *call) bool {
 // started on the dialog is in progress (inviteGate), and reads nothing of
 // the session's stored INVITE that sipgo parses lazily: Content-Type is
 // written fresh (every re-INVITE body Hello sends is SDP).
-func reinvite(dcs *sipgo.DialogClientSession, body []byte) ([]byte, bool) {
+func reinvite(s *Server, dcs *sipgo.DialogClientSession, body []byte) ([]byte, bool) {
 	if dcs == nil || dcs.InviteResponse == nil {
 		return nil, false
 	}
 	defer inviteGate.lock(dcs)()
-	return sendReinvite(dcs, body)
+	return sendReinvite(s, dcs, body)
 }
 
 // reinviteAcked is reinvite whose 2xx is ACKed (without a body) before the
 // dialog's gate opens, so the next queued re-INVITE never reaches the phone
 // ahead of this one's ACK.
-func reinviteAcked(dcs *sipgo.DialogClientSession, body []byte) ([]byte, bool) {
+func reinviteAcked(s *Server, dcs *sipgo.DialogClientSession, body []byte) ([]byte, bool) {
 	if dcs == nil || dcs.InviteResponse == nil {
 		return nil, false
 	}
 	defer inviteGate.lock(dcs)()
-	ans, ok := sendReinvite(dcs, body)
+	ans, ok := sendReinvite(s, dcs, body)
 	if ok {
 		ackLate(dcs, nil)
 	}
@@ -678,7 +692,7 @@ func reinviteAcked(dcs *sipgo.DialogClientSession, body []byte) ([]byte, bool) {
 }
 
 // sendReinvite is reinvite's transaction; the caller holds the gate.
-func sendReinvite(dcs *sipgo.DialogClientSession, body []byte) ([]byte, bool) {
+func sendReinvite(s *Server, dcs *sipgo.DialogClientSession, body []byte) ([]byte, bool) {
 	inv := dcs.InviteRequest
 	req := sip.NewRequest(sip.INVITE, *dcs.InviteRequest.Recipient.Clone())
 	from := &sip.FromHeader{Address: *inv.To().Address.Clone(), Params: sip.HeaderParams{{K: "tag", V: tagParam(inv.To())}}}
@@ -696,7 +710,7 @@ func sendReinvite(dcs *sipgo.DialogClientSession, body []byte) ([]byte, bool) {
 	req.SetTransport("UDP")
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	res, err := requireResponse(dcs.Do(ctx, req))
+	res, err := s.dialogDo(ctx, req, dcs.Do) // a phone may challenge it (S-22)
 	if err != nil || res == nil || !res.IsSuccess() {
 		return nil, false
 	}
@@ -705,7 +719,7 @@ func sendReinvite(dcs *sipgo.DialogClientSession, body []byte) ([]byte, bool) {
 
 // reinviteA is a re-INVITE on the caller's dialog (we are the UAS there),
 // gated like reinvite.
-func reinviteA(dss *sipgo.DialogServerSession, body []byte) ([]byte, bool) {
+func reinviteA(s *Server, dss *sipgo.DialogServerSession, body []byte) ([]byte, bool) {
 	if dss == nil {
 		return nil, false
 	}
@@ -727,7 +741,7 @@ func reinviteA(dss *sipgo.DialogServerSession, body []byte) ([]byte, bool) {
 	req.SetTransport("UDP")
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	res, err := requireResponse(dss.Do(ctx, req))
+	res, err := s.dialogDo(ctx, req, dss.Do) // a phone may challenge it (S-22)
 	if err != nil || res == nil || !res.IsSuccess() {
 		return nil, false
 	}
@@ -819,7 +833,7 @@ func (c2 *call) handOverAnchored(from *call, l *leg) (handled, ok bool) {
 		return true, c2.refuseTransferSRTP(l, "the transfer target requires SRTP and is not on TLS")
 	}
 	cOffer := c2.cryptoOfferOn(relay, legCallee, lg, filteredOffer(off, legCodecs(l)).PlainOffer()).Build(host, relay.LegPort(legCallee), "sendrecv")
-	cAns, ok := reinvite(l.session(), cOffer)
+	cAns, ok := reinvite(c2.s, l.session(), cOffer)
 	if !ok {
 		c2.addTrace("Transferred leg re-INVITE onto the anchor failed; its media follows the original offer")
 		return true, true
@@ -834,7 +848,7 @@ func (c2 *call) handOverAnchored(from *call, l *leg) (handled, ok bool) {
 	neg := media.AnswerFor(off, targetAns)
 	c2.applyNegotiated(neg, "transfer", "")
 	aOffer := keepSecurity(relay, legCaller, neg).Build(host, relay.LegPort(legCaller), "sendrecv")
-	if aAns, ok := reinviteA(from.dss, aOffer); ok {
+	if aAns, ok := reinviteA(c2.s, from.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
 		c2.noteSDP(sessCaller, aOffer)
 	}
@@ -875,7 +889,7 @@ func (other *call) bridgeAnchored(wB *leg) (*media.Relay, bool) {
 		return relay, false
 	}
 	cOffer := other.cryptoOfferOn(relay, legCallee, lg, filteredOffer(off, legCodecs(wB)).PlainOffer()).Build(host, relay.LegPort(legCallee), "sendrecv")
-	cAns, ok := reinvite(wB.session(), cOffer)
+	cAns, ok := reinvite(other.s, wB.session(), cOffer)
 	if !ok {
 		return relay, false
 	}
@@ -890,7 +904,7 @@ func (other *call) bridgeAnchored(wB *leg) (*media.Relay, bool) {
 	neg := media.AnswerFor(off, targetAns)
 	other.applyNegotiated(neg, "transfer", "")
 	aOffer := keepSecurity(relay, legCaller, neg).Build(host, relay.LegPort(legCaller), "sendrecv")
-	if aAns, ok := reinviteA(other.dss, aOffer); ok {
+	if aAns, ok := reinviteA(other.s, other.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
 		other.noteBridgeSDP(sessCaller, aOffer)
 	}
