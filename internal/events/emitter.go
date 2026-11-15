@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -56,6 +57,20 @@ type ValkeyAppender struct{ C valkey.Client }
 func (a ValkeyAppender) Append(ctx context.Context, payload []byte) error {
 	return a.C.Do(ctx, a.C.B().Arbitrary("XADD").Keys(StreamKey).
 		Args("MAXLEN", "~", "10000", "*", streamField, string(payload)).Build()).Error()
+}
+
+// LazyAppender appends to the Valkey stream through a client that may not
+// be connected yet (hello-control connects in the background); while it is
+// not, an append fails and the event is dropped like any other.
+type LazyAppender struct{ Client func() valkey.Client }
+
+// Append implements Appender.
+func (a LazyAppender) Append(ctx context.Context, payload []byte) error {
+	c := a.Client()
+	if c == nil {
+		return errors.New("events: valkey is not connected")
+	}
+	return ValkeyAppender{C: c}.Append(ctx, payload)
 }
 
 // Emitter queues events without blocking and appends them from a background

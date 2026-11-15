@@ -989,12 +989,25 @@ func (s *server) eraseMessagingPeer(w http.ResponseWriter, r *http.Request) {
 		writeFields(w, fieldErrs{{Path: "peer", Message: "must be a phone number or a chat visitor (visitor:<id>)"}})
 		return
 	}
-	rep, err := is.ErasePeer(r.Context(), actor(r).String(), key)
+	who := actor(r).String()
+	rep, err := is.ErasePeer(r.Context(), who, key)
 	if err != nil {
 		s.inboxError(w, "erase", err)
 		return
 	}
 	s.eraseMediaObjects(r.Context(), is, &rep)
+	// The texts sent through a carrier API are deleted there too, best
+	// effort: what the carriers did is part of the report.
+	if ps, ok := is.(InboxPrivacyStore); ok {
+		names := make([]string, len(rep.Providers))
+		for i, p := range rep.Providers {
+			names[i] = p.Provider
+		}
+		if rep.Providers, err = s.providerReport(r.Context(), ps, who, rep.Batch, names); err != nil {
+			s.internal(w, "erase: provider report", err)
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, rep)
 }
 

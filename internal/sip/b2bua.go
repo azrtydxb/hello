@@ -156,6 +156,12 @@ type call struct {
 	// the one dialled after the code).
 	vmTarget string
 	held     bool
+	// linkedInMu serializes a linked call's party's re-INVITEs and UPDATEs
+	// (linkedReinvite) from first look to the hold passed on to the peer:
+	// the next one arrives once this one's 200 is out, and must not pass
+	// it on to the peer before (or instead of) this one. Never taken under
+	// mu.
+	linkedInMu sync.Mutex
 	// doorOpening is set while a door-open code is being sent (spec S-47),
 	// guarded by mu, so two presses never interleave their events.
 	doorOpening bool
@@ -2336,13 +2342,20 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 	// relayed unchanged, so both phones agree on the direction.
 	c.setHeld(sdpHeld(req.Body()))
 	var (
-		out *sip.Request
-		do  func(context.Context, *sip.Request) (*sip.Response, error)
+		out  *sip.Request
+		do   func(context.Context, *sip.Request) (*sip.Response, error)
+		gate any // the dialog the request goes out on (inviteGate)
 	)
 	if ref.leg == nil {
-		out, do = sip.NewRequest(req.Method, w.target()), w.session().Do
+		ws := w.session()
+		out, do, gate = sip.NewRequest(req.Method, w.target()), ws.Do, ws
 	} else {
-		out, do = sip.NewRequest(req.Method, c.target()), c.dss.Do
+		out, do, gate = sip.NewRequest(req.Method, c.target()), c.dss.Do, c.dss
+	}
+	if req.Method == sip.INVITE {
+		// The relayed re-INVITE is Hello's INVITE transaction on the other
+		// dialog: it waits out one Hello started there (RFC 3261 14.1).
+		defer inviteGate.lock(gate)()
 	}
 	if body := req.Body(); len(body) > 0 {
 		if ct := req.ContentType(); ct != nil {

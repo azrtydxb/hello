@@ -490,6 +490,8 @@ interface Draft {
   types: string[];
   extensions: string;
   allowPrivate: boolean;
+  includePeer: boolean;
+  includeMessageBody: boolean;
   enabled: boolean;
 }
 
@@ -500,10 +502,21 @@ const draftOf = (e: WebhookEndpoint | null): Draft => ({
   types: e?.events ?? [],
   extensions: e?.extensions.join(", ") ?? "",
   allowPrivate: e?.allowPrivate ?? false,
+  includePeer: e?.includePeer ?? false,
+  includeMessageBody: e?.includeMessageBody ?? false,
   enabled: e?.enabled ?? true,
 });
 
-const KEYS = ["name", "url", "events", "extensions", "allowPrivate", "enabled"];
+const KEYS = [
+  "name",
+  "url",
+  "events",
+  "extensions",
+  "allowPrivate",
+  "includePeer",
+  "includeMessageBody",
+  "enabled",
+];
 
 function parseExtensions(text: string): string[] {
   return text
@@ -569,6 +582,8 @@ function EndpointDrawer({
       extensions: parseExtensions(d.extensions),
       enabled: d.enabled,
       allowPrivate: d.allowPrivate,
+      includePeer: d.includePeer,
+      includeMessageBody: d.includeMessageBody,
     };
     try {
       if (endpoint) {
@@ -670,7 +685,8 @@ function EndpointDrawer({
             className="pf-head__desc"
             role={errors.events ? "alert" : undefined}
           >
-            {errors.events ?? "Pick the call events this receiver needs."}
+            {errors.events ??
+              "Pick the call and messaging inbox events this receiver needs."}
           </p>
         </fieldset>
         <Input
@@ -689,6 +705,23 @@ function EndpointDrawer({
           checked={d.allowPrivate}
           onChange={(e) => set("allowPrivate", e.target.checked)}
         />
+        <fieldset className="pf-stack">
+          <legend>Messaging inbox events</legend>
+          <Switch
+            label="Include the customer's number"
+            labelPosition="end"
+            hint="Without it, conversation and message events carry only peerKey, a hash that tells customers apart without naming them."
+            checked={d.includePeer}
+            onChange={(e) => set("includePeer", e.target.checked)}
+          />
+          <Switch
+            label="Include the message text"
+            labelPosition="end"
+            hint="Adds the text to message.received and message.sent; never internal notes or redacted messages. The receiver then holds customer messages: turn it on only for a system that may keep them. The change is recorded in the audit log."
+            checked={d.includeMessageBody}
+            onChange={(e) => set("includeMessageBody", e.target.checked)}
+          />
+        </fieldset>
         <Switch
           label="Enabled"
           labelPosition="end"

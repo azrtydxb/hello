@@ -1102,8 +1102,9 @@ func (c *call) legPortFor(caller bool) int {
 func (c *call) mirrorInDialog(req *sip.Request, tx sip.ServerTransaction, fromCaller bool) {
 	s := c.s
 	var (
-		out *sip.Request
-		do  func(context.Context, *sip.Request) (*sip.Response, error)
+		out  *sip.Request
+		do   func(context.Context, *sip.Request) (*sip.Response, error)
+		gate any // the dialog the request goes out on (inviteGate)
 	)
 	if fromCaller {
 		c.mu.Lock()
@@ -1113,9 +1114,13 @@ func (c *call) mirrorInDialog(req *sip.Request, tx sip.ServerTransaction, fromCa
 			s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
 			return
 		}
-		out, do = sip.NewRequest(req.Method, w.target()), w.session().Do
+		ws := w.session()
+		out, do, gate = sip.NewRequest(req.Method, w.target()), ws.Do, ws
 	} else {
-		out, do = sip.NewRequest(req.Method, c.target()), c.dss.Do
+		out, do, gate = sip.NewRequest(req.Method, c.target()), c.dss.Do, c.dss
+	}
+	if req.Method == sip.INVITE {
+		defer inviteGate.lock(gate)() // one INVITE transaction per dialog
 	}
 	if body := req.Body(); len(body) > 0 {
 		if ct := req.ContentType(); ct != nil {

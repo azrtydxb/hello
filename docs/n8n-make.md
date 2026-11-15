@@ -7,20 +7,30 @@ phase P17). Both are thin clients of Hello's generic surface, the same one the
 Your Hello console must be reachable from the tool over https, and for the
 triggers the tool's webhook address must be reachable from Hello.
 
-| What                      | Hello API it uses                                         | n8n                  | Make                  |
-| ------------------------- | --------------------------------------------------------- | -------------------- | --------------------- |
-| Trigger on call events    | `POST/DELETE /api/v1/webhooks` ([webhooks](integrations.md#webhooks)) | Hello PBX Trigger    | Watch Call Events     |
-| Place a call              | `POST /api/v1/calls/originate`                            | Call: Place          | Place a Call          |
-| Get a call record         | `GET /api/v1/cdrs/{id}`                                   | Call: Get            | Get a Call Record     |
-| List the latest calls     | `GET /api/v1/cdrs`                                        | Call: Get Many       | List Calls            |
-| Find a contact by number  | `GET /api/v1/lookup/number` (added with the Zapier integration) | Contact: Find by Number | Find a Contact by Number |
-| Anything else             | any route with the same token                             | HTTP Request node    | Make an API Call      |
+| What                             | Hello API it uses                                                     | n8n                     | Make                     |
+| -------------------------------- | --------------------------------------------------------------------- | ----------------------- | ------------------------ |
+| Trigger on call and inbox events | `POST/DELETE /api/v1/webhooks` ([webhooks](integrations.md#webhooks)) | Hello PBX Trigger       | Watch Call Events        |
+| Place a call                     | `POST /api/v1/calls/originate`                                        | Call: Place             | Place a Call             |
+| Get a call record                | `GET /api/v1/cdrs/{id}`                                               | Call: Get               | Get a Call Record        |
+| List the latest calls            | `GET /api/v1/cdrs`                                                    | Call: Get Many          | List Calls               |
+| Find a contact by number         | `GET /api/v1/lookup/number` (added with the Zapier integration)       | Contact: Find by Number | Find a Contact by Number |
+| Anything else                    | any route with the same token                                         | HTTP Request node       | Make an API Call         |
 
 Events you can start on: `call.ringing`, `call.answered`, `call.missed`,
 `call.ended`, `call.completed` (carries the `cdrId` to fetch the record),
-`call.recording.ready` and `voicemail.received`. An event is the
-[envelope](integrations.md#what-is-emitted) as JSON; its `id` is stable across
-Hello's retries.
+`call.recording.ready` and `voicemail.received`, and the
+[messaging inbox events](integrations.md#messaging-inbox-events)
+`conversation.created`, `conversation.assigned`, `conversation.resolved`,
+`message.received`, `message.sent`, `message.status` and `message.optout`. An
+event is the [envelope](integrations.md#what-is-emitted) as JSON; its `id` is
+stable across Hello's retries.
+
+An inbox event carries a hashed customer key (`peerKey`), not the customer's
+number or the text. Both triggers have **Include the customer's number** and
+**Include the message text**, off by default: they set `includePeer` and
+`includeMessageBody` on the webhook (recorded in Hello's audit log), and the
+events then carry `data.peer` and, on received and sent messages, `data.body`.
+A trigger limited to some extensions receives no inbox events.
 
 ## The token
 

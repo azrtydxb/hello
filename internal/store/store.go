@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/auth"
@@ -79,8 +80,9 @@ type Store struct {
 	db   *sql.DB
 	box  *secret.Box
 	prov ProvSettings
-	// msgEvents receives the inbox's events; nil drops them.
-	msgEvents messaging.EventSink
+	// msgEvents receives the inbox's events; nil drops them. It is set at
+	// start-up while workers may already run, so it is read atomically.
+	msgEvents atomic.Pointer[messaging.EventSink]
 }
 
 // New wraps db.

@@ -327,6 +327,37 @@ func (c *Client) Status(ctx context.Context, providerID string) (provider.State,
 }
 
 // safeToken keeps a short lower-case token of letters, digits and _.
+// Redact implements provider.Redactor. Telnyx's v2 API has no operation that
+// deletes or blanks one message (DELETE /v2/messages/{id} only cancels a
+// scheduled send; checked against Telnyx's OpenAPI document on 2026-11-15):
+// redaction there is a messaging-profile setting (redaction_enabled) the
+// customer turns on in the Telnyx portal. Hello reports that instead.
+func (c *Client) Redact(context.Context, string) (provider.Redaction, error) {
+	return provider.Redaction{}, provider.ErrRedactUnsupported
+}
+
+// ProfileRedaction reads whether the channel's messaging profile has Telnyx's
+// own redaction on (redaction_enabled), for the erase report. ok is false
+// when the channel has no messaging profile or the read failed.
+func (c *Client) ProfileRedaction(ctx context.Context) (enabled, ok bool) {
+	if c.cfg.MessagingProfileID == "" {
+		return false, false
+	}
+	status, b, err := c.do(ctx, http.MethodGet, "/messaging_profiles/"+c.cfg.MessagingProfileID, nil)
+	if err != nil || status != http.StatusOK {
+		return false, false
+	}
+	var r struct {
+		Data struct {
+			RedactionEnabled *bool `json:"redaction_enabled"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(b, &r) != nil || r.Data.RedactionEnabled == nil {
+		return false, false
+	}
+	return *r.Data.RedactionEnabled, true
+}
+
 func safeToken(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(s) {
