@@ -37758,6 +37758,11 @@
           "sipCallId": {
             "type": "string"
           },
+          "legCallIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Call-IDs of the call's dialogs towards its callee side: the phone legs still ringing, then the answering leg (an INVITE with Replaces on another node finds the call by them); absent on records from older nodes"
+          },
           "from": {
             "type": "string"
           },

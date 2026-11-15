@@ -75,6 +75,12 @@ const (
 	// door station's door-open code to its door leg, on behalf of the
 	// extension Retriever (the API's POST /calls/{id}/door-open).
 	ParkOpDoorOpen = "door_open"
+	// ParkOpReplace asks the node holding the dialog CallID to let the
+	// extension Retriever's phone on node From take over the party of that
+	// dialog (an INVITE with Replaces naming a confirmed dialog, RFC 3891,
+	// phone-feature-parity S-17). Replaces is the header as the phone sent
+	// it; Offer, PeerCallID and Source are the phone's, as for a retrieve.
+	ParkOpReplace = "replace"
 )
 
 // ParkCommand asks the node holding a call to do something to it.
@@ -101,6 +107,8 @@ type ParkCommand struct {
 	// Dir is the media direction of a hold command, as the holding party
 	// offered it.
 	Dir string `json:"dir,omitempty"`
+	// Replaces is a replace command's Replaces header value.
+	Replaces string `json:"replaces,omitempty"`
 }
 
 // ParkReply is the holder's answer to a ParkCommand.

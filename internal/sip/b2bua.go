@@ -80,10 +80,14 @@ type call struct {
 	aborted     chan struct{}
 	abortOnce   sync.Once
 	abortReason string
-	abortOwned  bool        // guarded by mu: the abort owns the setup's end
-	maxTimer    *time.Timer // ends a connected call at MaxCallDuration
-	cancelMu    sync.Once
-	stopHB      chan struct{}
+	abortOwned  bool // guarded by mu: the abort owns the setup's end
+	// abortCode is the final response an abort gives the caller (guarded by
+	// mu): 503 when unset (a drain), 487 for a consultation call a transfer
+	// before answer ended (abortCancel).
+	abortCode int
+	maxTimer  *time.Timer // ends a connected call at MaxCallDuration
+	cancelMu  sync.Once
+	stopHB    chan struct{}
 	// pubMu orders live-call writes: publish and the final delete never
 	// overlap, and nothing is published once the call has ended, so an
 	// in-flight heartbeat cannot resurrect an ended call.
@@ -225,6 +229,10 @@ type call struct {
 	link     *callLink
 	pickedUp bool
 	pickupCh chan *pickupReq
+	// replaced is set once an INVITE with Replaces (replaces.go) has claimed
+	// one of the call's confirmed dialogs, so a second one cannot. Guarded
+	// by mu.
+	replaced bool
 
 	// ringTag and ringWhy are the ring tag the call's device legs carry and
 	// what chose it (S-40); guarded by mu, written to the trace and the CDR.
@@ -562,6 +570,13 @@ func (s *Server) routeCaller(c *call, req *sip.Request, tx sip.ServerTransaction
 		c.doorCall(req, tx, snap)
 		return
 	}
+	// An INVITE with Replaces (RFC 3891, spec S-17) takes over the dialog it
+	// names, whatever number it was sent to: a ringing call is picked up, an
+	// answered one moves to this phone (replaces.go).
+	if h := req.GetHeader("Replaces"); h != nil {
+		c.handleReplaces(tx, snap, h.Value())
+		return
+	}
 	// The alarm code (spec S-29) is answered here, before any other number.
 	if c.dialled == AlarmCode {
 		c.handleAlarm(tx, snap, dev)
@@ -593,14 +608,9 @@ func (s *Server) routeCaller(c *call, req *sip.Request, tx sip.ServerTransaction
 		c.startVoicemailGroup(tx, g, false)
 		return
 	}
-	// A park slot dialled as a number retrieves the call parked there, and
-	// an INVITE with Replaces naming an early dialog picks that call up.
+	// A park slot dialled as a number retrieves the call parked there.
 	if _, ok := snap.ParkLotOf(c.dialled); ok {
 		c.handleRetrieve(tx, snap, c.dialled)
-		return
-	}
-	if h := req.GetHeader("Replaces"); h != nil {
-		c.handleReplacesPickup(tx, snap, h.Value())
 		return
 	}
 	// A feature code dialled as a call (*78, *72599, *97) is dispatched here
@@ -1016,6 +1026,9 @@ func (c *call) ringing() {
 		if snap := c.s.deps.Snapshots.Current(); snap != nil {
 			c.s.publishDeviceState(c.s.devicesOf(snap, ext), ext, StateRinging)
 		}
+		// The live record names the ringing legs' dialogs now, so an INVITE
+		// with Replaces landing on another node finds the call (S-17).
+		c.publish()
 	}
 }
 
@@ -1290,9 +1303,21 @@ func closed(ch chan struct{}) bool {
 // win closeSetup afterwards and record a normal callee or timeout CDR:
 // the drain's system side and reason survive.
 func (c *call) abort(reason string) {
+	c.abortWith(0, reason)
+}
+
+// abortCancel ends a call that is not connected as if its caller had
+// cancelled it: the forks are cancelled and the caller gets 487 (a
+// consultation call whose transferor transferred before the target
+// answered, S-17).
+func (c *call) abortCancel(reason string) {
+	c.abortWith(sip.StatusRequestTerminated, reason)
+}
+
+func (c *call) abortWith(code int, reason string) {
 	c.abortOnce.Do(func() {
 		c.mu.Lock()
-		c.abortReason = reason
+		c.abortReason, c.abortCode = reason, code
 		if !c.setupClosed && c.winner == nil {
 			c.setupClosed = true
 			c.abortOwned = true
@@ -1327,8 +1352,13 @@ func (c *call) setupAbort() bool {
 // closed and the forks are cancelled.
 func (c *call) abortCaller() {
 	c.mu.Lock()
-	reason := c.abortReason
+	reason, code := c.abortReason, c.abortCode
 	c.mu.Unlock()
+	if code == sip.StatusRequestTerminated {
+		c.respondA(code, "Request Terminated")
+		c.end(code, cdr.SideCaller, reason, ResultCancelled)
+		return
+	}
 	c.addTrace("Call ended by the node: " + reason)
 	c.respondA(sip.StatusServiceUnavailable, "Service Unavailable")
 	c.end(sip.StatusServiceUnavailable, cdr.SideSystem, reason, ResultFailed)
@@ -1621,11 +1651,19 @@ func (c *call) live() livestate.Call {
 		ha = livestate.HATakenOver
 	}
 	callee := ""
+	var legIDs []string
 	if c.winner != nil {
 		callee = c.winner.binding.Extension
+		legIDs = []string{c.winner.callID}
+	} else {
+		for _, l := range c.legs {
+			if l.trunk == nil && l.uri == nil && !l.abandoned && l.stage == c.stageSeq {
+				legIDs = append(legIDs, l.callID)
+			}
+		}
 	}
 	return livestate.Call{
-		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, Callee: callee, Door: door, State: state,
+		ID: c.id, SIPCallID: c.callID, LegCallIDs: legIDs, From: c.callerNum, To: c.dialled, Callee: callee, Door: door, State: state,
 		Node: c.s.cfg.NodeID, Media: "direct", StartedAt: c.start, AnsweredAt: answered, HA: ha, Direction: c.direction,
 	}
 }
@@ -1728,10 +1766,11 @@ func (l *leg) drive(report func(legEvent)) {
 	l.mu.Lock()
 	l.dcs = dcs
 	l.mu.Unlock()
+	cur := dcs // the session being waited on: a phone's challenge replaces it
 	opts := sipgo.AnswerOptions{OnResponse: func(r *sip.Response) error {
 		switch {
 		case r.StatusCode > 100 && r.StatusCode < 200:
-			l.acknowledgeProvisional(dcs, r)
+			l.acknowledgeProvisional(cur, r)
 			select {
 			case l.c.events <- legEvent{leg: l, kind: evRinging}:
 			default:
@@ -1745,7 +1784,18 @@ func (l *leg) drive(report func(legEvent)) {
 		// A carrier's 401 or 407 is answered with the trunk credentials.
 		opts.Username, opts.Password = l.trunk.Username, l.trunk.Password
 	}
-	err = dcs.WaitAnswer(l.ctx, opts)
+	device := ""
+	if l.trunk == nil && l.uri == nil {
+		device = l.binding.Device
+	}
+	// A phone that authenticates incoming INVITEs (S-22) is answered with
+	// its device's credentials; the leg keeps the session that answers.
+	dcs, err = s.waitAnswerPhone(l.ctx, dcs, device, opts, func(next *sipgo.DialogClientSession) {
+		cur = next
+		l.mu.Lock()
+		l.dcs = next
+		l.mu.Unlock()
+	})
 	if res := dcs.InviteResponse; err == nil || (res != nil && res.IsSuccess()) {
 		if l.accept != nil {
 			if res := l.accept(l); res != "" {
@@ -2303,7 +2353,7 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	res, err := do(ctx, out)
+	res, err := s.dialogDo(ctx, out, do) // a phone may challenge it (S-22)
 	if err != nil {
 		s.respond(tx, req, sip.StatusRequestTimeout, "Request Timeout")
 		return

@@ -507,7 +507,7 @@ func (s *Server) sendStateNotify(sub *subscription, state string, expires int, r
 	sub.version++
 	seq, ver := sub.cseq, sub.version
 	s.subsMu.Unlock()
-	body := dialogXML(sub.extension, s.cfg.Domain, ver, state)
+	body := dialogXML(sub.extension, s.cfg.Domain, ver, state, s.extDialog(sub.extension, state))
 	req := sip.NewRequest(sip.NOTIFY, *sub.target.Clone())
 	from := &sip.FromHeader{
 		Address: sip.Uri{Scheme: "sip", User: sub.extension, Host: s.cfg.Domain},
@@ -541,8 +541,10 @@ func (s *Server) sendStateNotify(sub *subscription, state string, expires int, r
 
 // dialogXML renders the dialog-info document (RFC 4235) for one extension's
 // state. The mapping is the one BLF lamps expect: ringing is "early", a
-// connected or DND extension is "busy", idle is "terminated".
-func dialogXML(ext, domain string, version uint64, state string) []byte {
+// connected or DND extension is "busy", idle is "terminated". id, when set,
+// names the extension's dialog on this node (call-id and tags), which a phone
+// puts in the Replaces header of a BLF pickup or a call pull (S-17).
+func dialogXML(ext, domain string, version uint64, state string, id *dialogIdent) []byte {
 	dlg := "confirmed"
 	switch state {
 	case StateIdle:
@@ -558,7 +560,7 @@ func dialogXML(ext, domain string, version uint64, state string) []byte {
 	return []byte(`<?xml version="1.0"?>` + "\r\n" +
 		`<dialog-info xmlns="urn:ietf:params:xml:ns:dialog-info" version="` +
 		strconv.FormatUint(version, 10) + `" state="full" entity="sip:` + ext + `@` + domain + `">` + "\r\n" +
-		`<dialog id="` + ext + `"><state>` + dlg + `</state></dialog>` + "\r\n" +
+		`<dialog id="` + ext + `"` + id.attrs() + `><state>` + dlg + `</state></dialog>` + "\r\n" +
 		`</dialog-info>` + "\r\n")
 }
 
