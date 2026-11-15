@@ -287,7 +287,7 @@ func (c *call) faxSendAnswer(body []byte) bool {
 		c.mu.Lock()
 		c.connected = false
 		c.mu.Unlock()
-		if c.dss.LoadState() != sip.DialogStateEnded {
+		if !s.callerHungUpUnacked(c.dss) {
 			c.byeA()
 		}
 		return false

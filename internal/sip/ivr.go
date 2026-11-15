@@ -202,7 +202,7 @@ func (c *call) soloAnswer(phase, detail, what string) bool {
 	s.m.response(sip.StatusOK)
 	c.settleReliable(true)
 	if err := c.dss.WriteResponse(res); err != nil {
-		if c.dss.LoadState() == sip.DialogStateEnded {
+		if s.callerHungUpUnacked(c.dss) {
 			// The caller's BYE overtook its ACK: handleBye has accepted it
 			// and ends the call as the caller's hangup.
 			c.addTrace("Caller hung up before acknowledging the answer")
