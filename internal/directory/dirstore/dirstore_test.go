@@ -286,7 +286,7 @@ func TestProvisionAdoptBreakGlassAndRelease(t *testing.T) {
 	}
 	if got := r.one(`SELECT u.password_hash || '|' || u.must_change_password || '|' || u.external_id || '|' || u.provisioned_number || '|' || e.provisioned_by
 		FROM users u JOIN user_extensions ue ON ue.user_id = u.id JOIN extensions e ON e.id = ue.extension_id
-		WHERE u.username = 'legacy'`); got != fmt.Sprintf("!|false|l|500|%d", r.c.ID) {
+		WHERE u.email = 'legacy@corp.org'`); got != fmt.Sprintf("!|false|l|500|%d", r.c.ID) {
 		t.Fatalf("adopted = %s", got)
 	}
 	if got := r.one(`SELECT password_hash || '|' || (source_connector_id IS NULL) || '|' || coalesce(provisioned_number, '') || '|' ||
@@ -294,11 +294,15 @@ func TestProvisionAdoptBreakGlassAndRelease(t *testing.T) {
 		t.Fatalf("break-glass admin = %s", got)
 	}
 	var id int64
-	if err := r.db.QueryRowContext(r.ctx, `SELECT id FROM users WHERE username = 'legacy'`).Scan(&id); err != nil {
+	if err := r.db.QueryRowContext(r.ctx, `SELECT id FROM users WHERE email = 'legacy@corp.org'`).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	if managed, err := r.st.UserManagedByDirectory(r.ctx, id); err != nil || !managed {
 		t.Fatalf("managed = %v, %v", managed, err)
+	}
+	// The adopted user took the directory's username (its UPN).
+	if got := r.one(`SELECT username FROM users WHERE id = $1`, id); got != "legacy@corp" {
+		t.Fatalf("username = %s", got)
 	}
 	// Released, the user is local again: no password until an administrator
 	// sets one, and the number it was given stays its own.
@@ -307,7 +311,7 @@ func TestProvisionAdoptBreakGlassAndRelease(t *testing.T) {
 	}
 	if got := r.one(`SELECT u.password_hash || '|' || (u.source_connector_id IS NULL) || '|' || u.provisioned_number || '|' || e.number || '|' || (e.provisioned_by IS NULL)
 		FROM users u JOIN user_extensions ue ON ue.user_id = u.id JOIN extensions e ON e.id = ue.extension_id
-		WHERE u.username = 'legacy'`); got != "!|true|500|500|true" {
+		WHERE u.email = 'legacy@corp.org'`); got != "!|true|500|500|true" {
 		t.Fatalf("released = %s", got)
 	}
 	if managed, err := r.st.UserManagedByDirectory(r.ctx, id); err != nil || managed {
