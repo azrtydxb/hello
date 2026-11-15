@@ -5639,3 +5639,43 @@ first handler reproduces it every time. The callee now rings the INVITE
 From the transferor's extension (the consultation) and answers the others.
 Hello itself BYEs the transferor as soon as the transferred call is
 answered, whatever the order.
+
+## MoH takeover flake: the test read the dead owner's re-INVITE (2026-11-15, fix/moh-takeover)
+
+- **Test bug, not a product bug, and older than #357/#359/#364/#366.**
+  TestMusicOnHoldTakeover fails at abdf747c too (1/15). Later merges fail
+  0-2 times in 10 runs each, with no step change at any of them. Logs from a failing run show the
+  taker re-homing the call in `hold` with `moh:1:b`, starting the music and
+  writing it to the held phone's address from its new relay port.
+- **Cause.** The owner relays the holder's hold to the callee as a re-INVITE
+  (CSeq 2). It stays in `b.reinvites`, so "takeover re-INVITE to the held
+  callee" returned that one, and the test counted only packets from the dead
+  owner's relay port. It passed only when the taker's relay happened to bind
+  the same freed port. The holder also never ACKed its hold 200 (`dcs.Do`
+  alone), so no relayed ACK reached the callee, and the "ACK to the held
+  callee" wait was satisfied only by the taker's ACK.
+- **Fix.** The holder ACKs its hold, as a phone does. The test drains the
+  relayed hold re-INVITE and its ACK before the takeover, and checks that the
+  takeover re-INVITE's CSeq is past the hold's. No product change.
+- **Siblings: leaked call media exhausted the RTP range.** No other takeover
+  test reads a stale re-INVITE. The `-count=30` sweep of
+  `TestMusicOnHoldTakeover|Takeover` still failed, for another reason: a test
+  PBX's teardown cancels Serve but never closes the media of calls still up
+  (a killed owner's, a call the test never hung up). Every test PBX shares the
+  default range 20000-21000, and some takeover tests (TestConferenceTakeover,
+  TestTakeoverKeepsEventState among them) left 2 ports bound per run for the
+  rest of the process. Around iteration 10 TestConferenceTakeover got
+  `bind conference RTP socket: ... :20499: address already in use` (503), and
+  after that most takeover tests timed out. The leaked music streams also kept
+  sending RTP to ports other tests reused. startPBX's cleanup now runs
+  releaseCallMedia once Serve has returned. It closes every remaining call's
+  relay and conference party; killMedia uses it too. Measured with a probe
+  that counts bound ports in the range after each test: 0 for every takeover
+  test with the change; 2 more per run for those tests without it. This is test-only: in
+  production the process exits with the node.
+- **TestTrunkLeaseTakeover left as is.** It failed 1 in 30 sweep runs and 2
+  in 120 runs alone, in three different ways. The failing run with logs
+  coincides with a macOS maintenance sleep (pmset: asleep 17:25:16-17:25:59,
+  a 42 s wall-clock gap inside a run the test timed at 1.28 s). Its 300 ms
+  leases cannot survive the machine sleeping, which is not a product or
+  test bug. Local loops now run under `caffeinate -i`.

@@ -397,6 +397,7 @@ func startPBX(t *testing.T, devices []snapshot.Device, opts ...pbxOpt) *testPBX 
 		case <-time.After(10 * time.Second):
 			t.Error("Serve did not return")
 		}
+		releaseCallMedia(srv)
 	})
 	eventually(t, "pbx listener", srv.Serving) // all Serve startup writes done
 	p := &testPBX{srv: srv, stop: cancel, addr: addr, cfg: cfg, state: deps.State, throttle: deps.Throttle,
