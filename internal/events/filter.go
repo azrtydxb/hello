@@ -16,6 +16,9 @@ type Filter struct {
 	// extension. An event with no extension is only for an unrestricted
 	// reader.
 	Allowed []string
+	// Hide drops events whose type starts with one of these prefixes (the
+	// inbox's events for a reader without the messages scope).
+	Hide []string
 }
 
 // ParseTypes validates a comma-separated type list: each element is a
@@ -59,6 +62,11 @@ func (f Filter) Restricted() bool { return f.Allowed != nil }
 
 // Matches reports whether e passes the filter.
 func (f Filter) Matches(e Event) bool {
+	for _, p := range f.Hide {
+		if strings.HasPrefix(e.Type, p) {
+			return false
+		}
+	}
 	if f.Extension != "" && e.Data.Extension != f.Extension {
 		return false
 	}

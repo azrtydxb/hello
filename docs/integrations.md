@@ -71,6 +71,59 @@ caller hung up while it rang) or `unreachable` (no registered phone).
 event type are left out. Audio, SIP bodies and DTMF digits are never in an
 event. The envelope version is `apiVersion`; later versions only add fields.
 
+## Messaging inbox events
+
+The [messaging inbox](inbox.md) publishes its own events through the same
+stream, history and webhooks:
+
+| Event                   | When                                                                                                                                                       |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `conversation.created`  | A conversation started: a customer's first message, a chat, or an agent's new outbound conversation. Comes before its first message event.                 |
+| `conversation.assigned` | A conversation was given to an agent (`assigneeUserId`) by the router, a claim, a transfer or a reply; without `assigneeUserId` it went back to its queue. |
+| `conversation.resolved` | A conversation was resolved.                                                                                                                               |
+| `message.received`      | A customer's text or chat message arrived.                                                                                                                 |
+| `message.sent`          | A message left the inbox (an agent, an automation or the API).                                                                                             |
+| `message.status`        | The carrier reported a sent message's final state in `status` (`delivered`, `failed`, `undelivered`) and, for a failure, `errorCode`.                      |
+| `message.optout`        | A customer texted STOP (or another opt-out keyword) to one of the business's numbers.                                                                      |
+
+```json
+{
+  "apiVersion": "1",
+  "id": "evt_8d2e4a1c07b94f3e9a5d6c2b1e0f7a93",
+  "type": "message.received",
+  "createdAt": "2026-11-09T10:21:44.208Z",
+  "data": {
+    "conversationId": 381,
+    "messageId": 9120,
+    "channelId": 3,
+    "channelKind": "sms",
+    "provider": "twilio",
+    "addressId": 5,
+    "address": "+3225550100",
+    "direction": "in",
+    "status": "received",
+    "queueId": 2,
+    "peerKind": "phone",
+    "peerKey": "pk_0000000000000000000000000000c0de"
+  }
+}
+```
+
+An inbox event carries ids, the channel, the business's own number or chat
+site (`address`), direction, state, assignee and queue. The customer is
+`peerKey`, a keyed hash of the number (or chat visitor id): stable per
+customer on this Hello, so an integration can group by it, but not
+reversible. **No event carries the customer's number or a message's text.**
+A webhook endpoint can opt into them (below); they are read from the inbox
+when the event is delivered, so a message redacted or a customer erased
+before delivery is delivered without them. The stream and the history never
+carry them.
+
+Inbox events are for credentials with the `messages` scope and the operator
+or administrator role; the stream, the history and the ticket of any other
+credential leave them out. An endpoint with an extension list receives no
+inbox events (they are about no extension).
+
 ## Delivery guarantees
 
 - **At least once.** An event can arrive twice (a reconnect, a takeover of a
@@ -311,6 +364,17 @@ types or a prefix such as `call.*`; empty is all) and an optional list of
 extensions. `POST /api/v1/webhooks` is idempotent on `(url, events)`: repeating
 it returns the existing endpoint (200, null secret), which suits REST-hook
 subscriptions such as Zapier's; `DELETE /api/v1/webhooks/{id}` unsubscribes.
+
+Two options apply to [inbox events](#messaging-inbox-events), both off by
+default and each change recorded in the audit log:
+
+- `includePeer` adds `data.peer`, the customer's number (or `visitor:<id>`).
+- `includeMessageBody` adds `data.body`, the text, to `message.received` and
+  `message.sent`. A redacted message and system lines have none.
+
+Both are read from the inbox when a delivery is attempted. A delivery whose
+read fails is retried like a failed request (`enrich_failed`, which never
+counts against the endpoint).
 
 ### The request
 

@@ -70,17 +70,27 @@ type EndpointInput struct {
 	Extensions   []string
 	Enabled      bool
 	AllowPrivate bool
+	// IncludePeer and IncludeMessageBody: see Endpoint.
+	IncludePeer, IncludeMessageBody bool
 }
 
 // Patch changes an endpoint; nil fields stay.
 type Patch struct {
-	Name         *string
-	URL          *string
-	Events       *[]string
-	Extensions   *[]string
-	Enabled      *bool
-	AllowPrivate *bool
+	Name               *string
+	URL                *string
+	Events             *[]string
+	Extensions         *[]string
+	Enabled            *bool
+	AllowPrivate       *bool
+	IncludePeer        *bool
+	IncludeMessageBody *bool
 }
+
+// Enricher adds what an endpoint asked for to an inbox event at delivery:
+// the customer's number (includePeer) and the message text
+// (includeMessageBody). It reads them when the delivery is sent, so they are
+// never stored with the event and an erased conversation gives nothing.
+type Enricher func(ctx context.Context, d *events.InboxData, peer, body bool) error
 
 // TestResult is the outcome of a test ping.
 type TestResult struct {
@@ -114,6 +124,9 @@ type Service struct {
 	// that must reach a local server).
 	PublicClient, PrivateClient *http.Client
 	Log                         *slog.Logger
+	// Enrich fills the inbox options of an endpoint; nil leaves inbox events
+	// as they were stored (hashed peer, no text).
+	Enrich Enricher
 
 	publicC, privateC *http.Client
 	// skipURLCheck lets a test point an endpoint at a local server.
@@ -271,7 +284,8 @@ func (s *Service) Create(ctx context.Context, actor string, in EndpointInput) (e
 	if s.Box == nil {
 		return Endpoint{}, "", false, errors.New("webhook: no secret box to seal the signing secret")
 	}
-	e := Endpoint{Name: in.Name, URL: in.URL, Events: in.Events, Extensions: in.Extensions, Enabled: in.Enabled, AllowPrivate: in.AllowPrivate}
+	e := Endpoint{Name: in.Name, URL: in.URL, Events: in.Events, Extensions: in.Extensions, Enabled: in.Enabled, AllowPrivate: in.AllowPrivate,
+		IncludePeer: in.IncludePeer, IncludeMessageBody: in.IncludeMessageBody}
 	if err := s.check(&e); err != nil {
 		return Endpoint{}, "", false, err
 	}
@@ -319,6 +333,12 @@ func (s *Service) Update(ctx context.Context, actor string, id int64, p Patch) (
 	}
 	if p.AllowPrivate != nil {
 		e.AllowPrivate = *p.AllowPrivate
+	}
+	if p.IncludePeer != nil {
+		e.IncludePeer = *p.IncludePeer
+	}
+	if p.IncludeMessageBody != nil {
+		e.IncludeMessageBody = *p.IncludeMessageBody
 	}
 	reset := false
 	if p.Enabled != nil && *p.Enabled != e.Enabled {
@@ -466,6 +486,25 @@ func (s *Service) send(ctx context.Context, url string, allowPrivate bool, secre
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBody))
 	r.Body = b[:min(len(b), keep)]
 	return r
+}
+
+// enrich returns the payload of a claimed delivery with the endpoint's inbox
+// options applied: an inbox event gets the number and the text it asked
+// for. Any other payload, and an endpoint with neither option, is sent as
+// stored.
+func (s *Service) enrich(ctx context.Context, c Claim) ([]byte, error) {
+	if s.Enrich == nil || (!c.IncludePeer && !c.IncludeMessageBody) || !events.IsInboxType(c.EventType) {
+		return c.Payload, nil
+	}
+	var ev events.Event
+	if err := json.Unmarshal(c.Payload, &ev); err != nil || ev.Data.Inbox == nil {
+		return c.Payload, nil //nolint:nilerr // a payload that is not inbox data is sent as stored
+	}
+	body := c.IncludeMessageBody && (ev.Type == events.MessageReceived || ev.Type == events.MessageSent)
+	if err := s.Enrich(ctx, ev.Data.Inbox, c.IncludePeer, body); err != nil {
+		return nil, err
+	}
+	return json.Marshal(ev)
 }
 
 // newRef is a unique Hello-Delivery value.

@@ -143,6 +143,27 @@ type SMSProvider interface {
 	Numbers(ctx context.Context) ([]Number, error)
 }
 
+// Redactor is implemented by an adapter that can remove a message Hello sent
+// from the carrier's records (spec messaging-channels M-20: provider-side
+// deletion when a customer is erased or a message redacted). It is best
+// effort: the carrier keeps its own logs under its own terms.
+type Redactor interface {
+	// Redact deletes the message, or blanks its text where the carrier
+	// cannot delete it yet. A message the carrier no longer has is done
+	// (nil). ErrRedactUnsupported says the carrier has no such operation.
+	Redact(ctx context.Context, providerID string) (Redaction, error)
+}
+
+// Redaction is what a Redact did.
+type Redaction struct {
+	// Deleted is true when the carrier deleted the message record (and its
+	// media); false when only the text was blanked, or the carrier no longer
+	// had it.
+	Deleted bool
+	// Gone is true when the carrier answered that the message did not exist.
+	Gone bool
+}
+
 // Registrar is implemented by an adapter that can read the state of the
 // customer's sender registration (spec M-1, "Registration"): A2P 10DLC brand
 // and campaign for US long codes, toll-free verification. Hello only reports
@@ -269,6 +290,9 @@ var (
 	ErrNotFound = errors.New("provider: not found")
 	// ErrUnknownKind: no adapter is registered for the provider.
 	ErrUnknownKind = errors.New("provider: unknown provider")
+	// ErrRedactUnsupported: the carrier has no API to delete or blank one
+	// message.
+	ErrRedactUnsupported = errors.New("provider: the carrier cannot delete a single message")
 )
 
 // Rejected is a definite refusal: the carrier did not accept the text and

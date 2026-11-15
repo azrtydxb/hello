@@ -454,6 +454,10 @@ type Config struct {
 	// Inbox is the messaging inbox persistence (spec messaging-channels);
 	// nil answers 503 on the inbox and messaging routes.
 	Inbox InboxStore
+	// MsgRedactor deletes an erased customer's or a redacted message's
+	// texts at the carrier while the request waits; nil leaves them to the
+	// background worker.
+	MsgRedactor MsgRedactor
 	// MessagingAIAuto is HELLO_MSG_AI_AUTO, shown with the inbox AI
 	// settings: false stops every auto-reply.
 	MessagingAIAuto bool

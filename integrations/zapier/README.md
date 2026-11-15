@@ -9,6 +9,7 @@ zapier login && zapier register "Hello PBX" && zapier push
 node --test test/        # unit tests, no Zapier account or dependencies needed
 ```
 
-Layout: `index.js` (authentication and middleware), `triggers/` (five REST-hook
-triggers), `creates/place_call.js`, `searches/`, `lib/` (request helper and the
-trigger factory).
+Layout: `index.js` (authentication and middleware), `triggers/` (twelve
+REST-hook triggers: five on call events, seven on messaging inbox events),
+`creates/place_call.js`, `searches/`, `lib/` (request helper and the trigger
+factory).

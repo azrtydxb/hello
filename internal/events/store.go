@@ -71,6 +71,13 @@ func (s *Service) History(ctx context.Context, q Query) ([]Entry, error) {
 	if q.Allowed != nil {
 		where = append(where, "extension_number = ANY("+arg(pgArray(q.Allowed))+"::text[])")
 	}
+	if len(q.Hide) > 0 {
+		like := make([]string, len(q.Hide))
+		for i, p := range q.Hide {
+			like[i] = p + "%"
+		}
+		where = append(where, "NOT (type LIKE ANY("+arg(pgArray(like))+"::text[]))")
+	}
 	if len(q.Types) > 0 {
 		exact, prefixes := q.split()
 		var ors []string

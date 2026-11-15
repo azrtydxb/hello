@@ -427,9 +427,12 @@ func (s *Store) ClaimPolls(ctx context.Context, limit int) ([]messaging.PollJob,
 // records an opt-out the carrier reports); anything else schedules the next
 // read, or ends the polling when the read says to stop.
 func (s *Store) FinishPoll(ctx context.Context, job messaging.PollJob, res messaging.PollResult) error {
-	var changed bool
+	var (
+		changed bool
+		final   string
+	)
 	err := s.tx(ctx, func(tx *sql.Tx) error {
-		changed = false
+		changed, final = false, ""
 		if res.BadCredentials {
 			_, err := tx.ExecContext(ctx, `UPDATE msg_channels SET status = 'credentials_invalid',
 				status_detail = 'the carrier refused the account login; enter the SID and token again' WHERE id = $1`, job.ChannelID)
@@ -451,7 +454,7 @@ func (s *Store) FinishPoll(ctx context.Context, job messaging.PollJob, res messa
 			if n, _ := r.RowsAffected(); n == 0 {
 				return nil
 			}
-			changed = true
+			changed, final = true, st
 			if code == provider.CodeOptedOut {
 				if err := s.recordProviderOptOut(ctx, tx, job.ConversationID); err != nil {
 					return err
@@ -471,7 +474,7 @@ func (s *Store) FinishPoll(ctx context.Context, job messaging.PollJob, res messa
 	})
 	if err == nil && changed {
 		s.emit(ctx, messaging.Event{Type: "message.status", ConversationID: job.ConversationID, MessageID: job.MessageID,
-			Direction: messaging.DirOut, Status: "final"})
+			Direction: messaging.DirOut, Status: final})
 	}
 	return err
 }
@@ -610,7 +613,7 @@ func (s *Store) StartConversation(ctx context.Context, acc InboxAccess, in Start
 			return err
 		}
 		sinkEvent = &messaging.Event{Type: "message.sent", ConversationID: convID, MessageID: msgID, ChannelKind: kind,
-			Direction: messaging.DirOut, Status: messaging.DeliveryQueued}
+			Direction: messaging.DirOut, Status: messaging.DeliveryQueued, NewConversation: true}
 		return nil
 	})
 	if err != nil {

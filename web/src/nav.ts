@@ -260,6 +260,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "operator",
       },
       {
+        label: "Inbox reports",
+        path: "/inbox/reports",
+        phase: 5,
+        icon: "chart-bar",
+        minRole: "operator",
+      },
+      {
         label: "Channels",
         path: "/messaging/channels",
         phase: 5,
@@ -292,6 +299,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         path: "/messaging/settings",
         phase: 5,
         icon: "settings",
+        minRole: "admin",
+      },
+      {
+        label: "Privacy",
+        path: "/messaging/privacy",
+        phase: 5,
+        icon: "shield-check",
         minRole: "admin",
       },
     ],
@@ -434,6 +448,7 @@ export const MY_PHONE_GROUP = "My phone";
 const INBOX_PATHS: ReadonlySet<string> = new Set([
   "/inbox",
   "/inbox/queues",
+  "/inbox/reports",
   "/me/inbox",
 ]);
 

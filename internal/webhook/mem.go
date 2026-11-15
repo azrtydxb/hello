@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -96,6 +97,12 @@ func (m *Mem) CreateEndpoint(_ context.Context, actor string, e Endpoint) (Endpo
 	e.Events, e.Extensions = slices.Clone(nonNil(e.Events)), slices.Clone(nonNil(e.Extensions))
 	m.eps[e.ID] = &memEndpoint{e}
 	m.audit(actor, "create", "webhook_endpoint", e.ID)
+	if e.IncludePeer {
+		m.audit(actor, "include_peer true", "webhook_endpoint", e.ID)
+	}
+	if e.IncludeMessageBody {
+		m.audit(actor, "include_message_body true", "webhook_endpoint", e.ID)
+	}
 	return m.view(m.eps[e.ID]), true, nil
 }
 
@@ -134,7 +141,14 @@ func (m *Mem) UpdateEndpoint(_ context.Context, actor string, e Endpoint, resetH
 	if !ok {
 		return Endpoint{}, ErrNotFound
 	}
+	if cur.IncludePeer != e.IncludePeer {
+		m.audit(actor, "include_peer "+strconv.FormatBool(e.IncludePeer), "webhook_endpoint", e.ID)
+	}
+	if cur.IncludeMessageBody != e.IncludeMessageBody {
+		m.audit(actor, "include_message_body "+strconv.FormatBool(e.IncludeMessageBody), "webhook_endpoint", e.ID)
+	}
 	cur.Name, cur.URL, cur.Enabled, cur.AllowPrivate, cur.DisabledReason = e.Name, e.URL, e.Enabled, e.AllowPrivate, e.DisabledReason
+	cur.IncludePeer, cur.IncludeMessageBody = e.IncludePeer, e.IncludeMessageBody
 	cur.Events, cur.Extensions = slices.Clone(nonNil(e.Events)), slices.Clone(nonNil(e.Extensions))
 	if resetHealth {
 		cur.ConsecutiveFailures = 0
@@ -252,6 +266,7 @@ func (m *Mem) Claim(_ context.Context, now time.Time, limit, perEndpoint int, le
 		d.claimed = now.Add(lease)
 		busy[d.EndpointID]++
 		c := Claim{Delivery: d.Delivery, SeriesAttempt: d.series, URL: ep.URL, AllowPrivate: ep.AllowPrivate,
+			IncludePeer: ep.IncludePeer, IncludeMessageBody: ep.IncludeMessageBody,
 			SecretEnc: ep.SecretEnc, PreviousSecretEnc: ep.PreviousSecretEnc, PreviousSecretExpires: ep.PreviousSecretExpires,
 			Payload: m.events[d.EventID]}
 		out = append(out, c)

@@ -13,6 +13,13 @@
       { "label": "Call Missed", "value": "call.missed" },
       { "label": "Call Recording Ready", "value": "call.recording.ready" },
       { "label": "Call Ringing", "value": "call.ringing" },
+      { "label": "Inbox Conversation Assigned", "value": "conversation.assigned" },
+      { "label": "Inbox Conversation Created", "value": "conversation.created" },
+      { "label": "Inbox Conversation Resolved", "value": "conversation.resolved" },
+      { "label": "Inbox Message Delivery Status", "value": "message.status" },
+      { "label": "Inbox Message Received", "value": "message.received" },
+      { "label": "Inbox Message Sent", "value": "message.sent" },
+      { "label": "Inbox Opt-Out", "value": "message.optout" },
       { "label": "Voicemail Received", "value": "voicemail.received" }
     ]
   },
@@ -22,5 +29,19 @@
     "label": "Only these extensions",
     "help": "Extension numbers. Empty is every extension.",
     "spec": { "type": "text", "label": "Extension" }
+  },
+  {
+    "name": "includePeer",
+    "type": "boolean",
+    "label": "Include the customer's number",
+    "default": false,
+    "help": "Inbox events carry the customer's phone number or chat visitor id. Off, they carry a hashed key that is stable per customer."
+  },
+  {
+    "name": "includeMessageBody",
+    "type": "boolean",
+    "label": "Include the message text",
+    "default": false,
+    "help": "Inbox Message Received and Sent carry the text. Hello records the setting in its audit log."
   }
 ]

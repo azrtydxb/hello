@@ -73,6 +73,10 @@ type webhookBody struct {
 	Extensions   *[]string `json:"extensions"`
 	Enabled      *bool     `json:"enabled"`
 	AllowPrivate *bool     `json:"allowPrivate"`
+	// IncludePeer and IncludeMessageBody are the inbox options (spec
+	// messaging-channels M-23).
+	IncludePeer        *bool `json:"includePeer"`
+	IncludeMessageBody *bool `json:"includeMessageBody"`
 }
 
 func (s *server) listWebhooks(w http.ResponseWriter, r *http.Request) {
@@ -125,6 +129,12 @@ func (s *server) createWebhook(w http.ResponseWriter, r *http.Request) {
 	if b.AllowPrivate != nil {
 		in.AllowPrivate = *b.AllowPrivate
 	}
+	if b.IncludePeer != nil {
+		in.IncludePeer = *b.IncludePeer
+	}
+	if b.IncludeMessageBody != nil {
+		in.IncludeMessageBody = *b.IncludeMessageBody
+	}
 	e, secret, created, err := s.Webhooks.Create(r.Context(), actor(r).String(), in)
 	if err != nil {
 		s.webhookError(w, "create webhook", err)
@@ -152,7 +162,8 @@ func (s *server) updateWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e, err := s.Webhooks.Update(r.Context(), actor(r).String(), id, webhook.Patch{
-		Name: b.Name, URL: b.URL, Events: b.Events, Extensions: b.Extensions, Enabled: b.Enabled, AllowPrivate: b.AllowPrivate})
+		Name: b.Name, URL: b.URL, Events: b.Events, Extensions: b.Extensions, Enabled: b.Enabled, AllowPrivate: b.AllowPrivate,
+		IncludePeer: b.IncludePeer, IncludeMessageBody: b.IncludeMessageBody})
 	if err != nil {
 		s.webhookError(w, "update webhook", err)
 		return
