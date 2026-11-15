@@ -53,9 +53,14 @@ type fakeTwilio struct {
 	msgError  int
 	// regStatus, when not 0, is the status every registration read answers.
 	regStatus int
-	sends     []url.Values
-	reads     int
-	seq       int
+	// deleteStatus is what a DELETE of a message answers (0 means 204);
+	// deletes counts them and blanks the POST Body="" redactions.
+	deleteStatus int
+	deletes      int
+	blanks       int
+	sends        []url.Values
+	reads        int
+	seq          int
 }
 
 func newFakeTwilio(t *testing.T) *fakeTwilio {
@@ -112,6 +117,17 @@ func (f *fakeTwilio) serve(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusCreated)
 			_, _ = io.WriteString(w, `{"sid":"`+fmt.Sprintf(fakeMsgID, f.seq)+`","status":"queued"}`)
 		}
+	case r.Method == http.MethodDelete && strings.Contains(p, "/Messages/"):
+		f.deletes++
+		if f.deleteStatus != 0 {
+			w.WriteHeader(f.deleteStatus)
+			_, _ = io.WriteString(w, `{"code":20009,"message":"not deletable yet"}`)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case r.Method == http.MethodPost && strings.Contains(p, "/Messages/"):
+		f.blanks++
+		_, _ = io.WriteString(w, `{"body":""}`)
 	case r.Method == http.MethodGet && strings.Contains(p, "/Messages/"):
 		f.reads++
 		ec := "null"
@@ -185,7 +201,13 @@ type twilioRig struct {
 
 func newTwilioRig(t *testing.T) *twilioRig {
 	t.Helper()
-	r := &twilioRig{inboxRig: newInboxRig(t), fake: newFakeTwilio(t)}
+	return newTwilioRigConfig(t, Config{Live: noLive{}})
+}
+
+// newTwilioRigConfig is newTwilioRig with more of the API's dependencies.
+func newTwilioRigConfig(t *testing.T, cfg Config) *twilioRig {
+	t.Helper()
+	r := &twilioRig{inboxRig: newInboxRigConfig(t, cfg), fake: newFakeTwilio(t)}
 	var err error
 	if r.box, err = secret.New(base64.StdEncoding.EncodeToString(make([]byte, 32))); err != nil {
 		t.Fatal(err)

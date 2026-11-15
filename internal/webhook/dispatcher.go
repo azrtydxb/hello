@@ -141,7 +141,20 @@ func (d *Dispatcher) deliver(ctx context.Context, c Claim) {
 	ref := newRef()
 	f := Finish{DeliveryID: c.ID, Ref: ref, MaxFailures: MaxConsecutiveFailures}
 	secrets, serr := d.Svc.signingSecrets(c.EndpointID, c.SecretEnc, c.PreviousSecretEnc, c.PreviousSecretExpires)
+	var eerr error
+	if c.Payload != nil && serr == nil {
+		c.Payload, eerr = d.Svc.enrich(ctx, c)
+	}
 	switch {
+	case eerr != nil:
+		// The number or text could not be read (the database is busy): try
+		// again later; it is not the receiver's fault.
+		f.Outcome, f.Error, f.Internal = OutcomeRetry, "enrich_failed", true
+		if delay, ok := RetryDelay(c.SeriesAttempt+1, d.Svc.rnd); ok {
+			f.NextAttemptAt = d.Svc.now().Add(delay)
+		} else {
+			f.Outcome, f.Error = OutcomeDead, "enrich_failed; retries exhausted"
+		}
 	case c.Payload == nil:
 		// The event was purged while the delivery waited (a redelivery of a
 		// very old letter): nothing can be sent, and it is not the

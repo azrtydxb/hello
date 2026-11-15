@@ -1,0 +1,7 @@
+/* The inbox reports and privacy pages. */
+.inbox-report-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--az-space-4);
+  margin: var(--az-space-4) 0;
+}

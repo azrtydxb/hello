@@ -13,20 +13,36 @@ Zapier: [plain webhooks](#other-tools-plain-webhooks) and the REST API.
 
 ## What the integration offers
 
-| Kind    | Name                   | Hello API it uses                           |
-| ------- | ---------------------- | ------------------------------------------- |
-| Trigger | Call Ringing           | webhook on `call.ringing`                   |
-| Trigger | Call Answered          | webhook on `call.answered`                  |
-| Trigger | Call Missed            | webhook on `call.missed`                    |
-| Trigger | Call Completed         | webhook on `call.completed` (has `cdrId`)   |
-| Trigger | Call Recording Ready   | webhook on `call.recording.ready`           |
-| Action  | Place Call             | `POST /api/v1/calls/originate`              |
-| Search  | Find Contact by Number | `GET /api/v1/lookup/number`                 |
-| Search  | Find Call              | `GET /api/v1/cdrs/{id}`, `GET /api/v1/cdrs` |
+| Kind    | Name                          | Hello API it uses                           |
+| ------- | ----------------------------- | ------------------------------------------- |
+| Trigger | Call Ringing                  | webhook on `call.ringing`                   |
+| Trigger | Call Answered                 | webhook on `call.answered`                  |
+| Trigger | Call Missed                   | webhook on `call.missed`                    |
+| Trigger | Call Completed                | webhook on `call.completed` (has `cdrId`)   |
+| Trigger | Call Recording Ready          | webhook on `call.recording.ready`           |
+| Trigger | New Inbox Conversation        | webhook on `conversation.created`           |
+| Trigger | Inbox Conversation Assigned   | webhook on `conversation.assigned`          |
+| Trigger | Inbox Conversation Resolved   | webhook on `conversation.resolved`          |
+| Trigger | New Inbox Message             | webhook on `message.received`               |
+| Trigger | Inbox Message Sent            | webhook on `message.sent`                   |
+| Trigger | Inbox Message Delivery Status | webhook on `message.status`                 |
+| Trigger | Inbox Opt-Out                 | webhook on `message.optout`                 |
+| Action  | Place Call                    | `POST /api/v1/calls/originate`              |
+| Search  | Find Contact by Number        | `GET /api/v1/lookup/number`                 |
+| Search  | Find Call                     | `GET /api/v1/cdrs/{id}`, `GET /api/v1/cdrs` |
 
 A trigger event is the [call event](integrations.md#what-is-emitted) as Zapier
 fields: `data__from__number`, `data__extension`, `data__durationMs` and so on.
 Zapier de-duplicates on the event `id`, which is stable across Hello's retries.
+
+An inbox trigger's event is the [inbox event](integrations.md#messaging-inbox-events):
+`data__conversationId`, `data__channelKind`, `data__status` and a hashed
+customer key (`data__peerKey`), never the customer's number or the text. Each
+inbox trigger has **Include the customer's number** and (New Inbox Message and
+Inbox Message Sent) **Include the message text**, both off; turning one on
+sets `includePeer` or `includeMessageBody` on the webhook Hello creates, which
+is recorded in Hello's audit log, and the Zap gets `data__peer` and
+`data__body`. Change it by switching the Zap off and on again.
 
 ## Set it up
 
@@ -35,6 +51,8 @@ Zapier de-duplicates on the event `id`, which is stable across Hello's retries.
    - Triggers create and delete webhooks for you, so the credential must be an
      **administrator's** and hold the `admin`, `secrets`, `events` and `read`
      scopes (`secrets` because creating a webhook returns its signing secret).
+     The inbox triggers' samples also need the `messages` scope: the event
+     history leaves inbox events out without it.
    - Place Call needs the `calls` scope. A personal token rings the extension
      linked to its owner; an administrator, operator or service account without
      an extension limit may name any extension. Click-to-call limits and the

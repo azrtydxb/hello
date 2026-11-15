@@ -639,6 +639,9 @@ func (s *Store) Reconsent(ctx context.Context, actor string, id int64, note stri
 type EraseReport struct {
 	Conversations int `json:"conversations"`
 	Messages      int `json:"messages"`
+	// SIPMessages counts the copies in the SIP text queue and its history
+	// (the parts sent to desk phones and through SIP trunks) that went too.
+	SIPMessages int `json:"sipMessages"`
 	// OptOutsKept counts the opt-outs reduced to their hash.
 	OptOutsKept int `json:"optOutsKept"`
 	// MediaObjects counts the attachment files removed from the media store
@@ -649,22 +652,36 @@ type EraseReport struct {
 	// Media are the attachments whose files the caller removes (spec M-20:
 	// the object deletions follow the transaction).
 	Media []media.Garbage `json:"-"`
-	// Providers lists, per provider, whether provider-side deletion was
-	// tried. The carrier keeps its own logs under its own terms.
+	// Providers lists, per provider, what the provider-side deletion did.
+	// The carrier keeps its own logs under its own terms.
 	Providers []EraseProvider `json:"providers"`
+	// Batch names the provider deletions this erase queued.
+	Batch string `json:"-"`
 }
 
-// EraseProvider is one provider's part of an erase.
+// EraseProvider is one provider's part of an erase or a redaction.
 type EraseProvider struct {
 	Provider string `json:"provider"`
-	Redacted bool   `json:"redacted"`
+	// Redacted is true when every message Hello sent through the provider
+	// is gone from it (deleted, blanked, or no longer there).
+	Redacted bool `json:"redacted"`
+	// Messages counts the provider's messages queued for deletion; Done,
+	// Pending and Failed split them. Pending ones are retried in the
+	// background for a day.
+	Messages int    `json:"messages"`
+	Done     int    `json:"done"`
+	Pending  int    `json:"pending"`
+	Failed   int    `json:"failed"`
 	Detail   string `json:"detail"`
 }
 
 // ErasePeer deletes every conversation, message and note of a customer
-// (their number, reduced to its key) on every channel, and keeps only the
-// opt-out hash, so a deleted customer is not texted again. The audit row
-// holds counts only. Backups keep the rows until they expire.
+// (their number, reduced to its key) on every channel, and the copies of
+// their texts in the SIP text queue, and keeps only the opt-out hash, so a
+// deleted customer is not texted again. The messages Hello sent through a
+// carrier API are queued for deletion at the carrier in the same
+// transaction (rep.Batch); the caller runs them. The audit row holds counts
+// only. Backups keep the rows until they expire.
 func (s *Store) ErasePeer(ctx context.Context, actor, peerKey string) (EraseReport, error) {
 	var rep EraseReport
 	rep.Providers = []EraseProvider{}
@@ -672,8 +689,11 @@ func (s *Store) ErasePeer(ctx context.Context, actor, peerKey string) (EraseRepo
 	if err != nil {
 		return rep, err
 	}
+	rep.Batch = newRedactionBatch("erase")
+	var providers []string
 	err = s.tx(ctx, func(tx *sql.Tx) error {
-		providers, err := queryStrings(ctx, tx, `
+		var err error
+		providers, err = queryStrings(ctx, tx, `
 			SELECT DISTINCT ch.provider FROM conversations c JOIN msg_channels ch ON ch.id = c.channel_id
 			WHERE c.peer_key = $1 ORDER BY 1`, peerKey)
 		if err != nil {
@@ -693,11 +713,33 @@ func (s *Store) ErasePeer(ctx context.Context, actor, peerKey string) (EraseRepo
 			WHERE id = ANY($1::bigint[])`, garbageIDs(rep.Media)); err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM conversations WHERE peer_key = $1`, peerKey)
+		// A public link to an erased file stops working now, not when the
+		// file is gone.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM media_links WHERE media_id = ANY($1::bigint[])`, garbageIDs(rep.Media)); err != nil {
+			return err
+		}
+		if err := queueRedactions(ctx, tx, rep.Batch, `
+			SELECT m.channel_id, ch.provider, m.provider_message_id FROM conversation_messages m
+			JOIN conversations c ON c.id = m.conversation_id JOIN msg_channels ch ON ch.id = m.channel_id
+			WHERE c.peer_key = $1 AND m.provider_message_id IS NOT NULL AND ch.provider <> 'sip_trunk'`, peerKey); err != nil {
+			return err
+		}
+		// The SIP text queue holds a copy of what went to desk phones and
+		// through SIP trunks, and the trunk texts of the number itself.
+		res, err := tx.ExecContext(ctx, `
+			DELETE FROM messages WHERE conversation_message_id IN (
+				SELECT m.id FROM conversation_messages m JOIN conversations c ON c.id = m.conversation_id WHERE c.peer_key = $1)
+			   OR (sender_kind = 'external' AND sender = $1) OR (recipient_kind = 'external' AND recipient = $1)`, peerKey)
 		if err != nil {
 			return err
 		}
 		n, _ := res.RowsAffected()
+		rep.SIPMessages = int(n)
+		res, err = tx.ExecContext(ctx, `DELETE FROM conversations WHERE peer_key = $1`, peerKey)
+		if err != nil {
+			return err
+		}
+		n, _ = res.RowsAffected()
 		rep.Conversations = int(n)
 		// A chat visitor's own record goes with their conversations.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM chat_visitors WHERE 'visitor:' || id::text = $1`, peerKey); err != nil {
@@ -709,14 +751,16 @@ func (s *Store) ErasePeer(ctx context.Context, actor, peerKey string) (EraseRepo
 		}
 		n, _ = res.RowsAffected()
 		rep.OptOutsKept = int(n)
-		for _, p := range providers {
-			// The SIP trunk carrier holds no copy Hello can delete.
-			rep.Providers = append(rep.Providers, EraseProvider{Provider: p, Redacted: false,
-				Detail: "the carrier keeps its own logs; Hello cannot delete them"})
-		}
-		return insertAudit(ctx, tx, actor, fmt.Sprintf("erase conversations=%d messages=%d", rep.Conversations, rep.Messages), "msg_peer", "-")
+		return insertAudit(ctx, tx, actor, fmt.Sprintf("erase conversations=%d messages=%d sip_messages=%d", rep.Conversations, rep.Messages,
+			rep.SIPMessages), "msg_peer", rep.Batch)
 	})
-	return rep, err
+	if err != nil {
+		return rep, err
+	}
+	for _, p := range providers {
+		rep.Providers = append(rep.Providers, EraseProvider{Provider: p})
+	}
+	return rep, nil
 }
 
 func garbageIDs(gs []media.Garbage) []int64 {

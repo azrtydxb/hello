@@ -41,7 +41,8 @@ const TONES: Record<string, BadgeTone> = {
   "voicemail.received": "warn",
 };
 
-function party(p: { number?: string; name?: string; extension?: string }) {
+function party(p?: { number?: string; name?: string; extension?: string }) {
+  if (!p) return "—";
   const n = p.number || p.extension || "—";
   return p.name ? `${p.name} (${n})` : n;
 }
@@ -49,6 +50,14 @@ function party(p: { number?: string; name?: string; extension?: string }) {
 function details(e: EventEntry): string {
   const d = e.data;
   const parts: string[] = [];
+  // An inbox event: the conversation, its channel and the state.
+  if (d.conversationId) {
+    parts.push(`conversation #${String(d.conversationId)}`);
+    if (d.channelKind) parts.push(d.channelKind);
+    if (d.status) parts.push(d.status);
+    if (d.direction) parts.push(d.direction === "in" ? "inbound" : "outbound");
+    return parts.join(" · ");
+  }
   if (d.direction) parts.push(d.direction);
   if (d.state) parts.push(d.state);
   if (d.reason) parts.push(`reason ${d.reason}`);
