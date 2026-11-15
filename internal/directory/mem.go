@@ -439,6 +439,9 @@ func (m *Mem) Apply(_ context.Context, actor string, c Connector, op Op) (Applie
 	if err := m.ApplyErr[op.ExternalID]; err != nil {
 		return Applied{}, err
 	}
+	if u := m.Users[op.UserID]; u != nil && u.BreakGlass && op.Kind != ActionCreate {
+		return Applied{}, ErrProtected
+	}
 	m.Applied = append(m.Applied, op)
 	var got Applied
 	// provision allocates like the PostgreSQL store under its lock: the

@@ -4965,3 +4965,70 @@ Choices:
 - **`TestClientMetrics`** moves the registration, auth-failure, video-slot and
   WebRTC leg series with real calls through hello-sip; the push part of S-52's
   test comes with the push gateway.
+
+## Integrations P9 and P11: Google Workspace and Entra connectors, single sign-on (2026-11-14)
+
+Builder decisions within spec I-20 to I-22 and I-26 to I-30 (the spec left
+these open or to the implementation):
+
+- **Entra delta state lives in the connector's sync mark**, not on the run
+  row: the mark already carries the incremental state of LDAP, and a run that
+  fails keeps the previous link.
+- **A full run ends with `$deltatoken=latest`** to take the delta link without
+  paging the whole delta, since the full list was just read.
+- **Fallbacks to a full read**: `410 Gone` (`delta_expired`), any `@removed`
+  entry (`delta_removed`: absence needs a complete list, the engine's absence
+  rule depends on it), more than 1,000 changes (`delta_large`), and a changed
+  membership hash of the groups the rules use (`groups_changed`). Changed
+  users are re-read 15 ids per `$filter=id in (...)` for a full `$select`.
+- **Guests are skipped by default** (an `includeGuests` switch turns them on).
+- **Group rules read `transitiveMembers`** rather than `/groups/{id}/members`
+  (spec I-22), so nested groups count as they do with the AD in-chain rule.
+- **Domain-wide delegation is its own `authMode` (`delegation`)** instead of
+  `service_account` plus a `subject` (spec I-21): a `subject` on the default
+  mode is refused, so delegation is never switched on by filling one field.
+- **Identity keys**: Entra's `oid` (with `tid` pinned to the tenant), Google's
+  `sub`; both equal the ids the connectors link by, so a synced user is found
+  without email.
+- **Email matching only for Google synced non-admins**: exactly one synced,
+  non-admin, non-break-glass user with a verified email of a listed domain.
+  Entra never matches by email (`oid` is always there). Local users and
+  administrators link themselves from their profile while signed in.
+- **JIT is off by default**; a JIT user gets the `user` role and password `!`.
+- **SSO keeps Hello's own TOTP**: a user with 2FA continues on the login page
+  with the challenge carried in the URL fragment (`/login#mfa=`), never a
+  query string or log.
+- **The OIDC binding cookie is `SameSite=Lax`** (the provider's redirect is a
+  top-level cross-site GET), path `/api/v1/`, 10 minutes; the session cookie
+  stays `Strict`. `state` and `nonce` are single use in Valkey (`GETDEL`).
+- **Login method is a connector option** (`loginMethod`: `oidc` or
+  `ldap_bind`, `oidcProvider`), with the earlier `ldapBindLogin` config flag
+  read as `ldap_bind`. A connector whose users have no way in cannot be
+  enabled (`no_login_method`), nor an `oidc` one before its provider is.
+- **One `credential` body field** for the new kinds' secrets, accepted next to
+  `bindPassword` (one of the two per request); the `auth_method` CHECK is left
+  as it is (`local` for everyone).
+- **The Google SSO provider requires domains** (`hd` check); a personal Google
+  account is never accepted.
+- **Google scopes**: delegation and service-account tokens ask only for the
+  scopes the run needs (users, plus groups and members when rules use them);
+  consent asks for all three once. A grant with any scope outside the
+  allow-list is refused. Replacing an `oauth_admin` secret drops the refresh
+  token, so consent is granted again.
+- **Adoption by a connector now clears the local password** (`!`), matching
+  created users, and every set-password route answers `409
+managed_by_directory`.
+- **Break-glass guards are in the store**, under the same admin row lock as
+  `last_admin`, so two concurrent changes cannot remove the last one. Demoting
+  or disabling a break-glass admin unflags it, subject to that guard.
+- **LDAP bind login throttle**: 5 failures per user and per address in 10
+  minutes (Valkey), checked before any bind, so Hello locks before AD's own
+  lockout does.
+- **With P12 auto-provisioning** (merged after this was built): Google and
+  Entra connectors provision like LDAP ones; an adopted user loses its local
+  password in the same transaction that may allocate its number; a
+  break-glass admin is skipped before any provisioning; releasing a
+  connector's users keeps their numbers and extensions (unmarked) and gives
+  no password back. Migration renumbered to `00102`.
+- **All new operations are excluded from MCP** (`x-hello-mcp`): sign-in,
+  secrets and identity linking are browser or admin-console flows.

@@ -36,6 +36,7 @@ import (
 	"github.com/azrtydxb/hello/internal/safehttp"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/slack"
+	"github.com/azrtydxb/hello/internal/sso"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/turn"
@@ -254,8 +255,10 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	dirEngine := &directory.Engine{
 		// Range auto-provisioning (P12) creates extensions through the
 		// configuration store, with its numbering rules and routing check.
-		Store:          &directory.PG{DB: db, Box: box, Provisioner: &dirstore.Provisioner{Store: st, Realm: cfg.SIPDomain}},
-		Drivers:        map[string]directory.Driver{directory.KindLDAP: directory.LDAP{}},
+		Store: &directory.PG{DB: db, Box: box, Provisioner: &dirstore.Provisioner{Store: st, Realm: cfg.SIPDomain}},
+		Drivers: map[string]directory.Driver{
+			directory.KindLDAP: directory.LDAP{}, directory.KindGoogle: directory.Google{}, directory.KindEntra: directory.Entra{},
+		},
 		Metrics:        directory.NewMetrics(metrics.Registry),
 		Log:            log.With("component", "directory"),
 		Replica:        cfg.NodeID,
@@ -269,6 +272,15 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			return s, true, nil
 		}, nil, log.With("component", "directory")),
 	}
+	// Single sign-on (spec integrations P11): OIDC through Google or Entra
+	// and the LDAP bind login of AD-synced users. The sign-in state and the
+	// throttles live in Valkey; without HELLO_PUBLIC_URL SSO is off.
+	ssoSvc := &sso.Service{
+		Store: &sso.PG{DB: db, Box: box}, PublicURL: cfg.AI.PublicURL,
+		States: sso.ValkeyStates{Client: vk.Client}, Throttle: sso.ValkeyThrottle{Client: vk.Client},
+		Directory: dirEngine, Metrics: sso.NewMetrics(metrics.Registry), Log: log.With("component", "sso"),
+	}
+	dirEngine.LoginCheck = ssoSvc.ProviderEnabled
 	go dirEngine.Run(ctx)
 	go evSvc.Run(ctx)
 	go crmSvc.Run(ctx)
@@ -285,6 +297,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		CRM:          crmSvc.Service,
 		Slack:        slackSvc,
 		Directory:    dirEngine,
+		SSO:          ssoSvc,
 		Events:       evSvc,
 		Webhooks:     hooks,
 		AIAgent:      agent,

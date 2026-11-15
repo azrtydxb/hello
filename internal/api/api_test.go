@@ -20,6 +20,13 @@ type stubStore struct {
 }
 
 func (stubStore) ConfigRevision(context.Context) (int64, error) { return 42, nil }
+
+// SSORequired and UserManagedByDirectory answer "off" and "local" unless a
+// fake overrides them.
+func (stubStore) SSORequired(context.Context) (bool, error) { return false, nil }
+func (stubStore) UserManagedByDirectory(context.Context, int64) (bool, error) {
+	return false, nil
+}
 func (stubStore) SessionActor(context.Context, []byte) (auth.Actor, error) {
 	return auth.Actor{}, auth.ErrNoCredentials
 }
@@ -40,6 +47,12 @@ var publicOps = map[string]int{
 	// The CRM sign-in callback: without the CRM service wired it answers
 	// 503, and with it a redirect (TestCRMConnectorLifecycle).
 	"GET /api/v1/integrations/crm/oauth/callback": http.StatusServiceUnavailable,
+	// Single sign-on without the SSO service: no providers, and the round
+	// trips send the browser back to the login or directory page.
+	"GET /api/v1/auth/oidc/providers":           http.StatusOK,
+	"GET /api/v1/auth/oidc/{provider}/start":    http.StatusSeeOther,
+	"GET /api/v1/auth/oidc/{provider}/callback": http.StatusSeeOther,
+	"GET /api/v1/directory/oauth/callback":      http.StatusSeeOther,
 }
 
 // documentedOps lists "METHOD /path" for every operation in openapi.json.

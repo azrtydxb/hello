@@ -81,7 +81,7 @@ func newRig(t *testing.T, ap directory.AutoProvision) *rig {
 	r.e = &directory.Engine{Store: pg, Drivers: map[string]directory.Driver{directory.KindLDAP: r.drv}, Replica: "t"}
 	pw, name, on := "bind-password-123", "AD", true
 	r.c, err = r.e.Create(r.ctx, "admin", directory.ConnectorInput{Kind: directory.KindLDAP, Name: &name, Secret: &pw, Enabled: &on,
-		Config: json.RawMessage(`{"url":"ldaps://dc"}`), AutoProvision: &ap})
+		Config: json.RawMessage(`{"url":"ldaps://dc","ldapBindLogin":true}`), AutoProvision: &ap})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,5 +244,77 @@ func TestProvisionerPreferredAndCodes(t *testing.T) {
 	}
 	if _, err := p.Provision(ctx, tx, "directory:X", directory.ProvisionRequest{ConnectorID: cid, RangeStart: "3000", RangeEnd: "3000"}); !errors.Is(err, directory.ErrRangeExhausted) {
 		t.Fatalf("exhausted: %v", err)
+	}
+}
+
+// TestProvisionAdoptBreakGlassAndRelease fails if, with range
+// auto-provisioning on, an adopted local user does not lose its local
+// password (I-29) and get a number from the range, a break-glass admin with a
+// matching email is touched, or releasing the connector's users drops the
+// provisioned number, the extension, or brings a local password back.
+func TestProvisionAdoptBreakGlassAndRelease(t *testing.T) {
+	r := newRig(t, directory.AutoProvision{Enabled: true, RangeStart: "500", RangeEnd: "509", Device: true, Voicemail: true})
+	if _, err := r.db.ExecContext(r.ctx, `INSERT INTO users (username, password_hash, role, email) VALUES
+		('legacy', 'argon-hash', 'user', 'legacy@corp.org'),
+		('root', 'root-hash', 'admin', 'root@corp.org')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.ExecContext(r.ctx, `UPDATE users SET break_glass = TRUE WHERE username = 'root'`); err != nil {
+		t.Fatal(err)
+	}
+	r.drv.Res = &directory.Result{Users: []directory.SourceUser{
+		user("l", "legacy@corp", "legacy@corp.org", "Legacy User"),
+		user("x", "root@corp", "root@corp.org", "Root"),
+	}}
+	pre, err := r.e.RequestRun(r.ctx, "admin", r.c.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.e.TickOnce(r.ctx)
+	run, err := r.e.Apply(r.ctx, "admin", pre.ID, directory.Decisions{Adopt: []string{"l"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := r.e.ListChanges(r.ctx, run.ID, directory.ChangeFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cs {
+		if c.ExternalID == "x" && (c.Action != directory.ActionSkip || c.Reason != directory.ReasonProtected) {
+			t.Fatalf("break-glass row = %+v", c)
+		}
+	}
+	if got := r.one(`SELECT u.password_hash || '|' || u.must_change_password || '|' || u.external_id || '|' || u.provisioned_number || '|' || e.provisioned_by
+		FROM users u JOIN user_extensions ue ON ue.user_id = u.id JOIN extensions e ON e.id = ue.extension_id
+		WHERE u.email = 'legacy@corp.org'`); got != fmt.Sprintf("!|false|l|500|%d", r.c.ID) {
+		t.Fatalf("adopted = %s", got)
+	}
+	if got := r.one(`SELECT password_hash || '|' || (source_connector_id IS NULL) || '|' || coalesce(provisioned_number, '') || '|' ||
+		(SELECT count(*) FROM user_extensions WHERE user_id = users.id) FROM users WHERE username = 'root'`); got != "root-hash|true||0" {
+		t.Fatalf("break-glass admin = %s", got)
+	}
+	var id int64
+	if err := r.db.QueryRowContext(r.ctx, `SELECT id FROM users WHERE email = 'legacy@corp.org'`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if managed, err := r.st.UserManagedByDirectory(r.ctx, id); err != nil || !managed {
+		t.Fatalf("managed = %v, %v", managed, err)
+	}
+	// The adopted user took the directory's username (its UPN).
+	if got := r.one(`SELECT username FROM users WHERE id = $1`, id); got != "legacy@corp" {
+		t.Fatalf("username = %s", got)
+	}
+	// Released, the user is local again: no password until an administrator
+	// sets one, and the number it was given stays its own.
+	if err := r.e.Delete(r.ctx, "admin", r.c.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.one(`SELECT u.password_hash || '|' || (u.source_connector_id IS NULL) || '|' || u.provisioned_number || '|' || e.number || '|' || (e.provisioned_by IS NULL)
+		FROM users u JOIN user_extensions ue ON ue.user_id = u.id JOIN extensions e ON e.id = ue.extension_id
+		WHERE u.email = 'legacy@corp.org'`); got != "!|true|500|500|true" {
+		t.Fatalf("released = %s", got)
+	}
+	if managed, err := r.st.UserManagedByDirectory(r.ctx, id); err != nil || managed {
+		t.Fatalf("released managed = %v, %v", managed, err)
 	}
 }

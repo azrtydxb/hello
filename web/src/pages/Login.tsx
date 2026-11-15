@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   ApiError,
@@ -7,6 +7,12 @@ import {
   loginSecondFactor,
   safeNext,
 } from "../api";
+import {
+  listSSOProviders,
+  ssoErrorText,
+  ssoStartURL,
+  type PublicProvider,
+} from "../api/sso";
 import { useAuth } from "../auth";
 import { HelloLogo } from "../brand";
 import {
@@ -43,6 +49,19 @@ function ControlPlaneStatus({ state }: { state: ControlPlane }) {
   );
 }
 
+/** The second-factor challenge a single sign-on hands over in the URL
+ * fragment (never sent to a server); it is taken out of the address bar. */
+function challengeFromFragment(): string | null {
+  const m = /^#mfa=([^&]+)/.exec(window.location.hash);
+  if (!m?.[1]) return null;
+  window.history.replaceState(
+    null,
+    "",
+    window.location.pathname + window.location.search,
+  );
+  return decodeURIComponent(m[1]);
+}
+
 /** Sign-in screen; on success it returns to the `next` query parameter. */
 export function Login() {
   const { refresh } = useAuth();
@@ -51,10 +70,30 @@ export function Login() {
   const controlPlane = useControlPlane();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() => {
+    const code = params.get("sso_error");
+    return code ? ssoErrorText(code) : null;
+  });
   const [busy, setBusy] = useState(false);
-  // Set once the password was right for a user with two-factor authentication.
-  const [challenge, setChallenge] = useState<string | null>(null);
+  // Set once the password (or a single sign-on) was right for a user with
+  // two-factor authentication.
+  const [challenge, setChallenge] = useState<string | null>(
+    challengeFromFragment,
+  );
+  const [providers, setProviders] = useState<PublicProvider[]>([]);
+  useEffect(() => {
+    let live = true;
+    listSSOProviders()
+      .then((ps) => {
+        if (live) setProviders(ps);
+      })
+      .catch(() => {
+        // No buttons: the password form still works.
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
   const [code, setCode] = useState("");
 
   async function onCode(e: FormEvent<HTMLFormElement>) {
@@ -224,6 +263,21 @@ export function Login() {
                 {busy ? "Signing in…" : "Sign in"}
               </Button>
             </form>
+          )}
+
+          {challenge === null && providers.length > 0 && (
+            <nav className="signin__sso" aria-label="Single sign-on">
+              <span className="signin__sso-or">or</span>
+              {providers.map((p) => (
+                <a
+                  key={p.provider}
+                  className="az-btn az-btn--secondary az-btn--lg az-btn--block"
+                  href={ssoStartURL(p.provider, safeNext(params.get("next")))}
+                >
+                  Sign in with {p.name}
+                </a>
+              ))}
+            </nav>
           )}
         </section>
 
