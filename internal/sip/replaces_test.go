@@ -3,7 +3,6 @@ package sip
 import (
 	"context"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -171,12 +170,12 @@ func TestPrackAndReplaces(t *testing.T) {
 			}
 			inv1 := waitReq(t, b.invites, "INVITE to b")
 			dssAB := b.serverFor(inv1)
-			// Call 2: b -> c, which rings; c answers the next INVITE.
+			// Call 2: b -> c, which rings; c answers the transferred call.
 			var gate chan struct{}
 			if order.afterCancel {
 				gate = make(chan struct{})
 			}
-			c.setCallee(consultThenAnswer(gate))
+			c.setCallee(consultThenAnswer("200", gate)) // b is extension 200
 			ch2 := dial(t.Context(), b, "300")
 			inv2 := waitReq(t, c.invites, "consultation INVITE to c")
 			// b transfers a to c before c answers.
@@ -321,13 +320,17 @@ func TestPrackAndReplaces(t *testing.T) {
 	})
 }
 
-// consultThenAnswer rings on a phone's first INVITE until it is cancelled
-// and answers every later one: at once when gate is nil, else once gate is
-// closed.
-func consultThenAnswer(gate <-chan struct{}) calleeFn {
-	var n atomic.Int32
+// consultThenAnswer rings on the consultation call (the INVITE Hello sends
+// on behalf of the transferor, From consultFrom) until it is cancelled, and
+// answers every other INVITE: at once when gate is nil, else once gate is
+// closed. It tells them apart by the caller, not by the order its handlers
+// run in: the phone reports an INVITE before it calls the callee, so the
+// test can act on the consultation INVITE (REFER, then the transferred
+// call's INVITE) before that INVITE's handler has run, and an order-based
+// choice then rang the transferred call forever.
+func consultThenAnswer(consultFrom string, gate <-chan struct{}) calleeFn {
 	return func(p *phone, req *sip.Request, tx sip.ServerTransaction, dss *sipgo.DialogServerSession) {
-		if n.Add(1) == 1 {
+		if req.From().Address.User == consultFrom {
 			ringForever()(p, req, tx, dss)
 			return
 		}

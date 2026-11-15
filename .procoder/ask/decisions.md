@@ -5623,3 +5623,19 @@ Spec `.procoder/specs/phone-feature-parity.md` S-12 and S-20, following #259,
   download by message id, plus the rows off their message), so the lookup
   uses indexes; a key of another shape (a chat site's logo) is never
   removed. Counted in `hello_msg_purged_total{kind="media"}`.
+
+## TestPrackAndReplaces: the target answers by caller, not by arrival (2026-11-15)
+
+CI flaked `attended transfer before answer, answered after the cancel`
+("timed out waiting for BYE to the transferor's first call"). It was the
+test, not the product. The target's callee chose between ringing and
+answering by the order its handlers ran, but the phone reports an INVITE
+before it runs the callee. So the test could see the consultation INVITE,
+send the REFER and get the transferred call's INVITE while the
+consultation's handler had not yet run. The transferred call then counted
+as first and rang forever. Every earlier check still passed, because the
+consultation was cancelled either way. A forced one-second delay on the
+first handler reproduces it every time. The callee now rings the INVITE
+From the transferor's extension (the consultation) and answers the others.
+Hello itself BYEs the transferor as soon as the transferred call is
+answered, whatever the order.
