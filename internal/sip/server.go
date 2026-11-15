@@ -336,6 +336,9 @@ type Server struct {
 	bg            sync.WaitGroup
 	// emMarks is the node-local record of emergency calls (emergency.go).
 	emMarks emergencyMarks
+	// parkQ runs the park commands for one call in the order they were
+	// sent (pickup.go).
+	parkQ parkQueues
 	// bgMu guards bgClosed: once shutdown waits for bg, a late call event
 	// (a call ending as the node stops) must not start more work on it.
 	bgMu     sync.Mutex
