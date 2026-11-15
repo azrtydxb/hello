@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -41,6 +43,10 @@ type Objects interface {
 	// Exists reports whether an object is still there (an erase checks its
 	// deletions with it).
 	Exists(ctx context.Context, key string) (bool, error)
+	// List calls fn with every object under prefix (which starts with
+	// msg/) and when it was last written; an error from fn stops it. The
+	// orphan sweep reads the store with it.
+	List(ctx context.Context, prefix string, fn func(key string, modified time.Time) error) error
 }
 
 func checkKey(key string) error {
@@ -130,12 +136,32 @@ func (m *minioObjects) Exists(ctx context.Context, key string) (bool, error) {
 	return false, fmt.Errorf("media: stat: %w", err)
 }
 
+func (m *minioObjects) List(ctx context.Context, prefix string, fn func(key string, modified time.Time) error) error {
+	if err := checkKey(prefix); err != nil {
+		return err
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel() // stops the listing when fn stops early
+	for o := range m.c.ListObjects(cctx, Bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+		if o.Err != nil {
+			return fmt.Errorf("media: list: %w", o.Err)
+		}
+		if err := fn(o.Key, o.LastModified); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
 // MemObjects is an in-memory Objects for tests.
 type MemObjects struct {
 	mu sync.Mutex
 	M  map[string][]byte
 	// Types holds each object's stored content type.
 	Types map[string]string
+	// Modified holds when each object was written (time.Now at Put); a
+	// test sets it to age an object.
+	Modified map[string]time.Time
 	// FailPut and FailRemove, when set, make Put and Remove fail.
 	FailPut    error
 	FailRemove error
@@ -158,7 +184,10 @@ func (m *MemObjects) Put(_ context.Context, key string, r io.Reader, _ int64, ct
 	if m.M == nil {
 		m.M, m.Types = map[string][]byte{}, map[string]string{}
 	}
-	m.M[key], m.Types[key] = b, ctype
+	if m.Modified == nil {
+		m.Modified = map[string]time.Time{}
+	}
+	m.M[key], m.Types[key], m.Modified[key] = b, ctype, time.Now()
 	return nil
 }
 
@@ -185,6 +214,7 @@ func (m *MemObjects) Remove(_ context.Context, key string) error {
 		return m.FailRemove
 	}
 	delete(m.M, key)
+	delete(m.Modified, key)
 	return nil
 }
 
@@ -194,6 +224,32 @@ func (m *MemObjects) Exists(_ context.Context, key string) (bool, error) {
 	defer m.mu.Unlock()
 	_, ok := m.M[key]
 	return ok, nil
+}
+
+// List implements Objects, in key order.
+func (m *MemObjects) List(_ context.Context, prefix string, fn func(key string, modified time.Time) error) error {
+	if err := checkKey(prefix); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	type obj struct {
+		key string
+		at  time.Time
+	}
+	var objs []obj
+	for k := range m.M {
+		if strings.HasPrefix(k, prefix) {
+			objs = append(objs, obj{k, m.Modified[k]})
+		}
+	}
+	m.mu.Unlock()
+	sort.Slice(objs, func(i, j int) bool { return objs[i].key < objs[j].key })
+	for _, o := range objs {
+		if err := fn(o.key, o.at); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Len is how many objects are stored.

@@ -31,6 +31,8 @@ var (
 type mediaCarrier struct {
 	files map[string][]byte
 	gone  map[string]bool
+	// during, when set, runs while a download is under way.
+	during func()
 }
 
 func (mediaCarrier) Kind() string                   { return "fake" }
@@ -46,6 +48,9 @@ func (mediaCarrier) Send(context.Context, provider.Outbound) (provider.Sent, err
 func (c mediaCarrier) FetchMedia(_ context.Context, ref provider.MediaRef) (provider.Media, error) {
 	if c.gone[ref.URL] {
 		return provider.Media{}, provider.ErrNotFound
+	}
+	if c.during != nil {
+		c.during()
 	}
 	return provider.Media{Body: io.NopCloser(bytes.NewReader(c.files[ref.URL])), ContentType: ref.ContentType}, nil
 }
@@ -425,4 +430,140 @@ func TestDeskPhoneMediaNote(t *testing.T) {
 	if body != messaging.WithMediaNote("two photos", 2) {
 		t.Fatalf("desk phone got %q", body)
 	}
+}
+
+// TestMediaErasedDuringDownload fails if a file a download stores after an
+// erase or a redaction took its attachment stays in the media store, if the
+// worker removes a file another row of the message still names, or if the
+// orphan sweep misses an old object no row names, removes one a row names,
+// or removes one too young to be an orphan.
+func TestMediaErasedDuringDownload(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	objs := &media.MemObjects{}
+
+	t.Run("erase", func(t *testing.T) {
+		conv, msg := r.carrierText("+32475000101", "photo")
+		if err := r.st.AddInboundMedia(ctx, msg, []provider.MediaRef{{URL: "https://m/e"}}); err != nil {
+			t.Fatal(err)
+		}
+		var peerKey string
+		if err := r.db.QueryRowContext(ctx, `SELECT peer_key FROM conversations WHERE id = $1`, conv).Scan(&peerKey); err != nil {
+			t.Fatal(err)
+		}
+		c := mediaCarrier{files: map[string][]byte{"https://m/e": dbPNG}, during: func() {
+			// The erase and the API's removal of what it names (no file
+			// yet: the row's key is empty) run while the file downloads.
+			rep, err := r.st.ErasePeer(ctx, "user:admin", peerKey)
+			if err != nil || len(rep.Media) != 1 || rep.Media[0].Key != "" {
+				t.Errorf("erase = %+v, %v", rep, err)
+			}
+			for _, g := range rep.Media {
+				if err := r.st.DropMedia(ctx, g); err != nil {
+					t.Error(err)
+				}
+			}
+		}}
+		if n, err := r.mediaWorker(objs, c).FetchOnce(ctx, 10); err != nil || n != 1 {
+			t.Fatalf("fetch = %d, %v", n, err)
+		}
+		if objs.Len() != 0 {
+			t.Fatalf("%d files left in the media store after the erase", objs.Len())
+		}
+	})
+
+	t.Run("redaction", func(t *testing.T) {
+		conv, msg := r.carrierText("+32475000102", "photo")
+		if err := r.st.AddInboundMedia(ctx, msg, []provider.MediaRef{{URL: "https://m/r"}}); err != nil {
+			t.Fatal(err)
+		}
+		c := mediaCarrier{files: map[string][]byte{"https://m/r": dbPDF}, during: func() {
+			// The redaction takes the attachment off the message; the
+			// API's removal has not run yet, so the row is still there.
+			if _, err := r.st.RedactConversationMessage(ctx, "user:admin", conv, msg); err != nil {
+				t.Error(err)
+			}
+		}}
+		if _, err := r.mediaWorker(objs, c).FetchOnce(ctx, 10); err != nil {
+			t.Fatal(err)
+		}
+		if objs.Len() != 0 {
+			t.Fatalf("%d files left in the media store after the redaction", objs.Len())
+		}
+		if n := r.count(`SELECT count(*) FROM message_media WHERE object_key <> '' AND message_id IS NULL`); n != 0 {
+			t.Fatalf("%d detached rows name a file", n)
+		}
+	})
+
+	t.Run("a second worker", func(t *testing.T) {
+		// A worker whose lease lapsed finishes after another stored the
+		// same file under the same key: the file stays.
+		_, msg := r.carrierText("+32475000103", "photo")
+		if err := r.st.AddInboundMedia(ctx, msg, []provider.MediaRef{{URL: "https://m/s"}}); err != nil {
+			t.Fatal(err)
+		}
+		c := mediaCarrier{files: map[string][]byte{"https://m/s": dbPNG}}
+		jobs, err := r.st.ClaimMediaFetch(ctx, 10)
+		if err != nil || len(jobs) != 1 {
+			t.Fatalf("claim = %v, %v", jobs, err)
+		}
+		if n, err := r.mediaWorker(objs, c).FetchOnce(ctx, 10); err != nil || n != 0 {
+			t.Fatalf("fetch while claimed = %d, %v", n, err)
+		}
+		if _, err := r.db.ExecContext(ctx, `UPDATE message_media SET next_attempt_at = now() WHERE id = $1`, jobs[0].ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.mediaWorker(objs, c).FetchOnce(ctx, 10); err != nil || objs.Len() != 1 {
+			t.Fatalf("fetch = %v, %d files", err, objs.Len())
+		}
+		var key string
+		if err := r.db.QueryRowContext(ctx, `SELECT object_key FROM message_media WHERE id = $1`, jobs[0].ID).Scan(&key); err != nil || key == "" {
+			t.Fatalf("key %q, %v", key, err)
+		}
+		late := media.FetchResult{Status: media.StatusReady, Key: key, Inspected: media.Inspected{ContentType: "image/png", Size: 1, SHA256: strings.Repeat("a", 64)}}
+		if err := r.st.FinishMediaFetch(ctx, jobs[0], late); err != nil {
+			t.Fatalf("the late worker's result: %v", err)
+		}
+		other := media.FetchResult{Status: media.StatusReady, Key: key + "x", Inspected: late.Inspected}
+		if err := r.st.FinishMediaFetch(ctx, jobs[0], other); !errors.Is(err, media.ErrGone) {
+			t.Fatalf("a late file no row names: %v", err)
+		}
+	})
+
+	t.Run("orphan sweep", func(t *testing.T) {
+		before := objs.Len()
+		old := time.Now().Add(-2 * media.OrphanAge)
+		orphans := []string{"msg/1/2026/424242/" + strings.Repeat("c", 64), "msg/1/2026/upload-424243/" + strings.Repeat("d", 64)}
+		young := "msg/1/2026/424244/" + strings.Repeat("e", 64)
+		logo := media.LogoKey(1)
+		for _, k := range append(orphans, young, logo) {
+			if err := objs.Put(ctx, k, bytes.NewReader([]byte("x")), 1, "text/plain"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Everything is old but one; a key a row names stays whatever its
+		// age.
+		for k := range objs.M {
+			objs.Modified[k] = old
+		}
+		objs.Modified[young] = time.Now()
+		w := r.mediaWorker(objs, mediaCarrier{})
+		n, err := w.SweepOrphans(ctx)
+		if err != nil || n != len(orphans) {
+			t.Fatalf("sweep = %d, %v", n, err)
+		}
+		for _, k := range orphans {
+			if ok, _ := objs.Exists(ctx, k); ok {
+				t.Errorf("orphan %s is still there", k)
+			}
+		}
+		for _, k := range []string{young, logo} {
+			if ok, _ := objs.Exists(ctx, k); !ok {
+				t.Errorf("%s was removed", k)
+			}
+		}
+		if objs.Len() != before+2 {
+			t.Fatalf("%d objects, want the %d a row names and two more", objs.Len(), before)
+		}
+	})
 }

@@ -36,7 +36,10 @@ type fakeBackend struct {
 	uploads map[int64]*store.MediaUpload
 	ready   map[int64]bool
 	aborted []int64
-	media   map[int64]map[int64]store.MediaFile
+	// finishErr, when set, is FinishMediaUpload's answer (an upload erased
+	// meanwhile is store.ErrNotFound).
+	finishErr error
+	media     map[int64]map[int64]store.MediaFile
 }
 
 func newFake() *fakeBackend {
@@ -192,6 +195,9 @@ func (f *fakeBackend) ChatBeginUpload(_ context.Context, site store.ChatSite, _ 
 func (f *fakeBackend) FinishMediaUpload(_ context.Context, id int64) (store.ConvMedia, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.finishErr != nil {
+		return store.ConvMedia{}, f.finishErr
+	}
 	f.ready[id] = true
 	return store.ConvMedia{ID: id, Status: "ready"}, nil
 }

@@ -8,13 +8,16 @@ package api
 import (
 	"bytes"
 	"context"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/azrtydxb/hello/internal/messaging/media"
 	"github.com/azrtydxb/hello/internal/messaging/provider"
 	"github.com/azrtydxb/hello/internal/store"
 )
@@ -263,4 +266,53 @@ func (r *inboxRig) count(q string, args ...any) int {
 		r.t.Fatal(err)
 	}
 	return n
+}
+
+// putHookObjects is a media store that runs a hook once, before the next
+// object is stored.
+type putHookObjects struct {
+	*media.MemObjects
+	mu   sync.Mutex
+	hook func()
+}
+
+func (o *putHookObjects) Put(ctx context.Context, key string, r io.Reader, size int64, ctype string) error {
+	o.mu.Lock()
+	h := o.hook
+	o.hook = nil
+	o.mu.Unlock()
+	if h != nil {
+		h()
+	}
+	return o.MemObjects.Put(ctx, key, r, size, ctype)
+}
+
+// TestInboxUploadErasedMeanwhile fails if the file of an upload whose row an
+// erase removed while the file was being stored stays in the media store.
+func TestInboxUploadErasedMeanwhile(t *testing.T) {
+	objs := &putHookObjects{MemObjects: &media.MemObjects{}}
+	r := newInboxRigConfig(t, Config{Live: noLive{}, MediaObjects: objs})
+	ctx := context.Background()
+	conv, visitor := r.chatConversation("Erase desk")
+	objs.mu.Lock()
+	objs.hook = func() {
+		// The erase, and the API's removal of what it names, between the
+		// upload's row and its file.
+		rep, err := r.st.ErasePeer(ctx, "user:admin", "visitor:"+strconv.FormatInt(visitor, 10))
+		if err != nil || len(rep.Media) != 1 {
+			t.Errorf("erase = %+v, %v", rep, err)
+		}
+		for _, g := range rep.Media {
+			_ = media.RemoveVerified(ctx, objs, g.Key)
+			if err := r.st.DropMedia(ctx, g); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	objs.mu.Unlock()
+	r.operator.mediaUpload("POST", "/api/v1/inbox/media", "late.png", "image/png", mediaPNG,
+		map[string]string{"conversationId": strconv.FormatInt(conv, 10)}).expect(t, http.StatusNotFound)
+	if n := objs.Len(); n != 0 {
+		t.Fatalf("%d files left in the media store after the erase", n)
+	}
 }

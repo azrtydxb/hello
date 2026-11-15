@@ -305,6 +305,8 @@ func (s *server) exportMessagingPeer(w http.ResponseWriter, r *http.Request) {
 		"A message's media lists its attachments; the file of each is under media/, at the path its file field names. An\n" +
 		"attachment with an empty file has no file in Hello (still downloading, refused, expired, or removed meanwhile).\n" +
 		"uploads.json lists a chat visitor's files not sent with a message yet, their files under media/uploads/.\n" +
+		"A conversation's ai holds what the inbox AI kept of it (its last triage with the summary, what it changed, the\n" +
+		"handoff); a message's aiRuns the AI's runs on it (triage, draft, autoreply) with the output each produced.\n" +
 		"The carrier (the SMS provider or SIP trunk) keeps its own records under its own terms.\n"
 	f, err := zw.CreateHeader(&zip.FileHeader{Name: "README.txt", Method: zip.Deflate, Modified: exp.ExportedAt})
 	if err == nil {

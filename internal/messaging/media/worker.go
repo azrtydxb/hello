@@ -52,7 +52,14 @@ type Store interface {
 	ChannelProviderConfig(ctx context.Context, channelID int64) (provider.Config, error)
 	MediaGarbage(ctx context.Context, limit int) ([]Garbage, error)
 	DropMedia(ctx context.Context, g Garbage) error
+	// KnownMediaKeys returns which of keys an attachment row names.
+	KnownMediaKeys(ctx context.Context, keys []string) (map[string]bool, error)
 }
+
+// ErrGone is FinishMediaFetch's answer for a download whose attachment was
+// erased or redacted while it ran: the row is gone or no longer on its
+// message, so the file just stored must go too.
+var ErrGone = errors.New("media: the attachment was erased or redacted during the download")
 
 // Worker downloads inbound carrier media and removes what is no longer kept.
 // Any number of replicas may run FetchOnce (the store claims each row once);
@@ -109,7 +116,18 @@ func (w *Worker) FetchOnce(ctx context.Context, limit int) (int, error) {
 	for _, j := range jobs {
 		res := w.fetch(ctx, j)
 		w.count(res.Status)
-		if err := w.Store.FinishMediaFetch(ctx, j, res); err != nil && w.Log != nil {
+		err := w.Store.FinishMediaFetch(ctx, j, res)
+		switch {
+		case errors.Is(err, ErrGone):
+			// An erase or a redaction took the attachment while it was
+			// downloading: nothing names the file now, so it goes at once
+			// (and the orphan sweep removes it if MinIO refuses now).
+			if res.Key != "" {
+				if err := RemoveVerified(context.WithoutCancel(ctx), w.Objects, res.Key); err != nil && w.Log != nil {
+					w.Log.Warn("messaging media of an erased attachment not removed yet", "media", j.ID, "error", err)
+				}
+			}
+		case err != nil && w.Log != nil:
 			// The claim lapses and another pass tries again.
 			w.Log.Warn("messaging media result not saved", "media", j.ID, "error", err)
 		}
@@ -210,6 +228,59 @@ func (w *Worker) CollectOnce(ctx context.Context, limit int) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+// orphanBatch is how many listed keys the orphan sweep looks up at once.
+const orphanBatch = 500
+
+// SweepOrphans removes the attachment objects under msg/ that no attachment
+// row names and that are older than OrphanAge, checking each is gone, and
+// returns how many it removed. Such an object is a leftover: a download or
+// an upload whose row an erase or a redaction dropped meanwhile, and whose
+// removal then failed. Keys of another shape (a chat site's logo) are left
+// alone. It reads the whole prefix, so it runs rarely (hourly) on the
+// replica holding the inbox maintenance lease.
+func (w *Worker) SweepOrphans(ctx context.Context) (int, error) {
+	cutoff := w.now().Add(-OrphanAge)
+	removed := 0
+	var batch []string
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		known, err := w.Store.KnownMediaKeys(ctx, batch)
+		if err != nil {
+			return err
+		}
+		for _, k := range batch {
+			if known[k] {
+				continue
+			}
+			if err := RemoveVerified(ctx, w.Objects, k); err != nil {
+				if w.Log != nil {
+					w.Log.Warn("messaging media orphan not removed", "error", err)
+				}
+				continue
+			}
+			removed++
+		}
+		batch = batch[:0]
+		return nil
+	}
+	err := w.Objects.List(ctx, "msg/", func(key string, modified time.Time) error {
+		if _, _, ok := ParseKey(key); !ok || !modified.Before(cutoff) {
+			return nil
+		}
+		batch = append(batch, key)
+		if len(batch) < orphanBatch {
+			return nil
+		}
+		return flush()
+	})
+	if err != nil {
+		return removed, err
+	}
+	return removed, flush()
 }
 
 // ErrStillThere is an object that was removed but is still found.

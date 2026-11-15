@@ -232,7 +232,7 @@ func (s *Store) RedactConversationMessage(ctx context.Context, actor string, con
 		err := tx.QueryRowContext(ctx, `
 			SELECT m.kind, ch.provider, m.provider_message_id, m.redacted_at
 			FROM conversation_messages m JOIN msg_channels ch ON ch.id = m.channel_id
-			WHERE m.id = $1 AND m.conversation_id = $2 FOR UPDATE OF m`, msgID, convID).Scan(&kind, &prov, &providerID, &redacted)
+			WHERE m.id = $1 AND m.conversation_id = $2 FOR NO KEY UPDATE OF m`, msgID, convID).Scan(&kind, &prov, &providerID, &redacted)
 		if err != nil {
 			return err
 		}
@@ -250,6 +250,11 @@ func (s *Store) RedactConversationMessage(ctx context.Context, actor string, con
 		}
 		if rep.Media, err = detachMessageMedia(ctx, tx, msgID); err != nil {
 			return err
+		}
+		if kind == messaging.KindMessage {
+			if err := redactAIOutput(ctx, tx, convID, msgID); err != nil {
+				return err
+			}
 		}
 		if providerID.Valid && prov != messaging.ProviderSIPTrunk {
 			rep.Batch = newRedactionBatch("redact")
@@ -276,6 +281,40 @@ func (s *Store) RedactConversationMessage(ctx context.Context, actor string, con
 	}
 	rep.Message = ms[0]
 	return rep, nil
+}
+
+// redactAIOutput removes what the inbox AI derived from a redacted message
+// (spec M-21 with M-30), in the redaction's transaction. A run reads the
+// conversation's texts up to its own message, so every run of the
+// conversation from the redacted message on may hold some of its text in
+// its result (a triage summary, a reply draft, an auto-reply): those
+// results are cleared, and so is the run that wrote the message when the AI
+// wrote it. A run still working on the old text is marked stale, so it
+// stores and sends nothing; a queued one is locked until the redaction
+// commits, so no worker claims it before then and it reads the blanked text
+// afterwards. The conversation's triage summary goes when its triage read
+// the message or a later one; its classification (intent, tags, queue)
+// stays, as no text of the customer's is in it.
+//
+// Lock order: the message (FOR NO KEY UPDATE, which an AI run inserted for
+// it does not wait on), the runs, then the conversation: the order in which
+// FinishAIRun takes the run and then the conversation.
+func redactAIOutput(ctx context.Context, tx *sql.Tx, convID, msgID int64) error {
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE ai_message_runs SET result = NULL,
+			state = CASE WHEN state = 'running' THEN 'stale' ELSE state END,
+			error = CASE WHEN state = 'running' THEN 'redacted' ELSE error END,
+			finished_at = CASE WHEN state = 'running' THEN now() ELSE finished_at END
+		WHERE conversation_id = $1
+		  AND (message_id >= $2 OR id = (SELECT ai_run_id FROM conversation_messages WHERE id = $2))
+		  AND (result IS NOT NULL OR state IN ('queued', 'running'))`, convID, msgID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE conversations SET ai_triage = jsonb_set(ai_triage, '{summary}', '""')
+		WHERE id = $1 AND ai_triage IS NOT NULL AND coalesce((ai_triage ->> 'messageId')::bigint, 0) >= $2
+		  AND coalesce(ai_triage ->> 'summary', '') <> ''`, convID, msgID)
+	return err
 }
 
 // detachMessageMedia takes a redacted message's attachments off it: each
@@ -329,8 +368,34 @@ type ExportConversation struct {
 	AssigneeName string     `json:"assigneeName"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	ResolvedAt   *time.Time `json:"resolvedAt"`
+	// AI is what the inbox AI holds of the conversation (spec M-30).
+	AI ExportConvAI `json:"ai"`
 	// Messages are the conversation's lines, oldest first.
 	Messages []ExportMessage `json:"-"`
+}
+
+// ExportConvAI is what the inbox AI keeps on a conversation: its last
+// triage (with the summary it wrote for the agent), what the triage changed,
+// the spam flag and the handoff to a person.
+type ExportConvAI struct {
+	Triage        json.RawMessage `json:"triage"`
+	Applied       json.RawMessage `json:"applied"`
+	Spam          bool            `json:"spam"`
+	HandoffAt     *time.Time      `json:"handoffAt"`
+	HandoffReason string          `json:"handoffReason"`
+}
+
+// ExportAIRun is one inbox AI run on a message: its kind (triage, draft,
+// autoreply), state and the model's validated output (a summary, a reply
+// draft, an auto-reply decision); result is null when there is none or a
+// redaction removed it.
+type ExportAIRun struct {
+	ID         int64           `json:"id"`
+	Kind       string          `json:"kind"`
+	State      string          `json:"state"`
+	Result     json.RawMessage `json:"result"`
+	CreatedAt  time.Time       `json:"createdAt"`
+	FinishedAt *time.Time      `json:"finishedAt"`
 }
 
 // ExportMessage is one line of an exported conversation.
@@ -350,6 +415,8 @@ type ExportMessage struct {
 	RedactedAt  *time.Time `json:"redactedAt"`
 	// Media are the message's attachments (spec M-18), oldest first.
 	Media []ExportMedia `json:"media"`
+	// AIRuns are the inbox AI's runs on the message, oldest first.
+	AIRuns []ExportAIRun `json:"aiRuns"`
 }
 
 // ExportMedia is one attachment of an export: its metadata and, set by the
@@ -407,7 +474,8 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT c.id, ch.name, ch.kind, a.address, c.peer_key, c.peer_name, c.status, c.origin, to_json(c.tags)::text,
-		       coalesce(NULLIF(u.display_name, ''), u.username, ''), c.created_at, c.resolved_at
+		       coalesce(NULLIF(u.display_name, ''), u.username, ''), c.created_at, c.resolved_at,
+		       coalesce(c.ai_triage::text, 'null'), c.ai_applied::text, c.ai_spam, c.ai_handoff_at, c.ai_handoff_reason
 		FROM conversations c JOIN msg_channels ch ON ch.id = c.channel_id JOIN msg_addresses a ON a.id = c.address_id
 		LEFT JOIN users u ON u.id = c.assignee_user_id
 		WHERE c.peer_key = $1 ORDER BY c.created_at, c.id`, peerKey)
@@ -417,12 +485,13 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 	index := map[int64]int{}
 	for rows.Next() {
 		var (
-			c        ExportConversation
-			tags     string
-			resolved sql.NullTime
+			c                 ExportConversation
+			tags              string
+			triage, applied   string
+			resolved, handoff sql.NullTime
 		)
 		if err := rows.Scan(&c.ID, &c.Channel, &c.ChannelKind, &c.Address, &c.Peer, &c.PeerName, &c.Status, &c.Origin, &tags,
-			&c.AssigneeName, &c.CreatedAt, &resolved); err != nil {
+			&c.AssigneeName, &c.CreatedAt, &resolved, &triage, &applied, &c.AI.Spam, &handoff, &c.AI.HandoffReason); err != nil {
 			_ = rows.Close()
 			return out, err
 		}
@@ -430,6 +499,7 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 			c.Tags = []string{}
 		}
 		c.ResolvedAt = nullTime(resolved)
+		c.AI.Triage, c.AI.Applied, c.AI.HandoffAt = json.RawMessage(triage), json.RawMessage(applied), nullTime(handoff)
 		c.Messages = []ExportMessage{}
 		index[c.ID] = len(out.Conversations)
 		out.Conversations = append(out.Conversations, c)
@@ -466,6 +536,7 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 		}
 		m.SentAt, m.DeliveredAt, m.ReadAt, m.RedactedAt = nullTime(sent), nullTime(deliv), nullTime(read), nullTime(redacted)
 		m.Media = []ExportMedia{}
+		m.AIRuns = []ExportAIRun{}
 		if i, ok := index[conv]; ok {
 			at[m.ID] = [2]int{i, len(out.Conversations[i].Messages)}
 			out.Conversations[i].Messages = append(out.Conversations[i].Messages, m)
@@ -473,6 +544,11 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 		}
 	}
 	if err := rows.Close(); err != nil {
+		return out, err
+	}
+	// What the inbox AI made of the exported lines.
+	nRuns, err := s.exportAIRuns(ctx, peerKey, at, &out)
+	if err != nil {
 		return out, err
 	}
 	// The attachments of the exported lines, and a chat visitor's own
@@ -521,10 +597,42 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 		return out, err
 	}
 	err = s.tx(ctx, func(tx *sql.Tx) error {
-		return insertAudit(ctx, tx, actor, fmt.Sprintf("export conversations=%d messages=%d media=%d notes=%t", len(out.Conversations), count,
-			nMedia, notes), "msg_peer", "-")
+		return insertAudit(ctx, tx, actor, fmt.Sprintf("export conversations=%d messages=%d media=%d ai_runs=%d notes=%t", len(out.Conversations),
+			count, nMedia, nRuns, notes), "msg_peer", "-")
 	})
 	return out, err
+}
+
+// exportAIRuns adds the inbox AI's runs to the exported messages they
+// belong to (at finds a message by id) and returns how many it added.
+func (s *Store) exportAIRuns(ctx context.Context, peerKey string, at map[int64][2]int, out *PeerExport) (int, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT r.message_id, r.id, r.kind, r.state, coalesce(r.result::text, 'null'), r.created_at, r.finished_at
+		FROM ai_message_runs r JOIN conversations c ON c.id = r.conversation_id
+		WHERE c.peer_key = $1 ORDER BY r.message_id, r.id`, peerKey)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	n := 0
+	for rows.Next() {
+		var (
+			msg      int64
+			run      ExportAIRun
+			result   string
+			finished sql.NullTime
+		)
+		if err := rows.Scan(&msg, &run.ID, &run.Kind, &run.State, &result, &run.CreatedAt, &finished); err != nil {
+			return n, err
+		}
+		run.Result, run.FinishedAt = json.RawMessage(result), nullTime(finished)
+		if p, ok := at[msg]; ok {
+			m := &out.Conversations[p[0]].Messages[p[1]]
+			m.AIRuns = append(m.AIRuns, run)
+			n++
+		}
+	}
+	return n, rows.Err()
 }
 
 // exportMedia reads the attachments q selects (convMediaCols, then the
