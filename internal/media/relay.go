@@ -91,6 +91,10 @@ type Relay struct {
 	secureFail func(leg, reason string)
 	secureUp   func(leg string)
 
+	// label names the relay's call in diagnostics (SetLabel): the caller
+	// leg's SIP Call-ID.
+	label string
+
 	// alt is the alternate callee leg (AddAltMuxLeg): a browser the call is
 	// offered to while the plain callee leg stays for the other forks. It is
 	// not in legs until PromoteAlt.
@@ -159,6 +163,12 @@ type relayLeg struct {
 	// negotiated); the packet path reads it without a lock.
 	secure   Secure
 	authFail atomic.Uint64
+	// side is where the leg's peer is in the call: 0 the caller's, 1 the
+	// callee's (hello_srtp_auth_failures_total's direction).
+	side uint8
+	// wt is the leg's WebRTC diagnostics (webrtcstatus.go); nil for a leg
+	// that is not on the shared WebRTC port.
+	wt *webTrack
 
 	// muted drops what this leg receives instead of forwarding it to the
 	// peer (a holder's stream while music plays to the held party).
@@ -282,6 +292,7 @@ func (r *Relay) AddLeg(name string) (int, error) {
 		return 0, fmt.Errorf("media: bind leg %q RTP socket: %w", name, lastErr)
 	}
 	l := newRelayLeg(r, name, conn, port)
+	l.side = uint8(len(r.legs)) //nolint:gosec // a relay has at most two legs
 	l.remoteMu.Lock()
 	l.remote = nil
 	l.remoteMu.Unlock()
@@ -310,6 +321,8 @@ func (r *Relay) AddMuxLeg(name string, mux *Mux) (port int, ep *MuxEndpoint, err
 		return 0, nil, fmt.Errorf("media: leg %q on the WebRTC port: %w", name, err)
 	}
 	l := newRelayLeg(r, name, ep, mux.Port())
+	l.side = uint8(len(r.legs)) //nolint:gosec // a relay has at most two legs
+	l.trackWeb()
 	l.secure.Bind(ep.LocalAddr(), func(b []byte, to *net.UDPAddr) { _, _ = ep.WriteToUDP(b, to) },
 		func(from *net.UDPAddr, nominated bool) { l.iceVerified(from, nominated) })
 	l.secure.OnFail(func(reason string) { r.secureFailed(l.name, reason) })
@@ -689,6 +702,7 @@ func (r *Relay) recv(l *relayLeg) {
 		plain, isRTCP, ok, failed := l.secure.UnprotectAny(data, from)
 		if failed {
 			l.authFail.Add(1)
+			noteSRTPAuthFailure(l.side)
 		}
 		if !ok {
 			continue
@@ -1044,6 +1058,7 @@ func (r *Relay) Close() {
 	r.cancel()
 	r.closeVideo()
 	for _, l := range legs {
+		l.untrackWeb(true)
 		l.secure.Close() // a DTLS handshake still running ends with the call
 		_ = l.conn.Close()
 		if pv := l.pvState(false); pv != nil {

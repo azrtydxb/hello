@@ -254,3 +254,73 @@ describe("Login", () => {
     expect(safeNext(null)).toBe("/");
   });
 });
+
+describe("Login: single sign-on (spec integrations P11)", () => {
+  it("offers the enabled providers, keeping where to return", async () => {
+    mockApi({
+      ...VERSION,
+      "GET /api/v1/auth/me": UNAUTHORIZED,
+      "GET /api/v1/auth/oidc/providers": () =>
+        json({
+          items: [
+            { provider: "google", name: "Google" },
+            { provider: "entra", name: "Microsoft" },
+          ],
+        }),
+    });
+    renderApp("/login?next=%2Fcalls");
+    const nav = await screen.findByRole("navigation", {
+      name: "Single sign-on",
+    });
+    expect(
+      within(nav).getByRole("link", { name: "Sign in with Google" }),
+    ).toHaveAttribute("href", "/api/v1/auth/oidc/google/start?next=%2Fcalls");
+    expect(
+      within(nav).getByRole("link", { name: "Sign in with Microsoft" }),
+    ).toHaveAttribute("href", "/api/v1/auth/oidc/entra/start?next=%2Fcalls");
+  });
+
+  it("shows no buttons when no provider is enabled", async () => {
+    mockApi({
+      ...VERSION,
+      "GET /api/v1/auth/me": UNAUTHORIZED,
+      "GET /api/v1/auth/oidc/providers": () => json({ items: [] }),
+    });
+    renderApp("/login");
+    expect(await signInScreen()).toBeInTheDocument();
+    expect(
+      screen.queryByRole("navigation", { name: "Single sign-on" }),
+    ).toBeNull();
+  });
+
+  it("says a single sign-on failed without saying why", async () => {
+    mockApi({ ...VERSION, "GET /api/v1/auth/me": UNAUTHORIZED });
+    renderApp("/login?sso_error=failed");
+    expect(
+      await screen.findByText(/Single sign-on did not sign you in/),
+    ).toBeVisible();
+  });
+
+  it("continues with the second factor a single sign-on handed over", async () => {
+    const calls = mockApi({
+      ...VERSION,
+      "GET /api/v1/auth/me": [
+        UNAUTHORIZED,
+        () => json({ username: "ann", role: "user" }),
+      ],
+      "POST /api/v1/auth/login/2fa": () => noContent(),
+    });
+    window.history.replaceState(null, "", "/login#mfa=tok-123");
+    renderApp("/login");
+    fireEvent.change(await screen.findByLabelText("Authentication code"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.url === "/api/v1/auth/login/2fa")?.body,
+      ).toEqual({ mfaToken: "tok-123", code: "123456" }),
+    );
+    expect(window.location.hash).toBe("");
+  });
+});

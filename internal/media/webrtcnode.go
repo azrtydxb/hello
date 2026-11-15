@@ -65,6 +65,7 @@ func (n *WebRTCNode) Close() error { return n.mux.Close() }
 func (n *WebRTCNode) Register(reg prometheus.Registerer) {
 	registerVideoMetrics(reg)
 	registerVideoRecMetrics(reg)
+	registerWebRTCMetrics(reg)
 	reg.MustRegister(
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Name: "hello_webrtc_mux_legs", Help: "WebRTC legs on this node's shared UDP port.",

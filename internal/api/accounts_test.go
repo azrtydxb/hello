@@ -50,6 +50,30 @@ type acctFake struct {
 	nextID  int64
 	// clients are the web devices (accounts_clients_test.go).
 	clients []clientRow
+	// Single sign-on (sso_test.go): the users a directory connector syncs
+	// (user id -> connector id, external id), the break-glass admins and
+	// the sso_required policy.
+	synced     map[int64]syncedUser
+	breakGlass map[int64]bool
+	ssoReq     bool
+}
+
+type syncedUser struct {
+	connector int64
+	external  string
+}
+
+func (f *acctFake) SSORequired(context.Context) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ssoReq, nil
+}
+
+func (f *acctFake) UserManagedByDirectory(_ context.Context, id int64) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.synced[id]
+	return ok, nil
 }
 
 func (f *acctFake) SessionActor(_ context.Context, h []byte) (auth.Actor, error) {
@@ -120,7 +144,9 @@ func (f *acctFake) UserForLogin(_ context.Context, name string) (store.Login, er
 	defer f.mu.Unlock()
 	for id, u := range f.users {
 		if u.Username == name {
-			return store.Login{ID: id, Hash: f.hashes[id], Enabled: u.Enabled, Role: u.Role, TOTPEnabled: u.TOTPEnabled}, nil
+			sy := f.synced[id]
+			return store.Login{ID: id, Hash: f.hashes[id], Enabled: u.Enabled, Role: u.Role, TOTPEnabled: u.TOTPEnabled,
+				ConnectorID: sy.connector, ExternalID: sy.external, BreakGlass: f.breakGlass[id]}, nil
 		}
 	}
 	return store.Login{}, store.ErrNotFound

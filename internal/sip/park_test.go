@@ -236,6 +236,18 @@ func countRTP(conn net.PacketConn, stop <-chan struct{}) *atomic.Int64 {
 	return &n
 }
 
+// awaitCount gives a countRTP reader up to two seconds to reach want and
+// returns what it counted: the BYE and the audio travel on different
+// sockets, so the reader may still be taking the last frames when the BYE is
+// in.
+func awaitCount(n *atomic.Int64, want int64) int64 {
+	deadline := time.Now().Add(2 * time.Second)
+	for n.Load() < want && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	return n.Load()
+}
+
 // waitNotifyState reads the phone's NOTIFYs until one carries the dialog
 // state.
 func waitNotifyState(t *testing.T, p *phone, state string) {
@@ -339,8 +351,9 @@ func TestCallPark(t *testing.T) {
 		t.Fatalf("parked record = %+v", rec)
 	}
 	waitReq(t, a.byes, "BYE to the parker")
+	n := awaitCount(heard, 10)
 	close(stop)
-	if n := heard.Load(); n < 10 {
+	if n < 10 {
 		t.Fatalf("the parker heard %d RTP packets, want the slot announcement (>= 10)", n)
 	}
 	noReq(t, b.byes, 300*time.Millisecond, "BYE to the parked party")
@@ -769,10 +782,11 @@ func TestCallParkSpokenSlot(t *testing.T) {
 	parkBy(t, a, pc, "*74")
 	occupied(t, st, "701", "100")
 	waitReq(t, a.byes, "BYE to the parker")
+	n := awaitCount(heard, 120)
 	close(stop)
 	// Tones for 701 last under a second (< 50 packets); the spoken
 	// announcement is over 3 s.
-	if n := heard.Load(); n < 120 {
+	if n < 120 {
 		t.Fatalf("the parker heard %d RTP packets, want the spoken slot (>= 120)", n)
 	}
 	gets := strings.Join(objs.snapshotGets(), " ")

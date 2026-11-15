@@ -42,6 +42,7 @@ import { IntegrationsSlack } from "./pages/IntegrationsSlack";
 import { MyConnections } from "./pages/MyConnections";
 import { Webhooks } from "./pages/Webhooks";
 import { DirectorySync } from "./pages/DirectorySync";
+import { SingleSignOn } from "./pages/SingleSignOn";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
 import { AIProposalDetail } from "./pages/AIProposalDetail";
@@ -201,6 +202,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/me/connections": MyConnections,
   "/integrations/webhooks": Webhooks,
   "/integrations/directory": DirectorySync,
+  "/integrations/sso": SingleSignOn,
 };
 
 /** The canvas pulls in the graph library, so it loads on first use. */
