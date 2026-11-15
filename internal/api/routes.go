@@ -518,6 +518,15 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/messaging/chat/sites/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteChatSite},
 		{"GET", "/api/v1/messaging/chat/sites/{id}/blocks", auth.ScopeAdmin, auth.RoleAdmin, false, s.listChatBlocks},
 		{"DELETE", "/api/v1/messaging/chat/blocks/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteChatBlock},
+		{"GET", "/api/v1/messaging/chat/sites/{id}/logo", auth.ScopeAdmin, auth.RoleAdmin, false, s.getChatSiteLogo},
+		{"PUT", "/api/v1/messaging/chat/sites/{id}/logo", auth.ScopeAdmin, auth.RoleAdmin, false, s.putChatSiteLogo},
+		{"DELETE", "/api/v1/messaging/chat/sites/{id}/logo", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteChatSiteLogo},
+		// Attachments (spec M-18): an upload waits for the message it is
+		// sent with; a download is for the people who see the conversation.
+		{"POST", "/api/v1/inbox/media", auth.ScopeMessages, auth.RoleOperator, false, s.uploadInboxMedia},
+		{"GET", "/api/v1/inbox/media/{id}", auth.ScopeMessages, auth.RoleOperator, false, s.getInboxMedia},
+		{"POST", "/api/v1/me/inbox/media", auth.ScopeMessages, auth.RoleUser, false, s.uploadMyInboxMedia},
+		{"GET", "/api/v1/me/inbox/media/{id}", auth.ScopeMessages, auth.RoleUser, false, s.getMyInboxMedia},
 		{"POST", "/api/v1/inbox/conversations/{id}/block", auth.ScopeMessages, auth.RoleOperator, false, s.blockChatVisitor},
 		{"POST", "/api/v1/inbox/conversations/{id}/email-reply", auth.ScopeMessages, auth.RoleOperator, false, s.emailChatReply},
 		{"POST", "/api/v1/inbox/conversations/{id}/typing", auth.ScopeMessages, auth.RoleOperator, false, s.chatTyping},

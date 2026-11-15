@@ -22,6 +22,7 @@ import (
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/location"
 	"github.com/azrtydxb/hello/internal/mailer"
+	"github.com/azrtydxb/hello/internal/messaging/media"
 	"github.com/azrtydxb/hello/internal/originate"
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/prov"
@@ -399,6 +400,12 @@ type Config struct {
 	// Fax is the fax feature (destinations, the fax list, sending a PDF); the
 	// zero value answers 503 on its routes.
 	Fax FaxConfig
+	// MediaObjects is the messaging attachments' store (spec
+	// messaging-channels M-18); nil makes the media routes answer 503.
+	MediaObjects media.Objects
+	// MediaMax is HELLO_MSG_MEDIA_MAX, the largest attachment kept (0 is
+	// media.DefaultMax).
+	MediaMax int64
 	// Objects is the voicemail audio store; nil makes the audio routes and
 	// greeting uploads answer 503 instead of touching MinIO.
 	Objects Objects

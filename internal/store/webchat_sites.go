@@ -55,7 +55,15 @@ type ChatSite struct {
 	Transcripts        bool               `json:"transcripts"`
 	// RetentionDays is the site's own retention for finished chats; nil
 	// follows the messaging settings.
-	RetentionDays *int      `json:"retentionDays"`
+	RetentionDays *int `json:"retentionDays"`
+	// Attachments lets visitors send images and PDFs (off by default; no
+	// antivirus is bundled, spec M-29a.6).
+	Attachments bool `json:"attachments"`
+	// Logo is whether the site has a logo; LogoType is its sniffed type and
+	// LogoVersion changes with each upload (the widget's cache key).
+	Logo          bool      `json:"logo"`
+	LogoType      string    `json:"-"`
+	LogoVersion   int64     `json:"-"`
 	Conversations int       `json:"conversations"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
@@ -81,12 +89,14 @@ type ChatSiteInput struct {
 	MaxOpenUnassigned int
 	Transcripts       bool
 	RetentionDays     *int
+	Attachments       bool
 }
 
 const chatSiteCols = `s.id, s.channel_id, s.address_id, c.name, c.enabled AND a.enabled, s.site_key,
 	to_json(s.allowed_origins)::text, s.greeting, s.accent, s.position, s.collect, a.schedule::text, s.offline_mode,
 	s.privacy_url, s.challenge, s.pow_bits, s.turnstile_site_key, s.turnstile_secret_enc IS NOT NULL, s.strip_links,
-	s.max_open_unassigned, s.transcripts, s.retention_days,
+	s.max_open_unassigned, s.transcripts, s.retention_days, s.attachments, s.logo_type,
+	coalesce(extract(epoch FROM s.logo_updated_at)::bigint, 0),
 	(SELECT count(*) FROM conversations v WHERE v.channel_id = s.channel_id), s.created_at, s.updated_at`
 
 const chatSiteFrom = ` FROM chat_sites s JOIN msg_channels c ON c.id = s.channel_id JOIN msg_addresses a ON a.id = s.address_id`
@@ -100,7 +110,7 @@ func scanChatSite(r interface{ Scan(...any) error }) (ChatSite, error) {
 	if err := r.Scan(&c.ID, &c.ChannelID, &c.AddressID, &c.Name, &c.Enabled, &c.Key, &origins, &c.Greeting, &c.Accent,
 		&c.Position, &c.Collect, &hrs, &c.OfflineMode, &c.PrivacyURL, &c.Challenge, &c.PowBits, &c.TurnstileSiteKey,
 		&c.HasTurnstileSecret, &c.StripLinks, &c.MaxOpenUnassigned, &c.Transcripts, &retentionDays,
-		&c.Conversations, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		&c.Attachments, &c.LogoType, &c.LogoVersion, &c.Conversations, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return c, err
 	}
 	if err := json.Unmarshal([]byte(origins), &c.AllowedOrigins); err != nil {
@@ -119,6 +129,7 @@ func scanChatSite(r interface{ Scan(...any) error }) (ChatSite, error) {
 		n := int(retentionDays.Int64)
 		c.RetentionDays = &n
 	}
+	c.Logo = c.LogoType != ""
 	return c, nil
 }
 
@@ -258,11 +269,11 @@ func (s *Store) CreateChatSite(ctx context.Context, actor string, in ChatSiteInp
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO chat_sites (channel_id, address_id, site_key, allowed_origins, greeting, accent, position, collect,
 				offline_mode, privacy_url, challenge, pow_bits, turnstile_site_key, strip_links, max_open_unassigned,
-				transcripts, retention_days)
-			VALUES ($1, $2, $3, $4::text[], $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
+				transcripts, retention_days, attachments)
+			VALUES ($1, $2, $3, $4::text[], $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id`,
 			channelID, addressID, key, originsArg(in.AllowedOrigins), in.Greeting, in.Accent, in.Position, in.Collect,
 			in.OfflineMode, in.PrivacyURL, in.Challenge, in.PowBits, in.TurnstileSiteKey, in.StripLinks,
-			in.MaxOpenUnassigned, in.Transcripts, in.RetentionDays).Scan(&id); err != nil {
+			in.MaxOpenUnassigned, in.Transcripts, in.RetentionDays, in.Attachments).Scan(&id); err != nil {
 			return err
 		}
 		if err := s.sealTurnstile(ctx, tx, id, in.TurnstileSecret); err != nil {
@@ -304,11 +315,11 @@ func (s *Store) UpdateChatSite(ctx context.Context, actor string, id int64, in C
 			UPDATE chat_sites SET allowed_origins = $2::text[], greeting = $3, accent = $4, position = $5, collect = $6,
 				offline_mode = $7, privacy_url = $8, challenge = $9, pow_bits = $10,
 				turnstile_site_key = $11, strip_links = $12, max_open_unassigned = $13, transcripts = $14,
-				retention_days = $15, updated_at = now()
+				retention_days = $15, attachments = $16, updated_at = now()
 			WHERE id = $1`,
 			id, originsArg(in.AllowedOrigins), in.Greeting, in.Accent, in.Position, in.Collect,
 			in.OfflineMode, in.PrivacyURL, in.Challenge, in.PowBits, in.TurnstileSiteKey, in.StripLinks,
-			in.MaxOpenUnassigned, in.Transcripts, in.RetentionDays); err != nil {
+			in.MaxOpenUnassigned, in.Transcripts, in.RetentionDays, in.Attachments); err != nil {
 			return err
 		}
 		if err := s.sealTurnstile(ctx, tx, id, in.TurnstileSecret); err != nil {

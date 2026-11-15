@@ -5168,3 +5168,128 @@ Builder choices within the approved spec (M-30, M-30a; user decision 5 of
   injection test set and redaction against real number formats are on the lab
   list in docs/inbox.md. Every test runs against test/fakellm or go-ai-sdk's
   mock model.
+
+## Messaging M-18: the media pipeline (2026-11-15, feat/m18-media)
+
+- **Bucket and keys.** Attachments live in the existing media bucket
+  (`hello-recordings`, as the faxes) under `msg/<channel>/<yyyy>/<message>/<sha256>`
+  for inbound media, as the spec says. An upload has no message yet, so its key
+  is `msg/<channel>/<yyyy>/upload-<media id>/<sha256>`; a chat site's logo is
+  `msg/site/<site>/logo`. A new `internal/messaging/media` package holds the
+  sniffing, the allowlists, the MinIO store (with an in-memory fake), serving and
+  the workers; the store keeps MinIO out as before.
+- **Rows outlive their message until the file is gone.** `message_media` points
+  at its message and conversation with `ON DELETE SET NULL`; retention and an
+  erase delete conversations as before, and the sweeper (on the inbox
+  maintenance lease) removes the file, checks it is gone with a stat, and only
+  then drops the row. The spec says "MinIO objects first, rows after"; this
+  order keeps that invariant (no object without a row) without the store
+  touching MinIO. An erase removes the files at once in the API, verified, and
+  reports `mediaObjects` and `mediaObjectsPending` (left to the sweeper when
+  MinIO cannot be reached).
+- **Media retention.** New setting `retentionMediaDays` (default 90, 1 to 3650,
+  spec M-19). A file past it is removed and its attachment marked `expired`
+  (reason `retention`); the message stays. An upload never sent goes after 24 h.
+- **Sniffing and the allowlist.** `http.DetectContentType` plus PDF, AMR, 3GPP
+  and vCard; the declared type must name the same class. Besides SVG and HTML,
+  a file is refused as `active_content` when it contains markup or script
+  markers anywhere (`<script`, `<html`, `<svg`, `<!doctype`, `<iframe`, ...,
+  `javascript:`) or, for an image or a PDF, a ZIP end record in its tail (a
+  GIFAR). A plain-text file holding markup is refused on purpose.
+- **Outbound attachments: website chat only.** Per the user's LAN-only decision
+  (no public listener), Twilio and Telnyx cannot fetch an MMS's media, so a
+  carrier or SIP trunk conversation refuses `mediaIds` and uploads with `409
+media_unsupported`, and the composer offers **Attach** only in a chat. An
+  agent's file to a chat follows the chat's rules (images and PDF, 5 MiB), the
+  same as a visitor's.
+- **The public link is built but not mounted.** `media_links`, mint and redeem
+  (256-bit token, SHA-256 kept, 15 minutes, 5 uses) and `media.LinkHandler` for
+  `GET /m/{token}` exist and are tested, ready for the public listener (N1);
+  nothing serves them on the LAN.
+- **Inbound MMS.** No carrier delivers inbound texts in this build (webhooks
+  and reconcile are not on), so nothing calls `AddInboundMedia` yet outside
+  tests; the worker, Twilio's and Telnyx's `FetchMedia` and their host checks
+  are complete and tested against fakes. Twilio: the account's own
+  `api.twilio.com/2010-04-01/Accounts/<sid>/` URLs, redirects to
+  `*.twiliocdn.com` or the CDN bucket path on `s3-external-1.amazonaws.com`;
+  Telnyx: `*.telnyx.com`, the API key sent only to `api.telnyx.com`. Both host
+  lists are unverified and on the lab list. Credentials are dropped on any
+  redirect to another host.
+- **Chat attachments.** A visitor's file is its own message
+  (`POST /chat/v1/attachments`, multipart `file`, `clientMsgId`, optional
+  `text`), counted against the 5 per hour limit and the message limits. The
+  frame fetches a file with the token in the header and shows it from a blob
+  URL (the frame's policy adds `img-src blob:`, the iframe `allow-downloads`).
+  The UI nginx gets an exact `location = /chat/v1/attachments` with a 6 MB
+  body limit; every other chat request stays at 32 KB.
+- **Desk phones.** A phone cannot show a file: a text with attachments ends
+  with `[N attachments: open the inbox to see them]`, and a file alone arrives
+  as that line.
+- **DSAR export (messaging item 8).** `Store.ConversationMedia(ctx, convID)`
+  lists every attachment of a conversation with its object key, type, name,
+  size and SHA-256, and `media.Objects.Open` reads the file; the export can
+  stream them from these.
+- **No virus scanning** (not specced; the spec says none is bundled). The chat
+  site's attachments switch warns about it.
+- **MCP:** the new routes are excluded (customer files are private data; the
+  logo is a binary download and chat site settings stay excluded), so the
+  doctable is unchanged.
+
+## Items 26 and 27: Replaces of confirmed dialogs, authenticated INVITEs to phones (2026-11-14)
+
+- Who may replace a confirmed dialog (S-17 leaves it open): only a phone of the
+  same extension as the party whose dialog is named, so a user moves their own
+  call between their own phones (call pull, a shared line) and nobody else's.
+  The pickup scope (S-50) still governs early dialogs only: a colleague may
+  answer a ringing call but never take over an answered one. A trunk's side, a
+  click-to-call's own leg and a browser or video call are never taken over.
+  RFC 3891 matching is strict for confirmed dialogs (Call-ID and both tags,
+  either order, 481 otherwise; early-only gives 486); early dialogs keep the
+  Call-ID match pickup always had.
+- How the call continues: the caller's dialog of a plain call is taken over
+  by making the new phone's call the call (it gets the callee leg and the
+  relay, like an attended transfer's bridged call), so it stays an ordinary
+  call and replicates for in-call HA. The callee's dialog cannot be carried
+  that way (both remaining dialogs would be UAS dialogs of Hello), so the two
+  calls are linked like a picked-up call; a linked pair is not replicated
+  (park_ha.go), and the original's record is deleted at the switch so no
+  survivor re-INVITEs a phone that left. A linked call's own party can be
+  taken over again (the call moves back). Across nodes the holding node does
+  the rewiring through a new park-mailbox command, `replace`, and the pair is
+  linked across nodes; a linked call whose peer is on another node is refused
+  (486), because the peer names it by the replaced dialog's Call-ID.
+- The new phone must offer the call's codec (488 otherwise): the other party
+  is not re-INVITEd, so it hears no change. A party the old phone had held is
+  re-INVITEd sendrecv.
+- livestate.Call gains `legCallIds` (the ringing legs, then the answering leg),
+  so a Replaces landing on another node finds the call; a ringing call is
+  republished at its first ring. The BLF dialog-info names the watched
+  extension's dialog (call-id, local-tag, remote-tag, direction) when the call
+  is on the same node; without it no phone could build a Replaces header from
+  a BLF key. List (eventlist) parts stay compact, without them.
+- Attended transfer before answer: the transferor's ringing consultation call is
+  now cancelled (487 to its INVITE, CANCEL to the target) before the blind
+  transfer rings the target for the transferee, so the transferor has no call
+  left up and the target does not ring twice. The abort that does it gives 487
+  and a cancelled CDR, not the drain abort's 503.
+- Authenticated INVITEs (S-22): every INVITE Hello sends a phone (calls, pages,
+  intercom, door chimes, page tests, click-to-call) answers a 401 or 407 with the
+  device's credentials and is re-sent as a new transaction of the same attempt
+  (same Call-ID, From tag and To, CSeq + 1, new Via branch); at most two
+  answers, for a stale nonce. In-dialog re-INVITEs and UPDATEs (hold, re-anchor,
+  transfers, session refreshes, takeover re-INVITEs) are answered the same way
+  in their dialog. BYE is not: P2346 authenticates INVITEs only.
+- The realm: the stored HA1 answers a challenge in the SIP domain's realm; a
+  phone's own realm (a WP uses its server "host:port", as found for check-sync)
+  needs the sealed device password. hello-sip reads it through a new
+  `Deps.DeviceSecrets` (the store's DeviceSecret, as check-sync), once per
+  device and realm, and keeps only the derived HA1 in memory, keyed with the
+  device's stored HA1 so a new secret misses the cache. This is a PostgreSQL
+  read on the first challenged call of a device, off the SIP transaction path
+  (the leg's goroutine).
+- P2346 is now written 1 on every Grandstream WP account, and the per-account
+  P2347/P2346 of further lines (+100 per account) with it; the 2026-11-09 entry
+  that left P2346 out is superseded. Not yet confirmed on a phone (hardware
+  check: a WP836, WP822 and WP856 with P2346 = 1 ring, hold and transfer). The
+  Poly, Snom and Fanvil TR-069/SSH keys stay a hardware item: no vendor
+  document on hand confirms them.

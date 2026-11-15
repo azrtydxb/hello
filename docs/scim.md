@@ -238,7 +238,7 @@ company.
 | `DELETE /api/v1/directory/scim-tokens/{id}`          | admin / admin   | revoke a token                        |
 | `GET /api/v1/directory/connectors/{id}/scim`         | admin / admin   | base URL, guard, pushed counts, pause |
 
-Tables are in migration `00160` (`scim_resources`, `scim_group_members`,
+Tables are in migration `00107` (`scim_resources`, `scim_group_members`,
 `scim_tokens`, and `paused_at` and `guard_since` on `directory_connectors`).
 
 ## Lab checklist
