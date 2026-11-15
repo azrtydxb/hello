@@ -52,6 +52,7 @@ import { formatTime } from "../format";
 import { mapFieldErrors, splitList, type ErrorMap } from "../forms";
 import { useCan } from "../role";
 import { usePolling } from "../usePolling";
+import { PBX_EXTENSION, ScimConnectorDrawer, ScimPanel } from "./DirectoryScim";
 import "./platform/platform.css";
 
 const FORM_ID = "directory-form";
@@ -111,6 +112,7 @@ const ACTIONS: ChangeAction[] = [
 /** A connector's source, for the list: the host without credentials, the
  * Workspace domain or customer, or the Entra tenant. */
 export function sourceText(c: Connector): string {
+  if (c.kind === "scim") return "SCIM (pushed by an identity provider)";
   if (c.kind === "google")
     return `Google Workspace ${c.config.domain || c.config.customer || "my_customer"}`;
   if (c.kind === "entra") return `Entra tenant ${c.config.tenantId ?? ""}`;
@@ -201,7 +203,7 @@ export function DirectorySync() {
       <PageHeader
         eyebrow="Integrations"
         title="Directory"
-        description="Hello reads users from Active Directory or LDAP, Google Workspace or Microsoft Entra ID and keeps its own users in step: it creates and updates them, and disables the ones the directory drops. It never deletes users and never writes to the directory. Synced users have no local password: they sign in through their directory."
+        description="Hello reads users from Active Directory or LDAP, Google Workspace or Microsoft Entra ID, or an identity provider pushes them by SCIM, and Hello keeps its own users in step: it creates and updates them, and disables the ones the directory drops. It never deletes users and never writes to the directory. Synced users have no local password: they sign in through their directory."
       />
       {admin ? (
         <Connectors />
@@ -216,6 +218,7 @@ export function DirectorySync() {
 
 type Dialog =
   | { kind: "form"; connector: Connector | null }
+  | { kind: "scim-form"; connector: Connector | null }
   | { kind: "test"; connector: Connector; result: TestResult }
   | { kind: "run"; connector: Connector; run: Run }
   | { kind: "delete"; connector: Connector };
@@ -277,13 +280,23 @@ function Connectors() {
   }
 
   const add = (
-    <Button
-      icon="plus"
-      disabled={items === null}
-      onClick={() => setDialog({ kind: "form", connector: null })}
-    >
-      New connector
-    </Button>
+    <span style={{ display: "inline-flex", gap: 6 }}>
+      <Button
+        icon="plus"
+        disabled={items === null}
+        onClick={() => setDialog({ kind: "form", connector: null })}
+      >
+        New connector
+      </Button>
+      <Button
+        icon="plus"
+        variant="secondary"
+        disabled={items === null}
+        onClick={() => setDialog({ kind: "scim-form", connector: null })}
+      >
+        New SCIM connector
+      </Button>
+    </span>
   );
 
   return (
@@ -316,7 +329,7 @@ function Connectors() {
             <EmptyState
               icon="plug"
               title="No directory connectors"
-              description="Add an Active Directory or LDAP server, test the connection, preview what a sync would do, then apply it."
+              description="Add an Active Directory or LDAP server, test the connection, preview what a sync would do, then apply it. Or add a SCIM connector and let Entra ID or Okta push users."
               action={add}
             />
           ) : (
@@ -360,6 +373,7 @@ function Connectors() {
                       {c.status === "failing" && (
                         <Badge tone="bad">failing: {c.lastErrorCode}</Badge>
                       )}
+                      {c.pausedAt && <Badge tone="warn">paused</Badge>}
                     </>
                   ),
                 },
@@ -374,9 +388,11 @@ function Connectors() {
                   key: "schedule",
                   label: "Schedule",
                   render: (c) =>
-                    c.scheduleMinutes === 0
-                      ? "manual"
-                      : `every ${String(c.scheduleMinutes)} min`,
+                    c.kind === "scim"
+                      ? "pushed"
+                      : c.scheduleMinutes === 0
+                        ? "manual"
+                        : `every ${String(c.scheduleMinutes)} min`,
                 },
                 {
                   key: "actions",
@@ -395,7 +411,7 @@ function Connectors() {
                         variant="secondary"
                         size="sm"
                         aria-label={`Test the connection of ${c.name}`}
-                        disabled={!c.hasCredential}
+                        disabled={c.kind === "ldap" && !c.hasCredential}
                         onClick={() => void onTest(c)}
                       >
                         Test
@@ -425,7 +441,10 @@ function Connectors() {
                         size="sm"
                         aria-label={`Edit ${c.name}`}
                         onClick={() =>
-                          setDialog({ kind: "form", connector: c })
+                          setDialog({
+                            kind: c.kind === "scim" ? "scim-form" : "form",
+                            connector: c,
+                          })
                         }
                       >
                         Edit
@@ -456,6 +475,13 @@ function Connectors() {
           )}
         </div>
       )}
+      {current?.kind === "scim" && (
+        <ScimPanel
+          key={`scim-${String(current.id)}`}
+          connector={current}
+          onChanged={list.reload}
+        />
+      )}
       {current?.autoProvision.enabled && (
         <RangeCard key={`range-${String(current.id)}`} connector={current} />
       )}
@@ -476,6 +502,19 @@ function Connectors() {
           onSaved={(saved) => {
             list.reload();
             setDialog(null);
+            toast.show(`Connector ${saved.name} saved.`);
+          }}
+        />
+      )}
+      {dialog?.kind === "scim-form" && (
+        <ScimConnectorDrawer
+          key={dialog.connector ? String(dialog.connector.id) : "new-scim"}
+          connector={dialog.connector}
+          onClose={() => setDialog(null)}
+          onSaved={(saved) => {
+            list.reload();
+            setDialog(null);
+            setSelected(saved.id);
             toast.show(`Connector ${saved.name} saved.`);
           }}
         />
@@ -1194,6 +1233,16 @@ const KIND_DEFAULTS: Record<
     activeMode: "bool",
     activeAttr: "accountEnabled",
     login: "oidc:entra",
+  },
+  // Edited in the SCIM form (DirectoryScim.tsx); listed for completeness.
+  scim: {
+    username: "userName",
+    email: "emails[primary], emails[work], emails",
+    displayName: "displayName, name.formatted, name.full",
+    extension: PBX_EXTENSION,
+    activeMode: "bool",
+    activeAttr: "active",
+    login: "",
   },
 };
 

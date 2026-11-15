@@ -10,6 +10,8 @@
     <user_realname idx="1" perm="R">{{xml .Line.DisplayName}}</user_realname>
     <user_idle_text idx="1" perm="R">{{xml .Line.AccountLabel}}</user_idle_text>
     <user_expiry idx="1" perm="R">{{.Server.Expiry}}</user_expiry>
+{{- /* Backup servers (phone-feature-parity S-20): user_outbound is the identity's outbound proxy, "addr:port;transport=", and from firmware 8.7 a comma separated list the phone uses left to right on an outage (Snom Service Hub, user_outbound: "multiple comma separated values are supported for e.g. failover scenarios"). With backups (HELLO_PROV_SIP_BACKUP_SERVERS, else the HA node list) it lists the primary, then every backup (at most two), each on the primary's transport; without, it is written empty (the default), so a phone whose backups are removed goes back to sending to user_host. registrar_whitelist stays empty (its default), which user_outbound must otherwise match. Not confirmed on a phone (verify). */}}
+    <user_outbound idx="1" perm="R">{{if .Server.Backups}}{{xml .Server.Host}}:{{.Server.Port}};transport={{if eq .Server.Transport "tcp"}}tcp{{else}}udp{{end}}{{range .Server.Backups}},{{xml .Host}}:{{.Port}};transport={{if eq $.Server.Transport "tcp"}}tcp{{else}}udp{{end}}{{end}}{{end}}</user_outbound>
 {{- /* Text messages (SIP MESSAGE, RFC 3428): Snom documents no key to switch instant messages on that we could cite, so none is written; the phone shows a MESSAGE it receives as it does by default. Unverified on hardware (lab item). */}}
 {{- /* HD voice: codec_priority_list of identity 1 in order of preference (Snom Service Hub, codec_priority_list; D3xx/D7xx/D8xx): Opus (D7xx and D8xx), G.722, PCMU, PCMA, then telephone-event for DTMF. Another identity of a multi-line model has the same setting with its own idx. Unverified on hardware (verify). */}}
     <codec_priority_list idx="1" perm="R">{{if .Codecs.Opus}}opus,{{end}}g722,pcmu,pcma,telephone-event</codec_priority_list>
@@ -40,6 +42,7 @@
     <user_realname idx="{{.N}}" perm="R">{{xml .DisplayName}}</user_realname>
     <user_idle_text idx="{{.N}}" perm="R">{{xml .AccountLabel}}</user_idle_text>
     <user_expiry idx="{{.N}}" perm="R">{{$.Server.Expiry}}</user_expiry>
+    <user_outbound idx="{{.N}}" perm="R">{{if $.Server.Backups}}{{xml $.Server.Host}}:{{$.Server.Port}};transport={{if eq $.Server.Transport "tcp"}}tcp{{else}}udp{{end}}{{range $.Server.Backups}},{{xml .Host}}:{{.Port}};transport={{if eq $.Server.Transport "tcp"}}tcp{{else}}udp{{end}}{{end}}{{end}}</user_outbound>
     <codec_priority_list idx="{{.N}}" perm="R">{{if $.Codecs.Opus}}opus,{{end}}g722,pcmu,pcma,telephone-event</codec_priority_list>
 {{- with $.Ring.Default}}
     <ring_sound idx="{{$n}}" perm="R">{{xml .}}</ring_sound>

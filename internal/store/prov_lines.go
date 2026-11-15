@@ -48,6 +48,8 @@ func attachLines(ctx context.Context, q querier, ps []Phone) error {
 		ids[i], at[ps[i].ID] = ps[i].ID, i
 		ps[i].Lines = []PhoneLine{}
 		ps[i].MaxLines = prov.MaxLines(ps[i].Vendor, ps[i].Model)
+		ps[i].SpeedDialSlots = prov.SpeedDialSlots(ps[i].Vendor, ps[i].Model)
+		ps[i].SideKeyChoices = nonNil(prov.SideKeyChoices(ps[i].Vendor, ps[i].Model))
 	}
 	rows, err := q.QueryContext(ctx, `
 		SELECT l.phone_id, l.line, d.id, e.id, e.number, e.name, d.sip_username

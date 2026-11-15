@@ -1,6 +1,6 @@
 // Directory sync (docs/integrations.md, "Directory sync"): AD/LDAP, Google
-// Workspace and Microsoft Entra connectors, their runs, previews and
-// changes. Administrators only.
+// Workspace, Microsoft Entra and SCIM connectors, their runs, previews and
+// changes, and the SCIM tokens and status (docs/scim.md). Administrators only.
 import { request } from "../api";
 
 export type ConnectorMode = "authoritative" | "create_only" | "link_only";
@@ -59,7 +59,7 @@ export interface Options {
   oidcProvider: "" | "google" | "entra";
 }
 
-export type ConnectorKind = "ldap" | "google" | "entra";
+export type ConnectorKind = "ldap" | "google" | "entra" | "scim";
 
 export type GoogleAuthMode = "service_account" | "oauth_admin" | "delegation";
 
@@ -109,10 +109,18 @@ export interface LdapConfig {
   nestedGroups?: boolean;
 }
 
+/** Config of a scim connector; it has no credential (SCIM tokens instead). */
+export interface ScimConfig {
+  /** A pushed user may take over a local (non-admin) user with the same
+   * e-mail or username; off, such a push is refused (409). */
+  adoptExisting?: boolean;
+}
+
 /** A connector's config: the fields of its kind. */
 export type ConnectorConfig = Partial<LdapConfig> &
   Partial<GoogleConfig> &
-  Partial<EntraConfig>;
+  Partial<EntraConfig> &
+  ScimConfig;
 
 /**
  * Range auto-provisioning (off by default): a user with no extension, or one
@@ -164,7 +172,7 @@ export interface Connector {
   groupRules: GroupRules;
   options: Options;
   autoProvision: AutoProvision;
-  /** A credential (bind password, key file, client secret or private key) is stored. It is write-only. */
+  /** A credential (bind password, key file, client secret or private key) is stored. It is write-only. Always false for scim. */
   hasCredential: boolean;
   status: "new" | "ok" | "failing";
   lastRunAt: string | null;
@@ -175,6 +183,8 @@ export interface Connector {
   linkedUsers: number;
   /** When the last full run finished (a full run is forced every 24 h). */
   lastFullRunAt: string | null;
+  /** scim: set while the mass-deprovision guard pauses SCIM writes. */
+  pausedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -346,6 +356,62 @@ export const applyRun = (id: number, decisions: Decisions) =>
 
 export const confirmRun = (id: number) =>
   request<Run>("POST", `${run(id)}/confirm`, { body: {} });
+
+/** A SCIM bearer token's metadata; the token itself is shown once. */
+export interface ScimToken {
+  id: number;
+  connectorId: number;
+  hint: string;
+  createdBy: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+/** The answer to an issue: the token, shown this once, and the base URL. */
+export interface ScimTokenCreated extends ScimToken {
+  token: string;
+  baseUrl: string;
+}
+
+export interface ScimStatus {
+  connectorId: number;
+  baseUrl: string;
+  enabled: boolean;
+  pausedAt: string | null;
+  pausedRunId: number | null;
+  guard: { disables: number; limit: number; linked: number };
+  resources: {
+    users: number;
+    activeUsers: number;
+    deletedUsers: number;
+    groups: number;
+  };
+  lastRequestAt: string | null;
+  activeTokens: number;
+  adoptExisting: boolean;
+}
+
+export const issueScimToken = (id: number) =>
+  request<ScimTokenCreated>("POST", `${conn(id)}/scim-token`);
+
+export async function listScimTokens(
+  id: number,
+  signal?: AbortSignal,
+): Promise<ScimToken[]> {
+  const res = await request<{ items: ScimToken[] }>(
+    "GET",
+    `${conn(id)}/scim-tokens`,
+    { signal },
+  );
+  return res.items;
+}
+
+export const revokeScimToken = (tokenId: number) =>
+  request<void>("DELETE", `/api/v1/directory/scim-tokens/${String(tokenId)}`);
+
+export const getScimStatus = (id: number, signal?: AbortSignal) =>
+  request<ScimStatus>("GET", `${conn(id)}/scim`, { signal });
 
 /** Starts a Google OAuth-admin connector's consent: the URL to send the browser to. */
 export const startConsent = (id: number) =>

@@ -615,6 +615,7 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/syslog/unknown", auth.ScopeRead, auth.RoleViewer, false, s.unknownSyslog},
 		{"GET", "/api/v1/phone-groups/{id}/ldap", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneGroupLDAP},
 		{"PUT", "/api/v1/phone-groups/{id}/ldap", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupLDAP},
+		{"PUT", "/api/v1/phone-groups/{id}/side-key", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupSideKey},
 
 		{"GET", "/api/v1/prov/templates", auth.ScopeRead, auth.RoleViewer, false, s.listTemplates},
 		{"POST", "/api/v1/prov/templates", auth.ScopeWrite, auth.RoleOperator, false, s.createTemplate},
@@ -694,6 +695,10 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/directory/runs/{id}/changes", auth.ScopeAdmin, auth.RoleAdmin, false, s.listDirectoryChanges},
 		{"POST", "/api/v1/directory/runs/{id}/apply", auth.ScopeAdmin, auth.RoleAdmin, false, s.applyDirectoryRun},
 		{"POST", "/api/v1/directory/runs/{id}/confirm", auth.ScopeAdmin, auth.RoleAdmin, false, s.confirmDirectoryRun},
+		{"POST", "/api/v1/directory/connectors/{id}/scim-token", auth.ScopeSecrets, auth.RoleAdmin, false, s.issueSCIMToken},
+		{"GET", "/api/v1/directory/connectors/{id}/scim-tokens", auth.ScopeAdmin, auth.RoleAdmin, false, s.listSCIMTokens},
+		{"GET", "/api/v1/directory/connectors/{id}/scim", auth.ScopeAdmin, auth.RoleAdmin, false, s.getSCIMStatus},
+		{"DELETE", "/api/v1/directory/scim-tokens/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.revokeSCIMToken},
 		{"GET", "/api/v1/users", auth.ScopeAdmin, auth.RoleAdmin, false, s.listUsers},
 		{"POST", "/api/v1/users", auth.ScopeAdmin, auth.RoleAdmin, false, s.createUser},
 		{"GET", "/api/v1/users/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getUser},

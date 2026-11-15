@@ -13,6 +13,7 @@ import {
   setGroupLdap,
   setGroupMulticast,
   setGroupPtt,
+  setGroupSideKey,
   setGroupSyslog,
   SYSLOG_LEVELS,
   updateGroup,
@@ -27,7 +28,14 @@ import {
   type SyslogLevel,
   defaultPagingOptions,
 } from "../api/phonebook";
-import { listPhones, pushGroup, type Phone } from "../api/prov";
+import {
+  listPhones,
+  pushGroup,
+  SIDE_KEY_LABELS,
+  SIDE_KEYS,
+  type Phone,
+  type SideKey,
+} from "../api/prov";
 import {
   Alert,
   Badge,
@@ -415,6 +423,7 @@ function GroupModal({
     optionsInput(group?.pagingOptions),
   );
   const [syslog, setSyslog] = useState<Syslog>(syslogInput(group?.syslog));
+  const [sideKey, setSideKey] = useState<SideKey>(group?.sideKey ?? "ptt");
   const [mcErrors, setMcErrors] = useState<PathErrors>({});
   const [pttErrors, setPttErrors] = useState<PathErrors>({});
   const [errors, setErrors] = useState<ErrorMap>({});
@@ -512,6 +521,17 @@ function GroupModal({
         } catch (err) {
           setFormError(
             `The group was saved, but its syslog setting was not: ${errorMessage(err)}`,
+          );
+          setBusy(false);
+          return;
+        }
+      }
+      if ((saved.sideKey ?? "ptt") !== sideKey) {
+        try {
+          saved = await setGroupSideKey(saved.id, sideKey);
+        } catch (err) {
+          setFormError(
+            `The group was saved, but its side key was not: ${errorMessage(err)}`,
           );
           setBusy(false);
           return;
@@ -787,6 +807,20 @@ function GroupModal({
               options={SYSLOG_LEVELS.map((l) => ({ value: l, label: l }))}
             />
           )}
+        </div>
+
+        <div className="prov-stack">
+          <Select
+            id="group-side-key"
+            label="Side key"
+            hint="Grandstream WP8x6, WP856 and WP820. Alarm call: WP8x6 only, and only with an alarm destination; other phones keep PTT / paging. A phone can override it."
+            value={sideKey}
+            onChange={(e) => setSideKey(e.target.value as SideKey)}
+            options={SIDE_KEYS.map((k) => ({
+              value: k,
+              label: SIDE_KEY_LABELS[k],
+            }))}
+          />
         </div>
 
         {group && (

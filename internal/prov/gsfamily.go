@@ -58,7 +58,8 @@ func HasFXOPort(v Vendor, model string) bool {
 // None of the three WP templates defines the P323 key block the built-in
 // template used to write (the WP856 has its BLF keys in the multi-purpose
 // key app, and the WP8x6 and WP8xx have no BLF key type), so a WP phone
-// takes none. Every other phone does.
+// takes none: its BLF entries are written as speed dials instead
+// (SpeedDialSlots, phone-feature-parity S-12). Every other phone does.
 func SupportsBLF(v Vendor, model string) bool {
 	return v != Grandstream || GrandstreamFamily(model) == ""
 }

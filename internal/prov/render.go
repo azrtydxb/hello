@@ -168,6 +168,12 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 	d.Line.N = 1
 	d.Lines = renderLines(d)
 	lines := 1 + len(d.Lines)
+	d.SideKey = sideKeyFor(d.Phone.WP, d.SideKey.Function, d.AlarmNumber != "")
+	d.SpeedDials = nil
+	if SpeedDialSlots(d.Phone.Vendor, d.Phone.Model) > 0 {
+		// A WP has no BLF keys: its BLF entries are speed dials (S-12).
+		d.SpeedDials, d.BLF = speedDialKeys(d.Phone.WP, d.BLF), nil
+	}
 	d.BLF = PlaceBLFLines(d.Phone.Vendor, d.Phone.Model, d.BLF, d.Codes.PickupDirected, lines)
 	d.Line.BLFListURI = ""
 	if len(d.BLF) > 0 && d.Line.Username != "" {

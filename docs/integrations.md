@@ -904,6 +904,14 @@ passwords and two-factor authentication.
 Each sign-in, failure (without the identity that tried), link, unlink and
 settings change is audited. Tables are in migration `00102`.
 
+### SCIM
+
+A connector of kind **SCIM** is not read: an identity provider (Entra ID, Okta,
+JumpCloud) pushes users and groups to `/scim/v2` with a `hello_scim_` token,
+and each request runs the same mapping, group rules, modes, conflicts and
+deprovisioning rules as a sync, applied at once. Its guard counts SCIM disables
+per rolling hour and pauses the connector instead. See [SCIM](scim.md).
+
 ## What comes next
 
 Click-to-call (P3), recording links (P4) and the CRM connectors build on these

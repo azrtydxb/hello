@@ -24,6 +24,9 @@ import {
   pushPhone,
   rearmPhone,
   rotatePhoneToken,
+  SIDE_KEY_LABELS,
+  sideKeyChoices,
+  speedDialSlots,
   supportsBlf,
   updatePhone,
   VENDORS,
@@ -33,6 +36,7 @@ import {
   type Phone,
   type PhoneInput,
   type PhonePatch,
+  type SideKey,
   type Template,
   type Vendor,
 } from "../api/prov";
@@ -800,6 +804,7 @@ const FORM_FIELDS = [
   "blf",
   "templateId",
   "groupId",
+  "sideKey",
   "enabled",
 ] as const;
 
@@ -848,6 +853,8 @@ function PhoneForm({
     phone?.groupId == null ? "" : String(phone.groupId),
   );
   const [enabled, setEnabled] = useState(phone?.enabled ?? true);
+  // "" is the group's side key.
+  const [sideKey, setSideKey] = useState<SideKey | "">(phone?.sideKey ?? "");
   const [errors, setErrors] = useState<ErrorMap>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -857,9 +864,15 @@ function PhoneForm({
   );
   const bindsExisting =
     deviceId !== NEW_DEVICE && deviceId !== "" && deviceId !== originalDevice;
-  const blfOk = supportsBlf(vendor, model);
+  // A Grandstream WP has no BLF keys: its entries are speed dials (S-12).
+  const slots = speedDialSlots(vendor, model);
+  const asSpeedDials = slots > 0;
+  const blfOk = supportsBlf(vendor, model) || asSpeedDials;
+  const blfFull = asSpeedDials && blf.length >= slots;
+  const keyWord = asSpeedDials ? "speed dial" : "BLF key";
   // A model without BLF keys is saved with none.
   const blfKeys = blfOk ? blf : [];
+  const sideChoices = sideKeyChoices(vendor, model);
   // A key may name an extension (a busy lamp that dials it) or a conference
   // room (a lamp that shows who is in it and joins it).
   const blfChoices = [
@@ -905,6 +918,9 @@ function PhoneForm({
       patch.groupId = groupId === "" ? null : (idOf(groupId) ?? null);
     }
     if (enabled !== p.enabled) patch.enabled = enabled;
+    // A model without a side key keeps none of its own.
+    const side = sideChoices.length > 0 && sideKey !== "" ? sideKey : null;
+    if (side !== (p.sideKey ?? null)) patch.sideKey = side;
     return patch;
   }
 
@@ -1100,13 +1116,27 @@ function PhoneForm({
         )}
 
         <fieldset className="inv-blf" disabled={!blfOk}>
-          <legend className="az-field__label">BLF keys</legend>
+          <legend className="az-field__label">
+            {asSpeedDials ? "Speed dials" : "BLF keys"}
+          </legend>
+          {asSpeedDials && (
+            <p className="prov-muted">
+              A Grandstream WP has no BLF keys: these entries are its speed
+              dials, at most {slots}, in order (
+              {slots === 9 ? "keys 2 to 9, then 0" : "multi-purpose keys"}).
+            </p>
+          )}
           {!blfOk ? (
             <p className="prov-muted">This model has no BLF keys.</p>
           ) : blf.length === 0 ? (
-            <p className="prov-muted">No BLF keys.</p>
+            <p className="prov-muted">
+              {asSpeedDials ? "No speed dials." : "No BLF keys."}
+            </p>
           ) : (
-            <ol className="inv-blf__list" aria-label="BLF keys">
+            <ol
+              className="inv-blf__list"
+              aria-label={asSpeedDials ? "Speed dials" : "BLF keys"}
+            >
               {blf.map((n, i) => (
                 <li key={n} className="inv-blf__item">
                   <span className="az-table__mono">{n}</span>
@@ -1146,7 +1176,7 @@ function PhoneForm({
           <div className="prov-row">
             <Select
               id="phone-blf-add"
-              label="Add BLF key"
+              label={`Add ${keyWord}`}
               value={blfPick}
               onChange={(e) => setBlfPick(e.target.value)}
               options={[
@@ -1161,7 +1191,7 @@ function PhoneForm({
               variant="secondary"
               size="sm"
               icon="plus"
-              disabled={blfPick === ""}
+              disabled={blfPick === "" || blfFull}
               onClick={() => {
                 setBlf((keys) => [...keys, blfPick]);
                 setBlfPick("");
@@ -1171,6 +1201,24 @@ function PhoneForm({
             </Button>
           </div>
         </fieldset>
+
+        {editing && sideChoices.length > 0 && (
+          <Select
+            id="phone-side-key"
+            label="Side key"
+            hint="Grandstream WP. The group's setting unless set here; the alarm call needs the group's alarm destination."
+            value={sideKey}
+            error={errors.sideKey}
+            onChange={(e) => setSideKey(e.target.value as SideKey | "")}
+            options={[
+              { value: "", label: "Group setting" },
+              ...sideChoices.map((k) => ({
+                value: k,
+                label: SIDE_KEY_LABELS[k],
+              })),
+            ]}
+          />
+        )}
 
         {editing && (
           <Select

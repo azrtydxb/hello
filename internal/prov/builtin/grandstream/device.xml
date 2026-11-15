@@ -227,7 +227,21 @@
     <P{{add 32003 (mul $i 5)}}>{{xml $d.Number}}</P{{add 32003 (mul $i 5)}}>
 {{- end}}
 {{- end}}
-{{- /* BLF keys (CALL-43): the P323 block is defined by none of the WP templates (WP8x6, WP856, WP8xx), so it is written only to a Grandstream phone that is not a WP (Phone.Family empty). prov.SupportsBLF refuses BLF keys on a WP in the API. */}}
+{{- /* Side key and speed dials (phone-feature-parity S-12), keys and values per Grandstream's own templates (config-template-10212026.zip; see internal/prov/wpkeys.go). Side key: P82317 on the WP8x6 (wp8x6_config_1.0.3.39 "Side Key Funtions": 0 PTT/Paging, 2 Alarm, 4 None) and the WP856 (wp856_config_1.0.3.16 "PTT Button": 0 PTT, 4 Disable), P22258 on the WP820 (wp820_config_1.0.7.90 multi-function button: 0 PTT/Paging, 4 Disable); the WP810/822/825 template has none. Written always, from the phone's choice, else its group's, else PTT/paging; alarm only on a WP8x6 whose group has an alarm destination (the *55 keys above). Speed dials: a WP has no BLF keys, so the phone's BLF entries fill its speed-dial slots in order: the WP8x6 number keys 2 to 9 and 0 (long press; mode P8682/P8690+4(n-2), account, label, value; mode 0 Speed Dial, -1 None), the WP810/822/825 and WP820 speed dial keys 2 to 9 and 0 (account P23001/P23011+5(n-2), number P23003/P23013+5(n-2); listed commented out in the WP820 template) and the WP856 multi-purpose keys 1 to 30 (mode P23000+5(n-1), 0 Speed Dial; account, description, value). Every slot is written, empty when unused, so an entry taken off the phone is cleared. Not confirmed on a phone (verify). */}}
+{{- with .SideKey}}{{if .Param}}
+    <P{{.Param}}>{{.Value}}</P{{.Param}}>
+{{- end}}{{end}}
+{{- range .SpeedDials}}
+{{- if .ModeParam}}
+    <P{{.ModeParam}}>{{.Mode}}</P{{.ModeParam}}>
+{{- end}}
+    <P{{.AccountParam}}>0</P{{.AccountParam}}>
+{{- if .LabelParam}}
+    <P{{.LabelParam}}>{{xml .Label}}</P{{.LabelParam}}>
+{{- end}}
+    <P{{.ValueParam}}>{{xml .Number}}</P{{.ValueParam}}>
+{{- end}}
+{{- /* BLF keys (CALL-43): the P323 block is defined by none of the WP templates (WP8x6, WP856, WP8xx), so it is written only to a Grandstream phone that is not a WP (Phone.Family empty). A WP's BLF entries are its speed dials (above). */}}
 {{- if not .Phone.Family}}
 {{- range $i, $k := .BLF}}
     <P{{add 323 (mul $i 3)}}>1</P{{add 323 (mul $i 3)}}>
@@ -249,7 +263,7 @@
 {{- else}}
     <P298>1</P298>
 {{- end}}
-{{- /* Paging button, multicast paging, PTT and group paging (phone-feature-parity S-30, phonebooks-ptt P-15). Keys from Grandstream's own config templates (Grandstream config-template-10212026.zip): wp8x6_config_1.0.3.39 (WP816/826/836), wp856_config_1.0.3.16, wp810_822_825_config_1.0.11.83 (WP810/822/825), wp820_config_1.0.7.90, and the WP8x6 Administration Guide "PTT/Paging". Every Grandstream: P22208 multicast paging on, P1568 codec (0 PCMU, 8 PCMA, 9 G.722), P1569 and up listening address and label pairs (ten slots), P1566 paging barge (0 off, 1-10), P1567 paging priority active, P26019 barge by Call-Info/Alert-Info (intercom barging, default off). WP8x6 and WP8xx: P8381 page in DND. WP8x6: P22532 multicast call timeout (s), P22556 PTT/Paging switch. WP8x6 and WP856: P82317 side key (0 PTT/Paging), P26072 beep before an auto answer, P26071 do not mute on answer. PTT (WP8x6, WP856, WP8xx, WP820): P22177 PTT, P22183 PTT/group paging address, P22184 default, P22185 priority, P22186 emergency channel, P22179 accept while busy, P22180 codec; group paging: P22194 on, P22199 default, P22200 priority, P22201 emergency group, P22196 accept while busy, P22197 codec. Channel slots: WP8x6, WP856 and WP8xx at P82001 + 5 (n-1) for channels 1 to 50 (available, transmit, subscribe, join, name); the WP820 as digit strings P22187-P22192 (PTT) and P22203-P22207 (group), with its own codec numbers (0 G.711, 1 G.722). The WP8xx template has no PTT keys although its handset has PTT (WP8xx User Guide, "PTT (Push-to-talk) functionality"): the WP8x6 keys are written to it unverified. A WP always gets PTT (its PTT key otherwise reads "not configured"): channel 1 on the catalog's PTT channel unless its group says otherwise. All unverified on a phone (verify). */}}
+{{- /* Paging button, multicast paging, PTT and group paging (phone-feature-parity S-30, phonebooks-ptt P-15). Keys from Grandstream's own config templates (Grandstream config-template-10212026.zip): wp8x6_config_1.0.3.39 (WP816/826/836), wp856_config_1.0.3.16, wp810_822_825_config_1.0.11.83 (WP810/822/825), wp820_config_1.0.7.90, and the WP8x6 Administration Guide "PTT/Paging". Every Grandstream: P22208 multicast paging on, P1568 codec (0 PCMU, 8 PCMA, 9 G.722), P1569 and up listening address and label pairs (ten slots), P1566 paging barge (0 off, 1-10), P1567 paging priority active, P26019 barge by Call-Info/Alert-Info (intercom barging, default off). WP8x6 and WP8xx: P8381 page in DND. WP8x6: P22532 multicast call timeout (s), P22556 PTT/Paging switch. WP8x6 and WP856: P26072 beep before an auto answer, P26071 do not mute on answer. PTT (WP8x6, WP856, WP8xx, WP820): P22177 PTT, P22183 PTT/group paging address, P22184 default, P22185 priority, P22186 emergency channel, P22179 accept while busy, P22180 codec; group paging: P22194 on, P22199 default, P22200 priority, P22201 emergency group, P22196 accept while busy, P22197 codec. Channel slots: WP8x6, WP856 and WP8xx at P82001 + 5 (n-1) for channels 1 to 50 (available, transmit, subscribe, join, name); the WP820 as digit strings P22187-P22192 (PTT) and P22203-P22207 (group), with its own codec numbers (0 G.711, 1 G.722). The WP8xx template has no PTT keys although its handset has PTT (WP8xx User Guide, "PTT (Push-to-talk) functionality"): the WP8x6 keys are written to it unverified. A WP always gets PTT (its PTT key otherwise reads "not configured"): channel 1 on the catalog's PTT channel unless its group says otherwise. All unverified on a phone (verify). */}}
 {{- $wp := .Phone.WP}}
 {{- if or (eq $wp "WP8x6") (eq $wp "WP856") (eq $wp "WP820")}}
     <P26072>1</P26072>
@@ -279,9 +293,6 @@
 {{- if or (and .PTT (or .PTT.Enabled .PTT.GroupPaging)) (and .Multicast .Multicast.PagingKey)}}
 {{- if eq $wp "WP8x6"}}
     <P22556>1</P22556>
-{{- end}}
-{{- if or (eq $wp "WP8x6") (eq $wp "WP856")}}
-    <P82317>0</P82317>
 {{- end}}
 {{- end}}
 {{- with .PTT}}
