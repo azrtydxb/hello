@@ -268,7 +268,38 @@ function UrlsSection({
         what="Address"
         onCopied={onCopied}
       />
+      <BackupServers settings={settings} />
     </section>
+  );
+}
+
+const BACKUP_SOURCE: Record<string, string> = {
+  env: "from HELLO_PROV_SIP_BACKUP_SERVERS",
+  nodes: "from the HA node list (the other READY SIP nodes)",
+};
+
+/**
+ * The backup registrars and DNS mode phones are given (phone-feature-parity
+ * S-20); read only, they come from the server's configuration and cluster.
+ */
+function BackupServers({ settings }: { settings: Settings }) {
+  const backups = settings.sipBackupServers ?? [];
+  const source = BACKUP_SOURCE[settings.sipBackupSource ?? "none"];
+  return (
+    <div className="prov-stack" aria-label="Backup servers">
+      <p className="prov-muted">
+        <strong>Backup servers:</strong>{" "}
+        {backups.length > 0 && source
+          ? `${backups.join(", ")} (${source})`
+          : "none. Phones that register with a SIP node directly get the other nodes; behind an edge (Kamailio, a VIP) set HELLO_PROV_SIP_BACKUP_SERVERS."}
+      </p>
+      <p className="prov-muted">
+        <strong>DNS mode:</strong>{" "}
+        {settings.sipSrv
+          ? `SRV (${settings.sipSrv}) for Grandstream, and for Yealink and Poly on UDP; other phones use the address and its backups.`
+          : "A record (the address above)."}
+      </p>
+    </div>
   );
 }
 

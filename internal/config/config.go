@@ -325,15 +325,19 @@ type Prov struct {
 	SIPTLSModels []string
 	// SIPBackupServers (HELLO_PROV_SIP_BACKUP_SERVERS, comma separated
 	// host:port, at most 2) are the backup registrars rendered configs name
-	// for the phones that can take one: Yealink and Poly (second server) and
-	// Grandstream (backup outbound proxy). The first is used; the list is
-	// the HA node list of a deployment that does not publish SRV records
-	// (phone-feature-parity S-20). Empty provisions none.
+	// for the phones that can take one: Yealink and Poly (second server),
+	// Grandstream (secondary SIP server and backup outbound proxy), Fanvil
+	// (backup server) and Snom (both, in the outbound proxy list). Set, it
+	// overrides the HA node list; empty, the backups come from the HA node
+	// list: the other READY hello-sip nodes when phones register with a node
+	// directly, none behind an edge such as Kamailio (phone-feature-parity
+	// S-20).
 	SIPBackupServers []string
-	// SIPSRV (HELLO_PROV_SIP_SRV, a DNS name) switches Grandstream phones to
-	// DNS SRV mode: they register with this name and resolve the SIP
-	// servers from its _sip._udp SRV records. Empty keeps A-record mode,
-	// the default until the failover lab test passes.
+	// SIPSRV (HELLO_PROV_SIP_SRV, a DNS name) switches Grandstream phones,
+	// and Yealink and Poly phones on UDP, to DNS SRV mode: they register
+	// with this name and resolve the SIP servers from its SRV records
+	// (Yealink and Poly through DNS-NAPTR, which falls back to SRV). Empty
+	// keeps A-record mode, the default until the failover lab test passes.
 	SIPSRV string
 	// SIPTCPModels (HELLO_PROV_SIP_TCP_MODELS, same format, default none)
 	// are provisioned to register over TCP with SIPServer (S-13).

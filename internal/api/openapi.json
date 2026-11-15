@@ -23145,6 +23145,70 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/phone-groups/{id}/side-key": {
+      "put": {
+        "operationId": "setPhoneGroupSideKey",
+        "summary": "Set a phone group's side key",
+        "description": "Sets what the side key of the group's Grandstream WP phones does (phone-feature-parity S-12): ptt (PTT/paging, the default), alarm (the WP8x6 alarm call to the group's alarm destination; a WP8x6 without one, and a WP856 or WP820, keep PTT/paging) or none. The template writes P82317 (WP8x6, WP856) or P22258 (WP820); the WP810/822/825 has no side key. A phone's own sideKey wins over the group's. Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["sideKey"],
+                "properties": {
+                  "sideKey": {
+                    "type": "string",
+                    "enum": ["ptt", "alarm", "none"],
+                    "description": "ptt (PTT/paging), alarm (the WP8x6 alarm call) or none."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/phones/{id}/syslog": {
       "get": {
         "operationId": "listPhoneSyslog",
@@ -31902,7 +31966,24 @@
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Extension numbers shown as busy-lamp-field keys; a Grandstream WP takes them as speed dials (see speedDialSlots)."
+          },
+          "speedDialSlots": {
+            "type": "integer",
+            "description": "How many speed dials the model takes for its BLF entries: a Grandstream WP (WP8x6, WP810/820/822/825: 9; WP856: 30), which has no BLF keys; 0 for a phone with BLF keys."
+          },
+          "sideKey": {
+            "type": ["string", "null"],
+            "enum": ["ptt", "alarm", "none", null],
+            "description": "The phone's own side key function (Grandstream WP); null uses its group's."
+          },
+          "sideKeyChoices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The side key functions the model takes (WP8x6: ptt, alarm, none; WP856 and WP820: ptt, none); empty for a phone without a side key Hello can set."
           },
           "redirectStatus": {
             "$ref": "#/components/schemas/RedirectStatus"
@@ -32356,7 +32437,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Extension numbers shown as busy-lamp-field keys."
+            "description": "Extension numbers shown as busy-lamp-field keys. A Grandstream WP has no BLF keys and takes them as speed dials, at most its speedDialSlots."
           },
           "enabled": {
             "type": "boolean",
@@ -32374,6 +32455,11 @@
             "type": "string",
             "enum": ["host", "guest"],
             "description": "The phone's role when its group has account sharing on (Grandstream WP8x6 only)."
+          },
+          "sideKey": {
+            "type": ["string", "null"],
+            "enum": ["ptt", "alarm", "none", null],
+            "description": "The phone's own side key function (Grandstream WP; one of its sideKeyChoices); null returns it to its group's."
           }
         }
       },
@@ -32669,6 +32755,22 @@
           },
           "sipServer": {
             "type": "string"
+          },
+          "sipBackupServers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The backup registrars (host:port) phones are given (phone-feature-parity S-20), at most two."
+          },
+          "sipBackupSource": {
+            "type": "string",
+            "enum": ["env", "nodes", "none"],
+            "description": "Where the backups come from: HELLO_PROV_SIP_BACKUP_SERVERS (env, an override), the HA node list (nodes: the other READY hello-sip nodes, when phones register with a node directly), or none."
+          },
+          "sipSrv": {
+            "type": "string",
+            "description": "HELLO_PROV_SIP_SRV: the DNS name Grandstream phones, and Yealink and Poly phones on UDP, resolve the SIP servers from by SRV; empty in A-record mode."
           },
           "dhcp": {
             "type": "array",
@@ -35792,7 +35894,24 @@
       },
       "User": {
         "type": "object",
-        "required": ["id", "username", "displayName", "email", "authMethod", "role", "enabled", "mustChangePassword", "extensionId", "extensionIds", "voicemailEmail", "totpEnabled", "totpRequired", "createdAt", "managedBy", "disabledAt"],
+        "required": [
+          "id",
+          "username",
+          "displayName",
+          "email",
+          "authMethod",
+          "role",
+          "enabled",
+          "mustChangePassword",
+          "extensionId",
+          "extensionIds",
+          "voicemailEmail",
+          "totpEnabled",
+          "totpRequired",
+          "createdAt",
+          "managedBy",
+          "disabledAt"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -40154,7 +40273,12 @@
       },
       "WebRTCCounters": {
         "type": "object",
-        "required": ["ice", "dtlsHandshakes", "dtlsFailures", "srtpAuthFailures"],
+        "required": [
+          "ice",
+          "dtlsHandshakes",
+          "dtlsFailures",
+          "srtpAuthFailures"
+        ],
         "properties": {
           "ice": {
             "type": "object",
@@ -40631,7 +40755,13 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["devices", "live", "webrtc", "quality", "register_attempts"]
+              "enum": [
+                "devices",
+                "live",
+                "webrtc",
+                "quality",
+                "register_attempts"
+              ]
             },
             "description": "Sources that could not be read; their parts are empty."
           }
@@ -42955,6 +43085,11 @@
           "ldapEnabled": {
             "type": "boolean",
             "description": "The group's phones are given the LDAP directory (see PUT /phone-groups/{id}/ldap)."
+          },
+          "sideKey": {
+            "type": "string",
+            "enum": ["ptt", "alarm", "none"],
+            "description": "What the side key of the group's Grandstream WP phones does: ptt (PTT/paging, the default), alarm (the group's alarm call; WP8x6 with an alarm destination, otherwise PTT/paging) or none. A phone may override it (see PUT /phone-groups/{id}/side-key)."
           },
           "syslog": {
             "$ref": "#/components/schemas/PhoneGroupSyslog"
@@ -49278,7 +49413,30 @@
             "format": "date-time"
           }
         },
-        "required": ["id", "kind", "name", "enabled", "mode", "scheduleMinutes", "config", "mappings", "groupRules", "options", "autoProvision", "hasCredential", "status", "lastRunAt", "lastSuccessAt", "lastErrorCode", "lastErrorDetail", "consecutiveFailures", "linkedUsers", "lastFullRunAt", "createdAt", "updatedAt"]
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "enabled",
+          "mode",
+          "scheduleMinutes",
+          "config",
+          "mappings",
+          "groupRules",
+          "options",
+          "autoProvision",
+          "hasCredential",
+          "status",
+          "lastRunAt",
+          "lastSuccessAt",
+          "lastErrorCode",
+          "lastErrorDetail",
+          "consecutiveFailures",
+          "linkedUsers",
+          "lastFullRunAt",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "DirectoryConnectorList": {
         "type": "object",
@@ -53437,7 +53595,12 @@
       },
       "InboxRedactReport": {
         "type": "object",
-        "required": ["message", "providers", "mediaObjects", "mediaObjectsPending"],
+        "required": [
+          "message",
+          "providers",
+          "mediaObjects",
+          "mediaObjectsPending"
+        ],
         "properties": {
           "message": {
             "$ref": "#/components/schemas/InboxMessage"

@@ -2,6 +2,7 @@
 // HTTP JSON of spec phonebooks-ptt (P-1, P-2, P-7).
 
 import { listItems, request, type Id } from "../api";
+import type { SideKey } from "./prov";
 
 const seg = (value: Id) => encodeURIComponent(String(value));
 
@@ -67,6 +68,8 @@ export interface Group {
   syslog?: Syslog;
   /** The group's phones are given the LDAP directory. */
   ldapEnabled?: boolean;
+  /** What the side key of the group's Grandstream WP phones does. */
+  sideKey?: SideKey;
   phoneCount: number;
   createdAt: string;
   updatedAt: string;
@@ -460,6 +463,12 @@ export interface Syslog {
 export const setGroupSyslog = (groupId: Id, syslog: Syslog) =>
   request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/syslog`, {
     body: { enabled: syslog.enabled, level: syslog.level },
+  });
+
+/** PUT /api/v1/phone-groups/{id}/side-key: the group's WP side key (S-12). */
+export const setGroupSideKey = (groupId: Id, sideKey: SideKey) =>
+  request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/side-key`, {
+    body: { sideKey },
   });
 
 /** GET|PUT /api/v1/phone-groups/{id}/ldap (pbx-gaps S-26). */

@@ -84,8 +84,13 @@ created or none (400 with the same rows).
 ### Change or remove
 
 `updatePhone` (only the sent fields change: `label`, `extensionId`,
-`templateId`, `blf`, `enabled`, `groupId`, `pttChannelId`), `getPhone`,
-`listPhones`, `deletePhone` (its SIP device stays).
+`templateId`, `blf`, `enabled`, `groupId`, `pttChannelId`, `sideKey`),
+`getPhone`, `listPhones`, `deletePhone` (its SIP device stays).
+
+A Grandstream WP has no BLF keys: its `blf` entries are written as speed dials,
+at most the phone's `speedDialSlots` (9; 30 on the WP856). `sideKey` is the
+phone's own side key function (`ptt`, `alarm` or `none`, one of its
+`sideKeyChoices`), or `null` for its group's.
 
 ## Phone "Send Anonymous"
 
@@ -143,7 +148,10 @@ A group delivers address books and multicast settings to its phones.
    (channels come from `listMulticastChannels`, see `hello-call-handling`).
 5. `setPhoneGroupPTT`: push-to-talk and group paging for Grandstream WP
    handsets (channels 1 to 25 PTT, 26 to 50 group paging).
-6. `resyncPhoneGroup`, then `listLatestPhonePushes`.
+6. `setPhoneGroupSideKey` with `{ "sideKey": "alarm" }`: what the WP side key
+   does, `ptt` (PTT/paging, the default), `alarm` (the alarm call; WP8x6 with
+   an alarm destination only, others keep PTT/paging) or `none`.
+7. `resyncPhoneGroup`, then `listLatestPhonePushes`.
 
 `listPhoneGroups`, `getPhoneGroup`, `updatePhoneGroup` (replaces name and
 switches; the named books stay), `deletePhoneGroup` (phones fall back to no
