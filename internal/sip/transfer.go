@@ -664,11 +664,35 @@ func (c *call) bridge(other *call) bool {
 }
 
 // reinvite sends an in-dialog re-INVITE with body as the offer and returns
-// the answer from the 200.
+// the answer from the 200. It waits while another INVITE transaction Hello
+// started on the dialog is in progress (inviteGate), and reads nothing of
+// the session's stored INVITE that sipgo parses lazily: Content-Type is
+// written fresh (every re-INVITE body Hello sends is SDP).
 func reinvite(s *Server, dcs *sipgo.DialogClientSession, body []byte) ([]byte, bool) {
 	if dcs == nil || dcs.InviteResponse == nil {
 		return nil, false
 	}
+	defer inviteGate.lock(dcs)()
+	return sendReinvite(s, dcs, body)
+}
+
+// reinviteAcked is reinvite whose 2xx is ACKed (without a body) before the
+// dialog's gate opens, so the next queued re-INVITE never reaches the phone
+// ahead of this one's ACK.
+func reinviteAcked(s *Server, dcs *sipgo.DialogClientSession, body []byte) ([]byte, bool) {
+	if dcs == nil || dcs.InviteResponse == nil {
+		return nil, false
+	}
+	defer inviteGate.lock(dcs)()
+	ans, ok := sendReinvite(s, dcs, body)
+	if ok {
+		ackLate(dcs, nil)
+	}
+	return ans, ok
+}
+
+// sendReinvite is reinvite's transaction; the caller holds the gate.
+func sendReinvite(s *Server, dcs *sipgo.DialogClientSession, body []byte) ([]byte, bool) {
 	inv := dcs.InviteRequest
 	req := sip.NewRequest(sip.INVITE, *dcs.InviteRequest.Recipient.Clone())
 	from := &sip.FromHeader{Address: *inv.To().Address.Clone(), Params: sip.HeaderParams{{K: "tag", V: tagParam(inv.To())}}}
@@ -679,10 +703,8 @@ func reinvite(s *Server, dcs *sipgo.DialogClientSession, body []byte) ([]byte, b
 	req.AppendHeader(&callID)
 	req.AppendHeader(&sip.CSeqHeader{SeqNo: inv.CSeq().SeqNo + 1, MethodName: sip.INVITE})
 	req.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
-	if ct := inv.ContentType(); ct != nil {
-		req.AppendHeader(sip.HeaderClone(ct))
-	}
 	if len(body) > 0 {
+		req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 		req.SetBody(body)
 	}
 	req.SetTransport("UDP")
@@ -695,11 +717,13 @@ func reinvite(s *Server, dcs *sipgo.DialogClientSession, body []byte) ([]byte, b
 	return res.Body(), true
 }
 
-// reinviteA is a re-INVITE on the caller's dialog (we are the UAS there).
+// reinviteA is a re-INVITE on the caller's dialog (we are the UAS there),
+// gated like reinvite.
 func reinviteA(s *Server, dss *sipgo.DialogServerSession, body []byte) ([]byte, bool) {
 	if dss == nil {
 		return nil, false
 	}
+	defer inviteGate.lock(dss)()
 	inv := dss.InviteRequest
 	req := sip.NewRequest(sip.INVITE, *dss.InviteRequest.Recipient.Clone())
 	from := &sip.FromHeader{Address: *inv.From().Address.Clone(), Params: sip.HeaderParams{{K: "tag", V: tagParam(inv.From())}}}
@@ -710,10 +734,8 @@ func reinviteA(s *Server, dss *sipgo.DialogServerSession, body []byte) ([]byte, 
 	req.AppendHeader(&callID)
 	req.AppendHeader(&sip.CSeqHeader{SeqNo: inv.CSeq().SeqNo + 1, MethodName: sip.INVITE})
 	req.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
-	if ct := inv.ContentType(); ct != nil {
-		req.AppendHeader(sip.HeaderClone(ct))
-	}
 	if len(body) > 0 {
+		req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 		req.SetBody(body)
 	}
 	req.SetTransport("UDP")
@@ -732,10 +754,8 @@ func ackLate(dcs *sipgo.DialogClientSession, body []byte) {
 		return
 	}
 	ack := sip.NewRequest(sip.ACK, *dcs.InviteRequest.Recipient.Clone())
-	if ct := dcs.InviteRequest.ContentType(); ct != nil && len(body) > 0 {
-		ack.AppendHeader(sip.HeaderClone(ct))
-	}
 	if len(body) > 0 {
+		ack.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 		ack.SetBody(body)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
