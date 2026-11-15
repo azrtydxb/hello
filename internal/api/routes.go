@@ -61,6 +61,17 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/auth/logout", auth.ScopeRead, auth.RoleUser, false, s.logout},
 		{"GET", "/api/v1/auth/me", auth.ScopeRead, auth.RoleUser, false, s.me},
 		{"POST", "/api/v1/auth/password", auth.ScopeSession, auth.RoleUser, false, s.changePassword},
+		{"GET", "/api/v1/auth/oidc/providers", "", "", true, s.listSSOProviders},
+		{"GET", "/api/v1/auth/oidc/{provider}/start", "", "", true, s.oidcStart},
+		{"GET", "/api/v1/auth/oidc/{provider}/callback", "", "", true, s.oidcCallback},
+		{"GET", "/api/v1/auth/sso", auth.ScopeAdmin, auth.RoleAdmin, false, s.getSSOSettings},
+		{"PUT", "/api/v1/auth/sso", auth.ScopeAdmin, auth.RoleAdmin, false, s.putSSOSettings},
+		{"POST", "/api/v1/auth/sso/{provider}/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testSSOProvider},
+		{"GET", "/api/v1/me/identities", auth.ScopeSession, auth.RoleUser, false, s.listMyIdentities},
+		{"POST", "/api/v1/me/identities/{provider}/link", auth.ScopeSession, auth.RoleUser, false, s.linkMyIdentity},
+		{"DELETE", "/api/v1/me/identities/{provider}", auth.ScopeSession, auth.RoleUser, false, s.unlinkMyIdentity},
+		{"GET", "/api/v1/users/{id}/identities", auth.ScopeAdmin, auth.RoleAdmin, false, s.listUserIdentities},
+		{"DELETE", "/api/v1/users/{id}/identities/{provider}", auth.ScopeAdmin, auth.RoleAdmin, false, s.unlinkUserIdentity},
 
 		{"GET", "/api/v1/tokens", auth.ScopeAdmin, auth.RoleAdmin, false, s.listTokens},
 		{"POST", "/api/v1/tokens", auth.ScopeAdmin, auth.RoleAdmin, false, s.createToken},
@@ -482,6 +493,20 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/messaging/optouts", auth.ScopeAdmin, auth.RoleAdmin, false, s.recordMessagingOptOut},
 		{"POST", "/api/v1/messaging/optouts/{id}/reconsent", auth.ScopeAdmin, auth.RoleAdmin, false, s.reconsentMessagingOptOut},
 		{"POST", "/api/v1/inbox/erase", auth.ScopeAdmin, auth.RoleAdmin, false, s.eraseMessagingPeer},
+		// The inbox AI (spec messaging-channels M-30, M-30a): settings, kill
+		// switches, each number's mode and guardrails, and its FAQ.
+		{"GET", "/api/v1/messaging/ai", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessagingAI},
+		{"PUT", "/api/v1/messaging/ai", auth.ScopeAdmin, auth.RoleAdmin, false, s.putMessagingAI},
+		{"GET", "/api/v1/messaging/addresses/{id}/ai", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessagingAddressAI},
+		{"PUT", "/api/v1/messaging/addresses/{id}/ai", auth.ScopeAdmin, auth.RoleAdmin, false, s.putMessagingAddressAI},
+		{"GET", "/api/v1/messaging/faq", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessagingFAQ},
+		{"POST", "/api/v1/messaging/faq", auth.ScopeAdmin, auth.RoleAdmin, false, s.createMessagingFAQ},
+		{"GET", "/api/v1/messaging/faq/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessagingFAQ},
+		{"PUT", "/api/v1/messaging/faq/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putMessagingFAQ},
+		{"DELETE", "/api/v1/messaging/faq/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteMessagingFAQ},
+		{"POST", "/api/v1/inbox/conversations/{id}/ai/revert", auth.ScopeMessages, auth.RoleOperator, false, s.revertInboxAI},
+		{"POST", "/api/v1/me/inbox/conversations/{id}/ai/revert", auth.ScopeMessages, auth.RoleUser, false, s.revertMyInboxAI},
+		{"GET", "/api/v1/inbox/ai/stats", auth.ScopeMessages, auth.RoleOperator, false, s.getInboxAIStats},
 		// The LAN chat widget (spec messaging-channels M-28): sites and their
 		// blocks are administrators'; an agent blocks a visitor, emails an
 		// offline chat and shows typing from the inbox. The widget's own
@@ -604,6 +629,7 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/diagnostics/devices/{id}", auth.ScopeRead, auth.RoleViewer, false, s.deviceDiagnostics},
 		{"GET", "/api/v1/diagnostics/auth-failures", auth.ScopeRead, auth.RoleViewer, false, s.listAuthFailures},
 		{"DELETE", "/api/v1/diagnostics/auth-failures/{ip}", auth.ScopeWrite, auth.RoleOperator, false, s.clearAuthFailures},
+		{"GET", "/api/v1/webrtc/status", auth.ScopeRead, auth.RoleViewer, false, s.getWebRTCStatus},
 
 		// External AI access (spec ai-external-access). The rows are fixed
 		// here; each stream replaces s.pending with its handler.
@@ -647,8 +673,11 @@ func (s *server) routes() []route {
 		{"PATCH", "/api/v1/directory/connectors/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updateDirectoryConnector},
 		{"DELETE", "/api/v1/directory/connectors/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteDirectoryConnector},
 		{"POST", "/api/v1/directory/connectors/{id}/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testDirectoryConnector},
+		{"POST", "/api/v1/directory/connectors/{id}/consent", auth.ScopeSecrets, auth.RoleAdmin, false, s.startDirectoryConsent},
+		{"GET", "/api/v1/directory/oauth/callback", "", "", true, s.directoryConsentCallback},
 		{"POST", "/api/v1/directory/connectors/{id}/sync", auth.ScopeAdmin, auth.RoleAdmin, false, s.syncDirectoryConnector},
 		{"GET", "/api/v1/directory/connectors/{id}/runs", auth.ScopeAdmin, auth.RoleAdmin, false, s.listDirectoryRuns},
+		{"GET", "/api/v1/directory/connectors/{id}/range", auth.ScopeAdmin, auth.RoleAdmin, false, s.getDirectoryRange},
 		{"GET", "/api/v1/directory/runs/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getDirectoryRun},
 		{"GET", "/api/v1/directory/runs/{id}/changes", auth.ScopeAdmin, auth.RoleAdmin, false, s.listDirectoryChanges},
 		{"POST", "/api/v1/directory/runs/{id}/apply", auth.ScopeAdmin, auth.RoleAdmin, false, s.applyDirectoryRun},

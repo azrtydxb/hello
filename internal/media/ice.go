@@ -95,15 +95,17 @@ func (i *iceLite) local() (ufrag, pwd string) {
 }
 
 // setRemote records the peer's ufrag; it reports whether it changed (an ICE
-// restart, which starts the address verification over).
-func (i *iceLite) setRemote(ufrag string) bool {
+// restart, which starts the address verification over) and whether there was
+// one before (false for the first offer or answer).
+func (i *iceLite) setRemote(ufrag string) (changed, had bool) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if i.remoteUfrag == ufrag {
-		return false
+		return false, true
 	}
+	had = i.remoteUfrag != ""
 	i.remoteUfrag = ufrag
-	return true
+	return true, had
 }
 
 // iceResult is what a datagram meant to the ICE agent.

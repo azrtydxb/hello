@@ -11,10 +11,12 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/messaging/media"
+	"github.com/azrtydxb/hello/internal/messaging/msgai"
 	_ "github.com/azrtydxb/hello/internal/messaging/provider/telnyx" // registers the Telnyx adapter
 	_ "github.com/azrtydxb/hello/internal/messaging/provider/twilio" // registers the Twilio adapter
 	"github.com/azrtydxb/hello/internal/messaging/router"
@@ -243,4 +245,17 @@ func runMediaFetcher(ctx context.Context, w *media.Worker, log *slog.Logger) {
 			}
 		}
 	}
+}
+
+// inboxAIEvery is how often an idle inbox AI worker looks for queued runs.
+const inboxAIEvery = time.Second
+
+// runInboxAI works off the inbox AI's queued runs (spec messaging-channels
+// M-30): triage, drafts and auto-replies, every model call through
+// internal/ai. Every replica runs it; the store hands each run to one
+// replica. With the AI off it marks the runs skipped, so nothing waits on a
+// model that is not there. It never logs a message or a number.
+func runInboxAI(ctx context.Context, st *store.Store, agent *ai.Service, autoAllowed bool, m *msgai.Metrics, log *slog.Logger) {
+	w := &msgai.Worker{Store: st.MessageAI(), AI: agent, AutoAllowed: autoAllowed, Metrics: m, Log: log.With("component", "inbox-ai")}
+	w.Run(ctx, inboxAIEvery)
 }

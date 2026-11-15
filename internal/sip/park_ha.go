@@ -167,6 +167,13 @@ func (s *Server) takeOverPark(st livestate.DialogState, from string) {
 	c.park = pk
 	c.link = &callLink{selfSide: selfSide, byeSelf: c.partyBye, relayOwner: c, relayLeg: partyLeg, base: off}
 	c.mu.Unlock()
+	// The party's dialog is the call's caller or callee timer by its side
+	// (homedHas), not the caller's haNewCall bound it to.
+	if selfSide == cdr.SideCaller {
+		party.bindSession(&c.ses, sessCaller)
+	} else {
+		party.bindSession(&c.ses, sessCallee)
+	}
 	relay.Start()
 	if m := s.deps.Media; m != nil {
 		m.NoteStart()

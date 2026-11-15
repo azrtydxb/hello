@@ -335,6 +335,9 @@ type Secure struct {
 	// xp is the endpoint's ICE-lite and DTLS transport (secxport.go); nil
 	// until the host binds the endpoint's socket with Bind.
 	xp atomic.Pointer[xport]
+	// watch is told about the endpoint's ICE and DTLS events (Watch); nil
+	// watches nothing.
+	watch atomic.Pointer[secWatch]
 }
 
 // Local returns the keys Hello offers, generating them on first use. Once a

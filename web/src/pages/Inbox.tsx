@@ -40,6 +40,7 @@ import {
 import { formatTime } from "../format";
 import { AgentAvailability } from "./inbox/AgentAvailability";
 import { formatSize, MessageMedia } from "./inbox/Attachments";
+import { AIDraftChip, AIListChips, AITriagePanel } from "./inbox/AIParts";
 import { Can } from "../role";
 import { usePolling } from "../usePolling";
 import { LinkedText } from "./inbox/Linkified";
@@ -186,6 +187,9 @@ function Thread({
   const trusted = useRef(new Set<string>());
   const [leaving, setLeaving] = useState<URL | null>(null);
   const [blocking, setBlocking] = useState(false);
+  const [reverting, setReverting] = useState(false);
+  // The AI draft run the agent dismissed; a newer draft shows again.
+  const [dismissedDraft, setDismissedDraft] = useState(0);
   const toast = useToast();
 
   const apply = useCallback(
@@ -363,6 +367,29 @@ function Thread({
     }
   }
 
+  async function revertAI() {
+    setReverting(true);
+    try {
+      const c = await api.revertAI(id);
+      setConv(c);
+      setTags(c.tags.join(", "));
+      toast.show("The AI triage's changes are undone.");
+      onChanged();
+    } catch (err: unknown) {
+      setError(errorMessage(err));
+    } finally {
+      setReverting(false);
+    }
+  }
+
+  const aiDraft = conv.ai?.draft ?? null;
+  const showDraft =
+    aiDraft !== null &&
+    aiDraft.runId !== dismissedDraft &&
+    mode === "reply" &&
+    canReply &&
+    draft.trim() === "";
+
   const unassigned = conv.assigneeUserId === null;
   const tomorrow = () => {
     const d = new Date();
@@ -406,6 +433,11 @@ function Thread({
             sites page.
           </Alert>
         )}
+        <AITriagePanel
+          conv={conv}
+          busy={reverting}
+          onRevert={() => void revertAI()}
+        />
         {error && (
           <Alert tone="bad" title="Could not load the conversation">
             {error}
@@ -435,6 +467,11 @@ function Thread({
                       {m.kind === "note" ? "Note by " : ""}
                       {whoLabel(m)}
                     </span>
+                    {m.senderKind === "ai" && (
+                      <Badge tone="info" icon="bot">
+                        Sent by the AI
+                      </Badge>
+                    )}
                     <span>{formatTime(m.createdAt)}</span>
                     {m.kind === "message" && m.direction === "out" && (
                       <Badge tone={m.status === "failed" ? "bad" : "neutral"}>
@@ -485,6 +522,13 @@ function Thread({
               Internal note
             </Button>
           </div>
+          {showDraft && (
+            <AIDraftChip
+              text={aiDraft.text}
+              onUse={() => setDraft(aiDraft.text)}
+              onDismiss={() => setDismissedDraft(aiDraft.runId)}
+            />
+          )}
           <label className="visually-hidden" htmlFor="inbox-draft">
             {mode === "note" ? "Internal note" : "Reply to the customer"}
           </label>
@@ -1201,6 +1245,7 @@ function InboxView({
                   {c.channelKind === "webchat" && (
                     <Badge tone="neutral">Chat</Badge>
                   )}
+                  <AIListChips conv={c} />
                 </span>
               </button>
             </li>

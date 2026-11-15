@@ -46,17 +46,19 @@ type fakeLDAP struct {
 	implicit bool
 	startTLS bool
 
-	mu       sync.Mutex
-	BindDN   string
-	BindPW   string
-	Users    []fakeEntry
-	Groups   []fakeEntry
-	Members  map[string][]string // group DN -> user entry ids (for in-chain)
-	Filters  []string
-	Bound    int
-	PageSize int // forced page size, 0 = the client's
-	Referral bool
-	FailCode int // result code for searches
+	mu     sync.Mutex
+	BindDN string
+	BindPW string
+	// Passwords are the users' own passwords by DN, for bind login.
+	Passwords map[string]string
+	Users     []fakeEntry
+	Groups    []fakeEntry
+	Members   map[string][]string // group DN -> user entry ids (for in-chain)
+	Filters   []string
+	Bound     int
+	PageSize  int // forced page size, 0 = the client's
+	Referral  bool
+	FailCode  int // result code for searches
 
 	// RootDSE is the server's root entry; NTDS is the object dsServiceName
 	// points at (it holds the invocation ID).
@@ -207,7 +209,7 @@ func (f *fakeLDAP) serve(raw net.Conn) {
 			code := 0
 			f.mu.Lock()
 			f.Bound++
-			if dn != f.BindDN || pw != f.BindPW {
+			if (dn != f.BindDN || pw != f.BindPW) && (pw == "" || f.Passwords[dn] != pw) {
 				code = 49
 			}
 			f.mu.Unlock()
@@ -320,7 +322,27 @@ func (f *fakeLDAP) match(base, filter string) []fakeEntry {
 			return out
 		}
 	}
-	return changedSince(filter, append([]fakeEntry(nil), f.Users...))
+	users := append([]fakeEntry(nil), f.Users...)
+	if containsStr(filter, "objectGUID=") {
+		// A lookup by stable id (bind login): only the entry it names.
+		var one []fakeEntry
+		for _, u := range users {
+			if g := u.Attrs["objectGUID"]; len(g) > 0 && (containsStr(filter, "objectGUID="+hexEscape(g[0])+")") ||
+				containsStr(filter, "objectGUID="+ldap.EscapeFilter(string(g[0]))+")")) {
+				one = append(one, u)
+			}
+		}
+		users = one
+	}
+	return changedSince(filter, users)
+}
+
+func hexEscape(b []byte) string {
+	out := ""
+	for _, x := range b {
+		out += fmt.Sprintf("\\%02x", x)
+	}
+	return out
 }
 
 func containsStr(s, sub string) bool {

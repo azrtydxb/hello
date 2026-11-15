@@ -43,6 +43,50 @@ export interface Conversation {
   createdAt: string;
   /** What an agent sees of a website chat visitor; null for a text. */
   chat?: ChatInfo | null;
+  /** What the inbox AI made of it (spec messaging-channels M-30). */
+  ai?: ConversationAI;
+}
+
+/** A triage as the inbox shows it: the model's reading of a customer text. */
+export interface ConversationTriage {
+  language: string;
+  intent: string;
+  urgency: "low" | "normal" | "high";
+  sentiment: "positive" | "neutral" | "negative";
+  spam: boolean;
+  sensitive: boolean;
+  confidence: number;
+  /** The model's one-sentence summary for the agent. */
+  summary: string;
+  suggestedQueue: string;
+  suggestedTags: string[];
+  handoffRecommended: boolean;
+  messageId: number;
+  /** An agent undid what it changed. */
+  reverted: boolean;
+}
+
+export type AIMode = "off" | "triage" | "draft" | "auto";
+
+export interface ConversationAI {
+  /** The number's AI mode; auto means the AI may answer the customer. */
+  mode: AIMode;
+  triage: ConversationTriage | null;
+  /** What the triage changed: the tags it added, the priority before. */
+  applied: { tags: string[]; priority: string };
+  spam: boolean;
+  /** The AI asked for a person and nobody replied since. */
+  handoff: boolean;
+  handoffReason: string;
+  /** The suggested reply to the latest customer text; one conversation only. */
+  draft: {
+    runId: number;
+    messageId: number;
+    text: string;
+    createdAt: string;
+  } | null;
+  /** An AI run is queued or running. */
+  pending: boolean;
 }
 
 /** The facts kept about a chat visitor (spec messaging-channels M-29). */
@@ -195,6 +239,8 @@ export interface InboxApi {
   addContact(id: number, contact: ContactInput): Promise<Conversation>;
   /** The customer's most recent calls, newest first (an agent sees their own). */
   calls(id: number, signal?: AbortSignal): Promise<{ items: InboxCall[] }>;
+  /** Undoes what the AI triage changed (its tags, priority and spam flag). */
+  revertAI(id: number): Promise<Conversation>;
 }
 
 /** One call to or from the customer's number. */
@@ -255,6 +301,7 @@ function area(base: string): InboxApi {
     addContact: (id, contact) =>
       request("POST", at(id, "/contact"), { body: contact }),
     calls: (id, signal) => request("GET", at(id, "/calls"), { signal }),
+    revertAI: (id) => request("POST", at(id, "/ai/revert")),
   };
 }
 

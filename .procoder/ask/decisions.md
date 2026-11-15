@@ -4774,6 +4774,34 @@ Stacked on #343 (items 5 and 6); merges after it. Choices:
   Regression guard: TestKamailioInvite100AfterRelay; the kamailio-ha job
   (KINDHA_GRACEFUL_REPEAT=n repeats the graceful loss) shows it end to end.
 
+## Takeover re-INVITE restates the session timer (2026-11-15)
+
+- Context: #348 follow-up. `haReinvite` sent no `Session-Expires`, so a phone
+  could read the takeover re-INVITE (a session refresh in RFC 4028 terms) as
+  turning the dialog's timer off until the survivor's next refresh.
+- Decision: a homed leg is bound to its dialog's slot in the call's session
+  timers (`haLeg.bindSession`: caller/callee by `haNewCall`, the party's side
+  for a parked call, the callee for an IVR dial-out, the caller for a queue
+  callback). Every re-INVITE `haReinvite` sends on a leg whose dialog has a
+  timer carries `Supported: timer`, `Session-Expires: <interval>;refresher=`
+  `uac` (Hello refreshes) or `uas` (the phone does), and `Min-SE`; a leg
+  without one carries none. The call's live timer is the single source of
+  truth, so the mid-call homed re-INVITEs (hold mirroring, park retrieve on a
+  taken-over call) restate it too.
+- 422: the interval is raised to the answer's `Min-SE` and the re-INVITE is
+  resent with the next CSeq, up to `sessionMaxRetries`, inside the same
+  `haReinviteTimeout` budget; the survivor then refreshes at the raised
+  interval.
+- A 2xx with `Session-Expires` sets the granted interval (never below the
+  current one or `Min-SE`) and the refresher it names (RFC 4028 7.2). A 2xx
+  without one leaves the timer as it was, like the refresh path: Hello covers
+  phones without RFC 4028 support anyway.
+- Test globals (#347/#348 follow-up): `bossAssistantLead`,
+  `checkSyncTimeout`, `pushPollInterval`, `mwiPollInterval` and
+  `presencePollInterval` are atomic tunables; `ivrLaunch` became a Server
+  method with a per-server `ivrLaunchHook`, since its one test builds its own
+  Server.
+
 ## Messaging wiring between items 2 to 6 (2026-11-14, feat/messaging-wiring)
 
 What the merged messaging items left between them, and the choices made where
@@ -4819,6 +4847,259 @@ entry and the code it names).
   stay unbuilt (the route is 404, nothing half-wired).
 - **MCP:** no new operation; chat sites and routing stay excluded, so the
   doctable is unchanged.
+
+## Integrations P12: range auto-provisioning for directory users (2026-11-14)
+
+Built from spec `integrations.md` I-11 on the P8 directory engine. The spec
+left the points below open; each was **chosen by default (the conservative
+option)**, not by the user.
+
+- **Who gets a number.** A user the connector creates, adopts or manages whose
+  mapped extension is empty, or names no extension, when provisioning is on and
+  the user is in the optional source-group filter (`autoProvision.groups`,
+  empty = everyone). A value that is invalid, duplicated or linked elsewhere
+  stays the conflict it was. A user that already has its synced extension keeps
+  it even when the directory value names a missing one. In `create_only` mode a
+  user is provisioned once (Hello owns the extension afterwards, so a deleted
+  one is not recreated); `link_only` users are provisioned like
+  `authoritative` ones.
+- **A full range is a conflict, not a user without a number.**
+  `range_exhausted` leaves that user unchanged (not created, not linked), like
+  every other conflict, so nobody appears half set up; the administrator widens
+  the range. Not overridable.
+- **Stable numbers need state.** Migration 00101 keeps the allocated number on
+  the user (`users.provisioned_number`) and marks the extension
+  (`extensions.provisioned_by`, set null when the connector is deleted). A
+  re-run prefers that number even outside a changed range, relinks its
+  extension when it still exists unlinked, and recreates it with the same
+  number when it was deleted (at the next full run: an incremental run reads
+  only changed users).
+- **Preview predicts, apply allocates.** The preview shows the number the
+  planner predicts from the current dial space; the apply allocates in the
+  user's own transaction under the `hellocfg` lock through the configuration
+  store (the same dial-space rules and whole-configuration check as a console
+  create). A number taken in between is replaced by the next free one and the
+  run row shows the number actually given; a full range at that point is an
+  `error` row with reason `range_exhausted`. Enabling or changing provisioning
+  changes the sync fingerprint, so the next scheduled run is a full one.
+- **"Free" and "reserved prefix".** Free = no extension, ring group, IVR menu,
+  conference room, queue or voicemail group number, no park slot, and no
+  feature or paging code that is a prefix of it or it of one (feature and paging
+  codes start with `*`, so today that never matches a digit number; kept as a
+  guard). Hello has no other reserved-prefix setting; outbound route patterns
+  are not numbers an extension can take, and the whole-configuration check runs
+  anyway.
+- **What is created.** The extension (named from the display name, else the
+  username, trimmed to 100 printable characters), its voicemail box (on, mailed
+  to the user's email; with `voicemail: false` the box exists switched off, as
+  for every extension) and, unless `device: false`, one desk device named
+  after the number (`2000`, else `2000-2`, ...) whose secret is generated and
+  dropped. Ranges hold 2 to 10 digit numbers of equal width (zero-padded ones
+  allowed) and at most 100,000 numbers. Overlapping ranges of two connectors are
+  allowed: the lock keeps them apart.
+- **Following the user.** While provisioning is on, a display-name or email
+  change renames the provisioned extension and updates its voicemail email, but
+  only while each still holds the value provisioning gave it (an administrator's
+  own edit wins).
+- **Deprovisioning is unchanged (I-7).** A disabled user keeps the extension,
+  the voicemail box and its messages; its devices are switched off with the
+  existing `disableDevices` option and come back when the user does. Deleting a
+  connector keeps the extensions and clears their mark.
+- **Audit and metrics.** Each provisioning writes `provision user`, `create
+extension` and `create device` rows with the actor `directory:<connector>`;
+  `hello_directory_provisioned_total{connector_kind}` counts them.
+- **New read route** `GET /api/v1/directory/connectors/{id}/range` (admin,
+  exposed over MCP as `getDirectoryRange` like the other directory reads):
+  size, numbers used, next free and the users holding a number.
+
+## Clients item 3: Diagnostics Clients tab, WebRTC status and the S-52 series (2026-11-14)
+
+Builds on the web devices of #282 and the WebRTC legs of #324, #341 and #343.
+Choices:
+
+- **The live legs reach hello-control through Valkey, per node.** A call with a
+  browser leg is not replicated (its ICE and DTLS state is the node's own), so
+  no existing record holds it. Each hello-sip node with WebRTC media publishes
+  its legs (at most 100), its last 20 ICE and DTLS failures and its counters
+  every 10 s under `hello:webrtc:node:<id>` with a 30 s TTL, and removes the
+  key when it stops. `GET /api/v1/webrtc/status` reads every node's.
+- **The status answers 200 with the parts it could read.** It combines
+  PostgreSQL, Valkey and the TURN servers; one that cannot be read is named in
+  `unavailable` and its part is empty, instead of a 503 for the whole answer.
+- **TURN reachability is a STUN Binding request from hello-control** (UDP or
+  TCP; coturn answers it without credentials), and a TCP connection for a
+  `turns:` URI, whose certificate may come from a private CA hello-control
+  does not hold. The result is reused for 30 s. A leg counts as relayed
+  through TURN when ICE selected an address of a TURN server.
+- **Push is shown as not configured** with a sentence: the push gateway is
+  "not now" (decision 2026-10-25), so its series and alerts are documented as
+  coming with it, not stubbed.
+- **Labels.** `hello_srtp_auth_failures_total{direction}` uses the side of the
+  call the failing packet came from (`from_caller`, `from_callee`), since an
+  authentication failure only exists on receive. It counts every encrypted
+  leg (SDES phones too), so it is registered with the media series, not only
+  when WebRTC is on. `hello_webrtc_ice_state_total{state}` counts `connected`
+  (first authenticated check), `restarted` (new remote ufrag) and `failed` (no
+  check before the DTLS handshake gave up, or by the end of a call at least
+  5 s after its DTLS session started; a browser fork that lost is not a
+  failure). `hello_webrtc_candidate_type_total{type}` counts the client's own
+  (local) candidate type of each end-of-call report; the status endpoint shows
+  both sides from the stored reports. `hello_client_auth_failures_total{reason}`
+  has `expired`, `username`, `credentials`, `unknown_device` (a client name
+  whose device is gone: revoked, disabled or deleted) and `throttled`.
+- **`hello_webrtc_dtls_handshake_seconds` is a series of its own** next to the
+  existing `hello_dtls_handshake_seconds` (all DTLS-SRTP legs, phones too), so
+  the browser handshakes can be watched apart.
+- **`hello_ice_credentials_issued_total` is renamed
+  `hello_turn_credentials_issued_total`** (the spec's name), and now counts
+  only answers that carry a TURN credential, from `/me/ice-servers` and from an
+  enrolment (which also returns ICE servers). It was not on a dashboard yet.
+- **`hello_client_registrations{kind}` is per receiving node** (like
+  `hello_sip_registrations`), so the cluster value is the sum. To back the
+  spec's alert "zero registered WSS clients while some are enrolled",
+  hello-control adds `hello_client_devices{kind}` (enabled web and mobile
+  devices, read at scrape time).
+- **MCP:** `getWebRTCStatus` is a read tool (viewer) and
+  `hello://webrtc/status` a resource; the troubleshoot-call prompt points to it
+  for browser calls. The answer carries no credential or secret.
+- **`TestClientMetrics`** moves the registration, auth-failure, video-slot and
+  WebRTC leg series with real calls through hello-sip; the push part of S-52's
+  test comes with the push gateway.
+
+## Integrations P9 and P11: Google Workspace and Entra connectors, single sign-on (2026-11-14)
+
+Builder decisions within spec I-20 to I-22 and I-26 to I-30 (the spec left
+these open or to the implementation):
+
+- **Entra delta state lives in the connector's sync mark**, not on the run
+  row: the mark already carries the incremental state of LDAP, and a run that
+  fails keeps the previous link.
+- **A full run ends with `$deltatoken=latest`** to take the delta link without
+  paging the whole delta, since the full list was just read.
+- **Fallbacks to a full read**: `410 Gone` (`delta_expired`), any `@removed`
+  entry (`delta_removed`: absence needs a complete list, the engine's absence
+  rule depends on it), more than 1,000 changes (`delta_large`), and a changed
+  membership hash of the groups the rules use (`groups_changed`). Changed
+  users are re-read 15 ids per `$filter=id in (...)` for a full `$select`.
+- **Guests are skipped by default** (an `includeGuests` switch turns them on).
+- **Group rules read `transitiveMembers`** rather than `/groups/{id}/members`
+  (spec I-22), so nested groups count as they do with the AD in-chain rule.
+- **Domain-wide delegation is its own `authMode` (`delegation`)** instead of
+  `service_account` plus a `subject` (spec I-21): a `subject` on the default
+  mode is refused, so delegation is never switched on by filling one field.
+- **Identity keys**: Entra's `oid` (with `tid` pinned to the tenant), Google's
+  `sub`; both equal the ids the connectors link by, so a synced user is found
+  without email.
+- **Email matching only for Google synced non-admins**: exactly one synced,
+  non-admin, non-break-glass user with a verified email of a listed domain.
+  Entra never matches by email (`oid` is always there). Local users and
+  administrators link themselves from their profile while signed in.
+- **JIT is off by default**; a JIT user gets the `user` role and password `!`.
+- **SSO keeps Hello's own TOTP**: a user with 2FA continues on the login page
+  with the challenge carried in the URL fragment (`/login#mfa=`), never a
+  query string or log.
+- **The OIDC binding cookie is `SameSite=Lax`** (the provider's redirect is a
+  top-level cross-site GET), path `/api/v1/`, 10 minutes; the session cookie
+  stays `Strict`. `state` and `nonce` are single use in Valkey (`GETDEL`).
+- **Login method is a connector option** (`loginMethod`: `oidc` or
+  `ldap_bind`, `oidcProvider`), with the earlier `ldapBindLogin` config flag
+  read as `ldap_bind`. A connector whose users have no way in cannot be
+  enabled (`no_login_method`), nor an `oidc` one before its provider is.
+- **One `credential` body field** for the new kinds' secrets, accepted next to
+  `bindPassword` (one of the two per request); the `auth_method` CHECK is left
+  as it is (`local` for everyone).
+- **The Google SSO provider requires domains** (`hd` check); a personal Google
+  account is never accepted.
+- **Google scopes**: delegation and service-account tokens ask only for the
+  scopes the run needs (users, plus groups and members when rules use them);
+  consent asks for all three once. A grant with any scope outside the
+  allow-list is refused. Replacing an `oauth_admin` secret drops the refresh
+  token, so consent is granted again.
+- **Adoption by a connector now clears the local password** (`!`), matching
+  created users, and every set-password route answers `409
+managed_by_directory`.
+- **Break-glass guards are in the store**, under the same admin row lock as
+  `last_admin`, so two concurrent changes cannot remove the last one. Demoting
+  or disabling a break-glass admin unflags it, subject to that guard.
+- **LDAP bind login throttle**: 5 failures per user and per address in 10
+  minutes (Valkey), checked before any bind, so Hello locks before AD's own
+  lockout does.
+- **With P12 auto-provisioning** (merged after this was built): Google and
+  Entra connectors provision like LDAP ones; an adopted user loses its local
+  password in the same transaction that may allocate its number; a
+  break-glass admin is skipped before any provisioning; releasing a
+  connector's users keeps their numbers and extensions (unmarked) and gives
+  no password back. Migration renumbered to `00102`.
+- **All new operations are excluded from MCP** (`x-hello-mcp`): sign-in,
+  secrets and identity linking are browser or admin-console flows.
+
+## Messaging item 7: AI triage, drafts and auto-reply (2026-11-15, feat/messaging-ai)
+
+Builder choices within the approved spec (M-30, M-30a; user decision 5 of
+2026-10-25). None changes what the user approved.
+
+- **Migration 00103 (`messaging_ai`, placeholder 00210 until merge).** Additive only. The one
+  CHECK change (route kind `ai_triage`) goes through
+  `pg_temp.hello_check_values`. The spec said the `ai_*` columns of
+  `msg_addresses` came with P1; they did not, so this migration adds them, with
+  `ai_message_runs`, `msg_faq`, the conversation's AI fields and
+  `conversation_messages.ai_run_id`.
+- **Where runs are queued.** In the ingest transaction (trunk texts and
+  chat), only when the number's mode is not `off` and no kill switch is set,
+  and never for STOP, START or HELP. A run that fails records a code and moves
+  on; the text is in the inbox before any model call.
+- **Follow-up runs.** A finished triage queues the draft (mode `draft`) or the
+  auto-reply (mode `auto`). An auto-reply that does not send queues a draft,
+  unless the customer opted out, it is spam, a keyword, stale or the window is
+  closed. A failed triage still lets the draft run, and turns an auto-reply
+  into a handoff.
+- **Kill switches at three levels plus the environment.**
+  `messaging_settings.ai_enabled` (all AI), `ai_auto_enabled` (auto-replies),
+  `msg_channels.ai_enabled` (per channel; a chat site's channel or the number's
+  mode act per site), the number's mode, and `HELLO_MSG_AI_AUTO=false`
+  (deployment-wide, auto-replies only; helm `control.messagingAIAuto`). Every
+  switch is read again when a run starts and again in the transaction that
+  sends.
+- **Confidence thresholds and allowed intents.** The spec asked for an
+  intent list and "confidence". Triage and auto-reply both report a confidence
+  (0 to 1), and each number has a least confidence (default 0.8) and the
+  intents the AI may answer (empty = every intent but `other`). The inbox-wide
+  intent list defaults to question, sales, support, billing, appointment,
+  complaint. "Never on sensitive topics": an admin list of topics (default
+  medical, legal, emergency, self-harm, harassment, payment dispute, personal
+  data) that the triage flags as `sensitive`, which always hands off.
+- **Holding line.** Sent on every handoff (urgent, negative, sensitive, a
+  handoff word, the cap, low confidence, no FAQ, an answer the guardrails
+  refuse, an AI failure), once until a person replies, only when the number has
+  one (default empty). It is stored as a system message tied to the run.
+- **Handoff flag.** `conversations.ai_handoff_at` and its reason; the inbox
+  shows "Needs a person" until a person replies.
+- **Triage queue suggestions.** The model is given the names of the enabled
+  text queues (configuration, not customer data) so its `suggestedQueue` can be
+  checked. It is applied only on a number whose route is the new `ai_triage`
+  kind: the router waits up to 30 seconds for the first text's triage, then
+  places the conversation in the suggested queue or the route's own queue. On
+  other routes the suggestion is shown, not applied.
+- **Revert.** `POST .../conversations/{id}/ai/revert` (and `/me/...`) removes
+  the tags the AI added (still present), lowers a priority it raised (while
+  still high) and clears its spam flag; the triage stays, marked reverted.
+- **Grounding check.** An auto-reply must cite at least one of the number's
+  enabled snippets by id. Every link in it must be found, exactly, in a
+  snippet. A reply that holds a redaction placeholder is refused. The tools are
+  `lookup_faq` (word overlap over the snippets) and `handoff`; both are
+  read-only.
+- **Audit.** Turning auto-reply on or off for a number
+  (`ai_autoreply_enabled` / `_disabled`), each channel switch
+  (`ai_enabled` / `ai_disabled`), the settings (`update_ai`), FAQ create,
+  update and delete, and each AI-sent message (`ai_autoreply` by `system:ai`,
+  the message id only).
+- **MCP.** One new tool, `getInboxAIStats` (counts only, operator +
+  `messages`), taught in `hello-call-handling`. The settings, the FAQ and the
+  revert are excluded like the rest of messaging.
+- **Not verifiable without a real model.** Triage and draft quality, an
+  injection test set and redaction against real number formats are on the lab
+  list in docs/inbox.md. Every test runs against test/fakellm or go-ai-sdk's
+  mock model.
 
 ## Messaging M-18: the media pipeline (2026-11-15, feat/m18-media)
 

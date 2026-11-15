@@ -142,9 +142,9 @@ func drainNotifies(ch chan *sip.Request) {
 // BLF keys and their changes, or if a publication on one node does not reach a
 // subscriber on the other.
 func TestPresenceExtensions(t *testing.T) {
-	old := presencePollInterval
-	presencePollInterval = 50 * time.Millisecond
-	t.Cleanup(func() { presencePollInterval = old })
+	old := presencePollInterval.Get()
+	presencePollInterval.Set(50 * time.Millisecond)
+	t.Cleanup(func() { presencePollInterval.Set(old) })
 
 	pub := newMemPublished()
 	feats := func(s *snapshot.Snapshot) {
@@ -349,9 +349,9 @@ func TestPresenceExtensions(t *testing.T) {
 // served to a subscriber of the other, or a node cannot refresh or remove
 // what the other stored.
 func TestPresenceTwoNodes(t *testing.T) {
-	old := presencePollInterval
-	presencePollInterval = 50 * time.Millisecond
-	t.Cleanup(func() { presencePollInterval = old })
+	old := presencePollInterval.Get()
+	presencePollInterval.Set(50 * time.Millisecond)
+	t.Cleanup(func() { presencePollInterval.Set(old) })
 
 	pub, fs := newMemPublished(), newFakeState()
 	n1 := startPBX(t, threeDevices(), withNodeID("sip-1"), withSharedState(fs), withPublished(pub))

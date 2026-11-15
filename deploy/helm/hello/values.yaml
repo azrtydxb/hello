@@ -64,6 +64,9 @@ control:
     # controller's pods (comma separated CIDRs). Without them every visitor
     # shares one address and one set of limits.
     trustedProxies: ""
+  # The inbox AI (docs/inbox.md, "AI"): false stops every auto-reply on the
+  # deployment (HELLO_MSG_AI_AUTO); triage and drafts go on.
+  messagingAIAuto: true
   # Phone provisioning listener (:8083). Enabled when provisioning.publicUrl is set.
   provisioning:
     publicUrl: ""

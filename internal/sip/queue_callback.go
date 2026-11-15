@@ -870,6 +870,7 @@ func (c *call) callbackHome(snap *snapshot.Snapshot, q snapshot.Queue, cb queue.
 	if a == nil {
 		return false
 	}
+	a.bindSession(&c.ses, sessCaller)
 	now := time.Now()
 	c.mu.Lock()
 	c.winner, c.setupClosed = nil, false

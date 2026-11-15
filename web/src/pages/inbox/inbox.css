@@ -248,3 +248,46 @@
   align-items: center;
   gap: 4px;
 }
+
+/* The inbox AI: the triage of the latest text and the reply draft. */
+.inbox-ai {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--az-border, currentColor);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inbox-ai__head,
+.inbox-ai__chips,
+.inbox-ai__applied {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.inbox-ai__summary,
+.inbox-ai__handoff {
+  margin: 0;
+}
+
+.inbox-ai__handoff {
+  font-weight: 600;
+}
+
+.inbox-ai-draft {
+  border: 1px dashed var(--az-border, currentColor);
+  border-radius: 8px;
+  padding: 8px 12px;
+  opacity: 0.8;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inbox-ai-draft__text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -229,6 +229,10 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 		c.anchorFailed("port range", err)
 		return
 	}
+	if id := c.inv.CallID(); id != nil {
+		// The WebRTC diagnostics name a browser leg's call by this Call-ID.
+		relay.SetLabel(id.Value())
+	}
 	var portA int
 	if c.webCaller() {
 		// A browser's leg is on the shared WebRTC port, keyed by ICE and DTLS.
