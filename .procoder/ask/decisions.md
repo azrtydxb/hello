@@ -5167,6 +5167,65 @@ media_unsupported`, and the composer offers **Attach** only in a chat. An
   logo is a binary download and chat site settings stay excluded), so the
   doctable is unchanged.
 
+## Items 26 and 27: Replaces of confirmed dialogs, authenticated INVITEs to phones (2026-11-14)
+
+- Who may replace a confirmed dialog (S-17 leaves it open): only a phone of the
+  same extension as the party whose dialog is named, so a user moves their own
+  call between their own phones (call pull, a shared line) and nobody else's.
+  The pickup scope (S-50) still governs early dialogs only: a colleague may
+  answer a ringing call but never take over an answered one. A trunk's side, a
+  click-to-call's own leg and a browser or video call are never taken over.
+  RFC 3891 matching is strict for confirmed dialogs (Call-ID and both tags,
+  either order, 481 otherwise; early-only gives 486); early dialogs keep the
+  Call-ID match pickup always had.
+- How the call continues: the caller's dialog of a plain call is taken over
+  by making the new phone's call the call (it gets the callee leg and the
+  relay, like an attended transfer's bridged call), so it stays an ordinary
+  call and replicates for in-call HA. The callee's dialog cannot be carried
+  that way (both remaining dialogs would be UAS dialogs of Hello), so the two
+  calls are linked like a picked-up call; a linked pair is not replicated
+  (park_ha.go), and the original's record is deleted at the switch so no
+  survivor re-INVITEs a phone that left. A linked call's own party can be
+  taken over again (the call moves back). Across nodes the holding node does
+  the rewiring through a new park-mailbox command, `replace`, and the pair is
+  linked across nodes; a linked call whose peer is on another node is refused
+  (486), because the peer names it by the replaced dialog's Call-ID.
+- The new phone must offer the call's codec (488 otherwise): the other party
+  is not re-INVITEd, so it hears no change. A party the old phone had held is
+  re-INVITEd sendrecv.
+- livestate.Call gains `legCallIds` (the ringing legs, then the answering leg),
+  so a Replaces landing on another node finds the call; a ringing call is
+  republished at its first ring. The BLF dialog-info names the watched
+  extension's dialog (call-id, local-tag, remote-tag, direction) when the call
+  is on the same node; without it no phone could build a Replaces header from
+  a BLF key. List (eventlist) parts stay compact, without them.
+- Attended transfer before answer: the transferor's ringing consultation call is
+  now cancelled (487 to its INVITE, CANCEL to the target) before the blind
+  transfer rings the target for the transferee, so the transferor has no call
+  left up and the target does not ring twice. The abort that does it gives 487
+  and a cancelled CDR, not the drain abort's 503.
+- Authenticated INVITEs (S-22): every INVITE Hello sends a phone (calls, pages,
+  intercom, door chimes, page tests, click-to-call) answers a 401 or 407 with the
+  device's credentials and is re-sent as a new transaction of the same attempt
+  (same Call-ID, From tag and To, CSeq + 1, new Via branch); at most two
+  answers, for a stale nonce. In-dialog re-INVITEs and UPDATEs (hold, re-anchor,
+  transfers, session refreshes, takeover re-INVITEs) are answered the same way
+  in their dialog. BYE is not: P2346 authenticates INVITEs only.
+- The realm: the stored HA1 answers a challenge in the SIP domain's realm; a
+  phone's own realm (a WP uses its server "host:port", as found for check-sync)
+  needs the sealed device password. hello-sip reads it through a new
+  `Deps.DeviceSecrets` (the store's DeviceSecret, as check-sync), once per
+  device and realm, and keeps only the derived HA1 in memory, keyed with the
+  device's stored HA1 so a new secret misses the cache. This is a PostgreSQL
+  read on the first challenged call of a device, off the SIP transaction path
+  (the leg's goroutine).
+- P2346 is now written 1 on every Grandstream WP account, and the per-account
+  P2347/P2346 of further lines (+100 per account) with it; the 2026-11-09 entry
+  that left P2346 out is superseded. Not yet confirmed on a phone (hardware
+  check: a WP836, WP822 and WP856 with P2346 = 1 ring, hold and transfer). The
+  Poly, Snom and Fanvil TR-069/SSH keys stay a hardware item: no vendor
+  document on hand confirms them.
+
 ## TLS hop: outbound TLS requests leave from an ephemeral port (2026-11-15, fix/tls-path-test-isolation)
 
 - **Product bug, not test isolation.** Hello pins the requests its client
