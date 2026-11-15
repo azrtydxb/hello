@@ -258,3 +258,67 @@ func TestRegistered(t *testing.T) {
 		t.Fatal("twilio is not registered")
 	}
 }
+
+// TestFetchMediaHosts fails if a media URL off Twilio's hosts, over http, or
+// of another account is accepted.
+func TestFetchMediaHosts(t *testing.T) {
+	c, err := New(provider.Config{AccountSID: testSID, AuthToken: testToken})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for raw, want := range map[string]bool{
+		"https://api.twilio.com/2010-04-01/Accounts/" + testSID + "/Messages/MM1/Media/ME1":               true,
+		"https://media.twiliocdn.com/" + testSID + "/abc":                                                 true,
+		"https://s3-external-1.amazonaws.com/media.twiliocdn.com/" + testSID + "/abc":                     true,
+		"https://s3-external-1.amazonaws.com/other-bucket/abc":                                            false,
+		"http://api.twilio.com/2010-04-01/Accounts/" + testSID + "/Messages/MM1/Media/ME1":                false,
+		"https://api.twilio.com/2010-04-01/Accounts/AC" + strings.Repeat("00", 16) + "/Messages/M/Media/": false,
+		"https://evil.example/2010-04-01/Accounts/" + testSID + "/":                                       false,
+		"https://api.twilio.com.evil.example/2010-04-01/Accounts/" + testSID + "/":                        false,
+		"https://api.twilio.com:8443/2010-04-01/Accounts/" + testSID + "/":                                false,
+	} {
+		u, _ := url.Parse(raw)
+		if got := c.mediaHost(u); got != want {
+			t.Errorf("mediaHost(%s) = %v, want %v", raw, got, want)
+		}
+	}
+}
+
+// TestFetchMediaCredentials fails if the account's credentials are not sent
+// to Twilio's API, or follow the redirect to the media CDN.
+func TestFetchMediaCredentials(t *testing.T) {
+	var cdnAuth atomic.Value
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cdnAuth.Store(r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("\xff\xd8\xff\xe0 jpeg"))
+	}))
+	defer cdn.Close()
+	var apiUser, apiPass string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiUser, apiPass, _ = r.BasicAuth()
+		http.Redirect(w, r, cdn.URL+"/file", http.StatusTemporaryRedirect)
+	}))
+	defer api.Close()
+	c, err := New(provider.Config{AccountSID: testSID, AuthToken: testToken},
+		WithHTTPClient(api.Client()), WithMediaCheck(func(*url.URL) bool { return true }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := c.FetchMedia(context.Background(), provider.MediaRef{URL: api.URL + "/2010-04-01/Accounts/" + testSID + "/Messages/MM1/Media/ME1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(m.Body)
+	_ = m.Body.Close()
+	if apiUser != testSID || apiPass != testToken || m.ContentType != "image/jpeg" || len(b) == 0 {
+		t.Fatalf("api saw %q/%q; got %q, %d bytes", apiUser, apiPass, m.ContentType, len(b))
+	}
+	if a, _ := cdnAuth.Load().(string); a != "" {
+		t.Fatal("the credentials followed the redirect to another host")
+	}
+	c, _ = New(provider.Config{AccountSID: testSID, AuthToken: testToken}, WithHTTPClient(api.Client()))
+	if _, err := c.FetchMedia(context.Background(), provider.MediaRef{URL: api.URL + "/x"}); !errors.Is(err, provider.ErrMediaHost) {
+		t.Fatalf("a URL off Twilio's hosts: %v", err)
+	}
+}

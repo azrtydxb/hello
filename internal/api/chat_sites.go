@@ -20,6 +20,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/media"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/store"
 )
@@ -100,6 +101,9 @@ func viewChatSite(c store.ChatSite) chatSiteView {
 	if c.Challenge == store.ChallengeNone {
 		w = append(w, "no challenge: anyone on the network can open sessions without proving anything; the limits still apply")
 	}
+	if c.Attachments {
+		w = append(w, "attachments are on: visitors can send images and PDFs, and Hello bundles no virus scanner; leave them off for open sites")
+	}
 	if c.Challenge == store.ChallengeTurnstile {
 		w = append(w, "Turnstile needs the visitor's browser and this server to reach Cloudflare; it does not work on an isolated LAN")
 	}
@@ -134,6 +138,7 @@ type chatSiteBody struct {
 	MaxOpenUnassigned *int                `json:"maxOpenUnassigned"`
 	Transcripts       *bool               `json:"transcripts"`
 	RetentionDays     *int                `json:"retentionDays"`
+	Attachments       *bool               `json:"attachments"`
 }
 
 func oneOf(v string, set ...string) bool {
@@ -159,7 +164,11 @@ func (b chatSiteBody) input(create bool, cur store.ChatSite) (store.ChatSiteInpu
 			Position: cur.Position, Collect: cur.Collect, Hours: cur.Hours, OfflineMode: cur.OfflineMode, PrivacyURL: cur.PrivacyURL,
 			Challenge: cur.Challenge, PowBits: cur.PowBits, TurnstileSiteKey: cur.TurnstileSiteKey, StripLinks: cur.StripLinks,
 			MaxOpenUnassigned: cur.MaxOpenUnassigned, Transcripts: cur.Transcripts, RetentionDays: cur.RetentionDays,
+			Attachments: cur.Attachments,
 		}
+	}
+	if b.Attachments != nil {
+		in.Attachments = *b.Attachments
 	}
 	if b.Name != nil {
 		in.Name = strings.TrimSpace(*b.Name)
@@ -399,6 +408,12 @@ func (s *server) deleteChatSite(w http.ResponseWriter, r *http.Request) {
 	if err := cs.DeleteChatSite(r.Context(), actor(r).String(), id); err != nil {
 		s.inboxError(w, "chat site", err)
 		return
+	}
+	if s.MediaObjects != nil {
+		// The site is gone; its logo goes with it (absent is fine).
+		if err := s.MediaObjects.Remove(r.Context(), media.LogoKey(id)); err != nil {
+			s.Log.Warn("chat site logo not removed", "site", id, "error", err)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

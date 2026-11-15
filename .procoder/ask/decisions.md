@@ -5100,3 +5100,69 @@ Builder choices within the approved spec (M-30, M-30a; user decision 5 of
   injection test set and redaction against real number formats are on the lab
   list in docs/inbox.md. Every test runs against test/fakellm or go-ai-sdk's
   mock model.
+
+## Messaging M-18: the media pipeline (2026-11-15, feat/m18-media)
+
+- **Bucket and keys.** Attachments live in the existing media bucket
+  (`hello-recordings`, as the faxes) under `msg/<channel>/<yyyy>/<message>/<sha256>`
+  for inbound media, as the spec says. An upload has no message yet, so its key
+  is `msg/<channel>/<yyyy>/upload-<media id>/<sha256>`; a chat site's logo is
+  `msg/site/<site>/logo`. A new `internal/messaging/media` package holds the
+  sniffing, the allowlists, the MinIO store (with an in-memory fake), serving and
+  the workers; the store keeps MinIO out as before.
+- **Rows outlive their message until the file is gone.** `message_media` points
+  at its message and conversation with `ON DELETE SET NULL`; retention and an
+  erase delete conversations as before, and the sweeper (on the inbox
+  maintenance lease) removes the file, checks it is gone with a stat, and only
+  then drops the row. The spec says "MinIO objects first, rows after"; this
+  order keeps that invariant (no object without a row) without the store
+  touching MinIO. An erase removes the files at once in the API, verified, and
+  reports `mediaObjects` and `mediaObjectsPending` (left to the sweeper when
+  MinIO cannot be reached).
+- **Media retention.** New setting `retentionMediaDays` (default 90, 1 to 3650,
+  spec M-19). A file past it is removed and its attachment marked `expired`
+  (reason `retention`); the message stays. An upload never sent goes after 24 h.
+- **Sniffing and the allowlist.** `http.DetectContentType` plus PDF, AMR, 3GPP
+  and vCard; the declared type must name the same class. Besides SVG and HTML,
+  a file is refused as `active_content` when it contains markup or script
+  markers anywhere (`<script`, `<html`, `<svg`, `<!doctype`, `<iframe`, ...,
+  `javascript:`) or, for an image or a PDF, a ZIP end record in its tail (a
+  GIFAR). A plain-text file holding markup is refused on purpose.
+- **Outbound attachments: website chat only.** Per the user's LAN-only decision
+  (no public listener), Twilio and Telnyx cannot fetch an MMS's media, so a
+  carrier or SIP trunk conversation refuses `mediaIds` and uploads with `409
+media_unsupported`, and the composer offers **Attach** only in a chat. An
+  agent's file to a chat follows the chat's rules (images and PDF, 5 MiB), the
+  same as a visitor's.
+- **The public link is built but not mounted.** `media_links`, mint and redeem
+  (256-bit token, SHA-256 kept, 15 minutes, 5 uses) and `media.LinkHandler` for
+  `GET /m/{token}` exist and are tested, ready for the public listener (N1);
+  nothing serves them on the LAN.
+- **Inbound MMS.** No carrier delivers inbound texts in this build (webhooks
+  and reconcile are not on), so nothing calls `AddInboundMedia` yet outside
+  tests; the worker, Twilio's and Telnyx's `FetchMedia` and their host checks
+  are complete and tested against fakes. Twilio: the account's own
+  `api.twilio.com/2010-04-01/Accounts/<sid>/` URLs, redirects to
+  `*.twiliocdn.com` or the CDN bucket path on `s3-external-1.amazonaws.com`;
+  Telnyx: `*.telnyx.com`, the API key sent only to `api.telnyx.com`. Both host
+  lists are unverified and on the lab list. Credentials are dropped on any
+  redirect to another host.
+- **Chat attachments.** A visitor's file is its own message
+  (`POST /chat/v1/attachments`, multipart `file`, `clientMsgId`, optional
+  `text`), counted against the 5 per hour limit and the message limits. The
+  frame fetches a file with the token in the header and shows it from a blob
+  URL (the frame's policy adds `img-src blob:`, the iframe `allow-downloads`).
+  The UI nginx gets an exact `location = /chat/v1/attachments` with a 6 MB
+  body limit; every other chat request stays at 32 KB.
+- **Desk phones.** A phone cannot show a file: a text with attachments ends
+  with `[N attachments: open the inbox to see them]`, and a file alone arrives
+  as that line.
+- **DSAR export (messaging item 8).** `Store.ConversationMedia(ctx, convID)`
+  lists every attachment of a conversation with its object key, type, name,
+  size and SHA-256, and `media.Objects.Open` reads the file; the export can
+  stream them from these.
+- **No virus scanning** (not specced; the spec says none is bundled). The chat
+  site's attachments switch warns about it.
+- **MCP:** the new routes are excluded (customer files are private data; the
+  logo is a binary download and chat site settings stay excluded), so the
+  doctable is unchanged.

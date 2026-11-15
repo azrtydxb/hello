@@ -172,6 +172,8 @@ var NonFlowResources = map[string]string{
 	"messaging/chat/sites":          "website chat widgets of the messaging inbox, not call routing",
 	"messaging/faq":                 "FAQ snippets the messaging inbox AI answers customer texts from, not call routing",
 	"inbox/conversations":           "customer text conversations of the messaging inbox, not call routing",
+	"inbox/media":                   "attachments of messaging inbox conversations, not call routing",
+	"me/inbox/media":                "a user's own attachments in the messaging inbox, not call routing",
 }
 
 // NotDestinationEnums lists the OpenAPI enums that look like destination

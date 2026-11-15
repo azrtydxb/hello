@@ -309,6 +309,8 @@ type ChatSendInput struct {
 	// NoNew: the site hides itself while offline, so only a visitor who
 	// already has a conversation may continue it.
 	NoNew bool
+	// MediaIDs are the visitor's uploads that go with the message.
+	MediaIDs []int64
 }
 
 // ChatSendResult is what a send did.
@@ -447,6 +449,9 @@ func (s *Store) chatSend(ctx context.Context, tx *sql.Tx, in ChatSendInput, res 
 		return err
 	}
 	res.MessageID = msgID
+	if err := attachChatUploads(ctx, tx, conv, msgID, in.VisitorID, in.MediaIDs); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE conversations SET last_message_id = $2, last_message_at = now(), last_inbound_at = now(),
 			status = CASE WHEN status IN ('pending', 'snoozed') THEN 'open' ELSE status END, snoozed_until = NULL
@@ -488,6 +493,51 @@ type ChatLine struct {
 	From string    `json:"from"`
 	Text string    `json:"text"`
 	At   time.Time `json:"at"`
+	// Attachments are the line's files (spec M-18); the frame fetches each
+	// from /chat/v1/media/{id} with the visitor's token.
+	Attachments []ChatAttachment `json:"attachments"`
+}
+
+// ChatAttachment is a file of a chat line as the visitor sees it.
+type ChatAttachment struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Size   int64  `json:"size"`
+	Status string `json:"status"`
+}
+
+// loadChatAttachments fills the attachments of chat lines.
+func loadChatAttachments(ctx context.Context, q dbQuery, lines []*ChatLine) error {
+	if len(lines) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(lines))
+	at := map[int64][]*ChatLine{}
+	for _, l := range lines {
+		l.Attachments = []ChatAttachment{}
+		ids = append(ids, l.ID)
+		at[l.ID] = append(at[l.ID], l)
+	}
+	rows, err := q.QueryContext(ctx, `SELECT message_id, id, filename, content_type, size, status FROM message_media
+		WHERE message_id = ANY($1::bigint[]) ORDER BY id`, ids)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			msg int64
+			a   ChatAttachment
+		)
+		if err := rows.Scan(&msg, &a.ID, &a.Name, &a.Type, &a.Size, &a.Status); err != nil {
+			return err
+		}
+		for _, l := range at[msg] {
+			l.Attachments = append(l.Attachments, a)
+		}
+	}
+	return rows.Err()
 }
 
 // ChatHistory returns the visitor's lines after id `after`, oldest first, the
@@ -527,6 +577,13 @@ func (s *Store) ChatHistory(ctx context.Context, visitorID, after int64, limit i
 	}
 	if out == nil {
 		out = []ChatLine{}
+	}
+	ptrs := make([]*ChatLine, len(out))
+	for i := range out {
+		ptrs[i] = &out[i]
+	}
+	if err := loadChatAttachments(ctx, s.db, ptrs); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -571,7 +628,20 @@ func (s *Store) ChatEvents(ctx context.Context, visitorID, after int64, limit in
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	_ = rows.Close()
+	var lines []*ChatLine
+	for _, e := range out {
+		if e.Line != nil {
+			lines = append(lines, e.Line)
+		}
+	}
+	if err := loadChatAttachments(ctx, s.db, lines); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ChatLatestEventID is the newest event id of a visitor (0 for none).
@@ -745,10 +815,19 @@ func (s *Store) chatAgentReply(ctx context.Context, tx *sql.Tx, c convRow, acc I
 	if err != nil {
 		return ConvMessage{}, err
 	}
+	if err := attachUploads(ctx, tx, c.ID, id, acc.UserID, in.MediaIDs); err != nil {
+		return ConvMessage{}, err
+	}
 	if err := chatEvent(ctx, tx, c.ID, id, "message"); err != nil {
 		return ConvMessage{}, err
 	}
-	return scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = $1`, id))
+	m, err := scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = $1`, id))
+	if err != nil {
+		return m, err
+	}
+	ms := []ConvMessage{m}
+	err = loadMedia(ctx, tx, ms)
+	return ms[0], err
 }
 
 // ChatAgentTyping tells the visitor an agent is typing (at most one event

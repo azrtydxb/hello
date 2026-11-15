@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/azrtydxb/hello/internal/messaging/provider"
@@ -325,5 +327,41 @@ func TestRegistrationDegrades(t *testing.T) {
 	none := client(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(401) }))
 	if _, err := none.Registration(context.Background(), nil); !errors.Is(err, provider.ErrAuth) {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// TestFetchMediaHosts fails if a media URL off Telnyx's hosts is accepted,
+// or the API key goes anywhere but api.telnyx.com.
+func TestFetchMediaHosts(t *testing.T) {
+	c, err := New(provider.Config{APIKey: "KEY-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for raw, want := range map[string]bool{
+		"https://media.telnyx.com/abc":      true,
+		"https://api.telnyx.com/v2/media/x": true,
+		"http://media.telnyx.com/abc":       false,
+		"https://telnyx.com.evil.example/x": false,
+		"https://evil.example/media.telnyx": false,
+	} {
+		u, _ := url.Parse(raw)
+		if got := c.mediaHost(u); got != want {
+			t.Errorf("mediaHost(%s) = %v, want %v", raw, got, want)
+		}
+	}
+	var auth atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth.Store(r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte("GIF89a"))
+	}))
+	defer srv.Close()
+	c, _ = New(provider.Config{APIKey: "KEY-secret"}, WithHTTPClient(srv.Client()), WithMediaCheck(func(*url.URL) bool { return true }))
+	m, err := c.FetchMedia(context.Background(), provider.MediaRef{URL: srv.URL + "/presigned"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = m.Body.Close()
+	if a, _ := auth.Load().(string); a != "" {
+		t.Fatal("the API key was sent to a host that is not api.telnyx.com")
 	}
 }
