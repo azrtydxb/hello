@@ -40,8 +40,13 @@ type Binding struct {
 type Call struct {
 	ID        string `json:"id"` // correlation ID
 	SIPCallID string `json:"sipCallId"`
-	From      string `json:"from"` // caller extension number
-	To        string `json:"to"`   // dialled number
+	// LegCallIDs are the Call-IDs of the call's dialogs towards its callee
+	// side: the answering leg once connected, the phone legs still ringing
+	// before. An INVITE with Replaces (RFC 3891) that lands on another node
+	// finds the call by them. Empty from older nodes.
+	LegCallIDs []string `json:"legCallIds,omitempty"`
+	From       string   `json:"from"` // caller extension number
+	To         string   `json:"to"`   // dialled number
 	// Callee is the extension whose device answered, when that differs from
 	// the dialled number (a ring group member, a forward target); it makes
 	// the extension count as busy. Empty from older nodes and before answer.

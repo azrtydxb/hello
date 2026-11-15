@@ -16,11 +16,13 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -31,6 +33,8 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/media"
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -43,7 +47,7 @@ type Backend interface {
 	ChatTurnstileSecret(ctx context.Context, siteID int64) (string, error)
 	ChatRetentionDays(ctx context.Context, site store.ChatSite) (int, error)
 	ChatIPHash(ip string, now time.Time) ([]byte, error)
-	ChatAvailability(ctx context.Context, site store.ChatSite, now time.Time) (bool, string, error)
+	ChatAvailability(ctx context.Context, site store.ChatSite, now time.Time, states map[string]queue.AgentState) (bool, string, error)
 	ChatSession(ctx context.Context, in store.ChatSessionInput) (store.ChatSessionResult, error)
 	ChatAuth(ctx context.Context, siteID int64, token string, ipHash []byte) (store.ChatVisitor, error)
 	ChatSend(ctx context.Context, in store.ChatSendInput) (store.ChatSendResult, error)
@@ -53,6 +57,10 @@ type Backend interface {
 	ChatTyping(ctx context.Context, site store.ChatSite, visitorID int64) error
 	ChatEnd(ctx context.Context, site store.ChatSite, visitorID int64) error
 	ChatTranscript(ctx context.Context, visitorID int64) (string, []store.ChatLine, error)
+	ChatBeginUpload(ctx context.Context, site store.ChatSite, visitorID int64, in store.MediaUploadInput) (store.MediaUpload, error)
+	FinishMediaUpload(ctx context.Context, id int64) (store.ConvMedia, error)
+	AbortMediaUpload(ctx context.Context, id int64) error
+	ChatMedia(ctx context.Context, visitorID, id int64) (store.MediaFile, error)
 }
 
 var _ Backend = (*store.Store)(nil)
@@ -73,11 +81,19 @@ type Config struct {
 	// MaxStreams is the per-pod limit of open event streams (default 2000).
 	MaxStreams int
 	// Mail sends a transcript; nil turns transcripts off.
-	Mail      func(ctx context.Context, to, subject, body string) error
+	Mail func(ctx context.Context, to, subject, body string) error
+	// Agents reads the call queues' agent state (login and pause by
+	// extension), which decides whether a site routed to a text queue has
+	// anyone to answer. nil, or an error, counts only the queues' static
+	// members, as the router does when Valkey cannot be read.
+	Agents    func(ctx context.Context) (map[string]queue.AgentState, error)
 	Turnstile *Turnstile
-	Metrics   *Metrics
-	Log       *slog.Logger
-	Now       func() time.Time
+	// Objects is the attachments' store (spec M-18); nil turns visitor
+	// attachments and site logos off.
+	Objects media.Objects
+	Metrics *Metrics
+	Log     *slog.Logger
+	Now     func() time.Time
 	// Poll, Keepalive and StreamIdle are the event stream's timings (defaults
 	// 1s, 15s, 30m); variables for tests.
 	Poll       time.Duration
@@ -163,6 +179,9 @@ func New(cfg Config) *Server {
 	s.mux.HandleFunc("POST /chat/v1/transcript", s.api(s.transcript))
 	s.mux.HandleFunc("GET /chat/v1/history", s.api(s.history))
 	s.mux.HandleFunc("GET /chat/v1/events", s.events)
+	s.mux.HandleFunc("POST /chat/v1/attachments", s.upload(s.attachments))
+	s.mux.HandleFunc("GET /chat/v1/media/{id}", s.media)
+	s.mux.HandleFunc("GET /chat/v1/logo", s.logo)
 	return s
 }
 
@@ -203,6 +222,26 @@ func (m *Metrics) limited(rule string) {
 }
 
 func (s *Server) now() time.Time { return s.cfg.Now() }
+
+// agentStatesTimeout bounds the read of the agents' state, so a slow Valkey
+// costs a visitor at most this.
+const agentStatesTimeout = 2 * time.Second
+
+// agentStates is the call queues' agent state, or nil when there is no source
+// or it cannot be read now (only static queue members count then).
+func (s *Server) agentStates(ctx context.Context) map[string]queue.AgentState {
+	if s.cfg.Agents == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, agentStatesTimeout)
+	defer cancel()
+	st, err := s.cfg.Agents(ctx)
+	if err != nil {
+		s.cfg.Log.Debug("agent state unreadable; counting static queue members only", "error", err)
+		return nil
+	}
+	return st
+}
 
 // asset serves a static file of the widget.
 func (s *Server) asset(name, ctype string, cross bool) http.HandlerFunc {
@@ -248,7 +287,7 @@ func frameCSP(site store.ChatSite) string {
 		frameSrc = "; frame-src https://challenges.cloudflare.com"
 	}
 	return "frame-ancestors " + messaging.FrameAncestors(site.AllowedOrigins) +
-		"; default-src 'none'; " + script + "; style-src 'self'; connect-src 'self'; img-src 'self' data:" +
+		"; default-src 'none'; " + script + "; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:" +
 		"; base-uri 'none'; form-action 'none'" + frameSrc
 }
 
@@ -397,10 +436,15 @@ type siteConfig struct {
 	RetentionDays int    `json:"retentionDays"`
 	Transcripts   bool   `json:"transcripts"`
 	MaxChars      int    `json:"maxChars"`
+	// Attachments: the visitor may send images and PDFs of at most
+	// MaxAttachmentBytes. Logo is the logo's URL, empty for none.
+	Attachments        bool   `json:"attachments"`
+	MaxAttachmentBytes int64  `json:"maxAttachmentBytes"`
+	Logo               string `json:"logo"`
 }
 
 func (s *Server) config(ctx context.Context, site store.ChatSite) (siteConfig, error) {
-	online, _, err := s.cfg.Backend.ChatAvailability(ctx, site, s.now())
+	online, _, err := s.cfg.Backend.ChatAvailability(ctx, site, s.now(), s.agentStates(ctx))
 	if err != nil {
 		return siteConfig{}, err
 	}
@@ -412,6 +456,7 @@ func (s *Server) config(ctx context.Context, site store.ChatSite) (siteConfig, e
 		Name: site.Name, Greeting: site.Greeting, Accent: site.Accent, Position: site.Position, Collect: site.Collect,
 		Offline: !online, Hidden: !online && site.OfflineMode == "hidden", PrivacyURL: site.PrivacyURL,
 		RetentionDays: days, Transcripts: site.Transcripts && s.cfg.Mail != nil, MaxChars: messaging.MaxChatChars,
+		Attachments: site.Attachments && s.cfg.Objects != nil, MaxAttachmentBytes: media.ChatMax, Logo: s.logoURL(site),
 	}, nil
 }
 
@@ -689,7 +734,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errBody("invalid"))
 		return
 	}
-	online, _, err := s.cfg.Backend.ChatAvailability(r.Context(), site, s.now())
+	online, _, err := s.cfg.Backend.ChatAvailability(r.Context(), site, s.now(), s.agentStates(r.Context()))
 	if err != nil {
 		s.fail(w, "availability", err)
 		return
@@ -698,39 +743,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		Site: site, VisitorID: v.ID, Text: text, ClientMsgID: req.ClientMsgID, Offline: !online,
 		NoNew: !online && site.OfflineMode == "hidden",
 	})
-	var verr *store.ValidationError
-	switch {
-	case errors.As(err, &verr):
-		s.cfg.Metrics.message("email_required")
-		writeJSON(w, http.StatusBadRequest, errBody("email_required"))
-		return
-	case errors.Is(err, store.ErrChatLimit):
-		s.cfg.Metrics.limited("unanswered")
-		w.Header().Set("Retry-After", "60")
-		w.WriteHeader(http.StatusTooManyRequests)
-		return
-	case errors.Is(err, store.ErrChatFull):
-		s.cfg.Metrics.message("full")
-		writeJSON(w, http.StatusServiceUnavailable, errBody("full"))
-		return
-	case errors.Is(err, store.ErrChannelUnavailable), errors.Is(err, store.ErrNotFound):
-		writeJSON(w, http.StatusNotFound, errBody("not_found"))
-		return
-	case err != nil:
-		s.fail(w, "send", err)
-		return
-	}
-	switch {
-	case res.Closed:
-		s.cfg.Metrics.message("closed")
-		writeJSON(w, http.StatusOK, closedBody)
-	case res.Duplicate:
-		s.cfg.Metrics.message("duplicate")
-		writeJSON(w, http.StatusOK, map[string]any{"state": "open", "id": res.MessageID, "conversationId": res.ConversationID})
-	default:
-		s.cfg.Metrics.message("stored")
-		writeJSON(w, http.StatusCreated, map[string]any{"state": "open", "id": res.MessageID, "conversationId": res.ConversationID})
-	}
+	s.sent(w, res, err)
 }
 
 func printableID(s string) bool {
@@ -986,4 +999,282 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		case <-poll.C:
 		}
 	}
+}
+
+// logoURL is where the widget reads the site's logo; the version makes a new
+// logo replace a cached one.
+func (s *Server) logoURL(site store.ChatSite) string {
+	if !site.Logo || s.cfg.Objects == nil {
+		return ""
+	}
+	return "/chat/v1/logo?site=" + site.Key + "&v=" + strconv.FormatInt(site.LogoVersion, 10)
+}
+
+// uploadDeadline bounds an attachment upload (5 MiB on a slow link).
+const uploadDeadline = 60 * time.Second
+
+// upload wraps a multipart endpoint: the concurrency limit, a longer
+// deadline and the attachment's size cap.
+func (s *Server) upload(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.inflight.Add(1) > int64(s.cfg.MaxInFlight) {
+			s.inflight.Add(-1)
+			s.cfg.Metrics.reject("busy")
+			w.Header().Set("Retry-After", "5")
+			http.Error(w, "", http.StatusServiceUnavailable)
+			return
+		}
+		defer s.inflight.Add(-1)
+		ctx, cancel := context.WithTimeout(r.Context(), uploadDeadline)
+		defer cancel()
+		r = r.WithContext(ctx)
+		w.Header().Set("Cache-Control", "no-store")
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+			writeJSON(w, http.StatusUnsupportedMediaType, errBody("content_type"))
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, media.ChatMax+64<<10)
+		h(w, r)
+	}
+}
+
+// attachments takes a file from a visitor (spec M-29a.6): only where the
+// site turned attachments on, images and PDF only, sniffed from the bytes,
+// at most 5 per hour. The file becomes a message of its own, with the
+// visitor's optional text.
+func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
+	site, v, ok := s.visitor(w, r)
+	if !ok {
+		return
+	}
+	if !site.Attachments || s.cfg.Objects == nil {
+		writeJSON(w, http.StatusNotFound, errBody("not_found"))
+		return
+	}
+	if v.Blocked {
+		s.cfg.Metrics.message("closed")
+		writeJSON(w, http.StatusOK, closedBody)
+		return
+	}
+	if !s.allow(w, r, "attach_hour", vkey(v), 5, time.Hour) || !s.allow(w, r, "msg_day", vkey(v), 300, 24*time.Hour) ||
+		!s.allow(w, r, "msg_site_day", strconv.FormatInt(site.ID, 10), 10000, 24*time.Hour) {
+		s.cfg.Metrics.message("rate_limited")
+		return
+	}
+	data, filename, declared, fields, ok := readAttachment(w, r)
+	if !ok {
+		return
+	}
+	clientID := fields["clientMsgId"]
+	text := ""
+	if t := strings.TrimSpace(fields["text"]); t != "" {
+		var tok bool
+		if text, tok = messaging.CleanChatText(t); !tok {
+			writeJSON(w, http.StatusBadRequest, errBody("invalid"))
+			return
+		}
+		if site.StripLinks {
+			text = messaging.StripLinks(text)
+		}
+	}
+	if clientID == "" || len(clientID) > 64 || !printableID(clientID) {
+		s.cfg.Metrics.message("invalid")
+		writeJSON(w, http.StatusBadRequest, errBody("invalid"))
+		return
+	}
+	in, refusal := media.Inspect(data, declared, media.ChatRules())
+	if refusal != nil {
+		s.cfg.Metrics.message("attachment_refused")
+		if refusal.Reason == media.ReasonTooLarge {
+			writeJSON(w, http.StatusRequestEntityTooLarge, errBody("too_large"))
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, errBody("file_type"))
+		return
+	}
+	online, _, err := s.cfg.Backend.ChatAvailability(r.Context(), site, s.now(), s.agentStates(r.Context()))
+	if err != nil {
+		s.fail(w, "availability", err)
+		return
+	}
+	up, err := s.cfg.Backend.ChatBeginUpload(r.Context(), site, v.ID, store.MediaUploadInput{Inspected: in, Filename: filename, Declared: declared})
+	if err != nil {
+		s.fail(w, "attachment", err)
+		return
+	}
+	if err := s.cfg.Objects.Put(r.Context(), up.Key, bytes.NewReader(data), in.Size, in.ContentType); err != nil {
+		_ = s.cfg.Backend.AbortMediaUpload(context.WithoutCancel(r.Context()), up.ID)
+		_ = s.cfg.Objects.Remove(context.WithoutCancel(r.Context()), up.Key)
+		s.cfg.Log.Warn("chat: attachment not stored", "error", err)
+		w.Header().Set("Retry-After", "30")
+		writeJSON(w, http.StatusServiceUnavailable, errBody("unavailable"))
+		return
+	}
+	if _, err := s.cfg.Backend.FinishMediaUpload(r.Context(), up.ID); err != nil {
+		s.fail(w, "attachment", err)
+		return
+	}
+	res, err := s.cfg.Backend.ChatSend(r.Context(), store.ChatSendInput{
+		Site: site, VisitorID: v.ID, Text: text, ClientMsgID: clientID, Offline: !online,
+		NoNew: !online && site.OfflineMode == "hidden", MediaIDs: []int64{up.ID},
+	})
+	s.sent(w, res, err)
+}
+
+// sent answers a stored (or refused) visitor message.
+func (s *Server) sent(w http.ResponseWriter, res store.ChatSendResult, err error) {
+	var verr *store.ValidationError
+	switch {
+	case errors.As(err, &verr) && len(verr.Fields) > 0 && verr.Fields[0].Path == "email":
+		s.cfg.Metrics.message("email_required")
+		writeJSON(w, http.StatusBadRequest, errBody("email_required"))
+		return
+	case errors.As(err, &verr):
+		writeJSON(w, http.StatusBadRequest, errBody("invalid"))
+		return
+	case errors.Is(err, store.ErrChatLimit):
+		s.cfg.Metrics.limited("unanswered")
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(http.StatusTooManyRequests)
+		return
+	case errors.Is(err, store.ErrChatFull):
+		s.cfg.Metrics.message("full")
+		writeJSON(w, http.StatusServiceUnavailable, errBody("full"))
+		return
+	case errors.Is(err, store.ErrChannelUnavailable), errors.Is(err, store.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, errBody("not_found"))
+		return
+	case err != nil:
+		s.fail(w, "send", err)
+		return
+	}
+	switch {
+	case res.Closed:
+		s.cfg.Metrics.message("closed")
+		writeJSON(w, http.StatusOK, closedBody)
+	case res.Duplicate:
+		s.cfg.Metrics.message("duplicate")
+		writeJSON(w, http.StatusOK, map[string]any{"state": "open", "id": res.MessageID, "conversationId": res.ConversationID})
+	default:
+		s.cfg.Metrics.message("stored")
+		writeJSON(w, http.StatusCreated, map[string]any{"state": "open", "id": res.MessageID, "conversationId": res.ConversationID})
+	}
+}
+
+// readAttachment reads the multipart body of an attachment: one part "file"
+// and the short fields clientMsgId and text.
+func readAttachment(w http.ResponseWriter, r *http.Request) (data []byte, filename, declared string, fields map[string]string, ok bool) {
+	fields = map[string]string{}
+	mr, err := r.MultipartReader()
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errBody("bad_request"))
+		return nil, "", "", nil, false
+	}
+	tooBig := func(err error) bool {
+		var mb *http.MaxBytesError
+		return errors.As(err, &mb)
+	}
+	for {
+		part, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			if tooBig(err) {
+				writeJSON(w, http.StatusRequestEntityTooLarge, errBody("too_large"))
+			} else {
+				writeJSON(w, http.StatusBadRequest, errBody("bad_request"))
+			}
+			return nil, "", "", nil, false
+		}
+		switch name := part.FormName(); name {
+		case "file":
+			if data != nil {
+				writeJSON(w, http.StatusBadRequest, errBody("bad_request"))
+				return nil, "", "", nil, false
+			}
+			b, err := io.ReadAll(io.LimitReader(part, media.ChatMax+1))
+			if err != nil {
+				if tooBig(err) {
+					writeJSON(w, http.StatusRequestEntityTooLarge, errBody("too_large"))
+				} else {
+					writeJSON(w, http.StatusBadRequest, errBody("bad_request"))
+				}
+				return nil, "", "", nil, false
+			}
+			data, filename, declared = b, part.FileName(), part.Header.Get("Content-Type")
+		case "clientMsgId", "text":
+			b, err := io.ReadAll(io.LimitReader(part, 8<<10+1))
+			if err != nil || len(b) > 8<<10 {
+				writeJSON(w, http.StatusBadRequest, errBody("bad_request"))
+				return nil, "", "", nil, false
+			}
+			fields[name] = string(b)
+		}
+		_ = part.Close()
+	}
+	if data == nil {
+		writeJSON(w, http.StatusBadRequest, errBody("invalid"))
+		return nil, "", "", nil, false
+	}
+	return data, filename, declared, fields, true
+}
+
+// media serves an attachment the visitor's chat shows, to the visitor whose
+// token is in the Authorization header: the frame fetches it and shows it
+// from a blob URL, so the token is never in a URL.
+func (s *Server) media(w http.ResponseWriter, r *http.Request) {
+	_, v, ok := s.visitor(w, r)
+	if !ok {
+		return
+	}
+	if s.cfg.Objects == nil || v.Blocked {
+		writeJSON(w, http.StatusNotFound, errBody("not_found"))
+		return
+	}
+	if !s.allow(w, r, "media", vkey(v), 120, time.Minute) {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeJSON(w, http.StatusNotFound, errBody("not_found"))
+		return
+	}
+	f, err := s.cfg.Backend.ChatMedia(r.Context(), v.ID, id)
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) && !errors.Is(err, store.ErrMediaNotReady) {
+			s.cfg.Log.Error("chat: attachment lookup", "error", err)
+		}
+		writeJSON(w, http.StatusNotFound, errBody("not_found"))
+		return
+	}
+	media.Serve(w, r, s.cfg.Objects, f.Stored(), s.cfg.Log)
+}
+
+// logo serves a site's logo. It is not customer data and needs no token, so
+// the widget's <img> loads it directly.
+func (s *Server) logo(w http.ResponseWriter, r *http.Request) {
+	ip := s.clientIP(r)
+	if !s.allow(w, r, "bootstrap", ip, 60, time.Minute) {
+		return
+	}
+	site, err := s.siteByKey(r.Context(), r.URL.Query().Get("site"))
+	if err != nil || !site.Enabled || !site.Logo || s.cfg.Objects == nil {
+		http.Error(w, "", http.StatusNotFound)
+		return
+	}
+	obj, err := s.cfg.Objects.Open(r.Context(), media.LogoKey(site.ID))
+	if err != nil {
+		if !errors.Is(err, media.ErrNoObject) {
+			s.cfg.Log.Warn("chat: logo unreadable", "error", err)
+		}
+		http.Error(w, "", http.StatusNotFound)
+		return
+	}
+	defer func() { _ = obj.Body.Close() }()
+	h := w.Header()
+	h.Set("Content-Type", site.LogoType)
+	h.Set("Cache-Control", "public, max-age=300")
+	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	http.ServeContent(w, r, "", time.Time{}, obj.Body)
 }

@@ -225,6 +225,11 @@ type Deps struct {
 	// Pushes is the check-sync push queue hello-control fills; nil
 	// disables pushes.
 	Pushes PushQueue
+	// DeviceSecrets opens a device's sealed SIP password, so Hello can answer
+	// a phone that challenges an INVITE or NOTIFY in its own realm (S-5,
+	// S-22); nil falls back to Pushes when it implements DeviceSecrets, and
+	// then to the stored HA1 alone.
+	DeviceSecrets DeviceSecrets
 	// Settings applies feature-code mutations (DND, forwarding) by queueing
 	// them to PostgreSQL and bumping the configuration revision; nil makes
 	// the mutating feature codes answer 503.
@@ -314,15 +319,21 @@ type Server struct {
 	// rtcpxrRate bounds the quality reports per device (S-36).
 	rtcpxrRate reportWindow
 	digest     *Digest
-	contact    sip.ContactHeader
-	advHost    string
-	advPort    int
-	recount    chan struct{}
-	ua         *sipgo.UserAgent
-	client     *sipgo.Client
-	uas        *sipgo.DialogUA // A legs: callers
-	uac        *sipgo.DialogUA // B legs: forks
-	bg         sync.WaitGroup
+	// realms caches the HA1 of a device's password for the realms its
+	// phone challenges Hello's requests in (phoneauth.go).
+	realms  phoneRealms
+	contact sip.ContactHeader
+	advHost string
+	advPort int
+	recount chan struct{}
+	ua      *sipgo.UserAgent
+	client  *sipgo.Client
+	uas     *sipgo.DialogUA // A legs: callers
+	uac     *sipgo.DialogUA // B legs: forks
+	// ivrLaunchHook, when set, replaces how an IVR fork's INVITE starts
+	// (ivrLaunch); a test sets it on its own Server to script a fork.
+	ivrLaunchHook func(*leg)
+	bg            sync.WaitGroup
 	// emMarks is the node-local record of emergency calls (emergency.go).
 	emMarks emergencyMarks
 	// bgMu guards bgClosed: once shutdown waits for bg, a late call event
@@ -885,6 +896,11 @@ func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 		return snapshot.Device{}, false
 	}
 	if n >= int64(s.cfg.AuthFailLimit) {
+		if h := req.GetHeader("Authorization"); h != nil {
+			if c, err := ParseCredentials(h.Value()); err == nil && isClientName(snap, c.Username) {
+				s.noteClientAuthFailure("throttled")
+			}
+		}
 		s.respond(tx, req, sip.StatusForbidden, "Forbidden")
 		return snapshot.Device{}, false
 	}
@@ -900,6 +916,11 @@ func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 	}
 	dev, known := snap.DeviceByUsername(creds.Username)
 	if !known {
+		if looksDerived(creds.Username) {
+			// A client's expiring name whose device is gone: revoked,
+			// disabled or deleted.
+			s.noteClientAuthFailure("unknown_device")
+		}
 		// Unknown or disabled: no challenge would help.
 		s.authFailed(tx, req, ip, "unknown or disabled device", false)
 		return snapshot.Device{}, false
@@ -919,6 +940,9 @@ func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 	case Stale:
 		s.challenge(tx, req, true)
 	default:
+		if dev.AuthMode == snapshot.AuthDerived {
+			s.noteClientAuthFailure(clientAuthReason(check))
+		}
 		// Never log the response, HA1, nonce or cnonce.
 		s.authFailed(tx, req, ip, "bad credentials", true,
 			"check", check, "digest_uri", creds.URI, "request_uri", req.Recipient.String(),
@@ -1074,14 +1098,20 @@ func (s *Server) recountRegistrations(ctx context.Context) {
 	}
 	n := 0
 	byTransport := map[string]int{"udp": 0, "tcp": 0, "tls": 0, "ws": 0, "wss": 0}
+	byKind := map[string]int{"desk": 0, "web": 0, "mobile": 0}
+	snap := s.deps.Snapshots.Current()
 	for _, b := range bs {
 		if b.ReceivedNode == s.cfg.NodeID {
 			n++
 			byTransport[normTransport(b.Transport)]++
+			byKind[bindingKind(snap, b)]++
 		}
 	}
 	for t, c := range byTransport {
 		s.m.RegistrationsByTransport.WithLabelValues(t).Set(float64(c))
+	}
+	for k, c := range byKind {
+		s.m.ClientRegistrations.WithLabelValues(k).Set(float64(c))
 	}
 	s.m.Registrations.Set(float64(n))
 	s.registrations.Store(int64(n))

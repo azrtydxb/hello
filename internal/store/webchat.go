@@ -16,12 +16,15 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/router"
+	"github.com/azrtydxb/hello/internal/queue"
 )
 
 // Errors of the chat store; the chat listener and the API map them.
@@ -102,22 +105,49 @@ func (s *Store) ChatIPBlocked(ctx context.Context, siteID int64, ipHash []byte) 
 	return b, err
 }
 
-// ChatAvailability says whether a live chat can be answered now: the site is
-// inside its opening hours, a supervisor has the inbox open (it counts the
-// last two minutes), and the unassigned live chats are under the site's cap.
-// reason is "hours", "no_agent" or "full" when not.
-func (s *Store) ChatAvailability(ctx context.Context, site ChatSite, now time.Time) (online bool, reason string, err error) {
-	if !site.Hours.Open(now) {
-		return false, "hours", nil
-	}
-	var agent bool
+// Why a chat site is offline, as ChatAvailability reports it.
+const (
+	ChatOfflineHours   = "hours"    // outside the address's schedule, with no after-hours route
+	ChatOfflineNoAgent = "no_agent" // nobody staffs where the chat would go
+	ChatOfflineFull    = "full"     // the site's unassigned live chats are at its cap
+)
+
+// ChatAvailability says whether a live chat can be answered now, from where a
+// new chat of the site would go: the route of its address (or, outside the
+// address's schedule, its after-hours route; with no after-hours route the
+// site is closed). A text queue is available while one of its members is
+// staffed (logged in and not paused, the call queues' state in states); a
+// user, an extension's user or a ring group's users while one of them has
+// the inbox open (seen in the last two minutes); the supervisors' pool (the
+// inbox route, or a target that is gone) while a supervisor has. Then the
+// unassigned live chats must be under the site's cap. reason is one of the
+// ChatOffline constants when not.
+//
+// states is the call queues' agent state by extension; nil means it could
+// not be read, and then only static queue members count, as the router does.
+func (s *Store) ChatAvailability(ctx context.Context, site ChatSite, now time.Time, states map[string]queue.AgentState) (online bool, reason string, err error) {
+	var kind, target, sched, action, ahKind, ahTarget string
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT EXISTS (SELECT 1 FROM inbox_presence p JOIN users u ON u.id = p.user_id
-			WHERE p.seen_at > now() - interval '2 minutes' AND u.enabled AND u.role IN ('operator', 'admin'))`).Scan(&agent); err != nil {
+		SELECT route_kind, route_target, schedule::text, after_hours_action, after_hours_route_kind, after_hours_route_target
+		FROM msg_addresses WHERE id = $1`, site.AddressID).Scan(&kind, &target, &sched, &action, &ahKind, &ahTarget); err != nil {
+		return false, "", mapErr(err)
+	}
+	var schedule messaging.Schedule
+	if json.Unmarshal([]byte(sched), &schedule) != nil {
+		schedule = messaging.Schedule{} // an unreadable schedule is always open
+	}
+	if !schedule.Open(now) {
+		if action != messaging.AfterRoute {
+			return false, ChatOfflineHours, nil
+		}
+		kind, target = ahKind, ahTarget
+	}
+	staffed, err := s.routeStaffed(ctx, kind, target, states)
+	if err != nil {
 		return false, "", err
 	}
-	if !agent {
-		return false, "no_agent", nil
+	if !staffed {
+		return false, ChatOfflineNoAgent, nil
 	}
 	var n int
 	if err := s.db.QueryRowContext(ctx, `
@@ -126,9 +156,47 @@ func (s *Store) ChatAvailability(ctx context.Context, site ChatSite, now time.Ti
 		return false, "", err
 	}
 	if n >= site.MaxOpenUnassigned {
-		return false, "full", nil
+		return false, ChatOfflineFull, nil
 	}
 	return true, "", nil
+}
+
+// routeStaffed reports whether someone is there to answer a conversation the
+// route would place now (see ChatAvailability).
+func (s *Store) routeStaffed(ctx context.Context, kind, target string, states map[string]queue.AgentState) (bool, error) {
+	p, err := resolvePlacement(ctx, s.db, kind, target)
+	if err != nil {
+		return false, err
+	}
+	var present bool
+	switch {
+	case p.queue > 0:
+		var name string
+		if err := s.db.QueryRowContext(ctx, `SELECT name FROM queues WHERE id = $1`, p.queue).Scan(&name); err != nil {
+			return false, mapErr(err)
+		}
+		agents, err := routerStore{s}.Agents(ctx, p.queue)
+		if err != nil {
+			return false, err
+		}
+		return router.Staffed(router.Queue{ID: p.queue, Name: name}, agents, router.Availability{States: states}), nil
+	case p.user > 0:
+		err = s.db.QueryRowContext(ctx, `
+			SELECT EXISTS (SELECT 1 FROM inbox_presence WHERE user_id = $1 AND seen_at > now() - interval '2 minutes')`,
+			p.user).Scan(&present)
+	case p.group > 0:
+		err = s.db.QueryRowContext(ctx, `
+			SELECT EXISTS (SELECT 1 FROM ring_group_members gm
+				JOIN user_extensions ue ON ue.extension_id = gm.extension_id
+				JOIN users u ON u.id = ue.user_id AND u.enabled AND u.role IN ('user', 'operator', 'admin')
+				JOIN inbox_presence p ON p.user_id = u.id AND p.seen_at > now() - interval '2 minutes'
+				WHERE gm.group_id = $1)`, p.group).Scan(&present)
+	default:
+		err = s.db.QueryRowContext(ctx, `
+			SELECT EXISTS (SELECT 1 FROM inbox_presence p JOIN users u ON u.id = p.user_id
+				WHERE p.seen_at > now() - interval '2 minutes' AND u.enabled AND u.role IN ('operator', 'admin'))`).Scan(&present)
+	}
+	return present, err
 }
 
 // ChatSessionInput creates or resumes a visitor. Name and Email are already
@@ -241,6 +309,8 @@ type ChatSendInput struct {
 	// NoNew: the site hides itself while offline, so only a visitor who
 	// already has a conversation may continue it.
 	NoNew bool
+	// MediaIDs are the visitor's uploads that go with the message.
+	MediaIDs []int64
 }
 
 // ChatSendResult is what a send did.
@@ -353,7 +423,8 @@ func (s *Store) chatSend(ctx context.Context, tx *sql.Tx, in ChatSendInput, res 
 	if err := tx.QueryRowContext(ctx, `
 		SELECT count(*) FROM conversation_messages m WHERE m.conversation_id = $1 AND m.direction = 'in' AND m.kind = 'message'
 			AND m.id > coalesce((SELECT max(o.id) FROM conversation_messages o
-				WHERE o.conversation_id = $1 AND o.direction = 'out' AND o.kind = 'message'), 0)`, conv).Scan(&unanswered); err != nil {
+				WHERE o.conversation_id = $1 AND o.direction = 'out' AND o.kind = 'message' AND o.sender_kind <> 'system'), 0)`,
+		conv).Scan(&unanswered); err != nil {
 		return err
 	}
 	if unanswered >= messaging.MaxChatUnanswered {
@@ -378,6 +449,9 @@ func (s *Store) chatSend(ctx context.Context, tx *sql.Tx, in ChatSendInput, res 
 		return err
 	}
 	res.MessageID = msgID
+	if err := attachChatUploads(ctx, tx, conv, msgID, in.VisitorID, in.MediaIDs); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE conversations SET last_message_id = $2, last_message_at = now(), last_inbound_at = now(),
 			status = CASE WHEN status IN ('pending', 'snoozed') THEN 'open' ELSE status END, snoozed_until = NULL
@@ -385,6 +459,9 @@ func (s *Store) chatSend(ctx context.Context, tx *sql.Tx, in ChatSendInput, res 
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE msg_channels SET last_event_at = now() WHERE id = $1`, in.Site.ChannelID); err != nil {
+		return err
+	}
+	if err := queueAITriage(ctx, tx, conv, in.Site.AddressID, msgID); err != nil {
 		return err
 	}
 	if newConv {
@@ -416,6 +493,51 @@ type ChatLine struct {
 	From string    `json:"from"`
 	Text string    `json:"text"`
 	At   time.Time `json:"at"`
+	// Attachments are the line's files (spec M-18); the frame fetches each
+	// from /chat/v1/media/{id} with the visitor's token.
+	Attachments []ChatAttachment `json:"attachments"`
+}
+
+// ChatAttachment is a file of a chat line as the visitor sees it.
+type ChatAttachment struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Size   int64  `json:"size"`
+	Status string `json:"status"`
+}
+
+// loadChatAttachments fills the attachments of chat lines.
+func loadChatAttachments(ctx context.Context, q dbQuery, lines []*ChatLine) error {
+	if len(lines) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(lines))
+	at := map[int64][]*ChatLine{}
+	for _, l := range lines {
+		l.Attachments = []ChatAttachment{}
+		ids = append(ids, l.ID)
+		at[l.ID] = append(at[l.ID], l)
+	}
+	rows, err := q.QueryContext(ctx, `SELECT message_id, id, filename, content_type, size, status FROM message_media
+		WHERE message_id = ANY($1::bigint[]) ORDER BY id`, ids)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			msg int64
+			a   ChatAttachment
+		)
+		if err := rows.Scan(&msg, &a.ID, &a.Name, &a.Type, &a.Size, &a.Status); err != nil {
+			return err
+		}
+		for _, l := range at[msg] {
+			l.Attachments = append(l.Attachments, a)
+		}
+	}
+	return rows.Err()
 }
 
 // ChatHistory returns the visitor's lines after id `after`, oldest first, the
@@ -455,6 +577,13 @@ func (s *Store) ChatHistory(ctx context.Context, visitorID, after int64, limit i
 	}
 	if out == nil {
 		out = []ChatLine{}
+	}
+	ptrs := make([]*ChatLine, len(out))
+	for i := range out {
+		ptrs[i] = &out[i]
+	}
+	if err := loadChatAttachments(ctx, s.db, ptrs); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -499,7 +628,20 @@ func (s *Store) ChatEvents(ctx context.Context, visitorID, after int64, limit in
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	_ = rows.Close()
+	var lines []*ChatLine
+	for _, e := range out {
+		if e.Line != nil {
+			lines = append(lines, e.Line)
+		}
+	}
+	if err := loadChatAttachments(ctx, s.db, lines); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ChatLatestEventID is the newest event id of a visitor (0 for none).
@@ -673,10 +815,19 @@ func (s *Store) chatAgentReply(ctx context.Context, tx *sql.Tx, c convRow, acc I
 	if err != nil {
 		return ConvMessage{}, err
 	}
+	if err := attachUploads(ctx, tx, c.ID, id, acc.UserID, in.MediaIDs); err != nil {
+		return ConvMessage{}, err
+	}
 	if err := chatEvent(ctx, tx, c.ID, id, "message"); err != nil {
 		return ConvMessage{}, err
 	}
-	return scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = $1`, id))
+	m, err := scanConvMessage(tx.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = $1`, id))
+	if err != nil {
+		return m, err
+	}
+	ms := []ConvMessage{m}
+	err = loadMedia(ctx, tx, ms)
+	return ms[0], err
 }
 
 // ChatAgentTyping tells the visitor an agent is typing (at most one event

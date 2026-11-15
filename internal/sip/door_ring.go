@@ -230,7 +230,11 @@ func (s *Server) runDoorTrigger(ctx context.Context, t livestate.DoorTrigger) {
 				return
 			}
 			l := &leg{c: &call{s: s}, binding: c.b, dcs: dcs}
-			err = dcs.WaitAnswer(ringCtx, sipgo.AnswerOptions{})
+			dcs, err = s.waitAnswerPhone(ringCtx, dcs, c.b.Device, sipgo.AnswerOptions{}, func(next *sipgo.DialogClientSession) {
+				l.mu.Lock()
+				l.dcs = next
+				l.mu.Unlock()
+			})
 			if res := dcs.InviteResponse; err == nil || (res != nil && res.IsSuccess()) {
 				ans, perr := media.ParseAudioSDP(res.Body())
 				addr := udpAddr(ans.Address, ans.Port)

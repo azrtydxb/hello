@@ -411,7 +411,9 @@ devices and the softphone build on it.
   `HELLO_MEDIA_ANCHOR_HOST`), `HELLO_MEDIA_WEBRTC_PORT`,
   `HELLO_MEDIA_WEBRTC_PUBLIC_IP`, `HELLO_MEDIA_WEBRTC_ALLOW_CLEARTEXT_HOP`
   (default false: see below). Metrics: `hello_webrtc_mux_legs`,
-  `hello_webrtc_mux_unrouted_total`, `hello_webrtc_mux_queue_drops_total`.
+  `hello_webrtc_mux_unrouted_total`, `hello_webrtc_mux_queue_drops_total`, and
+  the per-leg ICE and DTLS series of
+  [webrtc.md](webrtc.md#clients-diagnostics-and-metrics).
 - **Cleartext hop.** The browser's DTLS fingerprint travels in the offer, so it
   is only as trustworthy as the signalling path to this node. `AnswerWebRTC`
   takes a `SignalingHop` and refuses an offer that arrived over a cleartext
@@ -541,6 +543,12 @@ The anchor's own series:
 SRTP `hello_srtp_legs` (legs encrypted now) and
 `hello_srtp_negotiations_total{result}` (`srtp`, `dtls`, `plain`, `refused`,
 `dtls_failed`); the DTLS and ICE series are listed in the section above.
+`hello_srtp_auth_failures_total{direction}` (`from_caller`, `from_callee`)
+counts inbound SRTP and SRTCP packets of any encrypted leg (SDES or DTLS) that
+failed authentication; the WebRTC leg series (`hello_webrtc_legs`,
+`hello_webrtc_ice_state_total`, `hello_webrtc_dtls_handshake_seconds`,
+`hello_webrtc_dtls_failures_total`) are in
+[webrtc.md](webrtc.md#clients-diagnostics-and-metrics).
 
 ## RTP port range
 

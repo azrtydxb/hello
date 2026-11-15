@@ -138,6 +138,8 @@ spec:
             - name: HELLO_OAUTH_DCR
               value: "true"
             {{- end }}
+            - name: HELLO_MSG_AI_AUTO
+              value: {{ ternary "true" "false" (ne .Values.control.messagingAIAuto false) | quote }}
             {{- if $chatOn }}
             - name: HELLO_MSG_CHAT_LAN_ADDR
               value: {{ $chat.lanAddr | quote }}

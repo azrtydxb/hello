@@ -154,3 +154,22 @@ func TestDeskPhoneParts(t *testing.T) {
 		}
 	}
 }
+
+// TestWithMediaNote fails if a desk phone is not told how many attachments a
+// text came with, or a text without any is changed.
+func TestWithMediaNote(t *testing.T) {
+	for _, c := range []struct {
+		body string
+		n    int
+		want string
+	}{
+		{"hello", 0, "hello"},
+		{"hello", 1, "hello\n[1 attachment: open the inbox to see it]"},
+		{"", 3, "[3 attachments: open the inbox to see them]"},
+		{"  ", 2, "[2 attachments: open the inbox to see them]"},
+	} {
+		if got := WithMediaNote(c.body, c.n); got != c.want {
+			t.Errorf("WithMediaNote(%q, %d) = %q, want %q", c.body, c.n, got, c.want)
+		}
+	}
+}

@@ -24,6 +24,7 @@ const FIELDS: ReadonlyArray<{
   key:
     | "retentionSmsDays"
     | "retentionChatDays"
+    | "retentionMediaDays"
     | "reopenDays"
     | "firstContactPerUserHour"
     | "firstContactPerAddressDay";
@@ -43,6 +44,13 @@ const FIELDS: ReadonlyArray<{
     key: "retentionChatDays",
     label: "Keep chat conversations for (days)",
     hint: "The same for chat conversations.",
+    min: 1,
+    max: 3650,
+  },
+  {
+    key: "retentionMediaDays",
+    label: "Keep attachments for (days)",
+    hint: "Images and files are deleted this long after they arrived or were sent; the message stays and says the file expired.",
     min: 1,
     max: 3650,
   },
@@ -99,6 +107,7 @@ export function MessagingSettings() {
           firstContactPerAddressDay: String(s.firstContactPerAddressDay),
           retentionSmsDays: String(s.retentionSmsDays),
           retentionChatDays: String(s.retentionChatDays),
+          retentionMediaDays: String(s.retentionMediaDays),
           reopenDays: String(s.reopenDays),
         });
       })
@@ -125,6 +134,7 @@ export function MessagingSettings() {
       await putMessagingSettings({
         retentionSmsDays: Number(draft.retentionSmsDays),
         retentionChatDays: Number(draft.retentionChatDays),
+        retentionMediaDays: Number(draft.retentionMediaDays),
         reopenDays: Number(draft.reopenDays),
         emailNotify,
         firstContact,
@@ -251,7 +261,11 @@ export function MessagingSettings() {
         >
           <p>
             Deleted {report.conversations} conversations and {report.messages}{" "}
-            messages. {report.optOutsKept} opt-outs were kept as a hash.
+            messages. {report.optOutsKept} opt-outs were kept as a hash.{" "}
+            {report.mediaObjects} attachment files were deleted
+            {report.mediaObjectsPending > 0
+              ? `; ${report.mediaObjectsPending} more could not be reached now and are deleted within minutes.`
+              : "."}
           </p>
           <ul>
             {report.providers.map((p) => (

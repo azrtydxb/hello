@@ -59,7 +59,10 @@ function RoutePicker({
   errors,
   onKind,
   onTarget,
+  allowAI = true,
 }: {
+  /** Offer ai_triage (not after hours, which routes without waiting). */
+  allowAI?: boolean;
   idPrefix: string;
   label: string;
   kind: RouteKind;
@@ -88,7 +91,10 @@ function RoutePicker({
       value: String(g.id),
       label: g.name,
     })),
+    ai_triage: [],
   };
+  // The AI triage falls back to a queue of its own when it suggests none.
+  options.ai_triage = options.queue;
   return (
     <div className="cf-two">
       <Select
@@ -96,10 +102,12 @@ function RoutePicker({
         label={label}
         value={kind}
         error={errors[`${idPrefix}Kind`]}
-        options={(Object.keys(ROUTE_KIND_LABEL) as RouteKind[]).map((k) => ({
-          value: k,
-          label: ROUTE_KIND_LABEL[k],
-        }))}
+        options={(Object.keys(ROUTE_KIND_LABEL) as RouteKind[])
+          .filter((k) => allowAI || k !== "ai_triage")
+          .map((k) => ({
+            value: k,
+            label: ROUTE_KIND_LABEL[k],
+          }))}
         onChange={(e) => {
           onKind(e.target.value as RouteKind);
           onTarget("");
@@ -108,13 +116,16 @@ function RoutePicker({
       {kind !== "inbox" && (
         <Select
           id={`${idPrefix}-target`}
-          label="Which"
+          label={kind === "ai_triage" ? "Otherwise to queue" : "Which"}
           value={target}
           error={errors[`${idPrefix}Target`]}
           hint={
-            kind === "queue" && options.queue.length === 0
+            (kind === "queue" || kind === "ai_triage") &&
+            options.queue.length === 0
               ? "No queue takes texts yet: turn on texting on a queue first."
-              : undefined
+              : kind === "ai_triage"
+                ? "The router waits up to 30 seconds for the AI triage of the first text, then places the conversation in the text queue the triage suggests, or in this one. Turn the number's AI on (triage or more) in Messaging, AI."
+                : undefined
           }
           options={[{ value: "", label: "Choose…" }, ...options[kind]]}
           onChange={(e) => onTarget(e.target.value)}
@@ -132,10 +143,16 @@ function RoutePicker({
  */
 export function RoutingDialog({
   address,
+  title,
+  chat = false,
   onClose,
   onSaved,
 }: {
-  address: MessagingAddress;
+  address: Pick<MessagingAddress, "id" | "address">;
+  /** The dialog's title; "Routing of <number>" by default. */
+  title?: string;
+  /** A chat site's address: its schedule is also the widget's hours. */
+  chat?: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -227,8 +244,12 @@ export function RoutingDialog({
 
   return (
     <Modal
-      title={`Routing of ${address.address}`}
-      description="Where new conversations of this number go. A target that is gone or cannot take conversations sends them to the supervisors' pool instead."
+      title={title ?? `Routing of ${address.address}`}
+      description={
+        chat
+          ? "Where the site's new chats go and when it is open. The widget takes live chats while someone staffs that target: a queue member who is logged in and not paused, or a user who has the inbox open; otherwise it takes a message. A target that is gone sends chats to the supervisors' pool."
+          : "Where new conversations of this number go. A target that is gone or cannot take conversations sends them to the supervisors' pool instead."
+      }
       onClose={onClose}
       actions={
         <>
@@ -274,7 +295,11 @@ export function RoutingDialog({
           <Input
             id="routing-first"
             label="First-contact text"
-            hint="Sent once to a customer who texts this number for the first time. Empty sends nothing. Only a SIP trunk channel can send it today."
+            hint={
+              chat
+                ? "Shown once in the widget to a visitor's first chat. Empty sends nothing."
+                : "Sent once to a customer who texts this number for the first time. Empty sends nothing. A carrier channel whose credentials were refused cannot send it; the conversation then says so."
+            }
             value={first}
             maxLength={480}
             error={fields.firstContactText}
@@ -283,8 +308,9 @@ export function RoutingDialog({
           <fieldset className="cf-form__section">
             <legend className="az-eyebrow">Opening hours</legend>
             <p className="az-caption">
-              No windows means always open. Outside the windows the after-hours
-              action applies.
+              {chat
+                ? "No windows means always open. Outside the windows the widget is offline, unless the after-hours action sends chats somewhere else."
+                : "No windows means always open. Outside the windows the after-hours action applies."}
             </p>
             {days.length > 0 && (
               <Input
@@ -358,7 +384,11 @@ export function RoutingDialog({
                 <Input
                   id="routing-text"
                   label="Reply"
-                  hint="Sent once, to a customer who has not opted out. Only a SIP trunk channel can send it today."
+                  hint={
+                    chat
+                      ? "Shown once in the widget to a visitor who writes outside the hours."
+                      : "Sent once, to a customer who has not opted out. A carrier channel whose credentials were refused cannot send it; the conversation then says so."
+                  }
                   value={text}
                   maxLength={480}
                   error={fields["afterHours.text"]}
@@ -367,6 +397,7 @@ export function RoutingDialog({
               )}
               {action === "route" && (
                 <RoutePicker
+                  allowAI={false}
                   idPrefix="after"
                   label="Goes to"
                   kind={ahKind}

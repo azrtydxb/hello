@@ -404,3 +404,51 @@ func scalar(t *testing.T, e *env, q string, args ...any) int {
 	}
 	return n
 }
+
+// TestChatSiteAvailabilityAPI fails if reading a site does not say whether
+// its widget takes live chats now and why not, if a write carries it, or if
+// a site's hours and its address's routing schedule are not the same data
+// through the API.
+func TestChatSiteAvailabilityAPI(t *testing.T) {
+	r := newChatRig(t, false)
+	ctx := context.Background()
+	site := r.createSite("Availability", map[string]any{"hours": map[string]any{"zone": "UTC", "days": []map[string]any{{"day": 1, "from": "09:00", "to": "17:00"}}}})
+	path := idPath("/api/v1/messaging/chat/sites", site.ID, "")
+	// Open every day, so the outcome does not depend on when the test runs.
+	week := []map[string]any{}
+	for d := 0; d < 7; d++ {
+		week = append(week, map[string]any{"day": d, "from": "00:00", "to": "23:59"})
+	}
+	routing := idPath("/api/v1/messaging/addresses", site.AddressID, "/routing")
+	rt := r.admin.must(http.StatusOK, "GET", routing, nil).json(t)
+	if days := rt["schedule"].(map[string]any)["days"].([]any); len(days) != 1 {
+		t.Fatalf("the site's hours are not its routing schedule: %v", rt["schedule"])
+	}
+	r.admin.must(http.StatusOK, "PUT", routing, map[string]any{"schedule": map[string]any{"zone": "UTC", "days": week}})
+	got := r.admin.must(http.StatusOK, "GET", path, nil).json(t)
+	if days := got["hours"].(map[string]any)["days"].([]any); len(days) != 7 {
+		t.Fatalf("a routing schedule is not the site's hours: %v", got["hours"])
+	}
+	av, ok := got["availability"].(map[string]any)
+	if !ok || av["online"] != false || av["reason"] != "no_agent" {
+		t.Fatalf("availability with nobody in the inbox = %v", got["availability"])
+	}
+	var admin int64
+	if err := r.db.QueryRowContext(ctx, `SELECT id FROM users WHERE username = $1`, testUser).Scan(&admin); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.st.TouchInboxPresence(ctx, admin); err != nil {
+		t.Fatal(err)
+	}
+	list := listItems(t, r.admin.must(http.StatusOK, "GET", "/api/v1/messaging/chat/sites", nil))
+	if av := list[0].(map[string]any)["availability"].(map[string]any); av["online"] != true || av["reason"] != nil {
+		t.Fatalf("availability with a supervisor in the inbox = %v", av)
+	}
+	put := r.admin.must(http.StatusOK, "PUT", path, map[string]any{"greeting": "Hello"}).json(t)
+	if _, has := put["availability"]; has {
+		t.Fatal("a write carries the availability")
+	}
+	if days := put["hours"].(map[string]any)["days"].([]any); len(days) != 7 {
+		t.Fatal("a site update that leaves the hours out changed the schedule")
+	}
+}

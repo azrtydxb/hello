@@ -11,9 +11,12 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/media"
+	"github.com/azrtydxb/hello/internal/messaging/msgai"
 	_ "github.com/azrtydxb/hello/internal/messaging/provider/telnyx" // registers the Telnyx adapter
 	_ "github.com/azrtydxb/hello/internal/messaging/provider/twilio" // registers the Twilio adapter
 	"github.com/azrtydxb/hello/internal/messaging/router"
@@ -30,7 +33,7 @@ const (
 // runInboxMaintenance wakes snoozed conversations and purges what retention
 // allows, on the replica holding the lease (any replica when the lease store
 // is unavailable: every step is idempotent).
-func runInboxMaintenance(ctx context.Context, st *store.Store, l lease, node string, m *messaging.Metrics, log *slog.Logger) {
+func runInboxMaintenance(ctx context.Context, st *store.Store, l lease, node string, m *messaging.Metrics, mw *media.Worker, log *slog.Logger) {
 	t := time.NewTicker(inboxMaintainEvery)
 	defer t.Stop()
 	for {
@@ -46,6 +49,21 @@ func runInboxMaintenance(ctx context.Context, st *store.Store, l lease, node str
 			}
 		}
 		if held || err != nil {
+			// Attachment files that retention, an erase or an unsent
+			// upload left: removed from MinIO, checked gone, then their
+			// rows settled (spec M-18, M-19).
+			for {
+				n, err := mw.CollectOnce(ctx, 200)
+				if err != nil && ctx.Err() == nil {
+					log.Warn("inbox media sweep", "error", err)
+				}
+				if n > 0 {
+					m.Purged.WithLabelValues("media").Add(float64(n))
+				}
+				if err != nil || n < 200 {
+					break
+				}
+			}
 			if unknown, failed, err := st.SettleCarrierTexts(ctx); err != nil {
 				if ctx.Err() == nil {
 					log.Warn("carrier text settle", "error", err)
@@ -196,4 +214,48 @@ func runCarrierWorkers(ctx context.Context, st *store.Store, m *messaging.Metric
 			}
 		}
 	}
+}
+
+// mediaFetchEvery is how often a replica looks for inbound attachments to
+// download.
+const mediaFetchEvery = 5 * time.Second
+
+// runMediaFetcher downloads the media of inbound carrier messages (spec
+// M-18). Every replica runs it: the store hands each attachment to one
+// worker at a time. It never logs a URL, a file name or a number.
+func runMediaFetcher(ctx context.Context, w *media.Worker, log *slog.Logger) {
+	t := time.NewTicker(mediaFetchEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		for {
+			n, err := w.FetchOnce(ctx, 10)
+			if err != nil {
+				if ctx.Err() == nil {
+					log.Warn("inbox media download", "error", err)
+				}
+				break
+			}
+			if n < 10 {
+				break
+			}
+		}
+	}
+}
+
+// inboxAIEvery is how often an idle inbox AI worker looks for queued runs.
+const inboxAIEvery = time.Second
+
+// runInboxAI works off the inbox AI's queued runs (spec messaging-channels
+// M-30): triage, drafts and auto-replies, every model call through
+// internal/ai. Every replica runs it; the store hands each run to one
+// replica. With the AI off it marks the runs skipped, so nothing waits on a
+// model that is not there. It never logs a message or a number.
+func runInboxAI(ctx context.Context, st *store.Store, agent *ai.Service, autoAllowed bool, m *msgai.Metrics, log *slog.Logger) {
+	w := &msgai.Worker{Store: st.MessageAI(), AI: agent, AutoAllowed: autoAllowed, Metrics: m, Log: log.With("component", "inbox-ai")}
+	w.Run(ctx, inboxAIEvery)
 }

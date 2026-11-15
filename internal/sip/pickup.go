@@ -2,7 +2,7 @@
 // code answers the oldest call ringing an extension in the dialler's pickup
 // scope; the directed code plus an extension answers that extension's call
 // if it is in scope; an INVITE with Replaces naming an early dialog does the
-// same. The picked-up call's other ringing legs are cancelled, its caller is
+// same (replaces.go). The picked-up call's other ringing legs are cancelled, its caller is
 // connected to the dialler through the caller's relay, and the two calls are
 // linked like a retrieved parked call.
 package sip
@@ -10,7 +10,6 @@ package sip
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -340,32 +339,6 @@ func (c *call) crossNodeOffer(offer media.AudioSDP) (body string, ok bool) {
 	return media.StripCrypto(string(c.inv.Body())), true
 }
 
-// handleReplacesPickup serves an INVITE with Replaces naming an early dialog
-// (the pickup form some phones use): in scope, it takes the call.
-func (c *call) handleReplacesPickup(tx sip.ServerTransaction, snap *snapshot.Snapshot, replaces string) {
-	callID := replaces
-	if i := strings.IndexByte(callID, ';'); i >= 0 {
-		callID = callID[:i]
-	}
-	callID, _ = url.QueryUnescape(callID)
-	ref, ok := c.s.lookup(callID)
-	if !ok {
-		c.pickupFail(tx, sip.StatusCallTransactionDoesNotExists, "the Replaces dialog does not exist")
-		return
-	}
-	var cands []pickupCandidate
-	for _, cand := range c.s.pickupCandidates(snap, c.callerNum, "") {
-		if cand.local == ref.c {
-			cands = append(cands, cand)
-		}
-	}
-	if len(cands) == 0 {
-		c.pickupFail(tx, sip.StatusForbidden, "the Replaces dialog is not in your pickup scope")
-		return
-	}
-	c.pickupFrom(tx, snap, cands)
-}
-
 // --- cross-node commands and slot presence ---------------------------------
 
 // parkCommand sends cmd to node and waits for its reply.
@@ -472,6 +445,8 @@ func (s *Server) runParkCommand(cmd livestate.ParkCommand) {
 				res: make(chan pickupRes, 1)})
 			rep.OK, rep.Answer, rep.Code, rep.Reason, rep.CallID = r.ok, string(r.answer), r.code, r.why, r.callID
 		}
+	case livestate.ParkOpReplace:
+		rep = s.replaceForPeer(cmd)
 	case livestate.ParkOpDoorOpen:
 		var target *call
 		s.mu.Lock()

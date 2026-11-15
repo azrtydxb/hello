@@ -21,13 +21,14 @@ import (
 	"github.com/azrtydxb/hello/internal/chat"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/mailer"
+	"github.com/azrtydxb/hello/internal/messaging/media"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
 // startChat starts the LAN chat listener and reports whether it did: an unset
 // HELLO_MSG_CHAT_LAN_ADDR starts nothing and touches nothing.
-func startChat(ctx context.Context, cfg config.Control, st *store.Store, box *secret.Box, vk *api.LazyValkey,
+func startChat(ctx context.Context, cfg config.Control, st *store.Store, box *secret.Box, vk *api.LazyValkey, objs media.Objects,
 	smtp func() (mailer.Settings, error), reg prometheus.Registerer, log *slog.Logger) (bool, error) {
 	if cfg.Chat.LANAddr == "" {
 		log.Info("LAN chat widget disabled (HELLO_MSG_CHAT_LAN_ADDR not set)")
@@ -48,7 +49,9 @@ func startChat(ctx context.Context, cfg config.Control, st *store.Store, box *se
 			MaxInFlight:    cfg.Chat.MaxInFlight,
 			MaxStreams:     cfg.Chat.MaxStreams,
 			Mail:           chatMail(smtp),
+			Agents:         vk.Agents,
 			Turnstile:      chat.NewTurnstile(),
+			Objects:        objs,
 			Metrics:        chat.NewMetrics(reg),
 			Log:            clog,
 		}),

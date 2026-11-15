@@ -24,10 +24,15 @@ This is the first phase of the messaging channels. What works now:
   campaign, toll-free verification) from the carrier (see "Sender
   registration");
 - a website chat widget for intranet pages and VPN users, served on the LAN only
-  (see "Website chat" below).
+  (see "Website chat" below);
+- attachments (see "Attachments"): images and PDFs both ways in a website
+  chat, a chat site's logo, and the download of a carrier's MMS media once a
+  carrier can deliver inbound texts.
+- AI triage, reply drafts and auto-replies from an FAQ, per number, through the
+  in-product AI's model (see "AI" below).
 
 Not yet: receiving texts from a carrier's web API (needs an Internet-facing
-address), WhatsApp, and AI. None of the providers that need an
+address) and WhatsApp. None of the providers that need an
 Internet-facing address is possible while Hello is reachable only on the LAN,
 and neither is a widget on a public website.
 
@@ -109,7 +114,7 @@ when Twilio reports it. There are no status callbacks on the LAN, so Hello
 5 minutes, then every 30 minutes after the first hour, and it stops at the
 final state or after 48 hours. A text still queued after an hour (the channel
 is off) fails with `not_sent`. A reply can be up to 1600 characters (Twilio
-segments it); media is not sent.
+segments it); media is not sent (see "Attachments").
 
 **Opt-out.** Twilio blocks a recipient who replied STOP and fails the send with
 error 21610. Hello records that as an opt-out on the number (source
@@ -266,13 +271,17 @@ The numbers match by their last nine digits, so `0475 12 34 56` and
 A text can follow the conversation to the desk phone. Two switches must both be
 on, both off by default: **Deliver to desk phones** on the number (Messaging
 channels) and **Show customer texts on my desk phone** in the user's profile.
-Then, when a conversation is assigned to or taken by that user, and for each
-later customer text while it is theirs, Hello queues a SIP MESSAGE to every
+Then, when a conversation is assigned to or taken by that user (by a
+supervisor, by the user taking it, or by the router: a number routed to the
+user, or a text queue's strategy picking them), and for each later customer
+text while it is theirs, Hello queues a SIP MESSAGE to every
 registered phone of the user's extension (an unregistered phone gets it at its
 next REGISTER, within the text queue's TTL). The phone shows it from the
 customer, with the contact name resolved for that user, and a non-SMS channel
 is prefixed (`[WhatsApp] `). A text longer than 700 bytes is split into parts
-numbered `(1/3) `. Turning text messaging off ([messaging.md](messaging.md))
+numbered `(1/3) `. A phone cannot show an attachment: a text that came with one
+ends with `[1 attachment: open the inbox to see it]` (or the number of them),
+and a file sent alone arrives as that line. Turning text messaging off ([messaging.md](messaging.md))
 stops phone delivery but never the inbox.
 
 A text typed on the phone to the customer's number replies into the
@@ -297,13 +306,14 @@ are all of such vendors does not see the profile switch.
 **Where a number's new conversations go** is set per number (Messaging >
 Channels > Routing, or `PUT /api/v1/messaging/addresses/{id}/routing`):
 
-| Route        | What happens                                                                                               |
-| ------------ | ---------------------------------------------------------------------------------------------------------- |
-| Pool (inbox) | Unassigned; every operator and administrator sees it. The default.                                         |
-| Queue        | The queue's strategy picks an agent (below).                                                               |
-| User         | Assigned to that user.                                                                                     |
-| Extension    | Assigned to the user the extension is linked to.                                                           |
-| Ring group   | A shared pool of the users of the group's extensions: it stays unassigned and the first to reply takes it. |
+| Route        | What happens                                                                                                                      |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| Pool (inbox) | Unassigned; every operator and administrator sees it. The default.                                                                |
+| Queue        | The queue's strategy picks an agent (below).                                                                                      |
+| User         | Assigned to that user.                                                                                                            |
+| Extension    | Assigned to the user the extension is linked to.                                                                                  |
+| Ring group   | A shared pool of the users of the group's extensions: it stays unassigned and the first to reply takes it.                        |
+| AI triage    | Waits up to 30 seconds for the AI triage of the first text, then the text queue it suggests, or the route's own queue (see "AI"). |
 
 A target that is deleted, disabled or cannot take conversations (a queue that
 stopped taking texts, an extension nobody is linked to) sends the conversation
@@ -314,16 +324,32 @@ once, when it starts; a reopened one keeps where it was.
 **First contact.** A number may have a first-contact text, sent once to a
 customer who texts it for the first time (never again to the same customer on
 that number, never to one who opted out, and not in addition to the
-closed-hours reply). Like the closed-hours reply it is sent by a SIP trunk
-channel only today.
+closed-hours reply). It goes out like the closed-hours reply, below.
 
 **Opening hours.** A number may have a weekly schedule (a time zone and
 windows). A conversation that starts outside it gets the **after-hours action**:
 route as usual (the default), send a reply text and then route as usual, or go
-to another target. The reply is sent once, never to a customer who opted out,
-and only a SIP trunk channel can send it today (another channel's conversation
-gets a line in the thread saying it was not sent). The time-conditions engine
-is not used for texts; the number's own schedule is.
+to another target. The reply is sent once, never to a customer who opted out.
+The time-conditions engine is not used for texts; the number's own schedule is.
+On a chat site the same schedule is the widget's opening hours (see Website
+chat): a site has no second schedule.
+
+**How an automatic text goes out** (the first-contact text and the
+closed-hours reply, shown in the inbox as "Automatic reply"):
+
+| Channel        | What happens                                                                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SIP trunk      | Queued in the SIP text queue at once, split into parts like a reply.                                                                               |
+| Twilio, Telnyx | Queued for the send worker, which checks the opt-out list again just before the carrier call; status polled.                                       |
+| Chat site      | Shown in the visitor's widget at once, from "Support" like an agent's reply. It does not count as an answer for the visitor's cap of 200 messages. |
+
+A channel that cannot send it writes a line in the conversation instead, saying
+which text was not sent and why: a carrier whose credentials were refused, a
+customer address a carrier cannot text (not `+` and digits), a carrier this
+build has no adapter for, or a SIP trunk channel without a trunk. Today the
+carrier case matters only once inbound texts reach a carrier number (the public
+listener or polling, not built); a conversation started by first contact is
+assigned to its sender and is not routed.
 
 **Text queues.** On a queue (Queues > the queue), **Texts** turns it on and sets
 how many open conversations each agent holds (default 3, 1 to 50), after how
@@ -361,6 +387,92 @@ conversations under a per-agent advisory lock, and keeps nothing in memory, so
 two pods never assign a conversation twice or give an agent more than the
 limit. If Valkey cannot be read it assigns to static members only.
 
+## AI
+
+The inbox AI reads customer texts and chats and helps the agents: it
+classifies and summarises them (**triage**), drafts a reply an agent must click
+to use (**drafts**), and, only where an administrator allows it, answers from
+the number's FAQ by itself (**auto-reply**). Every model call goes through the
+in-product AI (`HELLO_AI_*`, see the AI agent guide) and its private-endpoint
+guard: customer text goes only to that endpoint, and only to a public one when
+`HELLO_AI_ALLOW_PUBLIC_ENDPOINT=true` (Messaging > Inbox AI then says "AI
+endpoint is public"). Nothing works, and nothing waits, while the AI agent is
+off.
+
+**Modes, per number or chat site** (Messaging > Inbox AI > Edit AI, or
+`PUT /api/v1/messaging/addresses/{id}/ai`):
+
+| Mode     | What happens                                                                                      |
+| -------- | ------------------------------------------------------------------------------------------------- |
+| `off`    | Nothing. The default.                                                                             |
+| `triage` | Each customer text is classified: language, intent, urgency, sentiment, spam, sensitive, summary. |
+| `draft`  | Triage, and a reply draft for the latest text, shown dimmed above the composer.                   |
+| `auto`   | Triage, and the AI may answer from the FAQ within the guardrails below; else a draft.             |
+
+**What the model sees.** The conversation's last 20 messages (at most 8 KB,
+the oldest dropped first), the customer's first name when a shared address book
+knows it, the number's FAQ, the business name and the lists below; never
+another conversation, call records or configuration. With "remove phone numbers
+and email addresses" on (the default) every run of seven or more digits and
+every email address is replaced before the call. Customer text is marked as
+untrusted data, and the model has two tools only, both without effect outside
+the call: `lookup_faq` reads the number's FAQ and `handoff` asks for a person.
+Its answer is checked against a schema and refused when it does not fit (an
+intent or a queue that is not in the lists, for example).
+
+**Triage** (`message_triage`). The intent is one of the inbox's intents (Inbox
+AI settings; `other` is always allowed). The result is applied as suggestions,
+with the AI as the actor: its tags are added, an urgent text raises the
+priority to high, spam sets a "Spam?" flag for supervisors (nothing is deleted
+or blocked). It never assigns or moves a conversation, except on a number that
+routes through the AI triage (see "Routing and queues"), where the router reads
+the queue it suggests. The inbox shows the summary and labels above the thread
+and in the list, and **Undo** (`POST .../conversations/{id}/ai/revert`) removes
+the tags it added, lowers the priority it raised and clears its spam flag.
+
+**Drafts** (`message_draft`). One draft for the latest customer text. It shows
+as a dimmed proposal: **Use draft** puts it in the composer, where the agent may
+change it and sends it, so the audit shows the agent; nothing is sent without
+that. A newer customer text or any reply retires it.
+
+**Auto-reply** (`message_autoreply`), off by default, enabled per number by an
+administrator (audited). The AI answers only when every guardrail holds:
+
+- the answer rests on at least one of the number's FAQ snippets (at most 50 per
+  number, 4 KB each), cited by id, and holds no link that is not, exactly, in a
+  snippet; with no FAQ every text goes to a person;
+- the triage is sure enough (least confidence, default 0.8), and so is the
+  answer; the intent is one the number allows (default: every intent but
+  `other`);
+- the text is not urgent, not negative, not on a sensitive topic (Inbox AI
+  settings), not spam; it has no handoff word (`agent`, `human`, `person`,
+  `representative` by default) and is not STOP, START or HELP;
+- at most 3 AI replies (1 to 10) before a person replies, at most 60 AI
+  messages per number per hour, nothing within 10 minutes of a person's reply,
+  nothing to a customer who opted out, nothing outside the WhatsApp window.
+
+These are checked before the model is asked and again in the transaction that
+sends. The first AI reply of a conversation starts with the disclosure line
+(default on). An AI reply is stored with sender `ai`, shown as "Sent by the
+AI", and audited (`ai_autoreply`, the message id only). When the AI does not
+answer it hands the conversation to a person: the conversation shows "Needs a
+person" with the reason, the number's holding line goes once (until a person
+replies), and the agent gets a draft. An AI endpoint that is down or over
+budget does the same; it never delays a text: the text is in the inbox first.
+
+**Kill switches.** `HELLO_MSG_AI_AUTO=false` stops every auto-reply on the
+deployment (triage and drafts go on). In Messaging > Inbox AI: "Inbox AI on"
+stops all of it, "Auto-replies on" stops the auto-replies, and each channel has
+its own switch; a number's mode is the last one. A switch turned off stops the
+runs that are already queued.
+
+**How it runs.** The ingest queues one triage run per customer text in its own
+transaction (`ai_message_runs`, one per message and kind); any control replica
+claims a run with `SKIP LOCKED`, calls the model under the AI agent's budget and
+limits, and stores the result only while the conversation has not moved on (a
+newer customer text or a reply makes it stale). A replica that dies mid-run
+leaves the run to another after two minutes, at most three times.
+
 ## Opt-out (STOP)
 
 Hello handles opt-out itself, whatever the carrier does:
@@ -392,9 +504,19 @@ after it was resolved, in batches of 500, by one control replica. An open
 conversation is never deleted by age. Snoozed conversations come back when
 their time passes.
 
+Attachment files are kept `retentionMediaDays` (default 90) after they arrived
+or were sent: the sweeper removes the file from MinIO, checks it is gone, and
+marks the attachment **expired**; the message stays. When retention deletes a
+conversation, its attachments' rows stay, without the conversation, until the
+sweeper has removed their files, so no file is ever left without a row that
+names it. An upload an agent never sent is removed after 24 hours.
+
 **Erase a customer** (Messaging settings, or `POST /api/v1/inbox/erase`)
 deletes every conversation, message and note with a number on every channel in
-one transaction, keeps only the opt-out hash, and returns a report of counts.
+one transaction, keeps only the opt-out hash, then removes every attachment
+file of that customer from MinIO and checks each is gone, and returns a report
+of counts (`mediaObjects` removed; `mediaObjectsPending` the store could not
+reach now, which the sweeper removes within minutes).
 The carrier keeps its own logs and database backups keep the rows until they
 expire: keep backups no longer than your longest erasure deadline.
 
@@ -472,9 +594,32 @@ form-action 'none'`. A Turnstile site also allows Cloudflare's host for
 A launcher bubble, an optional pre-chat form (name and email: off, optional or
 required; the retention period and a privacy policy link are shown, and
 consent is recorded), the conversation, a typing indicator and "Support"
-as the agents' name. Outside the site's opening hours, with no supervisor
-holding the inbox open, or with the live queue full, the widget offers to leave
-a message and an email address (or hides itself, per site). A visitor may end
+as the agents' name. When nobody can take a live chat the widget offers to
+leave a message and an email address (or hides itself, per site). Whether
+somebody can follows where the site's chats go (**Routing and hours** on the
+chat sites page: the routing of the site's address, see Routing and queues):
+
+| Chats go to                         | Live while                                                                              |
+| ----------------------------------- | --------------------------------------------------------------------------------------- |
+| A text queue                        | a member is staffed: a static member not paused, a dynamic member logged in, not paused |
+| A user, or the user of an extension | that user has the inbox open (seen in the last two minutes)                             |
+| A ring group                        | one of its users has the inbox open                                                     |
+| The pool (or a target that is gone) | an operator or administrator has the inbox open                                         |
+
+Login and pause are the call queues' own (the inbox toggle or the feature
+codes); an agent at their conversation limit or on a call still counts, and the
+chat waits in the queue for them. If Valkey cannot be read, only static members
+count, as for the router. Outside the opening hours the widget is closed, unless
+the after-hours action routes chats elsewhere: then that target decides. In any
+case the widget goes offline when the site's unassigned live chats reach its
+cap. The chat sites page shows each widget's state now (live, closed, nobody
+available, too many waiting); `GET /api/v1/messaging/chat/sites` carries it as
+`availability`.
+
+The site's opening hours are the schedule of its address: the site's `hours`
+field and the routing's `schedule` are the same data, and changing either
+changes both (migration `00100_messaging_one_schedule` moved each site's own
+hours there). A visitor may end
 the chat and, when the site allows it, email themselves a transcript (three a
 day). Messages are plain text everywhere; a link in a visitor's message is
 clickable only in the inbox, with `rel="noopener noreferrer nofollow"` and one
@@ -517,8 +662,16 @@ All of them are server-side and none trusts the `Origin` header (anyone can run
 - **Content**: honeypot field, optional link stripping, no cookies, no
   fingerprinting, the user agent reduced to a browser family, the page to host
   and path.
-- **Not built**: attachments and the site logo (they need the media pipeline,
-  which is not on main).
+- **Attachments** (off by default, a switch on the site): images (PNG, JPEG,
+  GIF, WebP) and PDF, at most 5 MiB, 5 an hour per visitor, the type sniffed
+  from the bytes; SVG, HTML and files that also carry markup are refused.
+  Hello bundles **no virus scanner**: the site's settings say so, and the
+  switch is best left off for a site anyone can open. A visitor reads a file
+  of their chat with their token in the `Authorization` header (the frame
+  shows it from a blob, so the token is never in a URL). See "Attachments".
+- **Logo**: an administrator uploads one per site (PNG, JPEG, GIF or WebP, at
+  most 256 KiB, SVG refused); the widget shows it in its header from
+  `/chat/v1/logo`.
 
 Visitors' names, emails, tokens, addresses and text never reach a log, a metric
 label or an audit row. Retention for finished chats is 90 days by default (a
@@ -529,22 +682,84 @@ Metrics: `hello_chat_sessions_total{result}`, `hello_chat_messages_total{result}
 `hello_chat_rate_limited_total{rule}`, `hello_chat_challenge_raised_total`,
 `hello_chat_rejected_total{reason}` and `hello_chat_streams`.
 
+## Attachments
+
+Attachments (spec messaging-channels M-18) are kept in the existing media
+bucket (`hello-recordings`, the same as the call recordings and the faxes)
+under `msg/<channel>/<year>/<message>/<sha256>`, an upload under
+`msg/<channel>/<year>/upload-<id>/<sha256>` and a chat site's logo under
+`msg/site/<site>/logo`. Their rows are in `message_media`.
+
+**What is accepted.** A file's type is **sniffed from its bytes**; the type the
+sender declared is only advisory and must name the same kind (image, audio,
+video, text, application), or the file is refused. The inbox takes still images
+(JPEG, PNG, GIF, WebP), audio, MP4 and 3GPP video, PDF, vCard and plain text,
+at most `HELLO_MSG_MEDIA_MAX` (default 16 MiB, at most 100 MiB); a website
+chat takes images and PDF, at most 5 MiB. SVG, HTML and XML are never taken,
+and neither is a file that also carries markup or script (a "polyglot": a GIF
+with HTML in it, an image that is also a ZIP). A refused file is never stored;
+the attachment shows why (`too_large`, `type_not_allowed`, `type_mismatch`,
+`active_content`, ...).
+
+**Who reads it.** `GET /api/v1/inbox/media/{id}` (supervisors) and
+`GET /api/v1/me/inbox/media/{id}` (an agent: the conversations they can see)
+stream a file to the people who can see its conversation, and an upload to the
+person who made it. A file is served with its sniffed type,
+`X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store` and a
+sandboxing `Content-Security-Policy`; images, audio and video show in the page,
+anything else is a download. Range requests work, so audio and video seek.
+
+**In the inbox.** A message shows its images as thumbnails (click to open),
+plays audio and video in place and offers other files as downloads. An
+attachment still downloading from the carrier says so; one that was refused or
+expired says why.
+
+**Sending.** In a **website chat** the composer has **Attach**: the file is
+uploaded at once (`POST /api/v1/inbox/media`, multipart `file` and
+`conversationId`), stays the agent's own until sent, and goes with the reply
+(`mediaIds`); a reply may be a file alone. The visitor sees it in the widget.
+**Text channels take no attachments in this build**: a SIP trunk carries no
+media at all, and Twilio, Telnyx and the others fetch an MMS's media from a
+public link (`/m/<token>`: 256 random bits, 15 minutes, 5 fetches, only its
+SHA-256 stored) that only the public listener could serve, which is not on
+(user decision, see the spec). The composer offers no **Attach** there, and the
+API answers `409 media_unsupported`.
+
+**Inbound MMS.** When a carrier delivers an inbound text with media (with the
+public listener, or a reconciliation pull; neither is on in this build), the
+message is stored at once with its attachments **pending**, and a worker on any
+control replica downloads each one with the account's own credentials: the
+URL, and every redirect, must be the carrier's own media host (Twilio's
+`api.twilio.com` for the account, then its CDN; Telnyx's hosts), the size is
+capped while reading, and the bytes are checked as above. A failed download is
+tried again for 24 hours (1, 5, 15 minutes, then hourly), then the attachment
+is **expired**; one the carrier no longer has is expired at once. The message
+and the other attachments stay whatever happens to one.
+
+**What is not done.** No virus scanning (none is bundled); no transcoding; no
+outbound MMS until the public listener exists.
+
 ## API
 
-| Route                                                                                     | Role and scope                |
-| ----------------------------------------------------------------------------------------- | ----------------------------- |
-| `/api/v1/messaging/channels` (+ `/{id}`, `/{id}/test`)                                    | admin, `admin`                |
-| `/api/v1/messaging/addresses` (+ `/{id}`, `/{id}/routing`)                                | admin, `admin`                |
-| `/api/v1/messaging/settings`                                                              | admin, `admin`                |
-| `/api/v1/messaging/optouts` (+ `/{id}/reconsent`)                                         | admin, `admin`                |
-| `POST /api/v1/inbox/erase`                                                                | admin, `admin`                |
-| `/api/v1/messaging/chat/sites` (+ `/{id}`, `/{id}/blocks`), `/chat/blocks/{id}`           | admin, `admin`                |
-| `/api/v1/inbox/conversations/{id}/block`, `/email-reply`, `/typing` (and `/me/inbox/...`) | operator or agent, `messages` |
-| `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`, `/api/v1/inbox/queues`           | operator, `messages`          |
-| `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream`                      | any agent, `messages`         |
-| `/api/v1/me/inbox/agent` (GET, POST: log in, pause)                                       | any agent, `messages`         |
-| `POST .../conversations/{id}/contact` (add to contacts)                                   | as the area it is in          |
-| `GET .../conversations/{id}/calls` (the number's recent calls)                            | as the area it is in          |
+| Route                                                                                              | Role and scope                |
+| -------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `/api/v1/messaging/channels` (+ `/{id}`, `/{id}/test`)                                             | admin, `admin`                |
+| `/api/v1/messaging/addresses` (+ `/{id}`, `/{id}/routing`)                                         | admin, `admin`                |
+| `/api/v1/messaging/settings`                                                                       | admin, `admin`                |
+| `/api/v1/messaging/ai`, `/api/v1/messaging/addresses/{id}/ai`, `/api/v1/messaging/faq` (+ `/{id}`) | admin, `admin`                |
+| `POST .../conversations/{id}/ai/revert`                                                            | as the area it is in          |
+| `GET /api/v1/inbox/ai/stats` (also an MCP tool: counts, no text)                                   | operator, `messages`          |
+| `/api/v1/messaging/optouts` (+ `/{id}/reconsent`)                                                  | admin, `admin`                |
+| `POST /api/v1/inbox/erase`                                                                         | admin, `admin`                |
+| `/api/v1/messaging/chat/sites` (+ `/{id}`, `/{id}/blocks`), `/chat/blocks/{id}`                    | admin, `admin`                |
+| `/api/v1/messaging/chat/sites/{id}/logo` (GET, PUT, DELETE)                                        | admin, `admin`                |
+| `POST /api/v1/inbox/media`, `GET /api/v1/inbox/media/{id}` (and `/me/inbox/media...`)              | operator or agent, `messages` |
+| `/api/v1/inbox/conversations/{id}/block`, `/email-reply`, `/typing` (and `/me/inbox/...`)          | operator or agent, `messages` |
+| `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`, `/api/v1/inbox/queues`                    | operator, `messages`          |
+| `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream`                               | any agent, `messages`         |
+| `/api/v1/me/inbox/agent` (GET, POST: log in, pause)                                                | any agent, `messages`         |
+| `POST .../conversations/{id}/contact` (add to contacts)                                            | as the area it is in          |
+| `GET .../conversations/{id}/calls` (the number's recent calls)                                     | as the area it is in          |
 
 Queues take `textEnabled`, `textCapacity`, `textReassignSeconds` and
 `textRequiresIdleVoice`.
@@ -561,7 +776,12 @@ a desk phone), `hello_msg_optout_total{source}`, `hello_msg_purged_total{kind}`,
 `hello_msg_unassigned` and `hello_msg_unassigned_oldest_seconds`, and for
 routing `hello_msg_assign_total{result}` (placed, assigned, full, lost,
 returned, after_hours_reply), `hello_msg_first_response_seconds`,
-`hello_msg_queue_text_waiting{queue}` and `hello_msg_assign_live_down_total`.
+`hello_msg_queue_text_waiting{queue}` and `hello_msg_assign_live_down_total`,
+`hello_msg_media_total{result}` (ready, rejected, expired, pending: inbound
+attachment downloads), and for the AI `hello_msg_ai_runs_total{kind,result}`
+(done, failed, skipped, stale, sent, handoff; the calls and tokens are the AI
+agent's own metrics); `hello_msg_purged_total{kind="media"}` counts attachment
+files the sweeper removed.
 No label carries a number, a name or text.
 
 ## HA
@@ -576,6 +796,17 @@ holds the agents' login and pause, and without it assignment falls back to
 static queue members.
 
 ## Lab checklist (real carrier)
+
+Attachments, with a real Twilio or Telnyx account and the public listener on
+(not in this build): an inbound MMS with a photo, a PDF and a vCard is
+downloaded and shown; which host the media URL and its redirect point at
+(Twilio's CDN host names; the host of a Telnyx `media[].url`, and whether it
+needs the API key); an MMS whose media expired at the carrier shows expired.
+
+With a real model on a private endpoint: triage and draft quality in each
+language you serve; a set of injection texts (instructions to ignore the rules,
+to send a link, to reveal the prompt) never yields an auto-reply that is not in
+the FAQ; redaction catches the number formats your customers type.
 
 Which carrier delivers inbound SMS as SIP MESSAGE to a registered or
 IP-authenticated trunk, and whether it accepts outbound MESSAGE for SMS, is

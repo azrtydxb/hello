@@ -45,7 +45,7 @@ const (
 // presencePollInterval is how often reg and presence subscriptions are
 // re-read from the shared state: a registration or a PUBLISH handled by the
 // other node reaches this node's subscribers within it. Tests shorten it.
-var presencePollInterval = 5 * time.Second
+var presencePollInterval = newTunable(5 * time.Second)
 
 // PublishedPresence is the shared event state of PUBLISHed presence (Valkey);
 // *livestate.Store satisfies it. Nil makes PUBLISH answer 503.
@@ -471,7 +471,7 @@ func (s *Server) sendDocNotify(sub *subscription, event, ctype string, body []by
 // elsewhere reaches reg subscribers, a PUBLISH handled elsewhere reaches
 // presence subscribers.
 func (s *Server) presencePollLoop(ctx context.Context) {
-	t := time.NewTicker(presencePollInterval)
+	t := time.NewTicker(presencePollInterval.Get())
 	defer t.Stop()
 	for {
 		select {
@@ -682,7 +682,7 @@ func listPartCID(member, _ string) string { return "i" + member + "@rl" }
 // dialogCompact is dialogXML without the declaration and line breaks, for the
 // parts of a list NOTIFY, where every byte counts against the datagram.
 func dialogCompact(ext, domain string, version uint64, state string) string {
-	full := string(dialogXML(ext, domain, version, state))
+	full := string(dialogXML(ext, domain, version, state, nil))
 	full = strings.TrimPrefix(full, `<?xml version="1.0"?>`+"\r\n")
 	return strings.ReplaceAll(full, "\r\n", "") + "\r\n"
 }

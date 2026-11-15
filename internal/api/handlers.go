@@ -56,7 +56,23 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	l, err := s.Store.UserForLogin(r.Context(), in.Username)
 	id := l.ID
 	switch {
+	case err == nil && l.ConnectorID != 0:
+		// A synced user has no local password (I-29).
+		s.directoryLogin(w, r, l, in.Username, in.Password)
+		return
 	case err == nil:
+		required, rerr := s.Store.SSORequired(r.Context())
+		if rerr != nil {
+			s.internal(w, "login: sso policy", rerr)
+			return
+		}
+		if required && !l.BreakGlass {
+			// While SSO is required only break-glass users may use the
+			// password form; the answer is the same as a wrong password.
+			auth.SpendUserPasswordCheck(in.Password)
+			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid username or password")
+			return
+		}
 		// A disabled user gets the same answer as a wrong password.
 		if !auth.CheckUserPassword(l.Hash, in.Password) || !l.Enabled {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid username or password")
@@ -87,15 +103,26 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	s.startSession(w, r, id, in.Username)
 }
 
-// startSession creates a session for user id and sets its cookie.
+// startSession creates a session for user id, sets its cookie and answers
+// 204.
 func (s *server) startSession(w http.ResponseWriter, r *http.Request, id int64, username string) {
+	if s.issueSession(w, r, id, username, "login") {
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// issueSession creates a session for user id and sets its cookie, audited
+// as action; it is the one session creation every sign-in method shares, so
+// an SSO session is identical to a password one (I-27). On failure it has
+// answered and returns false.
+func (s *server) issueSession(w http.ResponseWriter, r *http.Request, id int64, username, action string) bool {
 	plain, tokenHash := auth.NewToken()
 	expires := time.Now().Add(s.SessionTTL)
 	if err := s.Store.CreateSession(r.Context(), id, tokenHash, expires); err != nil {
 		s.internal(w, "login: create session", err)
-		return
+		return false
 	}
-	if err := s.Store.Audit(r.Context(), "user:"+username, "login", "user", strconv.FormatInt(id, 10)); err != nil {
+	if err := s.Store.Audit(r.Context(), "user:"+username, action, "user", strconv.FormatInt(id, 10)); err != nil {
 		s.Log.Warn("login: audit", "error", err)
 	}
 	// Secure follows the request scheme (Shared contracts), so the lab works
@@ -110,7 +137,7 @@ func (s *server) startSession(w http.ResponseWriter, r *http.Request, id int64, 
 		SameSite: http.SameSiteStrictMode,
 		Secure:   isHTTPS(r),
 	})
-	w.WriteHeader(http.StatusNoContent)
+	return true
 }
 
 // isHTTPS reports whether the client reached us over HTTPS, directly or
@@ -229,6 +256,14 @@ func (s *server) changePassword(w http.ResponseWriter, r *http.Request) {
 		NewPassword     string `json:"newPassword"`
 	}
 	if !decode(w, r, &in) {
+		return
+	}
+	// A synced user has no local password and cannot get one (I-29).
+	if managed, err := s.Store.UserManagedByDirectory(r.Context(), a.UserID); err != nil {
+		s.storeError(w, "user", err)
+		return
+	} else if managed {
+		writeError(w, http.StatusConflict, "managed_by_directory", "your account is managed by a directory; change the password there")
 		return
 	}
 	var f fieldErrs

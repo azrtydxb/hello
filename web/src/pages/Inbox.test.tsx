@@ -201,6 +201,28 @@ describe("Inbox", () => {
     );
   });
 
+  it("names the router's automatic texts as such", async () => {
+    inbox("operator", {
+      "GET /api/v1/inbox/conversations/7/messages": () =>
+        json({
+          items: [
+            msg({
+              id: 2,
+              direction: "out",
+              senderKind: "system",
+              body: "We open at nine",
+              status: "queued",
+            }),
+            msg({ id: 1 }),
+          ],
+          next: "",
+        }),
+    });
+    const thread = await open();
+    expect(within(thread).getByText("We open at nine")).toBeInTheDocument();
+    expect(within(thread).getByText(/Automatic reply/)).toBeInTheDocument();
+  });
+
   it("shows customer text as text, never as markup", async () => {
     inbox("operator", {
       "GET /api/v1/inbox/conversations/7/messages": () =>
@@ -584,6 +606,182 @@ describe("Inbox", () => {
   });
 });
 
+const aiState = (over: Record<string, unknown> = {}) => ({
+  mode: "draft",
+  triage: {
+    language: "en",
+    intent: "billing",
+    urgency: "high",
+    sentiment: "negative",
+    spam: false,
+    sensitive: false,
+    confidence: 0.9,
+    summary: "<b>Charged twice</b> for one order.",
+    suggestedQueue: "Billing",
+    suggestedTags: ["refund"],
+    handoffRecommended: true,
+    messageId: 1,
+    reverted: false,
+  },
+  applied: { tags: ["refund"], priority: "normal" },
+  spam: false,
+  handoff: false,
+  handoffReason: "",
+  draft: {
+    runId: 5,
+    messageId: 1,
+    text: "Sorry about that, we will refund the second charge.",
+    createdAt: STAMP,
+  },
+  pending: false,
+  ...over,
+});
+
+describe("Inbox AI", () => {
+  it("shows the triage labels in the list and the summary as text", async () => {
+    inbox("operator", {
+      "GET /api/v1/inbox/conversations?view=all": () =>
+        json({
+          items: [conv({ ai: aiState({ mode: "auto", handoff: true }) })],
+          next: "",
+        }),
+      "GET /api/v1/inbox/conversations/7": () =>
+        json(
+          conv({
+            ai: aiState({
+              mode: "auto",
+              handoff: true,
+              handoffReason: "urgent",
+            }),
+          }),
+        ),
+    });
+    await open();
+    const list = screen.getByRole("list", { name: "Conversations" });
+    expect(within(list).getByText("Auto-reply")).toBeInTheDocument();
+    expect(within(list).getByText("Needs a person")).toBeInTheDocument();
+    expect(within(list).getByText("billing")).toBeInTheDocument();
+    expect(within(list).getByText("Urgent")).toBeInTheDocument();
+    const panel = await screen.findByRole("region", { name: "AI triage" });
+    expect(
+      within(panel).getByText("<b>Charged twice</b> for one order."),
+    ).toBeInTheDocument();
+    expect(panel.querySelector("b")).toBeNull();
+    expect(within(panel).getByText("Auto-reply on")).toBeInTheDocument();
+    expect(within(panel).getByText(/the text is urgent/)).toBeInTheDocument();
+  });
+
+  it("never sends the AI draft without a click", async () => {
+    const calls = inbox("operator", {
+      "GET /api/v1/inbox/conversations/7": () => json(conv({ ai: aiState() })),
+      "POST /api/v1/inbox/conversations/7/messages": () =>
+        json(
+          msg({
+            id: 9,
+            direction: "out",
+            senderKind: "user",
+            status: "sending",
+          }),
+          201,
+        ),
+    });
+    await open();
+    const chip = await screen.findByRole("group", { name: "AI draft" });
+    expect(
+      within(chip).getByText(/we will refund the second charge/),
+    ).toBeInTheDocument();
+    const box = screen.getByLabelText("Reply to the customer");
+    expect(box).toHaveValue("");
+    const sent = () =>
+      calls.filter(
+        (c) =>
+          c.method === "POST" && c.url.endsWith("/conversations/7/messages"),
+      );
+    expect(sent()).toHaveLength(0);
+    fireEvent.click(within(chip).getByRole("button", { name: "Use draft" }));
+    expect(box).toHaveValue(
+      "Sorry about that, we will refund the second charge.",
+    );
+    // Using it only fills the composer: the agent still sends.
+    expect(sent()).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sent()).toHaveLength(1));
+  });
+
+  it("dismisses a draft", async () => {
+    inbox("operator", {
+      "GET /api/v1/inbox/conversations/7": () => json(conv({ ai: aiState() })),
+    });
+    await open();
+    const chip = await screen.findByRole("group", { name: "AI draft" });
+    fireEvent.click(within(chip).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("group", { name: "AI draft" })).toBeNull();
+  });
+
+  it("offers no draft while the customer is opted out", async () => {
+    inbox("operator", {
+      "GET /api/v1/inbox/conversations?view=all": () =>
+        json({ items: [conv({ optedOut: true })], next: "" }),
+      "GET /api/v1/inbox/conversations/7": () =>
+        json(conv({ optedOut: true, ai: aiState() })),
+    });
+    await open();
+    await screen.findByText("The customer opted out");
+    expect(screen.queryByRole("group", { name: "AI draft" })).toBeNull();
+  });
+
+  it("undoes the triage's changes", async () => {
+    const calls = inbox("operator", {
+      "GET /api/v1/inbox/conversations/7": () =>
+        json(conv({ tags: ["refund"], priority: "high", ai: aiState() })),
+      "POST /api/v1/inbox/conversations/7/ai/revert": () =>
+        json(
+          conv({
+            ai: aiState({
+              applied: { tags: [], priority: "" },
+              triage: { ...aiState().triage, reverted: true },
+            }),
+          }),
+        ),
+    });
+    await open();
+    const panel = await screen.findByRole("region", { name: "AI triage" });
+    expect(
+      within(panel).getByText(/Added refund; raised the priority/),
+    ).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole("button", { name: "Undo" }));
+    expect(await within(panel).findByText("Undone")).toBeInTheDocument();
+    expect(
+      calls.some(
+        (c) =>
+          c.method === "POST" && c.url.endsWith("/conversations/7/ai/revert"),
+      ),
+    ).toBe(true);
+  });
+
+  it("labels a message the AI sent", async () => {
+    inbox("operator", {
+      "GET /api/v1/inbox/conversations/7/messages": () =>
+        json({
+          items: [
+            msg({
+              id: 2,
+              direction: "out",
+              senderKind: "ai",
+              body: "Open 9 to 5",
+              status: "sent",
+            }),
+            msg({ id: 1 }),
+          ],
+          next: "",
+        }),
+    });
+    const thread = await open();
+    expect(within(thread).getByText("Sent by the AI")).toBeInTheDocument();
+    expect(within(thread).getByText("AI assistant")).toBeInTheDocument();
+  });
+});
+
 describe("Inbox website chat", () => {
   const chatConv = (over: Record<string, unknown> = {}) =>
     conv({
@@ -826,5 +1024,143 @@ describe("Inbox website chat", () => {
     expect(
       await screen.findByText("The visitor is typing…"),
     ).toBeInTheDocument();
+  });
+
+  const media = (over: Record<string, unknown>) => ({
+    id: 50,
+    messageId: 1,
+    direction: "in",
+    status: "ready",
+    contentType: "image/png",
+    size: 2048,
+    filename: "screen.png",
+    reason: "",
+    createdAt: STAMP,
+    ...over,
+  });
+
+  it("shows attachments from the authorised route, and says why one is missing", async () => {
+    chatInbox(
+      {},
+      {
+        "GET /api/v1/inbox/conversations/7/messages": () =>
+          json({
+            items: [
+              msg({
+                id: 1,
+                body: "",
+                media: [
+                  media({}),
+                  media({
+                    id: 51,
+                    contentType: "application/pdf",
+                    filename: "<b>invoice</b>.pdf",
+                    size: 3 * 1024 * 1024,
+                  }),
+                  media({ id: 52, status: "pending", contentType: "" }),
+                  media({
+                    id: 53,
+                    status: "rejected",
+                    reason: "active_content",
+                  }),
+                ],
+              }),
+            ],
+            next: "",
+          }),
+      },
+    );
+    const thread = await openChat();
+    const img = await within(thread).findByRole("img", { name: "screen.png" });
+    expect(img).toHaveAttribute("src", "/api/v1/inbox/media/50");
+    const file = within(thread).getByRole("link", { name: /invoice/ });
+    expect(file).toHaveAttribute("href", "/api/v1/inbox/media/51");
+    expect(file).toHaveAttribute("download", "<b>invoice</b>.pdf");
+    expect(file.textContent).toContain("3.0 MB");
+    expect(thread.querySelector("b")).toBeNull();
+    expect(
+      within(thread).getByText("Downloading an attachment…"),
+    ).toBeInTheDocument();
+    expect(
+      within(thread).getByText(/carried markup or script/),
+    ).toBeInTheDocument();
+  });
+
+  it("uploads a file and sends it with the reply", async () => {
+    const calls = chatInbox(
+      {},
+      {
+        "POST /api/v1/inbox/media": () =>
+          json(
+            media({
+              id: 60,
+              messageId: null,
+              direction: "out",
+              filename: "map.png",
+            }),
+            201,
+          ),
+        "POST /api/v1/inbox/conversations/7/messages": () =>
+          json(msg({ id: 9, direction: "out", body: "" }), 201),
+      },
+    );
+    await openChat();
+    const send = await screen.findByRole("button", { name: "Send" });
+    expect(send).toBeDisabled();
+    const file = new File([new Uint8Array([137, 80, 78, 71])], "map.png", {
+      type: "image/png",
+    });
+    fireEvent.change(screen.getByLabelText("Attachment file"), {
+      target: { files: [file] },
+    });
+    const chips = await screen.findByRole("list", {
+      name: "Attachments to send",
+    });
+    expect(within(chips).getByText(/map\.png/)).toBeInTheDocument();
+    const up = calls.find((c) => c.url === "/api/v1/inbox/media");
+    expect(up?.body).toBeInstanceOf(FormData);
+    expect((up?.body as FormData).get("conversationId")).toBe("7");
+    // A file alone may be sent, without text.
+    await waitFor(() => expect(send).toBeEnabled());
+    fireEvent.click(send);
+    await waitFor(() =>
+      expect(
+        calls.find(
+          (c) =>
+            c.method === "POST" &&
+            c.url === "/api/v1/inbox/conversations/7/messages",
+        )?.body,
+      ).toMatchObject({ body: "", mediaIds: [60] }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("list", { name: "Attachments to send" }),
+      ).toBeNull(),
+    );
+  });
+
+  it("refuses a file over the chat's cap before uploading it", async () => {
+    const calls = chatInbox();
+    await openChat();
+    const big = new File([new Uint8Array(5 * 1024 * 1024 + 1)], "big.pdf", {
+      type: "application/pdf",
+    });
+    fireEvent.change(await screen.findByLabelText("Attachment file"), {
+      target: { files: [big] },
+    });
+    expect(
+      await screen.findByText(/big\.pdf is larger than/),
+    ).toBeInTheDocument();
+    expect(calls.some((c) => c.url === "/api/v1/inbox/media")).toBe(false);
+  });
+});
+
+describe("Inbox attachments on a text number", () => {
+  it("offers no attachments on an SMS conversation", async () => {
+    inbox("operator");
+    await open();
+    await screen.findByLabelText("Reply to the customer");
+    expect(screen.queryByRole("button", { name: "Attach" })).toBeNull();
+    expect(screen.queryByLabelText("Attachment file")).toBeNull();
   });
 });

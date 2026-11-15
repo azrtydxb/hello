@@ -227,6 +227,7 @@ func run(args []string) error {
 		Presence:       sip.ValkeyPresence{Client: vk},
 		MailboxEvents:  mailboxEvents{cfg: cfg.Database, log: log.With("component", "mailbox")},
 		Pushes:         pushQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "checksync")},
+		DeviceSecrets:  controlStore, // answers a phone's challenge in its own realm (S-5, S-22)
 		QualityReports: controlStore,
 		Messages:       messageQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "messages")},
 		Conversations:  conversations{st: controlStore, dial: cfg.Dial, log: log.With("component", "inbox"), metrics: messaging.NewMetrics(metrics.Registry)},
@@ -347,6 +348,16 @@ func run(args []string) error {
 	defer stopEvents()
 	eventsDone := make(chan struct{})
 	go func() { emitter.Run(eventsCtx); close(eventsDone) }()
+	// The WebRTC status of this node for the Diagnostics "Clients" tab.
+	webrtcDone := make(chan struct{})
+	if node := media.CurrentWebRTC(); node != nil {
+		go func() {
+			runWebRTCStatus(bg, live, node, cfg.NodeID, log.With("component", "webrtc"))
+			close(webrtcDone)
+		}()
+	} else {
+		close(webrtcDone)
+	}
 	sipCtx, stopSIP := context.WithCancel(context.Background())
 	defer stopSIP()
 	// A SIP listener that dies on its own takes the node down: readiness
@@ -385,6 +396,7 @@ func run(args []string) error {
 	<-lcDone
 	stopBG()
 	<-watchDone
+	<-webrtcDone
 	<-resolveDone
 	<-cdrDone
 	stopEvents()

@@ -42,6 +42,9 @@ type Config struct {
 // Enabled reports whether there is anything to hand out.
 func (c Config) Enabled() bool { return len(c.STUN) > 0 || (len(c.TURN) > 0 && c.Secret != "") }
 
+// Lifetime is how long a credential is valid.
+func (c Config) Lifetime() time.Duration { return c.ttl() }
+
 func (c Config) ttl() time.Duration {
 	if c.TTL > 0 {
 		return c.TTL

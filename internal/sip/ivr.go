@@ -889,9 +889,15 @@ func (c *call) ivrDial(ctx context.Context, snap *snapshot.Snapshot, m snapshot.
 	return res
 }
 
-// ivrLaunch starts a fork's INVITE; tests replace it to script a fork's
-// outcome.
-var ivrLaunch = func(l *leg) { go l.run() }
+// ivrLaunch starts a fork's INVITE; a test scripts a fork's outcome with
+// the server's ivrLaunchHook instead.
+func (s *Server) ivrLaunch(l *leg) {
+	if s.ivrLaunchHook != nil {
+		s.ivrLaunchHook(l)
+		return
+	}
+	go l.run()
+}
 
 // ivrFork is one leg to try.
 type ivrFork struct {
@@ -930,7 +936,7 @@ func (c *call) ivrRing(ctx context.Context, forks []ivrFork, hunt bool, total ti
 		c.mu.Lock()
 		l := f.mk(stage)
 		c.mu.Unlock()
-		ivrLaunch(l)
+		c.s.ivrLaunch(l)
 		return l
 	}
 	var (
@@ -968,7 +974,7 @@ func (c *call) ivrRing(ctx context.Context, forks []ivrFork, hunt bool, total ti
 				}
 				c.mu.Unlock()
 				if l != nil {
-					ivrLaunch(l)
+					c.s.ivrLaunch(l)
 				}
 			}))
 		}
@@ -1500,6 +1506,7 @@ func (c *call) ivrHomeCallee(hom *homedCall, w *leg) bool {
 	if l == nil {
 		return false
 	}
+	l.bindSession(&c.ses, sessCallee)
 	hom.setCallee(l)
 	return true
 }

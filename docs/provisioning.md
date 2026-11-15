@@ -1544,6 +1544,35 @@ picked up. Two phones picking up the same call cannot both connect.
 **What the CDR records.** The parked call's CDR carries "Parked in slot N by X"
 and "Retrieved from slot N by Y" in its trace; the retriever's or picker's own
 call has its own CDR. A picked-up call's trace says "Call picked up by Y".
+
+**Taking over an answered call (Replaces).** An INVITE with a `Replaces` header
+(RFC 3891) naming an answered call's dialog moves one party of the call to the
+phone that sent it: a user picks the call up on their handset that they
+answered on their desk phone, or a phone of a shared line takes the call over.
+Only a phone of the same extension as the party whose dialog is named may do
+this; a phone in the pickup scope may answer a ringing call but never take over
+an answered one, and a trunk's side of a call is never taken over. The Call-ID
+and both tags must name the dialog (`481` otherwise), `early-only` refuses an
+answered dialog (`486`), and a phone of another extension gets `403`. The new
+phone takes the old one's place on the call's media anchor (it must offer the
+call's codec), so the other party hears no change; a party the old phone had
+put on hold is resumed. The old phone is sent BYE. The replaced call's CDR ends
+with "replaced by N" and the new phone's call records what it took over. When
+the caller's side is taken over the new phone's call carries on as the call and
+is replicated for in-call HA; when the answering side is taken over the two
+calls are linked like a picked-up call, which is not replicated. A call held on
+another node is reached through the park command channel. A call that is
+parked, paging, in a conference, on video or with a browser leg is not taken
+over (`486`). The dialog-info NOTIFY of a BLF key names the watched
+extension's dialog (`call-id`, `local-tag`, `remote-tag`, RFC 4235) when the
+call is on the same node, which is what a phone puts in its `Replaces` header.
+`hello_replaces_total{dialog,result}` counts them (`early` or `confirmed`;
+`ok`, `not_found`, `forbidden`, `busy`, `refused`).
+
+**Attended transfer before answer.** A REFER whose `Replaces` names the
+transferor's own consultation call while it is still ringing is a blind
+transfer: the consultation call is cancelled first (the transferor's INVITE gets
+`487`), and the target rings once more, for the transferee.
 `hello_park_total{kind,result}` counts park, retrieve, return and pickup
 outcomes.
 
@@ -1900,9 +1929,31 @@ models whose template has it.
 | Configuration via the keypad menu       | `P1357`  | `1` (basic settings only)               | not the WP856        |
 | Disable direct IP calls                 | `P1310`  | `1`                                     | WP8x6, WP810/822/825 |
 | Accept incoming SIP from the proxy only | `P2347`  | `1` (the auto-answer restriction, S-32) | all (per account)    |
+| Authenticate incoming INVITE            | `P2346`  | `1` (Hello answers the challenge)       | all (per account)    |
 | Allow SIP reset                         | `P26015` | `0`                                     | all                  |
 | Firmware upgrade confirmation prompt    | `P8375`  | `0` (no prompt)                         | WP8x6                |
 | Disable firmware upgrade confirmation   | `P84988` | `1` (no prompt)                         | WP810/822/825        |
+
+The per-account keys are written for every line of the phone: account N is the
+key plus 100 (N-1) (`P2447`/`P2446` for account 2, up to `P2847`/`P2846` for the
+WP856's sixth).
+
+**Authenticated INVITEs.** With `P2346 = 1` the phone answers every INVITE it
+receives, new calls and re-INVITEs alike, with `401 Unauthorized` and accepts it
+only with its own SIP credentials. Hello answers the challenge with the device's
+credentials and sends the INVITE again (same Call-ID and tags, the next CSeq, a
+new Via branch, RFC 3261 22.2): from the stored HA1 when the phone challenges
+in the SIP domain's realm, else from the device's sealed SIP password hashed for
+the realm the phone names (a WP uses its configured server, `host:port`, as for
+the check-sync NOTIFY). The password is read from the database once per device
+and realm; only the HA1 it gives is kept in memory, until the device's secret
+changes. This covers calls, pages, intercom, door chimes, click-to-call and the
+re-INVITEs of hold, transfers, session refreshes and in-call HA takeovers.
+`hello_phone_challenges_total{method,result}` counts the challenges by method
+and whether Hello could answer them (`answered`, `unanswerable`). A phone whose
+calls fail with `unanswerable` has credentials Hello does not know (a password
+set by hand on the phone): re-provision it, or set `P2346 = 0` in the group's
+setting overrides.
 
 Yealink phones are written `static.managementserver.enable = 0` (TR-069 off).
 TR-069 is turned off on purpose: it is a way for a phone to be given a different
@@ -1911,9 +1962,6 @@ group.
 
 **What is not written, and why.**
 
-- `P2346` (Authenticate Incoming INVITE, 0 No, 1 Yes): Hello does not yet answer
-  a phone's digest challenge on an INVITE it originates, so switching it on would
-  fail every call to the phone.
 - `P60082` (Trusted Domain Name List, up to 256 characters; WP8x6 and
   WP810/822/825) is used with `P2311` (Check Domain Certificates, RFC 5922). The
   templates do not give the list format, and a wrong list would fail TLS
@@ -1926,7 +1974,9 @@ group.
 
 **Check on a phone.** `P2347 = 1` makes the phone drop SIP that does not come
 from its server address. If incoming calls stop arriving, set `P2347 = 0` in the
-group's setting overrides and report it. The keys are from Grandstream's
+group's setting overrides and report it. With `P2346 = 1` check that a call to
+the phone rings after Hello answers its 401, and that hold and transfer still
+work. The keys are from Grandstream's
 configuration templates and are not confirmed on a WP836, WP856 or WP822. On a
 Wi-Fi handset check that the keypad menu at `P1357 = 1` still allows the Wi-Fi
 setup; the WP810/822/825 template also has `P1357 = 4` (basic and network

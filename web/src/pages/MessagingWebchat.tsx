@@ -1,14 +1,18 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { errorMessage, fieldErrors } from "../api";
 import {
+  CHAT_LOGO_MAX,
+  chatSiteLogoUrl,
   createChatSite,
   deleteChatBlock,
   deleteChatSite,
+  deleteChatSiteLogo,
+  putChatSiteLogo,
   listChatBlocks,
   listChatSites,
   updateChatSite,
   type ChatBlock,
-  type ChatHours,
+  type ChatOfflineReason,
   type ChatSite,
   type ChatSiteInput,
 } from "../api/inbox";
@@ -30,45 +34,144 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
+import { RoutingDialog } from "./inbox/RoutingDialog";
 
-const DAYS = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-];
 const ADDRESS_KEY = "hello.chat.embedAddress";
 
-/** One weekday's opening window as the form edits it: blank means closed. */
-type Window = { from: string; to: string };
+const OFFLINE_REASON: Record<ChatOfflineReason, string> = {
+  hours: "Closed (outside the hours)",
+  no_agent: "Offline (nobody available)",
+  full: "Offline (too many waiting)",
+};
 
-function windowsOf(h: ChatHours | undefined): Window[] {
-  const w: Window[] = DAYS.map(() => ({ from: "", to: "" }));
-  for (const d of h?.days ?? []) w[d.day] = { from: d.from, to: d.to };
-  return w;
+/** What a site's widget shows now: live chat, or why it takes messages. */
+function availabilityBadge(s: ChatSite) {
+  if (!s.enabled) return <Badge tone="neutral">Off</Badge>;
+  if (!s.availability) return <Badge tone="neutral">Unknown</Badge>;
+  if (s.availability.online) return <Badge tone="good">Live</Badge>;
+  return (
+    <Badge tone="warn">
+      {OFFLINE_REASON[s.availability.reason ?? "no_agent"]}
+    </Badge>
+  );
 }
 
-function hoursOf(always: boolean, zone: string, w: Window[]): ChatHours {
-  if (always) return { zone: "", days: [] };
-  return {
-    zone: zone.trim(),
-    days: w.flatMap((x, day) =>
-      x.from && x.to ? [{ day, from: x.from, to: x.to }] : [],
-    ),
-  };
+/**
+ * A site's logo (spec messaging-channels M-18): uploaded on its own, kept in
+ * the media store, shown in the widget's header. SVG is refused: only PNG,
+ * JPEG, GIF and WebP, at most 256 KB.
+ */
+function LogoField({
+  site,
+  onChanged,
+}: {
+  site: ChatSite;
+  onChanged: (s: ChatSite) => void;
+}) {
+  const [current, setCurrent] = useState(site);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+
+  async function upload(f: File | undefined) {
+    if (input.current) input.current.value = "";
+    if (!f) return;
+    if (f.size > CHAT_LOGO_MAX) {
+      setError("The logo is larger than 256 KB.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const s = await putChatSiteLogo(current.id, f);
+      setCurrent(s);
+      onChanged(s);
+    } catch (err: unknown) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteChatSiteLogo(current.id);
+      const s = { ...current, logo: false };
+      setCurrent(s);
+      onChanged(s);
+    } catch (err: unknown) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="az-field">
+      <span className="az-field__label">Logo</span>
+      {current.logo ? (
+        <img
+          src={chatSiteLogoUrl(current.id, current.updatedAt)}
+          alt={`Logo of ${current.name}`}
+          style={{ maxHeight: 40, maxWidth: 160, display: "block" }}
+        />
+      ) : (
+        <span className="az-caption">No logo: the widget shows the name.</span>
+      )}
+      <input
+        ref={input}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        hidden
+        aria-label="Logo file"
+        onChange={(e) => void upload(e.target.files?.[0])}
+      />
+      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={busy}
+          onClick={() => input.current?.click()}
+        >
+          {current.logo ? "Replace logo" : "Upload logo"}
+        </Button>
+        {current.logo && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => void remove()}
+          >
+            Remove logo
+          </Button>
+        )}
+      </div>
+      <span className="az-caption">
+        PNG, JPEG, GIF or WebP, at most 256 KB.
+      </span>
+      {error && (
+        <Alert tone="bad" title="Logo not saved">
+          {error}
+        </Alert>
+      )}
+    </div>
+  );
 }
 
 function SiteDialog({
   site,
   onClose,
   onSaved,
+  onLogo,
 }: {
   site: ChatSite | null;
   onClose: () => void;
   onSaved: (s: ChatSite) => void;
+  onLogo: (s: ChatSite) => void;
 }) {
   useRestoreFocus();
   const [name, setName] = useState(site?.name ?? "");
@@ -88,17 +191,11 @@ function SiteDialog({
   const [tsSecret, setTsSecret] = useState("");
   const [stripLinks, setStripLinks] = useState(site?.stripLinks ?? false);
   const [transcripts, setTranscripts] = useState(site?.transcripts ?? false);
+  const [attachments, setAttachments] = useState(site?.attachments ?? false);
   const [cap, setCap] = useState(String(site?.maxOpenUnassigned ?? 200));
   const [retention, setRetention] = useState(
     site?.retentionDays ? String(site.retentionDays) : "",
   );
-  const [always, setAlways] = useState((site?.hours.days.length ?? 0) === 0);
-  const [zone, setZone] = useState(
-    site?.hours.zone ||
-      Intl.DateTimeFormat().resolvedOptions().timeZone ||
-      "UTC",
-  );
-  const [windows, setWindows] = useState(windowsOf(site?.hours));
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -126,9 +223,9 @@ function SiteDialog({
       turnstileSiteKey: tsKey.trim(),
       stripLinks,
       transcripts,
+      attachments,
       maxOpenUnassigned: Number(cap),
       retentionDays: retention.trim() === "" ? 0 : Number(retention),
-      hours: hoursOf(always, zone, windows),
     };
     // The secret is only ever sent when typed: leaving it empty keeps the
     // stored one.
@@ -230,53 +327,11 @@ function SiteDialog({
           error={fields.privacyUrl}
           onChange={(e) => setPrivacy(e.target.value)}
         />
-        <Switch
-          label="Always open"
-          hint="Off lets you set opening hours; outside them visitors can leave a message."
-          labelPosition="end"
-          checked={always}
-          onChange={(e) => setAlways(e.target.checked)}
-        />
-        {!always && (
-          <fieldset className="cf-stack">
-            <legend className="az-caption">Opening hours</legend>
-            <Input
-              label="Time zone"
-              hint="For example Europe/Brussels."
-              value={zone}
-              error={fields.hours}
-              onChange={(e) => setZone(e.target.value)}
-            />
-            {DAYS.map((d, i) => (
-              <div key={d} className="inbox-actions">
-                <Input
-                  label={`${d} from`}
-                  type="time"
-                  value={windows[i]?.from ?? ""}
-                  onChange={(e) =>
-                    setWindows((w) =>
-                      w.map((x, j) =>
-                        j === i ? { ...x, from: e.target.value } : x,
-                      ),
-                    )
-                  }
-                />
-                <Input
-                  label={`${d} to`}
-                  type="time"
-                  value={windows[i]?.to ?? ""}
-                  onChange={(e) =>
-                    setWindows((w) =>
-                      w.map((x, j) =>
-                        j === i ? { ...x, to: e.target.value } : x,
-                      ),
-                    )
-                  }
-                />
-              </div>
-            ))}
-          </fieldset>
-        )}
+        <p className="az-caption">
+          Opening hours and where this site's chats go (a queue, a user, a ring
+          group or the supervisors' pool) are set in the site's routing. The
+          widget takes live chats while someone staffs that target.
+        </p>
         <Select
           label="When nobody is available"
           value={offlineMode}
@@ -346,6 +401,20 @@ function SiteDialog({
           checked={transcripts}
           onChange={(e) => setTranscripts(e.target.checked)}
         />
+        <Switch
+          label="Let visitors send images and PDFs"
+          hint="At most 5 MB each and 5 an hour; SVG and anything else is refused. Hello has no virus scanner: leave this off for sites anyone can open."
+          labelPosition="end"
+          checked={attachments}
+          onChange={(e) => setAttachments(e.target.checked)}
+        />
+        {site ? (
+          <LogoField site={site} onChanged={onLogo} />
+        ) : (
+          <span className="az-caption">
+            Save the site first, then add a logo.
+          </span>
+        )}
         <Input
           label="Live chats that may wait"
           hint="Beyond this many unassigned live chats the widget switches to leaving a message."
@@ -506,6 +575,7 @@ export function MessagingWebchat() {
   const [edit, setEdit] = useState<ChatSite | "new" | null>(null);
   const [embed, setEmbed] = useState<ChatSite | null>(null);
   const [blocks, setBlocks] = useState<ChatSite | null>(null);
+  const [route, setRoute] = useState<ChatSite | null>(null);
   const [del, setDel] = useState<ChatSite | null>(null);
   const [reload, setReload] = useState(0);
   const toast = useToast();
@@ -570,13 +640,8 @@ export function MessagingWebchat() {
             { key: "name", label: "Site", render: (s) => s.name },
             {
               key: "state",
-              label: "State",
-              render: (s) =>
-                s.enabled ? (
-                  <Badge tone="good">On</Badge>
-                ) : (
-                  <Badge tone="neutral">Off</Badge>
-                ),
+              label: "Now",
+              render: (s) => availabilityBadge(s),
             },
             {
               key: "origins",
@@ -625,6 +690,13 @@ export function MessagingWebchat() {
                   <Button
                     size="sm"
                     variant="secondary"
+                    onClick={() => setRoute(s)}
+                  >
+                    Routing and hours of {s.name}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
                     onClick={() => setEdit(s)}
                   >
                     Edit {s.name}
@@ -647,10 +719,24 @@ export function MessagingWebchat() {
             toast.show(`Chat site ${s.name} saved.`);
             refresh();
           }}
+          onLogo={() => refresh()}
         />
       )}
       {embed && <EmbedDialog site={embed} onClose={() => setEmbed(null)} />}
       {blocks && <BlocksDialog site={blocks} onClose={() => setBlocks(null)} />}
+      {route && (
+        <RoutingDialog
+          address={{ id: route.addressId, address: route.name }}
+          title={`Routing and hours of ${route.name}`}
+          chat
+          onClose={() => setRoute(null)}
+          onSaved={() => {
+            setRoute(null);
+            toast.show(`Routing of ${route.name} saved.`);
+            refresh();
+          }}
+        />
+      )}
       {del && (
         <ConfirmDialog
           title={`Delete chat site ${del.name}?`}

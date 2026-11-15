@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,10 +16,11 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
-const siteKey = "0123456789abcdef01234567"
+const siteKey = "0123456789abcdef01234567" // gitleaks:allow (a public chat site key in a test, not a secret)
 
 type rig struct {
 	t    *testing.T
@@ -451,7 +453,7 @@ func TestLANChatListenerIsolation(t *testing.T) {
 	g := newRig(t, nil, nil)
 	for _, p := range []string{"/", "/index.html", "/api/v1/me", "/api/v1/inbox/conversations", "/oauth/authorize", "/oauth/token",
 		"/.well-known/oauth-authorization-server", "/mcp", "/hooks/sms/abc", "/m/token", "/assets/index.js", "/metrics", "/chat", "/chat/v2/session",
-		"/chat/v1/", "/chat/v1/../api/v1/me", "/chat/v1/attachments"} {
+		"/chat/v1/", "/chat/v1/../api/v1/me"} {
 		for _, m := range []string{"GET", "POST"} {
 			r := g.do(m, p, `{}`, nil)
 			if r.Code != 404 && r.Code != 405 && r.Code != 301 && r.Code != 307 {
@@ -772,3 +774,41 @@ func TestChatMessageFlow(t *testing.T) {
 }
 
 var _ = messaging.MaxChatChars
+
+// TestChatAvailabilityStaffing fails if the widget's availability check is
+// not given the call queues' agent state (a site routed to a text queue is
+// online only while a member is logged in and not paused), or if a state that
+// cannot be read is not passed as nil (static members only) instead of
+// failing the visitor's request.
+func TestChatAvailabilityStaffing(t *testing.T) {
+	want := map[string]queue.AgentState{"101": {Ext: "101", LoggedIn: true}}
+	fail := false
+	g := newRig(t, nil, func(c *Config) {
+		c.Agents = func(context.Context) (map[string]queue.AgentState, error) {
+			if fail {
+				return nil, errors.New("valkey down")
+			}
+			return want, nil
+		}
+	})
+	tok := g.token()
+	if r := g.do("POST", "/chat/v1/messages?site="+siteKey, map[string]any{"text": "hi", "clientMsgId": "s1"}, auth(tok)); r.Code != 201 {
+		t.Fatalf("%d %s", r.Code, r.Body)
+	}
+	g.fake.mu.Lock()
+	last := g.fake.states[len(g.fake.states)-1]
+	g.fake.mu.Unlock()
+	if !last["101"].LoggedIn {
+		t.Fatalf("the availability check got %v, want the agents' state", last)
+	}
+	fail = true
+	if r := g.do("POST", "/chat/v1/messages?site="+siteKey, map[string]any{"text": "hi", "clientMsgId": "s2"}, auth(tok)); r.Code != 201 {
+		t.Fatalf("an unreadable agent state failed the message: %d %s", r.Code, r.Body)
+	}
+	g.fake.mu.Lock()
+	last = g.fake.states[len(g.fake.states)-1]
+	g.fake.mu.Unlock()
+	if last != nil {
+		t.Fatalf("an unreadable agent state was passed as %v, want nil", last)
+	}
+}

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/provider"
 	"github.com/azrtydxb/hello/internal/messaging/router"
 )
 
@@ -102,7 +103,7 @@ func routeName(ctx context.Context, q rowQuerier, kind, target string) (string, 
 	}
 	var query string
 	switch kind {
-	case messaging.RouteQueue:
+	case messaging.RouteQueue, messaging.RouteAITriage:
 		query = `SELECT name FROM queues WHERE id = $1`
 	case messaging.RouteUser:
 		query = `SELECT coalesce(NULLIF(display_name, ''), username) FROM users WHERE id = $1`
@@ -161,7 +162,7 @@ func checkRouteTarget(ctx context.Context, tx *sql.Tx, path, kind, target string
 		return fieldError(path, "must be the id of the "+strings.ReplaceAll(kind, "_", " "))
 	}
 	switch kind {
-	case messaging.RouteQueue:
+	case messaging.RouteQueue, messaging.RouteAITriage:
 		var on, text bool
 		err := tx.QueryRowContext(ctx, `SELECT enabled, text_enabled FROM queues WHERE id = $1`, id).Scan(&on, &text)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -279,7 +280,7 @@ type placement struct {
 
 // resolvePlacement turns a route into a placement; a target that is gone or
 // cannot take conversations falls back to the supervisors' pool.
-func resolvePlacement(ctx context.Context, tx *sql.Tx, kind, target string) (placement, error) {
+func resolvePlacement(ctx context.Context, tx rowQuerier, kind, target string) (placement, error) {
 	var p placement
 	id, err := strconv.ParseInt(target, 10, 64)
 	if err != nil || id <= 0 {
@@ -336,63 +337,127 @@ func nilIf(id int64) any {
 	return id
 }
 
-// systemText queues a text the router sends on its own (the closed-hours
-// reply) through the conversation's channel. A customer who opted out gets
-// nothing. Only a SIP trunk channel can send today; another provider's
-// channel gets a line in the thread saying the text was not sent. sent is
-// whether a text was queued.
-func (s *Store) systemText(ctx context.Context, tx *sql.Tx, c convRow, body string) (sent bool, err error) {
+// aiTriageWait is how long a number that routes through the AI waits for the
+// triage of a new conversation's first text before it places it anyway.
+const aiTriageWait = 30 * time.Second
+
+// Automatic texts the router sends on its own, as systemText names them in
+// the line it writes when one cannot go.
+const (
+	autoClosedHours  = "closed-hours reply"
+	autoFirstContact = "first-contact text"
+)
+
+// systemText sends a text the router sends on its own (the closed-hours
+// reply, the first-contact text; what names it in the thread) through the
+// conversation's channel. A customer who opted out gets nothing. sent is
+// whether a text went or was queued.
+//
+//   - A chat site: the text is stored sent and the visitor's stream carries
+//     it, as an agent's reply is (the visitor sees "Support").
+//   - A SIP trunk channel: queued in the SIP text queue in this transaction,
+//     split into parts.
+//   - A carrier channel (Twilio, Telnyx): queued for the send worker, which
+//     checks the opt-out list again just before the carrier call.
+//
+// A channel that cannot send it (a carrier whose credentials were refused or
+// is not registered on this build, a customer address a carrier cannot text,
+// a trunk channel with no trunk) gets a line in the thread saying so.
+func (s *Store) systemText(ctx context.Context, tx *sql.Tx, c convRow, body, what string) (sent bool, err error) {
+	_, sent, err = s.autoText(ctx, tx, c, body, what, messaging.SenderSystem, 0)
+	return sent, err
+}
+
+// autoText is systemText for any automatic sender: system (the router's
+// texts, the AI's holding line) or ai (an auto-reply, spec M-30a), with the
+// AI run that wrote it (0 for none). id is the stored message, 0 when none
+// went.
+func (s *Store) autoText(ctx context.Context, tx *sql.Tx, c convRow, body, what, sender string, aiRun int64) (id int64, sent bool, err error) {
 	var (
-		provider, address    string
-		chEnabled, adEnabled bool
-		trunk                sql.NullInt64
+		prov, address, chStatus string
+		chEnabled, adEnabled    bool
+		trunk                   sql.NullInt64
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT ch.provider, ch.enabled, ch.trunk_id, a.address, a.enabled
+		SELECT ch.provider, ch.enabled, ch.trunk_id, ch.status, a.address, a.enabled
 		FROM msg_channels ch JOIN msg_addresses a ON a.channel_id = ch.id WHERE ch.id = $1 AND a.id = $2`,
-		c.ChannelID, c.AddressID).Scan(&provider, &chEnabled, &trunk, &address, &adEnabled)
+		c.ChannelID, c.AddressID).Scan(&prov, &chEnabled, &trunk, &chStatus, &address, &adEnabled)
 	if err != nil {
-		return false, err
+		return 0, false, err
 	}
 	if !chEnabled || !adEnabled {
-		return false, nil
+		return 0, false, nil
 	}
 	out, err := optedOut(ctx, tx, s, c.AddressID, c.PeerKey)
 	if err != nil || out {
-		return false, err
+		return 0, false, err
 	}
-	if provider != messaging.ProviderSIPTrunk || !trunk.Valid {
-		_, err = addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", "The closed-hours reply was not sent: this channel cannot send automatic texts")
-		return false, err
+	notSent := func(why string) (int64, bool, error) {
+		_, err := addLine(ctx, tx, c, messaging.KindSystem, messaging.SenderSystem, 0, "", "The "+what+" was not sent: "+why)
+		return 0, false, err
 	}
-	var id int64
-	if err := tx.QueryRowContext(ctx, `
-		INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_name, body, status)
-		VALUES ($1, $2, 'out', 'message', 'system', '', $3, 'sending') RETURNING id`, c.ID, c.ChannelID, body).Scan(&id); err != nil {
-		return false, err
+	run := nilIf(aiRun)
+	actorName := "system:router"
+	if aiRun > 0 {
+		actorName = "system:ai"
 	}
-	for _, part := range messaging.SplitText(body, messaging.MaxPartBytes) {
-		text, raw := splitBody(messageDefaultCType, []byte(part))
-		var m MessageSent
-		err := s.sendMessageTx(ctx, tx, MessageInput{
-			Sender: address, SenderKind: MsgSenderSystem, Actor: "system:router",
-			TargetKind: MsgKindExternal, Target: c.PeerKey, ContentType: messageDefaultCType, Body: []byte(part),
-			TrunkID: trunk.Int64, ConversationMessageID: id,
-		}, text, raw, &m)
-		if errors.Is(err, ErrMessagesDisabled) || errors.Is(err, ErrNoExternalTrunk) || errors.Is(err, ErrMessageRate) ||
-			errors.Is(err, ErrMessageTarget) || errors.Is(err, ErrMessageForbidden) {
-			// Texting is off or refuses: the message row would never be sent.
-			if _, derr := tx.ExecContext(ctx, `DELETE FROM conversation_messages WHERE id = $1`, id); derr != nil {
-				return false, derr
+	switch {
+	case prov == messaging.ProviderChat:
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_name, body, status, sent_at, ai_run_id)
+			VALUES ($1, $2, 'out', 'message', $4, '', $3, 'sent', now(), $5) RETURNING id`, c.ID, c.ChannelID, body, sender, run).Scan(&id); err != nil {
+			return 0, false, err
+		}
+		if err := chatEvent(ctx, tx, c.ID, id, "message"); err != nil {
+			return 0, false, err
+		}
+	case prov == messaging.ProviderSIPTrunk:
+		if !trunk.Valid {
+			return notSent("the channel has no SIP trunk")
+		}
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_name, body, status, ai_run_id)
+			VALUES ($1, $2, 'out', 'message', $4, '', $3, 'sending', $5) RETURNING id`, c.ID, c.ChannelID, body, sender, run).Scan(&id); err != nil {
+			return 0, false, err
+		}
+		for _, part := range messaging.SplitText(body, messaging.MaxPartBytes) {
+			text, raw := splitBody(messageDefaultCType, []byte(part))
+			var m MessageSent
+			err := s.sendMessageTx(ctx, tx, MessageInput{
+				Sender: address, SenderKind: MsgSenderSystem, Actor: actorName,
+				TargetKind: MsgKindExternal, Target: c.PeerKey, ContentType: messageDefaultCType, Body: []byte(part),
+				TrunkID: trunk.Int64, ConversationMessageID: id,
+			}, text, raw, &m)
+			if errors.Is(err, ErrMessagesDisabled) || errors.Is(err, ErrNoExternalTrunk) || errors.Is(err, ErrMessageRate) ||
+				errors.Is(err, ErrMessageTarget) || errors.Is(err, ErrMessageForbidden) {
+				// Texting is off or refuses: the message row would never be sent.
+				if _, derr := tx.ExecContext(ctx, `DELETE FROM conversation_messages WHERE id = $1`, id); derr != nil {
+					return 0, false, derr
+				}
+				return 0, false, nil
 			}
-			return false, nil
+			if err != nil {
+				return 0, false, err
+			}
 		}
-		if err != nil {
-			return false, err
+	case !provider.Known(prov):
+		return notSent("this channel cannot send automatic texts")
+	case chStatus == "credentials_invalid":
+		return notSent("the carrier refused the channel's credentials")
+	default:
+		if checkCarrierText(prov, c.PeerKey, body) != nil {
+			return notSent("the carrier cannot text this customer's number")
+		}
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO conversation_messages (conversation_id, channel_id, direction, kind, sender_kind, sender_name, body, status, ai_run_id)
+			VALUES ($1, $2, 'out', 'message', $4, '', $3, 'queued', $5) RETURNING id`, c.ID, c.ChannelID, body, sender, run).Scan(&id); err != nil {
+			return 0, false, err
 		}
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE conversations SET last_message_id = $2, last_message_at = now() WHERE id = $1`, c.ID, id)
-	return err == nil, err
+	if _, err = tx.ExecContext(ctx, `UPDATE conversations SET last_message_id = $2, last_message_at = now() WHERE id = $1`, c.ID, id); err != nil {
+		return 0, false, err
+	}
+	return id, true, nil
 }
 
 // RouteNew places the conversations no router has placed yet, oldest first,
@@ -436,7 +501,13 @@ func (s *Store) routeOne(ctx context.Context, tx *sql.Tx, now time.Time) (more, 
 		       a.enabled, a.route_kind, a.route_target, a.schedule::text, a.after_hours_action, a.after_hours_text,
 		       a.after_hours_route_kind, a.after_hours_route_target, a.first_contact_text
 		FROM conversations c JOIN msg_addresses a ON a.id = c.address_id
-		WHERE c.routed_at IS NULL ORDER BY c.id LIMIT 1 FOR UPDATE OF c SKIP LOCKED`).Scan(
+		WHERE c.routed_at IS NULL
+		  -- A number that routes through the AI waits for the triage of the
+		  -- first text, at most aiTriageWait.
+		  AND NOT (a.route_kind = 'ai_triage' AND c.created_at > now() - make_interval(secs => $1)
+		       AND EXISTS (SELECT 1 FROM ai_message_runs t WHERE t.conversation_id = c.id AND t.kind = 'triage'
+		                   AND t.state IN ('queued', 'running')))
+		ORDER BY c.id LIMIT 1 FOR UPDATE OF c SKIP LOCKED`, aiTriageWait.Seconds()).Scan(
 		&c.ID, &c.ChannelID, &c.AddressID, &c.PeerKey, &status, &assignee, &addrOn, &kind, &target, &sched, &action, &text, &ahKind, &ahTarget, &firstText)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, false, nil
@@ -462,7 +533,7 @@ func (s *Store) routeOne(ctx context.Context, tx *sql.Tx, now time.Time) (more, 
 			kind, target = ahKind, ahTarget
 		case messaging.AfterReply:
 			if strings.TrimSpace(text) != "" {
-				if replied, err = s.systemText(ctx, tx, c, text); err != nil {
+				if replied, err = s.systemText(ctx, tx, c, text, autoClosedHours); err != nil {
 					return true, false, err
 				}
 			}
@@ -477,14 +548,34 @@ func (s *Store) routeOne(ctx context.Context, tx *sql.Tx, now time.Time) (more, 
 			return true, false, err
 		}
 		if !earlier {
-			if replied, err = s.systemText(ctx, tx, c, firstText); err != nil {
+			if replied, err = s.systemText(ctx, tx, c, firstText, autoFirstContact); err != nil {
 				return true, false, err
 			}
+		}
+	}
+	byAI := false
+	if kind == messaging.RouteAITriage {
+		// The queue the triage suggests, when it names one that takes texts;
+		// otherwise the route's own queue.
+		kind = messaging.RouteQueue
+		var q int64
+		err := tx.QueryRowContext(ctx, `
+			SELECT q.id FROM conversations c JOIN queues q ON lower(q.name) = lower(c.ai_triage ->> 'suggestedQueue')
+			WHERE c.id = $1 AND q.enabled AND q.text_enabled AND coalesce(c.ai_triage ->> 'suggestedQueue', '') <> ''
+			ORDER BY q.id LIMIT 1`, c.ID).Scan(&q)
+		switch {
+		case err == nil:
+			target, byAI = strconv.FormatInt(q, 10), true
+		case !errors.Is(err, sql.ErrNoRows):
+			return true, replied, err
 		}
 	}
 	p, err := resolvePlacement(ctx, tx, kind, target)
 	if err != nil {
 		return true, replied, err
+	}
+	if byAI && p.label != "" {
+		p.label += " (suggested by the AI triage)"
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE conversations SET routed_at = now(), queue_id = $2, ring_group_id = $3, assignee_user_id = $4,

@@ -175,6 +175,37 @@ describe("Number routing", () => {
     );
   });
 
+  it("routes through the AI triage with a queue to fall back on, never after hours", async () => {
+    const calls = api({
+      "PUT /api/v1/messaging/addresses/5/routing": () =>
+        json({ ...routing, routeKind: "ai_triage", routeTarget: "7" }),
+    });
+    const kind = await openRouting();
+    fireEvent.change(kind, { target: { value: "ai_triage" } });
+    const fallback = await screen.findByLabelText("Otherwise to queue");
+    expect(within(fallback).getByText("support")).toBeInTheDocument();
+    expect(within(fallback).queryByText("voiceonly")).toBeNull();
+    fireEvent.change(fallback, { target: { value: "7" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add a window" }));
+    fireEvent.change(screen.getByLabelText("A new conversation"), {
+      target: { value: "route" },
+    });
+    const after = await screen.findByLabelText("Goes to");
+    expect(
+      within(after).queryByText("The queue the AI triage picks"),
+    ).toBeNull();
+    fireEvent.change(screen.getByLabelText("Time zone"), {
+      target: { value: "UTC" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save routing" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PUT")?.body).toMatchObject({
+        routeKind: "ai_triage",
+        routeTarget: "7",
+      }),
+    );
+  });
+
   it("shows why the server refuses a route", async () => {
     api({
       "PUT /api/v1/messaging/addresses/5/routing": () =>

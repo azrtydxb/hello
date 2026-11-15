@@ -42,6 +42,7 @@ func TestScheduleValidate(t *testing.T) {
 		"unknown zone": {Zone: "Nowhere/Land", Days: []ScheduleDay{good}},
 		"bad day":      {Zone: "UTC", Days: []ScheduleDay{{Day: 7, From: "09:00", To: "17:00"}}},
 		"bad clock":    {Zone: "UTC", Days: []ScheduleDay{{Day: 1, From: "9am", To: "17:00"}}},
+		"short clock":  {Zone: "UTC", Days: []ScheduleDay{{Day: 1, From: "9:00", To: "17:00"}}},
 		"backwards":    {Zone: "UTC", Days: []ScheduleDay{{Day: 1, From: "17:00", To: "09:00"}}},
 		"too many":     {Zone: "UTC", Days: make([]ScheduleDay, 29)},
 	} {
@@ -64,12 +65,12 @@ func TestValidAfterHours(t *testing.T) {
 	if ValidAfterHours("ignore") || ValidAfterHours("") {
 		t.Error("accepted an unknown action")
 	}
-	for _, k := range []string{RouteInbox, RouteQueue, RouteUser, RouteExtension, RouteRingGroup} {
+	for _, k := range []string{RouteInbox, RouteQueue, RouteUser, RouteExtension, RouteRingGroup, RouteAITriage} {
 		if !ValidRouteKind(k) {
 			t.Errorf("%q is a route kind", k)
 		}
 	}
-	if ValidRouteKind("ai_triage") || ValidRouteKind("") {
+	if ValidRouteKind("carrier_pigeon") || ValidRouteKind("") {
 		t.Error("accepted an unknown route kind")
 	}
 }

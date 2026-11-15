@@ -49,8 +49,15 @@ personal contacts; their extension and its voicemail stay. The last enabled
 admin cannot be demoted, disabled or deleted, and an admin cannot disable or
 delete their own account (`409 last_admin`, `self_disable`, `self_delete`).
 
-OIDC sign-in does not exist in Hello yet; `authMethod` is `local` for every
-user, so a later method can be added without changing the table.
+Users can also sign in with Google Workspace or Microsoft Entra ID (OpenID
+Connect), and users a directory connector manages have no local password:
+they sign in that way or, for Active Directory, by an LDAP bind. Setting or
+resetting their password answers `409 managed_by_directory`. An administrator
+can require single sign-on for everyone except **break-glass** administrators,
+local admins flagged on the user's dialog; the last one cannot be disabled,
+demoted, deleted or unflagged while it is required (`409 last_break_glass`).
+See [Single sign-on](integrations.md#single-sign-on). `authMethod` stays
+`local` for every user.
 
 ## Two-factor authentication (TOTP)
 

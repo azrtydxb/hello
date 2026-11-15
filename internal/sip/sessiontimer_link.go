@@ -239,7 +239,8 @@ func (c *call) sendRawCallerRefresh(ctx context.Context, method sip.RequestMetho
 		req.SetBody(sdp)
 	}
 	req.SetTransport("UDP")
-	res, err := s.do(ctx, req)
+	res, err := s.doDevice(ctx, req, c.callerDevice) // a phone may challenge it (S-22)
+	seq = req.CSeq().SeqNo                           // one higher when it did
 	if err == nil && method == sip.INVITE {
 		ack := sip.NewRequest(sip.ACK, *target.Clone())
 		ack.AppendHeader(sip.HeaderClone(req.From()))
