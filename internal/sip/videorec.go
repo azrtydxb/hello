@@ -54,21 +54,21 @@ type callVideoRec struct {
 // does nothing, and says why in the trace, when the policy forbids it.
 func (c *call) startVideoRecording() bool {
 	c.mu.Lock()
-	rec, have := c.rec, c.vrec != nil
+	rec, have, refused := c.rec, c.vrec != nil, c.vrecRefused
 	c.mu.Unlock()
 	if have {
 		return true
 	}
-	if rec == nil || !rec.isActive() || !c.webVideoCarried() {
+	if refused || rec == nil || !rec.isActive() || !c.webVideoCarried() {
 		return false
 	}
 	s := c.s
 	if !s.cfg.RecordingVideo || s.deps.Objects == nil || s.deps.VideoRecordings == nil {
-		c.addTrace("Video not recorded: the recording is audio only")
+		c.refuseVideoRec("the recording is audio only", "")
 		return false
 	}
 	if why := c.videoRecordingDenied(); why != "" {
-		c.addTrace("Video not recorded: " + why)
+		c.refuseVideoRec(why, "")
 		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.StateTimeout)
@@ -77,8 +77,7 @@ func (c *call) startVideoRecording() bool {
 	if err != nil {
 		s.log.Warn("video recording quota unreadable", "error", err)
 	} else if q := s.cfg.RecordingVideoQuotaBytes; q > 0 && used >= q {
-		media.NoteVideoRecFailure("quota")
-		c.addTrace("Video not recorded: the video recording quota is used up")
+		c.refuseVideoRec("the video recording quota is used up", "quota")
 		return false
 	}
 	key, err := media.RecordingKey(c.callID, time.Now())
@@ -146,6 +145,24 @@ func (c *call) videoRecordingDenied() string {
 		}
 	}
 	return ""
+}
+
+// refuseVideoRec settles a policy refusal of the call's video recording:
+// the first one is traced (why) and, with a metric reason, counted; any
+// later ask on the same call (the recording's start and the video's start
+// both ask, in either order or at once) is refused silently.
+func (c *call) refuseVideoRec(why, metric string) {
+	c.mu.Lock()
+	first := !c.vrecRefused
+	c.vrecRefused = true
+	c.mu.Unlock()
+	if !first {
+		return
+	}
+	if metric != "" {
+		media.NoteVideoRecFailure(metric)
+	}
+	c.addTrace("Video not recorded: " + why)
 }
 
 // stopVideoRecording ends the video recording: the open fragments are stored

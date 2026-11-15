@@ -54082,7 +54082,12 @@
       },
       "InboxRedactReport": {
         "type": "object",
-        "required": ["message", "providers", "mediaObjects", "mediaObjectsPending"],
+        "required": [
+          "message",
+          "providers",
+          "mediaObjects",
+          "mediaObjectsPending"
+        ],
         "properties": {
           "message": {
             "$ref": "#/components/schemas/InboxMessage"

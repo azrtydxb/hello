@@ -350,3 +350,27 @@ func TestRecordingSignalToBrowsers(t *testing.T) {
 	hangup(t, r.dcs)
 	pbx.nextCDR(t)
 }
+
+// TestVideoRecordingRefusedOnce fails if one call's refused video recording
+// is counted or traced more than once: the recording's start and the video's
+// start both ask, in either order or at once, and the quota metric counts
+// calls refused, not asks. Mutation: dropping the vrecRefused check in
+// refuseVideoRec counts eight refusals here.
+func TestVideoRecordingRefusedOnce(t *testing.T) {
+	c := &call{s: &Server{}}
+	before := media.VideoRecFailures("quota")
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() { c.refuseVideoRec("the video recording quota is used up", "quota") })
+	}
+	wg.Wait()
+	if got := media.VideoRecFailures("quota") - before; got != 1 {
+		t.Fatalf("one call's refusal counted %d times", got)
+	}
+	if n := strings.Count(traceText(c.trace), "quota is used up"); n != 1 {
+		t.Fatalf("refusal traced %d times: %s", n, traceText(c.trace))
+	}
+	if c.startVideoRecording() {
+		t.Fatal("a refused call started its video recording")
+	}
+}

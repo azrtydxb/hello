@@ -5541,3 +5541,31 @@ Spec `.procoder/specs/phone-feature-parity.md` S-12 and S-20, following #259,
   Yealink, Poly, Snom and Fanvil, and a backup follows the primary's transport
   (it was UDP only); a Yealink or Poly further line on a TCP phone now
   registers over TCP like line 1 (it was written UDP).
+
+## TestAlwaysAnchorPolicy flake: a late ACK turned a caller hangup into "no ACK" (2026-11-15)
+
+- Symptom (main-derived run 43679381386, integration job): the CDR of an
+  anchored call had empty CallerCodec/CalleeCodec although media mode and
+  trace were right.
+- Root cause: the caller's BYE was processed before its ACK. sipgo's ReadBye
+  sets the dialog state Ended, which wakes the answer's WriteResponse with "No
+  ACK received"; the ACK handled right after runs ReadAck, which sets the state
+  back to Confirmed without checking. answer() then saw a live dialog, took the
+  "no ACK from caller" path and won the end race: a ResultFailed CDR, whose
+  answer time (and so codecs and billable time) is cleared, on a SIDE_SYSTEM.
+- Product bug, not a test artefact: any phone whose ACK and BYE are reordered
+  or handled concurrently (a fast hangup) got a failed CDR for an answered call.
+- Fix: callerHungUpUnacked checks the dialog's context as well as its state;
+  the context is cancelled when the dialog ends and never comes back. Used by
+  the b2bua answer, the IVR/queue/directory solo answer, page, fax and pickup
+  (pickup had no BYE-overtook-ACK check at all). Regression guard:
+  TestCallByeBeforeLateAck, which lands the ACK through a test-only
+  unackedHook (fails on the old state-only check).
+- Follow-up flagged by the PR's integration run (43687055816):
+  TestVideoRecordingPolicy/quota_used_up saw the quota refusal counted twice.
+  startVideoRecording is asked by both the recording's start and the video's
+  start (videoStarted); depending on timing both ran the policy checks, so one
+  call's refusal was counted and traced once or twice. A metric over-count,
+  fixed in the product: refuseVideoRec settles the refusal once per call
+  (call.vrecRefused) and later asks return false silently. Regression guard:
+  TestVideoRecordingRefusedOnce (eight concurrent refusals, counted once).
