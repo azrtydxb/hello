@@ -5265,3 +5265,19 @@ could reach the phone reversed, leaving it held.
   the re-INVITE's 200 only moves the counter forward. `doOn` (#357) still
   moves it past a re-sent challenged request's CSeq; the challenge re-send
   stays inside the gate, as one INVITE attempt.
+
+## TestPrackAndReplaces: the target answers by caller, not by arrival (2026-11-15)
+
+CI flaked `attended transfer before answer, answered after the cancel`
+("timed out waiting for BYE to the transferor's first call"). It was the
+test, not the product. The target's callee chose between ringing and
+answering by the order its handlers ran, but the phone reports an INVITE
+before it runs the callee. So the test could see the consultation INVITE,
+send the REFER and get the transferred call's INVITE while the
+consultation's handler had not yet run. The transferred call then counted
+as first and rang forever. Every earlier check still passed, because the
+consultation was cancelled either way. A forced one-second delay on the
+first handler reproduces it every time. The callee now rings the INVITE
+From the transferor's extension (the consultation) and answers the others.
+Hello itself BYEs the transferor as soon as the transferred call is
+answered, whatever the order.
