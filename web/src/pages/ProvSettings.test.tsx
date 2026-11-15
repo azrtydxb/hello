@@ -61,6 +61,38 @@ const card = (name: string) => screen.findByRole("listitem", { name });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ProvSettings", () => {
+  it("shows the backup servers, their source and the DNS mode", async () => {
+    mockApi(
+      routes({
+        "GET /api/v1/prov/settings": () =>
+          json({
+            ...SETTINGS,
+            sipBackupServers: ["192.168.10.12:5060"],
+            sipBackupSource: "nodes",
+            sipSrv: "sip.hello.example.test",
+          }),
+      }),
+    );
+    renderApp("/phones/settings");
+    expect(
+      await screen.findByText(/192\.168\.10\.12:5060 \(from the HA node list/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/SRV \(sip\.hello\.example\.test\)/),
+    ).toBeInTheDocument();
+  });
+
+  it("says when phones have no backup server", async () => {
+    mockApi(routes());
+    renderApp("/phones/settings");
+    expect(
+      await screen.findByText(/set HELLO_PROV_SIP_BACKUP_SERVERS/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/A record \(the address above\)/),
+    ).toBeInTheDocument();
+  });
+
   it("never shows a redirect credential after saving it", async () => {
     const saved = account("snom", { enabled: true, hasCredentials: true });
     const calls = mockApi(

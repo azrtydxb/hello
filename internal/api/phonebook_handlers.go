@@ -52,6 +52,7 @@ type PhonebookStore interface {
 
 	SetPhoneGroupSyslog(ctx context.Context, actor string, id int64, in phonebook.Syslog) (phonebook.Group, error)
 	SetPhoneGroupLDAP(ctx context.Context, actor string, id int64, enabled bool) (phonebook.Group, error)
+	SetPhoneGroupSideKey(ctx context.Context, actor string, id int64, function string) (phonebook.Group, error)
 }
 
 // Page sizes of the address-book lists.

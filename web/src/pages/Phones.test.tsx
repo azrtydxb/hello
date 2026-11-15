@@ -345,6 +345,57 @@ describe("Phones inventory", () => {
     expect(patches[1]!.body).toEqual({ label: "Lobby", blf: ["103", "102"] });
   });
 
+  it("edits a Grandstream WP's speed dials and side key", async () => {
+    const wp = phone({
+      vendor: "grandstream",
+      model: "WP836",
+      label: "Handset",
+      blf: ["102"],
+      sideKey: null,
+    });
+    const calls = api([wp], {
+      "PATCH /api/v1/phones/5": () =>
+        json({ ...wp, blf: ["102", "103"], sideKey: "none" }),
+    });
+    renderApp("/phones");
+    const t = await table();
+    fireEvent.click(
+      within(t).getByRole("button", { name: "Edit 80:5e:c0:12:34:56" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Edit Handset" });
+    expect(within(dialog).getByText("Speed dials")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/has no BLF keys: these entries are its speed/),
+    ).toBeInTheDocument();
+    const add = within(dialog).getByLabelText("Add speed dial");
+    fireEvent.change(add, { target: { value: "103" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add key" }));
+    const side = within(dialog).getByLabelText("Side key");
+    expect(side).toHaveValue("");
+    expect(
+      within(side).getByRole("option", { name: "Alarm call" }),
+    ).toBeInTheDocument();
+    fireEvent.change(side, { target: { value: "none" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: /^Edit/ })).toBeNull(),
+    );
+    const patch = calls.find((c) => c.method === "PATCH");
+    expect(patch!.body).toEqual({ blf: ["102", "103"], sideKey: "none" });
+  });
+
+  it("offers no side key on a phone without one", async () => {
+    api([phone()]);
+    renderApp("/phones");
+    const t = await table();
+    fireEvent.click(
+      within(t).getByRole("button", { name: "Edit 80:5e:c0:12:34:56" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Edit Front desk" });
+    expect(within(dialog).queryByLabelText("Side key")).toBeNull();
+    expect(within(dialog).getByLabelText("Add BLF key")).toBeInTheDocument();
+  });
+
   it("deletes a phone after confirmation", async () => {
     const calls = api([phone()], { "DELETE /api/v1/phones/5": noContent });
     renderApp("/phones");

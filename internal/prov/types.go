@@ -180,6 +180,14 @@ type RenderData struct {
 	// extension (at most MaxDoorStations), for the Grandstream WP door
 	// system entries (spec phone-feature-parity S-49).
 	DoorStations []DoorStation
+	// SideKey is the Grandstream WP side key (S-12): the store sets its
+	// Function (phone, then group, then PTT/paging) and Render fills the
+	// model's key and value; Param is 0 for a phone without one.
+	SideKey SideKey
+	// SpeedDials are a Grandstream WP's speed dials (S-12): Render lays the
+	// phone's BLF entries on the model's speed-dial slots (a WP has no BLF
+	// keys, so BLF is then empty). Empty for any other phone.
+	SpeedDials []SpeedDial
 }
 
 // E911Info is what a WP8x6 needs to ask Hello for its location (RFC 5985).
@@ -330,13 +338,20 @@ type Server struct {
 	// lists, registering with HELLO_PROV_SIP_TLS_SERVER (S-14).
 	Transport string
 	// DNSMode is DNSA (the default: the host is resolved by its A record)
-	// or DNSSRV (Grandstream only: the host is a name whose SRV records list
-	// the servers, and Port is 0). See S-20.
+	// or DNSSRV (Grandstream, and Yealink and Poly on UDP: the host is a
+	// name whose SRV records list the servers, and Port is 0; Yealink and
+	// Poly reach them through their DNS-NAPTR transport, which falls back
+	// to SRV). See S-20.
 	DNSMode string
-	// Backup is the backup registrar of a phone that registers over UDP
-	// with a fixed address, nil when none is configured or the phone
-	// resolves its servers by SRV (S-20).
-	Backup *Backup
+	// Backup is the backup registrar of a phone that registers over UDP or
+	// TCP with a fixed address, nil when there is none or the phone resolves
+	// its servers by SRV (S-20). Backups lists every backup in order (at
+	// most two; Backup is the first) for the vendors whose setting takes a
+	// list (Snom's user_outbound). They come from HELLO_PROV_SIP_BACKUP_SERVERS
+	// when it is set, otherwise from the HA node list (the READY hello-sip
+	// nodes) when phones register with a node directly.
+	Backup  *Backup
+	Backups []Backup
 	// SRTP is the phone's media-encryption policy ("off", "optional" or
 	// "required") on a TLS phone; empty on a phone that registers over UDP,
 	// where Hello offers no crypto and the templates leave the phone's SRTP

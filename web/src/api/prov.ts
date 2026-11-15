@@ -96,8 +96,17 @@ export interface Phone {
   maxLines?: number;
   /** Host or guest while the phone's group has account sharing on. */
   sharingRole?: SharingRole;
-  /** BLF keys: extension numbers, in key order. */
+  /**
+   * BLF keys: extension numbers, in key order. A Grandstream WP has no BLF
+   * keys and takes them as speed dials (at most speedDialSlots).
+   */
   blf: string[];
+  /** How many speed dials a Grandstream WP takes; 0 for a phone with BLF keys. */
+  speedDialSlots?: number;
+  /** The phone's own side key function; null uses its group's. */
+  sideKey?: SideKey | null;
+  /** The side key functions the model takes; empty without a side key. */
+  sideKeyChoices?: SideKey[];
   enabled: boolean;
   tokenExposed: boolean;
   uaMismatch: boolean;
@@ -150,8 +159,20 @@ export type PhonePatch = Partial<
     groupId: Id | null;
     pttChannelId: Id | null;
     sharingRole: SharingRole;
+    sideKey: SideKey | null;
   }
 >;
+
+/** What a Grandstream WP's side key does (phone-feature-parity S-12). */
+export const SIDE_KEYS = ["ptt", "alarm", "none"] as const;
+export type SideKey = (typeof SIDE_KEYS)[number];
+
+/** How the console names each side key function. */
+export const SIDE_KEY_LABELS: Record<SideKey, string> = {
+  ptt: "PTT / paging",
+  alarm: "Alarm call",
+  none: "Nothing",
+};
 
 /** One provisioning request a phone made (prov_fetches, token redacted). */
 export interface Fetch {
@@ -839,6 +860,15 @@ export interface ProvSettings {
   caSha256: string;
   dhcp: DhcpValue[];
   sipServer: string;
+  /** The backup registrars phones are given (host:port), at most two. */
+  sipBackupServers?: string[];
+  /**
+   * Where the backups come from: HELLO_PROV_SIP_BACKUP_SERVERS (env), the
+   * HA node list (nodes) or none.
+   */
+  sipBackupSource?: "env" | "nodes" | "none";
+  /** The SRV name phones resolve the SIP servers from; "" in A-record mode. */
+  sipSrv?: string;
 }
 
 export const getProvSettings = (signal?: AbortSignal) =>
@@ -846,12 +876,56 @@ export const getProvSettings = (signal?: AbortSignal) =>
 
 /**
  * Whether Hello can provision BLF keys for the phone. A Grandstream WP
- * (WP8xx, WP856) has no BLF key type in its provisioning template, so the
- * API refuses keys for it; the phone form hides the editor.
+ * (WP8x6, WP8xx, WP856) has no BLF key type in its provisioning template:
+ * its BLF entries become speed dials instead (see speedDialSlots).
  */
 export function supportsBlf(vendor: string, model: string): boolean {
-  return !(
-    vendor === "grandstream" &&
-    /^WP(8[1-3]6|856|8(10|2[0258]))/i.test(model.replace(/[\s_-]/g, ""))
-  );
+  return wpFamily(vendor, model) === "";
+}
+
+/** The Grandstream WP family of a model, as the server tells them apart. */
+function wpFamily(vendor: string, model: string): string {
+  if (vendor !== "grandstream") return "";
+  const m = model.replace(/[\s_-]/g, "").toUpperCase();
+  if (/^WP856/.test(m)) return "WP856";
+  if (/^WP8[1-3]6/.test(m)) return "WP8x6";
+  if (/^WP820/.test(m)) return "WP820";
+  if (/^WP8(10|2[258])/.test(m)) return "WP8xx";
+  return "";
+}
+
+/**
+ * How many speed dials a Grandstream WP takes for its BLF entries
+ * (phone-feature-parity S-12): the WP8x6 number keys and the WP810/820/822/825
+ * speed dial keys (2 to 9 and 0), the WP856's first 30 multi-purpose keys.
+ * 0 for a phone with BLF keys. Mirrors prov.SpeedDialSlots.
+ */
+export function speedDialSlots(vendor: string, model: string): number {
+  switch (wpFamily(vendor, model)) {
+    case "WP8x6":
+    case "WP8xx":
+    case "WP820":
+      return 9;
+    case "WP856":
+      return 30;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * The side key functions a model takes (S-12): the WP8x6 has PTT / paging,
+ * the alarm call and nothing; the WP856 and WP820 PTT / paging and nothing;
+ * any other phone none. Mirrors prov.SideKeyChoices.
+ */
+export function sideKeyChoices(vendor: string, model: string): SideKey[] {
+  switch (wpFamily(vendor, model)) {
+    case "WP8x6":
+      return ["ptt", "alarm", "none"];
+    case "WP856":
+    case "WP820":
+      return ["ptt", "none"];
+    default:
+      return [];
+  }
 }

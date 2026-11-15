@@ -134,6 +134,10 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	deployment := redirect.Deployment(cfg.Prov.Redirect)
 	settings := provSettings(cfg, deployment)
+	// The HA node list (S-20): the cluster poller fills it, and phones that
+	// register with a hello-sip node directly get the other nodes as backups.
+	sipNodes := &api.SIPNodeList{}
+	settings.SIPNodes = sipNodes.Addrs
 	st := store.New(db).WithSecretBox(box).WithProv(settings)
 	go bootstrap(ctx, st, cfg.BootstrapAdminPassword, log)
 	go pruneSessions(ctx, st, log)
@@ -473,6 +477,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Log:             log,
 		DrainDelay:      cfg.DrainDelay,
 		ShutdownTimeout: cfg.ShutdownTimeout,
+		SIPNodes:        sipNodes,
 	})
 	err = node.Run(ctx.Done(), ln)
 	log.Info("stopped", "error", err)

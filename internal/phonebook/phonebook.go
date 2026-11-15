@@ -180,10 +180,14 @@ type Group struct {
 	Syslog Syslog `json:"syslog"`
 	// LDAPEnabled turns the phone LDAP directory on for the group's phones
 	// (spec pbx-gaps S-26).
-	LDAPEnabled bool      `json:"ldapEnabled"`
-	PhoneCount  int       `json:"phoneCount"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	LDAPEnabled bool `json:"ldapEnabled"`
+	// SideKey is what the side key of the group's Grandstream WP phones does:
+	// ptt (PTT/paging, the default), alarm (the group's alarm call, WP8x6)
+	// or none; a phone may override it (phone-feature-parity S-12).
+	SideKey    string    `json:"sideKey"`
+	PhoneCount int       `json:"phoneCount"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 // Syslog is a phone group's syslog setting: off by default, Level one of
