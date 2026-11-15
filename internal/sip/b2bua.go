@@ -157,6 +157,10 @@ type call struct {
 	doorOpening bool
 	// vrec is the call's video recording (videorec.go); nil when none runs.
 	vrec *callVideoRec
+	// vrecRefused is set when the policy refused the call's video
+	// recording (refuseVideoRec): the refusal is traced and counted once,
+	// though the recording start and the video's start both ask.
+	vrecRefused bool
 	// web is the call's browser state (webrtc.go); nil for a call with none.
 	web *callWeb
 

@@ -5120,3 +5120,11 @@ Builder choices within the approved spec (M-30, M-30a; user decision 5 of
   (pickup had no BYE-overtook-ACK check at all). Regression guard:
   TestCallByeBeforeLateAck, which lands the ACK through a test-only
   unackedHook (fails on the old state-only check).
+- Follow-up flagged by the PR's integration run (43687055816):
+  TestVideoRecordingPolicy/quota_used_up saw the quota refusal counted twice.
+  startVideoRecording is asked by both the recording's start and the video's
+  start (videoStarted); depending on timing both ran the policy checks, so one
+  call's refusal was counted and traced once or twice. A metric over-count,
+  fixed in the product: refuseVideoRec settles the refusal once per call
+  (call.vrecRefused) and later asks return false silently. Regression guard:
+  TestVideoRecordingRefusedOnce (eight concurrent refusals, counted once).
