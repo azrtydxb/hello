@@ -129,6 +129,11 @@ type Control struct {
 	Syslog Syslog
 	// Chat is the LAN chat widget listener (HELLO_MSG_CHAT_*).
 	Chat Chat
+	// MsgAIAuto (HELLO_MSG_AI_AUTO, default true) is the deployment-wide kill
+	// switch of the inbox AI's auto-replies (spec messaging-channels M-30a):
+	// false stops every auto-reply whatever the numbers say; triage and
+	// drafts go on.
+	MsgAIAuto bool
 }
 
 // Chat configures the LAN chat widget (spec messaging-channels M-28). The
@@ -685,6 +690,14 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	c.Clients = r.clients()
 	c.Syslog = r.syslog()
 	c.Chat = r.chat()
+	c.MsgAIAuto = true
+	switch r.getenv("HELLO_MSG_AI_AUTO") {
+	case "", "true":
+	case "false":
+		c.MsgAIAuto = false
+	default:
+		r.fail("HELLO_MSG_AI_AUTO", errors.New("must be true or false"))
+	}
 	return c, r.err()
 }
 

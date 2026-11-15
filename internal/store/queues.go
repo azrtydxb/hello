@@ -551,7 +551,7 @@ func (s *Store) DeleteQueue(ctx context.Context, actor string, id int64, check C
 func queueTextReferences(ctx context.Context, tx *sql.Tx, id int64) ([]string, error) {
 	var refs []string
 	rows, err := tx.QueryContext(ctx, `SELECT coalesce(NULLIF(label, ''), address) FROM msg_addresses
-		WHERE (route_kind = 'queue' AND route_target = $1) OR (after_hours_action = 'route' AND after_hours_route_kind = 'queue' AND after_hours_route_target = $1)
+		WHERE (route_kind IN ('queue', 'ai_triage') AND route_target = $1) OR (after_hours_action = 'route' AND after_hours_route_kind = 'queue' AND after_hours_route_target = $1)
 		ORDER BY id`, strconv.FormatInt(id, 10))
 	if err != nil {
 		return nil, err

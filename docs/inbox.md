@@ -24,10 +24,12 @@ This is the first phase of the messaging channels. What works now:
   campaign, toll-free verification) from the carrier (see "Sender
   registration");
 - a website chat widget for intranet pages and VPN users, served on the LAN only
-  (see "Website chat" below).
+  (see "Website chat" below);
+- AI triage, reply drafts and auto-replies from an FAQ, per number, through the
+  in-product AI's model (see "AI" below).
 
 Not yet: receiving texts from a carrier's web API (needs an Internet-facing
-address), WhatsApp, and AI. None of the providers that need an
+address) and WhatsApp. None of the providers that need an
 Internet-facing address is possible while Hello is reachable only on the LAN,
 and neither is a widget on a public website.
 
@@ -299,13 +301,14 @@ are all of such vendors does not see the profile switch.
 **Where a number's new conversations go** is set per number (Messaging >
 Channels > Routing, or `PUT /api/v1/messaging/addresses/{id}/routing`):
 
-| Route        | What happens                                                                                               |
-| ------------ | ---------------------------------------------------------------------------------------------------------- |
-| Pool (inbox) | Unassigned; every operator and administrator sees it. The default.                                         |
-| Queue        | The queue's strategy picks an agent (below).                                                               |
-| User         | Assigned to that user.                                                                                     |
-| Extension    | Assigned to the user the extension is linked to.                                                           |
-| Ring group   | A shared pool of the users of the group's extensions: it stays unassigned and the first to reply takes it. |
+| Route        | What happens                                                                                                                      |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| Pool (inbox) | Unassigned; every operator and administrator sees it. The default.                                                                |
+| Queue        | The queue's strategy picks an agent (below).                                                                                      |
+| User         | Assigned to that user.                                                                                                            |
+| Extension    | Assigned to the user the extension is linked to.                                                                                  |
+| Ring group   | A shared pool of the users of the group's extensions: it stays unassigned and the first to reply takes it.                        |
+| AI triage    | Waits up to 30 seconds for the AI triage of the first text, then the text queue it suggests, or the route's own queue (see "AI"). |
 
 A target that is deleted, disabled or cannot take conversations (a queue that
 stopped taking texts, an extension nobody is linked to) sends the conversation
@@ -378,6 +381,92 @@ The router runs on every control replica every 2 seconds. It claims rows with
 conversations under a per-agent advisory lock, and keeps nothing in memory, so
 two pods never assign a conversation twice or give an agent more than the
 limit. If Valkey cannot be read it assigns to static members only.
+
+## AI
+
+The inbox AI reads customer texts and chats and helps the agents: it
+classifies and summarises them (**triage**), drafts a reply an agent must click
+to use (**drafts**), and, only where an administrator allows it, answers from
+the number's FAQ by itself (**auto-reply**). Every model call goes through the
+in-product AI (`HELLO_AI_*`, see the AI agent guide) and its private-endpoint
+guard: customer text goes only to that endpoint, and only to a public one when
+`HELLO_AI_ALLOW_PUBLIC_ENDPOINT=true` (Messaging > Inbox AI then says "AI
+endpoint is public"). Nothing works, and nothing waits, while the AI agent is
+off.
+
+**Modes, per number or chat site** (Messaging > Inbox AI > Edit AI, or
+`PUT /api/v1/messaging/addresses/{id}/ai`):
+
+| Mode     | What happens                                                                                      |
+| -------- | ------------------------------------------------------------------------------------------------- |
+| `off`    | Nothing. The default.                                                                             |
+| `triage` | Each customer text is classified: language, intent, urgency, sentiment, spam, sensitive, summary. |
+| `draft`  | Triage, and a reply draft for the latest text, shown dimmed above the composer.                   |
+| `auto`   | Triage, and the AI may answer from the FAQ within the guardrails below; else a draft.             |
+
+**What the model sees.** The conversation's last 20 messages (at most 8 KB,
+the oldest dropped first), the customer's first name when a shared address book
+knows it, the number's FAQ, the business name and the lists below; never
+another conversation, call records or configuration. With "remove phone numbers
+and email addresses" on (the default) every run of seven or more digits and
+every email address is replaced before the call. Customer text is marked as
+untrusted data, and the model has two tools only, both without effect outside
+the call: `lookup_faq` reads the number's FAQ and `handoff` asks for a person.
+Its answer is checked against a schema and refused when it does not fit (an
+intent or a queue that is not in the lists, for example).
+
+**Triage** (`message_triage`). The intent is one of the inbox's intents (Inbox
+AI settings; `other` is always allowed). The result is applied as suggestions,
+with the AI as the actor: its tags are added, an urgent text raises the
+priority to high, spam sets a "Spam?" flag for supervisors (nothing is deleted
+or blocked). It never assigns or moves a conversation, except on a number that
+routes through the AI triage (see "Routing and queues"), where the router reads
+the queue it suggests. The inbox shows the summary and labels above the thread
+and in the list, and **Undo** (`POST .../conversations/{id}/ai/revert`) removes
+the tags it added, lowers the priority it raised and clears its spam flag.
+
+**Drafts** (`message_draft`). One draft for the latest customer text. It shows
+as a dimmed proposal: **Use draft** puts it in the composer, where the agent may
+change it and sends it, so the audit shows the agent; nothing is sent without
+that. A newer customer text or any reply retires it.
+
+**Auto-reply** (`message_autoreply`), off by default, enabled per number by an
+administrator (audited). The AI answers only when every guardrail holds:
+
+- the answer rests on at least one of the number's FAQ snippets (at most 50 per
+  number, 4 KB each), cited by id, and holds no link that is not, exactly, in a
+  snippet; with no FAQ every text goes to a person;
+- the triage is sure enough (least confidence, default 0.8), and so is the
+  answer; the intent is one the number allows (default: every intent but
+  `other`);
+- the text is not urgent, not negative, not on a sensitive topic (Inbox AI
+  settings), not spam; it has no handoff word (`agent`, `human`, `person`,
+  `representative` by default) and is not STOP, START or HELP;
+- at most 3 AI replies (1 to 10) before a person replies, at most 60 AI
+  messages per number per hour, nothing within 10 minutes of a person's reply,
+  nothing to a customer who opted out, nothing outside the WhatsApp window.
+
+These are checked before the model is asked and again in the transaction that
+sends. The first AI reply of a conversation starts with the disclosure line
+(default on). An AI reply is stored with sender `ai`, shown as "Sent by the
+AI", and audited (`ai_autoreply`, the message id only). When the AI does not
+answer it hands the conversation to a person: the conversation shows "Needs a
+person" with the reason, the number's holding line goes once (until a person
+replies), and the agent gets a draft. An AI endpoint that is down or over
+budget does the same; it never delays a text: the text is in the inbox first.
+
+**Kill switches.** `HELLO_MSG_AI_AUTO=false` stops every auto-reply on the
+deployment (triage and drafts go on). In Messaging > Inbox AI: "Inbox AI on"
+stops all of it, "Auto-replies on" stops the auto-replies, and each channel has
+its own switch; a number's mode is the last one. A switch turned off stops the
+runs that are already queued.
+
+**How it runs.** The ingest queues one triage run per customer text in its own
+transaction (`ai_message_runs`, one per message and kind); any control replica
+claims a run with `SKIP LOCKED`, calls the model under the AI agent's budget and
+limits, and stores the result only while the conversation has not moved on (a
+newer customer text or a reply makes it stale). A replica that dies mid-run
+leaves the run to another after two minutes, at most three times.
 
 ## Opt-out (STOP)
 
@@ -574,20 +663,23 @@ Metrics: `hello_chat_sessions_total{result}`, `hello_chat_messages_total{result}
 
 ## API
 
-| Route                                                                                     | Role and scope                |
-| ----------------------------------------------------------------------------------------- | ----------------------------- |
-| `/api/v1/messaging/channels` (+ `/{id}`, `/{id}/test`)                                    | admin, `admin`                |
-| `/api/v1/messaging/addresses` (+ `/{id}`, `/{id}/routing`)                                | admin, `admin`                |
-| `/api/v1/messaging/settings`                                                              | admin, `admin`                |
-| `/api/v1/messaging/optouts` (+ `/{id}/reconsent`)                                         | admin, `admin`                |
-| `POST /api/v1/inbox/erase`                                                                | admin, `admin`                |
-| `/api/v1/messaging/chat/sites` (+ `/{id}`, `/{id}/blocks`), `/chat/blocks/{id}`           | admin, `admin`                |
-| `/api/v1/inbox/conversations/{id}/block`, `/email-reply`, `/typing` (and `/me/inbox/...`) | operator or agent, `messages` |
-| `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`, `/api/v1/inbox/queues`           | operator, `messages`          |
-| `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream`                      | any agent, `messages`         |
-| `/api/v1/me/inbox/agent` (GET, POST: log in, pause)                                       | any agent, `messages`         |
-| `POST .../conversations/{id}/contact` (add to contacts)                                   | as the area it is in          |
-| `GET .../conversations/{id}/calls` (the number's recent calls)                            | as the area it is in          |
+| Route                                                                                              | Role and scope                |
+| -------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `/api/v1/messaging/channels` (+ `/{id}`, `/{id}/test`)                                             | admin, `admin`                |
+| `/api/v1/messaging/addresses` (+ `/{id}`, `/{id}/routing`)                                         | admin, `admin`                |
+| `/api/v1/messaging/settings`                                                                       | admin, `admin`                |
+| `/api/v1/messaging/ai`, `/api/v1/messaging/addresses/{id}/ai`, `/api/v1/messaging/faq` (+ `/{id}`) | admin, `admin`                |
+| `POST .../conversations/{id}/ai/revert`                                                            | as the area it is in          |
+| `GET /api/v1/inbox/ai/stats` (also an MCP tool: counts, no text)                                   | operator, `messages`          |
+| `/api/v1/messaging/optouts` (+ `/{id}/reconsent`)                                                  | admin, `admin`                |
+| `POST /api/v1/inbox/erase`                                                                         | admin, `admin`                |
+| `/api/v1/messaging/chat/sites` (+ `/{id}`, `/{id}/blocks`), `/chat/blocks/{id}`                    | admin, `admin`                |
+| `/api/v1/inbox/conversations/{id}/block`, `/email-reply`, `/typing` (and `/me/inbox/...`)          | operator or agent, `messages` |
+| `/api/v1/inbox/conversations...`, `/api/v1/inbox/stats`, `/api/v1/inbox/queues`                    | operator, `messages`          |
+| `/api/v1/me/inbox/conversations...`, `/status`, `/agents`, `/stream`                               | any agent, `messages`         |
+| `/api/v1/me/inbox/agent` (GET, POST: log in, pause)                                                | any agent, `messages`         |
+| `POST .../conversations/{id}/contact` (add to contacts)                                            | as the area it is in          |
+| `GET .../conversations/{id}/calls` (the number's recent calls)                                     | as the area it is in          |
 
 Queues take `textEnabled`, `textCapacity`, `textReassignSeconds` and
 `textRequiresIdleVoice`.
@@ -604,7 +696,9 @@ a desk phone), `hello_msg_optout_total{source}`, `hello_msg_purged_total{kind}`,
 `hello_msg_unassigned` and `hello_msg_unassigned_oldest_seconds`, and for
 routing `hello_msg_assign_total{result}` (placed, assigned, full, lost,
 returned, after_hours_reply), `hello_msg_first_response_seconds`,
-`hello_msg_queue_text_waiting{queue}` and `hello_msg_assign_live_down_total`.
+`hello_msg_queue_text_waiting{queue}` and `hello_msg_assign_live_down_total`,
+and for the AI `hello_msg_ai_runs_total{kind,result}` (done, failed, skipped,
+stale, sent, handoff; the calls and tokens are the AI agent's own metrics).
 No label carries a number, a name or text.
 
 ## HA
@@ -619,6 +713,11 @@ holds the agents' login and pause, and without it assignment falls back to
 static queue members.
 
 ## Lab checklist (real carrier)
+
+With a real model on a private endpoint: triage and draft quality in each
+language you serve; a set of injection texts (instructions to ignore the rules,
+to send a link, to reveal the prompt) never yields an auto-reply that is not in
+the FAQ; redaction catches the number formats your customers type.
 
 Which carrier delivers inbound SMS as SIP MESSAGE to a registered or
 IP-authenticated trunk, and whether it accepts outbound MESSAGE for SMS, is

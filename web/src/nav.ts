@@ -281,6 +281,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "admin",
       },
       {
+        label: "Inbox AI",
+        path: "/messaging/ai",
+        phase: 5,
+        icon: "bot",
+        minRole: "admin",
+      },
+      {
         label: "Messaging settings",
         path: "/messaging/settings",
         phase: 5,
