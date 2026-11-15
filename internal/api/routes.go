@@ -493,6 +493,20 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/messaging/optouts", auth.ScopeAdmin, auth.RoleAdmin, false, s.recordMessagingOptOut},
 		{"POST", "/api/v1/messaging/optouts/{id}/reconsent", auth.ScopeAdmin, auth.RoleAdmin, false, s.reconsentMessagingOptOut},
 		{"POST", "/api/v1/inbox/erase", auth.ScopeAdmin, auth.RoleAdmin, false, s.eraseMessagingPeer},
+		// The inbox AI (spec messaging-channels M-30, M-30a): settings, kill
+		// switches, each number's mode and guardrails, and its FAQ.
+		{"GET", "/api/v1/messaging/ai", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessagingAI},
+		{"PUT", "/api/v1/messaging/ai", auth.ScopeAdmin, auth.RoleAdmin, false, s.putMessagingAI},
+		{"GET", "/api/v1/messaging/addresses/{id}/ai", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessagingAddressAI},
+		{"PUT", "/api/v1/messaging/addresses/{id}/ai", auth.ScopeAdmin, auth.RoleAdmin, false, s.putMessagingAddressAI},
+		{"GET", "/api/v1/messaging/faq", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessagingFAQ},
+		{"POST", "/api/v1/messaging/faq", auth.ScopeAdmin, auth.RoleAdmin, false, s.createMessagingFAQ},
+		{"GET", "/api/v1/messaging/faq/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessagingFAQ},
+		{"PUT", "/api/v1/messaging/faq/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putMessagingFAQ},
+		{"DELETE", "/api/v1/messaging/faq/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteMessagingFAQ},
+		{"POST", "/api/v1/inbox/conversations/{id}/ai/revert", auth.ScopeMessages, auth.RoleOperator, false, s.revertInboxAI},
+		{"POST", "/api/v1/me/inbox/conversations/{id}/ai/revert", auth.ScopeMessages, auth.RoleUser, false, s.revertMyInboxAI},
+		{"GET", "/api/v1/inbox/ai/stats", auth.ScopeMessages, auth.RoleOperator, false, s.getInboxAIStats},
 		// The LAN chat widget (spec messaging-channels M-28): sites and their
 		// blocks are administrators'; an agent blocks a visitor, emails an
 		// offline chat and shows typing from the inbox. The widget's own

@@ -5032,3 +5032,71 @@ managed_by_directory`.
   no password back. Migration renumbered to `00102`.
 - **All new operations are excluded from MCP** (`x-hello-mcp`): sign-in,
   secrets and identity linking are browser or admin-console flows.
+
+## Messaging item 7: AI triage, drafts and auto-reply (2026-11-15, feat/messaging-ai)
+
+Builder choices within the approved spec (M-30, M-30a; user decision 5 of
+2026-10-25). None changes what the user approved.
+
+- **Migration 00103 (`messaging_ai`, placeholder 00210 until merge).** Additive only. The one
+  CHECK change (route kind `ai_triage`) goes through
+  `pg_temp.hello_check_values`. The spec said the `ai_*` columns of
+  `msg_addresses` came with P1; they did not, so this migration adds them, with
+  `ai_message_runs`, `msg_faq`, the conversation's AI fields and
+  `conversation_messages.ai_run_id`.
+- **Where runs are queued.** In the ingest transaction (trunk texts and
+  chat), only when the number's mode is not `off` and no kill switch is set,
+  and never for STOP, START or HELP. A run that fails records a code and moves
+  on; the text is in the inbox before any model call.
+- **Follow-up runs.** A finished triage queues the draft (mode `draft`) or the
+  auto-reply (mode `auto`). An auto-reply that does not send queues a draft,
+  unless the customer opted out, it is spam, a keyword, stale or the window is
+  closed. A failed triage still lets the draft run, and turns an auto-reply
+  into a handoff.
+- **Kill switches at three levels plus the environment.**
+  `messaging_settings.ai_enabled` (all AI), `ai_auto_enabled` (auto-replies),
+  `msg_channels.ai_enabled` (per channel; a chat site's channel or the number's
+  mode act per site), the number's mode, and `HELLO_MSG_AI_AUTO=false`
+  (deployment-wide, auto-replies only; helm `control.messagingAIAuto`). Every
+  switch is read again when a run starts and again in the transaction that
+  sends.
+- **Confidence thresholds and allowed intents.** The spec asked for an
+  intent list and "confidence". Triage and auto-reply both report a confidence
+  (0 to 1), and each number has a least confidence (default 0.8) and the
+  intents the AI may answer (empty = every intent but `other`). The inbox-wide
+  intent list defaults to question, sales, support, billing, appointment,
+  complaint. "Never on sensitive topics": an admin list of topics (default
+  medical, legal, emergency, self-harm, harassment, payment dispute, personal
+  data) that the triage flags as `sensitive`, which always hands off.
+- **Holding line.** Sent on every handoff (urgent, negative, sensitive, a
+  handoff word, the cap, low confidence, no FAQ, an answer the guardrails
+  refuse, an AI failure), once until a person replies, only when the number has
+  one (default empty). It is stored as a system message tied to the run.
+- **Handoff flag.** `conversations.ai_handoff_at` and its reason; the inbox
+  shows "Needs a person" until a person replies.
+- **Triage queue suggestions.** The model is given the names of the enabled
+  text queues (configuration, not customer data) so its `suggestedQueue` can be
+  checked. It is applied only on a number whose route is the new `ai_triage`
+  kind: the router waits up to 30 seconds for the first text's triage, then
+  places the conversation in the suggested queue or the route's own queue. On
+  other routes the suggestion is shown, not applied.
+- **Revert.** `POST .../conversations/{id}/ai/revert` (and `/me/...`) removes
+  the tags the AI added (still present), lowers a priority it raised (while
+  still high) and clears its spam flag; the triage stays, marked reverted.
+- **Grounding check.** An auto-reply must cite at least one of the number's
+  enabled snippets by id. Every link in it must be found, exactly, in a
+  snippet. A reply that holds a redaction placeholder is refused. The tools are
+  `lookup_faq` (word overlap over the snippets) and `handoff`; both are
+  read-only.
+- **Audit.** Turning auto-reply on or off for a number
+  (`ai_autoreply_enabled` / `_disabled`), each channel switch
+  (`ai_enabled` / `ai_disabled`), the settings (`update_ai`), FAQ create,
+  update and delete, and each AI-sent message (`ai_autoreply` by `system:ai`,
+  the message id only).
+- **MCP.** One new tool, `getInboxAIStats` (counts only, operator +
+  `messages`), taught in `hello-call-handling`. The settings, the FAQ and the
+  revert are excluded like the rest of messaging.
+- **Not verifiable without a real model.** Triage and draft quality, an
+  injection test set and redaction against real number formats are on the lab
+  list in docs/inbox.md. Every test runs against test/fakellm or go-ai-sdk's
+  mock model.

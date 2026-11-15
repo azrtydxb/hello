@@ -170,6 +170,7 @@ var NonFlowResources = map[string]string{
 	"messaging/channels":            "customer text channels of the messaging inbox, not call routing",
 	"messaging/addresses":           "numbers customers text in the messaging inbox, not call routing",
 	"messaging/chat/sites":          "website chat widgets of the messaging inbox, not call routing",
+	"messaging/faq":                 "FAQ snippets the messaging inbox AI answers customer texts from, not call routing",
 	"inbox/conversations":           "customer text conversations of the messaging inbox, not call routing",
 }
 

@@ -223,6 +223,13 @@ unavailable` in a call's trace mean a 488; a fax on a trunk with `faxMode`
   the unassigned pool, and how long the longest-waiting one has waited. It
   carries no customer text; conversations and messages are never exposed
   through MCP.
+- `getInboxAIStats` for what the inbox AI did in the last 24 hours: its runs
+  by kind (`triage`, `draft`, `autoreply`) and state (`failed` many times
+  means the AI endpoint is down or over budget), the auto-replies it sent,
+  the conversations it handed to a person, the active conversations it
+  flagged as spam, and how many numbers are in each AI mode. It carries no
+  customer text. The AI settings, the FAQ and each number's mode are
+  administrator settings in the console (Messaging, AI), not MCP tools.
 
 ## Boss and assistant
 

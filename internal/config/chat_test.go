@@ -34,3 +34,19 @@ func TestLoadChat(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadMsgAIAuto fails if the auto-reply kill switch is set by default,
+// false does not set it, or a bad value is accepted.
+func TestLoadMsgAIAuto(t *testing.T) {
+	c, err := LoadControl(env(nil))
+	if err != nil || !c.MsgAIAuto {
+		t.Fatalf("default = %v, %v", c.MsgAIAuto, err)
+	}
+	c, err = LoadControl(env(map[string]string{"HELLO_MSG_AI_AUTO": "false"}))
+	if err != nil || c.MsgAIAuto {
+		t.Fatalf("false = %v, %v", c.MsgAIAuto, err)
+	}
+	if _, err := LoadControl(env(map[string]string{"HELLO_MSG_AI_AUTO": "maybe"})); err == nil || !strings.Contains(err.Error(), "HELLO_MSG_AI_AUTO") {
+		t.Fatalf("a bad value: %v", err)
+	}
+}

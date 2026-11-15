@@ -59,7 +59,10 @@ function RoutePicker({
   errors,
   onKind,
   onTarget,
+  allowAI = true,
 }: {
+  /** Offer ai_triage (not after hours, which routes without waiting). */
+  allowAI?: boolean;
   idPrefix: string;
   label: string;
   kind: RouteKind;
@@ -88,7 +91,10 @@ function RoutePicker({
       value: String(g.id),
       label: g.name,
     })),
+    ai_triage: [],
   };
+  // The AI triage falls back to a queue of its own when it suggests none.
+  options.ai_triage = options.queue;
   return (
     <div className="cf-two">
       <Select
@@ -96,10 +102,12 @@ function RoutePicker({
         label={label}
         value={kind}
         error={errors[`${idPrefix}Kind`]}
-        options={(Object.keys(ROUTE_KIND_LABEL) as RouteKind[]).map((k) => ({
-          value: k,
-          label: ROUTE_KIND_LABEL[k],
-        }))}
+        options={(Object.keys(ROUTE_KIND_LABEL) as RouteKind[])
+          .filter((k) => allowAI || k !== "ai_triage")
+          .map((k) => ({
+            value: k,
+            label: ROUTE_KIND_LABEL[k],
+          }))}
         onChange={(e) => {
           onKind(e.target.value as RouteKind);
           onTarget("");
@@ -108,13 +116,16 @@ function RoutePicker({
       {kind !== "inbox" && (
         <Select
           id={`${idPrefix}-target`}
-          label="Which"
+          label={kind === "ai_triage" ? "Otherwise to queue" : "Which"}
           value={target}
           error={errors[`${idPrefix}Target`]}
           hint={
-            kind === "queue" && options.queue.length === 0
+            (kind === "queue" || kind === "ai_triage") &&
+            options.queue.length === 0
               ? "No queue takes texts yet: turn on texting on a queue first."
-              : undefined
+              : kind === "ai_triage"
+                ? "The router waits up to 30 seconds for the AI triage of the first text, then places the conversation in the text queue the triage suggests, or in this one. Turn the number's AI on (triage or more) in Messaging, AI."
+                : undefined
           }
           options={[{ value: "", label: "Choose…" }, ...options[kind]]}
           onChange={(e) => onTarget(e.target.value)}
@@ -386,6 +397,7 @@ export function RoutingDialog({
               )}
               {action === "route" && (
                 <RoutePicker
+                  allowAI={false}
                   idPrefix="after"
                   label="Goes to"
                   kind={ahKind}
