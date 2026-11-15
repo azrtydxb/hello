@@ -28,6 +28,9 @@ const notifyChannel = "hello_config"
 type PG struct {
 	DB  *sql.DB
 	Box *secret.Box
+	// Provisioner creates the extensions of range auto-provisioning (I-11);
+	// nil refuses a run that would provision.
+	Provisioner Provisioner
 }
 
 func credentialAAD(id int64) string { return "directory:" + strconv.FormatInt(id, 10) + ":credential" }
@@ -88,11 +91,11 @@ func scanConnector(r interface{ Scan(...any) error }) (Connector, error) {
 	if lastFull.Valid {
 		c.LastFullRunAt, c.Sync.LastFullAt = &lastFull.Time, &lastFull.Time
 	}
-	c.Config, c.AutoProvision = json.RawMessage(cfg), json.RawMessage(autoP)
+	c.Config = json.RawMessage(cfg)
 	for _, d := range []struct {
 		raw string
 		to  any
-	}{{maps, &c.Mappings}, {rules, &c.GroupRules}, {opts, &c.Options}} {
+	}{{maps, &c.Mappings}, {rules, &c.GroupRules}, {opts, &c.Options}, {autoP, &c.AutoProvision}} {
 		if err := json.Unmarshal([]byte(d.raw), d.to); err != nil {
 			return c, err
 		}
@@ -159,7 +162,7 @@ func (p *PG) SaveConnector(ctx context.Context, actor string, c Connector, secre
 				INSERT INTO directory_connectors (kind, name, enabled, mode, schedule_minutes, config, mappings, group_rules, options, auto_provision)
 				VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb) RETURNING id`,
 				c.Kind, c.Name, c.Enabled, c.Mode, c.ScheduleMinutes, string(c.Config), jsonOf(c.Mappings), jsonOf(c.GroupRules),
-				jsonOf(c.Options), string(c.AutoProvision)).Scan(&id); err != nil {
+				jsonOf(c.Options), jsonOf(c.AutoProvision)).Scan(&id); err != nil {
 				return err
 			}
 			if err := audit(ctx, tx, actor, "create", "directory_connector", strconv.FormatInt(id, 10)); err != nil {
@@ -175,7 +178,7 @@ func (p *PG) SaveConnector(ctx context.Context, actor string, c Connector, secre
 					mappings = $7::jsonb, group_rules = $8::jsonb, options = $9::jsonb, auto_provision = $10::jsonb, updated_at = now()
 				WHERE id = $1`,
 				id, c.Name, c.Enabled, c.Mode, c.ScheduleMinutes, string(c.Config), jsonOf(c.Mappings), jsonOf(c.GroupRules),
-				jsonOf(c.Options), string(c.AutoProvision)); err != nil {
+				jsonOf(c.Options), jsonOf(c.AutoProvision)); err != nil {
 				return err
 			}
 			if err := audit(ctx, tx, actor, "update", "directory_connector", strconv.FormatInt(id, 10)); err != nil {
@@ -497,7 +500,7 @@ func (p *PG) LoadState(ctx context.Context, connectorID int64) (State, error) {
 	st := State{Exts: map[string]LocalExt{}, RingGroups: map[int64]bool{}}
 	rows, err := p.DB.QueryContext(ctx, `
 		SELECT id, username, email, display_name, role, enabled, coalesce(source_connector_id, 0), coalesce(external_id, ''),
-			disabled_at IS NOT NULL, absent_runs, to_json(managed_fields)::text, break_glass
+			disabled_at IS NOT NULL, absent_runs, to_json(managed_fields)::text, coalesce(provisioned_number, ''), break_glass
 		FROM users ORDER BY id`)
 	if err != nil {
 		return st, err
@@ -509,7 +512,7 @@ func (p *PG) LoadState(ctx context.Context, connectorID int64) (State, error) {
 			managed string
 		)
 		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.DisplayName, &u.Role, &u.Enabled, &u.ConnectorID, &u.ExternalID,
-			&u.DisabledByDirectory, &u.AbsentRuns, &managed, &u.BreakGlass); err != nil {
+			&u.DisabledByDirectory, &u.AbsentRuns, &managed, &u.ProvisionedNumber, &u.BreakGlass); err != nil {
 			_ = rows.Close()
 			return st, err
 		}
@@ -602,7 +605,40 @@ func (p *PG) LoadState(ctx context.Context, connectorID int64) (State, error) {
 		}
 		st.RingGroups[g] = true
 	}
-	return st, gs.Close()
+	if err := gs.Close(); err != nil {
+		return st, err
+	}
+	return st, p.loadTaken(ctx, connectorID, &st)
+}
+
+// loadTaken fills State.Taken with the numbers of the connector's range that
+// the dial space claims, when auto-provisioning is on.
+func (p *PG) loadTaken(ctx context.Context, connectorID int64, st *State) error {
+	st.Taken = map[string]bool{}
+	if p.Provisioner == nil {
+		return nil
+	}
+	c, err := p.GetConnector(ctx, connectorID)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !c.AutoProvision.active() {
+		return nil
+	}
+	tx, err := p.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	taken, err := p.Provisioner.Taken(ctx, tx, c.AutoProvision.RangeStart, c.AutoProvision.RangeEnd)
+	if err != nil {
+		return err
+	}
+	st.Taken = taken
+	return nil
 }
 
 // PruneChanges implements Store: old changes, and finished runs past the
@@ -647,15 +683,19 @@ func (p *PG) TryLock(ctx context.Context, key string) (func(), bool, error) {
 
 func itoa64(id int64) string { return strconv.FormatInt(id, 10) }
 
-func (o Op) touchesConfig() bool {
-	return len(o.RingAdd)+len(o.RingRemove) > 0 || o.SetExtension || (o.Devices && (o.Kind == ActionDisable || o.Kind == ActionEnable))
+func (o Op) touchesConfig(c Connector) bool {
+	return len(o.RingAdd)+len(o.RingRemove) > 0 || o.SetExtension || o.Provision != nil ||
+		(o.Devices && (o.Kind == ActionDisable || o.Kind == ActionEnable)) ||
+		(c.AutoProvision.Enabled && o.Kind == ActionUpdate && (o.Display != nil || o.Email != nil))
 }
 
 // Apply implements Store: one operation, in one transaction, audited as the
 // connector (one row per user-level change, never per field, never a value).
-func (p *PG) Apply(ctx context.Context, actor string, c Connector, op Op) error {
-	return p.tx(ctx, func(tx *sql.Tx) error {
-		if op.touchesConfig() {
+func (p *PG) Apply(ctx context.Context, actor string, c Connector, op Op) (Applied, error) {
+	var got Applied
+	err := p.tx(ctx, func(tx *sql.Tx) error {
+		got = Applied{}
+		if op.touchesConfig(c) {
 			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(configLockKey)); err != nil {
 				return err
 			}
@@ -664,9 +704,9 @@ func (p *PG) Apply(ctx context.Context, actor string, c Connector, op Op) error 
 		var err error
 		switch op.Kind {
 		case ActionCreate:
-			bump, err = p.create(ctx, tx, actor, c, op)
+			bump, err = p.create(ctx, tx, actor, c, op, &got)
 		case ActionUpdate, ActionAdopt:
-			bump, err = p.update(ctx, tx, actor, c, op)
+			bump, err = p.update(ctx, tx, actor, c, op, &got)
 		case ActionDisable:
 			bump, err = p.disable(ctx, tx, actor, op)
 		case ActionEnable:
@@ -689,6 +729,64 @@ func (p *PG) Apply(ctx context.Context, actor string, c Connector, op Op) error 
 		}
 		return nil
 	})
+	return got, err
+}
+
+// provision allocates and creates the user's extension through the
+// Provisioner (inside tx, under the configuration lock), keeps the number on
+// the user so a re-run never renumbers, and turns op into a link of it.
+func (p *PG) provision(ctx context.Context, tx *sql.Tx, actor string, c Connector, userID int64, op *Op, got *Applied) error {
+	if op.Provision == nil {
+		return nil
+	}
+	if p.Provisioner == nil {
+		return errors.New("directory: auto-provisioning is not available on this node")
+	}
+	pr := op.Provision
+	res, err := p.Provisioner.Provision(ctx, tx, actor, ProvisionRequest{ConnectorID: c.ID, Preferred: pr.Preferred,
+		RangeStart: pr.Range.RangeStart, RangeEnd: pr.Range.RangeEnd, Name: ExtensionName(pr.Name, ""), Email: pr.Email,
+		Voicemail: pr.Range.Voicemail, Device: pr.Range.Device})
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET provisioned_number = $2 WHERE id = $1`, userID, res.Number); err != nil {
+		return err
+	}
+	op.Extension, op.SetExtension = res.ExtensionID, true
+	got.Extension = res.Number
+	return audit(ctx, tx, actor, "provision", "user", itoa64(userID))
+}
+
+// followUser keeps the extension auto-provisioning created for the user in
+// step with it while provisioning is on: its name follows the display name and
+// its voicemail email follows the email, each only while it still has the
+// value provisioning gave it (an administrator's own edit wins).
+func (p *PG) followUser(ctx context.Context, tx *sql.Tx, c Connector, userID int64, op Op, oldName, oldEmail string) (bool, error) {
+	if !c.AutoProvision.Enabled || (op.Display == nil && op.Email == nil) {
+		return false, nil
+	}
+	const owned = `SELECT e.id FROM extensions e JOIN user_extensions ue ON ue.extension_id = e.id
+		WHERE ue.user_id = $1 AND ue.source_connector_id = $2 AND e.provisioned_by = $2`
+	bump := false
+	if op.Display != nil && *op.Display != "" && *op.Display != oldName {
+		res, err := tx.ExecContext(ctx, `UPDATE extensions SET name = $3, updated_at = now()
+			WHERE id IN (`+owned+`) AND name = $4`, userID, c.ID, ExtensionName(*op.Display, ""), ExtensionName(oldName, ""))
+		if err != nil {
+			return false, err
+		}
+		n, _ := res.RowsAffected()
+		bump = n > 0
+	}
+	if op.Email != nil && *op.Email != oldEmail {
+		res, err := tx.ExecContext(ctx, `UPDATE voicemail_boxes SET email = $3, updated_at = now()
+			WHERE extension_id IN (`+owned+`) AND email = $4`, userID, c.ID, *op.Email, oldEmail)
+		if err != nil {
+			return false, err
+		}
+		n, _ := res.RowsAffected()
+		bump = bump || n > 0
+	}
+	return bump, nil
 }
 
 func nonNilStrings(s []string) []string {
@@ -707,7 +805,7 @@ func bumpRevision(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-func (p *PG) create(ctx context.Context, tx *sql.Tx, actor string, c Connector, op Op) (bool, error) {
+func (p *PG) create(ctx context.Context, tx *sql.Tx, actor string, c Connector, op Op, got *Applied) (bool, error) {
 	if op.Username == nil || op.Role == nil {
 		return false, errors.New("directory: create without username or role")
 	}
@@ -730,11 +828,13 @@ func (p *PG) create(ctx context.Context, tx *sql.Tx, actor string, c Connector, 
 		*op.Username, *op.Role, display, email, c.ID, op.ExternalID, jsonOf(nonNilStrings(op.Managed))).Scan(&id); err != nil {
 		return false, err
 	}
-	bump, err := p.extAndRings(ctx, tx, c, id, op)
-	if err != nil {
+	if err := audit(ctx, tx, actor, "create", "user", itoa64(id)); err != nil {
 		return false, err
 	}
-	return bump, audit(ctx, tx, actor, "create", "user", itoa64(id))
+	if err := p.provision(ctx, tx, actor, c, id, &op, got); err != nil {
+		return false, err
+	}
+	return p.extAndRings(ctx, tx, c, id, op)
 }
 
 // lockAdmins locks every enabled admin row and counts them, like the store's.
@@ -751,18 +851,18 @@ func lockAdmins(ctx context.Context, tx *sql.Tx) (int, error) {
 	return n, rows.Err()
 }
 
-func (p *PG) update(ctx context.Context, tx *sql.Tx, actor string, c Connector, op Op) (bool, error) {
+func (p *PG) update(ctx context.Context, tx *sql.Tx, actor string, c Connector, op Op, got *Applied) (bool, error) {
 	admins, err := lockAdmins(ctx, tx)
 	if err != nil {
 		return false, err
 	}
 	var (
-		role       string
-		enabled    bool
-		src        sql.NullInt64
-		breakGlass bool
+		role, oldName, oldEmail string
+		enabled, breakGlass     bool
+		src                     sql.NullInt64
 	)
-	if err := tx.QueryRowContext(ctx, `SELECT role, enabled, source_connector_id, break_glass FROM users WHERE id = $1 FOR UPDATE`, op.UserID).Scan(&role, &enabled, &src, &breakGlass); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT role, enabled, source_connector_id, CASE WHEN display_name <> '' THEN display_name ELSE username END, email, break_glass
+		FROM users WHERE id = $1 FOR UPDATE`, op.UserID).Scan(&role, &enabled, &src, &oldName, &oldEmail, &breakGlass); err != nil {
 		return false, mapErr(err)
 	}
 	if breakGlass {
@@ -799,11 +899,21 @@ func (p *PG) update(ctx context.Context, tx *sql.Tx, actor string, c Connector, 
 		op.Kind == ActionAdopt, c.ID, op.ExternalID); err != nil {
 		return false, err
 	}
+	if err := audit(ctx, tx, actor, op.Kind, "user", itoa64(op.UserID)); err != nil {
+		return false, err
+	}
+	followed, err := p.followUser(ctx, tx, c, op.UserID, op, oldName, oldEmail)
+	if err != nil {
+		return false, err
+	}
+	if err := p.provision(ctx, tx, actor, c, op.UserID, &op, got); err != nil {
+		return false, err
+	}
 	bump, err := p.extAndRings(ctx, tx, c, op.UserID, op)
 	if err != nil {
 		return false, err
 	}
-	return bump, audit(ctx, tx, actor, op.Kind, "user", itoa64(op.UserID))
+	return bump || followed, nil
 }
 
 // extAndRings links the user's synced extension and brings its synced

@@ -17,7 +17,7 @@ const site = (over: Record<string, unknown> = {}) => ({
   addressId: 11,
   name: "Help desk",
   enabled: true,
-  siteKey: "0123456789abcdef01234567",
+  siteKey: "0123456789abcdef01234567", // gitleaks:allow (a public chat site key, not a secret)
   allowedOrigins: ["https://intranet.lan"],
   greeting: "Hi!",
   accent: "#2563eb",
@@ -96,11 +96,12 @@ describe("Chat sites", () => {
         challenge: "pow",
         powBits: 16,
         collect: "off",
-        hours: { zone: "", days: [] },
         maxOpenUnassigned: 200,
         retentionDays: 0,
       });
       expect(post?.body).not.toHaveProperty("turnstileSecret");
+      // The hours are the site's routing schedule, edited there.
+      expect(post?.body).not.toHaveProperty("hours");
     });
   });
 
@@ -247,5 +248,110 @@ describe("Chat sites", () => {
     expect(
       await screen.findByText(/the site has 3 conversations/),
     ).toBeInTheDocument();
+  });
+
+  it("shows whether each widget takes live chats now, and why not", async () => {
+    api({
+      "GET /api/v1/messaging/chat/sites": () =>
+        json({
+          items: [
+            site({ availability: { online: true } }),
+            site({
+              id: 5,
+              name: "Sales",
+              availability: { online: false, reason: "no_agent" },
+            }),
+            site({
+              id: 6,
+              name: "Night",
+              availability: { online: false, reason: "hours" },
+            }),
+            site({ id: 7, name: "Old", enabled: false }),
+          ],
+        }),
+    });
+    renderApp("/messaging/chat");
+    const table = await screen.findByRole("table", { name: "Chat sites" });
+    expect(within(table).getByText("Live")).toBeInTheDocument();
+    expect(
+      within(table).getByText("Offline (nobody available)"),
+    ).toBeInTheDocument();
+    expect(
+      within(table).getByText("Closed (outside the hours)"),
+    ).toBeInTheDocument();
+    expect(within(table).getByText("Off")).toBeInTheDocument();
+  });
+
+  it("routes a site to a queue and sets its hours in the routing", async () => {
+    const routing = {
+      addressId: 11,
+      routeKind: "inbox",
+      routeTarget: "",
+      routeName: "",
+      schedule: { zone: "", days: [] },
+      afterHours: {
+        action: "none",
+        text: "",
+        routeKind: "inbox",
+        routeTarget: "",
+        routeName: "",
+      },
+      firstContactText: "",
+    };
+    const calls = api({
+      "GET /api/v1/messaging/addresses/11/routing": () => json(routing),
+      "PUT /api/v1/messaging/addresses/11/routing": () =>
+        json({ ...routing, routeKind: "queue", routeTarget: "7" }),
+      "GET /api/v1/queues": () =>
+        json({
+          items: [
+            { id: 7, name: "support", textEnabled: true },
+            { id: 8, name: "voiceonly", textEnabled: false },
+          ],
+        }),
+      "GET /api/v1/me/inbox/agents": () => json({ items: [] }),
+      "GET /api/v1/extensions": () => json({ items: [] }),
+      "GET /api/v1/ring-groups": () => json({ items: [] }),
+    });
+    renderApp("/messaging/chat");
+    await screen.findByRole("table", { name: "Chat sites" });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Routing and hours of Help desk" }),
+    );
+    expect(
+      await screen.findByRole("dialog", {
+        name: "Routing and hours of Help desk",
+      }),
+    ).toBeInTheDocument();
+    fireEvent.change(await screen.findByLabelText("New conversations go to"), {
+      target: { value: "queue" },
+    });
+    fireEvent.change(await screen.findByLabelText("Which"), {
+      target: { value: "7" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add a window" }));
+    fireEvent.change(screen.getByLabelText("Time zone"), {
+      target: { value: "Europe/Brussels" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save routing" }));
+    await waitFor(() =>
+      expect(
+        calls.find(
+          (c) =>
+            c.method === "PUT" &&
+            c.url === "/api/v1/messaging/addresses/11/routing",
+        )?.body,
+      ).toMatchObject({
+        routeKind: "queue",
+        routeTarget: "7",
+        schedule: {
+          zone: "Europe/Brussels",
+          days: [{ day: 1, from: "09:00", to: "17:00" }],
+        },
+      }),
+    );
+    expect(
+      await screen.findByText("Routing of Help desk saved."),
+    ).toBeVisible();
   });
 });

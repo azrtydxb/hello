@@ -14,12 +14,14 @@ type Metrics struct {
 	Changes     *prometheus.CounterVec
 	Conflicts   *prometheus.GaugeVec
 	LastSuccess *prometheus.GaugeVec
+	Provisioned *prometheus.CounterVec
 }
 
 // NewMetrics registers hello_directory_sync_runs_total{kind,result},
 // hello_directory_sync_duration_seconds{kind},
 // hello_directory_changes_total{kind,action}, hello_directory_conflicts{connector_kind}
-// and hello_directory_last_success_timestamp_seconds{connector} on reg.
+// hello_directory_last_success_timestamp_seconds{connector} and
+// hello_directory_provisioned_total{connector_kind} on reg.
 func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
 		Runs: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -33,8 +35,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "hello_directory_conflicts", Help: "Conflicts of the latest directory run, by connector kind."}, []string{"connector_kind"}),
 		LastSuccess: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "hello_directory_last_success_timestamp_seconds", Help: "Unix time of a connector's last successful run."}, []string{"connector"}),
+		Provisioned: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "hello_directory_provisioned_total", Help: "Extensions created by range auto-provisioning, by connector kind."}, []string{"connector_kind"}),
 	}
-	reg.MustRegister(m.Runs, m.Seconds, m.Changes, m.Conflicts, m.LastSuccess)
+	reg.MustRegister(m.Runs, m.Seconds, m.Changes, m.Conflicts, m.LastSuccess, m.Provisioned)
 	return m
 }
 
@@ -66,5 +70,11 @@ func (m *Metrics) conflicts(connectorKind string, n int) {
 func (m *Metrics) success(id int64, unix float64) {
 	if m != nil {
 		m.LastSuccess.WithLabelValues(strconv.FormatInt(id, 10)).Set(unix)
+	}
+}
+
+func (m *Metrics) provisioned(connectorKind string) {
+	if m != nil {
+		m.Provisioned.WithLabelValues(connectorKind).Inc()
 	}
 }

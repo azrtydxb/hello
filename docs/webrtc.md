@@ -114,7 +114,9 @@ life. `HELLO_TURN_URLS` (comma separated `turn:`/`turns:` URIs; the chart
 builds them from `coturn.servers`), `HELLO_STUN_URLS` (default: the plain
 `turn:` hosts as `stun:`), `HELLO_TURN_SECRET` and `HELLO_TURN_TTL` (default
 1h) configure it. With no server configured it answers 503. Issuing is
-counted in `hello_ice_credentials_issued_total`, not logged per credential.
+counted in `hello_turn_credentials_issued_total` (each answer that carries a
+TURN credential, from this route and from an enrolment), not logged per
+credential.
 
 ## SIP over WSS on Kamailio
 
@@ -491,6 +493,87 @@ Video recording has its own settings (`HELLO_RECORDING_VIDEO*`,
 `hello_video_dropped_packets_total{reason}` and
 `hello_video_negotiation_failures_total{reason}` (`no_common_codec`,
 `not_allowed`, `over_limit`, `peer_cannot`, `disabled`).
+
+## Clients diagnostics and metrics
+
+**Diagnostics, Clients tab.** `GET /api/v1/webrtc/status` (viewer, scope
+`read`; MCP tool `getWebRTCStatus` and resource `hello://webrtc/status`)
+answers what the tab shows:
+
+- Web and mobile devices enrolled and registered, by kind; client bindings by
+  transport (WSS, WS, TLS, TCP, UDP); desk phones registered for comparison.
+- The live WebRTC legs of every hello-sip node: the call (caller leg's
+  Call-ID, with its parties when it is listed live), caller or callee side,
+  ICE `checking`/`connected`/`failed` with restarts, DTLS
+  `new`/`connecting`/`connected`/`failed` with the reason and the handshake
+  time, the address ICE selected, video, and the packets that failed SRTP
+  authentication. A leg whose selected address is a TURN server's is marked
+  TURN (relayed). Each node publishes its legs (at most 100), its last 20 ICE
+  and DTLS failures and its counters to Valkey every 10 s under
+  `hello:webrtc:node:<id>` with a 30 s TTL, so a node that stops drops out.
+- TURN: whether credentials are handed out, the credential life, and a check
+  of each `HELLO_TURN_URLS` address from hello-control: a STUN Binding request
+  over UDP or TCP (coturn answers it without credentials), a TCP connection for
+  a `turns:` address (its certificate may come from a private CA). A check is
+  reused for 30 s, so a polling page does not repeat it.
+- Push: not configured (the push gateway comes with the mobile apps).
+- ICE candidate types from the clients' end-of-call reports over the last 24
+  hours, for the client's side and Hello's side, and how many calls were
+  relayed.
+- REGISTER failures of client devices in the last hour (the first 401
+  challenge is normal and not listed), each with a link to the device on the
+  Registrations tab, and one list of the last REGISTER, ICE and DTLS errors.
+
+A source that cannot be read (the database, Valkey) is named in
+`unavailable` and its part stays empty; the rest still shows. The answer
+carries no credential or secret.
+
+**Metrics** (labels are words from fixed lists, never ids):
+
+| Series                                      | Where         | Meaning                                                                                                                                                   |
+| ------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hello_client_registrations{kind}`          | hello-sip     | Bindings last registered through this node by device kind (`desk`, `web`, `mobile`); sum over nodes for the cluster                                       |
+| `hello_client_auth_failures_total{reason}`  | hello-sip     | Failed authentications of web and mobile devices: `expired`, `username`, `credentials`, `unknown_device` (revoked or deleted), `throttled`                |
+| `hello_client_devices{kind}`                | hello-control | Enabled web and mobile devices (`web`, `mobile`); every replica reports the same value                                                                    |
+| `hello_webrtc_legs`                         | hello-sip     | Live WebRTC legs on this node                                                                                                                             |
+| `hello_webrtc_ice_state_total{state}`       | hello-sip     | Legs reaching `connected` (first authenticated check), `restarted` (new remote ufrag) or `failed` (no check before the DTLS handshake gave up or the end) |
+| `hello_webrtc_dtls_handshake_seconds`       | hello-sip     | Duration of successful DTLS-SRTP handshakes on WebRTC legs (histogram)                                                                                    |
+| `hello_webrtc_dtls_failures_total{reason}`  | hello-sip     | Failed handshakes on WebRTC legs: `timeout`, `fingerprint`, `failed`                                                                                      |
+| `hello_srtp_auth_failures_total{direction}` | hello-sip     | Inbound packets of any encrypted leg that failed SRTP authentication, by the side they came from: `from_caller`, `from_callee`                            |
+| `hello_webrtc_candidate_type_total{type}`   | hello-control | Client end-of-call reports by the client's own candidate type: `host`, `srflx`, `prflx`, `relay`, `unknown`                                               |
+| `hello_turn_credentials_issued_total`       | hello-control | TURN credentials handed out                                                                                                                               |
+
+The video series are in [Settings and series](#settings-and-series); the push
+series come with the push gateway (not built). An ICE failure is counted when
+a leg's DTLS handshake fails without an authenticated check, or when a call
+ends with no check at least 5 s after its DTLS session started; a browser
+fork that lost to another answer is not a failure.
+
+**Alerts** (PromQL; tune the windows to the deployment):
+
+```yaml
+- alert: HelloWebRTCDTLSFailures
+  # More than 5% of WebRTC DTLS handshakes fail.
+  expr: |
+    sum(rate(hello_webrtc_dtls_failures_total[15m]))
+      / (sum(rate(hello_webrtc_dtls_failures_total[15m])) + sum(rate(hello_webrtc_dtls_handshake_seconds_count[15m]))) > 0.05
+  for: 15m
+- alert: HelloNoWebClientRegistered
+  # Web devices are enrolled but none is registered (WSS edge down?).
+  expr: max(hello_client_devices{kind="web"}) > 0 and sum(hello_client_registrations{kind="web"}) == 0
+  for: 15m
+- alert: HelloCoturnDown
+  # No coturn pod is ready (kube-state-metrics).
+  expr: sum(kube_pod_status_ready{namespace="hello", pod=~"coturn.*", condition="true"}) == 0
+  for: 5m
+- alert: HelloClientAuthFailures
+  # Clients keep failing to authenticate (stale credentials after a key change, revoked devices).
+  expr: sum(rate(hello_client_auth_failures_total[15m])) > 0.1
+  for: 30m
+```
+
+The push alerts of the spec (wake p95, provider errors) come with the push
+gateway; the video recording alerts are in [media.md](media.md).
 
 ### Tests
 

@@ -18,9 +18,9 @@ import (
 // contact without a subscription gets no unsolicited NOTIFY (and one with a
 // subscription gets two).
 func TestMessageSummarySubscribe(t *testing.T) {
-	old := mwiPollInterval
-	mwiPollInterval = 50 * time.Millisecond
-	t.Cleanup(func() { mwiPollInterval = old })
+	old := mwiPollInterval.Get()
+	mwiPollInterval.Set(50 * time.Millisecond)
+	t.Cleanup(func() { mwiPollInterval.Set(old) })
 
 	vm := newVMStore()
 	vm.boxes["200"] = VoicemailBox{ID: 5, Extension: "200"}

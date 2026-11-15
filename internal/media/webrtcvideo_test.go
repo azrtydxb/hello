@@ -649,12 +649,19 @@ func TestVideoCapEnforced(t *testing.T) {
 	c := newVideoCall(t, true)
 	c.r.SetVideoCap(200) // 200 kbit/s: 25 kB/s
 	c.connect(t)
+	start := time.Now()
 	for i := 0; i < 120; i++ {
 		c.a.sendRTP(videoPacket(98, uint16(i), uint32(i)*3000, 5, bytes.Repeat([]byte{1}, 1000)))
 	}
+	// The bucket holds one second (25 kB) and refills at 25 kB/s for as long
+	// as the relay takes to read the burst, which is not fixed on a loaded
+	// machine: the bound follows the time that really passed up to the
+	// read, not a constant.
 	waitFor(t, "drops above the ceiling", func() bool { return c.r.VideoStats().DroppedCap > 0 })
-	if st := c.r.VideoStats(); st.Packets > 40 {
-		t.Errorf("relayed %d kB in a burst, the ceiling is 25 kB per second", st.Packets)
+	st := c.r.VideoStats()
+	elapsed := time.Since(start)
+	if most := uint64((1+elapsed.Seconds())*25) + 1; st.Packets > most {
+		t.Errorf("relayed %d kB in %v, the ceiling is 25 kB per second (at most %d)", st.Packets, elapsed, most)
 	}
 	rb, ok := c.a.nextFeedback(4*time.Second, func(p rtcp.Packet) bool { _, ok := p.(*rtcp.ReceiverEstimatedMaximumBitrate); return ok })
 	if !ok {

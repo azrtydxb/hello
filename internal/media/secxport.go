@@ -168,6 +168,9 @@ func (s *Secure) stunIn(x *xport, data []byte, from *net.UDPAddr) {
 	x.readyLocked()
 	cb := x.onICE
 	x.mu.Unlock()
+	if first {
+		s.notify(watchICE, "connected", 0)
+	}
 	if cb != nil {
 		cb(addr, nominate || first)
 	}
@@ -285,8 +288,15 @@ func (s *Secure) iceRemote(info *ICEInfo) {
 	if x.ice == nil {
 		return
 	}
-	if x.ice.setRemote(info.Ufrag) {
-		x.verified = false
+	changed, had := x.ice.setRemote(info.Ufrag)
+	if !changed {
+		return
+	}
+	x.verified = false
+	if had {
+		s.notify(watchICE, "restarted", 0)
+	} else {
+		s.notify(watchICE, "offered", 0)
 	}
 }
 
@@ -450,6 +460,7 @@ func (s *Secure) replaceSession(x *xport, ds *dtlsSession, client bool, want []F
 	if old != nil && old != ds {
 		old.close()
 	}
+	s.notify(watchDTLS, "started", 0)
 	go s.runDTLS(x, ds, client)
 }
 
@@ -496,6 +507,7 @@ func (s *Secure) runDTLS(x *xport, ds *dtlsSession, client bool) {
 			reason = "timeout"
 		}
 		noteDTLS(reason, time.Since(start))
+		s.notify(watchDTLS, reason, time.Since(start))
 		s.dtlsFailed(x, ds, reason)
 		if conn != nil {
 			_ = conn.Close()
@@ -506,6 +518,7 @@ func (s *Secure) runDTLS(x *xport, ds *dtlsSession, client bool) {
 	prof, ok2 := conn.SelectedSRTPProtectionProfile()
 	if !ok || !ok2 {
 		noteDTLS("failed", time.Since(start))
+		s.notify(watchDTLS, "failed", time.Since(start))
 		s.dtlsFailed(x, ds, "failed")
 		_ = conn.Close()
 		return
@@ -514,12 +527,14 @@ func (s *Secure) runDTLS(x *xport, ds *dtlsSession, client bool) {
 	if err != nil || !s.installDTLS(x, ds, local, remote) {
 		if ds.ctx.Err() == nil {
 			noteDTLS("failed", time.Since(start))
+			s.notify(watchDTLS, "failed", time.Since(start))
 			s.dtlsFailed(x, ds, "failed")
 		}
 		_ = conn.Close()
 		return
 	}
 	noteDTLS("ok", time.Since(start))
+	s.notify(watchDTLS, "ok", time.Since(start))
 	x.mu.Lock()
 	ready := x.onReady
 	x.mu.Unlock()

@@ -50,7 +50,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | P9  | Google Workspace and Entra connectors          | wip (#358)        |
 | P10 | SCIM 2.0                                       | todo              |
 | P11 | OIDC SSO, LDAP bind login                      | wip (#358)        |
-| P12 | Auto-provisioning extensions from a range      | todo              |
+| P12 | Auto-provisioning extensions from a range      | wip (#353)        |
 | P13 | Salesforce Open CTI                            | done (#331)       |
 | P14 | Pipedrive                                      | done (#329)       |
 | P15 | Zoho CRM                                       | done (#329)       |
@@ -72,28 +72,29 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 4     | LAN chat widget                                     | done (#309)       |
 | 5     | Message routing and ACD                             | done (#311)       |
 | 6     | Telnyx, sender registration                         | done (#346)       |
+| W     | Wiring between items 2 to 6, one schedule           | wip (#352)        |
 | 7     | AI triage, drafts, auto-reply                       | todo              |
 | 8     | Integrations, reporting, DSAR export, redact        | todo              |
 | N1-N3 | Public listener, WhatsApp, polling                  | not now           |
 
 ## clients-webrtc-mobile-video
 
-| #   | Item                                        | Status                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| --- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Media foundation (pion)                     | done (#324, #341)                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| 2   | WSS on Kamailio                             | done (#326)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 2b  | Kamailio to hello-sip TLS hop (S-12)        | done (#340)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 2c  | Browsers on kw: WSS, TLS hop, WebRTC media  | done (#334)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 3   | Web devices and credentials                 | partial (#282, #343): the Diagnostics "Clients" tab, `GET /api/v1/webrtc/status` and the S-52 client metrics (`hello_client_registrations`, `hello_client_auth_failures_total`, `hello_webrtc_legs`, `hello_webrtc_ice_state_total`, `hello_webrtc_dtls_handshake_seconds`, `hello_webrtc_dtls_failures_total`, `hello_srtp_auth_failures_total`, `hello_webrtc_candidate_type_total`, `hello_turn_credentials_issued_total`) are not built |
-| 4   | coturn, ICE servers                         | done (#282, #334)                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| 5   | Web softphone, audio                        | done (#343)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 6   | Web video                                   | done (#343)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 6b  | Video recording                             | done (#344)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 10  | Video phones and door stations              | done (#344)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 11  | Conference-room video                       | done (#344)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 13  | Teams SBC-peer trunk profile, docs/teams.md | done (#326)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 7-9 | Push gateway, mobile apps, mobile video     | not now                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| 12  | Public reach                                | not now                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| #   | Item                                        | Status            |
+| --- | ------------------------------------------- | ----------------- |
+| 1   | Media foundation (pion)                     | done (#324, #341) |
+| 2   | WSS on Kamailio                             | done (#326)       |
+| 2b  | Kamailio to hello-sip TLS hop (S-12)        | done (#340)       |
+| 2c  | Browsers on kw: WSS, TLS hop, WebRTC media  | done (#334)       |
+| 3   | Web devices and credentials                 | wip (#354)        |
+| 4   | coturn, ICE servers                         | done (#282, #334) |
+| 5   | Web softphone, audio                        | done (#343)       |
+| 6   | Web video                                   | done (#343)       |
+| 6b  | Video recording                             | done (#344)       |
+| 10  | Video phones and door stations              | done (#344)       |
+| 11  | Conference-room video                       | done (#344)       |
+| 13  | Teams SBC-peer trunk profile, docs/teams.md | done (#326)       |
+| 7-9 | Push gateway, mobile apps, mobile video     | not now           |
+| 12  | Public reach                                | not now           |
 
 ## flow-canvas
 
@@ -137,7 +138,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                                                                                      | Status             |
 | --------------------------------------------------------------------------------------------------------- | ------------------ |
-| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-abdf747) |
+| Deploy main to kw (#203, #213, #214, #218, #221, #227, #231; flow canvas editing, batch backend)          | done (sha-7545599) |
 | MCP skills, JSON bodies                                                                                   | done (#189)        |
 | Ring-group voicemail box                                                                                  | done (#194)        |
 | Transfer-to-voicemail phone key                                                                           | done (#200)        |

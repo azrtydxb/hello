@@ -30,6 +30,7 @@ var resources = []resourceDef{
 	{"hello://cdrs/recent", "cdrs-recent", "Recent calls", "The last 50 call detail records.", "listCDRs", "/api/v1/cdrs", url.Values{"limit": {"50"}}},
 	{"hello://trunks/status", "trunks-status", "Trunk status", "Each trunk's registration and reachability.", "listTrunkStatus", "/api/v1/trunks/status", nil},
 	{"hello://cluster", "cluster", "Cluster", "The cluster's nodes, leases and health.", "getCluster", "/api/v1/cluster", nil},
+	{"hello://webrtc/status", "webrtc-status", "Clients and WebRTC", "Web and mobile clients, their WebRTC legs (ICE, DTLS, TURN) and recent client errors.", "getWebRTCStatus", "/api/v1/webrtc/status", nil},
 }
 
 // templates are the resource templates; {id} is the last path segment.

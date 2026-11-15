@@ -606,6 +606,7 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/diagnostics/devices/{id}", auth.ScopeRead, auth.RoleViewer, false, s.deviceDiagnostics},
 		{"GET", "/api/v1/diagnostics/auth-failures", auth.ScopeRead, auth.RoleViewer, false, s.listAuthFailures},
 		{"DELETE", "/api/v1/diagnostics/auth-failures/{ip}", auth.ScopeWrite, auth.RoleOperator, false, s.clearAuthFailures},
+		{"GET", "/api/v1/webrtc/status", auth.ScopeRead, auth.RoleViewer, false, s.getWebRTCStatus},
 
 		// External AI access (spec ai-external-access). The rows are fixed
 		// here; each stream replaces s.pending with its handler.
@@ -653,6 +654,7 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/directory/oauth/callback", "", "", true, s.directoryConsentCallback},
 		{"POST", "/api/v1/directory/connectors/{id}/sync", auth.ScopeAdmin, auth.RoleAdmin, false, s.syncDirectoryConnector},
 		{"GET", "/api/v1/directory/connectors/{id}/runs", auth.ScopeAdmin, auth.RoleAdmin, false, s.listDirectoryRuns},
+		{"GET", "/api/v1/directory/connectors/{id}/range", auth.ScopeAdmin, auth.RoleAdmin, false, s.getDirectoryRange},
 		{"GET", "/api/v1/directory/runs/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getDirectoryRun},
 		{"GET", "/api/v1/directory/runs/{id}/changes", auth.ScopeAdmin, auth.RoleAdmin, false, s.listDirectoryChanges},
 		{"POST", "/api/v1/directory/runs/{id}/apply", auth.ScopeAdmin, auth.RoleAdmin, false, s.applyDirectoryRun},

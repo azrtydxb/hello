@@ -3668,9 +3668,17 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["name", "description", "defaults", "limits"],
+                        "required": [
+                          "name",
+                          "description",
+                          "defaults",
+                          "limits"
+                        ],
                         "properties": {
-                          "name": { "type": "string", "enum": ["generic", "sbc-peer"] },
+                          "name": {
+                            "type": "string",
+                            "enum": ["generic", "sbc-peer"]
+                          },
                           "description": { "type": "string" },
                           "defaults": {
                             "type": "object",
@@ -9266,6 +9274,38 @@
         },
         "x-hello-scope": "write",
         "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/webrtc/status": {
+      "get": {
+        "operationId": "getWebRTCStatus",
+        "summary": "Web and mobile clients and their WebRTC media",
+        "description": "Returns the state of the browser (and later mobile) clients for the Diagnostics Clients tab: registered clients by kind and transport, the live WebRTC legs of every hello-sip node with their ICE and DTLS state and whether TURN relays them, each TURN server's reachability, push health, the ICE candidate types clients reported in the last 24 hours, refused REGISTERs of client devices, and the last register, ICE and DTLS errors. A source that cannot be read is listed in unavailable and its part is empty. Contains no credential or secret.",
+        "tags": ["diagnostics"],
+        "responses": {
+          "200": {
+            "description": "The status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebRTCStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
         "x-hello-mcp": true
       }
     },
@@ -17175,7 +17215,7 @@
       "get": {
         "operationId": "listChatSites",
         "summary": "List chat sites",
-        "description": "Lists the sites of the LAN chat widget with their settings and what deserves a second look. The Turnstile secret is never returned.",
+        "description": "Lists the sites of the LAN chat widget with their settings, what deserves a second look and whether each widget takes live chats now. The Turnstile secret is never returned.",
         "tags": ["messaging"],
         "responses": {
           "200": {
@@ -17265,7 +17305,7 @@
       "get": {
         "operationId": "getChatSite",
         "summary": "One chat site",
-        "description": "Returns one chat site by id.",
+        "description": "Returns one chat site by id, with whether its widget takes live chats now.",
         "tags": ["messaging"],
         "parameters": [
           {
@@ -23161,6 +23201,49 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/directory/connectors/{id}/range": {
+      "get": {
+        "operationId": "getDirectoryRange",
+        "summary": "Get a connector's auto-provisioning range usage",
+        "description": "How the connector's auto-provisioning range is used: its size, how many numbers something already claims (an extension, a group or room number, a park slot, a number a feature code overlaps), the next number an allocation takes, and the users of this connector that have a number from it. A number stays with its user: a re-run never renumbers.",
+        "tags": ["directory"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The range usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryRangeUsage"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -35476,7 +35559,24 @@
       },
       "RecordingVideoStream": {
         "type": "object",
-        "required": ["id", "part", "leg", "direction", "codec", "container", "segments", "bytes", "width", "height", "offsetMs", "durationMs", "startedAt", "state", "finalized", "mediaType"],
+        "required": [
+          "id",
+          "part",
+          "leg",
+          "direction",
+          "codec",
+          "container",
+          "segments",
+          "bytes",
+          "width",
+          "height",
+          "offsetMs",
+          "durationMs",
+          "startedAt",
+          "state",
+          "finalized",
+          "mediaType"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -38476,6 +38576,491 @@
           },
           "limit": {
             "type": "integer"
+          }
+        }
+      },
+      "WebRTCCounters": {
+        "type": "object",
+        "required": ["ice", "dtlsHandshakes", "dtlsFailures", "srtpAuthFailures"],
+        "properties": {
+          "ice": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Legs that reached an ICE state since the node started: connected, restarted, failed."
+          },
+          "dtlsHandshakes": {
+            "type": "integer",
+            "description": "Successful DTLS-SRTP handshakes on WebRTC legs."
+          },
+          "dtlsFailures": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Failed handshakes by reason: timeout, fingerprint, failed."
+          },
+          "srtpAuthFailures": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Inbound packets that failed SRTP authentication on any leg, by side: from_caller, from_callee."
+          }
+        }
+      },
+      "WebRTCLeg": {
+        "type": "object",
+        "required": [
+          "call",
+          "side",
+          "ringing",
+          "ice",
+          "dtls",
+          "iceRestarts",
+          "video",
+          "srtpAuthFailures",
+          "since",
+          "node",
+          "turn"
+        ],
+        "properties": {
+          "call": {
+            "type": "string",
+            "description": "The caller leg's SIP Call-ID (the Call trace tab finds the call by it)."
+          },
+          "side": {
+            "type": "string",
+            "enum": ["caller", "callee"]
+          },
+          "ringing": {
+            "type": "boolean",
+            "description": "An alternate callee leg offered to a browser that has not answered."
+          },
+          "ice": {
+            "type": "string",
+            "enum": ["checking", "connected", "failed"]
+          },
+          "dtls": {
+            "type": "string",
+            "enum": ["new", "connecting", "connected", "failed"]
+          },
+          "dtlsReason": {
+            "type": "string",
+            "enum": ["timeout", "fingerprint", "failed"]
+          },
+          "dtlsMs": {
+            "type": "integer",
+            "description": "How long the DTLS handshake took."
+          },
+          "iceRestarts": {
+            "type": "integer"
+          },
+          "remote": {
+            "type": "string",
+            "description": "The address ICE selected (ip:port), absent before the first check."
+          },
+          "video": {
+            "type": "boolean"
+          },
+          "srtpAuthFailures": {
+            "type": "integer"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "node": {
+            "type": "string",
+            "description": "The hello-sip node carrying the leg."
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "boolean",
+            "description": "The selected address is a TURN server's: the media is relayed."
+          }
+        }
+      },
+      "WebRTCNode": {
+        "type": "object",
+        "required": ["node", "port", "hosts", "legs", "counters", "updatedAt"],
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "description": "The shared WebRTC UDP port."
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The candidate addresses the node advertises."
+          },
+          "legs": {
+            "type": "integer"
+          },
+          "counters": {
+            "$ref": "#/components/schemas/WebRTCCounters"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TurnProbe": {
+        "type": "object",
+        "required": [
+          "url",
+          "transport",
+          "method",
+          "reachable",
+          "latencyMs",
+          "addrs",
+          "checkedAt"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string",
+            "enum": ["udp", "tcp", "tls", ""]
+          },
+          "method": {
+            "type": "string",
+            "enum": ["stun", "connect", ""],
+            "description": "stun: a Binding request was answered; connect: a TCP connection was made (TLS listeners)."
+          },
+          "reachable": {
+            "type": "boolean"
+          },
+          "latencyMs": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "addrs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The server's addresses as hello-control resolves them."
+          },
+          "checkedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ClientCandidateStats": {
+        "type": "object",
+        "required": ["since", "reports", "local", "remote", "relayed"],
+        "properties": {
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reports": {
+            "type": "integer"
+          },
+          "local": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Reports by the client's candidate type: host, srflx, prflx, relay, unknown."
+          },
+          "remote": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Reports by the remote candidate type."
+          },
+          "relayed": {
+            "type": "integer",
+            "description": "Reports whose pair used a relay candidate on either side."
+          }
+        }
+      },
+      "WebRTCStatus": {
+        "type": "object",
+        "required": [
+          "generatedAt",
+          "clients",
+          "registrations",
+          "nodes",
+          "legs",
+          "turn",
+          "push",
+          "candidates",
+          "authFailures",
+          "lastErrors",
+          "unavailable"
+        ],
+        "properties": {
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "clients": {
+            "type": "object",
+            "required": ["enrolled", "registered", "byTransport"],
+            "properties": {
+              "enrolled": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "description": "Enabled client devices by kind: web, mobile."
+              },
+              "registered": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "description": "Bindings by device kind: desk, web, mobile."
+              },
+              "byTransport": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "description": "Client (web and mobile) bindings by transport: udp, tcp, tls, ws, wss."
+              }
+            }
+          },
+          "registrations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "deviceId",
+                "device",
+                "kind",
+                "label",
+                "extension",
+                "transport",
+                "source",
+                "userAgent",
+                "node",
+                "expires"
+              ],
+              "properties": {
+                "deviceId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "device": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "extension": {
+                  "type": "string"
+                },
+                "transport": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "userAgent": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "expires": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "description": "Registered web and mobile clients (at most 200)."
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebRTCNode"
+            }
+          },
+          "legs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebRTCLeg"
+            },
+            "description": "Live WebRTC legs of every node (at most 100 per node)."
+          },
+          "turn": {
+            "type": "object",
+            "required": [
+              "configured",
+              "ttlSeconds",
+              "stun",
+              "servers",
+              "relayedLegs"
+            ],
+            "properties": {
+              "configured": {
+                "type": "boolean",
+                "description": "TURN URIs and the shared secret are set."
+              },
+              "ttlSeconds": {
+                "type": "integer"
+              },
+              "stun": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "servers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TurnProbe"
+                },
+                "description": "Each TURN URI checked from hello-control (reused for 30 s)."
+              },
+              "relayedLegs": {
+                "type": "integer"
+              }
+            }
+          },
+          "push": {
+            "type": "object",
+            "required": ["configured", "detail"],
+            "properties": {
+              "configured": {
+                "type": "boolean"
+              },
+              "detail": {
+                "type": "string"
+              }
+            }
+          },
+          "candidates": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ClientCandidateStats"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Candidate types of the clients' end-of-call reports over the last 24 hours."
+          },
+          "authFailures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "deviceId",
+                "device",
+                "label",
+                "kind",
+                "at",
+                "code",
+                "reason",
+                "source",
+                "node",
+                "credentials"
+              ],
+              "properties": {
+                "deviceId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "device": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "code": {
+                  "type": "integer"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "userAgent": {
+                  "type": "string"
+                },
+                "credentials": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "description": "Refused REGISTERs of client devices in the last hour, newest first (at most 50). A first challenge (401 without credentials) is not a failure."
+          },
+          "lastErrors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["at", "kind", "reason", "detail"],
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["register", "ice", "dtls"]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "call": {
+                  "type": "string"
+                },
+                "device": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The last register, ICE and DTLS errors, newest first (at most 20)."
+          },
+          "unavailable": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["devices", "live", "webrtc", "quality", "register_attempts"]
+            },
+            "description": "Sources that could not be read; their parts are empty."
           }
         }
       },
@@ -44402,7 +44987,7 @@
       "MessagingSchedule": {
         "type": "object",
         "required": ["zone", "days"],
-        "description": "A weekly opening schedule. No windows means always open.",
+        "description": "A weekly opening schedule. No windows means always open. It is the one schedule of a number: the router's after-hours action and, for a chat site, the widget's opening hours both read it.",
         "properties": {
           "zone": {
             "type": "string",
@@ -44446,7 +45031,7 @@
           "text": {
             "type": "string",
             "maxLength": 480,
-            "description": "The text a reply sends. Only a SIP trunk channel can send it today."
+            "description": "The text a reply sends: queued on a SIP trunk or carrier (Twilio, Telnyx) channel, shown in the widget on a chat site. A channel that cannot send it gets a line in the conversation saying so."
           },
           "routeKind": {
             "type": "string",
@@ -44500,7 +45085,7 @@
           "firstContactText": {
             "type": "string",
             "maxLength": 480,
-            "description": "Sent once to a customer who texts the number for the first time (not when the closed-hours reply already went); empty sends nothing. Only a SIP trunk channel can send it today."
+            "description": "Sent once to a customer who texts the number for the first time (not when the closed-hours reply already went); empty sends nothing. On a chat site it is shown in the widget to a first-time visitor."
           }
         }
       },
@@ -44812,44 +45397,6 @@
           }
         }
       },
-      "ChatHours": {
-        "type": "object",
-        "description": "A weekly schedule; empty means always open.",
-        "required": ["zone", "days"],
-        "additionalProperties": false,
-        "properties": {
-          "zone": {
-            "type": "string",
-            "description": "An IANA time zone such as Europe/Brussels; required when there are windows."
-          },
-          "days": {
-            "type": "array",
-            "maxItems": 28,
-            "description": "The opening windows.",
-            "items": {
-              "type": "object",
-              "required": ["day", "from", "to"],
-              "additionalProperties": false,
-              "properties": {
-                "day": {
-                  "type": "integer",
-                  "description": "0 is Sunday, 6 is Saturday.",
-                  "minimum": 0,
-                  "maximum": 6
-                },
-                "from": {
-                  "type": "string",
-                  "description": "Opening time, HH:MM."
-                },
-                "to": {
-                  "type": "string",
-                  "description": "Closing time, HH:MM, after the opening time."
-                }
-              }
-            }
-          }
-        }
-      },
       "ChatSite": {
         "type": "object",
         "required": [
@@ -44934,12 +45481,12 @@
             "description": "Whether the widget asks for a name and an email address before the first message."
           },
           "hours": {
-            "$ref": "#/components/schemas/ChatHours"
+            "$ref": "#/components/schemas/MessagingSchedule"
           },
           "offlineMode": {
             "type": "string",
             "enum": ["collect", "hidden"],
-            "description": "Outside the hours or with nobody available: collect a message and an email address, or hide the widget."
+            "description": "Outside the hours (the schedule of the site's address, also shown in its routing) or with nobody available: collect a message and an email address, or hide the widget."
           },
           "privacyUrl": {
             "type": "string",
@@ -44998,6 +45545,23 @@
               "type": "string"
             },
             "description": "Settings that work but deserve a second look: a public-looking origin, no challenge, Turnstile on an isolated LAN."
+          },
+          "availability": {
+            "type": "object",
+            "description": "What the widget shows right now; only reads (list and get) carry it. A site follows its address's routing: inside the hours (or outside them with an after-hours route) a text queue is available while one of its members is logged in and not paused, a user, an extension's user or a ring group's users while one of them has the inbox open, and the supervisors' pool while a supervisor has; then the unassigned live chats must be under the cap.",
+            "required": ["online"],
+            "additionalProperties": false,
+            "properties": {
+              "online": {
+                "type": "boolean",
+                "description": "Whether a visitor can start a live chat now; otherwise the widget is offline (collects a message, or hides)."
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["hours", "no_agent", "full"],
+                "description": "Why it is offline: outside the hours with no after-hours route, nobody staffs where a chat would go, or the cap of unassigned live chats is reached. Absent when online."
+              }
+            }
           }
         }
       },
@@ -45051,7 +45615,7 @@
             "description": "Whether the widget asks for a name and an email address before the first message. Left as it is when omitted."
           },
           "hours": {
-            "$ref": "#/components/schemas/ChatHours"
+            "$ref": "#/components/schemas/MessagingSchedule"
           },
           "offlineMode": {
             "type": "string",
@@ -46335,8 +46899,7 @@
             "$ref": "#/components/schemas/DirectoryOptions"
           },
           "autoProvision": {
-            "type": "object",
-            "description": "Reserved for range auto-provisioning; it cannot be enabled yet."
+            "$ref": "#/components/schemas/DirectoryAutoProvision"
           },
           "hasCredential": {
             "type": "boolean",
@@ -46447,8 +47010,7 @@
             "$ref": "#/components/schemas/DirectoryOptions"
           },
           "autoProvision": {
-            "type": "object",
-            "description": "Reserved for range auto-provisioning; it cannot be enabled yet."
+            "$ref": "#/components/schemas/DirectoryAutoProvision"
           },
           "bindPassword": {
             "type": "string",
@@ -46509,8 +47071,7 @@
             "$ref": "#/components/schemas/DirectoryOptions"
           },
           "autoProvision": {
-            "type": "object",
-            "description": "Reserved for range auto-provisioning; it cannot be enabled yet."
+            "$ref": "#/components/schemas/DirectoryAutoProvision"
           },
           "bindPassword": {
             "type": "string",
@@ -46754,6 +47315,115 @@
         },
         "required": ["items"]
       },
+      "DirectoryAutoProvision": {
+        "type": "object",
+        "description": "Range auto-provisioning (off by default): a user with no extension value, or one that names no extension, gets the next free number of the range, an extension named after the user, a voicemail box that mails the user and one SIP device whose generated secret is shown nowhere (rotate it from the device page to set up a phone). Allocation happens under the configuration lock; a user's number is kept and never renumbered. A disabled user keeps the extension and its voicemail.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Provision from the range. Needs rangeStart and rangeEnd."
+          },
+          "rangeStart": {
+            "type": "string",
+            "pattern": "^([0-9]{2,10})?$",
+            "description": "The first number of the range, for example 2000 (2 to 10 digits; empty while no range is set)."
+          },
+          "rangeEnd": {
+            "type": "string",
+            "pattern": "^([0-9]{2,10})?$",
+            "description": "The last number, inclusive, with as many digits as rangeStart; at most 100000 numbers."
+          },
+          "device": {
+            "type": "boolean",
+            "description": "Create one SIP device on the extension (default true)."
+          },
+          "voicemail": {
+            "type": "boolean",
+            "description": "Turn voicemail on and mail it to the user's email (default true)."
+          },
+          "groups": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "description": "Stable ids of source groups; when set, only their members are provisioned. Needs the group base DN."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DirectoryRangeUsage": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "rangeStart": {
+            "type": "string"
+          },
+          "rangeEnd": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "description": "How many numbers the range holds (0 without a range)."
+          },
+          "used": {
+            "type": "integer",
+            "description": "Numbers of the range something already claims."
+          },
+          "free": {
+            "type": "integer"
+          },
+          "nextFree": {
+            "type": "string",
+            "description": "The number the next allocation takes; empty when the range is full."
+          },
+          "provisioned": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectoryProvisionedUser"
+            }
+          }
+        },
+        "required": [
+          "enabled",
+          "rangeStart",
+          "rangeEnd",
+          "size",
+          "used",
+          "free",
+          "nextFree",
+          "provisioned"
+        ]
+      },
+      "DirectoryProvisionedUser": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "username": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string",
+            "description": "The number allocated to the user."
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The extension of that number; 0 when it was deleted (the next full run creates it again with the same number)."
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": ["userId", "username", "number", "extensionId", "enabled"]
+      },
       "DirectoryChange": {
         "type": "object",
         "properties": {
@@ -46807,7 +47477,7 @@
           },
           "reason": {
             "type": "string",
-            "description": "Why: for conflicts extension_linked, extension_kind, duplicate_extension, email_in_use, username_collision, claimed_by_other_connector, extension_invalid, extension_missing, username_invalid or last_admin; for skips inactive_in_source, absent_pending, link_only_no_match or local_admin_not_adopted; for adopt adopt_not_confirmed or confirmed; for disable inactive_in_source or absent_from_source; for error last_admin, not_found, invalid or apply_failed."
+            "description": "Why: for create and update auto_provisioned (an extension from the connector's range, with its device and voicemail in fieldDiffs; after an apply the number actually allocated); for conflicts extension_linked, extension_kind, duplicate_extension, email_in_use, username_collision, claimed_by_other_connector, extension_invalid, extension_missing, username_invalid, range_exhausted or last_admin; for skips inactive_in_source, absent_pending, link_only_no_match or local_admin_not_adopted; for adopt adopt_not_confirmed or confirmed; for disable inactive_in_source or absent_from_source; for error last_admin, not_found, invalid, range_exhausted or apply_failed."
           },
           "overridable": {
             "type": "boolean",

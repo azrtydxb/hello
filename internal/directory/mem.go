@@ -30,9 +30,24 @@ type Mem struct {
 	Applied []Op
 
 	nextConn, nextRun, nextChange, nextUser int64
+	nextExt                                 int64
 	locked                                  map[string]bool
 	// ApplyErr makes Apply fail for the user of that external id.
 	ApplyErr map[string]error
+	// Taken are dial-space numbers other than extensions (a ring group, a
+	// park slot); Provisioned are the extensions auto-provisioning created,
+	// by number.
+	Taken       map[string]bool
+	Provisioned map[string]MemProvisioned
+}
+
+// MemProvisioned is an extension auto-provisioning created.
+type MemProvisioned struct {
+	Connector int64
+	Name      string
+	Email     string
+	Voicemail bool
+	Device    bool
 }
 
 // MemUser is a user row of the in-memory store.
@@ -45,16 +60,22 @@ type MemUser struct {
 func NewMem() *Mem {
 	return &Mem{Connectors: map[int64]*Connector{}, Secrets: map[int64]string{}, FPs: map[int64]string{}, Runs: map[int64]*Run{},
 		Changes: map[int64][]Change{}, Users: map[int64]*MemUser{}, Exts: map[string]*LocalExt{}, Rings: map[int64]map[int64]int64{},
-		locked: map[string]bool{}, ApplyErr: map[string]error{}}
+		locked: map[string]bool{}, ApplyErr: map[string]error{}, Taken: map[string]bool{}, Provisioned: map[string]MemProvisioned{}}
 }
 
 // AddExt adds an extension.
 func (m *Mem) AddExt(number string, door bool) int64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	id := int64(len(m.Exts) + 100)
+	id := m.newExtID()
 	m.Exts[number] = &LocalExt{ID: id, Number: number, Door: door}
 	return id
+}
+
+// newExtID is a fresh extension id (never reused, like a sequence).
+func (m *Mem) newExtID() int64 {
+	m.nextExt++
+	return m.nextExt + 99
 }
 
 // AddUser adds a user and returns its id.
@@ -373,7 +394,10 @@ func (m *Mem) ListChanges(_ context.Context, runID int64, f ChangeFilter) ([]Cha
 func (m *Mem) LoadState(_ context.Context, connectorID int64) (State, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	st := State{Exts: map[string]LocalExt{}, RingGroups: map[int64]bool{}}
+	st := State{Exts: map[string]LocalExt{}, RingGroups: map[int64]bool{}, Taken: map[string]bool{}}
+	for n := range m.Taken {
+		st.Taken[n] = true
+	}
 	for n, e := range m.Exts {
 		st.Exts[n] = *e
 	}
@@ -409,16 +433,54 @@ func (m *Mem) LoadState(_ context.Context, connectorID int64) (State, error) {
 }
 
 // Apply implements Store.
-func (m *Mem) Apply(_ context.Context, actor string, c Connector, op Op) error {
+func (m *Mem) Apply(_ context.Context, actor string, c Connector, op Op) (Applied, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.ApplyErr[op.ExternalID]; err != nil {
-		return err
+		return Applied{}, err
 	}
 	if u := m.Users[op.UserID]; u != nil && u.BreakGlass && op.Kind != ActionCreate {
-		return ErrProtected
+		return Applied{}, ErrProtected
 	}
 	m.Applied = append(m.Applied, op)
+	var got Applied
+	// provision allocates like the PostgreSQL store under its lock: the
+	// preferred number when free, else the first free one of the range.
+	provision := func(u *MemUser) error {
+		pr := op.Provision
+		if pr == nil {
+			return nil
+		}
+		free := func(n string) bool { _, ext := m.Exts[n]; return n != "" && !ext && !m.Taken[n] }
+		number := ""
+		if free(pr.Preferred) {
+			number = pr.Preferred
+		} else {
+			pr.Range.Numbers(func(n string) bool {
+				if free(n) {
+					number = n
+					return false
+				}
+				return true
+			})
+		}
+		if number == "" {
+			return ErrRangeExhausted
+		}
+		id := m.newExtID()
+		m.Exts[number] = &LocalExt{ID: id, Number: number}
+		email := ""
+		if pr.Range.Voicemail {
+			email = pr.Email
+		}
+		m.Provisioned[number] = MemProvisioned{Connector: c.ID, Name: ExtensionName(pr.Name, number), Email: email,
+			Voicemail: pr.Range.Voicemail, Device: pr.Range.Device}
+		u.ProvisionedNumber = number
+		op.Extension, op.SetExtension = id, true
+		got.Extension = number
+		m.audit(actor, "provision", "user", itoa(u.ID))
+		return nil
+	}
 	set := func(u *MemUser) {
 		if op.Username != nil {
 			u.Username = *op.Username
@@ -472,18 +534,22 @@ func (m *Mem) Apply(_ context.Context, actor string, c Connector, op Op) error {
 	case ActionCreate:
 		for _, o := range m.Users {
 			if strings.EqualFold(o.Username, *op.Username) {
-				return ErrInvalid
+				return Applied{}, ErrInvalid
 			}
 		}
 		m.nextUser++
 		u := &MemUser{LocalUser: LocalUser{ID: m.nextUser, Enabled: true, ConnectorID: c.ID, ExternalID: op.ExternalID}, Devices: true}
+		if err := provision(u); err != nil {
+			m.nextUser--
+			return Applied{}, err
+		}
 		m.Users[u.ID] = u
 		set(u)
 		m.audit(actor, "create", "user", itoa(u.ID))
 	case ActionUpdate, ActionAdopt, "managed":
 		u := m.Users[op.UserID]
 		if u == nil {
-			return ErrNotFound
+			return Applied{}, ErrNotFound
 		}
 		if op.Role != nil && u.Role == "admin" && u.Enabled && *op.Role != "admin" {
 			n := 0
@@ -493,8 +559,11 @@ func (m *Mem) Apply(_ context.Context, actor string, c Connector, op Op) error {
 				}
 			}
 			if n <= 1 {
-				return ErrLastAdmin
+				return Applied{}, ErrLastAdmin
 			}
+		}
+		if err := provision(u); err != nil {
+			return Applied{}, err
 		}
 		if op.Kind == ActionAdopt {
 			u.ConnectorID, u.ExternalID = c.ID, op.ExternalID
@@ -506,7 +575,7 @@ func (m *Mem) Apply(_ context.Context, actor string, c Connector, op Op) error {
 	case ActionDisable:
 		u := m.Users[op.UserID]
 		if u == nil {
-			return ErrNotFound
+			return Applied{}, ErrNotFound
 		}
 		if u.Role == "admin" && u.Enabled {
 			n := 0
@@ -516,7 +585,7 @@ func (m *Mem) Apply(_ context.Context, actor string, c Connector, op Op) error {
 				}
 			}
 			if n <= 1 {
-				return ErrLastAdmin
+				return Applied{}, ErrLastAdmin
 			}
 		}
 		u.Enabled, u.DisabledByDirectory = false, true
@@ -530,7 +599,7 @@ func (m *Mem) Apply(_ context.Context, actor string, c Connector, op Op) error {
 	case ActionEnable:
 		u := m.Users[op.UserID]
 		if u == nil {
-			return ErrNotFound
+			return Applied{}, ErrNotFound
 		}
 		u.Enabled, u.DisabledByDirectory, u.AbsentRuns = true, false, 0
 		if op.Devices {
@@ -546,7 +615,7 @@ func (m *Mem) Apply(_ context.Context, actor string, c Connector, op Op) error {
 			u.AbsentRuns = 0
 		}
 	}
-	return nil
+	return got, nil
 }
 
 func itoa(id int64) string {

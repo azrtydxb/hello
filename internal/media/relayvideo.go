@@ -500,9 +500,12 @@ func (r *Relay) requestKeyframe(l *relayLeg) {
 		p = &rtcp.FullIntraRequest{SenderSSRC: self, MediaSSRC: media, FIR: []rtcp.FIREntry{{SSRC: media, SequenceNumber: seq}}}
 	}
 	if raw, err := rtcp.Marshal([]rtcp.Packet{p}); err == nil {
-		enqueueDropOldest(l.vq, relayMsg{data: raw, rtcp: true}, &l.dropped)
+		// Counted before it is queued: once queued, the sender loop can put
+		// it on the wire (and the sender can act on it) before this goroutine
+		// runs again, and the stats must never trail what the peer has seen.
 		r.video.keyReqs.Add(1)
 		noteVideoKeyframeRequest()
+		enqueueDropOldest(l.vq, relayMsg{data: raw, rtcp: true}, &l.dropped)
 	}
 }
 
@@ -533,8 +536,8 @@ func (r *Relay) forwardNACK(from, to *relayLeg, n *rtcp.TransportLayerNack) {
 	to.vid.mu.Unlock()
 	out := &rtcp.TransportLayerNack{SenderSSRC: self, MediaSSRC: src, Nacks: nackPairs(seqs)}
 	if raw, err := rtcp.Marshal([]rtcp.Packet{out}); err == nil {
+		r.video.nacks.Add(1) // before the queue, as for keyframe requests
 		enqueueDropOldest(to.vq, relayMsg{data: raw, rtcp: true}, &to.dropped)
-		r.video.nacks.Add(1)
 	}
 }
 

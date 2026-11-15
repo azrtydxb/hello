@@ -114,3 +114,23 @@ func Choose(q Queue, agents []Agent, av Availability, exclude int64, rr, seed ui
 	}
 	return out
 }
+
+// Staffed reports whether any of the queue's agents is staffed now: logged
+// in (a dynamic member) and not paused, by the same rule Choose uses. Unlike
+// Choose it ignores the capacity and the queue's idle-voice flag: an agent
+// at capacity or on a call is still at work, and a conversation that reaches
+// the queue waits for them. The chat widget asks it to decide whether a live
+// chat has anyone to answer it.
+func Staffed(q Queue, agents []Agent, av Availability) bool {
+	for _, a := range agents {
+		var st queue.AgentState
+		known := false
+		if av.States != nil {
+			st, known = av.States[a.Ext]
+		}
+		if (queue.Member{Ext: a.Ext, Dynamic: a.Dynamic}).Staffed(q.Name, st, known) {
+			return true
+		}
+	}
+	return false
+}

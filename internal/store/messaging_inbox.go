@@ -604,7 +604,7 @@ func (s *Store) emit(ctx context.Context, e messaging.Event) {
 
 // eligibleAgent reports whether the user can take conversations: enabled,
 // and a role that has the inbox.
-func eligibleAgent(ctx context.Context, tx *sql.Tx, userID int64) (string, error) {
+func eligibleAgent(ctx context.Context, tx rowQuerier, userID int64) (string, error) {
 	var name string
 	err := tx.QueryRowContext(ctx, `
 		SELECT coalesce(NULLIF(display_name, ''), username) FROM users

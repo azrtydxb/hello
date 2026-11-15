@@ -36,6 +36,7 @@ type DirectoryService interface {
 	// of an oauth_admin connector (P9, I-21).
 	ConsentURL(ctx context.Context, id int64, redirectURI, state, verifier string) (string, error)
 	CompleteConsent(ctx context.Context, actor string, id int64, code, verifier, redirectURI string) error
+	RangeUsage(ctx context.Context, id int64) (directory.RangeUsage, error)
 }
 
 func (s *server) directoryDisabled(w http.ResponseWriter) bool {
@@ -105,16 +106,16 @@ func (s *server) getDirectoryConnector(w http.ResponseWriter, r *http.Request) {
 
 // connectorBody is a create or a patch as sent.
 type connectorBody struct {
-	Kind            string                `json:"kind"`
-	Name            *string               `json:"name"`
-	Enabled         *bool                 `json:"enabled"`
-	Mode            *string               `json:"mode"`
-	ScheduleMinutes *int                  `json:"scheduleMinutes"`
-	Config          json.RawMessage       `json:"config"`
-	Mappings        *directory.Mappings   `json:"mappings"`
-	GroupRules      *directory.GroupRules `json:"groupRules"`
-	Options         *directory.Options    `json:"options"`
-	AutoProvision   json.RawMessage       `json:"autoProvision"`
+	Kind            string                   `json:"kind"`
+	Name            *string                  `json:"name"`
+	Enabled         *bool                    `json:"enabled"`
+	Mode            *string                  `json:"mode"`
+	ScheduleMinutes *int                     `json:"scheduleMinutes"`
+	Config          json.RawMessage          `json:"config"`
+	Mappings        *directory.Mappings      `json:"mappings"`
+	GroupRules      *directory.GroupRules    `json:"groupRules"`
+	Options         *directory.Options       `json:"options"`
+	AutoProvision   *directory.AutoProvision `json:"autoProvision"`
 	// BindPassword is the LDAP credential; Credential that of the Google
 	// (key file, or OAuth client secret) and Entra (client secret, or the
 	// certificate's private key) connectors. Both are write-only.
@@ -185,6 +186,22 @@ func (s *server) updateDirectoryConnector(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
+}
+
+// getDirectoryRange answers how the connector's auto-provisioning range is
+// used: its size, the numbers claimed, the next free one and the users that
+// have a number from it (I-11).
+func (s *server) getDirectoryRange(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok || s.directoryDisabled(w) {
+		return
+	}
+	u, err := s.Directory.RangeUsage(r.Context(), id)
+	if err != nil {
+		s.directoryError(w, "directory connector", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
 }
 
 func (s *server) deleteDirectoryConnector(w http.ResponseWriter, r *http.Request) {

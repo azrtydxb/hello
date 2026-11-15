@@ -642,3 +642,91 @@ func TestCloudConnectorLifecycle(t *testing.T) {
 		t.Fatalf("enabled connector without a login method: %v", err)
 	}
 }
+
+// TestGoogleSyncAutoProvisions fails if a Google Workspace sync with range
+// auto-provisioning on (P12) does not give a user without an extension a
+// number from the connector's range, does not link one whose phone names an
+// existing extension, provisions an adopted local user only once it is
+// adopted, or touches a break-glass admin with a matching email.
+func TestGoogleSyncAutoProvisions(t *testing.T) {
+	f := newFakeGoogle(t, 4) // u0 to u3, work phones +1 555 0100 to 0103
+	m := NewMem()
+	e := &Engine{Store: m, Drivers: map[string]Driver{KindGoogle: f.driver()}, HTTP: f.srv.Client(), Replica: "r1",
+		LoginCheck: func(context.Context, string) error { return nil }}
+	ctx := context.Background()
+	linked := m.AddExt("15550101", false)
+	legacy := m.AddUser(LocalUser{Username: "legacy", Email: "user2@example.com", Enabled: true})
+	root := m.AddUser(LocalUser{Username: "root", Email: "user3@example.com", Role: "admin", Enabled: true, BreakGlass: true})
+	key := f.keyFile()
+	ap := AutoProvision{Enabled: true, RangeStart: "300", RangeEnd: "309", Device: true, Voicemail: true}
+	c, err := e.Create(ctx, "admin", ConnectorInput{Kind: KindGoogle, Name: strPtr("GW"), Secret: &key, Enabled: boolPtr(true), AutoProvision: &ap})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pre, err := e.RequestRun(ctx, "admin", c.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.TickOnce(ctx)
+	if pre, _ = m.GetRun(ctx, pre.ID); pre.Status != StatusPreview {
+		t.Fatalf("preview = %+v", pre)
+	}
+	cs, _ := m.ListChanges(ctx, pre.ID, ChangeFilter{})
+	byExt := map[string]Change{}
+	for _, ch := range cs {
+		byExt[ch.ExternalID] = ch
+	}
+	inRange := func(n string) bool { return len(n) == 3 && n >= "300" && n <= "309" }
+	if u0 := byExt["u0"]; u0.Action != ActionCreate || u0.Reason != ReasonAutoProvisioned || !inRange(u0.FieldDiffs["extension"].After) {
+		t.Fatalf("u0 = %+v", u0)
+	}
+	if u1 := byExt["u1"]; u1.Action != ActionCreate || u1.Reason == ReasonAutoProvisioned || u1.FieldDiffs["extension"].After != "15550101" {
+		t.Fatalf("u1 = %+v", u1)
+	}
+	if u2 := byExt["u2"]; u2.Action != ActionAdopt {
+		t.Fatalf("u2 = %+v", u2)
+	}
+	if u3 := byExt["u3"]; u3.Action != ActionSkip || u3.Reason != ReasonProtected {
+		t.Fatalf("u3 = %+v", u3)
+	}
+	if len(m.Provisioned) != 0 {
+		t.Fatal("a preview provisioned")
+	}
+	if _, err := e.Apply(ctx, "admin", pre.ID, Decisions{Adopt: []string{"u2"}}); err != nil {
+		t.Fatal(err)
+	}
+	var u0 *MemUser
+	for _, u := range m.Users {
+		if u.ExternalID == "u0" {
+			u0 = u
+		}
+	}
+	if u0 == nil || u0.ConnectorID != c.ID || !inRange(u0.ProvisionedNumber) || m.Provisioned[u0.ProvisionedNumber].Connector != c.ID {
+		t.Fatalf("u0 = %+v, provisioned = %v", u0, m.Provisioned)
+	}
+	for _, u := range m.Users {
+		if u.ExternalID == "u1" && (u.OwnedExtension != linked || u.ProvisionedNumber != "") {
+			t.Fatalf("u1 = %+v", u)
+		}
+	}
+	lg := m.Users[legacy]
+	if lg.ConnectorID != c.ID || lg.ExternalID != "u2" || !inRange(lg.ProvisionedNumber) || lg.ProvisionedNumber == u0.ProvisionedNumber {
+		t.Fatalf("adopted = %+v", lg)
+	}
+	if r := m.Users[root]; r.ConnectorID != 0 || r.ProvisionedNumber != "" || r.OwnedExtension != 0 {
+		t.Fatalf("break-glass admin touched: %+v", r)
+	}
+	if len(m.Provisioned) != 2 {
+		t.Fatalf("provisioned = %v", m.Provisioned)
+	}
+	// A second run allocates nothing more and never renumbers.
+	before := lg.ProvisionedNumber
+	run, err := e.RequestRun(ctx, "admin", c.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.TickOnce(ctx)
+	if run, _ = m.GetRun(ctx, run.ID); run.Status != StatusSucceeded || len(m.Provisioned) != 2 || m.Users[legacy].ProvisionedNumber != before {
+		t.Fatalf("re-run = %+v, provisioned = %v", run, m.Provisioned)
+	}
+}

@@ -5,6 +5,7 @@ import {
   confirmRun,
   createConnector,
   deleteConnector,
+  getRange,
   getRun,
   listChanges,
   listConnectors,
@@ -15,6 +16,7 @@ import {
   updateConnector,
   GOOGLE_SCOPES,
   type AttrMap,
+  type AutoProvision,
   type Change,
   type ChangeAction,
   type Connector,
@@ -55,6 +57,8 @@ import "./platform/platform.css";
 const FORM_ID = "directory-form";
 /** How often the connector list and the run list reload. */
 const POLL_MS = 4000;
+/** How often the auto-provisioning range usage reloads (it reads every user). */
+const RANGE_POLL_MS = 30000;
 
 const MODES: { value: ConnectorMode; label: string }[] = [
   {
@@ -143,6 +147,32 @@ const FULL_REASONS: Record<string, string> = {
   groups_changed: "a group used by the rules changed",
   unsupported: "the server has no change tracking",
 };
+
+/** The range of a connector's auto-provisioning in words. */
+export function rangeText(a: AutoProvision): string {
+  if (!a.enabled) return "off";
+  return `${a.rangeStart}–${a.rangeEnd}`;
+}
+
+/** Client-side check of a range, mirroring the server's (null when fine). */
+export function rangeError(
+  start: string,
+  end: string,
+): { start?: string; end?: string } | null {
+  const num = /^[0-9]{2,10}$/;
+  const out: { start?: string; end?: string } = {};
+  if (!num.test(start)) out.start = "2 to 10 digits.";
+  if (!num.test(end)) out.end = "2 to 10 digits.";
+  else if (num.test(start)) {
+    if (start.length !== end.length)
+      out.end = "As many digits as the first number.";
+    else if (Number(end) < Number(start))
+      out.end = "Not below the first number.";
+    else if (Number(end) - Number(start) + 1 > 100000)
+      out.end = "At most 100000 numbers.";
+  }
+  return out.start || out.end ? out : null;
+}
 
 /** Whether a run read only the changes or everything, and why. */
 export function readText(r: Run): string {
@@ -426,6 +456,9 @@ function Connectors() {
           )}
         </div>
       )}
+      {current?.autoProvision.enabled && (
+        <RangeCard key={`range-${String(current.id)}`} connector={current} />
+      )}
       {current && (
         <Runs
           key={current.id}
@@ -544,6 +577,83 @@ function DeleteDialog({
         />
       )}
     </ConfirmDialog>
+  );
+}
+
+/** How full the connector's auto-provisioning range is (I-11). */
+function RangeCard({ connector }: { connector: Connector }) {
+  const load = useCallback(
+    (signal: AbortSignal) => getRange(connector.id, signal),
+    [connector.id],
+  );
+  const range = usePolling(load, RANGE_POLL_MS);
+  const u = range.status === "loading" ? undefined : range.data;
+  return (
+    <div className="az-card pf-card pf-card--tight">
+      <div className="pf-cardhead">
+        <div>
+          <h2 className="pf-h3">
+            Auto-provisioning range {rangeText(connector.autoProvision)}
+          </h2>
+          <p className="pf-head__desc">
+            Users without an extension get the next free number of this range. A
+            number stays with its user; a disabled user keeps it.
+          </p>
+        </div>
+      </div>
+      {range.status === "loading" && <Spinner label="Loading the range…" />}
+      {range.status === "error" && (
+        <Alert tone="bad" title="Could not load the range">
+          {range.message}
+        </Alert>
+      )}
+      {u && (
+        <>
+          <p>
+            {String(u.used)} of {String(u.size)} numbers in use,{" "}
+            {String(u.free)} free.{" "}
+            {u.nextFree === "" ? (
+              <Badge tone="bad">full: widen the range</Badge>
+            ) : (
+              <>
+                Next: <span className="pf-mono">{u.nextFree}</span>
+              </>
+            )}
+          </p>
+          {u.provisioned.length > 0 && (
+            <Table
+              caption={`Numbers given by ${connector.name}`}
+              rows={u.provisioned}
+              rowKey={(p) => p.userId}
+              columns={[
+                {
+                  key: "number",
+                  label: "Number",
+                  render: (p) => <span className="pf-mono">{p.number}</span>,
+                },
+                { key: "user", label: "User", render: (p) => p.username },
+                {
+                  key: "state",
+                  label: "State",
+                  render: (p) => (
+                    <>
+                      {p.extensionId === 0 ? (
+                        <Badge tone="warn">extension deleted</Badge>
+                      ) : (
+                        <Badge tone="good">extension</Badge>
+                      )}{" "}
+                      {!p.enabled && (
+                        <Badge tone="neutral">user disabled</Badge>
+                      )}
+                    </>
+                  ),
+                },
+              ]}
+            />
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1034,6 +1144,12 @@ interface Draft {
   absenceRuns: string;
   allowAdmin: boolean;
   disableDevices: boolean;
+  apEnabled: boolean;
+  apStart: string;
+  apEnd: string;
+  apDevice: boolean;
+  apVoicemail: boolean;
+  apGroups: string;
 }
 
 const DEFAULT_URL = "ldaps://";
@@ -1164,6 +1280,12 @@ function draftOf(c: Connector | null, kind: ConnectorKind = "ldap"): Draft {
     absenceRuns: String(c?.options.absenceRuns || 2),
     allowAdmin: c?.options.allowAdminFromDirectory ?? false,
     disableDevices: c?.options.disableDevices ?? true,
+    apEnabled: c?.autoProvision.enabled ?? false,
+    apStart: c?.autoProvision.rangeStart ?? "",
+    apEnd: c?.autoProvision.rangeEnd ?? "",
+    apDevice: c?.autoProvision.device ?? true,
+    apVoicemail: c?.autoProvision.voicemail ?? true,
+    apGroups: (c?.autoProvision.groups ?? []).join("\n"),
   };
 }
 
@@ -1355,6 +1477,11 @@ function ConnectorDrawer({
         "One rule per line: <group id> <user|viewer|operator|admin>.";
     if (rings === null || rings.some(([, r]) => !/^[0-9]+$/.test(r)))
       found.ringRules = "One rule per line: <group id> <ring group id>.";
+    if (d.apEnabled || d.apStart !== "" || d.apEnd !== "") {
+      const re = rangeError(d.apStart, d.apEnd);
+      if (re?.start) found["autoProvision.rangeStart"] = re.start;
+      if (re?.end) found["autoProvision.rangeEnd"] = re.end;
+    }
     setErrors(found);
     if (Object.keys(found).length > 0 || roles === null || rings === null) {
       setFormError("Fix the highlighted fields.");
@@ -1387,6 +1514,17 @@ function ConnectorDrawer({
         disableDevices: d.disableDevices,
         loginMethod,
         oidcProvider,
+      },
+      autoProvision: {
+        enabled: d.apEnabled,
+        rangeStart: d.apStart,
+        rangeEnd: d.apEnd,
+        device: d.apDevice,
+        voicemail: d.apVoicemail,
+        groups: d.apGroups
+          .split("\n")
+          .map((g) => g.trim())
+          .filter((g) => g !== ""),
       },
     };
     if (d.bindPassword !== "") {
@@ -1716,6 +1854,85 @@ function ConnectorDrawer({
           />
         </fieldset>
 
+        <fieldset className="pf-stack">
+          <legend className="az-field__label">Auto-provisioning</legend>
+          <p className="az-field__hint">
+            A user whose extension attribute is empty, or names no extension,
+            gets the next free number of this range: an extension named after
+            the user, a voicemail box and a SIP device. A number is never
+            renumbered; a disabled user keeps its extension and voicemail.
+          </p>
+          <Switch
+            label="Give users without an extension a number from a range"
+            labelPosition="end"
+            checked={d.apEnabled}
+            onChange={(e) => set("apEnabled", e.target.checked)}
+          />
+          <Input
+            id="dir-ap-start"
+            label="First number"
+            inputMode="numeric"
+            mono
+            value={d.apStart}
+            error={errors["autoProvision.rangeStart"]}
+            hint="For example 2000."
+            onChange={(e) => set("apStart", e.target.value.trim())}
+          />
+          <Input
+            id="dir-ap-end"
+            label="Last number"
+            inputMode="numeric"
+            mono
+            value={d.apEnd}
+            error={errors["autoProvision.rangeEnd"]}
+            hint="Inclusive, with as many digits as the first, for example 2999."
+            onChange={(e) => set("apEnd", e.target.value.trim())}
+          />
+          <Switch
+            label="Create a SIP device"
+            labelPosition="end"
+            hint="Its secret is shown nowhere: rotate it from the device page when you set up a phone."
+            checked={d.apDevice}
+            onChange={(e) => set("apDevice", e.target.checked)}
+          />
+          <Switch
+            label="Turn on voicemail, sent to the user's email"
+            labelPosition="end"
+            checked={d.apVoicemail}
+            onChange={(e) => set("apVoicemail", e.target.checked)}
+          />
+          <div className="az-field">
+            <label className="az-field__label" htmlFor="dir-ap-groups">
+              Only members of these groups
+            </label>
+            <textarea
+              id="dir-ap-groups"
+              className="az-input prov-textarea"
+              rows={2}
+              spellCheck={false}
+              value={d.apGroups}
+              placeholder={"<group id>"}
+              onChange={(e) => set("apGroups", e.target.value)}
+            />
+            <span
+              className={
+                errors["autoProvision.groups"]
+                  ? "az-field__error"
+                  : "az-field__hint"
+              }
+            >
+              {errors["autoProvision.groups"] ??
+                `One group id per line; empty gives every user a number. ${
+                  d.kind === "ldap"
+                    ? "Needs the group base DN."
+                    : d.kind === "google"
+                      ? "Google group ids."
+                      : "Entra group object ids."
+                }`}
+            </span>
+          </div>
+        </fieldset>
+
         <Select
           label="How these users sign in"
           value={d.login}
@@ -1807,6 +2024,9 @@ const KEYS = [
   "config.groupBaseDn",
   "mappings.extension",
   "options.absenceRuns",
+  "autoProvision.rangeStart",
+  "autoProvision.rangeEnd",
+  "autoProvision.groups",
 ];
 
 type SetDraft = <K extends keyof Draft>(k: K, v: Draft[K]) => void;
