@@ -595,6 +595,8 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	if err != nil {
 		return err
 	}
+	// TLS requests leave from an ephemeral port, not the UDP socket's.
+	client.TxRequester = hopRequester{ua: ua}
 	s.ua, s.client = ua, client
 	if host, port, err := sip.ParseAddr(conn.LocalAddr().String()); err == nil {
 		s.laddr = sip.Addr{IP: net.ParseIP(host), Port: port, Hostname: host}

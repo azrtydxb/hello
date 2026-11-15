@@ -5166,3 +5166,29 @@ media_unsupported`, and the composer offers **Attach** only in a chat. An
 - **MCP:** the new routes are excluded (customer files are private data; the
   logo is a binary download and chat site settings stay excluded), so the
   doctable is unchanged.
+
+## TLS hop: outbound TLS requests leave from an ephemeral port (2026-11-15, fix/tls-path-test-isolation)
+
+- **Product bug, not test isolation.** Hello pins the requests its client
+  originates to the SIP UDP listening address (`WithClientConnectionAddr`,
+  `fromListener`, for DSCP and NAT). sipgo applied that address to TLS
+  requests too: it bound the TCP dial to the UDP socket's IP:port and looked
+  the connection up by that local address. The first TLS connection to one
+  edge then carried every later TLS request whatever the Path named, a second
+  connection could not bind while the first (or its TIME_WAIT) held the port,
+  and the dial failed with `bind: address already in use` whenever an
+  unrelated TCP socket held that port number (the flaky
+  TestSIPCallsPhoneThroughTLSPath).
+- **Fix.** The server's client has a `hopRequester` TxRequester (also used by
+  the pickup "elsewhere" requester) that clears `Laddr` on requests over a
+  reliable transport. UDP requests stay pinned to the marked SIP socket; TLS
+  requests dial from an ephemeral port and sipgo reuses the connection by
+  destination. Via is unchanged (the advertised address). DSCP is unchanged:
+  the mark was only ever on the UDP socket, never on a TLS connection.
+- **WriteRequest is for ACKs only.** With a TxRequester set, sipgo's
+  `Client.WriteRequest` goes through it; `hopRequester` writes an ACK
+  straight to the transport and sends anything else as a transaction. Hello
+  only writes ACKs that way; TestDSCPOutboundOnMarkedSocket, which wrote a
+  bare OPTIONS, now sends it as a client transaction from the listener.
+- **Regression test.** TestSIPCallsPhonesBehindTwoTLSEdges: phones of one
+  extension registered through two edge TLS sockets must each get an INVITE.
