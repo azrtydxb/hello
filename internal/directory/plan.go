@@ -17,7 +17,10 @@ type LocalUser struct {
 	Email       string
 	DisplayName string
 	Role        string
-	Enabled     bool
+	// BreakGlass is a local admin who may always sign in with a password;
+	// sync never touches one (AC-10c).
+	BreakGlass bool
+	Enabled    bool
 	// ConnectorID and ExternalID are set for a directory-managed user.
 	ConnectorID int64
 	ExternalID  string
@@ -34,6 +37,9 @@ type LocalUser struct {
 	SyncedMemberOf []int64
 	// Managed is the managed-field set stored on the user.
 	Managed []string
+	// ProvisionedNumber is the number range auto-provisioning allocated to
+	// the user ("" none); a re-run reuses it, never another.
+	ProvisionedNumber string
 }
 
 // LocalExt is an extension as the planner sees it.
@@ -54,6 +60,9 @@ type State struct {
 	Admins int
 	// RingGroups are the ring groups that exist.
 	RingGroups map[int64]bool
+	// Taken are the numbers of the connector's auto-provisioning range that
+	// something other than an extension claims (Exts holds the extensions).
+	Taken map[string]bool
 }
 
 // Op is what applying a change does to the database.
@@ -78,6 +87,9 @@ type Op struct {
 	SetManaged bool
 	AbsentRuns int
 	Devices    bool
+	// Provision allocates an extension from the range and links it (I-11);
+	// Extension and SetExtension are then filled in by the apply.
+	Provision *Provision
 }
 
 // Plan is the planner's answer: the rows, their hash and the operations.
@@ -127,6 +139,11 @@ type planner struct {
 	override map[string]bool
 	plan     Plan
 	managed  []string
+	// ap is the connector's auto-provisioning when it is on (I-11);
+	// allocated are the numbers earlier users of the run take from it.
+	ap        AutoProvision
+	apOn      bool
+	allocated map[string]bool
 }
 
 // MakePlan computes the changes a sync would make (I-3 to I-10). It is a pure
@@ -139,7 +156,8 @@ func MakePlan(in PlanInput) Plan {
 		admins: in.State.Admins, emails: map[string]string{}, names: map[string]string{},
 		extOwner: map[string]string{}, extCount: map[string]int{},
 		adopt: map[string]bool{}, override: map[string]bool{}, adoptAll: in.Decisions.AdoptAll,
-		plan: Plan{Counts: map[string]int{}},
+		plan: Plan{Counts: map[string]int{}}, ap: in.Connector.AutoProvision, apOn: in.Connector.AutoProvision.active(),
+		allocated: map[string]bool{},
 	}
 	for _, id := range in.Decisions.Adopt {
 		p.adopt[id] = true
@@ -278,6 +296,8 @@ func (p *planner) wantedRole(s src) string {
 	return p.c.GroupRules.Role(s.u.Groups, p.opts.AllowAdminFromDirectory)
 }
 
+// wantedRings are the ring groups the user's groups put its extension in;
+// extID is the extension (newExtension for one auto-provisioning creates).
 func (p *planner) wantedRings(s src, extID int64) []int64 {
 	if len(p.c.GroupRules.RingGroups) == 0 || extID == 0 {
 		return nil
@@ -322,9 +342,116 @@ func (p *planner) linked(s src, lu *LocalUser) {
 		}
 	}
 	if p.c.Mode == ModeCreateOnly {
+		// Hello owns the fields after the first write; a user that never had
+		// a number allocated still gets one, once (I-11).
+		if lu.OwnedExtension == 0 && lu.ProvisionedNumber == "" && p.provisionable(s) {
+			p.provisionOnly(s, lu, base)
+		}
 		return
 	}
 	p.fields(s, lu, base, false)
+}
+
+// newExtension stands for the extension auto-provisioning creates when the
+// plan needs an extension id before the apply has one.
+const newExtension = -1
+
+// provisionable reports whether the user is one auto-provisioning serves: it
+// is on, the user is in its groups, and the mapped extension is empty or
+// names no extension (I-11).
+func (p *planner) provisionable(s src) bool {
+	if !p.apOn || !p.ap.wants(s.u.Groups) || s.m.ExtensionError != "" {
+		return false
+	}
+	if s.m.Extension == "" || len(p.c.Mappings.Extension.Sources) == 0 {
+		return true
+	}
+	_, ok := p.in.State.Exts[s.m.Extension]
+	return !ok
+}
+
+func (p *planner) numberFree(n string) bool {
+	_, ext := p.in.State.Exts[n]
+	return !ext && !p.in.State.Taken[n] && !p.allocated[n]
+}
+
+// provision decides the extension a user without one gets: the extension of
+// its earlier number when that still exists and is free (relink, id set), or
+// a number to create: the earlier one when free, else the first free one of
+// the range. ok is false when the range has none free.
+func (p *planner) provision(lu *LocalUser) (id int64, number string, ok bool) {
+	prev := ""
+	if lu != nil {
+		prev = lu.ProvisionedNumber
+	}
+	if prev != "" {
+		if e, exists := p.in.State.Exts[prev]; exists && !e.Door && (e.UserID == 0 || e.UserID == lu.ID) {
+			if owner, taken := p.extOwner[prev]; !taken || owner == lu.ExternalID {
+				p.extOwner[prev] = lu.ExternalID
+				return e.ID, prev, true
+			}
+		}
+		if p.numberFree(prev) {
+			p.allocated[prev] = true
+			return 0, prev, true
+		}
+	}
+	p.ap.Numbers(func(n string) bool {
+		if p.numberFree(n) {
+			number = n
+			return false
+		}
+		return true
+	})
+	if number == "" {
+		return 0, "", false
+	}
+	p.allocated[number] = true
+	return 0, number, true
+}
+
+// provisionDiffs adds what creating an extension shows in a row.
+func (p *planner) provisionDiffs(diffs map[string]Diff, number, email string) {
+	diffs["extension"] = Diff{"", number}
+	if p.ap.Device {
+		diffs["device"] = Diff{"", number}
+	}
+	if p.ap.Voicemail {
+		vm := "on"
+		if email != "" {
+			vm = email
+		}
+		diffs["voicemail"] = Diff{"", vm}
+	}
+}
+
+// provisionOnly plans the provisioning of a linked create_only user, the one
+// write such a user still gets.
+func (p *planner) provisionOnly(s src, lu *LocalUser, base Change) {
+	id, number, ok := p.provision(lu)
+	if !ok {
+		p.conflict(s, lu, ReasonRangeExhausted, false)
+		return
+	}
+	op := &Op{Kind: ActionUpdate, UserID: lu.ID, ExternalID: s.u.ExternalID, Managed: p.managedFor(), SetManaged: true}
+	diffs := map[string]Diff{}
+	if id != 0 {
+		op.Extension, op.SetExtension = id, true
+		diffs["extension"] = Diff{"", number}
+	} else {
+		op.Provision = &Provision{Preferred: number, Range: p.ap, Name: nameOf(lu.DisplayName, lu.Username), Email: lu.Email}
+		p.provisionDiffs(diffs, number, lu.Email)
+	}
+	c := base
+	c.Action, c.FieldDiffs, c.Reason = ActionUpdate, diffs, ReasonAutoProvisioned
+	p.add(c, op)
+}
+
+func nameOf(display, username string) string {
+	if display != "" {
+		return display
+	}
+	return username
 }
 
 // fields plans the attribute changes of an existing user (a linked user, or an
@@ -372,6 +499,12 @@ func (p *planner) fields(s src, lu *LocalUser, base Change, adopting bool) {
 		}
 	}
 	ext := p.extension(s, lu)
+	canProvision := p.provisionable(s)
+	if ext.reason == ReasonExtensionMissing && canProvision {
+		// The value names no extension: auto-provisioning gives the user a
+		// number of the range instead, or keeps the one it has (I-11).
+		ext = extResult{}
+	}
 	if ext.reason != "" {
 		p.conflict(s, lu, ext.reason, ext.overridable)
 		return
@@ -385,10 +518,36 @@ func (p *planner) fields(s src, lu *LocalUser, base Change, adopting bool) {
 			p.extOwner[ext.number] = s.u.ExternalID
 		}
 	}
+	provisioned := false
+	if finalExt == 0 && canProvision {
+		id, number, ok := p.provision(lu)
+		if !ok {
+			p.conflict(s, lu, ReasonRangeExhausted, false)
+			return
+		}
+		provisioned = true
+		email := lu.Email
+		if op.Email != nil {
+			email = *op.Email
+		}
+		if id != 0 {
+			finalExt = id
+			op.Extension, op.SetExtension = id, true
+			diffs["extension"] = Diff{"", number}
+		} else {
+			finalExt = newExtension
+			display := lu.DisplayName
+			if op.Display != nil {
+				display = *op.Display
+			}
+			op.Provision = &Provision{Preferred: number, Range: p.ap, Name: nameOf(display, lu.Username), Email: email}
+			p.provisionDiffs(diffs, number, email)
+		}
+	}
 	if len(p.c.GroupRules.RingGroups) > 0 && finalExt != 0 {
 		want := p.wantedRings(s, finalExt)
 		have, synced := lu.MemberOf, lu.SyncedMemberOf
-		if op.SetExtension {
+		if op.SetExtension || op.Provision != nil {
 			// A new extension: the old one's synced rows go with the link and
 			// the new one is joined to every wanted group.
 			have, synced = nil, nil
@@ -425,6 +584,9 @@ func (p *planner) fields(s src, lu *LocalUser, base Change, adopting bool) {
 	}
 	c := base
 	c.Action, c.FieldDiffs = ActionUpdate, diffs
+	if provisioned {
+		c.Reason = ReasonAutoProvisioned
+	}
 	p.reserve(m, lu)
 	p.add(c, op)
 }
@@ -551,6 +713,10 @@ func (p *planner) match(s src, cand *LocalUser, byUsername bool) {
 		}
 		p.conflict(s, cand, reason, false)
 		return
+	case cand.BreakGlass:
+		id := cand.ID
+		p.add(Change{Action: ActionSkip, UserID: &id, ExternalID: s.u.ExternalID, Username: cand.Username, Reason: ReasonProtected}, nil)
+		return
 	case cand.Role == "admin":
 		id := cand.ID
 		p.add(Change{Action: ActionSkip, UserID: &id, ExternalID: s.u.ExternalID, Username: cand.Username, Reason: ReasonLocalAdmin}, nil)
@@ -580,9 +746,21 @@ func (p *planner) create(s src) {
 		return
 	}
 	ext := p.extension(s, nil)
+	canProvision := p.provisionable(s)
+	if ext.reason == ReasonExtensionMissing && canProvision {
+		ext = extResult{}
+	}
 	if ext.reason != "" {
 		p.conflict(s, nil, ext.reason, ext.overridable)
 		return
+	}
+	number := ""
+	if ext.id == 0 && canProvision {
+		var ok bool
+		if _, number, ok = p.provision(nil); !ok {
+			p.conflict(s, nil, ReasonRangeExhausted, false)
+			return
+		}
 	}
 	role := "user"
 	if len(p.c.GroupRules.Roles) > 0 {
@@ -598,16 +776,23 @@ func (p *planner) create(s src) {
 	if m.Email != "" {
 		diffs["email"] = Diff{"", m.Email}
 	}
+	extID := ext.id
 	if ext.id != 0 {
 		diffs["extension"] = Diff{"", ext.number}
 		p.extOwner[ext.number] = s.u.ExternalID
 	}
-	op.RingAdd = p.wantedRings(s, ext.id)
+	reason := ""
+	if number != "" {
+		extID, reason = newExtension, ReasonAutoProvisioned
+		op.Provision = &Provision{Preferred: number, Range: p.ap, Name: name, Email: m.Email}
+		p.provisionDiffs(diffs, number, m.Email)
+	}
+	op.RingAdd = p.wantedRings(s, extID)
 	if len(op.RingAdd) > 0 {
 		diffs["ringGroups"] = Diff{"", joinIDs(op.RingAdd)}
 	}
 	p.reserve(m, &LocalUser{ExternalID: s.u.ExternalID})
-	p.add(Change{Action: ActionCreate, ExternalID: s.u.ExternalID, Username: m.Username, FieldDiffs: diffs}, op)
+	p.add(Change{Action: ActionCreate, ExternalID: s.u.ExternalID, Username: m.Username, FieldDiffs: diffs, Reason: reason}, op)
 }
 
 // absent handles linked users missing from the source (I-7).

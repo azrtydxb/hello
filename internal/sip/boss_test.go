@@ -250,9 +250,9 @@ func TestBossLinkDivert(t *testing.T) {
 // time, then the boss's rings too. It fails if the boss rings at once, or
 // never.
 func TestBossLinkAssistantFirst(t *testing.T) {
-	prev := bossAssistantLead
-	bossAssistantLead = 400 * time.Millisecond
-	t.Cleanup(func() { bossAssistantLead = prev })
+	prev := bossAssistantLead.Get()
+	bossAssistantLead.Set(400 * time.Millisecond)
+	t.Cleanup(func() { bossAssistantLead.Set(prev) })
 	link := bossLink()
 	link.RingMode = snapshot.BossRingAssistantFirst
 	pbx := startPBX(t, threeDevices(), shortRing(3*time.Second), bossOpts([]snapshot.BossLink{link}))
@@ -600,7 +600,7 @@ func TestBossAssistantDeclinesRingsBoss(t *testing.T) {
 		t.Fatalf("call: %v", r.err)
 	}
 	if d := time.Since(start); d > 3*time.Second {
-		t.Fatalf("the boss rang after %v, want at once (the lead is %v)", d, bossAssistantLead)
+		t.Fatalf("the boss rang after %v, want at once (the lead is %v)", d, bossAssistantLead.Get())
 	}
 	waitReq(t, b.invites, "INVITE to the boss after the assistant declined")
 	hangup(t, r.dcs)

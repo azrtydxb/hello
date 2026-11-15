@@ -11,7 +11,8 @@ import (
 func TestPGPush(t *testing.T) {
 	r := newPGRig(t)
 	r.e.Drivers[KindSCIM] = &pushDriver{}
-	c, err := r.e.Create(r.ctx, "admin", ConnectorInput{Kind: KindSCIM, Name: strPtr("Okta"), Enabled: boolPtr(true)})
+	c, err := r.e.Create(r.ctx, "admin", ConnectorInput{Kind: KindSCIM, Name: strPtr("Okta"), Enabled: boolPtr(true),
+		Options: &Options{LoginMethod: LoginOIDC, OIDCProvider: KindGoogle}})
 	if err != nil {
 		t.Fatal(err)
 	}

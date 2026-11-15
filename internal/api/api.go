@@ -50,6 +50,10 @@ type Store interface {
 	Audit(ctx context.Context, actor, action, resource, resourceID string) error
 
 	UserForLogin(ctx context.Context, username string) (store.Login, error)
+	// SSORequired is the sso_required policy (spec integrations I-29).
+	SSORequired(ctx context.Context) (bool, error)
+	// UserManagedByDirectory reports whether a user is directory-synced.
+	UserManagedByDirectory(ctx context.Context, id int64) (bool, error)
 	UpgradePasswordHash(ctx context.Context, id int64, oldHash, newHash string) error
 	UserPasswordHash(ctx context.Context, id int64) (string, error)
 	ChangeOwnPassword(ctx context.Context, id int64, newHash string, keep []byte) error
@@ -368,6 +372,9 @@ type Config struct {
 	// I-25): /scim/v2 and its token administration; nil answers 404 on
 	// /scim/v2 and 503 on the token routes.
 	SCIM SCIMService
+	// SSO is single sign-on (spec integrations P11); nil hides the login
+	// page's providers and answers 503 on the SSO routes.
+	SSO SSOService
 	// Originate and OriginateLive carry click-to-call (spec integrations
 	// I-37): its requests and policy in PostgreSQL, its queue, live state
 	// and limit counters in Valkey; nil answers 503. OriginateLimits
@@ -399,6 +406,9 @@ type Config struct {
 	// the Diagnostics view; nil answers 503. AuthFailLimit is hello-sip's
 	// HELLO_SIP_AUTH_FAIL_LIMIT (0 means its default, 10).
 	Diagnostics DiagnosticsLive
+	// WebRTC reads the WebRTC status the hello-sip nodes publish for
+	// GET /api/v1/webrtc/status; nil leaves the legs out.
+	WebRTC WebRTCLive
 	// Syslog reads the lines of the phone syslog sink; nil answers 503.
 	Syslog        SyslogLive
 	AuthFailLimit int
@@ -479,6 +489,8 @@ type Config struct {
 	prewarmMu *sync.Mutex
 	// credLimit bounds how often a user mints device credentials.
 	credLimit *rateLimiter
+	// turnProbe checks the TURN servers for the WebRTC status.
+	turnProbe *turnProber
 	// prewarmKick asks the background worker to pre-generate the prompts of a
 	// language a queue just set. Batchable handlers kick it rather than call
 	// the pre-generation, which uses the speech cache and must not run inside a
@@ -504,6 +516,9 @@ func Handler(c Config) http.Handler {
 		c.TTS = &tts.Client{}
 	}
 	c.credLimit = &rateLimiter{}
+	if c.turnProbe == nil {
+		c.turnProbe = &turnProber{}
+	}
 	c.speech, c.prewarmMu = newSpeechCache(c), &sync.Mutex{}
 	c.prewarmKick = make(chan struct{}, 1)
 	c.self = new(atomic.Pointer[http.Handler])

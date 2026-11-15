@@ -83,6 +83,21 @@ interface Draft {
   ringRules: string;
   allowAdmin: boolean;
   disableDevices: boolean;
+  /** "oidc:google" or "oidc:entra"; "" until chosen. */
+  login: string;
+}
+
+/** How a SCIM connector's users sign in: single sign-on only (they have no
+ * local password, and LDAP bind is for LDAP connectors). */
+const LOGINS = [
+  { value: "oidc:entra", label: "Single sign-on with Microsoft" },
+  { value: "oidc:google", label: "Single sign-on with Google" },
+];
+
+function loginOf(c: Connector | null): string {
+  if (c?.options.loginMethod === "oidc" && c.options.oidcProvider)
+    return `oidc:${c.options.oidcProvider}`;
+  return "";
 }
 
 function draftOf(c: Connector | null): Draft {
@@ -115,6 +130,7 @@ function draftOf(c: Connector | null): Draft {
       .join("\n"),
     allowAdmin: c?.options.allowAdminFromDirectory ?? false,
     disableDevices: c?.options.disableDevices ?? true,
+    login: loginOf(c),
   };
 }
 
@@ -155,6 +171,8 @@ const KEYS = [
   "mappings.email",
   "mappings.displayName",
   "mappings.extension",
+  "options.loginMethod",
+  "options.oidcProvider",
 ];
 
 /** The settings of a scim connector: create or edit. */
@@ -182,6 +200,9 @@ export function ScimConnectorDrawer({
     setUnmatched([]);
     const found: Record<string, string> = {};
     if (d.name.trim() === "") found.name = "Required.";
+    if (d.enabled && d.login === "")
+      found["options.loginMethod"] =
+        "Choose how these users sign in: they have no local password.";
     if (splitList(d.username).length === 0)
       found["mappings.username"] = "Name at least one attribute.";
     const roles = ruleLines(d.roleRules);
@@ -217,8 +238,16 @@ export function ScimConnectorDrawer({
         })),
       },
       options: {
+        ...connector?.options,
         allowAdminFromDirectory: d.allowAdmin,
         disableDevices: d.disableDevices,
+        loginMethod: d.login ? "oidc" : "",
+        oidcProvider:
+          d.login === "oidc:google"
+            ? "google"
+            : d.login === "oidc:entra"
+              ? "entra"
+              : "",
       },
     };
     try {
@@ -389,6 +418,16 @@ export function ScimConnectorDrawer({
             onChange={(e) => set("allowAdmin", e.target.checked)}
           />
         </fieldset>
+        <Select
+          label="How these users sign in"
+          value={d.login}
+          error={
+            errors["options.loginMethod"] ?? errors["options.oidcProvider"]
+          }
+          hint="Pushed users have no local password. Single sign-on needs the provider set up under Single sign-on first."
+          options={[{ value: "", label: "Choose…" }, ...LOGINS]}
+          onChange={(e) => set("login", e.target.value)}
+        />
         <Select
           label="Mode"
           value={d.mode}

@@ -41,7 +41,8 @@ func newEnv(t *testing.T, cfg string) *env {
 	e.eng = &directory.Engine{Store: e.dm, Drivers: map[string]directory.Driver{directory.KindSCIM: Driver{Store: e.sm}}, Replica: "t", Now: clock}
 	on := true
 	name := "Entra"
-	c, err := e.eng.Create(ctx, "admin", directory.ConnectorInput{Kind: directory.KindSCIM, Name: &name, Enabled: &on, Config: json.RawMessage(cfg)})
+	c, err := e.eng.Create(ctx, "admin", directory.ConnectorInput{Kind: directory.KindSCIM, Name: &name, Enabled: &on, Config: json.RawMessage(cfg),
+		Options: &directory.Options{LoginMethod: directory.LoginOIDC, OIDCProvider: directory.KindEntra}})
 	if err != nil {
 		t.Fatal(err)
 	}

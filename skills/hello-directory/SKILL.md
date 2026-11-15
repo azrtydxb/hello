@@ -68,6 +68,25 @@ and the `reason`. Filter by `action`, page with `after` and `nextAfter`.
   default, its devices are switched off. A user that reappears is enabled
   again.
 
+## Auto-provisioned extensions
+
+A connector may have **range auto-provisioning** on (`autoProvision` on the
+connector: `enabled`, `rangeStart`, `rangeEnd`, `device`, `voicemail`,
+optional source `groups`). A user whose directory entry has no extension, or
+names one that does not exist, then gets the next free number of the range:
+an extension named after the user, a voicemail box that mails the user, and
+one SIP device whose secret nobody sees (the administrator rotates it from the
+device page to set up a phone). Such rows have reason `auto_provisioned`, with
+`extension`, `device` and `voicemail` in `fieldDiffs`; after an apply the
+`extension` shows the number actually allocated, which differs from the
+preview's when someone took that number in between. `range_exhausted` is a user
+left unchanged because the range is full: the administrator widens it.
+
+A number stays with its user: re-runs never renumber, and an extension that was
+deleted comes back with the same number at the next full run. A disabled user
+keeps the extension and its voicemail. `getDirectoryRange` shows how full the
+range is, the next number and which users hold a number from it.
+
 ## The guards
 
 A run halts as `needs_confirmation` and applies nothing when it would disable

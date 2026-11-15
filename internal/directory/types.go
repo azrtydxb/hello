@@ -11,16 +11,26 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/netip"
 	"time"
 )
 
-// Connector kinds. A kind is a Driver; later phases register more.
+// Connector kinds. A kind is a Driver.
 const (
-	KindLDAP = "ldap"
+	KindLDAP   = "ldap"
+	KindGoogle = "google"
+	KindEntra  = "entra"
 	// KindSCIM is pushed to by identity providers (I-23 to I-25): its
 	// driver reads the resources they pushed.
 	KindSCIM = "scim"
+)
+
+// Sign-in methods of a connector's users (I-29, I-30): synced users have no
+// local password, so every enabled connector names one.
+const (
+	LoginOIDC     = "oidc"
+	LoginLDAPBind = "ldap_bind"
 )
 
 // Modes (I-5).
@@ -80,6 +90,8 @@ const (
 	ReasonLocalAdmin        = "local_admin_not_adopted"
 	ReasonAdoptNotConfirmed = "adopt_not_confirmed"
 	ReasonAlreadyLinked     = "already_linked"
+	// ReasonProtected is a break-glass admin: sync never touches one (AC-10c).
+	ReasonProtected = "protected_local_admin"
 )
 
 // Classified connector error codes (I-14, I-19).
@@ -95,6 +107,12 @@ const (
 	CodeUserCap      = "user_cap_exceeded"
 	CodeReplicaLost  = "replica_lost"
 	CodeInternal     = "internal"
+	// CodeNoLoginMethod is enabling a connector whose users could not sign
+	// in (I-29).
+	CodeNoLoginMethod = "no_login_method"
+	// CodeConsentRequired is a Google OAuth-admin connector without the
+	// administrator's consent (no refresh token yet).
+	CodeConsentRequired = "consent_required"
 )
 
 // Errors the engine and stores return.
@@ -112,6 +130,8 @@ var (
 	ErrLastAdmin = errors.New("directory: last admin")
 	// ErrHasUsers is a connector delete while users are still linked to it.
 	ErrHasUsers = errors.New("directory: connector still has linked users")
+	// ErrProtected is a change to a break-glass admin, which sync never makes.
+	ErrProtected = errors.New("directory: protected local admin")
 	// ErrDisabled is a run asked of a disabled connector.
 	ErrDisabled = errors.New("directory: connector is disabled")
 	// ErrPaused is a push to a connector the mass-deprovision guard paused
@@ -193,6 +213,12 @@ type SyncMark struct {
 	// Time is an LDAP generalized time, the start of the read less an overlap
 	// for clock skew.
 	Time string `json:"time,omitempty"`
+	// Delta is the Microsoft Graph delta link of the users (method delta).
+	// It is opaque state, not a credential: it is useless without a token.
+	Delta string `json:"delta,omitempty"`
+	// Groups is a hash of the memberships of the groups the rules use, taken
+	// with a delta mark: a change forces the next run full.
+	Groups string `json:"groups,omitempty"`
 }
 
 // SyncState is what a connector keeps between runs.
@@ -217,6 +243,9 @@ const (
 	FullMethodChanged  = "method_changed"
 	FullGroupsChanged  = "groups_changed"
 	FullUnsupported    = "unsupported"
+	FullDeltaExpired   = "delta_expired"
+	FullDeltaRemoved   = "delta_removed"
+	FullDeltaLarge     = "delta_large"
 )
 
 // FullRunInterval is how often a full run is forced: it is the only kind of
@@ -280,6 +309,24 @@ func isPush(d Driver) bool {
 	return ok && p.Push()
 }
 
+// SecretDriver is a Driver whose credential is not a bind password: it names
+// the field and checks the value against the config before it is sealed.
+type SecretDriver interface {
+	// SecretField is the API field that carries the credential.
+	SecretField() string
+	// CheckSecret validates a new credential for cfg; the error message is
+	// safe to show and never echoes the value.
+	CheckSecret(cfg json.RawMessage, secret string) error
+}
+
+// secretField names a driver's credential field.
+func secretField(d Driver) string {
+	if sd, ok := d.(SecretDriver); ok {
+		return sd.SecretField()
+	}
+	return "bindPassword"
+}
+
 // ValidateOptions are deployment switches a driver's validation honours.
 type ValidateOptions struct {
 	// AllowPlaintext is HELLO_DIRECTORY_ALLOW_PLAINTEXT_LDAP (lab only).
@@ -301,6 +348,9 @@ type FetchOptions struct {
 	AllowPlaintext bool
 	// Dial replaces the guarded dialer (tests only).
 	Dial func(ctx context.Context, network, address string) (net.Conn, error)
+	// HTTP replaces the guarded HTTPS client of the Google and Entra drivers
+	// (tests only).
+	HTTP *http.Client
 	// Allow are the private ranges the connection may reach
 	// (HELLO_INTEGRATIONS_ALLOWED_CIDRS).
 	Allow []netip.Prefix
@@ -326,8 +376,8 @@ type Connector struct {
 	Mappings        Mappings        `json:"mappings"`
 	GroupRules      GroupRules      `json:"groupRules"`
 	Options         Options         `json:"options"`
-	// AutoProvision is reserved for range auto-provisioning; it must be off.
-	AutoProvision json.RawMessage `json:"autoProvision"`
+	// AutoProvision is range auto-provisioning (I-11), off by default.
+	AutoProvision AutoProvision `json:"autoProvision"`
 
 	HasCredential      bool       `json:"hasCredential"`
 	CredentialFP       string     `json:"-"`
@@ -364,6 +414,11 @@ type Options struct {
 	// (default 20,000).
 	RunTimeoutMinutes int `json:"runTimeoutMinutes"`
 	UserCap           int `json:"userCap"`
+	// LoginMethod is how the connector's users sign in (I-29, I-30): oidc
+	// through OIDCProvider, or ldap_bind (LDAP connectors only). An enabled
+	// connector must have one.
+	LoginMethod  string `json:"loginMethod"`
+	OIDCProvider string `json:"oidcProvider"`
 }
 
 // Defaults.

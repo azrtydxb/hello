@@ -16,8 +16,12 @@ it `/scim/v2` answers `404` and no token can be issued).
 ## Setting it up
 
 1. **New SCIM connector.** Give it a name and, if needed, change the mapping
-   and the group rules (below). It is enabled by default; switched off, every
-   SCIM request answers `403`.
+   and the group rules (below), and choose how its users sign in: pushed users
+   have no local password, so an enabled SCIM connector needs single sign-on
+   with Microsoft or Google (`options.loginMethod` `oidc`, `oidcProvider`
+   `entra` or `google`), set up under Single sign-on first (see
+   [integrations](integrations.md)). It is enabled by default; switched off,
+   every SCIM request answers `403`.
 2. **Issue token.** The console shows the base URL
    (`<HELLO_PUBLIC_URL>/scim/v2`) and a token `hello_scim_…` once. Hello keeps
    only its SHA-256; the token is valid for `/scim/v2` of this connector and

@@ -22,6 +22,7 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/directory"
+	"github.com/azrtydxb/hello/internal/directory/dirstore"
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/mailer"
@@ -36,6 +37,7 @@ import (
 	"github.com/azrtydxb/hello/internal/scim"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/slack"
+	"github.com/azrtydxb/hello/internal/sso"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/turn"
@@ -255,9 +257,11 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// pushed resources are the source of the scim connector kind.
 	scimStore := &scim.PG{DB: db}
 	dirEngine := &directory.Engine{
-		Store: &directory.PG{DB: db, Box: box},
+		// Range auto-provisioning (P12) creates extensions through the
+		// configuration store, with its numbering rules and routing check.
+		Store: &directory.PG{DB: db, Box: box, Provisioner: &dirstore.Provisioner{Store: st, Realm: cfg.SIPDomain}},
 		Drivers: map[string]directory.Driver{
-			directory.KindLDAP: directory.LDAP{},
+			directory.KindLDAP: directory.LDAP{}, directory.KindGoogle: directory.Google{}, directory.KindEntra: directory.Entra{},
 			directory.KindSCIM: scim.Driver{Store: scimStore},
 		},
 		Metrics:        directory.NewMetrics(metrics.Registry),
@@ -273,6 +277,15 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			return s, true, nil
 		}, nil, log.With("component", "directory")),
 	}
+	// Single sign-on (spec integrations P11): OIDC through Google or Entra
+	// and the LDAP bind login of AD-synced users. The sign-in state and the
+	// throttles live in Valkey; without HELLO_PUBLIC_URL SSO is off.
+	ssoSvc := &sso.Service{
+		Store: &sso.PG{DB: db, Box: box}, PublicURL: cfg.AI.PublicURL,
+		States: sso.ValkeyStates{Client: vk.Client}, Throttle: sso.ValkeyThrottle{Client: vk.Client},
+		Directory: dirEngine, Metrics: sso.NewMetrics(metrics.Registry), Log: log.With("component", "sso"),
+	}
+	dirEngine.LoginCheck = ssoSvc.ProviderEnabled
 	go dirEngine.Run(ctx)
 	var scimSvc api.SCIMService
 	if cfg.AI.PublicURL != "" {
@@ -289,11 +302,13 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// open and copy the states the nodes post into their rows.
 	sweeper := &originate.Sweeper{Store: st, Live: vk, Lock: st, Log: log.With("component", "originate")}
 	go sweeper.Run(ctx)
+	registerClientDevices(ctx, st, metrics.Registry)
 	apiCfg := api.Config{
 		CRM:          crmSvc.Service,
 		Slack:        slackSvc,
 		Directory:    dirEngine,
 		SCIM:         scimSvc,
+		SSO:          ssoSvc,
 		Events:       evSvc,
 		Webhooks:     hooks,
 		AIAgent:      agent,
@@ -317,6 +332,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Backups:         backups,
 		Maintenance:     backups.Maintenance,
 		Diagnostics:     vk,
+		WebRTC:          vk,
 		Syslog:          vk,
 		AuthFailLimit:   cfg.AuthFailLimit,
 		EmailDelivery:   cfg.SmtpHost != "",
@@ -679,6 +695,32 @@ func activeRecordingLinks(ctx context.Context, st *store.Store) float64 {
 	return float64(n)
 }
 
+// registerClientDevices exposes hello_client_devices{kind}: the enabled web
+// and mobile devices, read from the database at scrape time (0 when it does
+// not answer in time). With hello_client_registrations it backs the alert
+// "no client registered while some are enrolled" (docs/webrtc.md).
+func registerClientDevices(ctx context.Context, st *store.Store, reg prometheus.Registerer) {
+	for _, kind := range []string{"web", "mobile"} {
+		reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "hello_client_devices", Help: "Enabled web and mobile client devices, by kind.", ConstLabels: prometheus.Labels{"kind": kind},
+		}, func() float64 {
+			ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			ds, err := st.ListDevices(ctx, kind)
+			if err != nil {
+				return 0
+			}
+			n := 0
+			for _, d := range ds {
+				if d.Enabled {
+					n++
+				}
+			}
+			return float64(n)
+		}))
+	}
+}
+
 // clientConfig is the browser softphone's settings: the key derived device
 // credentials come from, the cap, and the STUN and TURN servers handed out.
 // The shared TURN secret and the key stay in this process; neither is
@@ -690,12 +732,18 @@ func clientConfig(cfg config.Control, reg prometheus.Registerer) api.ClientConfi
 		stun = turn.StunFromTurn(c.TURNURLs)
 	}
 	issued := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "hello_ice_credentials_issued_total", Help: "TURN credentials handed out by /api/v1/me/ice-servers.",
+		Name: "hello_turn_credentials_issued_total", Help: "TURN credentials handed out (ICE servers and device enrolment).",
 	})
-	reg.MustRegister(issued)
+	candidates := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_webrtc_candidate_type_total", Help: "Client end-of-call reports by the local ICE candidate type of the selected pair (host, srflx, prflx, relay, unknown).",
+	}, []string{"type"})
+	for _, t := range store.CandidateTypes {
+		candidates.WithLabelValues(t)
+	}
+	reg.MustRegister(issued, candidates)
 	return api.ClientConfig{
 		AuthKey: c.AuthKey, MaxDevices: c.MaxDevices, WSSURL: c.WSSURL,
-		ICE:       turn.Config{STUN: stun, TURN: c.TURNURLs, Secret: c.TURNSecret, TTL: c.TURNTTL},
-		ICEIssued: issued,
+		ICE:        turn.Config{STUN: stun, TURN: c.TURNURLs, Secret: c.TURNSecret, TTL: c.TURNTTL},
+		TURNIssued: issued, CandidateTypes: candidates,
 	}
 }

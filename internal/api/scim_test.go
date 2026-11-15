@@ -33,7 +33,8 @@ func newSCIMEnv(t *testing.T) (*dirEnv, *scim.Mem) {
 
 func TestSCIMTokenRoutes(t *testing.T) {
 	e, sm := newSCIMEnv(t)
-	c := wantJSON(t, e.admin("POST", "/api/v1/directory/connectors", map[string]any{"kind": "scim", "name": "Entra", "enabled": true}),
+	c := wantJSON(t, e.admin("POST", "/api/v1/directory/connectors", map[string]any{"kind": "scim", "name": "Entra", "enabled": true,
+		"options": map[string]any{"loginMethod": "oidc", "oidcProvider": "entra"}}),
 		http.StatusCreated, "create scim connector")
 	if c["kind"] != "scim" || c["scheduleMinutes"] != float64(0) || c["hasCredential"] != false {
 		t.Fatalf("connector = %v", c)

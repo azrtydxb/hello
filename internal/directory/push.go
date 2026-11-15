@@ -2,6 +2,7 @@ package directory
 
 import (
 	"context"
+	"maps"
 	"strconv"
 	"time"
 )
@@ -161,7 +162,8 @@ func (e *Engine) Push(ctx context.Context, c Connector, users []SourceUser, o Pu
 			rows = append(rows, ch)
 			continue
 		}
-		if err := e.Store.Apply(ctx, actor, c, *ch.op); err != nil {
+		got, err := e.Store.Apply(ctx, actor, c, *ch.op)
+		if err != nil {
 			rows = append(rows, Change{Action: ActionError, UserID: ch.UserID, ExternalID: ch.ExternalID, Username: ch.Username,
 				FieldDiffs: ch.FieldDiffs, Reason: applyReason(err)})
 			e.log().Warn("directory: apply push", "connector", c.ID, "reason", applyReason(err))
@@ -170,6 +172,16 @@ func (e *Engine) Push(ctx context.Context, c Connector, users []SourceUser, o Pu
 			}
 			continue
 		}
+		if got.Extension != "" {
+			// The number range auto-provisioning allocated (I-11).
+			d := ch.FieldDiffs["extension"]
+			if d.After != got.Extension {
+				ch.FieldDiffs = maps.Clone(ch.FieldDiffs)
+				d.After = got.Extension
+				ch.FieldDiffs["extension"] = d
+			}
+			e.Metrics.provisioned(c.Kind)
+		}
 		rows = append(rows, ch)
 	}
 	for _, q := range plan.Quiet {
@@ -177,7 +189,7 @@ func (e *Engine) Push(ctx context.Context, c Connector, users []SourceUser, o Pu
 			// The delete's own active mapping is not the connector's.
 			continue
 		}
-		if err := e.Store.Apply(ctx, actor, c, q); err != nil {
+		if _, err := e.Store.Apply(ctx, actor, c, q); err != nil {
 			e.log().Warn("directory: apply quiet", "connector", c.ID, "err", applyReason(err))
 		}
 	}

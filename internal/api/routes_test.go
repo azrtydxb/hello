@@ -42,6 +42,8 @@ func TestRoutesTable(t *testing.T) {
 		"POST /api/v1/webhooks/{id}/rotate-secret": true,
 		// A SCIM token is shown when it is issued (spec integrations I-24).
 		"POST /api/v1/directory/connectors/{id}/scim-token": true,
+		// The Google administrator consent stores a refresh token.
+		"POST /api/v1/directory/connectors/{id}/consent": true,
 	}
 	// Self-service routes (spec P-19, user accounts) ask only the user role,
 	// which ranks below viewer: the signed-in user's own profile, contacts,
@@ -71,7 +73,14 @@ func TestRoutesTable(t *testing.T) {
 	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true, "POST /api/v1/auth/login/2fa": true,
 		// The doorbell webhook is signature-checked and rate-limited instead (spec S-48).
 		"POST /api/v1/door/webhooks/{id}/trigger":     true,
-		"GET /api/v1/integrations/crm/oauth/callback": true}
+		"GET /api/v1/integrations/crm/oauth/callback": true,
+		// Single sign-on (spec integrations I-27): the login page's buttons,
+		// the IdP round trip, and the directory consent's return. The state is
+		// single use and bound to the browser instead.
+		"GET /api/v1/auth/oidc/providers":           true,
+		"GET /api/v1/auth/oidc/{provider}/start":    true,
+		"GET /api/v1/auth/oidc/{provider}/callback": true,
+		"GET /api/v1/directory/oauth/callback":      true}
 	seen := map[string]bool{}
 	for _, r := range Routes() {
 		key := r.Method + " " + r.Pattern

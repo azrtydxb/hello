@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -28,6 +29,8 @@ type fakeBackend struct {
 	lines    map[int64][]store.ChatLine
 	secret   string
 	email    string
+	// states is the agent state each availability check was given.
+	states []map[string]queue.AgentState
 }
 
 func newFake() *fakeBackend {
@@ -82,9 +85,10 @@ func (f *fakeBackend) ChatIPHash(ip string, _ time.Time) ([]byte, error) {
 	h := sha256.Sum256([]byte("day:" + ip))
 	return h[:], nil
 }
-func (f *fakeBackend) ChatAvailability(context.Context, store.ChatSite, time.Time) (bool, string, error) {
+func (f *fakeBackend) ChatAvailability(_ context.Context, _ store.ChatSite, _ time.Time, states map[string]queue.AgentState) (bool, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.states = append(f.states, states)
 	if !f.online {
 		return false, "no_agent", nil
 	}

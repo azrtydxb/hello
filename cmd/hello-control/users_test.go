@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/store"
 )
 
 type fakeUsers struct {
@@ -66,5 +67,20 @@ func TestUser2FAReset(t *testing.T) {
 	}
 	if err := user2FAReset(context.Background(), f, " ", &out); err == nil {
 		t.Fatal("an empty name was accepted")
+	}
+}
+
+type managedUsers struct{}
+
+func (managedUsers) CreateUser(context.Context, string, string, string, auth.Role) (int64, error) {
+	return 0, store.ErrManagedByDirectory
+}
+
+// TestUserAddRefusesASyncedUser fails if the CLI gives a directory-synced
+// user a password or hides why it refused (spec integrations I-29, AC-10b).
+func TestUserAddRefusesASyncedUser(t *testing.T) {
+	err := userAdd(context.Background(), managedUsers{}, []string{"ann@corp.example"}, strings.NewReader("pw-123456\n"), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "managed_by_directory") {
+		t.Fatalf("err = %v, want managed_by_directory", err)
 	}
 }

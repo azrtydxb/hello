@@ -4,8 +4,10 @@ go 1.27.1
 
 require (
 	github.com/azrtydxb/go-ai-sdk v0.8.0
+	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/emiago/sipgo v1.7.2
 	github.com/go-asn1-ber/asn1-ber v1.5.8
+	github.com/go-jose/go-jose/v4 v4.1.3
 	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/gobwas/ws v1.3.2
 	github.com/google/jsonschema-go v0.4.3
@@ -32,6 +34,7 @@ require (
 	golang.org/x/crypto v0.58.0
 	golang.org/x/image v0.47.0
 	golang.org/x/net v0.62.0
+	golang.org/x/oauth2 v0.37.0
 	golang.org/x/text v0.43.0
 )
 
@@ -68,7 +71,6 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/time v0.15.0 // indirect

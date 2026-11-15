@@ -300,19 +300,41 @@ func TestRecordingPauseOnHold(t *testing.T) {
 		t.Fatalf("call: %v", r.err)
 	}
 	waitReq(t, b.invites, "INVITE to b")
+	// The duration counts frames, not wall time, so each phase's frames must
+	// land in that phase: record_default starts off the answer path, and the
+	// relay reads its socket on its own goroutine, which a loaded machine can
+	// leave a few hundred milliseconds behind the feed. Feed only once the
+	// recording runs, and let the relay take every frame of a phase before
+	// the hold, the resume and the hangup change what is captured.
+	cl := onlyCall(t, pbx)
+	eventually(t, "the record_default recording to start", func() bool {
+		cl.mu.Lock()
+		rc := cl.rec
+		cl.mu.Unlock()
+		return rc != nil && rc.isActive()
+	})
+	relay := cl.anchorRelay()
 	feedA := startRTPFeed(t, r.dcs.InviteResponse.Body())
-	feedA.silence(1)
+	sent := 0
+	feed := func(seconds float64) {
+		feedA.silence(seconds)
+		sent += int(seconds * 50)
+		eventually(t, "the relay to read the fed frames", func() bool {
+			return relay.Metrics().Directions["a>b"].Packets >= uint64(sent) //nolint:gosec // a small count
+		})
+	}
+	feed(1)
 	// Hold: a sendonly re-INVITE pauses the recording.
 	res := a.reinviteAsCaller(t, r.dcs, "v=0\r\no=a 2 2 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 4970 RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\na=sendonly\r\n")
 	if res.StatusCode != 200 {
 		t.Fatalf("hold re-INVITE = %d", res.StatusCode)
 	}
-	feedA.silence(1.5) // held: must not be captured
+	feed(1.5) // held: must not be captured
 	res = a.reinviteAsCaller(t, r.dcs, "v=0\r\no=a 3 3 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 4970 RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\na=sendrecv\r\n")
 	if res.StatusCode != 200 {
 		t.Fatalf("resume re-INVITE = %d", res.StatusCode)
 	}
-	feedA.silence(1)
+	feed(1)
 	hangup(t, r.dcs)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -728,4 +750,22 @@ func TestRecordingToggleRFC2833(t *testing.T) {
 	}
 	hangup(t, r.dcs)
 	pbx.nextCDR(t)
+}
+
+// onlyCall is the one call the PBX carries, waiting for it to be listed.
+func onlyCall(t *testing.T, pbx *testPBX) *call {
+	t.Helper()
+	var c *call
+	eventually(t, "the call to be listed", func() bool {
+		pbx.srv.mu.Lock()
+		defer pbx.srv.mu.Unlock()
+		if len(pbx.srv.calls) != 1 {
+			return false
+		}
+		for k := range pbx.srv.calls {
+			c = k
+		}
+		return true
+	})
+	return c
 }

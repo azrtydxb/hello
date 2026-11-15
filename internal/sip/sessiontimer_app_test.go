@@ -218,8 +218,25 @@ func TestSessionTimersQueueTransfer(t *testing.T) {
 
 // TestSessionTimersIVRTakeover fails if an IVR menu's caller, taken over by a
 // survivor, is not refreshed with the timer the owner negotiated, or the
-// one-legged call is ended for a callee dialog it never had.
+// one-legged call is ended for a callee dialog it never had. The second case
+// has the owner's last refresh reach the caller before the takeover
+// re-INVITE: it fails if that refresh is mistaken for the survivor's.
 func TestSessionTimersIVRTakeover(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		ownerRefreshedFirst bool
+	}{
+		{"taken over before the owner refreshed", false},
+		{"the owner's refresh arrives first", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) { testSessionTimersIVRTakeover(t, tc.ownerRefreshedFirst) })
+	}
+}
+
+// ivrTakeoverPair starts an HA pair whose menu 800 holds its caller for 30s,
+// with opts on both nodes, and has the owner's phone a call the menu.
+func ivrTakeoverPair(t *testing.T, opts ...pbxOpt) (*fakeHA, *fakeMembership, *testPBX, *testPBX, *phone) {
+	t.Helper()
 	objs := &fakeObjects{}
 	_ = objs.Put(context.Background(), "ann/greet.wav", media.EncodeWAV(make([]byte, 16000*4), 8000))
 	m := ivrMenu("main", "800", map[string]snapshot.IVRDest{"1": ext("200")})
@@ -228,14 +245,37 @@ func TestSessionTimersIVRTakeover(t *testing.T) {
 		s.WithAnnouncements(map[string]string{"greet": "ann/greet.wav"})
 		s.WithIVRMenus([]snapshot.IVRMenu{m})
 	}
-	ha, mem, owner, taker := haPair(t, callerDevices(), withMedia(false), withFeatures(feats), withVoicemail(newVMStore(), objs),
-		withSessions(2*time.Second, time.Second, 0))
+	ha, mem, owner, taker := haPair(t, callerDevices(), append([]pbxOpt{withMedia(false), withFeatures(feats),
+		withVoicemail(newVMStore(), objs)}, opts...)...)
 	a := newPhone(t, owner, "a1", "pa")
 	a.register(t)
 	r := waitCall(t, dial(t.Context(), a, "800"))
 	if r.err != nil {
 		t.Fatal(r.err)
 	}
+	return ha, mem, owner, taker, a
+}
+
+// checkTakeoverTimer fails unless the takeover re-INVITE restates the
+// session timer with Session-Expires want (RFC 4028), or, for want "",
+// carries none of it.
+func checkTakeoverTimer(t *testing.T, r *sip.Request, want string) {
+	t.Helper()
+	se, minSE := headerOfReq(r, "Session-Expires"), headerOfReq(r, "Min-SE")
+	timer := listHas(r.GetHeaders("Supported"), "timer")
+	if want == "" {
+		if se != "" || minSE != "" || timer {
+			t.Fatalf("takeover re-INVITE of a call without a timer: Session-Expires %q, Min-SE %q, Supported timer %v", se, minSE, timer)
+		}
+		return
+	}
+	if se != want || minSE != "1" || !timer {
+		t.Fatalf("takeover re-INVITE: Session-Expires %q (want %q), Min-SE %q (want 1), Supported timer %v", se, want, minSE, timer)
+	}
+}
+
+func testSessionTimersIVRTakeover(t *testing.T, ownerRefreshedFirst bool) {
+	ha, mem, owner, taker, a := ivrTakeoverPair(t, withSessions(2*time.Second, time.Second, 0))
 	rec := waitRecord(t, ha, "the menu call is replicated with its timer", "sip-1", func(s livestate.DialogState) bool {
 		return s.State == haPhaseIVR && s.Session != nil && s.Session.Legs[sessCaller] != nil && s.Legs[0].RemoteSDP != ""
 	})
@@ -243,16 +283,80 @@ func TestSessionTimersIVRTakeover(t *testing.T) {
 		t.Fatalf("replicated session = %+v", rec.Session)
 	}
 	haReinviteTimeout.Set(time.Second)
+	if ownerRefreshedFirst {
+		// Leave the owner's refresh and its ACK queued at the phone, ahead
+		// of the takeover's re-INVITE (the order a slow CI runner produced).
+		eventually(t, "the owner refreshed the caller", func() bool {
+			return len(a.reinvites) > 0 && len(a.acks) > 0
+		})
+	}
 	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
 	taker.srv.takeoverPass(t.Context())
-	waitReq(t, a.reinvites, "takeover re-INVITE to the caller")
-	waitReq(t, a.acks, "ACK to the caller's 200")
-	drain(a.reinvites)
-	refreshWithin(t, a.reinvites, 4*time.Second, "the caller on the survivor")
+	// The owner refreshes the caller every second until it dies: its last
+	// refresh and ACK may reach the phone before the takeover's, so only the
+	// survivor's requests count.
+	reinv := reqFromWithin(t, a.reinvites, taker, 10*time.Second, "takeover re-INVITE to the caller")
+	checkTakeoverTimer(t, reinv, "2;refresher=uac")
+	for {
+		ack := reqFromWithin(t, a.acks, taker, 10*time.Second, "ACK to the caller's 200")
+		if ack.CSeq().SeqNo == reinv.CSeq().SeqNo {
+			break
+		}
+	}
+	refreshFrom(t, a.reinvites, taker, 4*time.Second, "the caller on the survivor")
 	noReq(t, a.byes, 1500*time.Millisecond, "BYE to a caller whose refresh was answered")
 	if n := len(liveCalls(t, taker)); n != 1 {
 		t.Fatalf("live calls on the survivor = %d, want the menu call", n)
 	}
+}
+
+// TestSessionTimersTakeoverReinvite fails if the takeover re-INVITE of a
+// call without a session timer carries one, or if a phone answering the
+// restated timer with 422 is not re-INVITEd at its Min-SE and refreshed at
+// that interval from then on.
+func TestSessionTimersTakeoverReinvite(t *testing.T) {
+	t.Run("no timer: no Session-Expires", func(t *testing.T) {
+		ha, mem, owner, taker, a := ivrTakeoverPair(t)
+		rec := waitRecord(t, ha, "the menu call is replicated", "sip-1", func(s livestate.DialogState) bool {
+			return s.State == haPhaseIVR && s.Legs[0].RemoteSDP != ""
+		})
+		if rec.Session != nil {
+			t.Fatalf("replicated session of a call without timers = %+v", rec.Session)
+		}
+		haReinviteTimeout.Set(time.Second)
+		killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
+		taker.srv.takeoverPass(t.Context())
+		checkTakeoverTimer(t, reqFromWithin(t, a.reinvites, taker, 10*time.Second, "takeover re-INVITE to the caller"), "")
+		eventually(t, "the survivor carries the menu call", func() bool { return len(liveCalls(t, taker)) == 1 })
+	})
+
+	t.Run("422: retried at the phone's Min-SE", func(t *testing.T) {
+		ha, mem, owner, taker, a := ivrTakeoverPair(t, withSessions(2*time.Second, time.Second, 0))
+		waitRecord(t, ha, "the menu call is replicated with its timer", "sip-1", func(s livestate.DialogState) bool {
+			return s.State == haPhaseIVR && s.Session != nil && s.Session.Legs[sessCaller] != nil && s.Legs[0].RemoteSDP != ""
+		})
+		haReinviteTimeout.Set(time.Second)
+		killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
+		a.mu.Lock()
+		a.reinviteMinSE = 3
+		a.mu.Unlock()
+		taker.srv.takeoverPass(t.Context())
+		first := reqFromWithin(t, a.reinvites, taker, 10*time.Second, "takeover re-INVITE to the caller")
+		checkTakeoverTimer(t, first, "2;refresher=uac")
+		retry := reqFromWithin(t, a.reinvites, taker, 5*time.Second, "takeover re-INVITE after the 422")
+		checkTakeoverTimer(t, retry, "3;refresher=uac")
+		if retry.CSeq().SeqNo <= first.CSeq().SeqNo {
+			t.Fatalf("retry CSeq %d not above the 422'd %d", retry.CSeq().SeqNo, first.CSeq().SeqNo)
+		}
+		ref := reqFromWithin(t, a.reinvites, taker, 4*time.Second, "session refresh at the raised interval")
+		if got := headerOfReq(ref, "Session-Expires"); got != "3;refresher=uac" {
+			t.Fatalf("refresh after the 422: Session-Expires %q, want 3;refresher=uac", got)
+		}
+		noReq(t, a.byes, 500*time.Millisecond, "BYE to a caller whose takeover was retried")
+		if n := len(liveCalls(t, taker)); n != 1 {
+			t.Fatalf("live calls on the survivor = %d, want the menu call", n)
+		}
+	})
 }
 
 // TestSessionTimersIVRCallerRefreshes fails if a caller that names itself the

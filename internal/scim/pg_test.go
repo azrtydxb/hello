@@ -60,7 +60,8 @@ func TestPGStore(t *testing.T) {
 	p := &PG{DB: db}
 	eng := &directory.Engine{Store: &directory.PG{DB: db}, Drivers: map[string]directory.Driver{directory.KindSCIM: Driver{Store: p}}, Replica: "pg"}
 	on, name := true, "Okta"
-	c, err := eng.Create(ctx, "admin", directory.ConnectorInput{Kind: directory.KindSCIM, Name: &name, Enabled: &on})
+	c, err := eng.Create(ctx, "admin", directory.ConnectorInput{Kind: directory.KindSCIM, Name: &name, Enabled: &on,
+		Options: &directory.Options{LoginMethod: directory.LoginOIDC, OIDCProvider: directory.KindEntra}})
 	if err != nil {
 		t.Fatal(err)
 	}

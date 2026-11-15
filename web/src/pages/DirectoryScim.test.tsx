@@ -39,6 +39,16 @@ function scimConnector(over: Partial<Connector> = {}): Connector {
       allowAdminFromDirectory: false,
       runTimeoutMinutes: 0,
       userCap: 0,
+      loginMethod: "oidc",
+      oidcProvider: "entra",
+    },
+    autoProvision: {
+      enabled: false,
+      rangeStart: "",
+      rangeEnd: "",
+      device: true,
+      voicemail: true,
+      groups: [],
     },
     hasCredential: false,
     status: "ok",
@@ -150,6 +160,16 @@ describe("Directory: SCIM connectors (spec integrations P10)", () => {
       target: { value: "grp-sales operator" },
     });
     fireEvent.submit(form);
+    expect(
+      await within(form).findByText(
+        "Choose how these users sign in: they have no local password.",
+      ),
+    ).toBeVisible();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.change(within(form).getByLabelText("How these users sign in"), {
+      target: { value: "oidc:google" },
+    });
+    fireEvent.submit(form);
     await waitFor(() =>
       expect(calls.some((c) => c.method === "POST")).toBe(true),
     );
@@ -161,6 +181,10 @@ describe("Directory: SCIM connectors (spec integrations P10)", () => {
     expect(body.config).toEqual({ adoptExisting: true });
     expect(body.bindPassword).toBeUndefined();
     expect(body.scheduleMinutes).toBeUndefined();
+    expect(body.options).toMatchObject({
+      loginMethod: "oidc",
+      oidcProvider: "google",
+    });
     expect((body.mappings as { extension: unknown }).extension).toEqual({
       sources: [PBX_EXTENSION],
       transforms: [],
@@ -178,6 +202,9 @@ describe("Directory: SCIM connectors (spec integrations P10)", () => {
     const form = await screen.findByRole("form", { name: "Edit Entra" });
     expect(within(form).queryByLabelText("Bind password")).toBeNull();
     expect(within(form).getByLabelText("Extension")).toHaveValue(PBX_EXTENSION);
+    expect(within(form).getByLabelText("How these users sign in")).toHaveValue(
+      "oidc:entra",
+    );
   });
 
   it("shows the base URL, what was pushed and the tokens", async () => {

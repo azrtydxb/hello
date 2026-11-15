@@ -201,6 +201,28 @@ describe("Inbox", () => {
     );
   });
 
+  it("names the router's automatic texts as such", async () => {
+    inbox("operator", {
+      "GET /api/v1/inbox/conversations/7/messages": () =>
+        json({
+          items: [
+            msg({
+              id: 2,
+              direction: "out",
+              senderKind: "system",
+              body: "We open at nine",
+              status: "queued",
+            }),
+            msg({ id: 1 }),
+          ],
+          next: "",
+        }),
+    });
+    const thread = await open();
+    expect(within(thread).getByText("We open at nine")).toBeInTheDocument();
+    expect(within(thread).getByText(/Automatic reply/)).toBeInTheDocument();
+  });
+
   it("shows customer text as text, never as markup", async () => {
     inbox("operator", {
       "GET /api/v1/inbox/conversations/7/messages": () =>

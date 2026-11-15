@@ -17,7 +17,8 @@ func newPushRig(t *testing.T) *rig {
 	t.Helper()
 	r := &rig{t: t, m: NewMem(), d: &fakeDriver{res: &Result{}}, now: time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)}
 	r.e = &Engine{Store: r.m, Drivers: map[string]Driver{KindSCIM: &pushDriver{}}, Replica: "r1", Now: func() time.Time { return r.now }}
-	c, err := r.e.Create(context.Background(), "admin", ConnectorInput{Kind: KindSCIM, Name: strPtr("Entra"), Enabled: boolPtr(true)})
+	c, err := r.e.Create(context.Background(), "admin", ConnectorInput{Kind: KindSCIM, Name: strPtr("Entra"), Enabled: boolPtr(true),
+		Options: &Options{LoginMethod: LoginOIDC, OIDCProvider: KindEntra}})
 	if err != nil {
 		t.Fatal(err)
 	}
