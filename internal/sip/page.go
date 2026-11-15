@@ -684,7 +684,11 @@ func (l *leg) runPage() {
 	l.mu.Lock()
 	l.dcs = dcs
 	l.mu.Unlock()
-	err = dcs.WaitAnswer(l.ctx, sipgo.AnswerOptions{})
+	dcs, err = c.s.waitAnswerPhone(l.ctx, dcs, l.binding.Device, sipgo.AnswerOptions{}, func(next *sipgo.DialogClientSession) {
+		l.mu.Lock()
+		l.dcs = next
+		l.mu.Unlock()
+	})
 	if res := dcs.InviteResponse; err == nil || (res != nil && res.IsSuccess()) {
 		c.pageLegAnswered(l)
 		return

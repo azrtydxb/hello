@@ -34,6 +34,8 @@ const site = (over: Record<string, unknown> = {}) => ({
   maxOpenUnassigned: 200,
   transcripts: false,
   retentionDays: null,
+  attachments: false,
+  logo: false,
   conversations: 3,
   createdAt: STAMP,
   updatedAt: STAMP,
@@ -179,6 +181,65 @@ describe("Chat sites", () => {
       }),
     );
     expect(document.body.textContent).not.toContain("cf-secret");
+  });
+
+  it("turns visitors' attachments on, warning there is no virus scanner", async () => {
+    const calls = api({
+      "PUT /api/v1/messaging/chat/sites/4": () =>
+        json(site({ attachments: true })),
+    });
+    renderApp("/messaging/chat");
+    await screen.findByRole("table", { name: "Chat sites" });
+    fireEvent.click(screen.getByRole("button", { name: "Edit Help desk" }));
+    const toggle = await screen.findByRole("switch", {
+      name: /Let visitors send images and PDFs/,
+    });
+    expect(toggle).not.toBeChecked();
+    expect(toggle.closest("label")?.textContent).toMatch(/no virus scanner/);
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Save site" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PUT")?.body).toMatchObject({
+        attachments: true,
+      }),
+    );
+  });
+
+  it("uploads, shows and removes a site's logo", async () => {
+    const calls = api({
+      "PUT /api/v1/messaging/chat/sites/4/logo": () =>
+        json(site({ logo: true, updatedAt: "2026-10-02T10:00:00Z" })),
+      "DELETE /api/v1/messaging/chat/sites/4/logo": () => noContent(),
+    });
+    renderApp("/messaging/chat");
+    await screen.findByRole("table", { name: "Chat sites" });
+    fireEvent.click(screen.getByRole("button", { name: "Edit Help desk" }));
+    expect(await screen.findByText(/No logo/)).toBeInTheDocument();
+    const big = new File([new Uint8Array(256 * 1024 + 1)], "big.png", {
+      type: "image/png",
+    });
+    fireEvent.change(screen.getByLabelText("Logo file"), {
+      target: { files: [big] },
+    });
+    expect(await screen.findByText(/larger than 256 KB/)).toBeInTheDocument();
+    expect(calls.some((c) => c.url.endsWith("/logo"))).toBe(false);
+    const png = new File([new Uint8Array([137, 80, 78, 71])], "logo.png", {
+      type: "image/png",
+    });
+    fireEvent.change(screen.getByLabelText("Logo file"), {
+      target: { files: [png] },
+    });
+    const img = await screen.findByRole("img", { name: "Logo of Help desk" });
+    expect(img.getAttribute("src")).toMatch(
+      /^\/api\/v1\/messaging\/chat\/sites\/4\/logo\?v=/,
+    );
+    const put = calls.find((c) => c.method === "PUT");
+    expect(put?.body).toBeInstanceOf(FormData);
+    fireEvent.click(screen.getByRole("button", { name: "Remove logo" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "DELETE")).toBe(true),
+    );
+    expect(await screen.findByText(/No logo/)).toBeInTheDocument();
   });
 
   it("builds the embed code from the chat address", async () => {

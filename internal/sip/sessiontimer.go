@@ -580,6 +580,12 @@ func (c *call) sendRefresh(idx int, method sip.RequestMethod, interval time.Dura
 		req.SetTransport("UDP")
 		return req
 	}
+	if method == sip.INVITE {
+		// One INVITE transaction on the dialog at a time (RFC 3261 14.1):
+		// a refresh waits out a hold or retrieve re-INVITE in progress, and
+		// its own timeout starts once it may go.
+		defer c.lockRefreshDialog(idx)()
+	}
 	timeout := s.cfg.SessionRefreshTimeout
 	if timeout <= 0 {
 		timeout = defaultRefreshTimeout
@@ -605,7 +611,7 @@ func (c *call) sendRefresh(idx int, method sip.RequestMethod, interval time.Dura
 		if ct := w.InviteResponse.Contact(); ct != nil {
 			target = *ct.Address.Clone()
 		}
-		res, err := requireResponse(w.Do(ctx, build(target)))
+		res, err := s.dialogDo(ctx, build(target), w.Do) // a phone may challenge it (S-22)
 		if err == nil && method == sip.INVITE && res.IsSuccess() {
 			ack := sip.NewRequest(sip.ACK, target)
 			if werr := w.WriteRequest(ack); werr != nil {
@@ -624,13 +630,46 @@ func (c *call) sendRefresh(idx int, method sip.RequestMethod, interval time.Dura
 	if ct := dss.InviteRequest.Contact(); ct != nil {
 		target = *ct.Address.Clone()
 	}
-	res, err := requireResponse(dss.Do(ctx, build(target)))
+	res, err := s.dialogDo(ctx, build(target), dss.Do)
 	if err == nil && method == sip.INVITE && res.IsSuccess() {
 		if werr := dss.WriteRequest(sip.NewRequest(sip.ACK, target)); werr != nil {
 			s.log.Debug("session refresh ACK to the caller failed", "correlation_id", c.id, "error", werr)
 		}
 	}
 	return res, err
+}
+
+// lockRefreshDialog takes the INVITE gate of the dialog sendRefresh would
+// refresh as idx and returns its release (a no-op when there is none to
+// take: the raw caller dialog, or a dialog that is gone).
+func (c *call) lockRefreshDialog(idx int) (unlock func()) {
+	if hom := c.homed(); hom != nil {
+		l := hom.leg(idx == sessCallee)
+		if c.isLinked() {
+			l = hom.legs[0]
+		}
+		if l == nil {
+			return func() {}
+		}
+		l.inviteMu.Lock()
+		return l.inviteMu.Unlock
+	}
+	if idx == sessCaller && c.isRawCaller() {
+		return func() {}
+	}
+	if idx == sessCallee {
+		if w := c.winnerSession(); w != nil {
+			return inviteGate.lock(w)
+		}
+		return func() {}
+	}
+	c.mu.Lock()
+	dss := c.dss
+	c.mu.Unlock()
+	if dss == nil {
+		return func() {}
+	}
+	return inviteGate.lock(dss)
 }
 
 // sessionTeardown ends the call because one dialog's far end went silent.
@@ -828,8 +867,7 @@ func (c *call) sendHomedRefresh(ctx context.Context, l *haLeg, method sip.Reques
 	req.AppendHeader(sip.NewHeader("Supported", "timer"))
 	req.AppendHeader(sip.NewHeader("Session-Expires", secondsOf(interval)+";refresher=uac"))
 	req.AppendHeader(sip.NewHeader("Min-SE", secondsOf(s.cfg.SessionMinSE)))
-	l.useCSeq()
-	res, err := s.do(ctx, req)
+	res, err := s.doOn(ctx, l, req)
 	if err == nil && method == sip.INVITE {
 		s.haAck(l, req, res)
 	}

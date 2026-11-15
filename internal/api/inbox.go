@@ -23,6 +23,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/media"
 	"github.com/azrtydxb/hello/internal/messaging/provider"
 	"github.com/azrtydxb/hello/internal/messaging/provider/telnyx"
 	"github.com/azrtydxb/hello/internal/messaging/provider/twilio"
@@ -132,6 +133,10 @@ func (s *server) inboxError(w http.ResponseWriter, what string, err error) {
 		writeError(w, http.StatusConflict, "messaging_disabled", "text messaging is turned off")
 	case errors.Is(err, store.ErrNoExternalTrunk):
 		writeError(w, http.StatusConflict, "no_messaging_trunk", "no enabled trunk has messaging turned on")
+	case errors.Is(err, store.ErrMediaUnsupported):
+		writeError(w, http.StatusConflict, "media_unsupported", "this channel cannot carry attachments: only a website chat does, until the public listener lets a carrier fetch them")
+	case errors.Is(err, store.ErrMediaNotReady):
+		writeError(w, http.StatusConflict, "media_not_ready", "the attachment has no file: it is still downloading, was refused or has expired")
 	case errors.Is(err, store.ErrNoSecretBox):
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "the messaging inbox needs HELLO_SECRET_KEY")
 	default:
@@ -775,10 +780,12 @@ func (s *server) deleteMessagingAddress(w http.ResponseWriter, r *http.Request) 
 }
 
 type messagingSettingsBody struct {
-	RetentionSMSDays  *int  `json:"retentionSmsDays"`
-	RetentionChatDays *int  `json:"retentionChatDays"`
-	ReopenDays        *int  `json:"reopenDays"`
-	EmailNotify       *bool `json:"emailNotify"`
+	RetentionSMSDays  *int `json:"retentionSmsDays"`
+	RetentionChatDays *int `json:"retentionChatDays"`
+	// RetentionMediaDays is how long attachments' files are kept.
+	RetentionMediaDays *int  `json:"retentionMediaDays"`
+	ReopenDays         *int  `json:"reopenDays"`
+	EmailNotify        *bool `json:"emailNotify"`
 	// FirstContact is off or attested; the two limits bound the texts an
 	// agent and a number may start per hour and per day.
 	FirstContact              *string `json:"firstContact"`
@@ -815,6 +822,7 @@ func (s *server) putMessagingSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	setIf(&cur.RetentionSMSDays, b.RetentionSMSDays)
 	setIf(&cur.RetentionChatDays, b.RetentionChatDays)
+	setIf(&cur.RetentionMediaDays, b.RetentionMediaDays)
 	setIf(&cur.ReopenDays, b.ReopenDays)
 	setIf(&cur.EmailNotify, b.EmailNotify)
 	setIf(&cur.FirstContact, b.FirstContact)
@@ -835,6 +843,9 @@ func (s *server) putMessagingSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if cur.RetentionChatDays < 1 || cur.RetentionChatDays > 3650 {
 		f.add("retentionChatDays", "must be 1-3650")
+	}
+	if cur.RetentionMediaDays < 1 || cur.RetentionMediaDays > 3650 {
+		f.add("retentionMediaDays", "must be 1-3650")
 	}
 	if cur.ReopenDays < 0 || cur.ReopenDays > 365 {
 		f.add("reopenDays", "must be 0-365")
@@ -983,6 +994,7 @@ func (s *server) eraseMessagingPeer(w http.ResponseWriter, r *http.Request) {
 		s.inboxError(w, "erase", err)
 		return
 	}
+	s.eraseMediaObjects(r.Context(), is, &rep)
 	writeJSON(w, http.StatusOK, rep)
 }
 
@@ -1121,6 +1133,8 @@ func (s *server) listInboxMessagesCommon(w http.ResponseWriter, r *http.Request,
 type inboxSendBody struct {
 	Body        string `json:"body"`
 	ClientMsgID string `json:"clientMsgId"`
+	// MediaIDs are the caller's uploads to send with the text (spec M-18).
+	MediaIDs []int64 `json:"mediaIds"`
 }
 
 func (s *server) sendInboxMessageCommon(w http.ResponseWriter, r *http.Request, all bool) {
@@ -1138,17 +1152,21 @@ func (s *server) sendInboxMessageCommon(w http.ResponseWriter, r *http.Request, 
 	}
 	var f fieldErrs
 	body, bok := messaging.CleanBody(b.Body, messaging.MaxBodyBytes)
-	if !bok {
+	if !bok && (len(b.MediaIDs) == 0 || strings.TrimSpace(b.Body) != "") {
+		// A message with attachments may have no text.
 		f.add("body", "must be 1-%d bytes of text", messaging.MaxBodyBytes)
 	}
 	if b.ClientMsgID != "" && !printable(b.ClientMsgID, 64, false) {
 		f.add("clientMsgId", "must be at most 64 printable characters without spaces")
 	}
+	if len(b.MediaIDs) > media.MaxPerMessage {
+		f.add("mediaIds", "at most %d attachments per message", media.MaxPerMessage)
+	}
 	if len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
-	m, created, err := is.SendConversationText(r.Context(), acc, store.SendInput{ConversationID: id, Body: body, ClientMsgID: b.ClientMsgID})
+	m, created, err := is.SendConversationText(r.Context(), acc, store.SendInput{ConversationID: id, Body: body, ClientMsgID: b.ClientMsgID, MediaIDs: b.MediaIDs})
 	if err != nil {
 		s.inboxError(w, "conversation", err)
 		return

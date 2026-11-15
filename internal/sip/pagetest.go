@@ -225,7 +225,11 @@ func (s *Server) testContact(ctx context.Context, c *testContact, ext string, of
 		return
 	}
 	l := &leg{c: &call{s: s}, binding: c.b, dcs: dcs}
-	err = dcs.WaitAnswer(lctx, sipgo.AnswerOptions{})
+	dcs, err = s.waitAnswerPhone(lctx, dcs, c.b.Device, sipgo.AnswerOptions{}, func(next *sipgo.DialogClientSession) {
+		l.mu.Lock()
+		l.dcs = next
+		l.mu.Unlock()
+	})
 	if res := dcs.InviteResponse; err == nil || (res != nil && res.IsSuccess()) {
 		ans, perr := media.ParseAudioSDP(res.Body())
 		addr := udpAddr(ans.Address, ans.Port)

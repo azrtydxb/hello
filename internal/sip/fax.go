@@ -323,7 +323,7 @@ func (c *call) faxMoveAnswered(snap *snapshot.Snapshot, name string) (*faxCall, 
 	fx := &faxCall{dest: dest, peer: c.callerNum, local: c.dialled, host: host, relay: relay,
 		carrier: legCaller, engine: legCallee, t38OK: c.faxModeIs(fax.ModeT38), pt: pt}
 	body := media.BuildSDP(host, relay.LegPort(legCaller), g711.Codecs[:1], nil, "sendrecv")
-	ans, ok := reinviteA(c.dss, body)
+	ans, ok := reinviteA(c.s, c.dss, body)
 	if !ok {
 		return nil, &faxRefusal{sip.StatusNotAcceptableHere, "the caller did not accept G.711 for the fax"}
 	}
@@ -443,9 +443,9 @@ func (c *call) faxSwitchT38(why string) {
 	var ok bool
 	if fx.outbound {
 		w := fx.w
-		ans, ok = reinvite(w.session(), offer)
+		ans, ok = reinvite(c.s, w.session(), offer)
 	} else {
-		ans, ok = reinviteA(c.dss, offer)
+		ans, ok = reinviteA(c.s, c.dss, offer)
 	}
 	t, isT38 := media.ParseT38SDP(ans)
 	if !ok || !isT38 || !t.T38Acceptable() {

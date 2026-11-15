@@ -16718,7 +16718,7 @@
       "post": {
         "operationId": "sendMyInboxMessage",
         "summary": "Reply to the customer",
-        "description": "Sends a reply to the customer through the conversation's channel. A long text is split into several. Replying to an unassigned conversation takes it and replying to a resolved one reopens it. A customer who opted out cannot be texted (422). Sending the same clientMsgId again returns the first message with 200 and sends nothing.",
+        "description": "Sends a reply to the customer through the conversation's channel. A long text is split into several. Replying to an unassigned conversation takes it and replying to a resolved one reopens it. A customer who opted out cannot be texted (422). Sending the same clientMsgId again returns the first message with 200 and sends nothing. Attachments uploaded first (POST /api/v1/inbox/media) go in mediaIds; only a website chat carries them, any other channel answers 409 media_unsupported.",
         "tags": ["inbox"],
         "parameters": [
           {
@@ -18767,7 +18767,7 @@
       "post": {
         "operationId": "sendInboxMessage",
         "summary": "Reply to the customer",
-        "description": "Sends a reply to the customer through the conversation's channel. A long text is split into several. Replying to an unassigned conversation takes it and replying to a resolved one reopens it. A customer who opted out cannot be texted (422). Sending the same clientMsgId again returns the first message with 200 and sends nothing.",
+        "description": "Sends a reply to the customer through the conversation's channel. A long text is split into several. Replying to an unassigned conversation takes it and replying to a resolved one reopens it. A customer who opted out cannot be texted (422). Sending the same clientMsgId again returns the first message with 200 and sends nothing. Attachments uploaded first (POST /api/v1/inbox/media) go in mediaIds; only a website chat carries them, any other channel answers 409 media_unsupported.",
         "tags": ["inbox"],
         "parameters": [
           {
@@ -30091,6 +30091,435 @@
           "category": "credentials"
         }
       }
+    },
+    "/api/v1/inbox/media": {
+      "post": {
+        "operationId": "uploadInboxMedia",
+        "summary": "Upload an attachment",
+        "description": "Uploads a file to send with a reply in any conversation. Send multipart/form-data with `file` and `conversationId`. The type is sniffed from the bytes: images (JPEG, PNG, GIF, WebP) and PDF, at most 5 MiB; SVG, HTML and files that also carry markup are refused (422). Only a website chat carries attachments in this build; any other conversation answers 409 media_unsupported. The upload is yours until you send it: name it in mediaIds of the reply. An upload not sent within 24 hours is deleted.",
+        "tags": ["inbox"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file", "conversationId"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The file, at most 5 MiB."
+                  },
+                  "conversationId": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "The conversation the file will be sent in."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The upload, ready to send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMedia"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/inbox/media/{id}": {
+      "get": {
+        "operationId": "getInboxMedia",
+        "summary": "Download an attachment",
+        "description": "Streams an attachment of any conversation, or the caller's own upload not sent yet. It is served with the type sniffed from its bytes, X-Content-Type-Options: nosniff, Cache-Control: private, no-store and a sandboxing Content-Security-Policy; images, audio and video are inline, everything else is a download. Range requests work. An attachment still downloading from the carrier, refused or expired answers 409 media_not_ready.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested range of the file",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/media": {
+      "post": {
+        "operationId": "uploadMyInboxMedia",
+        "summary": "Upload an attachment",
+        "description": "Uploads a file to send with a reply in an agent's own conversations (assigned to them, replied to, or waiting in their queue). Send multipart/form-data with `file` and `conversationId`. The type is sniffed from the bytes: images (JPEG, PNG, GIF, WebP) and PDF, at most 5 MiB; SVG, HTML and files that also carry markup are refused (422). Only a website chat carries attachments in this build; any other conversation answers 409 media_unsupported. The upload is yours until you send it: name it in mediaIds of the reply. An upload not sent within 24 hours is deleted.",
+        "tags": ["inbox"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file", "conversationId"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The file, at most 5 MiB."
+                  },
+                  "conversationId": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "The conversation the file will be sent in."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The upload, ready to send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMedia"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/me/inbox/media/{id}": {
+      "get": {
+        "operationId": "getMyInboxMedia",
+        "summary": "Download an attachment",
+        "description": "Streams an attachment of the conversations the caller can see (assigned to them, replied to, or waiting in their queue), or the caller's own upload not sent yet. It is served with the type sniffed from its bytes, X-Content-Type-Options: nosniff, Cache-Control: private, no-store and a sandboxing Content-Security-Policy; images, audio and video are inline, everything else is a download. Range requests work. An attachment still downloading from the carrier, refused or expired answers 409 media_not_ready.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested range of the file",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent",
+          "category": "private-data"
+        }
+      }
+    },
+    "/api/v1/messaging/chat/sites/{id}/logo": {
+      "get": {
+        "operationId": "getChatSiteLogo",
+        "summary": "Read a chat site's logo",
+        "description": "Streams the site's logo image, as the widget shows it. A site without a logo answers 404.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The logo",
+            "content": {
+              "image/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "an image for a person, not data for an agent",
+          "category": "binary-download"
+        }
+      },
+      "put": {
+        "operationId": "putChatSiteLogo",
+        "summary": "Set a chat site's logo",
+        "description": "Replaces the site's logo, which the widget shows in its header. Send multipart/form-data with `file`: a PNG, JPEG, GIF or WebP image of at most 256 KiB; the type is sniffed from the bytes and SVG is refused (422). The logo is kept in the media store under msg/site/<id>/logo.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The image, at most 256 KiB."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSite"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      },
+      "delete": {
+        "operationId": "deleteChatSiteLogo",
+        "summary": "Remove a chat site's logo",
+        "description": "Removes the site's logo; the widget shows the site's name alone. A site without a logo answers 404.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "chat site settings and blocks concern website visitors and hold a Turnstile secret: they are not exposed to an agent",
+          "category": "credentials"
+        }
+      }
     }
   },
   "components": {
@@ -34567,6 +34996,9 @@
                   "device_limit",
                   "derived_device",
                   "not_your_call",
+                  "media_unsupported",
+                  "media_not_ready",
+                  "unsupported_media",
                   "faq_full",
                   "no_login_method",
                   "no_break_glass",
@@ -36832,6 +37264,11 @@
           },
           "sipCallId": {
             "type": "string"
+          },
+          "legCallIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Call-IDs of the call's dialogs towards its callee side: the phone legs still ringing, then the answering leg (an INVITE with Replaces on another node finds the call by them); absent on records from older nodes"
           },
           "from": {
             "type": "string"
@@ -45125,6 +45562,12 @@
             "minimum": 1,
             "maximum": 10000,
             "description": "The most conversations one number may start per 24 hours (default 200)."
+          },
+          "retentionMediaDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650,
+            "description": "How long an attachment's file is kept after it arrived or was sent (default 90 days). The message stays and shows the file expired."
           }
         }
       },
@@ -45225,7 +45668,14 @@
       },
       "MessagingEraseReport": {
         "type": "object",
-        "required": ["conversations", "messages", "optOutsKept", "providers"],
+        "required": [
+          "conversations",
+          "messages",
+          "optOutsKept",
+          "providers",
+          "mediaObjects",
+          "mediaObjectsPending"
+        ],
         "properties": {
           "conversations": {
             "type": "integer"
@@ -45254,6 +45704,14 @@
                 }
               }
             }
+          },
+          "mediaObjects": {
+            "type": "integer",
+            "description": "Attachment files removed from the media store and checked gone."
+          },
+          "mediaObjectsPending": {
+            "type": "integer",
+            "description": "Attachment files the media store could not remove now; the media sweeper removes them within minutes, and their rows hold nothing else."
           }
         }
       },
@@ -45433,7 +45891,8 @@
           "createdAt",
           "sentAt",
           "deliveredAt",
-          "readAt"
+          "readAt",
+          "media"
         ],
         "properties": {
           "id": {
@@ -45501,6 +45960,13 @@
           "readAt": {
             "type": ["string", "null"],
             "format": "date-time"
+          },
+          "media": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxMedia"
+            },
+            "description": "The message's attachments, oldest first."
           }
         }
       },
@@ -45524,18 +45990,26 @@
       "InboxSendInput": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["body"],
+        "required": [],
         "properties": {
           "body": {
             "type": "string",
-            "description": "The text to send, 1-2000 bytes; a long one is split into several texts.",
-            "minLength": 1,
-            "maxLength": 2000
+            "maxLength": 2000,
+            "description": "The text to send, at most 2000 bytes; a long one is split into several texts. It may be empty only when mediaIds names attachments."
           },
           "clientMsgId": {
             "type": "string",
             "description": "A value the client makes up for this send; sending it again with the same value returns the first message and sends nothing more.",
             "maxLength": 64
+          },
+          "mediaIds": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Your uploads to this conversation (POST /api/v1/inbox/media) to send with the text. Only a website chat carries attachments; any other channel answers 409 media_unsupported."
           }
         }
       },
@@ -46726,7 +47200,9 @@
           "conversations",
           "createdAt",
           "updatedAt",
-          "warnings"
+          "warnings",
+          "attachments",
+          "logo"
         ],
         "properties": {
           "id": {
@@ -46863,6 +47339,14 @@
                 "description": "Why it is offline: outside the hours with no after-hours route, nobody staffs where a chat would go, or the cap of unassigned live chats is reached. Absent when online."
               }
             }
+          },
+          "attachments": {
+            "type": "boolean",
+            "description": "Whether visitors may send images and PDFs (at most 5 MiB, at most 5 per hour). Off by default: Hello bundles no virus scanner."
+          },
+          "logo": {
+            "type": "boolean",
+            "description": "Whether the site has a logo (PUT /api/v1/messaging/chat/sites/{id}/logo); the widget shows it in its header."
           }
         }
       },
@@ -46962,6 +47446,10 @@
             "description": "Days a finished chat is kept, 1 to 3650; 0 follows the messaging settings.",
             "minimum": 0,
             "maximum": 3650
+          },
+          "attachments": {
+            "type": "boolean",
+            "description": "Whether visitors may send images and PDFs. Left as it is when omitted."
           }
         }
       },
@@ -52198,6 +52686,60 @@
             "type": "string",
             "maxLength": 18,
             "description": "The id of the Salesforce Task the softphone created."
+          }
+        }
+      },
+      "InboxMedia": {
+        "type": "object",
+        "required": [
+          "id",
+          "messageId",
+          "direction",
+          "status",
+          "contentType",
+          "size",
+          "filename",
+          "reason",
+          "createdAt"
+        ],
+        "description": "An attachment of a message. Its file is read from GET /api/v1/inbox/media/{id} (or the /me form) by anyone who can see the conversation.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "messageId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The message it belongs to; null for an upload not sent yet."
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["in", "out"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "ready", "rejected", "expired"],
+            "description": "pending: still downloading from the carrier; ready: the file can be read; rejected: refused (see reason); expired: the carrier no longer had it, or the file passed the media retention."
+          },
+          "contentType": {
+            "type": "string",
+            "description": "The type sniffed from the file's bytes, which it is served with; empty until downloaded."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why a file was refused or expired: too_large, type_not_allowed, type_mismatch, active_content, media_host, provider_cannot_fetch, gone_at_provider, download_window_passed, retention."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }

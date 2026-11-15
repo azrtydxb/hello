@@ -281,7 +281,7 @@ func hopHandshakeFails(addr string, cfg *tls.Config) error {
 	return err
 }
 
-// registerThroughHop registers user b1 over mutual TLS with the given Path
+// registerThroughHop registers user over mutual TLS with the given Path
 // header, as the edge would, and fails the test on anything but 200.
 func registerThroughHop(t *testing.T, pki *hopPKI, addr, edgeCert, edgeKey, user, pass, path string) {
 	t.Helper()
@@ -291,7 +291,7 @@ func registerThroughHop(t *testing.T, pki *hopPKI, addr, edgeCert, edgeKey, user
 	}
 	defer func() { _ = c.Close() }()
 	br := bufio.NewReader(c)
-	callID := "hoppath@test"
+	callID := "hoppath-" + user + "@test"
 	_, h := hopRoundTrip(t, c, br, hopRegisterPath(user, callID, 1, "", path))
 	var chal *digest.Challenge
 	for _, v := range h["Www-Authenticate"] {
@@ -311,6 +311,47 @@ func registerThroughHop(t *testing.T, pki *hopPKI, addr, edgeCert, edgeKey, user
 	}
 }
 
+// startTLSEdge starts a stand-in for the edge's hello_tls socket: a TLS
+// server that demands a client certificate of the Hello CA and reports the
+// first line of what arrives on its first connection.
+func startTLSEdge(t *testing.T, pki *hopPKI, certFile, keyFile string) (addr string, got <-chan string) {
+	t.Helper()
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(pki.ca)
+	edge, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool, MinVersion: tls.VersionTLS12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = edge.Close() })
+	ch := make(chan string, 1)
+	go func() {
+		c, err := edge.Accept()
+		if err != nil {
+			ch <- "accept: " + err.Error()
+			return
+		}
+		defer func() { _ = c.Close() }()
+		_ = c.SetDeadline(time.Now().Add(8 * time.Second))
+		line, err := bufio.NewReader(c).ReadString('\n')
+		if err != nil {
+			ch <- "read: " + err.Error()
+			return
+		}
+		ch <- strings.TrimSpace(line)
+	}()
+	return edge.Addr().String(), ch
+}
+
+// tlsEdgePath is the Path the edge adds for a phone it reaches over TLS,
+// naming its hello_tls socket at addr.
+func tlsEdgePath(addr string) string {
+	return fmt.Sprintf("<sip:%s;transport=tls;lr;received=sip:192.0.2.5:5999;transport=tls>", addr)
+}
+
 // TestSIPCallsPhoneThroughTLSPath fails if Hello cannot ring a phone whose
 // binding's Path names the edge's TLS socket (transport=tls): the INVITE must
 // leave over TLS to that socket, verifying the edge's certificate and
@@ -327,33 +368,10 @@ func TestSIPCallsPhoneThroughTLSPath(t *testing.T) {
 	t.Cleanup(func() { _ = hop.Listener.Close() })
 
 	// The edge's hello_tls socket: a TLS server the INVITE should reach.
-	edgeC, _ := tls.LoadX509KeyPair(edgeCert, edgeKey)
-	pool := x509.NewCertPool()
-	pool.AddCert(pki.ca)
-	edge, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{edgeC}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool, MinVersion: tls.VersionTLS12})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = edge.Close() })
-	got := make(chan string, 1)
-	go func() {
-		c, err := edge.Accept()
-		if err != nil {
-			got <- "accept: " + err.Error()
-			return
-		}
-		defer func() { _ = c.Close() }()
-		_ = c.SetDeadline(time.Now().Add(8 * time.Second))
-		line, err := bufio.NewReader(c).ReadString('\n')
-		if err != nil {
-			got <- "read: " + err.Error()
-			return
-		}
-		got <- strings.TrimSpace(line)
-	}()
+	edge, got := startTLSEdge(t, pki, edgeCert, edgeKey)
 
 	pbx := startPBX(t, ringAllDevices(), trustLoopback, func(c *Config, _ *Deps) { c.TLSListener, c.TLSClient = hop.Listener, hop.Client })
-	path := fmt.Sprintf("<sip:%s;transport=tls;lr;received=sip:192.0.2.5:5999;transport=tls>", edge.Addr().String())
+	path := tlsEdgePath(edge)
 	registerThroughHop(t, pki, hop.Listener.Addr().String(), edgeCert, edgeKey, "b1", "pb1", path)
 	if len(bindings(t, pbx, "sip:b1@"+testDomain)) != 1 {
 		t.Fatalf("the binding is not stored: %v", bindings(t, pbx, "sip:b1@"+testDomain))
@@ -371,6 +389,46 @@ func TestSIPCallsPhoneThroughTLSPath(t *testing.T) {
 		}
 	case <-time.After(7 * time.Second):
 		t.Fatal("the INVITE to a phone behind a transport=tls Path never reached the edge's TLS socket")
+	}
+}
+
+// TestSIPCallsPhonesBehindTwoTLSEdges fails if Hello cannot hold the TLS hop
+// to two edge sockets at once: with phones of one extension registered
+// through two edges, each edge must get its own INVITE over its own
+// connection. A TLS connection pinned to the SIP UDP listening address
+// (address:port) is found again for any destination, so the second edge's
+// INVITE went to the first edge, or its dial failed to bind.
+func TestSIPCallsPhonesBehindTwoTLSEdges(t *testing.T) {
+	pki := newHopPKI(t)
+	srvCert, srvKey := pki.leaf(t, "hello-sip", nil)
+	edgeCert, edgeKey := pki.leaf(t, "kamailio", nil)
+	hop, err := ListenTLS("127.0.0.1:0", srvCert, srvKey, pki.caFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = hop.Listener.Close() })
+	edge1, got1 := startTLSEdge(t, pki, edgeCert, edgeKey)
+	edge2, got2 := startTLSEdge(t, pki, edgeCert, edgeKey)
+
+	pbx := startPBX(t, ringAllDevices(), trustLoopback, func(c *Config, _ *Deps) { c.TLSListener, c.TLSClient = hop.Listener, hop.Client })
+	hopAddr := hop.Listener.Addr().String()
+	registerThroughHop(t, pki, hopAddr, edgeCert, edgeKey, "b1", "pb1", tlsEdgePath(edge1))
+	registerThroughHop(t, pki, hopAddr, edgeCert, edgeKey, "b2", "pb2", tlsEdgePath(edge2))
+
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Second)
+	defer cancel()
+	go func() { _, _ = a.callReq(ctx, a.inviteReq("200")) }() // rings b1 and b2
+	for name, got := range map[string]<-chan string{"first": got1, "second": got2} {
+		select {
+		case line := <-got:
+			if !strings.HasPrefix(line, "INVITE ") {
+				t.Errorf("the %s edge's TLS socket received %q, want an INVITE", name, line)
+			}
+		case <-time.After(7 * time.Second):
+			t.Errorf("the INVITE to the phone behind the %s edge never reached its TLS socket", name)
+		}
 	}
 }
 

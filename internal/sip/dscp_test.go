@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"golang.org/x/net/ipv4"
 )
@@ -53,15 +54,21 @@ func TestDSCPOutboundOnMarkedSocket(t *testing.T) {
 		req := sip.NewRequest(sip.OPTIONS, sip.Uri{Scheme: "sip", User: "x", Host: "127.0.0.1", Port: paddr.Port})
 		// Serving() can report ready a moment before the transport pool
 		// holds the listener; until then a write cannot find it.
-		var werr error
+		// A request Hello originates is a client transaction (only an ACK is
+		// written without one), built and sent from the listener.
+		var (
+			tx   sip.ClientTransaction
+			werr error
+		)
 		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-			if werr = p.srv.client.WriteRequest(req, p.srv.addViaFromListener); werr == nil || time.Now().After(deadline) {
+			if tx, werr = p.srv.client.TransactionRequest(t.Context(), req, sipgo.ClientRequestBuild, p.srv.fromListener); werr == nil || time.Now().After(deadline) {
 				break
 			}
 		}
 		if werr != nil {
 			t.Fatal(werr)
 		}
+		t.Cleanup(tx.Terminate)
 		_ = peer.SetReadDeadline(time.Now().Add(5 * time.Second))
 		buf := make([]byte, 4096)
 		_, from, err := peer.ReadFromUDP(buf)

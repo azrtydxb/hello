@@ -31,11 +31,18 @@ type fakeBackend struct {
 	email    string
 	// states is the agent state each availability check was given.
 	states []map[string]queue.AgentState
+	// uploads are the attachments begun, by id; media are the files a
+	// visitor may read, by visitor and id.
+	uploads map[int64]*store.MediaUpload
+	ready   map[int64]bool
+	aborted []int64
+	media   map[int64]map[int64]store.MediaFile
 }
 
 func newFake() *fakeBackend {
 	return &fakeBackend{sites: map[string]store.ChatSite{}, visitors: map[string]*store.ChatVisitor{}, blocked: map[int64]bool{},
-		events: map[int64][]store.ChatEvent{}, online: true, lines: map[int64][]store.ChatLine{}}
+		events: map[int64][]store.ChatEvent{}, online: true, lines: map[int64][]store.ChatLine{},
+		uploads: map[int64]*store.MediaUpload{}, ready: map[int64]bool{}, media: map[int64]map[int64]store.MediaFile{}}
 }
 
 func (f *fakeBackend) addSite(key string, mod func(*store.ChatSite)) store.ChatSite {
@@ -173,4 +180,33 @@ func (f *fakeBackend) ChatTranscript(_ context.Context, v int64) (string, []stor
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.email, f.lines[v], nil
+}
+func (f *fakeBackend) ChatBeginUpload(_ context.Context, site store.ChatSite, _ int64, in store.MediaUploadInput) (store.MediaUpload, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := int64(len(f.uploads) + 1)
+	up := &store.MediaUpload{ID: id, ChannelID: site.ChannelID, Key: "msg/10/2026/upload-" + strconv.FormatInt(id, 10) + "/" + in.SHA256}
+	f.uploads[id] = up
+	return *up, nil
+}
+func (f *fakeBackend) FinishMediaUpload(_ context.Context, id int64) (store.ConvMedia, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ready[id] = true
+	return store.ConvMedia{ID: id, Status: "ready"}, nil
+}
+func (f *fakeBackend) AbortMediaUpload(_ context.Context, id int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.aborted = append(f.aborted, id)
+	return nil
+}
+func (f *fakeBackend) ChatMedia(_ context.Context, visitor, id int64) (store.MediaFile, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, ok := f.media[visitor][id]
+	if !ok {
+		return store.MediaFile{}, store.ErrNotFound
+	}
+	return m, nil
 }
