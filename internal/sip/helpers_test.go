@@ -510,6 +510,9 @@ type phone struct {
 	// instead of a 200; negative sends no answer at all (a handset that left
 	// the Wi-Fi).
 	reinviteStatus int
+	// reinviteMinSE, when set, answers a re-INVITE/UPDATE whose
+	// Session-Expires is below it with 422 and that Min-SE (RFC 4028).
+	reinviteMinSE int
 	// notifyPass, when set, makes the phone challenge an out-of-dialog
 	// NOTIFY with digest and accept only that password (check-sync with
 	// P4428 on); notifyStatus answers every NOTIFY with that status
@@ -689,8 +692,14 @@ func (p *phone) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 func (p *phone) onReinvite(req *sip.Request, tx sip.ServerTransaction) {
 	push(p.reinvites, req)
 	p.mu.Lock()
-	status := p.reinviteStatus
+	status, minSE := p.reinviteStatus, p.reinviteMinSE
 	p.mu.Unlock()
+	if secs, _, ok := sessionExpires(req.GetHeader); ok && secs < minSE {
+		res := sip.NewResponseFromRequest(req, 422, "Session Interval Too Small", nil)
+		res.AppendHeader(sip.NewHeader("Min-SE", strconv.Itoa(minSE)))
+		_ = tx.Respond(res)
+		return
+	}
 	if status != 0 {
 		if status > 0 {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, status, "Refused", nil))

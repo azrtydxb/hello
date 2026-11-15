@@ -4,9 +4,10 @@
 // carrier is one file and a golden-payload test.
 //
 // This build is LAN-only (spec Default 6), so the interface has no webhook
-// parsing or media fetching yet: those arrive with the public listener. What
-// it has is what works from inside the LAN: validate the credentials, list
-// the numbers, send a text and read a message's delivery status.
+// parsing yet: it arrives with the public listener. What it has is what works
+// from inside the LAN: validate the credentials, list the numbers, send a
+// text, read a message's delivery status and download an inbound message's
+// media (MediaFetcher, spec M-18).
 //
 // Credentials and message text never reach a log or an error string.
 package provider
@@ -15,6 +16,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -353,4 +357,104 @@ func New(kind string, cfg Config) (SMSProvider, error) {
 		return nil, fmt.Errorf("%w %q", ErrUnknownKind, kind)
 	}
 	return f(cfg)
+}
+
+// MediaRef names one attachment of an inbound message as the carrier gave it
+// (spec M-1, Event.Media): the carrier's URL or id, the type it declared and
+// its size when known. It is stored with the pending attachment and never
+// shown.
+type MediaRef struct {
+	URL         string `json:"url,omitempty"`
+	ID          string `json:"id,omitempty"`
+	ContentType string `json:"contentType,omitempty"`
+	Size        int64  `json:"size,omitempty"`
+}
+
+// Media is a downloaded attachment: its body (the caller closes it) and the
+// type the carrier's answer declared, which is advisory.
+type Media struct {
+	Body        io.ReadCloser
+	ContentType string
+}
+
+// MediaFetcher is implemented by an adapter that can download the media of an
+// inbound message with the account's own credentials (spec M-18).
+type MediaFetcher interface {
+	FetchMedia(ctx context.Context, ref MediaRef) (Media, error)
+}
+
+// ErrMediaHost is a media URL, or a redirect, that leaves the carrier's own
+// media hosts. Nothing is fetched from it.
+var ErrMediaHost = errors.New("provider: media host not allowed")
+
+// HostCheck reports whether a media URL (the first one or a redirect target)
+// may be fetched.
+type HostCheck func(u *url.URL) bool
+
+// FetchMedia downloads rawURL with client: every URL, the first and each
+// redirect (at most 3), must pass ok, or nothing is read (ErrMediaHost).
+// authorize adds the credentials to the first request only; they are dropped
+// on a redirect to another host. A 401 or 403 is ErrAuth, a 404 or 410
+// ErrNotFound (the carrier no longer has it), any other failure ErrAmbiguous
+// (worth another try).
+func FetchMedia(ctx context.Context, client *http.Client, rawURL string, ok HostCheck, authorize func(*http.Request)) (Media, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || !ok(u) {
+		return Media{}, ErrMediaHost
+	}
+	c := *client
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) > 3 {
+			return ErrMediaHost
+		}
+		if !ok(req.URL) {
+			return ErrMediaHost
+		}
+		if !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+			// The credentials are for the first host alone, whatever Go's
+			// own rule for a redirect between ports of one name.
+			req.Header.Del("Authorization")
+		}
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return Media{}, ErrMediaHost
+	}
+	if authorize != nil {
+		authorize(req)
+	}
+	req.Header.Set("User-Agent", "Hello-PBX")
+	resp, err := c.Do(req)
+	if err != nil {
+		if errors.Is(err, ErrMediaHost) {
+			return Media{}, ErrMediaHost
+		}
+		return Media{}, ErrAmbiguous
+	}
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		_ = resp.Body.Close()
+		return Media{}, ErrAuth
+	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
+		_ = resp.Body.Close()
+		return Media{}, ErrNotFound
+	case resp.StatusCode < 200 || resp.StatusCode > 299:
+		_ = resp.Body.Close()
+		return Media{}, ErrAmbiguous
+	}
+	return Media{Body: resp.Body, ContentType: resp.Header.Get("Content-Type")}, nil
+}
+
+// HTTPSHost reports whether u is https on host, or on a subdomain of host
+// when sub is set.
+func HTTPSHost(u *url.URL, host string, sub bool) bool {
+	if u == nil || u.Scheme != "https" || u.User != nil {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	if p := u.Port(); p != "" && p != "443" {
+		return false
+	}
+	return h == host || sub && strings.HasSuffix(h, "."+host)
 }

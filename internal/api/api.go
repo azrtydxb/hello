@@ -22,6 +22,7 @@ import (
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/location"
 	"github.com/azrtydxb/hello/internal/mailer"
+	"github.com/azrtydxb/hello/internal/messaging/media"
 	"github.com/azrtydxb/hello/internal/originate"
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/prov"
@@ -50,6 +51,10 @@ type Store interface {
 	Audit(ctx context.Context, actor, action, resource, resourceID string) error
 
 	UserForLogin(ctx context.Context, username string) (store.Login, error)
+	// SSORequired is the sso_required policy (spec integrations I-29).
+	SSORequired(ctx context.Context) (bool, error)
+	// UserManagedByDirectory reports whether a user is directory-synced.
+	UserManagedByDirectory(ctx context.Context, id int64) (bool, error)
 	UpgradePasswordHash(ctx context.Context, id int64, oldHash, newHash string) error
 	UserPasswordHash(ctx context.Context, id int64) (string, error)
 	ChangeOwnPassword(ctx context.Context, id int64, newHash string, keep []byte) error
@@ -364,6 +369,9 @@ type Config struct {
 	// Directory is the directory engine (AD/LDAP sync); nil answers 503 on
 	// the directory routes.
 	Directory DirectoryService
+	// SSO is single sign-on (spec integrations P11); nil hides the login
+	// page's providers and answers 503 on the SSO routes.
+	SSO SSOService
 	// Originate and OriginateLive carry click-to-call (spec integrations
 	// I-37): its requests and policy in PostgreSQL, its queue, live state
 	// and limit counters in Valkey; nil answers 503. OriginateLimits
@@ -388,6 +396,12 @@ type Config struct {
 	// Fax is the fax feature (destinations, the fax list, sending a PDF); the
 	// zero value answers 503 on its routes.
 	Fax FaxConfig
+	// MediaObjects is the messaging attachments' store (spec
+	// messaging-channels M-18); nil makes the media routes answer 503.
+	MediaObjects media.Objects
+	// MediaMax is HELLO_MSG_MEDIA_MAX, the largest attachment kept (0 is
+	// media.DefaultMax).
+	MediaMax int64
 	// Objects is the voicemail audio store; nil makes the audio routes and
 	// greeting uploads answer 503 instead of touching MinIO.
 	Objects Objects
@@ -395,6 +409,9 @@ type Config struct {
 	// the Diagnostics view; nil answers 503. AuthFailLimit is hello-sip's
 	// HELLO_SIP_AUTH_FAIL_LIMIT (0 means its default, 10).
 	Diagnostics DiagnosticsLive
+	// WebRTC reads the WebRTC status the hello-sip nodes publish for
+	// GET /api/v1/webrtc/status; nil leaves the legs out.
+	WebRTC WebRTCLive
 	// Syslog reads the lines of the phone syslog sink; nil answers 503.
 	Syslog        SyslogLive
 	AuthFailLimit int
@@ -441,6 +458,9 @@ type Config struct {
 	// texts at the carrier while the request waits; nil leaves them to the
 	// background worker.
 	MsgRedactor MsgRedactor
+	// MessagingAIAuto is HELLO_MSG_AI_AUTO, shown with the inbox AI
+	// settings: false stops every auto-reply.
+	MessagingAIAuto bool
 	// AI is the OAuth authorization server (spec ai-external-access); nil
 	// without HELLO_PUBLIC_URL, when the consent, grant and service-account
 	// routes answer 404 and bearer tokens get no audience check.
@@ -479,6 +499,8 @@ type Config struct {
 	prewarmMu *sync.Mutex
 	// credLimit bounds how often a user mints device credentials.
 	credLimit *rateLimiter
+	// turnProbe checks the TURN servers for the WebRTC status.
+	turnProbe *turnProber
 	// prewarmKick asks the background worker to pre-generate the prompts of a
 	// language a queue just set. Batchable handlers kick it rather than call
 	// the pre-generation, which uses the speech cache and must not run inside a
@@ -504,6 +526,9 @@ func Handler(c Config) http.Handler {
 		c.TTS = &tts.Client{}
 	}
 	c.credLimit = &rateLimiter{}
+	if c.turnProbe == nil {
+		c.turnProbe = &turnProber{}
+	}
 	c.speech, c.prewarmMu = newSpeechCache(c), &sync.Mutex{}
 	c.prewarmKick = make(chan struct{}, 1)
 	c.self = new(atomic.Pointer[http.Handler])

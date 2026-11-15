@@ -17,8 +17,11 @@ import {
   type InboxAgent,
   type InboxApi,
   type InboxCall,
+  type InboxMedia,
   type InboxMessage,
   type StatusFilter,
+  CHAT_MEDIA_MAX,
+  CHAT_MEDIA_TYPES,
 } from "../api/inbox";
 import {
   Alert,
@@ -37,6 +40,8 @@ import {
 import { redactMessage } from "../api/inboxReports";
 import { formatTime } from "../format";
 import { AgentAvailability } from "./inbox/AgentAvailability";
+import { formatSize, MessageMedia } from "./inbox/Attachments";
+import { AIDraftChip, AIListChips, AITriagePanel } from "./inbox/AIParts";
 import { Can } from "../role";
 import { usePolling } from "../usePolling";
 import { LinkedText } from "./inbox/Linkified";
@@ -171,6 +176,10 @@ function Thread({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  // Files uploaded for the next reply (a website chat only).
+  const [uploads, setUploads] = useState<InboxMedia[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [tags, setTags] = useState(conversation.tags.join(", "));
   const [calls, setCalls] = useState<InboxCall[] | null>(null);
   const [callsFailed, setCallsFailed] = useState(false);
@@ -180,6 +189,9 @@ function Thread({
   const [leaving, setLeaving] = useState<URL | null>(null);
   const [blocking, setBlocking] = useState(false);
   const [redacting, setRedacting] = useState<InboxMessage | null>(null);
+  const [reverting, setReverting] = useState(false);
+  // The AI draft run the agent dismissed; a newer draft shows again.
+  const [dismissedDraft, setDismissedDraft] = useState(0);
   const toast = useToast();
 
   const apply = useCallback(
@@ -263,15 +275,17 @@ function Thread({
   async function submit(e: FormEvent) {
     e.preventDefault();
     const text = draft.trim();
-    if (!text) return;
+    const files = mode === "reply" ? uploads.map((u) => u.id) : [];
+    if (!text && files.length === 0) return;
     setBusy(true);
     setSendError(null);
     try {
       if (mode === "note") await api.note(id, text);
-      else await api.send(id, text, clientId.current);
+      else await api.send(id, text, clientId.current, files);
       // A sent text is done: the next one is a new message.
       clientId.current = newClientId();
       setDraft("");
+      if (mode === "reply") setUploads([]);
       onChanged();
       await load();
     } catch (err: unknown) {
@@ -285,6 +299,39 @@ function Thread({
   const chat = conv.channelKind === "webchat";
   const sms = smsSegments(draft);
   const canReply = !conv.optedOut && conv.status !== "spam";
+  // Only a website chat carries an agent's attachments: a carrier needs the
+  // public listener to fetch them, which this build does not have.
+  const canAttach = chat && mode === "reply" && canReply;
+
+  /** Uploads the files picked for the next reply. */
+  async function attach(list: FileList | null) {
+    const files = Array.from(list ?? []);
+    if (fileInput.current) fileInput.current.value = "";
+    if (files.length === 0) return;
+    setSendError(null);
+    const tooBig = files.find((f) => f.size > CHAT_MEDIA_MAX);
+    if (tooBig) {
+      setSendError(
+        `${tooBig.name} is larger than ${formatSize(CHAT_MEDIA_MAX)}, the most a chat takes.`,
+      );
+      return;
+    }
+    if (uploads.length + files.length > 10) {
+      setSendError("At most 10 attachments per message.");
+      return;
+    }
+    setUploading(true);
+    try {
+      for (const f of files) {
+        const m = await api.upload(id, f);
+        setUploads((u) => [...u, m]);
+      }
+    } catch (err: unknown) {
+      setSendError(errorMessage(err));
+    } finally {
+      setUploading(false);
+    }
+  }
 
   /** A link in a visitor's message leaves Hello: ask once per host. */
   function openLink(url: URL) {
@@ -321,6 +368,29 @@ function Thread({
       setBusy(false);
     }
   }
+
+  async function revertAI() {
+    setReverting(true);
+    try {
+      const c = await api.revertAI(id);
+      setConv(c);
+      setTags(c.tags.join(", "));
+      toast.show("The AI triage's changes are undone.");
+      onChanged();
+    } catch (err: unknown) {
+      setError(errorMessage(err));
+    } finally {
+      setReverting(false);
+    }
+  }
+
+  const aiDraft = conv.ai?.draft ?? null;
+  const showDraft =
+    aiDraft !== null &&
+    aiDraft.runId !== dismissedDraft &&
+    mode === "reply" &&
+    canReply &&
+    draft.trim() === "";
 
   const unassigned = conv.assigneeUserId === null;
   const tomorrow = () => {
@@ -365,6 +435,11 @@ function Thread({
             sites page.
           </Alert>
         )}
+        <AITriagePanel
+          conv={conv}
+          busy={reverting}
+          onRevert={() => void revertAI()}
+        />
         {error && (
           <Alert tone="bad" title="Could not load the conversation">
             {error}
@@ -394,6 +469,11 @@ function Thread({
                       {m.kind === "note" ? "Note by " : ""}
                       {whoLabel(m)}
                     </span>
+                    {m.senderKind === "ai" && (
+                      <Badge tone="info" icon="bot">
+                        Sent by the AI
+                      </Badge>
+                    )}
                     <span>{formatTime(m.createdAt)}</span>
                     {m.kind === "message" && m.direction === "out" && (
                       <Badge tone={m.status === "failed" ? "bad" : "neutral"}>
@@ -421,14 +501,17 @@ function Thread({
                     Redacted {formatTime(m.redactedAt)}
                   </p>
                 ) : (
-                  <p className="inbox-msg__body">
-                    {chat && m.kind === "message" && m.direction === "in" ? (
-                      <LinkedText text={m.body} onOpen={openLink} />
-                    ) : (
-                      m.body
-                    )}
-                  </p>
+                  m.body !== "" && (
+                    <p className="inbox-msg__body">
+                      {chat && m.kind === "message" && m.direction === "in" ? (
+                        <LinkedText text={m.body} onOpen={openLink} />
+                      ) : (
+                        m.body
+                      )}
+                    </p>
+                  )
                 )}
+                <MessageMedia media={m.media ?? []} url={api.mediaUrl} />
               </li>
             );
           })}
@@ -459,6 +542,13 @@ function Thread({
               Internal note
             </Button>
           </div>
+          {showDraft && (
+            <AIDraftChip
+              text={aiDraft.text}
+              onUse={() => setDraft(aiDraft.text)}
+              onDismiss={() => setDismissedDraft(aiDraft.runId)}
+            />
+          )}
           <label className="visually-hidden" htmlFor="inbox-draft">
             {mode === "note" ? "Internal note" : "Reply to the customer"}
           </label>
@@ -477,6 +567,28 @@ function Thread({
               typingPing();
             }}
           />
+          {canAttach && uploads.length > 0 && (
+            <ul className="inbox-uploads" aria-label="Attachments to send">
+              {uploads.map((u) => (
+                <li key={u.id}>
+                  <Badge tone="neutral">
+                    {u.filename} ({formatSize(u.size)})
+                  </Badge>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Remove ${u.filename}`}
+                    onClick={() =>
+                      setUploads((all) => all.filter((x) => x.id !== u.id))
+                    }
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
           {sendError && (
             <Alert tone="bad" title="Not sent">
               {sendError}
@@ -512,11 +624,37 @@ function Thread({
                 Reply by email
               </Button>
             )}
+            {canAttach && (
+              <>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  multiple
+                  accept={CHAT_MEDIA_TYPES}
+                  hidden
+                  aria-label="Attachment file"
+                  onChange={(e) => void attach(e.target.files)}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={busy || uploading}
+                  title={`Images (PNG, JPEG, GIF, WebP) and PDF, at most ${formatSize(CHAT_MEDIA_MAX)} each`}
+                  onClick={() => fileInput.current?.click()}
+                >
+                  {uploading ? "Uploading…" : "Attach"}
+                </Button>
+              </>
+            )}
             <Button
               type="submit"
               icon="send"
               disabled={
-                busy || draft.trim() === "" || (mode === "reply" && !canReply)
+                busy ||
+                uploading ||
+                (draft.trim() === "" &&
+                  (mode !== "reply" || uploads.length === 0)) ||
+                (mode === "reply" && !canReply)
               }
             >
               {mode === "note" ? "Add note" : "Send"}
@@ -749,7 +887,7 @@ function Thread({
       {redacting && (
         <ConfirmDialog
           title="Redact this message?"
-          description="Its text is deleted from Hello for good, including the copies queued for desk phones, and a text sent through Twilio is deleted at Twilio too. The thread shows that it was redacted. This is recorded in the audit log."
+          description="Its text and attachments are deleted from Hello for good, including the copies queued for desk phones, and a text sent through Twilio is deleted at Twilio too. The thread shows that it was redacted. This is recorded in the audit log."
           confirmLabel="Redact message"
           confirmIcon="eraser"
           errorTitle="Could not redact the message"
@@ -758,10 +896,14 @@ function Thread({
             const rep = await redactMessage(id, redacting.id);
             setRedacting(null);
             const left = rep.providers.some((p) => !p.redacted);
+            const files =
+              rep.mediaObjectsPending > 0
+                ? ` ${String(rep.mediaObjectsPending)} attachment files are deleted within minutes.`
+                : "";
             toast.show(
-              left
+              (left
                 ? "Message redacted. The carrier part is not complete; see Messaging, Privacy."
-                : "Message redacted.",
+                : "Message redacted.") + files,
             );
             await load();
           }}
@@ -1148,6 +1290,7 @@ function InboxView({
                   {c.channelKind === "webchat" && (
                     <Badge tone="neutral">Chat</Badge>
                   )}
+                  <AIListChips conv={c} />
                 </span>
               </button>
             </li>

@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"net"
+	"net/http"
 	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,8 +57,9 @@ type Store interface {
 	SaveSyncState(ctx context.Context, connectorID int64, s SyncState) error
 
 	LoadState(ctx context.Context, connectorID int64) (State, error)
-	// Apply performs one operation, audited with actor.
-	Apply(ctx context.Context, actor string, c Connector, op Op) error
+	// Apply performs one operation, audited with actor. An operation that
+	// auto-provisions reports the number it allocated.
+	Apply(ctx context.Context, actor string, c Connector, op Op) (Applied, error)
 	PruneChanges(ctx context.Context, before time.Time) (int64, error)
 	TryLock(ctx context.Context, key string) (unlock func(), ok bool, err error)
 }
@@ -76,8 +80,14 @@ type Engine struct {
 	AllowPlaintext bool
 	// Allow are the private ranges connections may reach.
 	Allow []netip.Prefix
-	// Dial replaces the guarded dialer (tests only).
+	// Dial replaces the guarded dialer and HTTP the guarded HTTPS client
+	// (tests only).
 	Dial func(ctx context.Context, network, address string) (net.Conn, error)
+	HTTP *http.Client
+	// LoginCheck reports whether the named OIDC provider is configured and
+	// enabled, so a connector whose users sign in through it may be enabled
+	// (I-29); nil accepts any provider.
+	LoginCheck func(ctx context.Context, provider string) error
 	// Notify is told after the third consecutive failure of a connector (an
 	// administrator e-mail when SMTP is set); it must not block.
 	Notify func(ctx context.Context, c Connector, code string)
@@ -145,7 +155,7 @@ type ConnectorInput struct {
 	Mappings        *Mappings
 	GroupRules      *GroupRules
 	Options         *Options
-	AutoProvision   json.RawMessage
+	AutoProvision   *AutoProvision
 	// Secret is the bind password: write-only, sealed by the store.
 	Secret *string
 }
@@ -157,7 +167,12 @@ func (e *Engine) Create(ctx context.Context, actor string, in ConnectorInput) (C
 		return Connector{}, err
 	}
 	c := Connector{Kind: in.Kind, Mode: ModeAuthoritative, ScheduleMinutes: 60, Mappings: d.DefaultMappings(),
-		GroupRules: GroupRules{Roles: []RoleRule{}, RingGroups: []RingGroupRule{}}, AutoProvision: json.RawMessage(`{}`)}
+		GroupRules: GroupRules{Roles: []RoleRule{}, RingGroups: []RingGroupRule{}}, AutoProvision: DefaultAutoProvision()}
+	// A cloud directory's users sign in at that cloud's IdP by default.
+	switch in.Kind {
+	case KindGoogle, KindEntra:
+		c.Options.LoginMethod, c.Options.OIDCProvider = LoginOIDC, in.Kind
+	}
 	return e.save(ctx, actor, d, c, in)
 }
 
@@ -234,6 +249,9 @@ func (e *Engine) save(ctx context.Context, actor string, d Driver, c Connector, 
 	if in.Options != nil {
 		c.Options = *in.Options
 	}
+	if c.Kind == KindLDAP && c.Options.LoginMethod == "" && legacyBindLogin(in.Config, c.Config) {
+		c.Options.LoginMethod = LoginLDAPBind
+	}
 	o := c.Options
 	if o.AbsenceRuns < 0 || o.AbsenceRuns > 10 {
 		v.Fields = append(v.Fields, FieldError{"options.absenceRuns", "must be 1 to 10"})
@@ -244,20 +262,38 @@ func (e *Engine) save(ctx context.Context, actor string, d Driver, c Connector, 
 	if o.RunTimeoutMinutes < 0 || o.RunTimeoutMinutes > 240 {
 		v.Fields = append(v.Fields, FieldError{"options.runTimeoutMinutes", "must be 1 to 240"})
 	}
-	if len(in.AutoProvision) > 0 {
-		var ap struct {
-			Enabled bool `json:"enabled"`
+	switch o.LoginMethod {
+	case "":
+		if o.OIDCProvider != "" {
+			v.Fields = append(v.Fields, FieldError{"options.oidcProvider", "only applies with loginMethod oidc"})
 		}
-		if err := json.Unmarshal(in.AutoProvision, &ap); err != nil && string(in.AutoProvision) != "null" {
-			v.Fields = append(v.Fields, FieldError{"autoProvision", "must be an object"})
-		} else if ap.Enabled {
-			v.Fields = append(v.Fields, FieldError{"autoProvision.enabled", "range auto-provisioning is not available yet"})
+	case LoginOIDC:
+		if o.OIDCProvider != KindGoogle && o.OIDCProvider != KindEntra {
+			v.Fields = append(v.Fields, FieldError{"options.oidcProvider", "must be google or entra"})
 		}
+	case LoginLDAPBind:
+		if c.Kind != KindLDAP {
+			v.Fields = append(v.Fields, FieldError{"options.loginMethod", "ldap_bind is for LDAP connectors only"})
+		}
+		if o.OIDCProvider != "" {
+			v.Fields = append(v.Fields, FieldError{"options.oidcProvider", "only applies with loginMethod oidc"})
+		}
+	default:
+		v.Fields = append(v.Fields, FieldError{"options.loginMethod", "must be oidc or ldap_bind"})
+	}
+	if in.AutoProvision != nil {
+		c.AutoProvision = *in.AutoProvision
+	}
+	if c.AutoProvision.Groups == nil {
+		c.AutoProvision.Groups = []string{}
+	}
+	if av := c.AutoProvision.Validate(); av != nil {
+		v.Fields = append(v.Fields, av.Fields...)
 	}
 	if in.Config != nil {
 		c.Config = in.Config
 	}
-	cfg, cerr := d.Validate(c.Config, ValidateOptions{AllowPlaintext: e.AllowPlaintext, GroupRules: len(c.GroupRules.RingGroups)+len(c.GroupRules.Roles) > 0})
+	cfg, cerr := d.Validate(c.Config, ValidateOptions{AllowPlaintext: e.AllowPlaintext, GroupRules: len(c.GroupRules.RingGroups)+len(c.GroupRules.Roles)+len(c.AutoProvision.Groups) > 0})
 	if cerr != nil {
 		var ve *ValidationError
 		if errors.As(cerr, &ve) {
@@ -269,27 +305,80 @@ func (e *Engine) save(ctx context.Context, actor string, d Driver, c Connector, 
 		c.Config = cfg
 	}
 	fp := ""
+	field := secretField(d)
+	sd, custom := d.(SecretDriver)
 	if in.Secret != nil {
-		if *in.Secret == "" {
-			v.Fields = append(v.Fields, FieldError{"bindPassword", "must not be empty: an empty password is an anonymous bind"})
+		switch {
+		case *in.Secret == "" && !custom:
+			v.Fields = append(v.Fields, FieldError{field, "must not be empty: an empty password is an anonymous bind"})
+		case *in.Secret == "":
+			v.Fields = append(v.Fields, FieldError{field, "must not be empty"})
+		case custom && cerr == nil:
+			if err := sd.CheckSecret(c.Config, *in.Secret); err != nil {
+				v.Fields = append(v.Fields, FieldError{field, err.Error()})
+			}
 		}
 	}
 	if cerr == nil {
 		fp = Fingerprint(d.Identity(c.Config))
 		if c.ID != 0 && in.Secret == nil && c.HasCredential && Fingerprint(oldIdentity) != fp {
-			v.Fields = append(v.Fields, FieldError{"bindPassword", "enter the bind password again: the host or bind DN changed"})
+			msg := "enter the bind password again: the host or bind DN changed"
+			if custom {
+				msg = "enter the credential again: the account it belongs to changed"
+			}
+			v.Fields = append(v.Fields, FieldError{field, msg})
 		}
 		if c.Enabled && !c.HasCredential && in.Secret == nil {
-			v.Fields = append(v.Fields, FieldError{"enabled", "set the bind password before enabling the connector"})
+			msg := "set the bind password before enabling the connector"
+			if custom {
+				msg = "set the credential before enabling the connector"
+			}
+			v.Fields = append(v.Fields, FieldError{"enabled", msg})
 		}
 	}
 	if len(v.Fields) > 0 {
 		return Connector{}, &v
 	}
-	if len(c.AutoProvision) == 0 {
-		c.AutoProvision = json.RawMessage(`{}`)
+	// Synced users have no local password, so an enabled connector must say
+	// how they sign in (I-29).
+	if c.Enabled {
+		if err := e.checkLogin(ctx, c.Options); err != nil {
+			return Connector{}, err
+		}
 	}
 	return e.Store.SaveConnector(ctx, actor, c, in.Secret, fp)
+}
+
+// legacyBindLogin reports the ldapBindLogin switch of the P8 LDAP config, the
+// earlier spelling of loginMethod ldap_bind.
+func legacyBindLogin(cfgs ...json.RawMessage) bool {
+	for _, raw := range cfgs {
+		var c struct {
+			LDAPBindLogin bool `json:"ldapBindLogin"`
+		}
+		if len(raw) > 0 && json.Unmarshal(raw, &c) == nil && c.LDAPBindLogin {
+			return true
+		}
+	}
+	return false
+}
+
+// checkLogin refuses to enable a connector whose users could not sign in.
+func (e *Engine) checkLogin(ctx context.Context, o Options) error {
+	switch o.LoginMethod {
+	case LoginLDAPBind:
+		return nil
+	case LoginOIDC:
+		if e.LoginCheck == nil {
+			return nil
+		}
+		if err := e.LoginCheck(ctx, o.OIDCProvider); err != nil {
+			return &Error{Code: CodeNoLoginMethod, Detail: "the users of this connector sign in through " + o.OIDCProvider +
+				" single sign-on, which is not configured and enabled; set it up under Single sign-on first"}
+		}
+		return nil
+	}
+	return &Error{Code: CodeNoLoginMethod, Detail: "choose how this connector's users sign in (options.loginMethod: oidc or ldap_bind): synced users have no local password"}
 }
 
 // Get returns a connector.
@@ -303,6 +392,18 @@ func (e *Engine) List(ctx context.Context) ([]Connector, error) { return e.Store
 // Delete removes a connector; release turns its users into local ones.
 func (e *Engine) Delete(ctx context.Context, actor string, id int64, release bool) error {
 	return e.Store.DeleteConnector(ctx, actor, id, release)
+}
+
+// needGroups are the source groups the rules and the auto-provisioning
+// filter name: the ones whose membership a fetch resolves.
+func (c Connector) needGroups() []string {
+	out := c.GroupRules.GroupIDs()
+	for _, g := range c.AutoProvision.Groups {
+		if !slices.Contains(out, g) {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 // Attributes are the source attributes the mappings read.
@@ -326,8 +427,8 @@ func (m Mappings) Attributes() []string {
 }
 
 func (e *Engine) fetchOptions(c Connector) FetchOptions {
-	return FetchOptions{Limit: c.Options.userCap(), NeedGroups: c.GroupRules.GroupIDs(), Attributes: c.Mappings.Attributes(), Allow: e.Allow, Dial: e.Dial,
-		AllowPlaintext: e.AllowPlaintext, Now: e.now()}
+	return FetchOptions{Limit: c.Options.userCap(), NeedGroups: c.needGroups(), Attributes: c.Mappings.Attributes(), Allow: e.Allow, Dial: e.Dial,
+		HTTP: e.HTTP, AllowPlaintext: e.AllowPlaintext, Now: e.now()}
 }
 
 // Test connects with the stored credential and reads a small page (I-19). The
@@ -357,7 +458,7 @@ func (e *Engine) Test(ctx context.Context, actor string, id int64, mappings *Map
 	}
 	secret, err := e.Store.Secret(ctx, id)
 	if err != nil {
-		return failed(&Error{Code: CodeAuthFailed, Detail: "no bind password is set"}), nil
+		return failed(&Error{Code: CodeAuthFailed, Detail: "no credential is set"}), nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -576,7 +677,7 @@ func (e *Engine) fetch(ctx context.Context, c Connector, since *SyncMark) (*Resu
 	}
 	secret, err := e.Store.Secret(ctx, c.ID)
 	if err != nil {
-		return nil, &Error{Code: CodeAuthFailed, Detail: "no bind password is set"}
+		return nil, &Error{Code: CodeAuthFailed, Detail: "no credential is set"}
 	}
 	o := e.fetchOptions(c)
 	o.Since = since
@@ -602,7 +703,8 @@ func syncFingerprint(c Connector) string {
 		Mappings Mappings
 		Rules    GroupRules
 		Mode     string
-	}{cfg, c.Mappings.Normalize(), c.GroupRules, c.Mode})
+		Auto     AutoProvision
+	}{cfg, c.Mappings.Normalize(), c.GroupRules, c.Mode, c.AutoProvision})
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:12])
 }
@@ -762,17 +864,29 @@ func (e *Engine) applyPlan(ctx context.Context, c Connector, run Run, plan Plan,
 			rows = append(rows, ch)
 			continue
 		}
-		if err := e.Store.Apply(ctx, actor, c, *ch.op); err != nil {
+		got, err := e.Store.Apply(ctx, actor, c, *ch.op)
+		if err != nil {
 			errs++
 			rows = append(rows, Change{Action: ActionError, UserID: ch.UserID, ExternalID: ch.ExternalID, Username: ch.Username,
 				FieldDiffs: ch.FieldDiffs, Reason: applyReason(err)})
 			e.log().Warn("directory: apply change", "connector", c.ID, "reason", applyReason(err))
 			continue
 		}
+		if got.Extension != "" {
+			// The number actually allocated: another one than the preview's
+			// when that was taken in between (I-11).
+			d := ch.FieldDiffs["extension"]
+			if d.After != got.Extension {
+				ch.FieldDiffs = maps.Clone(ch.FieldDiffs)
+				d.After = got.Extension
+				ch.FieldDiffs["extension"] = d
+			}
+			e.Metrics.provisioned(c.Kind)
+		}
 		rows = append(rows, ch)
 	}
 	for _, q := range plan.Quiet {
-		if err := e.Store.Apply(ctx, actor, c, q); err != nil {
+		if _, err := e.Store.Apply(ctx, actor, c, q); err != nil {
 			e.log().Warn("directory: apply quiet", "connector", c.ID, "err", applyReason(err))
 		}
 	}
@@ -803,8 +917,12 @@ func applyReason(err error) string {
 	switch {
 	case errors.Is(err, ErrLastAdmin):
 		return ReasonLastAdmin
+	case errors.Is(err, ErrProtected):
+		return ReasonProtected
 	case errors.Is(err, ErrNotFound):
 		return "not_found"
+	case errors.Is(err, ErrRangeExhausted):
+		return ReasonRangeExhausted
 	}
 	var ve *ValidationError
 	if errors.As(err, &ve) {

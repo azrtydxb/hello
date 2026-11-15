@@ -453,7 +453,7 @@ func TestLANChatListenerIsolation(t *testing.T) {
 	g := newRig(t, nil, nil)
 	for _, p := range []string{"/", "/index.html", "/api/v1/me", "/api/v1/inbox/conversations", "/oauth/authorize", "/oauth/token",
 		"/.well-known/oauth-authorization-server", "/mcp", "/hooks/sms/abc", "/m/token", "/assets/index.js", "/metrics", "/chat", "/chat/v2/session",
-		"/chat/v1/", "/chat/v1/../api/v1/me", "/chat/v1/attachments"} {
+		"/chat/v1/", "/chat/v1/../api/v1/me"} {
 		for _, m := range []string{"GET", "POST"} {
 			r := g.do(m, p, `{}`, nil)
 			if r.Code != 404 && r.Code != 405 && r.Code != 301 && r.Code != 307 {

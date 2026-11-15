@@ -67,9 +67,10 @@ function ExportForm() {
       <p>
         Downloads a zip of every conversation and message with a phone number
         (or a chat visitor, <code>visitor:&lt;id&gt;</code>) on every channel,
-        with times and delivery states, and the customer&apos;s opt-out records.
-        The agents&apos; internal notes are left out unless you include them.
-        The export is recorded in the audit log, without its content.
+        with times and delivery states, their attachments (the files
+        themselves), and the customer&apos;s opt-out records. The agents&apos;
+        internal notes are left out unless you include them. The export is
+        recorded in the audit log, without its content.
       </p>
       <div className="msg-toolbar" role="group" aria-label="Export">
         <Input

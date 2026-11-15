@@ -95,6 +95,9 @@ export interface ProviderRedaction {
 export interface RedactReport {
   message: InboxMessage;
   providers: ProviderRedaction[];
+  /** Attachment files removed, and those left for the media sweeper. */
+  mediaObjects: number;
+  mediaObjectsPending: number;
 }
 
 export const redactMessage = (conversationId: number, messageId: number) =>

@@ -10,10 +10,13 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +24,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/provider"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -174,9 +178,42 @@ func TestInboxReportsAPI(t *testing.T) {
 	}
 }
 
+// storedMedia stores data as a ready attachment (spec M-18) of message msgID
+// (0: none, an upload not sent yet by visitor) in conversation conv, the way
+// the media worker or an upload leaves it, and returns its id and key.
+func (r *inboxRig) storedMedia(conv, msgID, visitor int64, direction, name string, data []byte) (int64, string) {
+	r.t.Helper()
+	ctx := context.Background()
+	sum := sha256.Sum256(data)
+	sha := hex.EncodeToString(sum[:])
+	key := "msg/test/" + strconv.FormatInt(inboxSeq.Add(1), 10) + "/" + sha
+	if err := r.objects.Put(ctx, key, bytes.NewReader(data), int64(len(data)), "image/png"); err != nil {
+		r.t.Fatal(err)
+	}
+	var msg, vis any
+	if msgID != 0 {
+		msg = msgID
+	}
+	if visitor != 0 {
+		vis = visitor
+	}
+	var id int64
+	if err := r.db.QueryRowContext(ctx, `
+		INSERT INTO message_media (message_id, conversation_id, channel_id, direction, status, object_key, content_type, size, sha256,
+			filename, uploader_visitor_id, attached_at)
+		SELECT $1::bigint, c.id, c.channel_id, $3::text, 'ready', $4::text, 'image/png', $5::bigint, $6::text, $7::text, $8::bigint,
+			CASE WHEN $1::bigint IS NULL THEN NULL ELSE now() END
+		FROM conversations c WHERE c.id = $2 RETURNING id`, msg, conv, direction, key, len(data), sha, name, vis).Scan(&id); err != nil {
+		r.t.Fatal(err)
+	}
+	return id, key
+}
+
 // TestInboxExportAPI fails if the export of a customer misses a conversation
 // or message, includes internal notes unasked, holds another customer, is
-// not audited with counts only, or answers anyone but an administrator.
+// not audited with counts only, answers anyone but an administrator, or
+// misses an attachment (its metadata or its file, spec M-18), a chat
+// visitor's unsent upload, or holds another customer's file.
 func TestInboxExportAPI(t *testing.T) {
 	r := newInboxRig(t)
 	ctx := context.Background()
@@ -184,7 +221,23 @@ func TestInboxExportAPI(t *testing.T) {
 	conv := r.text(peer, "my order is late")
 	r.admin.must(http.StatusCreated, "POST", idPath("/api/v1/inbox/conversations", conv, "/notes"), map[string]any{"body": "VIP customer"})
 	r.admin.must(http.StatusCreated, "POST", idPath("/api/v1/inbox/conversations", conv, "/messages"), map[string]any{"body": "on its way"})
-	r.text(other, "someone else")
+	otherConv := r.text(other, "someone else")
+
+	// The customer's photo (downloaded), a second attachment still
+	// downloading, and another customer's file.
+	var inMsg, otherMsg int64
+	if err := r.db.QueryRowContext(ctx, `SELECT id FROM conversation_messages WHERE conversation_id = $1 AND direction = 'in'`, conv).Scan(&inMsg); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.db.QueryRowContext(ctx, `SELECT id FROM conversation_messages WHERE conversation_id = $1 AND direction = 'in'`, otherConv).Scan(&otherMsg); err != nil {
+		t.Fatal(err)
+	}
+	photo, _ := r.storedMedia(conv, inMsg, 0, "in", "parcel.png", mediaPNG)
+	if err := r.st.AddInboundMedia(ctx, inMsg, []provider.MediaRef{{URL: "https://api.twilio.com/m", ContentType: "image/jpeg"}}); err != nil {
+		t.Fatal(err)
+	}
+	otherFile := append([]byte("\x89PNG\r\n\x1a\nOTHER-CUSTOMER"), mediaPNG...)
+	r.storedMedia(otherConv, otherMsg, 0, "in", "other.png", otherFile)
 
 	read := func(body []byte) (map[string]any, map[string][]byte) {
 		t.Helper()
@@ -229,6 +282,43 @@ func TestInboxExportAPI(t *testing.T) {
 		strings.Contains(all, "someone else") {
 		t.Fatalf("exported messages = %s", all)
 	}
+	// The attachments: both listed with the message, the photo's file in
+	// the archive at the path its entry names, nothing of the other
+	// customer's.
+	var in struct {
+		Media []struct {
+			ID       int64  `json:"id"`
+			Status   string `json:"status"`
+			Filename string `json:"filename"`
+			SHA256   string `json:"sha256"`
+			File     string `json:"file"`
+		} `json:"media"`
+	}
+	if err := json.Unmarshal(files["messages/"+itoa(conv)+"/"+itoa(inMsg)+".json"], &in); err != nil {
+		t.Fatalf("the inbound message: %v", err)
+	}
+	if len(in.Media) != 2 {
+		t.Fatalf("exported attachments = %+v", in.Media)
+	}
+	got, pending := in.Media[0], in.Media[1]
+	if got.ID != photo || got.Status != "ready" || got.Filename != "parcel.png" || got.SHA256 == "" ||
+		got.File != "media/"+itoa(conv)+"/"+itoa(photo)+".png" {
+		t.Fatalf("the photo's entry = %+v", got)
+	}
+	if !bytes.Equal(files[got.File], mediaPNG) {
+		t.Fatalf("the photo's file in the archive = %d bytes", len(files[got.File]))
+	}
+	if pending.Status != "pending" || pending.File != "" {
+		t.Fatalf("the downloading attachment's entry = %+v", pending)
+	}
+	for name, b := range files {
+		if bytes.Contains(b, []byte("OTHER-CUSTOMER")) || strings.Contains(string(b), "other.png") {
+			t.Fatalf("%s holds the other customer's file", name)
+		}
+	}
+	if string(files["uploads.json"]) != "[]\n" {
+		t.Fatalf("uploads.json = %q", files["uploads.json"])
+	}
 	_, files = read(r.admin.must(http.StatusOK, "GET", "/api/v1/inbox/export?peer="+url.QueryEscape(peer)+"&notes=true", nil).body)
 	withNotes := ""
 	for name, b := range files {
@@ -243,8 +333,39 @@ func TestInboxExportAPI(t *testing.T) {
 	if err := r.db.QueryRowContext(ctx, `SELECT action FROM audit_events WHERE action LIKE 'export %' ORDER BY id LIMIT 1`).Scan(&audit); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(audit, "export conversations=1 messages=") || strings.Contains(audit, peer) {
+	if !strings.HasPrefix(audit, "export conversations=1 messages=") || !strings.Contains(audit, " media=2 ") || strings.Contains(audit, peer) {
 		t.Errorf("export audit = %q", audit)
+	}
+
+	// A file the media sweeper removed meanwhile is listed without one.
+	if err := r.objects.Remove(ctx, func() string {
+		var k string
+		if err := r.db.QueryRowContext(ctx, `SELECT object_key FROM message_media WHERE id = $1`, photo).Scan(&k); err != nil {
+			t.Fatal(err)
+		}
+		return k
+	}()); err != nil {
+		t.Fatal(err)
+	}
+	_, files = read(r.admin.must(http.StatusOK, "GET", "/api/v1/inbox/export?peer="+url.QueryEscape(peer), nil).body)
+	if b := string(files["messages/"+itoa(conv)+"/"+itoa(inMsg)+".json"]); !strings.Contains(b, `"file": ""`) || strings.Contains(b, `"file": "media/`) {
+		t.Fatalf("a removed file is still listed: %s", b)
+	}
+
+	// A chat visitor's export holds their sent file and the one not sent yet.
+	chat, visitor := r.chatConversation("Export desk")
+	var chatMsg int64
+	if err := r.db.QueryRowContext(ctx, `SELECT id FROM conversation_messages WHERE conversation_id = $1 AND direction = 'in'`, chat).Scan(&chatMsg); err != nil {
+		t.Fatal(err)
+	}
+	sent, _ := r.storedMedia(chat, chatMsg, visitor, "in", "sent.png", mediaPNG)
+	unsent, _ := r.storedMedia(chat, 0, visitor, "in", "draft.png", mediaPNG)
+	_, files = read(r.admin.must(http.StatusOK, "GET", "/api/v1/inbox/export?peer=visitor:"+itoa(visitor), nil).body)
+	if !bytes.Equal(files["media/"+itoa(chat)+"/"+itoa(sent)+".png"], mediaPNG) {
+		t.Fatalf("the visitor's sent file is missing: %v", keys(files))
+	}
+	if !bytes.Equal(files["media/uploads/"+itoa(unsent)+".png"], mediaPNG) || !strings.Contains(string(files["uploads.json"]), "draft.png") {
+		t.Fatalf("the visitor's unsent upload is missing: %v %s", keys(files), files["uploads.json"])
 	}
 	r.admin.must(http.StatusBadRequest, "GET", "/api/v1/inbox/export?peer=nope", nil)
 	r.admin.must(http.StatusBadRequest, "GET", "/api/v1/inbox/export?peer="+url.QueryEscape(peer)+"&notes=maybe", nil)
@@ -255,11 +376,20 @@ func TestInboxExportAPI(t *testing.T) {
 	r.admin.must(http.StatusUnprocessableEntity, "GET", "/api/v1/inbox/export?peer="+url.QueryEscape(peer), nil)
 }
 
+func keys(m map[string][]byte) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 // TestInboxRedactAPI fails if a redacted message keeps its text anywhere
 // Hello holds it, is not deleted at Twilio (or blanked there when Twilio
 // cannot delete it yet), is not audited, if a system line can be redacted,
-// if anyone but an administrator can redact, or if an erase does not report
-// the carrier's part.
+// if anyone but an administrator can redact, if a redacted message's
+// attachment (its file, its row or a public link to it, spec M-18) survives,
+// or if an erase does not report the carrier's part.
 func TestInboxRedactAPI(t *testing.T) {
 	late := &lateRedactor{}
 	r := newTwilioRigConfig(t, Config{Live: noLive{}, MsgRedactor: late})
@@ -275,6 +405,18 @@ func TestInboxRedactAPI(t *testing.T) {
 	if providerID == "" {
 		t.Fatal("the text was not sent")
 	}
+	// The text carried a file, with a public link a carrier could fetch it
+	// through, and a second attachment never stored.
+	file, fileKey := r.storedMedia(conv, msgID, 0, "out", "card.png", mediaPNG)
+	if _, _, err := r.st.MintMediaLink(ctx, file); err != nil {
+		t.Fatal(err)
+	}
+	var unstored int64
+	if err := r.db.QueryRowContext(ctx, `
+		INSERT INTO message_media (message_id, conversation_id, channel_id, direction, status, attached_at)
+		VALUES ($1, $2, $3, 'out', 'rejected', now()) RETURNING id`, msgID, conv, r.tChannel).Scan(&unstored); err != nil {
+		t.Fatal(err)
+	}
 	path := idPath("/api/v1/inbox/conversations", conv, "/messages/") + itoa(msgID) + "/redact"
 	r.operator.must(http.StatusForbidden, "POST", path, nil)
 	r.admin.must(http.StatusNotFound, "POST", idPath("/api/v1/inbox/conversations", conv, "/messages/99999/redact"), nil)
@@ -282,6 +424,21 @@ func TestInboxRedactAPI(t *testing.T) {
 	m := rep["message"].(map[string]any)
 	if m["body"] != "" || m["redactedAt"] == nil {
 		t.Fatalf("redacted message = %v", m)
+	}
+	if media, _ := m["media"].([]any); media == nil || len(media) != 0 {
+		t.Fatalf("the redacted message still has attachments: %v", m["media"])
+	}
+	if rep["mediaObjects"] != float64(1) || rep["mediaObjectsPending"] != float64(0) {
+		t.Fatalf("redaction media counts = %v, %v", rep["mediaObjects"], rep["mediaObjectsPending"])
+	}
+	if ok, _ := r.objects.Exists(ctx, fileKey); ok {
+		t.Fatal("the redacted message's file is still in the media store")
+	}
+	if n := r.count(`SELECT count(*) FROM message_media WHERE id = ANY($1::bigint[])`, []int64{file, unstored}); n != 0 {
+		t.Fatalf("%d attachment rows left after the redaction", n)
+	}
+	if n := r.count(`SELECT count(*) FROM media_links WHERE media_id = $1`, file); n != 0 {
+		t.Fatalf("%d public links left after the redaction", n)
 	}
 	provs := rep["providers"].([]any)
 	if len(provs) != 1 || provs[0].(map[string]any)["provider"] != "twilio" || provs[0].(map[string]any)["redacted"] != true {
@@ -304,7 +461,7 @@ func TestInboxRedactAPI(t *testing.T) {
 	}
 	// Twice changes nothing.
 	again := r.admin.must(http.StatusOK, "POST", path, nil).json(t)
-	if d, _ := r.fake.redactCounts(); len(again["providers"].([]any)) != 0 || d != 1 {
+	if d, _ := r.fake.redactCounts(); len(again["providers"].([]any)) != 0 || d != 1 || again["mediaObjects"] != float64(0) {
 		t.Fatalf("a second redaction = %v, deletes %d", again, d)
 	}
 	// A system line has nothing to redact.

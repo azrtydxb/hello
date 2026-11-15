@@ -42,6 +42,7 @@ import { IntegrationsSlack } from "./pages/IntegrationsSlack";
 import { MyConnections } from "./pages/MyConnections";
 import { Webhooks } from "./pages/Webhooks";
 import { DirectorySync } from "./pages/DirectorySync";
+import { SingleSignOn } from "./pages/SingleSignOn";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
 import { AIProposalDetail } from "./pages/AIProposalDetail";
@@ -72,6 +73,7 @@ import { MessagingPrivacy } from "./pages/MessagingPrivacy";
 import { MessagingChannels } from "./pages/MessagingChannels";
 import { MessagingOptOuts } from "./pages/MessagingOptOuts";
 import { MessagingSettings } from "./pages/MessagingSettings";
+import { MessagingAI } from "./pages/MessagingAI";
 import { MessagingWebchat } from "./pages/MessagingWebchat";
 import { getInboxStatus } from "./api/inbox";
 import { Messages } from "./pages/Messages";
@@ -151,6 +153,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/messaging/optouts": MessagingOptOuts,
   "/messaging/settings": MessagingSettings,
   "/messaging/privacy": MessagingPrivacy,
+  "/messaging/ai": MessagingAI,
   "/me/voicemail": MyVoicemail,
   "/me/forwarding": MyForwarding,
   "/me/history": MyHistory,
@@ -203,6 +206,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/me/connections": MyConnections,
   "/integrations/webhooks": Webhooks,
   "/integrations/directory": DirectorySync,
+  "/integrations/sso": SingleSignOn,
 };
 
 /** The canvas pulls in the graph library, so it loads on first use. */

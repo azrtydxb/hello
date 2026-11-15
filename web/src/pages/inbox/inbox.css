@@ -217,3 +217,83 @@
   font-style: italic;
   color: var(--az-text-muted, inherit);
 }
+
+/* Attachments (spec messaging-channels M-18). */
+.inbox-media {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.inbox-media__thumb {
+  display: block;
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: 8px;
+  border: 1px solid var(--az-border, #e5e7eb);
+}
+.inbox-media__video {
+  max-width: 320px;
+  border-radius: 8px;
+}
+.inbox-media__file {
+  overflow-wrap: anywhere;
+}
+.inbox-uploads {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.inbox-uploads li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The inbox AI: the triage of the latest text and the reply draft. */
+.inbox-ai {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--az-border, currentColor);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inbox-ai__head,
+.inbox-ai__chips,
+.inbox-ai__applied {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.inbox-ai__summary,
+.inbox-ai__handoff {
+  margin: 0;
+}
+
+.inbox-ai__handoff {
+  font-weight: 600;
+}
+
+.inbox-ai-draft {
+  border: 1px dashed var(--az-border, currentColor);
+  border-radius: 8px;
+  padding: 8px 12px;
+  opacity: 0.8;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inbox-ai-draft__text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -73,7 +73,7 @@ func newPGRig(t *testing.T) *pgRig {
 	r.e = &Engine{Store: r.pg, Drivers: map[string]Driver{KindLDAP: r.d}, Replica: "pg1"}
 	pw := "bind-password-123"
 	r.c, err = r.e.Create(ctx, "admin", ConnectorInput{Kind: KindLDAP, Name: strPtr("AD"), Secret: &pw, Enabled: boolPtr(true),
-		Config: json.RawMessage(`{"url":"ldaps://dc"}`)})
+		Config: json.RawMessage(`{"url":"ldaps://dc","ldapBindLogin":true}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,8 +289,9 @@ func TestPGAdoptAndRelease(t *testing.T) {
 	if _, err := r.e.Apply(r.ctx, "admin", run.ID, Decisions{Adopt: []string{"g1"}}); err != nil {
 		t.Fatal(err)
 	}
-	// An adopted user keeps its local password and login until its directory sign-in exists.
-	if got := r.scalar(`SELECT auth_method || '/' || password_hash || '/' || external_id || '/' || role FROM users WHERE email = 'old@corp.org'`); got != "local/bcrypt-hash/g1/operator" {
+	// An adopted user loses its local password: it signs in through the
+	// directory from now on (I-29), like a user the connector created.
+	if got := r.scalar(`SELECT auth_method || '/' || password_hash || '/' || external_id || '/' || role FROM users WHERE email = 'old@corp.org'`); got != "local/!/g1/operator" {
 		t.Fatalf("adopted = %q", got)
 	}
 	if err := r.e.Delete(r.ctx, "admin", r.c.ID, false); !errors.Is(err, ErrHasUsers) {

@@ -270,6 +270,33 @@
   }
 }
 
+/* Single sign-on buttons under the password form. */
+.signin__sso {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.signin__sso-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--az-text-3, var(--az-text-2));
+}
+
+.signin__sso-or::before,
+.signin__sso-or::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--az-border, currentColor);
+  opacity: 0.6;
+}
+
+.signin__sso .az-btn {
+  text-decoration: none;
+}
+
 .signin__foot {
   display: flex;
   align-items: center;

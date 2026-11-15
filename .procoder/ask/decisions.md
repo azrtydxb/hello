@@ -4774,6 +4774,34 @@ Stacked on #343 (items 5 and 6); merges after it. Choices:
   Regression guard: TestKamailioInvite100AfterRelay; the kamailio-ha job
   (KINDHA_GRACEFUL_REPEAT=n repeats the graceful loss) shows it end to end.
 
+## Takeover re-INVITE restates the session timer (2026-11-15)
+
+- Context: #348 follow-up. `haReinvite` sent no `Session-Expires`, so a phone
+  could read the takeover re-INVITE (a session refresh in RFC 4028 terms) as
+  turning the dialog's timer off until the survivor's next refresh.
+- Decision: a homed leg is bound to its dialog's slot in the call's session
+  timers (`haLeg.bindSession`: caller/callee by `haNewCall`, the party's side
+  for a parked call, the callee for an IVR dial-out, the caller for a queue
+  callback). Every re-INVITE `haReinvite` sends on a leg whose dialog has a
+  timer carries `Supported: timer`, `Session-Expires: <interval>;refresher=`
+  `uac` (Hello refreshes) or `uas` (the phone does), and `Min-SE`; a leg
+  without one carries none. The call's live timer is the single source of
+  truth, so the mid-call homed re-INVITEs (hold mirroring, park retrieve on a
+  taken-over call) restate it too.
+- 422: the interval is raised to the answer's `Min-SE` and the re-INVITE is
+  resent with the next CSeq, up to `sessionMaxRetries`, inside the same
+  `haReinviteTimeout` budget; the survivor then refreshes at the raised
+  interval.
+- A 2xx with `Session-Expires` sets the granted interval (never below the
+  current one or `Min-SE`) and the refresher it names (RFC 4028 7.2). A 2xx
+  without one leaves the timer as it was, like the refresh path: Hello covers
+  phones without RFC 4028 support anyway.
+- Test globals (#347/#348 follow-up): `bossAssistantLead`,
+  `checkSyncTimeout`, `pushPollInterval`, `mwiPollInterval` and
+  `presencePollInterval` are atomic tunables; `ivrLaunch` became a Server
+  method with a per-server `ivrLaunchHook`, since its one test builds its own
+  Server.
+
 ## Messaging wiring between items 2 to 6 (2026-11-14, feat/messaging-wiring)
 
 What the merged messaging items left between them, and the choices made where
@@ -4820,6 +4848,325 @@ entry and the code it names).
 - **MCP:** no new operation; chat sites and routing stay excluded, so the
   doctable is unchanged.
 
+## Integrations P12: range auto-provisioning for directory users (2026-11-14)
+
+Built from spec `integrations.md` I-11 on the P8 directory engine. The spec
+left the points below open; each was **chosen by default (the conservative
+option)**, not by the user.
+
+- **Who gets a number.** A user the connector creates, adopts or manages whose
+  mapped extension is empty, or names no extension, when provisioning is on and
+  the user is in the optional source-group filter (`autoProvision.groups`,
+  empty = everyone). A value that is invalid, duplicated or linked elsewhere
+  stays the conflict it was. A user that already has its synced extension keeps
+  it even when the directory value names a missing one. In `create_only` mode a
+  user is provisioned once (Hello owns the extension afterwards, so a deleted
+  one is not recreated); `link_only` users are provisioned like
+  `authoritative` ones.
+- **A full range is a conflict, not a user without a number.**
+  `range_exhausted` leaves that user unchanged (not created, not linked), like
+  every other conflict, so nobody appears half set up; the administrator widens
+  the range. Not overridable.
+- **Stable numbers need state.** Migration 00101 keeps the allocated number on
+  the user (`users.provisioned_number`) and marks the extension
+  (`extensions.provisioned_by`, set null when the connector is deleted). A
+  re-run prefers that number even outside a changed range, relinks its
+  extension when it still exists unlinked, and recreates it with the same
+  number when it was deleted (at the next full run: an incremental run reads
+  only changed users).
+- **Preview predicts, apply allocates.** The preview shows the number the
+  planner predicts from the current dial space; the apply allocates in the
+  user's own transaction under the `hellocfg` lock through the configuration
+  store (the same dial-space rules and whole-configuration check as a console
+  create). A number taken in between is replaced by the next free one and the
+  run row shows the number actually given; a full range at that point is an
+  `error` row with reason `range_exhausted`. Enabling or changing provisioning
+  changes the sync fingerprint, so the next scheduled run is a full one.
+- **"Free" and "reserved prefix".** Free = no extension, ring group, IVR menu,
+  conference room, queue or voicemail group number, no park slot, and no
+  feature or paging code that is a prefix of it or it of one (feature and paging
+  codes start with `*`, so today that never matches a digit number; kept as a
+  guard). Hello has no other reserved-prefix setting; outbound route patterns
+  are not numbers an extension can take, and the whole-configuration check runs
+  anyway.
+- **What is created.** The extension (named from the display name, else the
+  username, trimmed to 100 printable characters), its voicemail box (on, mailed
+  to the user's email; with `voicemail: false` the box exists switched off, as
+  for every extension) and, unless `device: false`, one desk device named
+  after the number (`2000`, else `2000-2`, ...) whose secret is generated and
+  dropped. Ranges hold 2 to 10 digit numbers of equal width (zero-padded ones
+  allowed) and at most 100,000 numbers. Overlapping ranges of two connectors are
+  allowed: the lock keeps them apart.
+- **Following the user.** While provisioning is on, a display-name or email
+  change renames the provisioned extension and updates its voicemail email, but
+  only while each still holds the value provisioning gave it (an administrator's
+  own edit wins).
+- **Deprovisioning is unchanged (I-7).** A disabled user keeps the extension,
+  the voicemail box and its messages; its devices are switched off with the
+  existing `disableDevices` option and come back when the user does. Deleting a
+  connector keeps the extensions and clears their mark.
+- **Audit and metrics.** Each provisioning writes `provision user`, `create
+extension` and `create device` rows with the actor `directory:<connector>`;
+  `hello_directory_provisioned_total{connector_kind}` counts them.
+- **New read route** `GET /api/v1/directory/connectors/{id}/range` (admin,
+  exposed over MCP as `getDirectoryRange` like the other directory reads):
+  size, numbers used, next free and the users holding a number.
+
+## Clients item 3: Diagnostics Clients tab, WebRTC status and the S-52 series (2026-11-14)
+
+Builds on the web devices of #282 and the WebRTC legs of #324, #341 and #343.
+Choices:
+
+- **The live legs reach hello-control through Valkey, per node.** A call with a
+  browser leg is not replicated (its ICE and DTLS state is the node's own), so
+  no existing record holds it. Each hello-sip node with WebRTC media publishes
+  its legs (at most 100), its last 20 ICE and DTLS failures and its counters
+  every 10 s under `hello:webrtc:node:<id>` with a 30 s TTL, and removes the
+  key when it stops. `GET /api/v1/webrtc/status` reads every node's.
+- **The status answers 200 with the parts it could read.** It combines
+  PostgreSQL, Valkey and the TURN servers; one that cannot be read is named in
+  `unavailable` and its part is empty, instead of a 503 for the whole answer.
+- **TURN reachability is a STUN Binding request from hello-control** (UDP or
+  TCP; coturn answers it without credentials), and a TCP connection for a
+  `turns:` URI, whose certificate may come from a private CA hello-control
+  does not hold. The result is reused for 30 s. A leg counts as relayed
+  through TURN when ICE selected an address of a TURN server.
+- **Push is shown as not configured** with a sentence: the push gateway is
+  "not now" (decision 2026-10-25), so its series and alerts are documented as
+  coming with it, not stubbed.
+- **Labels.** `hello_srtp_auth_failures_total{direction}` uses the side of the
+  call the failing packet came from (`from_caller`, `from_callee`), since an
+  authentication failure only exists on receive. It counts every encrypted
+  leg (SDES phones too), so it is registered with the media series, not only
+  when WebRTC is on. `hello_webrtc_ice_state_total{state}` counts `connected`
+  (first authenticated check), `restarted` (new remote ufrag) and `failed` (no
+  check before the DTLS handshake gave up, or by the end of a call at least
+  5 s after its DTLS session started; a browser fork that lost is not a
+  failure). `hello_webrtc_candidate_type_total{type}` counts the client's own
+  (local) candidate type of each end-of-call report; the status endpoint shows
+  both sides from the stored reports. `hello_client_auth_failures_total{reason}`
+  has `expired`, `username`, `credentials`, `unknown_device` (a client name
+  whose device is gone: revoked, disabled or deleted) and `throttled`.
+- **`hello_webrtc_dtls_handshake_seconds` is a series of its own** next to the
+  existing `hello_dtls_handshake_seconds` (all DTLS-SRTP legs, phones too), so
+  the browser handshakes can be watched apart.
+- **`hello_ice_credentials_issued_total` is renamed
+  `hello_turn_credentials_issued_total`** (the spec's name), and now counts
+  only answers that carry a TURN credential, from `/me/ice-servers` and from an
+  enrolment (which also returns ICE servers). It was not on a dashboard yet.
+- **`hello_client_registrations{kind}` is per receiving node** (like
+  `hello_sip_registrations`), so the cluster value is the sum. To back the
+  spec's alert "zero registered WSS clients while some are enrolled",
+  hello-control adds `hello_client_devices{kind}` (enabled web and mobile
+  devices, read at scrape time).
+- **MCP:** `getWebRTCStatus` is a read tool (viewer) and
+  `hello://webrtc/status` a resource; the troubleshoot-call prompt points to it
+  for browser calls. The answer carries no credential or secret.
+- **`TestClientMetrics`** moves the registration, auth-failure, video-slot and
+  WebRTC leg series with real calls through hello-sip; the push part of S-52's
+  test comes with the push gateway.
+
+## Integrations P9 and P11: Google Workspace and Entra connectors, single sign-on (2026-11-14)
+
+Builder decisions within spec I-20 to I-22 and I-26 to I-30 (the spec left
+these open or to the implementation):
+
+- **Entra delta state lives in the connector's sync mark**, not on the run
+  row: the mark already carries the incremental state of LDAP, and a run that
+  fails keeps the previous link.
+- **A full run ends with `$deltatoken=latest`** to take the delta link without
+  paging the whole delta, since the full list was just read.
+- **Fallbacks to a full read**: `410 Gone` (`delta_expired`), any `@removed`
+  entry (`delta_removed`: absence needs a complete list, the engine's absence
+  rule depends on it), more than 1,000 changes (`delta_large`), and a changed
+  membership hash of the groups the rules use (`groups_changed`). Changed
+  users are re-read 15 ids per `$filter=id in (...)` for a full `$select`.
+- **Guests are skipped by default** (an `includeGuests` switch turns them on).
+- **Group rules read `transitiveMembers`** rather than `/groups/{id}/members`
+  (spec I-22), so nested groups count as they do with the AD in-chain rule.
+- **Domain-wide delegation is its own `authMode` (`delegation`)** instead of
+  `service_account` plus a `subject` (spec I-21): a `subject` on the default
+  mode is refused, so delegation is never switched on by filling one field.
+- **Identity keys**: Entra's `oid` (with `tid` pinned to the tenant), Google's
+  `sub`; both equal the ids the connectors link by, so a synced user is found
+  without email.
+- **Email matching only for Google synced non-admins**: exactly one synced,
+  non-admin, non-break-glass user with a verified email of a listed domain.
+  Entra never matches by email (`oid` is always there). Local users and
+  administrators link themselves from their profile while signed in.
+- **JIT is off by default**; a JIT user gets the `user` role and password `!`.
+- **SSO keeps Hello's own TOTP**: a user with 2FA continues on the login page
+  with the challenge carried in the URL fragment (`/login#mfa=`), never a
+  query string or log.
+- **The OIDC binding cookie is `SameSite=Lax`** (the provider's redirect is a
+  top-level cross-site GET), path `/api/v1/`, 10 minutes; the session cookie
+  stays `Strict`. `state` and `nonce` are single use in Valkey (`GETDEL`).
+- **Login method is a connector option** (`loginMethod`: `oidc` or
+  `ldap_bind`, `oidcProvider`), with the earlier `ldapBindLogin` config flag
+  read as `ldap_bind`. A connector whose users have no way in cannot be
+  enabled (`no_login_method`), nor an `oidc` one before its provider is.
+- **One `credential` body field** for the new kinds' secrets, accepted next to
+  `bindPassword` (one of the two per request); the `auth_method` CHECK is left
+  as it is (`local` for everyone).
+- **The Google SSO provider requires domains** (`hd` check); a personal Google
+  account is never accepted.
+- **Google scopes**: delegation and service-account tokens ask only for the
+  scopes the run needs (users, plus groups and members when rules use them);
+  consent asks for all three once. A grant with any scope outside the
+  allow-list is refused. Replacing an `oauth_admin` secret drops the refresh
+  token, so consent is granted again.
+- **Adoption by a connector now clears the local password** (`!`), matching
+  created users, and every set-password route answers `409
+managed_by_directory`.
+- **Break-glass guards are in the store**, under the same admin row lock as
+  `last_admin`, so two concurrent changes cannot remove the last one. Demoting
+  or disabling a break-glass admin unflags it, subject to that guard.
+- **LDAP bind login throttle**: 5 failures per user and per address in 10
+  minutes (Valkey), checked before any bind, so Hello locks before AD's own
+  lockout does.
+- **With P12 auto-provisioning** (merged after this was built): Google and
+  Entra connectors provision like LDAP ones; an adopted user loses its local
+  password in the same transaction that may allocate its number; a
+  break-glass admin is skipped before any provisioning; releasing a
+  connector's users keeps their numbers and extensions (unmarked) and gives
+  no password back. Migration renumbered to `00102`.
+- **All new operations are excluded from MCP** (`x-hello-mcp`): sign-in,
+  secrets and identity linking are browser or admin-console flows.
+
+## Messaging item 7: AI triage, drafts and auto-reply (2026-11-15, feat/messaging-ai)
+
+Builder choices within the approved spec (M-30, M-30a; user decision 5 of
+2026-10-25). None changes what the user approved.
+
+- **Migration 00103 (`messaging_ai`, placeholder 00210 until merge).** Additive only. The one
+  CHECK change (route kind `ai_triage`) goes through
+  `pg_temp.hello_check_values`. The spec said the `ai_*` columns of
+  `msg_addresses` came with P1; they did not, so this migration adds them, with
+  `ai_message_runs`, `msg_faq`, the conversation's AI fields and
+  `conversation_messages.ai_run_id`.
+- **Where runs are queued.** In the ingest transaction (trunk texts and
+  chat), only when the number's mode is not `off` and no kill switch is set,
+  and never for STOP, START or HELP. A run that fails records a code and moves
+  on; the text is in the inbox before any model call.
+- **Follow-up runs.** A finished triage queues the draft (mode `draft`) or the
+  auto-reply (mode `auto`). An auto-reply that does not send queues a draft,
+  unless the customer opted out, it is spam, a keyword, stale or the window is
+  closed. A failed triage still lets the draft run, and turns an auto-reply
+  into a handoff.
+- **Kill switches at three levels plus the environment.**
+  `messaging_settings.ai_enabled` (all AI), `ai_auto_enabled` (auto-replies),
+  `msg_channels.ai_enabled` (per channel; a chat site's channel or the number's
+  mode act per site), the number's mode, and `HELLO_MSG_AI_AUTO=false`
+  (deployment-wide, auto-replies only; helm `control.messagingAIAuto`). Every
+  switch is read again when a run starts and again in the transaction that
+  sends.
+- **Confidence thresholds and allowed intents.** The spec asked for an
+  intent list and "confidence". Triage and auto-reply both report a confidence
+  (0 to 1), and each number has a least confidence (default 0.8) and the
+  intents the AI may answer (empty = every intent but `other`). The inbox-wide
+  intent list defaults to question, sales, support, billing, appointment,
+  complaint. "Never on sensitive topics": an admin list of topics (default
+  medical, legal, emergency, self-harm, harassment, payment dispute, personal
+  data) that the triage flags as `sensitive`, which always hands off.
+- **Holding line.** Sent on every handoff (urgent, negative, sensitive, a
+  handoff word, the cap, low confidence, no FAQ, an answer the guardrails
+  refuse, an AI failure), once until a person replies, only when the number has
+  one (default empty). It is stored as a system message tied to the run.
+- **Handoff flag.** `conversations.ai_handoff_at` and its reason; the inbox
+  shows "Needs a person" until a person replies.
+- **Triage queue suggestions.** The model is given the names of the enabled
+  text queues (configuration, not customer data) so its `suggestedQueue` can be
+  checked. It is applied only on a number whose route is the new `ai_triage`
+  kind: the router waits up to 30 seconds for the first text's triage, then
+  places the conversation in the suggested queue or the route's own queue. On
+  other routes the suggestion is shown, not applied.
+- **Revert.** `POST .../conversations/{id}/ai/revert` (and `/me/...`) removes
+  the tags the AI added (still present), lowers a priority it raised (while
+  still high) and clears its spam flag; the triage stays, marked reverted.
+- **Grounding check.** An auto-reply must cite at least one of the number's
+  enabled snippets by id. Every link in it must be found, exactly, in a
+  snippet. A reply that holds a redaction placeholder is refused. The tools are
+  `lookup_faq` (word overlap over the snippets) and `handoff`; both are
+  read-only.
+- **Audit.** Turning auto-reply on or off for a number
+  (`ai_autoreply_enabled` / `_disabled`), each channel switch
+  (`ai_enabled` / `ai_disabled`), the settings (`update_ai`), FAQ create,
+  update and delete, and each AI-sent message (`ai_autoreply` by `system:ai`,
+  the message id only).
+- **MCP.** One new tool, `getInboxAIStats` (counts only, operator +
+  `messages`), taught in `hello-call-handling`. The settings, the FAQ and the
+  revert are excluded like the rest of messaging.
+- **Not verifiable without a real model.** Triage and draft quality, an
+  injection test set and redaction against real number formats are on the lab
+  list in docs/inbox.md. Every test runs against test/fakellm or go-ai-sdk's
+  mock model.
+
+## Messaging M-18: the media pipeline (2026-11-15, feat/m18-media)
+
+- **Bucket and keys.** Attachments live in the existing media bucket
+  (`hello-recordings`, as the faxes) under `msg/<channel>/<yyyy>/<message>/<sha256>`
+  for inbound media, as the spec says. An upload has no message yet, so its key
+  is `msg/<channel>/<yyyy>/upload-<media id>/<sha256>`; a chat site's logo is
+  `msg/site/<site>/logo`. A new `internal/messaging/media` package holds the
+  sniffing, the allowlists, the MinIO store (with an in-memory fake), serving and
+  the workers; the store keeps MinIO out as before.
+- **Rows outlive their message until the file is gone.** `message_media` points
+  at its message and conversation with `ON DELETE SET NULL`; retention and an
+  erase delete conversations as before, and the sweeper (on the inbox
+  maintenance lease) removes the file, checks it is gone with a stat, and only
+  then drops the row. The spec says "MinIO objects first, rows after"; this
+  order keeps that invariant (no object without a row) without the store
+  touching MinIO. An erase removes the files at once in the API, verified, and
+  reports `mediaObjects` and `mediaObjectsPending` (left to the sweeper when
+  MinIO cannot be reached).
+- **Media retention.** New setting `retentionMediaDays` (default 90, 1 to 3650,
+  spec M-19). A file past it is removed and its attachment marked `expired`
+  (reason `retention`); the message stays. An upload never sent goes after 24 h.
+- **Sniffing and the allowlist.** `http.DetectContentType` plus PDF, AMR, 3GPP
+  and vCard; the declared type must name the same class. Besides SVG and HTML,
+  a file is refused as `active_content` when it contains markup or script
+  markers anywhere (`<script`, `<html`, `<svg`, `<!doctype`, `<iframe`, ...,
+  `javascript:`) or, for an image or a PDF, a ZIP end record in its tail (a
+  GIFAR). A plain-text file holding markup is refused on purpose.
+- **Outbound attachments: website chat only.** Per the user's LAN-only decision
+  (no public listener), Twilio and Telnyx cannot fetch an MMS's media, so a
+  carrier or SIP trunk conversation refuses `mediaIds` and uploads with `409
+media_unsupported`, and the composer offers **Attach** only in a chat. An
+  agent's file to a chat follows the chat's rules (images and PDF, 5 MiB), the
+  same as a visitor's.
+- **The public link is built but not mounted.** `media_links`, mint and redeem
+  (256-bit token, SHA-256 kept, 15 minutes, 5 uses) and `media.LinkHandler` for
+  `GET /m/{token}` exist and are tested, ready for the public listener (N1);
+  nothing serves them on the LAN.
+- **Inbound MMS.** No carrier delivers inbound texts in this build (webhooks
+  and reconcile are not on), so nothing calls `AddInboundMedia` yet outside
+  tests; the worker, Twilio's and Telnyx's `FetchMedia` and their host checks
+  are complete and tested against fakes. Twilio: the account's own
+  `api.twilio.com/2010-04-01/Accounts/<sid>/` URLs, redirects to
+  `*.twiliocdn.com` or the CDN bucket path on `s3-external-1.amazonaws.com`;
+  Telnyx: `*.telnyx.com`, the API key sent only to `api.telnyx.com`. Both host
+  lists are unverified and on the lab list. Credentials are dropped on any
+  redirect to another host.
+- **Chat attachments.** A visitor's file is its own message
+  (`POST /chat/v1/attachments`, multipart `file`, `clientMsgId`, optional
+  `text`), counted against the 5 per hour limit and the message limits. The
+  frame fetches a file with the token in the header and shows it from a blob
+  URL (the frame's policy adds `img-src blob:`, the iframe `allow-downloads`).
+  The UI nginx gets an exact `location = /chat/v1/attachments` with a 6 MB
+  body limit; every other chat request stays at 32 KB.
+- **Desk phones.** A phone cannot show a file: a text with attachments ends
+  with `[N attachments: open the inbox to see them]`, and a file alone arrives
+  as that line.
+- **DSAR export (messaging item 8).** `Store.ConversationMedia(ctx, convID)`
+  lists every attachment of a conversation with its object key, type, name,
+  size and SHA-256, and `media.Objects.Open` reads the file; the export can
+  stream them from these.
+- **No virus scanning** (not specced; the spec says none is bundled). The chat
+  site's attachments switch warns about it.
+- **MCP:** the new routes are excluded (customer files are private data; the
+  logo is a binary download and chat site settings stay excluded), so the
+  doctable is unchanged.
+
 ## Messaging item 8: events, reports, export, redaction (2026-11-15, feat/messaging-8-reporting)
 
 - **Events carry a hash, delivery adds the content.** The inbox's `EventSink`
@@ -4830,7 +5177,7 @@ entry and the code it names).
   event has ids, channel, direction, state, assignee, queue and `peerKey`, a
   keyed MAC of the number (`HELLO_SECRET_KEY`, purpose
   `messaging-event-peer`, 16 bytes hex), never a number or a text. An
-  endpoint's `includePeer` and `includeMessageBody` (migration 00220, admin,
+  endpoint's `includePeer` and `includeMessageBody` (migration 00105, admin,
   audited per change, off by default) are applied at delivery by reading the
   inbox, so an erase or a redaction between the event and the delivery is
   honoured and the history and stream never hold content. The body is only
@@ -4861,12 +5208,35 @@ entry and the code it names).
 - **DSAR export.** `GET /api/v1/inbox/export?peer=` (admin), a zip of
   README, `conversations.json` (with opt-outs) and one JSON per message.
   Notes are excluded unless `notes=true`. At most 50,000 messages (422
-  `too_large`). Audited with counts. Media is not exported: M-18 is not on
-  main; when it merges, the export adds the files.
+  `too_large`). Audited with counts (`media=` too).
+- **The export carries M-18 attachments, files included.** The export
+  bundles the message bodies, so it bundles the attachments' files too: each
+  message JSON lists its `media` (id, direction, status, type, size, file
+  name, SHA-256, `file`), and each file Hello holds is copied from MinIO into
+  `media/<conversation>/<id>.<ext>`, named by id and sniffed type, never by
+  the sender's file name (no path tricks in the archive). Attachments of
+  notes follow `notes`. A chat visitor's uploads not sent yet are part of
+  their data (an erase removes them), so `uploads.json` and
+  `media/uploads/` hold them. Without a media store and with files to export
+  the route answers 503 instead of a silently incomplete archive; a file the
+  sweeper removed meanwhile (`ErrNoObject`) is listed with an empty `file`;
+  any other MinIO error breaks the stream (headers are out) and is logged.
 - **Redaction.** `POST .../messages/{messageId}/redact` (admin) blanks the
   body, sets `redacted_at`, deletes the SIP text-queue copies, queues the
   carrier deletion, emits `conversation.updated` and audits. System lines are
   refused (409 `not_redactable`); a second redaction is a no-op.
+- **Redaction removes the message's attachments the way an erase does.** In
+  the redaction's transaction the attachments are detached (`message_id`,
+  `conversation_id` NULL, `attached_at` set, `source_ref` cleared so nothing
+  is fetched again) and their public `media_links` deleted; after commit the
+  API removes each file, checks it is gone (`media.RemoveVerified`) and drops
+  the row, the erase's helper. A file MinIO cannot remove now stays an orphan
+  for the media sweeper. The report adds `mediaObjects` and
+  `mediaObjectsPending`; the message comes back with `media: []`. An
+  attachment is removed rather than kept with a "redacted" mark: its row has
+  no customer content once the file is gone, and the message already says it
+  was redacted. The erase now deletes the `media_links` of erased files in
+  its transaction too, so a link stops working before the file is gone.
 - **Erase also deletes the SIP text-queue copies** (`messages` rows linked to
   the conversation's messages or to the number), which it left behind.
 - **Carrier deletion is a durable queue.** `msg_provider_redactions` (unique
@@ -4891,5 +5261,5 @@ entry and the code it names).
   in the conversation view (admins), webhook inbox options, inbox events on
   the integration events page. Zapier gets seven inbox triggers with the two
   options as Zap inputs; n8n and Make get the events and both options.
-- **Migration 00220** (placeholder number): the webhook options, the SLA
+- **Migration 00105** (after main's 00104 media): the webhook options, the SLA
   targets, `redacted_at`, the redaction queue and three report indexes.

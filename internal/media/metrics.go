@@ -124,6 +124,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(m.RTPSessions, m.AnchoredCalls, m.AnchorFailures,
 		m.RTPPackets, m.RTPOctets, m.RTPLoss, m.RTPJitter, m.SRTPLegs, m.SRTPNegotiations,
 		m.DTLSHandshakes, m.DTLSSeconds, m.ICEChecks, m.RecordingStorage)
+	registerSRTPAuthMetrics(reg)
 	activeMetrics.Store(m)
 	return m
 }

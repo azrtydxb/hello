@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/messaging/media"
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
@@ -39,6 +40,8 @@ type inboxRig struct {
 	agent, other, viewer      *client
 	adminID, agentID, otherID int64
 	viewerID                  int64
+	// objects is the attachments' store (spec M-18).
+	objects *media.MemObjects
 }
 
 func newInboxRig(t *testing.T) *inboxRig {
@@ -53,8 +56,13 @@ func newInboxRigConfig(t *testing.T, cfg Config) *inboxRig {
 	if err != nil {
 		t.Fatal(err)
 	}
+	objs, _ := cfg.MediaObjects.(*media.MemObjects)
+	if objs == nil && cfg.MediaObjects == nil {
+		objs = &media.MemObjects{}
+		cfg.MediaObjects = objs
+	}
 	e := newEnvConfig(t, cfg, box)
-	r := &inboxRig{env: e}
+	r := &inboxRig{env: e, objects: objs}
 	ctx := context.Background()
 	r.admin = e.login()
 	if err := e.db.QueryRowContext(ctx, `SELECT id FROM users WHERE username = $1`, testUser).Scan(&r.adminID); err != nil {

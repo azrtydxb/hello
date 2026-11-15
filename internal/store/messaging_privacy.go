@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/media"
 )
 
 // newRedactionBatch names one erase or redaction: what for, and random.
@@ -199,6 +200,14 @@ type RedactReport struct {
 	// went through a carrier API.
 	Providers []EraseProvider `json:"providers"`
 	Batch     string          `json:"-"`
+	// MediaObjects counts the message's attachment files removed from the
+	// media store and checked gone; MediaObjectsPending those the store
+	// could not remove now, which the media sweeper removes later.
+	MediaObjects        int `json:"mediaObjects"`
+	MediaObjectsPending int `json:"mediaObjectsPending"`
+	// Media are the attachments whose files the caller removes, as after
+	// an erase (spec M-20: the object deletions follow the transaction).
+	Media []media.Garbage `json:"-"`
 }
 
 // ErrNotRedactable is a line that cannot be redacted (a system line).
@@ -206,9 +215,11 @@ var ErrNotRedactable = errors.New("store: this line cannot be redacted")
 
 // RedactConversationMessage removes the text of one message or note: the
 // body is emptied and marked redacted, the copies in the SIP text queue go,
-// and a message sent through a carrier API is queued for deletion there
-// (Batch). It is audited without content. Redacting a line twice changes
-// nothing.
+// the attachments are detached from the message for the caller to remove
+// (rep.Media, as an erase does; the media sweeper removes what the caller
+// cannot), and a message sent through a carrier API is queued for deletion
+// there (Batch). It is audited without content. Redacting a line twice
+// changes nothing.
 func (s *Store) RedactConversationMessage(ctx context.Context, actor string, convID, msgID int64) (RedactReport, error) {
 	var rep RedactReport
 	rep.Providers = []EraseProvider{}
@@ -237,6 +248,9 @@ func (s *Store) RedactConversationMessage(ctx context.Context, actor string, con
 		if _, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE conversation_message_id = $1`, msgID); err != nil {
 			return err
 		}
+		if rep.Media, err = detachMessageMedia(ctx, tx, msgID); err != nil {
+			return err
+		}
 		if providerID.Valid && prov != messaging.ProviderSIPTrunk {
 			rep.Batch = newRedactionBatch("redact")
 			if err := queueRedactions(ctx, tx, rep.Batch, `
@@ -253,7 +267,49 @@ func (s *Store) RedactConversationMessage(ctx context.Context, actor string, con
 		return rep, mapErr(err)
 	}
 	rep.Message, err = scanConvMessage(s.db.QueryRowContext(ctx, `SELECT `+convMessageCols+` FROM conversation_messages WHERE id = $1`, msgID))
-	return rep, err
+	if err != nil {
+		return rep, err
+	}
+	ms := []ConvMessage{rep.Message}
+	if err := loadMedia(ctx, s.db, ms); err != nil {
+		return rep, err
+	}
+	rep.Message = ms[0]
+	return rep, nil
+}
+
+// detachMessageMedia takes a redacted message's attachments off it: each
+// becomes an orphan (no message, no conversation, nothing left to fetch)
+// that the caller removes now or the media sweeper later, and any public
+// link to it stops working at once.
+func detachMessageMedia(ctx context.Context, tx *sql.Tx, msgID int64) ([]media.Garbage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id, object_key, TRUE FROM message_media WHERE message_id = $1 ORDER BY id FOR UPDATE`, msgID)
+	if err != nil {
+		return nil, err
+	}
+	gs := []media.Garbage{}
+	for rows.Next() {
+		var g media.Garbage
+		if err := rows.Scan(&g.ID, &g.Key, &g.Drop); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		gs = append(gs, g)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if len(gs) == 0 {
+		return gs, nil
+	}
+	ids := garbageIDs(gs)
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE message_media SET message_id = NULL, conversation_id = NULL, attached_at = coalesce(attached_at, now()), source_ref = '{}'
+		WHERE id = ANY($1::bigint[])`, ids); err != nil {
+		return nil, err
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM media_links WHERE media_id = ANY($1::bigint[])`, ids)
+	return gs, err
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +348,17 @@ type ExportMessage struct {
 	DeliveredAt *time.Time `json:"deliveredAt"`
 	ReadAt      *time.Time `json:"readAt"`
 	RedactedAt  *time.Time `json:"redactedAt"`
+	// Media are the message's attachments (spec M-18), oldest first.
+	Media []ExportMedia `json:"media"`
+}
+
+// ExportMedia is one attachment of an export: its metadata and, set by the
+// caller that writes the archive, where the archive holds its file.
+type ExportMedia struct {
+	MediaFile
+	// File is the file's path in the archive; empty when Hello holds no
+	// file (still downloading, refused, expired or removed meanwhile).
+	File string `json:"file"`
 }
 
 // PeerExport is everything Hello holds of one customer in the inbox.
@@ -301,6 +368,9 @@ type PeerExport struct {
 	Conversations []ExportConversation `json:"conversations"`
 	// OptOuts are the customer's opt-out records, per number of ours.
 	OptOuts []ExportOptOut `json:"optOuts"`
+	// Uploads are a chat visitor's files not sent with a message yet; the
+	// archive lists them in uploads.json.
+	Uploads []ExportMedia `json:"-"`
 }
 
 // ExportOptOut is one opt-out record of the customer.
@@ -324,7 +394,8 @@ var ErrExportTooLarge = errors.New("store: the export is too large")
 // the customer and are part of it only with notes. The export is audited
 // with counts only.
 func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes bool) (PeerExport, error) {
-	out := PeerExport{Peer: peerKey, ExportedAt: time.Now().UTC(), Conversations: []ExportConversation{}, OptOuts: []ExportOptOut{}}
+	out := PeerExport{Peer: peerKey, ExportedAt: time.Now().UTC(), Conversations: []ExportConversation{}, OptOuts: []ExportOptOut{},
+		Uploads: []ExportMedia{}}
 	var n int
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT count(*) FROM conversation_messages m JOIN conversations c ON c.id = m.conversation_id
@@ -380,6 +451,8 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 		return out, err
 	}
 	count := 0
+	// at finds an exported message by id: its conversation and place.
+	at := map[int64][2]int{}
 	for rows.Next() {
 		var (
 			conv                        int64
@@ -392,7 +465,9 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 			return out, err
 		}
 		m.SentAt, m.DeliveredAt, m.ReadAt, m.RedactedAt = nullTime(sent), nullTime(deliv), nullTime(read), nullTime(redacted)
+		m.Media = []ExportMedia{}
 		if i, ok := index[conv]; ok {
+			at[m.ID] = [2]int{i, len(out.Conversations[i].Messages)}
 			out.Conversations[i].Messages = append(out.Conversations[i].Messages, m)
 			count++
 		}
@@ -400,6 +475,34 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 	if err := rows.Close(); err != nil {
 		return out, err
 	}
+	// The attachments of the exported lines, and a chat visitor's own
+	// uploads not sent yet: everything an erase would remove.
+	//nolint:gosec // G202: kinds is one of two fixed lists.
+	files, err := s.exportMedia(ctx, `
+		SELECT `+convMediaCols+`, coalesce(mm.conversation_id, 0), mm.object_key, mm.sha256 FROM message_media mm
+		JOIN conversation_messages m ON m.id = mm.message_id JOIN conversations c ON c.id = m.conversation_id
+		WHERE c.peer_key = $1 AND m.kind IN `+kinds+` ORDER BY mm.id`, peerKey)
+	if err != nil {
+		return out, err
+	}
+	nMedia := 0
+	for _, f := range files {
+		if f.MessageID == nil {
+			continue
+		}
+		if p, ok := at[*f.MessageID]; ok {
+			msg := &out.Conversations[p[0]].Messages[p[1]]
+			msg.Media = append(msg.Media, f)
+			nMedia++
+		}
+	}
+	if out.Uploads, err = s.exportMedia(ctx, `
+		SELECT `+convMediaCols+`, coalesce(mm.conversation_id, 0), mm.object_key, mm.sha256 FROM message_media mm
+		JOIN chat_visitors v ON v.id = mm.uploader_visitor_id
+		WHERE 'visitor:' || v.id::text = $1 AND mm.message_id IS NULL ORDER BY mm.id`, peerKey); err != nil {
+		return out, err
+	}
+	nMedia += len(out.Uploads)
 	rows, err = s.db.QueryContext(ctx, `
 		SELECT a.address, o.state, o.source, o.at FROM sms_opt_outs o JOIN msg_addresses a ON a.id = o.address_id
 		WHERE o.peer_key = $1 ORDER BY o.at`, peerKey)
@@ -418,10 +521,31 @@ func (s *Store) ExportPeer(ctx context.Context, actor, peerKey string, notes boo
 		return out, err
 	}
 	err = s.tx(ctx, func(tx *sql.Tx) error {
-		return insertAudit(ctx, tx, actor, fmt.Sprintf("export conversations=%d messages=%d notes=%t", len(out.Conversations), count, notes),
-			"msg_peer", "-")
+		return insertAudit(ctx, tx, actor, fmt.Sprintf("export conversations=%d messages=%d media=%d notes=%t", len(out.Conversations), count,
+			nMedia, notes), "msg_peer", "-")
 	})
 	return out, err
+}
+
+// exportMedia reads the attachments q selects (convMediaCols, then the
+// conversation, the object key and the hash; $1 is the peer key).
+func (s *Store) exportMedia(ctx context.Context, q, peerKey string) ([]ExportMedia, error) {
+	rows, err := s.db.QueryContext(ctx, q, peerKey)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []ExportMedia{}
+	for rows.Next() {
+		var f MediaFile
+		m, err := scanConvMedia(rows, &f.ConversationID, &f.Key, &f.SHA256)
+		if err != nil {
+			return nil, err
+		}
+		f.ConvMedia = m
+		out = append(out, ExportMedia{MediaFile: f})
+	}
+	return out, rows.Err()
 }
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import { apiError, json, mockApi, renderApp, type Routes } from "../test/api";
 const SETTINGS = {
   retentionSmsDays: 365,
   retentionChatDays: 90,
+  retentionMediaDays: 90,
   reopenDays: 7,
   emailNotify: true,
   firstContact: "off",
@@ -50,6 +51,24 @@ describe("Messaging settings", () => {
     ).toBeInTheDocument();
   });
 
+  it("saves how long attachments are kept", async () => {
+    const calls = api({
+      "PUT /api/v1/messaging/settings": () =>
+        json({ ...SETTINGS, retentionMediaDays: 30 }),
+    });
+    renderApp("/messaging/settings");
+    const days = await screen.findByLabelText("Keep attachments for (days)");
+    expect(days).toHaveValue("90");
+    fireEvent.change(days, { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PUT")?.body).toEqual({
+        ...SETTINGS,
+        retentionMediaDays: 30,
+      }),
+    );
+  });
+
   it("allows first contact only when an administrator chooses it", async () => {
     const calls = api({
       "PUT /api/v1/messaging/settings": () =>
@@ -78,6 +97,8 @@ describe("Messaging settings", () => {
           messages: 9,
           sipMessages: 3,
           optOutsKept: 1,
+          mediaObjects: 3,
+          mediaObjectsPending: 1,
           providers: [
             {
               provider: "sip_trunk",
@@ -120,6 +141,9 @@ describe("Messaging settings", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(/3 of 4 deleted at the carrier, 1 being retried/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/3 attachment files were deleted; 1 more/),
     ).toBeInTheDocument();
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
       peer: "+32475123456",

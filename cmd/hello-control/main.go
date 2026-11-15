@@ -22,11 +22,14 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/directory"
+	"github.com/azrtydxb/hello/internal/directory/dirstore"
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/messaging/inboxevents"
+	"github.com/azrtydxb/hello/internal/messaging/media"
+	"github.com/azrtydxb/hello/internal/messaging/msgai"
 	"github.com/azrtydxb/hello/internal/messaging/router"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/oauth"
@@ -36,6 +39,7 @@ import (
 	"github.com/azrtydxb/hello/internal/safehttp"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/slack"
+	"github.com/azrtydxb/hello/internal/sso"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/turn"
@@ -175,11 +179,21 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// erase tries them at once, this worker retries what is left.
 	msgRedactor := &messaging.Redactor{Store: st, Metrics: messaging.NewRedactMetrics(metrics.Registry), Log: log.With("component", "redact")}
 	go msgRedactor.Run(ctx)
-	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, msgMetrics, log)
+	// The inbox's attachments (spec messaging-channels M-18) live in the
+	// media bucket under msg/.
+	msgObjects, err := media.NewObjects(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioSecure)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("MINIO_ENDPOINT: %w", err)
+	}
+	msgMedia := &media.Worker{Store: st, Objects: msgObjects, Max: cfg.MsgMediaMax, Log: log.With("component", "messaging-media"),
+		Count: func(result string) { msgMetrics.Media.WithLabelValues(result).Inc() }}
+	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, msgMetrics, msgMedia, log)
 	go runCarrierWorkers(ctx, st, msgMetrics, log)
+	go runMediaFetcher(ctx, msgMedia, log)
 	go runInboxNotifier(ctx, envSMTP(cfg), st, log)
 	go runMessageRouter(ctx, st, routerLive{vk}, router.NewMetrics(metrics.Registry), log)
-	if _, err := startChat(ctx, cfg, st, box, vk, effectiveSMTP(st, envSMTP(cfg)), metrics.Registry, log); err != nil {
+	if _, err := startChat(ctx, cfg, st, box, vk, msgObjects, effectiveSMTP(st, envSMTP(cfg)), metrics.Registry, log); err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("HELLO_MSG_CHAT_LAN_ADDR: %w", err)
 	}
@@ -224,6 +238,10 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	} else {
 		log.Info("ai agent off", "reason", reason)
 	}
+	// The inbox AI (spec messaging-channels M-30): triage, drafts and
+	// auto-replies through the agent's model; with the agent off it marks the
+	// queued runs skipped.
+	go runInboxAI(ctx, st, agent, cfg.MsgAIAuto, msgai.NewMetrics(metrics.Registry), log)
 	// Call events (spec integrations I-35): consume the stream hello-sip
 	// appends to, store it, and fan it out to the SSE clients of this pod.
 	// CRM connectors (spec integrations I-47): their hook queues calls in
@@ -264,8 +282,12 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// Directory sync (spec integrations P8): connectors read their source and
 	// sync users; one replica runs a connector, the one holding its lock.
 	dirEngine := &directory.Engine{
-		Store:          &directory.PG{DB: db, Box: box},
-		Drivers:        map[string]directory.Driver{directory.KindLDAP: directory.LDAP{}},
+		// Range auto-provisioning (P12) creates extensions through the
+		// configuration store, with its numbering rules and routing check.
+		Store: &directory.PG{DB: db, Box: box, Provisioner: &dirstore.Provisioner{Store: st, Realm: cfg.SIPDomain}},
+		Drivers: map[string]directory.Driver{
+			directory.KindLDAP: directory.LDAP{}, directory.KindGoogle: directory.Google{}, directory.KindEntra: directory.Entra{},
+		},
 		Metrics:        directory.NewMetrics(metrics.Registry),
 		Log:            log.With("component", "directory"),
 		Replica:        cfg.NodeID,
@@ -279,6 +301,15 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			return s, true, nil
 		}, nil, log.With("component", "directory")),
 	}
+	// Single sign-on (spec integrations P11): OIDC through Google or Entra
+	// and the LDAP bind login of AD-synced users. The sign-in state and the
+	// throttles live in Valkey; without HELLO_PUBLIC_URL SSO is off.
+	ssoSvc := &sso.Service{
+		Store: &sso.PG{DB: db, Box: box}, PublicURL: cfg.AI.PublicURL,
+		States: sso.ValkeyStates{Client: vk.Client}, Throttle: sso.ValkeyThrottle{Client: vk.Client},
+		Directory: dirEngine, Metrics: sso.NewMetrics(metrics.Registry), Log: log.With("component", "sso"),
+	}
+	dirEngine.LoginCheck = ssoSvc.ProviderEnabled
 	go dirEngine.Run(ctx)
 	go evSvc.Run(ctx)
 	go crmSvc.Run(ctx)
@@ -290,10 +321,12 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// open and copy the states the nodes post into their rows.
 	sweeper := &originate.Sweeper{Store: st, Live: vk, Lock: st, Log: log.With("component", "originate")}
 	go sweeper.Run(ctx)
+	registerClientDevices(ctx, st, metrics.Registry)
 	apiCfg := api.Config{
 		CRM:          crmSvc.Service,
 		Slack:        slackSvc,
 		Directory:    dirEngine,
+		SSO:          ssoSvc,
 		Events:       evSvc,
 		Webhooks:     hooks,
 		AIAgent:      agent,
@@ -302,6 +335,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Queues:       vk,
 		Callbacks:    st.QueueCallbacks(),
 		Fax:          faxCfg,
+		MediaObjects: msgObjects,
+		MediaMax:     cfg.MsgMediaMax,
 		Trunks:       vk,
 		Cluster:      vk,
 		Valkey:       vk,
@@ -317,6 +352,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Backups:         backups,
 		Maintenance:     backups.Maintenance,
 		Diagnostics:     vk,
+		WebRTC:          vk,
 		Syslog:          vk,
 		AuthFailLimit:   cfg.AuthFailLimit,
 		EmailDelivery:   cfg.SmtpHost != "",
@@ -336,6 +372,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		ClientAuth:      clientConfig(cfg, metrics.Registry),
 		Inbox:           st,
 		MsgRedactor:     msgRedactor,
+		MessagingAIAuto: cfg.MsgAIAuto,
 		Blocklist:       st,
 		Dialing:         cfg.Dial,
 		PromptLanguage:  cfg.VoicePromptLanguage,
@@ -680,6 +717,32 @@ func activeRecordingLinks(ctx context.Context, st *store.Store) float64 {
 	return float64(n)
 }
 
+// registerClientDevices exposes hello_client_devices{kind}: the enabled web
+// and mobile devices, read from the database at scrape time (0 when it does
+// not answer in time). With hello_client_registrations it backs the alert
+// "no client registered while some are enrolled" (docs/webrtc.md).
+func registerClientDevices(ctx context.Context, st *store.Store, reg prometheus.Registerer) {
+	for _, kind := range []string{"web", "mobile"} {
+		reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "hello_client_devices", Help: "Enabled web and mobile client devices, by kind.", ConstLabels: prometheus.Labels{"kind": kind},
+		}, func() float64 {
+			ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			ds, err := st.ListDevices(ctx, kind)
+			if err != nil {
+				return 0
+			}
+			n := 0
+			for _, d := range ds {
+				if d.Enabled {
+					n++
+				}
+			}
+			return float64(n)
+		}))
+	}
+}
+
 // clientConfig is the browser softphone's settings: the key derived device
 // credentials come from, the cap, and the STUN and TURN servers handed out.
 // The shared TURN secret and the key stay in this process; neither is
@@ -691,12 +754,18 @@ func clientConfig(cfg config.Control, reg prometheus.Registerer) api.ClientConfi
 		stun = turn.StunFromTurn(c.TURNURLs)
 	}
 	issued := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "hello_ice_credentials_issued_total", Help: "TURN credentials handed out by /api/v1/me/ice-servers.",
+		Name: "hello_turn_credentials_issued_total", Help: "TURN credentials handed out (ICE servers and device enrolment).",
 	})
-	reg.MustRegister(issued)
+	candidates := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_webrtc_candidate_type_total", Help: "Client end-of-call reports by the local ICE candidate type of the selected pair (host, srflx, prflx, relay, unknown).",
+	}, []string{"type"})
+	for _, t := range store.CandidateTypes {
+		candidates.WithLabelValues(t)
+	}
+	reg.MustRegister(issued, candidates)
 	return api.ClientConfig{
 		AuthKey: c.AuthKey, MaxDevices: c.MaxDevices, WSSURL: c.WSSURL,
-		ICE:       turn.Config{STUN: stun, TURN: c.TURNURLs, Secret: c.TURNSecret, TTL: c.TURNTTL},
-		ICEIssued: issued,
+		ICE:        turn.Config{STUN: stun, TURN: c.TURNURLs, Secret: c.TURNSecret, TTL: c.TURNTTL},
+		TURNIssued: issued, CandidateTypes: candidates,
 	}
 }

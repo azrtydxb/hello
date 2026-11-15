@@ -17,7 +17,7 @@ func ldapCfg(f *fakeLDAP, mut func(*LDAPConfig)) json.RawMessage {
 		scheme = "ldaps"
 	}
 	c := LDAPConfig{URL: scheme + "://dc.corp.test:389", BindDN: f.BindDN, BaseDN: "ou=people,dc=corp", CACertPEM: f.CAPEM, PageSize: 10, TimeoutSecond: 5,
-		GroupBaseDN: "ou=groups,dc=corp"}
+		GroupBaseDN: "ou=groups,dc=corp", LDAPBindLogin: true}
 	if mut != nil {
 		mut(&c)
 	}

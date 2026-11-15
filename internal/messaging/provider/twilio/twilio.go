@@ -72,6 +72,7 @@ type Client struct {
 	base      string
 	messaging string
 	http      *http.Client
+	mediaOK   provider.HostCheck
 }
 
 // New builds an adapter. The account SID and the token are required.
@@ -369,4 +370,38 @@ func normalise(s string) string {
 	default:
 		return provider.StatusQueued
 	}
+}
+
+// WithMediaCheck replaces the check of media URLs and their redirects. Only Go
+// code (tests aiming at a fake carrier) can set it.
+func WithMediaCheck(ok provider.HostCheck) Option { return func(c *Client) { c.mediaOK = ok } }
+
+// mediaHost is where an inbound message's media may come from (spec M-18):
+// the account's own media resources on api.twilio.com, which answer with a
+// redirect to Twilio's media CDN. [unverified against a live account: the
+// CDN host names; the lab list has it]
+func (c *Client) mediaHost(u *url.URL) bool {
+	if c.mediaOK != nil {
+		return c.mediaOK(u)
+	}
+	switch {
+	case provider.HTTPSHost(u, "api.twilio.com", false):
+		return strings.HasPrefix(u.EscapedPath(), "/2010-04-01/Accounts/"+c.cfg.AccountSID+"/")
+	case provider.HTTPSHost(u, "twiliocdn.com", true):
+		return true
+	case provider.HTTPSHost(u, "s3-external-1.amazonaws.com", false):
+		// Twilio's older media redirects point into its CDN bucket by path.
+		return strings.HasPrefix(u.EscapedPath(), "/media.twiliocdn.com/")
+	}
+	return false
+}
+
+// FetchMedia implements provider.MediaFetcher: it downloads one MediaUrl of
+// an inbound message with the account's credentials (HTTP Basic, which Twilio
+// requires when the account enforces authenticated media access). The
+// credentials go to api.twilio.com only.
+func (c *Client) FetchMedia(ctx context.Context, ref provider.MediaRef) (provider.Media, error) {
+	return provider.FetchMedia(ctx, c.http, ref.URL, c.mediaHost, func(r *http.Request) {
+		r.SetBasicAuth(c.cfg.AccountSID, c.cfg.AuthToken)
+	})
 }

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -64,9 +65,10 @@ func Factory(opts ...Option) provider.Factory {
 
 // Client is a Telnyx account.
 type Client struct {
-	cfg  provider.Config
-	base string
-	http *http.Client
+	cfg     provider.Config
+	base    string
+	http    *http.Client
+	mediaOK provider.HostCheck
 }
 
 // New builds an adapter. The API key is required.
@@ -387,4 +389,29 @@ func normalise(s string) string {
 	default:
 		return provider.StatusQueued
 	}
+}
+
+// WithMediaCheck replaces the check of media URLs and their redirects. Only Go
+// code (tests aiming at a fake carrier) can set it.
+func WithMediaCheck(ok provider.HostCheck) Option { return func(c *Client) { c.mediaOK = ok } }
+
+// mediaHost is where an inbound message's media may come from (spec M-18):
+// Telnyx's own hosts. [unverified against a live account: the host the
+// media[].url of an inbound webhook points at; the lab list has it]
+func (c *Client) mediaHost(u *url.URL) bool {
+	if c.mediaOK != nil {
+		return c.mediaOK(u)
+	}
+	return provider.HTTPSHost(u, "telnyx.com", true)
+}
+
+// FetchMedia implements provider.MediaFetcher: it downloads one media[].url
+// of an inbound message. The API key is sent only to api.telnyx.com; a
+// pre-signed media URL on another Telnyx host needs none.
+func (c *Client) FetchMedia(ctx context.Context, ref provider.MediaRef) (provider.Media, error) {
+	return provider.FetchMedia(ctx, c.http, ref.URL, c.mediaHost, func(r *http.Request) {
+		if strings.EqualFold(r.URL.Hostname(), "api.telnyx.com") {
+			r.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+		}
+	})
 }

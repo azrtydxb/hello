@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/messaging"
+	"github.com/azrtydxb/hello/internal/messaging/media"
 	"github.com/azrtydxb/hello/internal/messaging/provider"
 )
 
@@ -469,10 +470,13 @@ func (s *Store) DeleteMsgAddress(ctx context.Context, actor string, id int64) er
 
 // MessagingSettings are the administrator-set inbox limits.
 type MessagingSettings struct {
-	RetentionSMSDays  int  `json:"retentionSmsDays"`
-	RetentionChatDays int  `json:"retentionChatDays"`
-	ReopenDays        int  `json:"reopenDays"`
-	EmailNotify       bool `json:"emailNotify"`
+	RetentionSMSDays  int `json:"retentionSmsDays"`
+	RetentionChatDays int `json:"retentionChatDays"`
+	// RetentionMediaDays is how long an attachment's file is kept (spec
+	// M-19); the message stays and shows it expired.
+	RetentionMediaDays int  `json:"retentionMediaDays"`
+	ReopenDays         int  `json:"reopenDays"`
+	EmailNotify        bool `json:"emailNotify"`
 	// FirstContact is off (default) or attested (M-17): whether an agent may
 	// start a conversation with a number that has not texted first.
 	FirstContact string `json:"firstContact"`
@@ -489,9 +493,9 @@ func (s *Store) GetMessagingSettings(ctx context.Context) (MessagingSettings, er
 func getMessagingSettings(ctx context.Context, q rowQuerier) (MessagingSettings, error) {
 	var m MessagingSettings
 	err := q.QueryRowContext(ctx, `SELECT retention_sms_days, retention_chat_days, reopen_days, email_notify,
-		first_contact, first_contact_user_hour, first_contact_address_day
+		first_contact, first_contact_user_hour, first_contact_address_day, retention_media_days
 		FROM messaging_settings`).Scan(&m.RetentionSMSDays, &m.RetentionChatDays, &m.ReopenDays, &m.EmailNotify,
-		&m.FirstContact, &m.FirstContactPerUserHour, &m.FirstContactPerAddressDay)
+		&m.FirstContact, &m.FirstContactPerUserHour, &m.FirstContactPerAddressDay, &m.RetentionMediaDays)
 	return m, err
 }
 
@@ -500,9 +504,9 @@ func (s *Store) PutMessagingSettings(ctx context.Context, actor string, m Messag
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE messaging_settings SET retention_sms_days = $1, retention_chat_days = $2, reopen_days = $3, email_notify = $4,
-				first_contact = $5, first_contact_user_hour = $6, first_contact_address_day = $7`,
+				first_contact = $5, first_contact_user_hour = $6, first_contact_address_day = $7, retention_media_days = $8`,
 			m.RetentionSMSDays, m.RetentionChatDays, m.ReopenDays, m.EmailNotify,
-			m.FirstContact, m.FirstContactPerUserHour, m.FirstContactPerAddressDay); err != nil {
+			m.FirstContact, m.FirstContactPerUserHour, m.FirstContactPerAddressDay, m.RetentionMediaDays); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "update", "messaging_settings", "1")
@@ -640,6 +644,14 @@ type EraseReport struct {
 	SIPMessages int `json:"sipMessages"`
 	// OptOutsKept counts the opt-outs reduced to their hash.
 	OptOutsKept int `json:"optOutsKept"`
+	// MediaObjects counts the attachment files removed from the media store
+	// and checked gone; MediaObjectsPending those the store could not remove
+	// now, which the media sweeper removes later.
+	MediaObjects        int `json:"mediaObjects"`
+	MediaObjectsPending int `json:"mediaObjectsPending"`
+	// Media are the attachments whose files the caller removes (spec M-20:
+	// the object deletions follow the transaction).
+	Media []media.Garbage `json:"-"`
 	// Providers lists, per provider, what the provider-side deletion did.
 	// The carrier keeps its own logs under its own terms.
 	Providers []EraseProvider `json:"providers"`
@@ -692,6 +704,20 @@ func (s *Store) ErasePeer(ctx context.Context, actor, peerKey string) (EraseRepo
 			peerKey).Scan(&rep.Messages); err != nil {
 			return err
 		}
+		// The attachments' rows stay, orphaned, until their files are gone:
+		// the caller removes them now, or the media sweeper later.
+		if rep.Media, err = peerMedia(ctx, tx, peerKey); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE message_media SET attached_at = coalesce(attached_at, now())
+			WHERE id = ANY($1::bigint[])`, garbageIDs(rep.Media)); err != nil {
+			return err
+		}
+		// A public link to an erased file stops working now, not when the
+		// file is gone.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM media_links WHERE media_id = ANY($1::bigint[])`, garbageIDs(rep.Media)); err != nil {
+			return err
+		}
 		if err := queueRedactions(ctx, tx, rep.Batch, `
 			SELECT m.channel_id, ch.provider, m.provider_message_id FROM conversation_messages m
 			JOIN conversations c ON c.id = m.conversation_id JOIN msg_channels ch ON ch.id = m.channel_id
@@ -735,6 +761,14 @@ func (s *Store) ErasePeer(ctx context.Context, actor, peerKey string) (EraseRepo
 		rep.Providers = append(rep.Providers, EraseProvider{Provider: p})
 	}
 	return rep, nil
+}
+
+func garbageIDs(gs []media.Garbage) []int64 {
+	out := make([]int64, len(gs))
+	for i, g := range gs {
+		out[i] = g.ID
+	}
+	return out
 }
 
 // MessagingMaintenance is what one maintenance run did, counts only.
@@ -812,6 +846,7 @@ func (s *Store) MaintainMessaging(ctx context.Context) (MessagingMaintenance, er
 		`DELETE FROM conversation_assignments WHERE at < now() - interval '365 days'`,
 		`DELETE FROM conversation_notify WHERE last_email_at < now() - interval '1 day'`,
 		`DELETE FROM inbox_presence WHERE seen_at < now() - interval '1 day'`,
+		`DELETE FROM media_links WHERE expires_at < now() - interval '1 day'`,
 	} {
 		res, err := s.db.ExecContext(ctx, q)
 		if err != nil {

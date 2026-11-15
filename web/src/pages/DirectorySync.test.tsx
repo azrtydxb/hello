@@ -1,9 +1,11 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { apiError, json, mockApi, noContent, renderApp } from "../test/api";
 import {
   countsText,
   diffText,
+  rangeError,
+  rangeText,
   readDetail,
   readText,
   sourceText,
@@ -43,6 +45,16 @@ function connector(over: Partial<Connector> = {}): Connector {
       allowAdminFromDirectory: false,
       runTimeoutMinutes: 0,
       userCap: 0,
+      loginMethod: "ldap_bind",
+      oidcProvider: "",
+    },
+    autoProvision: {
+      enabled: false,
+      rangeStart: "",
+      rangeEnd: "",
+      device: true,
+      voicemail: true,
+      groups: [],
     },
     hasCredential: true,
     status: "ok",
@@ -598,5 +610,322 @@ describe("Directory (spec integrations P8)", () => {
         ),
       ).toBe(true),
     );
+  });
+  it("describes and checks an auto-provisioning range", () => {
+    const ap = connector().autoProvision;
+    expect(rangeText(ap)).toBe("off");
+    expect(
+      rangeText({ ...ap, enabled: true, rangeStart: "2000", rangeEnd: "2999" }),
+    ).toBe("2000–2999");
+    expect(rangeError("2000", "2999")).toBeNull();
+    expect(rangeError("0100", "0199")).toBeNull();
+    expect(rangeError("2", "2999")?.start).toBe("2 to 10 digits.");
+    expect(rangeError("200", "2999")?.end).toBe(
+      "As many digits as the first number.",
+    );
+    expect(rangeError("2999", "2000")?.end).toBe("Not below the first number.");
+    expect(rangeError("0000000", "9999999")?.end).toBe(
+      "At most 100000 numbers.",
+    );
+  });
+
+  it("saves the auto-provisioning range, device, voicemail and groups", async () => {
+    const calls = setup({
+      "PATCH /api/v1/directory/connectors/1": () => json(connector()),
+    });
+    renderApp("/integrations/directory");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit Corp AD" }),
+    );
+    const form = await screen.findByRole("form", { name: "Edit Corp AD" });
+    fireEvent.click(
+      within(form).getByRole("switch", {
+        name: /Give users without an extension a number/,
+      }),
+    );
+    fireEvent.change(within(form).getByLabelText("First number"), {
+      target: { value: "2000" },
+    });
+    fireEvent.change(within(form).getByLabelText("Last number"), {
+      target: { value: "2999" },
+    });
+    fireEvent.click(
+      within(form).getByRole("switch", { name: /Create a SIP device/ }),
+    );
+    fireEvent.change(
+      within(form).getByLabelText("Only members of these groups"),
+      { target: { value: "g-phones\n\n g-sales " } },
+    );
+    fireEvent.submit(form);
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PATCH")).toBe(true),
+    );
+    const body = calls.find((c) => c.method === "PATCH")?.body as Record<
+      string,
+      unknown
+    >;
+    expect(body.autoProvision).toEqual({
+      enabled: true,
+      rangeStart: "2000",
+      rangeEnd: "2999",
+      device: false,
+      voicemail: true,
+      groups: ["g-phones", "g-sales"],
+    });
+  });
+
+  it("refuses a bad range before saving", async () => {
+    const calls = setup();
+    renderApp("/integrations/directory");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit Corp AD" }),
+    );
+    const form = await screen.findByRole("form", { name: "Edit Corp AD" });
+    fireEvent.click(
+      within(form).getByRole("switch", {
+        name: /Give users without an extension a number/,
+      }),
+    );
+    fireEvent.change(within(form).getByLabelText("First number"), {
+      target: { value: "2999" },
+    });
+    fireEvent.change(within(form).getByLabelText("Last number"), {
+      target: { value: "2000" },
+    });
+    fireEvent.submit(form);
+    expect(
+      await within(form).findByText("Not below the first number."),
+    ).toBeVisible();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("shows how full the range of the selected connector is", async () => {
+    setup(
+      {
+        "GET /api/v1/directory/connectors/1/runs": () => json({ items: [] }),
+        "GET /api/v1/directory/connectors/1/range": () =>
+          json({
+            enabled: true,
+            rangeStart: "2000",
+            rangeEnd: "2009",
+            size: 10,
+            used: 3,
+            free: 7,
+            nextFree: "2003",
+            provisioned: [
+              {
+                userId: 7,
+                username: "ann@corp",
+                number: "2001",
+                extensionId: 0,
+                enabled: false,
+              },
+            ],
+          }),
+      },
+      [
+        connector({
+          autoProvision: {
+            enabled: true,
+            rangeStart: "2000",
+            rangeEnd: "2009",
+            device: true,
+            voicemail: true,
+            groups: [],
+          },
+        }),
+      ],
+    );
+    renderApp("/integrations/directory");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Show runs of Corp AD" }),
+    );
+    expect(
+      await screen.findByRole("heading", {
+        name: "Auto-provisioning range 2000–2009",
+      }),
+    ).toBeVisible();
+    expect(await screen.findByText(/3 of 10 numbers in use/)).toBeVisible();
+    const table = await screen.findByRole("table", {
+      name: "Numbers given by Corp AD",
+    });
+    expect(within(table).getByText("ann@corp")).toBeVisible();
+    expect(within(table).getByText("extension deleted")).toBeVisible();
+    expect(within(table).getByText("user disabled")).toBeVisible();
+  });
+});
+
+describe("Directory: Google Workspace and Entra (spec integrations P9)", () => {
+  it("names a cloud connector's source", () => {
+    expect(
+      sourceText(
+        connector({
+          kind: "google",
+          config: {
+            authMode: "service_account",
+            customer: "my_customer",
+            domain: "example.com",
+          },
+        }),
+      ),
+    ).toBe("Google Workspace example.com");
+    expect(
+      sourceText(
+        connector({
+          kind: "entra",
+          config: { tenantId: "t-1", clientId: "c", authMethod: "secret" },
+        }),
+      ),
+    ).toBe("Entra tenant t-1");
+  });
+
+  it("creates an Entra connector with its credential, mapping and sign-in", async () => {
+    const calls = setup({
+      "POST /api/v1/directory/connectors": () =>
+        json(connector({ id: 4, kind: "entra", name: "Entra" }), 201),
+    });
+    renderApp("/integrations/directory");
+    fireEvent.click(
+      await screen.findByRole("button", { name: /New connector/ }),
+    );
+    const form = await screen.findByRole("form", {
+      name: "New directory connector",
+    });
+    fireEvent.change(within(form).getByLabelText("Directory"), {
+      target: { value: "entra" },
+    });
+    fireEvent.change(within(form).getByLabelText("Name"), {
+      target: { value: "Entra" },
+    });
+    expect(within(form).queryByLabelText("Server URL")).toBeNull();
+    fireEvent.change(within(form).getByLabelText("Directory (tenant) id"), {
+      target: { value: "11111111-2222-3333-4444-555555555555" },
+    });
+    fireEvent.change(within(form).getByLabelText("Application (client) id"), {
+      target: { value: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" },
+    });
+    fireEvent.change(within(form).getByLabelText("Client secret"), {
+      target: { value: "graph-secret" },
+    });
+    fireEvent.submit(form);
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "POST")).toBe(true),
+    );
+    const body = calls.find((c) => c.method === "POST")?.body as Record<
+      string,
+      unknown
+    >;
+    expect(body.kind).toBe("entra");
+    expect(body.credential).toBe("graph-secret");
+    expect(body.bindPassword).toBeUndefined();
+    expect(body.config).toEqual({
+      tenantId: "11111111-2222-3333-4444-555555555555",
+      clientId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      authMethod: "secret",
+      certificatePem: "",
+      includeGuests: false,
+      timeoutSeconds: undefined,
+    });
+    expect(body.options).toMatchObject({
+      loginMethod: "oidc",
+      oidcProvider: "entra",
+    });
+    expect(
+      (body.mappings as { username: { sources: string[] } }).username.sources,
+    ).toEqual(["userPrincipalName"]);
+  });
+
+  it("warns about domain-wide delegation and lists the scopes to authorise", async () => {
+    setup();
+    renderApp("/integrations/directory");
+    fireEvent.click(
+      await screen.findByRole("button", { name: /New connector/ }),
+    );
+    const form = await screen.findByRole("form", {
+      name: "New directory connector",
+    });
+    fireEvent.change(within(form).getByLabelText("Directory"), {
+      target: { value: "google" },
+    });
+    fireEvent.change(
+      within(form).getByLabelText("How Hello reads the directory"),
+      {
+        target: { value: "delegation" },
+      },
+    );
+    expect(
+      within(form).getByText("Domain-wide delegation is discouraged"),
+    ).toBeVisible();
+    expect(
+      within(form).getByText(
+        "https://www.googleapis.com/auth/admin.directory.user.readonly",
+      ),
+    ).toBeVisible();
+    fireEvent.submit(form);
+    expect(
+      await within(form).findByText("Required for domain-wide delegation."),
+    ).toBeVisible();
+  });
+
+  it("refuses to enable a connector without a sign-in method", async () => {
+    const calls = setup();
+    renderApp("/integrations/directory");
+    fireEvent.click(
+      await screen.findByRole("button", { name: /New connector/ }),
+    );
+    const form = await screen.findByRole("form", {
+      name: "New directory connector",
+    });
+    fireEvent.change(within(form).getByLabelText("Directory"), {
+      target: { value: "google" },
+    });
+    fireEvent.change(within(form).getByLabelText("Name"), {
+      target: { value: "GW" },
+    });
+    fireEvent.change(within(form).getByLabelText("How these users sign in"), {
+      target: { value: "" },
+    });
+    fireEvent.click(within(form).getByRole("switch", { name: /^Enabled/ }));
+    fireEvent.submit(form);
+    expect(
+      await within(form).findByText(/they have no local password/),
+    ).toBeVisible();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("starts the Google consent of an OAuth-admin connector", async () => {
+    const gw = connector({
+      id: 9,
+      kind: "google",
+      name: "GW",
+      config: {
+        authMode: "oauth_admin",
+        clientId: "1-x.apps.googleusercontent.com",
+      },
+    });
+    const calls = setup(
+      {
+        "POST /api/v1/directory/connectors/9/consent": () =>
+          json({ url: "https://accounts.google.com/o/oauth2/v2/auth?x=1" }),
+      },
+      [gw],
+    );
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign, search: "" });
+    renderApp("/integrations/directory");
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Grant Google consent for GW",
+      }),
+    );
+    await waitFor(() =>
+      expect(assign).toHaveBeenCalledWith(
+        "https://accounts.google.com/o/oauth2/v2/auth?x=1",
+      ),
+    );
+    expect(
+      calls.some((c) => c.url === "/api/v1/directory/connectors/9/consent"),
+    ).toBe(true);
+    vi.unstubAllGlobals();
   });
 });

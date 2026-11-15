@@ -13,11 +13,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/messaging/media"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
 )
@@ -277,6 +279,13 @@ func (s *server) exportMessagingPeer(w http.ResponseWriter, r *http.Request) {
 		s.inboxError(w, "export", err)
 		return
 	}
+	// The customer's attachments are part of the export: without the media
+	// store the archive would silently miss them.
+	if s.MediaObjects == nil && exportHoldsFiles(exp) {
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "the media store (MinIO) is not configured; the export would miss the customer's attachments")
+		return
+	}
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="hello-inbox-export.zip"`)
 	w.Header().Set("Cache-Control", "no-store")
@@ -293,6 +302,9 @@ func (s *server) exportMessagingPeer(w http.ResponseWriter, r *http.Request) {
 	readme := "Everything Hello's messaging inbox holds of " + exp.Peer + ", exported " + exp.ExportedAt.Format(time.RFC3339) + ".\n\n" +
 		"conversations.json lists the conversations and the opt-out records; messages/<conversation>/<message>.json holds each\n" +
 		"message with its times and delivery state. A redacted message has an empty body and a redactedAt time.\n" +
+		"A message's media lists its attachments; the file of each is under media/, at the path its file field names. An\n" +
+		"attachment with an empty file has no file in Hello (still downloading, refused, expired, or removed meanwhile).\n" +
+		"uploads.json lists a chat visitor's files not sent with a message yet, their files under media/uploads/.\n" +
 		"The carrier (the SMS provider or SIP trunk) keeps its own records under its own terms.\n"
 	f, err := zw.CreateHeader(&zip.FileHeader{Name: "README.txt", Method: zip.Deflate, Modified: exp.ExportedAt})
 	if err == nil {
@@ -306,8 +318,25 @@ func (s *server) exportMessagingPeer(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				break
 			}
-			err = put("messages/"+strconv.FormatInt(c.ID, 10)+"/"+strconv.FormatInt(m.ID, 10)+".json", m)
+			dir := "media/" + strconv.FormatInt(c.ID, 10) + "/"
+			for i := range m.Media {
+				if err = s.exportMediaFile(r.Context(), zw, &m.Media[i], dir); err != nil {
+					break
+				}
+			}
+			if err == nil {
+				err = put("messages/"+strconv.FormatInt(c.ID, 10)+"/"+strconv.FormatInt(m.ID, 10)+".json", m)
+			}
 		}
+	}
+	for i := range exp.Uploads {
+		if err != nil {
+			break
+		}
+		err = s.exportMediaFile(r.Context(), zw, &exp.Uploads[i], "media/uploads/")
+	}
+	if err == nil {
+		err = put("uploads.json", exp.Uploads)
 	}
 	if err == nil {
 		err = zw.Close()
@@ -316,6 +345,55 @@ func (s *server) exportMessagingPeer(w http.ResponseWriter, r *http.Request) {
 		// The headers are out: the client sees a broken archive.
 		s.Log.Warn("inbox export: writing the archive", "error", err)
 	}
+}
+
+// exportHoldsFiles reports whether an export has an attachment whose file
+// Hello keeps.
+func exportHoldsFiles(exp store.PeerExport) bool {
+	for _, c := range exp.Conversations {
+		for _, m := range c.Messages {
+			for _, f := range m.Media {
+				if f.Key != "" {
+					return true
+				}
+			}
+		}
+	}
+	for _, f := range exp.Uploads {
+		if f.Key != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// exportMediaFile copies one attachment's file into the archive under dir,
+// named by its id and type (never the sender's file name, which the JSON
+// keeps), and sets f.File to that path. A file the store no longer has (the
+// media sweeper removed it meanwhile) leaves f.File empty; any other error
+// stops the export, so an archive never misses a file silently.
+func (s *server) exportMediaFile(ctx context.Context, zw *zip.Writer, f *store.ExportMedia, dir string) error {
+	if f.Key == "" {
+		return nil
+	}
+	o, err := s.MediaObjects.Open(ctx, f.Key)
+	if errors.Is(err, media.ErrNoObject) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = o.Body.Close() }()
+	name := dir + strconv.FormatInt(f.ID, 10) + media.Extension(f.ContentType)
+	out, err := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: f.CreatedAt})
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, o.Body); err != nil {
+		return err
+	}
+	f.File = name
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +423,9 @@ func (s *server) redactInboxMessage(w http.ResponseWriter, r *http.Request) {
 		s.inboxError(w, "message", err)
 		return
 	}
+	// The attachments' files go as an erase's do: removed and checked gone
+	// now, or by the media sweeper when the store is out of reach.
+	rep.MediaObjects, rep.MediaObjectsPending = s.removeMediaObjects(r.Context(), s.Inbox, rep.Media, "redact")
 	if rep.Batch != "" {
 		if rep.Providers, err = s.providerReport(r.Context(), ps, who, rep.Batch, nil); err != nil {
 			s.internal(w, "redact: provider report", err)

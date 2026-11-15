@@ -57,9 +57,10 @@ import {
 } from "./platform/health";
 import "./platform/platform.css";
 import { Can } from "../role";
+import { ClientsTab } from "./platform/ClientsTab";
 
-type TabId = "trace" | "reg" | "probes" | "health";
-const TABS: readonly TabId[] = ["trace", "reg", "probes", "health"];
+type TabId = "trace" | "reg" | "clients" | "probes" | "health";
+const TABS: readonly TabId[] = ["trace", "reg", "clients", "probes", "health"];
 
 async function settled<T>(p: Promise<T>): Promise<T | undefined> {
   try {
@@ -109,7 +110,7 @@ async function loadLive(signal: AbortSignal): Promise<Live> {
   };
 }
 
-/** Diagnostics: call traces, registration attempts, trunk probes, health checks. */
+/** Diagnostics: call traces, registration attempts, web and mobile clients, trunk probes, health checks. */
 export function Diagnostics() {
   const [params, setParams] = useSearchParams();
   const tabParam = params.get("tab") as TabId | null;
@@ -141,7 +142,7 @@ export function Diagnostics() {
       <PageHeader
         eyebrow="Platform"
         title="Diagnostics"
-        description="Call traces, registration attempts, trunk probes and cluster checks. Secrets and digest responses are never shown."
+        description="Call traces, registration attempts, web and mobile clients, trunk probes and cluster checks. Secrets and digest responses are never shown."
         actions={
           <LinkButton to="/routes/test" icon="flask-conical">
             Route tester
@@ -157,6 +158,7 @@ export function Diagnostics() {
         items={[
           { id: "trace", label: "Call trace" },
           { id: "reg", label: "Registrations" },
+          { id: "clients", label: "Clients" },
           { id: "probes", label: "Trunk probes" },
           {
             id: "health",
@@ -184,6 +186,9 @@ export function Diagnostics() {
             onDevice={(id) => go("reg", { device: id })}
             showToast={showToast}
           />
+        )}
+        {tab === "clients" && (
+          <ClientsTab onDevice={(id) => go("reg", { device: id })} />
         )}
         {tab === "probes" && <ProbesTab live={data} />}
         {tab === "health" && (

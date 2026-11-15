@@ -231,6 +231,13 @@ unavailable` in a call's trace mean a 488; a fax on a trunk with `faxMode`
   It is counts and durations only. To answer "who is slow to answer", group
   by agent and compare `firstResponse.p50Seconds`; a breach count names
   conversations answered late or still waiting past the target in `sla`.
+- `getInboxAIStats` for what the inbox AI did in the last 24 hours: its runs
+  by kind (`triage`, `draft`, `autoreply`) and state (`failed` many times
+  means the AI endpoint is down or over budget), the auto-replies it sent,
+  the conversations it handed to a person, the active conversations it
+  flagged as spam, and how many numbers are in each AI mode. It carries no
+  customer text. The AI settings, the FAQ and each number's mode are
+  administrator settings in the console (Messaging, AI), not MCP tools.
 
 ## Boss and assistant
 
