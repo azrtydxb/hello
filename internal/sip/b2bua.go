@@ -152,6 +152,12 @@ type call struct {
 	// the one dialled after the code).
 	vmTarget string
 	held     bool
+	// linkedInMu serializes a linked call's party's re-INVITEs and UPDATEs
+	// (linkedReinvite) from first look to the hold passed on to the peer:
+	// the next one arrives once this one's 200 is out, and must not pass
+	// it on to the peer before (or instead of) this one. Never taken under
+	// mu.
+	linkedInMu sync.Mutex
 	// doorOpening is set while a door-open code is being sent (spec S-47),
 	// guarded by mu, so two presses never interleave their events.
 	doorOpening bool

@@ -4939,6 +4939,11 @@ could reach the phone reversed, leaving it held.
 - **No lazy reads of the shared INVITE.** The re-INVITE and its late ACK set
   `Content-Type: application/sdp` themselves (every body Hello sends there is
   SDP) instead of copying the dialog INVITE's header.
+- **A linked party's re-INVITEs are handled one at a time.** Its next
+  re-INVITE can arrive as soon as the previous 200 is out, while the previous
+  handler is still telling the peer. `linkedReinvite` holds a per-call lock
+  from first look to `holdPeer`, so a hold then resume is sent to the peer's
+  node in that order, once each (CI caught the reversal through the new test).
 - **A homed leg's CSeq is spent when the request is built,** under the leg's
   lock, so a BYE or NOTIFY built during a re-INVITE never shares its CSeq, and
   the re-INVITE's 200 only moves the counter forward.

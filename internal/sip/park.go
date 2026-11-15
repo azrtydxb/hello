@@ -939,6 +939,11 @@ func (c *call) parkVoicemail(ctx context.Context, pk *parkState, relay *media.Re
 // party is re-INVITEd in the same direction, as an anchored bridged call
 // does (handleAnchoredInDialog), so the other phone shows the hold too.
 func (s *Server) linkedReinvite(c *call, req *sip.Request, tx sip.ServerTransaction) {
+	// The party's next re-INVITE can arrive as soon as the 200 below is
+	// out; it waits until this one's hold has reached the peer, so a hold
+	// then resume is passed on in that order and exactly once each.
+	c.linkedInMu.Lock()
+	defer c.linkedInMu.Unlock()
 	c.mu.Lock()
 	lk := c.link
 	c.mu.Unlock()
