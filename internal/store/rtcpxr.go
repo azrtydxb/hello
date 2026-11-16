@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/rtcpxr"
 )
 
@@ -40,18 +42,20 @@ var rtcpxrWrites atomic.Int64
 func (s *Store) RecordRTCPXR(ctx context.Context, device, extension string, r rtcpxr.Report) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO cdr_rtcpxr
 		(call_id, device, extension, final, mos_lq, mos_cq, jitter_ms, loss_pct, discard_pct, rtt_ms, reported_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+		VALUES (@call_id, @device, @extension, @final, @mos_lq, @mos_cq, @jitter_ms, @loss_pct, @discard_pct, @rtt_ms, now())
 		ON CONFLICT (call_id, device) DO UPDATE SET
 			extension = EXCLUDED.extension, final = EXCLUDED.final, mos_lq = EXCLUDED.mos_lq,
 			mos_cq = EXCLUDED.mos_cq, jitter_ms = EXCLUDED.jitter_ms, loss_pct = EXCLUDED.loss_pct,
 			discard_pct = EXCLUDED.discard_pct, rtt_ms = EXCLUDED.rtt_ms, reported_at = now()
 		WHERE EXCLUDED.final OR NOT cdr_rtcpxr.final`,
-		r.CallID, device, extension, r.Final, r.MOSLQ, r.MOSCQ, r.JitterMs, r.LossPct, r.DiscardPct, r.RoundTripMs)
+		momo.Named("call_id", r.CallID), momo.Named("device", device), momo.Named("extension", extension), momo.Named("final", r.Final),
+		momo.Named("mos_lq", r.MOSLQ), momo.Named("mos_cq", r.MOSCQ), momo.Named("jitter_ms", r.JitterMs), momo.Named("loss_pct", r.LossPct),
+		momo.Named("discard_pct", r.DiscardPct), momo.Named("rtt_ms", r.RoundTripMs))
 	if err != nil {
 		return fmt.Errorf("store: record rtcp-xr report: %w", err)
 	}
 	if rtcpxrWrites.Add(1)%1000 == 0 {
-		_, _ = s.db.ExecContext(ctx, `DELETE FROM cdr_rtcpxr WHERE reported_at < $1`, time.Now().Add(-RTCPXRRetention))
+		_, _ = s.db.ExecContext(ctx, `DELETE FROM cdr_rtcpxr WHERE reported_at < @cutoff`, momo.Named("cutoff", time.Now().Add(-RTCPXRRetention)))
 	}
 	return nil
 }
@@ -62,7 +66,7 @@ func (s *Store) rtcpxrOf(ctx context.Context, cdrID int64) ([]RTCPXRQuality, err
 	rows, err := s.db.QueryContext(ctx, `SELECT x.device, x.extension, x.final, x.mos_lq, x.mos_cq,
 			x.jitter_ms, x.loss_pct, x.discard_pct, x.rtt_ms, x.reported_at
 		FROM cdrs c JOIN cdr_rtcpxr x ON x.call_id = c.sip_call_id OR (c.peer_call_id <> '' AND x.call_id = c.peer_call_id)
-		WHERE c.id = $1 ORDER BY x.reported_at, x.device`, cdrID)
+		WHERE c.id = @id ORDER BY x.reported_at, x.device`, momo.Named("id", cdrID))
 	if err != nil {
 		return nil, fmt.Errorf("store: rtcp-xr reports of cdr %d: %w", cdrID, err)
 	}

@@ -31,6 +31,9 @@ import (
 // pull request that converts a file adds it here.
 var namedFiles = map[string]bool{
 	"batch.go":             true,
+	"conference.go":        true,
+	"clientquality.go":     true,
+	"clients.go":           true,
 	"blocklist.go":         true,
 	"boss.go":              true,
 	"calendar_dnd.go":      true,
@@ -38,13 +41,48 @@ var namedFiles = map[string]bool{
 	"dialspace.go":         true,
 	"dirprovision.go":      true,
 	"flow_canvas.go":       true,
+	"followme.go":          true,
+	"ivr.go":               true,
 	"locations.go":         true,
-	"originate.go":         true,
+	"multicast.go":         true,
+	"paging.go":            true,
+	"park.go":              true,
 	"personal_contacts.go": true,
 	"phonebook.go":         true,
 	"phonebook_lookup.go":  true,
-	"routing.go":           true,
+	"pickup.go":            true,
+	"queue_callbacks.go":   true,
+	"queues.go":            true,
+	"ringmap.go":           true,
+	"ringtag.go":           true,
 	"store.go":             true,
+	"door.go":              true,
+	"door_camera.go":       true,
+	"door_open.go":         true,
+	"door_webhook.go":      true,
+	"scep.go":              true,
+	"wifi.go":              true,
+	"backup.go":            true,
+	"faxes.go":             true,
+	"mail.go":              true,
+	"ldap.go":              true,
+	"oauth.go":             true,
+	"onboarding.go":        true,
+	"sidekey.go":           true,
+	"totp.go":              true,
+	"users.go":             true,
+	"prov.go":              true,
+	"prov_admin.go":        true,
+	"prov_books.go":        true,
+	"prov_handler.go":      true,
+	"prov_lines.go":        true,
+	"prov_multicast.go":    true,
+	"prov_overrides.go":    true,
+	"prov_push.go":         true,
+	"rtcpxr.go":            true,
+	"syslog.go":            true,
+	"originate.go":         true,
+	"routing.go":           true,
 	"timecond.go":          true,
 }
 
@@ -395,6 +433,8 @@ func (r *fakeRows) Scan(dest ...any) error {
 		switch p := d.(type) {
 		case *int64:
 			*p = r.rows[r.i][i].(int64)
+		case *int:
+			*p = int(r.rows[r.i][i].(int64))
 		case *string:
 			*p = r.rows[r.i][i].(string)
 		default:

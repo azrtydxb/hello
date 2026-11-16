@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -122,6 +123,8 @@ const ivrFrom = ` FROM ivr_menus m
 	LEFT JOIN announcements i ON i.id = m.invalid_prompt_id
 	LEFT JOIN announcements t ON t.id = m.timeout_prompt_id `
 
+// listIVRMenus reads the menus the where fragment selects; args are the
+// momo.Named binds of the fragment's @names.
 func listIVRMenus(ctx context.Context, q querier, where string, args ...any) ([]IVRMenu, error) {
 	rows, err := q.QueryContext(ctx, `SELECT `+ivrCols+ivrFrom+where+` ORDER BY m.id`, args...)
 	if err != nil {
@@ -154,7 +157,7 @@ func listIVRMenus(ctx context.Context, q querier, where string, args ...any) ([]
 		byID[out[i].ID] = &out[i]
 	}
 	orows, err := q.QueryContext(ctx, `SELECT menu_id, digit, dest_kind, dest_target FROM ivr_menu_options
-		WHERE menu_id = ANY($1) ORDER BY menu_id, digit`, ids)
+		WHERE menu_id = ANY(@ids) ORDER BY menu_id, digit`, momo.Named("ids", ids))
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +182,7 @@ func (s *Store) ListIVRMenus(ctx context.Context) ([]IVRMenu, error) {
 
 // GetIVRMenu returns one IVR menu.
 func (s *Store) GetIVRMenu(ctx context.Context, id int64) (IVRMenu, error) {
-	ms, err := listIVRMenus(ctx, s.q(ctx), ` WHERE m.id = $1`, id)
+	ms, err := listIVRMenus(ctx, s.q(ctx), ` WHERE m.id = @id`, momo.Named("id", id))
 	if err != nil {
 		return IVRMenu{}, err
 	}
@@ -214,9 +217,10 @@ func ValidIVRDigit(d string) bool {
 // checkIVRDestination verifies that a destination names something that
 // exists. self is the menu being written (its name, which may be new).
 func checkIVRDestination(ctx context.Context, tx *dbTx, d ivrDest) error {
+	// exists runs a count statement that binds @target.
 	exists := func(query, what string) error {
 		var n int
-		if err := tx.QueryRowContext(ctx, query, d.Target).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, query, momo.Named("target", d.Target)).Scan(&n); err != nil {
 			return err
 		}
 		if n == 0 {
@@ -234,30 +238,30 @@ func checkIVRDestination(ctx context.Context, tx *dbTx, d ivrDest) error {
 			return fieldError(d.path+".target", `must be empty when kind is "directory"`)
 		}
 	case IVRExtension:
-		return exists(`SELECT count(*) FROM extensions WHERE number = $1`, "extension")
+		return exists(`SELECT count(*) FROM extensions WHERE number = @target`, "extension")
 	case IVRVoicemail:
 		return exists(`SELECT count(*) FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id
-			WHERE e.number = $1`, "voicemail box of extension")
+			WHERE e.number = @target`, "voicemail box of extension")
 	case IVRVoicemailGroup:
-		return exists(`SELECT count(*) FROM voicemail_groups WHERE number = $1`, "voicemail group with number")
+		return exists(`SELECT count(*) FROM voicemail_groups WHERE number = @target`, "voicemail group with number")
 	case IVRRingGroup:
-		return exists(`SELECT count(*) FROM ring_groups WHERE name = $1`, "ring group")
+		return exists(`SELECT count(*) FROM ring_groups WHERE name = @target`, "ring group")
 	case IVRAnnouncement:
-		return exists(`SELECT count(*) FROM announcements WHERE name = $1`, "announcement")
+		return exists(`SELECT count(*) FROM announcements WHERE name = @target`, "announcement")
 	case IVRPaging:
-		return exists(`SELECT count(*) FROM paging_groups WHERE code = $1`, "paging group with code")
+		return exists(`SELECT count(*) FROM paging_groups WHERE code = @target`, "paging group with code")
 	case IVRQueueDest:
-		return exists(`SELECT count(*) FROM queues WHERE name = $1`, "queue")
+		return exists(`SELECT count(*) FROM queues WHERE name = @target`, "queue")
 	case IVRMenuDest:
 		// A menu being created is not in the table yet; the caller handles
 		// a reference to itself.
-		return exists(`SELECT count(*) FROM ivr_menus WHERE name = $1`, "IVR menu")
+		return exists(`SELECT count(*) FROM ivr_menus WHERE name = @target`, "IVR menu")
 	case IVRExternal:
 		// The format is checked by the API; routing decides at call time.
 	case IVRTimeCondition:
-		return exists(`SELECT count(*) FROM time_conditions WHERE name = $1`, "time condition")
+		return exists(`SELECT count(*) FROM time_conditions WHERE name = @target`, "time condition")
 	case IVRFax:
-		return exists(`SELECT count(*) FROM fax_destinations WHERE name = $1`, "fax destination")
+		return exists(`SELECT count(*) FROM fax_destinations WHERE name = @target`, "fax destination")
 	default:
 		return fieldError(d.path+".kind", "is not a destination kind")
 	}
@@ -296,7 +300,7 @@ func checkIVRMenu(ctx context.Context, tx *dbTx, id int64, in IVRMenuInput) erro
 // would be passed round for ever. A loop through options needs the caller to
 // press a key each time, so it is allowed ("0 for the main menu").
 func checkIVRLoops(ctx context.Context, tx *dbTx, id int64, in IVRMenuInput) error {
-	rows, err := tx.QueryContext(ctx, `SELECT name, timeout_kind, timeout_target, invalid_kind, invalid_target FROM ivr_menus WHERE id <> $1`, id)
+	rows, err := tx.QueryContext(ctx, `SELECT name, timeout_kind, timeout_target, invalid_kind, invalid_target FROM ivr_menus WHERE id <> @id`, momo.Named("id", id))
 	if err != nil {
 		return err
 	}
@@ -344,12 +348,12 @@ func reaches(next map[string][]string, from, want string, seen map[string]bool) 
 }
 
 func writeIVROptions(ctx context.Context, tx *dbTx, id int64, in IVRMenuInput) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM ivr_menu_options WHERE menu_id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM ivr_menu_options WHERE menu_id = @menu_id`, momo.Named("menu_id", id)); err != nil {
 		return err
 	}
 	for _, o := range in.Options {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO ivr_menu_options (menu_id, digit, dest_kind, dest_target)
-			VALUES ($1, $2, $3, $4)`, id, o.Digit, o.Kind, o.Target); err != nil {
+			VALUES (@menu_id, @digit, @dest_kind, @dest_target)`, momo.Named("menu_id", id), momo.Named("digit", o.Digit), momo.Named("dest_kind", o.Kind), momo.Named("dest_target", o.Target)); err != nil {
 			return err
 		}
 	}
@@ -390,16 +394,19 @@ func (s *Store) CreateIVRMenu(ctx context.Context, actor string, in IVRMenuInput
 		if err := tx.QueryRowContext(ctx, `INSERT INTO ivr_menus (name, number, enabled, greeting_id, invalid_prompt_id,
 				timeout_prompt_id, digit_timeout, inter_digit_timeout, max_retries, allow_direct_dial,
 				timeout_kind, timeout_target, invalid_kind, invalid_target, prompt_language)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULLIF($15, '')) RETURNING id`,
-			in.Name, in.Number, in.Enabled, in.GreetingID, in.InvalidPromptID, in.TimeoutPromptID,
-			in.DigitTimeout, in.InterDigitTimeout, in.MaxRetries, in.AllowDirectDial,
-			in.Timeout.Kind, in.Timeout.Target, in.Invalid.Kind, in.Invalid.Target, in.PromptLanguage).Scan(&id); err != nil {
+			VALUES (@name, @number, @enabled, @greeting_id, @invalid_prompt_id, @timeout_prompt_id, @digit_timeout, @inter_digit_timeout,
+				@max_retries, @allow_direct_dial, @timeout_kind, @timeout_target, @invalid_kind, @invalid_target, NULLIF(@prompt_language, '')) RETURNING id`,
+			momo.Named("name", in.Name), momo.Named("number", in.Number), momo.Named("enabled", in.Enabled),
+			momo.Named("greeting_id", in.GreetingID), momo.Named("invalid_prompt_id", in.InvalidPromptID), momo.Named("timeout_prompt_id", in.TimeoutPromptID),
+			momo.Named("digit_timeout", in.DigitTimeout), momo.Named("inter_digit_timeout", in.InterDigitTimeout), momo.Named("max_retries", in.MaxRetries),
+			momo.Named("allow_direct_dial", in.AllowDirectDial), momo.Named("timeout_kind", in.Timeout.Kind), momo.Named("timeout_target", in.Timeout.Target),
+			momo.Named("invalid_kind", in.Invalid.Kind), momo.Named("invalid_target", in.Invalid.Target), momo.Named("prompt_language", in.PromptLanguage)).Scan(&id); err != nil {
 			return 0, ivrFK(err)
 		}
 		if err := writeIVROptions(ctx, tx, id, in); err != nil {
 			return id, err
 		}
-		ms, err := listIVRMenus(ctx, tx, ` WHERE m.id = $1`, id)
+		ms, err := listIVRMenus(ctx, tx, ` WHERE m.id = @id`, momo.Named("id", id))
 		if err == nil && len(ms) == 1 {
 			m = ms[0]
 		}
@@ -416,16 +423,16 @@ func ivrReferences(ctx context.Context, tx *dbTx, id int64, name string) ([]stri
 		query, label string
 		args         []any
 	}{
-		{`SELECT name FROM inbound_routes WHERE destination_kind = 'ivr' AND destination = $1`, "inbound route", []any{name}},
-		{`SELECT name FROM ring_groups WHERE failure_kind = 'ivr' AND failure_target = $1`, "ring group", []any{name}},
-		{`SELECT code FROM feature_codes WHERE action = 'ivr' AND argument = $1`, "feature code", []any{name}},
-		{`SELECT m.name FROM ivr_menus m WHERE m.id <> $2 AND (
-			(m.timeout_kind = 'ivr' AND m.timeout_target = $1) OR (m.invalid_kind = 'ivr' AND m.invalid_target = $1)
-			OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = m.id AND o.dest_kind = 'ivr' AND o.dest_target = $1))`,
-			"IVR menu", []any{name, id}},
+		{`SELECT name FROM inbound_routes WHERE destination_kind = 'ivr' AND destination = @name`, "inbound route", []any{momo.Named("name", name)}},
+		{`SELECT name FROM ring_groups WHERE failure_kind = 'ivr' AND failure_target = @name`, "ring group", []any{momo.Named("name", name)}},
+		{`SELECT code FROM feature_codes WHERE action = 'ivr' AND argument = @name`, "feature code", []any{momo.Named("name", name)}},
+		{`SELECT m.name FROM ivr_menus m WHERE m.id <> @id AND (
+			(m.timeout_kind = 'ivr' AND m.timeout_target = @name) OR (m.invalid_kind = 'ivr' AND m.invalid_target = @name)
+			OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = m.id AND o.dest_kind = 'ivr' AND o.dest_target = @name))`,
+			"IVR menu", []any{momo.Named("name", name), momo.Named("id", id)}},
 		{`SELECT name FROM time_conditions WHERE
-			(open_kind = 'ivr' AND open_target = $1) OR (closed_kind = 'ivr' AND closed_target = $1)
-			OR (holiday_kind = 'ivr' AND holiday_target = $1)`, "time condition", []any{name}},
+			(open_kind = 'ivr' AND open_target = @name) OR (closed_kind = 'ivr' AND closed_target = @name)
+			OR (holiday_kind = 'ivr' AND holiday_target = @name)`, "time condition", []any{momo.Named("name", name)}},
 	} {
 		rows, err := tx.QueryContext(ctx, q.query, q.args...)
 		if err != nil {
@@ -460,7 +467,7 @@ func (s *Store) UpdateIVRMenu(ctx context.Context, actor string, id int64, in IV
 	var m IVRMenu
 	err := s.configChange(ctx, actor, "update", "ivr_menu", check, func(tx *dbTx) (int64, error) {
 		var cur string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM ivr_menus WHERE id = $1 FOR UPDATE`, id).Scan(&cur); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM ivr_menus WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&cur); err != nil {
 			return id, err
 		}
 		if cur != in.Name {
@@ -475,19 +482,21 @@ func (s *Store) UpdateIVRMenu(ctx context.Context, actor string, id int64, in IV
 		if err := checkIVRMenu(ctx, tx, id, in); err != nil {
 			return id, err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE ivr_menus SET name = $2, number = $3, enabled = $4, greeting_id = $5,
-				invalid_prompt_id = $6, timeout_prompt_id = $7, digit_timeout = $8, inter_digit_timeout = $9,
-				max_retries = $10, allow_direct_dial = $11, timeout_kind = $12, timeout_target = $13,
-				invalid_kind = $14, invalid_target = $15, prompt_language = NULLIF($16, ''), updated_at = now()
-			WHERE id = $1`, id, in.Name, in.Number, in.Enabled, in.GreetingID, in.InvalidPromptID, in.TimeoutPromptID,
-			in.DigitTimeout, in.InterDigitTimeout, in.MaxRetries, in.AllowDirectDial,
-			in.Timeout.Kind, in.Timeout.Target, in.Invalid.Kind, in.Invalid.Target, in.PromptLanguage); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE ivr_menus SET name = @name, number = @number, enabled = @enabled, greeting_id = @greeting_id,
+				invalid_prompt_id = @invalid_prompt_id, timeout_prompt_id = @timeout_prompt_id, digit_timeout = @digit_timeout, inter_digit_timeout = @inter_digit_timeout,
+				max_retries = @max_retries, allow_direct_dial = @allow_direct_dial, timeout_kind = @timeout_kind, timeout_target = @timeout_target,
+				invalid_kind = @invalid_kind, invalid_target = @invalid_target, prompt_language = NULLIF(@prompt_language, ''), updated_at = now()
+			WHERE id = @id`, momo.Named("id", id), momo.Named("name", in.Name), momo.Named("number", in.Number), momo.Named("enabled", in.Enabled),
+			momo.Named("greeting_id", in.GreetingID), momo.Named("invalid_prompt_id", in.InvalidPromptID), momo.Named("timeout_prompt_id", in.TimeoutPromptID),
+			momo.Named("digit_timeout", in.DigitTimeout), momo.Named("inter_digit_timeout", in.InterDigitTimeout), momo.Named("max_retries", in.MaxRetries),
+			momo.Named("allow_direct_dial", in.AllowDirectDial), momo.Named("timeout_kind", in.Timeout.Kind), momo.Named("timeout_target", in.Timeout.Target),
+			momo.Named("invalid_kind", in.Invalid.Kind), momo.Named("invalid_target", in.Invalid.Target), momo.Named("prompt_language", in.PromptLanguage)); err != nil {
 			return id, ivrFK(err)
 		}
 		if err := writeIVROptions(ctx, tx, id, in); err != nil {
 			return id, err
 		}
-		ms, err := listIVRMenus(ctx, tx, ` WHERE m.id = $1`, id)
+		ms, err := listIVRMenus(ctx, tx, ` WHERE m.id = @id`, momo.Named("id", id))
 		if err == nil && len(ms) == 1 {
 			m = ms[0]
 		}
@@ -502,7 +511,7 @@ func (s *Store) UpdateIVRMenu(ctx context.Context, actor string, id int64, in IV
 func (s *Store) DeleteIVRMenu(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "ivr_menu", check, func(tx *dbTx) (int64, error) {
 		var name string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM ivr_menus WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM ivr_menus WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&name); err != nil {
 			return id, err
 		}
 		refs, err := ivrReferences(ctx, tx, id, name)
@@ -512,7 +521,7 @@ func (s *Store) DeleteIVRMenu(ctx context.Context, actor string, id int64, check
 		if len(refs) > 0 {
 			return id, inUseBy("IVR menu "+name, refs)
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM ivr_menus WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM ivr_menus WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -524,7 +533,7 @@ func (s *Store) DeleteIVRMenu(ctx context.Context, actor string, id int64, check
 // settings that name one (ring group failover, feature codes).
 func (s *Store) IVRMenuNameExists(ctx context.Context, name string) (bool, error) {
 	var n int
-	if err := s.q(ctx).QueryRowContext(ctx, `SELECT count(*) FROM ivr_menus WHERE name = $1`, name).Scan(&n); err != nil {
+	if err := s.q(ctx).QueryRowContext(ctx, `SELECT count(*) FROM ivr_menus WHERE name = @name`, momo.Named("name", name)).Scan(&n); err != nil {
 		return false, err
 	}
 	return n > 0, nil
@@ -540,10 +549,10 @@ func refuseIfIVRPoints(ctx context.Context, tx *dbTx, what, target string, kinds
 		k2 = kinds[1]
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT m.name FROM ivr_menus m WHERE
-		(m.timeout_kind IN ($1, $2) AND m.timeout_target = $3)
-		OR (m.invalid_kind IN ($1, $2) AND m.invalid_target = $3)
-		OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = m.id AND o.dest_kind IN ($1, $2) AND o.dest_target = $3)
-		ORDER BY m.name`, kinds[0], k2, target)
+		(m.timeout_kind IN (@kind, @kind2) AND m.timeout_target = @target)
+		OR (m.invalid_kind IN (@kind, @kind2) AND m.invalid_target = @target)
+		OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = m.id AND o.dest_kind IN (@kind, @kind2) AND o.dest_target = @target)
+		ORDER BY m.name`, momo.Named("kind", kinds[0]), momo.Named("kind2", k2), momo.Named("target", target))
 	if err != nil {
 		return err
 	}
@@ -570,7 +579,7 @@ func refuseIfIVRPoints(ctx context.Context, tx *dbTx, what, target string, kinds
 // so a menu cannot be deleted between the check and the write that names it.
 func requireIVRMenuTx(ctx context.Context, tx *dbTx, path, name string) error {
 	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM ivr_menus WHERE name = $1`, name).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM ivr_menus WHERE name = @name`, momo.Named("name", name)).Scan(&n); err != nil {
 		return err
 	}
 	if n == 0 {

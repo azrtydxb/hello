@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/prov"
 )
 
@@ -64,7 +66,8 @@ type WifiScope struct {
 	Radio *prov.WifiRadio `json:"radio,omitempty"`
 }
 
-const wifiSetPSK = `UPDATE wifi_profiles SET psk_enc = $2 WHERE id = $1`
+// wifiSetPSK binds @id and @enc, as sealWifi passes them.
+const wifiSetPSK = `UPDATE wifi_profiles SET psk_enc = @enc WHERE id = @id`
 
 const wifiProfileCols = `p.id, p.name, p.ssid, p.security, p.psk_enc IS NOT NULL, p.dot1x_id, p.priority, p.hidden, p.prefer_account, p.verified,
 	(SELECT count(*) FROM wifi_assignments a WHERE a.profile_id = p.id AND a.group_id IS NOT NULL),
@@ -100,7 +103,7 @@ func (s *Store) ListWifiProfiles(ctx context.Context) ([]WifiProfile, error) {
 
 // GetWifiProfile returns one profile; ErrNotFound when there is none.
 func (s *Store) GetWifiProfile(ctx context.Context, id int64) (WifiProfile, error) {
-	p, err := scanWifiProfile(s.db.QueryRowContext(ctx, `SELECT `+wifiProfileCols+` FROM wifi_profiles p WHERE p.id = $1`, id))
+	p, err := scanWifiProfile(s.db.QueryRowContext(ctx, `SELECT `+wifiProfileCols+` FROM wifi_profiles p WHERE p.id = @id`, momo.Named("id", id)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -121,7 +124,7 @@ func checkWifiDot1X(ctx context.Context, tx *dbTx, in WifiProfileInput) error {
 		return nil
 	}
 	var method string
-	err := tx.QueryRowContext(ctx, `SELECT method FROM dot1x_profiles WHERE id = $1`, in.Dot1XID).Scan(&method)
+	err := tx.QueryRowContext(ctx, `SELECT method FROM dot1x_profiles WHERE id = @id`, momo.Named("id", in.Dot1XID)).Scan(&method)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return fieldError("dot1xProfileId", "no such 802.1X profile")
@@ -141,7 +144,8 @@ func nullID(id int64) any {
 }
 
 // sealWifi stores the sealed secret of a profile column with the update
-// statement (wifiSetPSK): nil keeps it, "" clears it.
+// statement (wifiSetPSK), which binds @id and @enc: nil keeps it, "" clears
+// it.
 func (s *Store) sealWifi(ctx context.Context, tx *dbTx, id int64, update, aad string, v *string) error {
 	if v == nil {
 		return nil
@@ -156,7 +160,7 @@ func (s *Store) sealWifi(ctx context.Context, tx *dbTx, id int64, update, aad st
 			return fmt.Errorf("store: seal Wi-Fi profile %d: %w", id, err)
 		}
 	}
-	_, err := tx.ExecContext(ctx, update, id, enc)
+	_, err := tx.ExecContext(ctx, update, momo.Named("id", id), momo.Named("enc", enc))
 	return err
 }
 
@@ -172,8 +176,9 @@ func (s *Store) CreateWifiProfile(ctx context.Context, actor string, in WifiProf
 			return rid, false, err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO wifi_profiles (id, name, ssid, security, dot1x_id, priority, hidden, prefer_account, verified)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-			id, in.Name, in.SSID, in.Security, nullID(in.Dot1XID), in.Priority, in.Hidden, in.PreferAccount, in.Verified); err != nil {
+			VALUES (@id, @name, @ssid, @security, @dot1x_id, @priority, @hidden, @prefer_account, @verified)`,
+			momo.Named("id", id), momo.Named("name", in.Name), momo.Named("ssid", in.SSID), momo.Named("security", in.Security), momo.Named("dot1x_id", nullID(in.Dot1XID)),
+			momo.Named("priority", in.Priority), momo.Named("hidden", in.Hidden), momo.Named("prefer_account", in.PreferAccount), momo.Named("verified", in.Verified)); err != nil {
 			return rid, false, wifiNameError(err, in.Name)
 		}
 		return rid, false, s.sealWifi(ctx, tx, id, wifiSetPSK, prov.WifiPSKAAD(id), in.PSK)
@@ -192,10 +197,11 @@ func (s *Store) UpdateWifiProfile(ctx context.Context, actor string, id int64, i
 		if err := checkWifiDot1X(ctx, tx, in); err != nil {
 			return rid, false, err
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE wifi_profiles SET name = $2, ssid = $3, security = $4, dot1x_id = $5, priority = $6,
-				hidden = $7, prefer_account = $8, verified = $9, updated_at = now()
-			WHERE id = $1`,
-			id, in.Name, in.SSID, in.Security, nullID(in.Dot1XID), in.Priority, in.Hidden, in.PreferAccount, in.Verified)
+		res, err := tx.ExecContext(ctx, `UPDATE wifi_profiles SET name = @name, ssid = @ssid, security = @security, dot1x_id = @dot1x_id, priority = @priority,
+				hidden = @hidden, prefer_account = @prefer_account, verified = @verified, updated_at = now()
+			WHERE id = @id`,
+			momo.Named("id", id), momo.Named("name", in.Name), momo.Named("ssid", in.SSID), momo.Named("security", in.Security), momo.Named("dot1x_id", nullID(in.Dot1XID)),
+			momo.Named("priority", in.Priority), momo.Named("hidden", in.Hidden), momo.Named("prefer_account", in.PreferAccount), momo.Named("verified", in.Verified))
 		if err != nil {
 			return rid, false, wifiNameError(err, in.Name)
 		}
@@ -215,17 +221,17 @@ func (s *Store) DeleteWifiProfile(ctx context.Context, actor string, id int64) e
 	return s.provChange(ctx, actor, "delete", "wifi_profile", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
 		var groups, phones int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM wifi_profiles WHERE id = $1 FOR UPDATE`, id).Scan(new(int)); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM wifi_profiles WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(new(int)); err != nil {
 			return rid, false, err
 		}
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FILTER (WHERE group_id IS NOT NULL), count(*) FILTER (WHERE phone_id IS NOT NULL)
-			FROM wifi_assignments WHERE profile_id = $1`, id).Scan(&groups, &phones); err != nil {
+			FROM wifi_assignments WHERE profile_id = @profile_id`, momo.Named("profile_id", id)).Scan(&groups, &phones); err != nil {
 			return rid, false, err
 		}
 		if groups+phones > 0 {
 			return rid, false, conflict("the Wi-Fi profile is assigned to %d phone groups and %d phones; remove it from them first", groups, phones)
 		}
-		_, err := tx.ExecContext(ctx, `DELETE FROM wifi_profiles WHERE id = $1`, id)
+		_, err := tx.ExecContext(ctx, `DELETE FROM wifi_profiles WHERE id = @id`, momo.Named("id", id))
 		return rid, false, err
 	})
 }
@@ -250,20 +256,21 @@ func (s *Store) wifiIDs(ctx context.Context, q string, args ...any) ([]int64, er
 // GetWifiGroup returns a phone group's profiles and radio settings.
 func (s *Store) GetWifiGroup(ctx context.Context, groupID int64) (WifiScope, error) {
 	var one int
-	if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1`, groupID).Scan(&one); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = @id`, momo.Named("id", groupID)).Scan(&one); err != nil {
 		return WifiScope{}, mapErr(err)
 	}
 	sc := WifiScope{InheritedIDs: []int64{}}
 	var err error
-	if sc.ProfileIDs, err = s.wifiIDs(ctx, `SELECT profile_id FROM wifi_assignments WHERE group_id = $1 ORDER BY profile_id`, groupID); err != nil {
+	if sc.ProfileIDs, err = s.wifiIDs(ctx, `SELECT profile_id FROM wifi_assignments WHERE group_id = @group_id ORDER BY profile_id`,
+		momo.Named("group_id", groupID)); err != nil {
 		return sc, err
 	}
 	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(bool_or(p.verified), FALSE) FROM wifi_assignments a JOIN wifi_profiles p ON p.id = a.profile_id
-		WHERE a.group_id = $1`, groupID).Scan(&sc.Pushing); err != nil {
+		WHERE a.group_id = @group_id`, momo.Named("group_id", groupID)).Scan(&sc.Pushing); err != nil {
 		return sc, err
 	}
 	r := prov.WifiRadio{}
-	err = s.db.QueryRowContext(ctx, `SELECT band, roam_mode, threshold, poor_scan, good_scan, gain, dot11r, dot11v, prompt FROM wifi_radio WHERE group_id = $1`, groupID).
+	err = s.db.QueryRowContext(ctx, `SELECT band, roam_mode, threshold, poor_scan, good_scan, gain, dot11r, dot11v, prompt FROM wifi_radio WHERE group_id = @group_id`, momo.Named("group_id", groupID)).
 		Scan(nullable(&r.Band), nullable(&r.RoamMode), nullable(&r.Threshold), nullable(&r.PoorScan), nullable(&r.GoodScan), nullable(&r.Gain),
 			nullable(&r.Dot11r), nullable(&r.Dot11v), nullable(&r.Prompt))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -314,21 +321,23 @@ func (n *nullScan[T]) Scan(src any) error {
 // GetWifiPhone returns a phone's own profiles and those it inherits.
 func (s *Store) GetWifiPhone(ctx context.Context, phoneID int64) (WifiScope, error) {
 	var group sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `SELECT group_id FROM phones WHERE id = $1`, phoneID).Scan(&group); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT group_id FROM phones WHERE id = @id`, momo.Named("id", phoneID)).Scan(&group); err != nil {
 		return WifiScope{}, mapErr(err)
 	}
 	sc := WifiScope{InheritedIDs: []int64{}}
 	var err error
-	if sc.ProfileIDs, err = s.wifiIDs(ctx, `SELECT profile_id FROM wifi_assignments WHERE phone_id = $1 ORDER BY profile_id`, phoneID); err != nil {
+	if sc.ProfileIDs, err = s.wifiIDs(ctx, `SELECT profile_id FROM wifi_assignments WHERE phone_id = @phone_id ORDER BY profile_id`,
+		momo.Named("phone_id", phoneID)); err != nil {
 		return sc, err
 	}
 	if group.Valid {
-		if sc.InheritedIDs, err = s.wifiIDs(ctx, `SELECT profile_id FROM wifi_assignments WHERE group_id = $1 ORDER BY profile_id`, group.Int64); err != nil {
+		if sc.InheritedIDs, err = s.wifiIDs(ctx, `SELECT profile_id FROM wifi_assignments WHERE group_id = @group_id ORDER BY profile_id`,
+			momo.Named("group_id", group.Int64)); err != nil {
 			return sc, err
 		}
 	}
 	err = s.db.QueryRowContext(ctx, `SELECT COALESCE(bool_or(p.verified), FALSE) FROM wifi_assignments a JOIN wifi_profiles p ON p.id = a.profile_id
-		WHERE a.phone_id = $1 OR a.group_id = $2`, phoneID, group).Scan(&sc.Pushing)
+		WHERE a.phone_id = @phone_id OR a.group_id = @group_id`, momo.Named("phone_id", phoneID), momo.Named("group_id", group)).Scan(&sc.Pushing)
 	return sc, err
 }
 
@@ -343,7 +352,7 @@ func checkWifiIDs(ctx context.Context, tx *dbTx, ids []int64) error {
 			return fieldError(fmt.Sprintf("profileIds[%d]", i), "names the same profile as an earlier entry")
 		}
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM wifi_profiles WHERE id = $1`, id).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM wifi_profiles WHERE id = @id`, momo.Named("id", id)).Scan(&one); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return fieldError(fmt.Sprintf("profileIds[%d]", i), "no such Wi-Fi profile")
 			}
@@ -354,15 +363,16 @@ func checkWifiIDs(ctx context.Context, tx *dbTx, ids []int64) error {
 }
 
 func replaceWifiAssignments(ctx context.Context, tx *dbTx, group bool, owner int64, ids []int64) error {
-	del, ins := `DELETE FROM wifi_assignments WHERE phone_id = $1`, `INSERT INTO wifi_assignments (profile_id, phone_id) VALUES ($1, $2)`
+	// del binds @owner, ins @profile_id and @owner.
+	del, ins := `DELETE FROM wifi_assignments WHERE phone_id = @owner`, `INSERT INTO wifi_assignments (profile_id, phone_id) VALUES (@profile_id, @owner)`
 	if group {
-		del, ins = `DELETE FROM wifi_assignments WHERE group_id = $1`, `INSERT INTO wifi_assignments (profile_id, group_id) VALUES ($1, $2)`
+		del, ins = `DELETE FROM wifi_assignments WHERE group_id = @owner`, `INSERT INTO wifi_assignments (profile_id, group_id) VALUES (@profile_id, @owner)`
 	}
-	if _, err := tx.ExecContext(ctx, del, owner); err != nil {
+	if _, err := tx.ExecContext(ctx, del, momo.Named("owner", owner)); err != nil {
 		return err
 	}
 	for _, id := range ids {
-		if _, err := tx.ExecContext(ctx, ins, id, owner); err != nil {
+		if _, err := tx.ExecContext(ctx, ins, momo.Named("profile_id", id), momo.Named("owner", owner)); err != nil {
 			return err
 		}
 	}
@@ -375,7 +385,7 @@ func replaceWifiAssignments(ctx context.Context, tx *dbTx, group bool, owner int
 func (s *Store) PutWifiGroup(ctx context.Context, actor string, groupID int64, ids []int64, radio prov.WifiRadio) (WifiScope, error) {
 	err := s.provChange(ctx, actor, "update", "wifi_group", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(groupID, 10)
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1 FOR UPDATE`, groupID).Scan(new(int)); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = @id FOR UPDATE`, momo.Named("id", groupID)).Scan(new(int)); err != nil {
 			return rid, false, err
 		}
 		if err := checkWifiIDs(ctx, tx, ids); err != nil {
@@ -385,15 +395,17 @@ func (s *Store) PutWifiGroup(ctx context.Context, actor string, groupID int64, i
 			return rid, false, err
 		}
 		if radio == (prov.WifiRadio{}) {
-			_, err := tx.ExecContext(ctx, `DELETE FROM wifi_radio WHERE group_id = $1`, groupID)
+			_, err := tx.ExecContext(ctx, `DELETE FROM wifi_radio WHERE group_id = @group_id`, momo.Named("group_id", groupID))
 			return rid, false, err
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO wifi_radio (group_id, band, roam_mode, threshold, poor_scan, good_scan, gain, dot11r, dot11v, prompt)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			VALUES (@group_id, @band, @roam_mode, @threshold, @poor_scan, @good_scan, @gain, @dot11r, @dot11v, @prompt)
 			ON CONFLICT (group_id) DO UPDATE SET band = EXCLUDED.band, roam_mode = EXCLUDED.roam_mode, threshold = EXCLUDED.threshold,
 				poor_scan = EXCLUDED.poor_scan, good_scan = EXCLUDED.good_scan, gain = EXCLUDED.gain, dot11r = EXCLUDED.dot11r,
 				dot11v = EXCLUDED.dot11v, prompt = EXCLUDED.prompt, updated_at = now()`,
-			groupID, radio.Band, radio.RoamMode, radio.Threshold, radio.PoorScan, radio.GoodScan, radio.Gain, radio.Dot11r, radio.Dot11v, radio.Prompt)
+			momo.Named("group_id", groupID), momo.Named("band", radio.Band), momo.Named("roam_mode", radio.RoamMode), momo.Named("threshold", radio.Threshold),
+			momo.Named("poor_scan", radio.PoorScan), momo.Named("good_scan", radio.GoodScan), momo.Named("gain", radio.Gain), momo.Named("dot11r", radio.Dot11r),
+			momo.Named("dot11v", radio.Dot11v), momo.Named("prompt", radio.Prompt))
 		return rid, false, err
 	})
 	if err != nil {
@@ -406,7 +418,7 @@ func (s *Store) PutWifiGroup(ctx context.Context, actor string, groupID int64, i
 func (s *Store) PutWifiPhone(ctx context.Context, actor string, phoneID int64, ids []int64) (WifiScope, error) {
 	err := s.provChange(ctx, actor, "update", "wifi_phone", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(phoneID, 10)
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phones WHERE id = $1 FOR UPDATE`, phoneID).Scan(new(int)); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phones WHERE id = @id FOR UPDATE`, momo.Named("id", phoneID)).Scan(new(int)); err != nil {
 			return rid, false, err
 		}
 		if err := checkWifiIDs(ctx, tx, ids); err != nil {
@@ -430,8 +442,8 @@ func (s *Store) wifiInfo(ctx context.Context, phoneID int64, v prov.Vendor, mode
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT p.id, p.name, p.ssid, p.security, p.psk_enc, p.dot1x_id, p.priority, p.hidden, p.prefer_account, p.verified, a.phone_id IS NOT NULL
 		FROM wifi_assignments a JOIN wifi_profiles p ON p.id = a.profile_id
-		WHERE a.phone_id = $1 OR a.group_id = (SELECT group_id FROM phones WHERE id = $1)
-		ORDER BY p.id`, phoneID)
+		WHERE a.phone_id = @phone_id OR a.group_id = (SELECT group_id FROM phones WHERE id = @phone_id)
+		ORDER BY p.id`, momo.Named("phone_id", phoneID))
 	if err != nil {
 		return nil, err
 	}
@@ -472,7 +484,7 @@ func (s *Store) wifiInfo(ctx context.Context, phoneID int64, v prov.Vendor, mode
 	}
 	var r prov.WifiRadio
 	err = s.db.QueryRowContext(ctx, `SELECT band, roam_mode, threshold, poor_scan, good_scan, gain, dot11r, dot11v, prompt
-		FROM wifi_radio WHERE group_id = (SELECT group_id FROM phones WHERE id = $1)`, phoneID).
+		FROM wifi_radio WHERE group_id = (SELECT group_id FROM phones WHERE id = @phone_id)`, momo.Named("phone_id", phoneID)).
 		Scan(nullable(&r.Band), nullable(&r.RoamMode), nullable(&r.Threshold), nullable(&r.PoorScan), nullable(&r.GoodScan), nullable(&r.Gain),
 			nullable(&r.Dot11r), nullable(&r.Dot11v), nullable(&r.Prompt))
 	switch {
@@ -565,9 +577,10 @@ func (s *Store) adoptInsert(ctx context.Context, tx *dbTx, id int64, l legacyWif
 	}
 	name += " #" + strconv.FormatInt(l.id, 10)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO dot1x_profiles (id, name, method, identity, anonymous_identity, password_enc)
-		VALUES ($1, $2, 'peap', $3, $4, $5)`, id, name, l.identity, l.anonymous, enc); err != nil {
+		VALUES (@id, @name, 'peap', @identity, @anonymous_identity, @password_enc)`,
+		momo.Named("id", id), momo.Named("name", name), momo.Named("identity", l.identity), momo.Named("anonymous_identity", l.anonymous), momo.Named("password_enc", enc)); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE wifi_profiles SET dot1x_id = $2, updated_at = now() WHERE id = $1`, l.id, id)
+	_, err := tx.ExecContext(ctx, `UPDATE wifi_profiles SET dot1x_id = @dot1x_id, updated_at = now() WHERE id = @id`, momo.Named("id", l.id), momo.Named("dot1x_id", id))
 	return err
 }
