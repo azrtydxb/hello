@@ -9,15 +9,18 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cluster"
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/store"
+	"github.com/azrtydxb/momo"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/valkey-io/valkey-go"
@@ -82,7 +85,7 @@ func testEnv(t testing.TB) (*Env, *fakeLive) {
 	t.Helper()
 	db := scratchDB(t)
 	live := &fakeLive{trunks: map[int64]livestate.TrunkStatus{}}
-	return &Env{DB: db, Store: store.New(db), Live: live, Cluster: fakeMembers{}, Now: func() time.Time { return t0 }}, live
+	return &Env{DB: hellodb.New(db, slog.New(slog.DiscardHandler)), Store: store.New(db), Live: live, Cluster: fakeMembers{}, Now: func() time.Time { return t0 }}, live
 }
 
 // valkeyClient is a client on the CI Valkey's database 14 (flushed), or skips.
@@ -103,32 +106,34 @@ func valkeyClient(t testing.TB) valkey.Client {
 	return c
 }
 
-func exec(t testing.TB, db *sql.DB, q string, args ...any) {
+// exec runs a test fixture statement, written with native $n placeholders.
+func exec(t testing.TB, db *momo.DB, q string, args ...any) {
 	t.Helper()
-	if _, err := db.Exec(q, args...); err != nil {
+	if _, err := momo.Exec(context.Background(), db, q, args...); err != nil {
 		t.Fatalf("%s: %v", q, err)
 	}
 }
 
-func queryID(t testing.TB, db *sql.DB, q string, args ...any) int64 {
+// queryID runs a fixture statement returning one id.
+func queryID(t testing.TB, db *momo.DB, q string, args ...any) int64 {
 	t.Helper()
-	var id int64
-	if err := db.QueryRow(q, args...).Scan(&id); err != nil {
-		t.Fatalf("%s: %v", q, err)
+	ids, err := momo.Scalars[int64](context.Background(), db, q, args...)
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("%s: %d rows, %v", q, len(ids), err)
 	}
-	return id
+	return ids[0]
 }
 
-func addExtension(t testing.TB, db *sql.DB, number string) int64 {
+func addExtension(t testing.TB, db *momo.DB, number string) int64 {
 	return queryID(t, db, `INSERT INTO extensions (number, name) VALUES ($1, $1) RETURNING id`, number)
 }
 
-func addDevice(t testing.TB, db *sql.DB, ext int64, user string, enabled bool) int64 {
+func addDevice(t testing.TB, db *momo.DB, ext int64, user string, enabled bool) int64 {
 	return queryID(t, db, `INSERT INTO devices (extension_id, sip_username, realm, ha1_md5, ha1_sha256, enabled)
 		VALUES ($1, $2, 'hello.test', 'x', 'x', $3) RETURNING id`, ext, user, enabled)
 }
 
-func addTrunk(t testing.TB, db *sql.DB, name, mode string, maxCalls int, enabled bool) int64 {
+func addTrunk(t testing.TB, db *momo.DB, name, mode string, maxCalls int, enabled bool) int64 {
 	return queryID(t, db, `INSERT INTO trunks (name, mode, max_calls, enabled) VALUES ($1, $2, $3, $4) RETURNING id`, name, mode, maxCalls, enabled)
 }
 
@@ -143,7 +148,7 @@ type cdr struct {
 	jitter        *float64
 }
 
-func addCDR(t testing.TB, db *sql.DB, c cdr) {
+func addCDR(t testing.TB, db *momo.DB, c cdr) {
 	t.Helper()
 	if c.node == "" {
 		c.node = "sip-1"

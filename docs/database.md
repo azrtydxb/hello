@@ -13,9 +13,8 @@ are never logged.
 
 Moved so far: `internal/crm` (`crm.PG`) and the CDR writer (`internal/cdr`),
 which runs on hello-sip's pgx pool through `db.NewPool`, in the pool's own
-query execution mode. `internal/events` runs its ingest transaction on
-momo and hands the hooks its `*sql.Tx` (`pgxdriver.UnwrapSQLTx`), so a hook
-still writes in the same transaction, raw or through `db.AdoptTx`.
+query execution mode. `internal/webhook` (`webhook.PG`) takes its advisory
+locks through momo's `advisory` package with the same keys as before.
 
 ## Writing a statement
 
@@ -39,7 +38,11 @@ still writes in the same transaction, raw or through `db.AdoptTx`.
 - A test that runs every method on `momo.NewOffline(dialect.Postgres)` proves
   that each statement builds without a database (see
   `internal/crm/pg_offline_test.go`), so the pull request tier catches a
-  misspelled `@name`.
+  misspelled `@name`. A package whose statements mostly run inside
+  transactions, which the offline handle stops at BEGIN, uses a recording
+  stub driver instead (`internal/webhook/pg_offline_test.go`): it answers
+  every statement with one row so each method runs down its longest path,
+  and it pins the advisory lock statements and keys.
 
 ## Models
 

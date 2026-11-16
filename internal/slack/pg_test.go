@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/migrate"
 )
@@ -49,7 +51,7 @@ func scratch(t *testing.T) (*PG, *sql.DB) {
 	if _, err := migrate.Up(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	return &PG{DB: db}, db
+	return &PG{DB: hellodb.New(db, slog.New(slog.DiscardHandler))}, db
 }
 
 // TestPGQueue fails if an event is queued twice for one destination, if the
