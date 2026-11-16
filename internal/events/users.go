@@ -2,43 +2,32 @@ package events
 
 import (
 	"context"
-	"database/sql"
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
-// userQuerier is the part of *sql.DB and *sql.Tx the user lookup needs.
-type userQuerier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
 // usersOf returns the user each extension number is linked to; an extension
-// no user owns is absent from the result.
-func usersOf(ctx context.Context, q userQuerier, exts []string) (map[string]int64, error) {
+// no user owns is absent from the result. q is the pool or the ingest
+// transaction.
+func usersOf(ctx context.Context, q momo.Querier, exts []string) (map[string]int64, error) {
 	out := map[string]int64{}
 	if len(exts) == 0 {
 		return out, nil
 	}
-	rows, err := q.QueryContext(ctx, `
+	rows, err := momo.Query[momo.Row2[string, int64]](ctx, q, `
 		SELECT e.number, ue.user_id
 		FROM user_extensions ue JOIN extensions e ON e.id = ue.extension_id
-		WHERE e.number = ANY($1::text[])`, pgArray(exts))
+		WHERE e.number = ANY(@numbers::text[])`, momo.Named("numbers", pgArray(exts)))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var (
-			n  string
-			id int64
-		)
-		if err := rows.Scan(&n, &id); err != nil {
-			return nil, err
-		}
-		out[n] = id
+	for _, r := range rows {
+		out[r.C1] = r.C2
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // userTTL is how long the live path remembers which user owns an extension:
@@ -61,7 +50,7 @@ type userCache struct {
 // fill sets UserID on each event from the cache, looking up the extensions
 // it does not know in one query. A failed lookup leaves the events without a
 // user rather than holding the stream up.
-func (c *userCache) fill(ctx context.Context, q userQuerier, es []*Event) {
+func (c *userCache) fill(ctx context.Context, q momo.Querier, es []*Event) {
 	now := time.Now
 	if c.now != nil {
 		now = c.now

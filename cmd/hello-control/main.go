@@ -255,7 +255,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	crmSvc := newCRM(cfg, st, hellodb.New(db, log), box, vk, metrics.Registry, &crmLinks{Store: st, PublicURL: cfg.AI.PublicURL}, crmAudio{st: st, objs: objs}, log)
 	evSvc := &events.Service{
 		Hooks: []events.TxHook{crmSvc.Hook},
-		DB:    db, Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
+		DB:    hellodb.New(db, log), Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
 		RetentionDays: cfg.EventRetentionDays, Log: log.With("component", "events"),
 		Metrics: events.NewServiceMetrics(metrics.Registry),
 	}
@@ -289,11 +289,11 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// sync users; one replica runs a connector, the one holding its lock.
 	// SCIM (spec integrations P10): identity providers push to /scim/v2; the
 	// pushed resources are the source of the scim connector kind.
-	scimStore := &scim.PG{DB: db}
+	scimStore := &scim.PG{DB: hellodb.New(db, log)}
 	dirEngine := &directory.Engine{
 		// Range auto-provisioning (P12) creates extensions through the
 		// configuration store, with its numbering rules and routing check.
-		Store: &directory.PG{DB: db, Box: box, Provisioner: &dirstore.Provisioner{Store: st, Realm: cfg.SIPDomain}},
+		Store: &directory.PG{DB: hellodb.New(db, log), Box: box, Provisioner: &dirstore.Provisioner{Store: st, Realm: cfg.SIPDomain}},
 		Drivers: map[string]directory.Driver{
 			directory.KindLDAP: directory.LDAP{}, directory.KindGoogle: directory.Google{}, directory.KindEntra: directory.Entra{},
 			directory.KindSCIM: scim.Driver{Store: scimStore},
@@ -315,7 +315,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// and the LDAP bind login of AD-synced users. The sign-in state and the
 	// throttles live in Valkey; without HELLO_PUBLIC_URL SSO is off.
 	ssoSvc := &sso.Service{
-		Store: &sso.PG{DB: db, Box: box}, PublicURL: cfg.AI.PublicURL,
+		Store: &sso.PG{DB: hellodb.New(db, log), Box: box}, PublicURL: cfg.AI.PublicURL,
 		States: sso.ValkeyStates{Client: vk.Client}, Throttle: sso.ValkeyThrottle{Client: vk.Client},
 		Directory: dirEngine, Metrics: sso.NewMetrics(metrics.Registry), Log: log.With("component", "sso"),
 	}

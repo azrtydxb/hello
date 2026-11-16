@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/directory"
 	"github.com/azrtydxb/hello/internal/migrate"
 )
@@ -57,8 +59,9 @@ func pgDB(t *testing.T) *sql.DB {
 func TestPGStore(t *testing.T) {
 	db := pgDB(t)
 	ctx := context.Background()
-	p := &PG{DB: db}
-	eng := &directory.Engine{Store: &directory.PG{DB: db}, Drivers: map[string]directory.Driver{directory.KindSCIM: Driver{Store: p}}, Replica: "pg"}
+	m := hellodb.New(db, slog.New(slog.DiscardHandler))
+	p := &PG{DB: m}
+	eng := &directory.Engine{Store: &directory.PG{DB: m}, Drivers: map[string]directory.Driver{directory.KindSCIM: Driver{Store: p}}, Replica: "pg"}
 	on, name := true, "Okta"
 	c, err := eng.Create(ctx, "admin", directory.ConnectorInput{Kind: directory.KindSCIM, Name: &name, Enabled: &on,
 		Options: &directory.Options{LoginMethod: directory.LoginOIDC, OIDCProvider: directory.KindEntra}})
@@ -199,7 +202,7 @@ func TestPGStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, err := (&directory.PG{DB: db}).TryLock(ctx, "hello:dirsync:"+fmt.Sprint(c.ID)); err != nil || ok {
+	if _, ok, err := (&directory.PG{DB: hellodb.New(db, slog.New(slog.DiscardHandler))}).TryLock(ctx, "hello:dirsync:"+fmt.Sprint(c.ID)); err != nil || ok {
 		t.Fatalf("engine lock while SCIM holds it: %v %v", ok, err)
 	}
 	unlock()
