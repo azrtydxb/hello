@@ -786,6 +786,7 @@ func (c *call) replaceRemote(tx sip.ServerTransaction, lc livestate.Call, raw st
 	c.addTrace(fmt.Sprintf("Took over a dialog of call %s on node %s (Replaces)", lc.SIPCallID, lc.Node))
 	if !c.answerSelf([]byte(rep.Answer)) {
 		s.notifyPeer(c, lk)
+		s.replacesMetric(replacesConfirmed, replacesRefused) // as replaceCallee and replaceLinkedParty count it
 		return
 	}
 	if snap := s.deps.Snapshots.Current(); snap != nil {

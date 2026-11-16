@@ -6366,7 +6366,13 @@ passes.
   it cannot be counted before the response. A forced sleep there gives
   `{confirmed,ok} = 2, want 3`. The test now waits up to 10 s for the count
   to reach 3 and still fails unless it is exactly 3.
-- **Not changed, reported.** `replaceRemote` (the call is on another node)
-  returns without counting when `answerSelf` fails. The local takeover paths
-  count that as refused. This is a separate inconsistency and is left for a
-  decision.
+- **A takeover across nodes whose 200 cannot be sent counts as refused.**
+  `replaceRemote` returned without counting when `answerSelf` failed, while
+  `replaceCallee` and `replaceLinkedParty` count the same failure as
+  refused; it now counts it too (coordinator's decision, 2026-11-17).
+  `answerSelf` fails when the 200 cannot be sent (the phone cancelled, the
+  transaction is gone). It does not wait for the ACK, so a phone that never
+  ACKs is not detected on the `answerSelf` paths, local or remote; only
+  `replaceCaller` (`WriteResponse`) sees that case. The new test,
+  `TestReplacesAcrossNodesAnswerFails`, holds the answer on the second
+  node until the phone has cancelled and fails without the count.
