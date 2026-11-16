@@ -30,11 +30,14 @@ import (
 // native $n in one of them, so a converted file stays converted. A domain
 // pull request that converts a file adds it here.
 var namedFiles = map[string]bool{
+	"backup.go":       true,
 	"batch.go":        true,
 	"config.go":       true,
 	"dialspace.go":    true,
 	"dirprovision.go": true,
+	"faxes.go":        true,
 	"flow_canvas.go":  true,
+	"mail.go":         true,
 	"store.go":        true,
 }
 
