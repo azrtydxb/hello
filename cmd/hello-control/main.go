@@ -414,7 +414,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			_ = ln.Close()
 			return fmt.Errorf("ai proposals: %w", err)
 		}
-		props := proposal.NewStore(db, validator)
+		props := proposal.NewStore(hellodb.New(db, log), validator)
 		props.OnStatus = func(source string, st proposal.Status) {
 			agent.Metrics().Proposal(proposalSource(source), string(st))
 		}
@@ -446,7 +446,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		// and explain findings through it when it answers.
 		if cfg.AIAgent.AIOpsInterval > 0 {
 			env := &detect.Env{
-				DB: db, Store: st, Live: vk, Cluster: vk,
+				DB: hellodb.New(db, log), Store: st, Live: vk, Cluster: vk,
 				VKFunc:        vk.Client,
 				AuthFailLimit: cfg.AuthFailLimit,
 				Log:           log,

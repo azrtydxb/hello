@@ -10,6 +10,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/replay"
+	"github.com/azrtydxb/momo"
 )
 
 // ViaPrefix is the audit via of an applied action: "ai-proposal:<id>".
@@ -78,11 +79,11 @@ func (s *DBStore) apply(ctx context.Context, id string, header http.Header, user
 	}
 	// The outcome is written even if the caller goes away mid-way: actions
 	// already replayed are applied.
-	tx, err := s.db.BeginTx(context.WithoutCancel(ctx), nil)
+	tx, err := s.db.Begin(context.WithoutCancel(ctx), momo.TxOptions{})
 	if err != nil {
 		return Proposal{}, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 	p, err := lock(ctx, tx, id)
 	if err != nil {
 		return p, err
@@ -90,8 +91,8 @@ func (s *DBStore) apply(ctx context.Context, id string, header http.Header, user
 	if appliedVia != "" && (len(p.Actions) != 1 || p.Actions[0].OperationID != BatchOp) {
 		return p, ErrNotBatch
 	}
-	var rev int64
-	if err := tx.QueryRowContext(ctx, `SELECT config_revision FROM schema_info`).Scan(&rev); err != nil {
+	rev, err := revision(ctx, tx)
+	if err != nil {
 		return p, err
 	}
 	var (
@@ -110,21 +111,29 @@ func (s *DBStore) apply(ctx context.Context, id string, header http.Header, user
 		fj = raw
 	}
 	wc := context.WithoutCancel(ctx)
-	if _, err := tx.ExecContext(wc, `UPDATE ai_proposals SET status = $2, failure = $3, updated_at = now(),
-		applied_by = CASE WHEN $2 = 'applied' THEN $4::bigint END, applied_at = CASE WHEN $2 = 'applied' THEN now() END,
-		applied_via = CASE WHEN $2 = 'applied' THEN NULLIF($5, '') END,
-		batch_id = CASE WHEN $2 = 'applied' THEN NULLIF($6, '')::uuid END
-		WHERE id = $1`, id, string(status), fj, userID, appliedVia, batchID); err != nil {
+	if err := recordOutcome(wc, tx, id, status, fj, userID, appliedVia, batchID); err != nil {
 		return p, err
 	}
 	if err := audit(wc, tx, userID, "apply_"+string(status), id, appliedVia); err != nil {
 		return p, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(wc); err != nil {
 		return p, err
 	}
 	s.notify(p.Source, status)
 	return s.Get(wc, id)
+}
+
+// recordOutcome writes an apply's outcome: the status and failure, and who
+// applied it, how and as which batch when it was applied.
+func recordOutcome(ctx context.Context, q momo.Querier, id string, status Status, failure any, userID int64, appliedVia, batchID string) error {
+	_, err := momo.Exec(ctx, q, `UPDATE ai_proposals SET status = @status, failure = @failure, updated_at = now(),
+		applied_by = CASE WHEN @status::text = 'applied' THEN @by::bigint END, applied_at = CASE WHEN @status::text = 'applied' THEN now() END,
+		applied_via = CASE WHEN @status::text = 'applied' THEN NULLIF(@via, '') END,
+		batch_id = CASE WHEN @status::text = 'applied' THEN NULLIF(@batch, '')::uuid END
+		WHERE id = @id`, momo.Named("id", id), momo.Named("status", string(status)), momo.Named("failure", failure), momo.Named("by", userID),
+		momo.Named("via", appliedVia), momo.Named("batch", batchID))
+	return err
 }
 
 // changed reports whether any target's current state differs from its

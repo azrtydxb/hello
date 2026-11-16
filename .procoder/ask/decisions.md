@@ -5838,3 +5838,49 @@ answered, whatever the order.
   at GOMAXPROCS=2. The CI failure did not reproduce locally. New test on
   old code: "487 before 200" failed 50/50 with the CI message ("timed out waiting for ACK to the callee's crossing 200"); "200 before 487" failed 0/50. New test with the fix: 0/50 for
   each order.
+
+## momo Phase 2: internal/ai/proposal and internal/ai/detect (2026-11-16, feat/momo-p2-ai)
+
+- **Handle.** `proposal.NewStore` and `detect.Env.DB` take the `*momo.DB`
+  that hello-control builds inline with `hellodb.New(db, log)` at each
+  construction site. Every statement keeps its SQL text with `@name` binds.
+  AI calls are untouched (still go-ai-sdk through `internal/ai`).
+- **Advisory lock.** Upsert's `pg_advisory_xact_lock(hashtext('hello:ai:proposals'))`
+  is now `advisory.XactLockString(ctx, tx, "hello:ai:proposals")`: the same
+  function, the same server-side `hashtext` of the same text (bound as a
+  parameter instead of a literal), so old and new pods contend on one key.
+- **Transactions.** Upsert, Dismiss and Apply use `momo.DB.Begin` with a
+  deferred Rollback rather than `DB.Tx`, so the early `return id,
+tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
+  ErrNotFound, ErrNotBatch) are exactly as before. Apply still begins on
+  `context.WithoutCancel(ctx)` and writes its outcome and commits on it.
+  Difference (as in Phase 1, accepted): with `FromSQLDB` a transaction
+  outlives the context given to Begin, so a cancelled request no longer
+  rolls the transaction back by itself; the next statement fails on the
+  cancelled context and the deferred Rollback ends it.
+- **Same results for callers.** Single-row reads go through a local `one()`
+  that returns `sql.ErrNoRows`, so ErrNotFound, ErrNotOpen and the
+  suppression check map as before; `List` still returns an empty, non-nil
+  slice. `FOR UPDATE SKIP LOCKED` in `lock` is unchanged. The detectors'
+  `QueryRow` on the last explanation sample became a read of at most one
+  row (no row is the zero state, as `isNoRows` gave). `history` now wraps a
+  row scan error in "read <kind> samples" too (it wrapped only the query).
+- **Reused binds.** momo renders one bind per use of an `@name`, so a use
+  that PostgreSQL must type on its own carries a cast: `@status::text` and
+  `@source::text` in List, `@status::text` in Apply's outcome update. The
+  supersede query's `@session::uuid IS NOT NULL AND session_id = @session`
+  is typed by the cast and the column.
+- **Statements pulled into helpers for the build test.** Upsert's three
+  statements (`suppressed`, `refresh`, `insert`), Dismiss's update
+  (`markDismissed`) and Apply's outcome update (`recordOutcome`) are small
+  functions on `momo.Querier`, as are `lock`, `audit` and `supersede`;
+  detect's last-explanation read (`lastExplained`) and the
+  never-registered read (`neverRegistered`) likewise. The offline tests
+  (`TestStatementsBuild` in both packages) call each on
+  `momo.NewOffline(dialect.Postgres)`, so a misspelled `@name` fails the
+  pull request tier. Neither package has an in-memory fake of its own, so
+  there is no mem/pg contract test; the DB-backed tests (env_test,
+  batch_db_test, the detector tests) cover behaviour in the integration job.
+- **Detector test fixtures** run on the same momo handle (`momo.Exec`,
+  `momo.Scalars`) with their native `$n` placeholders, which momo accepts
+  on PostgreSQL.
