@@ -6068,3 +6068,45 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   changes, the SCIM run of the hour, link and release, the lock); the
   known differences are listed in the test's comment. The SCIM PG test
   builds `directory.PG` on the momo handle too.
+
+## momo Phase 2: the SCIM store (2026-11-16, momo/scim)
+
+- **Scope.** `internal/scim/pg.go`, all 24 raw call sites plus the
+  dedicated connection of Lock, moves to momo v0.14.0; `scim.PG.DB` is a
+  `*momo.DB`, built inline in hello-control. The other "call sites" a grep
+  finds in the package (`URL.Query()` in handler.go) are not SQL. Stacked on
+  the directory PR (momo/directory): the SCIM PG test builds `directory.PG`
+  on the momo handle, which that PR introduces.
+- **Same SQL, named binds, positional scans.** As in the directory store:
+  every statement keeps its text with `@name` binds, rows are scanned by
+  the existing `scanToken`/`scanResource` through `momo.RawRows`, and
+  `queryRow` returns `sql.ErrNoRows` so the mapping to ErrNotFound (a
+  missing token, a moved resource version) is unchanged. FindDeleted's
+  reused externalId bind is cast `@external_id::text` at each use, the type
+  PostgreSQL inferred for the single `$4`. FindResources binds the hint as
+  `@value`.
+- **The mass-deprovision guard (I-25) and adoptExisting are unchanged.**
+  Neither lives in this store: the guard counts the SCIM runs' disables
+  through `directory.Store.PushDisables`/`RecordPush`/`SetPaused` (moved,
+  same statements, in the directory PR) and decides in the directory
+  engine (`push.go`); adoption is the service's `AdoptExisting` switch, the
+  engine's plan and `directory.PG.Apply`. This store's part
+  is the per-connector lock that serialises a push with a directory run,
+  which keeps its key and semantics (below).
+- **Lock.** Lock pins one connection (`momo.Pinner`) and takes
+  `advisory.LockString` with a deadline of lockWait: the same
+  `pg_advisory_lock(hashtext('hello:dirsync:<id>'))` the directory engine's
+  TryLock takes, so a push and a run still exclude each other across
+  replicas. A wait that fails is still ErrBusy when only the lock wait ran
+  out, and the connection is discarded (`momo.Discarder`) as the
+  `driver.ErrBadConn` path did; so is one whose unlock fails.
+- **Transactions and errors unchanged.** CreateToken, RevokeToken and
+  SaveResource run in `momo.DB.Tx` with their audit rows. SaveResource maps
+  a unique violation to ErrConflict and a foreign key violation (an unknown
+  member) to ErrNotFound, by momo's kinds or the 23505/23503
+  `*pgconn.PgError` check it always made.
+- **Tests.** `TestPGStatementsBuild` runs every method on a scripted momo
+  driver (a copy of the directory package's) on the PR tier.
+  `TestStoreContractMem`/`PG` run the same token, resource, membership,
+  count and lock assertions on Mem and PG; the known differences are in the
+  test's comment.
