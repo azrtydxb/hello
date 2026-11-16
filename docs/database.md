@@ -11,7 +11,9 @@ is no second connection pool. Statements are logged at debug level with the
 component `db`, and at warn when slower than `db.SlowQuery`; argument values
 are never logged.
 
-Moved so far: `internal/crm` (`crm.PG`).
+Moved so far: `internal/crm` (`crm.PG`) and the CDR writer (`internal/cdr`),
+which runs on hello-sip's pgx pool through `db.NewPool`, in the pool's own
+query execution mode.
 
 ## Writing a statement
 
@@ -28,6 +30,10 @@ Moved so far: `internal/crm` (`crm.PG`).
   on `db.AdoptTx(m, tx)`; the caller still commits or rolls back.
 - Errors keep the driver's error inside: `errors.As(err, &*pgconn.PgError)`
   still works, and momo adds kinds such as `momo.ErrUniqueViolation`.
+- A statement worth freezing goes into a `momo.QueryRegistry` and a
+  `momotest.QueryGolden` test, which writes the SQL PostgreSQL receives to
+  `testdata/queries/postgres.sql` (rewrite after an intended change with
+  `MOMO_UPDATE_GOLDEN=1`, then review the diff). See `internal/cdr`.
 - A test that runs every method on `momo.NewOffline(dialect.Postgres)` proves
   that each statement builds without a database (see
   `internal/crm/pg_offline_test.go`), so the pull request tier catches a
