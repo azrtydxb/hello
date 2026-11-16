@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"slices"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/ai/assistant/chat"
 )
 
@@ -34,14 +36,15 @@ func scanAISession(row interface{ Scan(...any) error }) (chat.Session, error) {
 // CreateAISession starts a session owned by owner.
 func (s *Store) CreateAISession(ctx context.Context, owner int64, title string) (chat.Session, error) {
 	return scanAISession(s.db.QueryRowContext(ctx,
-		`INSERT INTO ai_sessions (id, owner, title) VALUES (gen_random_uuid(), $1, $2) RETURNING `+aiSessionCols, owner, title))
+		`INSERT INTO ai_sessions (id, owner, title) VALUES (gen_random_uuid(), @owner, @title) RETURNING `+aiSessionCols,
+		momo.Named("owner", owner), momo.Named("title", title)))
 }
 
 // ListAISessions lists owner's sessions, or all with owner 0, most recently
 // active first.
 func (s *Store) ListAISessions(ctx context.Context, owner int64) ([]chat.Session, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+aiSessionCols+` FROM ai_sessions
-		WHERE $1::bigint = 0 OR owner = $1::bigint ORDER BY last_active_at DESC, id`, owner)
+		WHERE @owner::bigint = 0 OR owner = @owner::bigint ORDER BY last_active_at DESC, id`, momo.Named("owner", owner))
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +65,7 @@ func (s *Store) GetAISession(ctx context.Context, id string) (chat.Session, erro
 	if !uuidText.MatchString(id) {
 		return chat.Session{}, chat.ErrNotFound
 	}
-	return scanAISession(s.db.QueryRowContext(ctx, `SELECT `+aiSessionCols+` FROM ai_sessions WHERE id = $1`, id))
+	return scanAISession(s.db.QueryRowContext(ctx, `SELECT `+aiSessionCols+` FROM ai_sessions WHERE id = @id`, momo.Named("id", id)))
 }
 
 // RenameAISession sets a session's title.
@@ -71,17 +74,18 @@ func (s *Store) RenameAISession(ctx context.Context, id, title string) (chat.Ses
 		return chat.Session{}, chat.ErrNotFound
 	}
 	return scanAISession(s.db.QueryRowContext(ctx,
-		`UPDATE ai_sessions SET title = $2 WHERE id = $1 RETURNING `+aiSessionCols, id, title))
+		`UPDATE ai_sessions SET title = @title WHERE id = @id RETURNING `+aiSessionCols, momo.Named("id", id), momo.Named("title", title)))
 }
 
 // lockAISession serialises the writes of one session in tx; posts and
 // deletes take it so a check for a running task cannot race a new task.
 func lockAISession(ctx context.Context, tx *dbTx, id string) error {
-	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('hello:ai:session:' || $1::text))`, id)
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('hello:ai:session:' || @session_id::text))`, momo.Named("session_id", id))
 	return err
 }
 
-const activeAITask = `SELECT EXISTS (SELECT 1 FROM ai_tasks WHERE session_id = $1 AND status IN ('queued', 'running'))`
+// activeAITask binds @session_id.
+const activeAITask = `SELECT EXISTS (SELECT 1 FROM ai_tasks WHERE session_id = @session_id AND status IN ('queued', 'running'))`
 
 // DeleteAISession deletes a session and, by cascade, its messages; refused
 // while a task works for it.
@@ -98,13 +102,13 @@ func (s *Store) DeleteAISession(ctx context.Context, id string) error {
 		return err
 	}
 	var busy bool
-	if err := tx.QueryRowContext(ctx, activeAITask, id).Scan(&busy); err != nil {
+	if err := tx.QueryRowContext(ctx, activeAITask, momo.Named("session_id", id)).Scan(&busy); err != nil {
 		return err
 	}
 	if busy {
 		return chat.ErrTaskRunning
 	}
-	res, err := tx.ExecContext(ctx, `DELETE FROM ai_sessions WHERE id = $1`, id)
+	res, err := tx.ExecContext(ctx, `DELETE FROM ai_sessions WHERE id = @id`, momo.Named("id", id))
 	if err != nil {
 		return err
 	}
@@ -115,6 +119,13 @@ func (s *Store) DeleteAISession(ctx context.Context, id string) error {
 }
 
 const aiMessageCols = `id, session_id::text, role, content, tool_calls, citations, proposal_id::text, task_id::text, created_at, context`
+
+// A session's messages, oldest first, and its latest @window messages,
+// newest first; both bind @session_id.
+const (
+	aiSessionMessages = `SELECT ` + aiMessageCols + ` FROM ai_messages WHERE session_id = @session_id ORDER BY id`
+	aiMessageHistory  = `SELECT ` + aiMessageCols + ` FROM ai_messages WHERE session_id = @session_id ORDER BY id DESC LIMIT @window`
+)
 
 func scanAIMessage(row interface{ Scan(...any) error }) (chat.Message, error) {
 	var m chat.Message
@@ -174,7 +185,7 @@ func (s *Store) AIMessages(ctx context.Context, sessionID string) ([]chat.Messag
 	if !uuidText.MatchString(sessionID) {
 		return nil, chat.ErrNotFound
 	}
-	return queryAIMessages(ctx, s.db, `SELECT `+aiMessageCols+` FROM ai_messages WHERE session_id = $1 ORDER BY id`, sessionID)
+	return queryAIMessages(ctx, s.db, aiSessionMessages, momo.Named("session_id", sessionID))
 }
 
 // ActiveAITask returns the session's queued or running task, or nil.
@@ -186,8 +197,8 @@ func (s *Store) ActiveAITask(ctx context.Context, sessionID string) (*chat.Task,
 	var result []byte
 	err := s.db.QueryRowContext(ctx, `SELECT id::text, kind, status, session_id::text, error_code, error_message,
 			result, created_at, started_at, finished_at
-		FROM ai_tasks WHERE session_id = $1 AND status IN ('queued', 'running')
-		ORDER BY created_at DESC LIMIT 1`, sessionID).
+		FROM ai_tasks WHERE session_id = @session_id AND status IN ('queued', 'running')
+		ORDER BY created_at DESC LIMIT 1`, momo.Named("session_id", sessionID)).
 		Scan(&t.ID, &t.Kind, &t.Status, &t.SessionID, &t.ErrorCode, &t.ErrorMessage, &result, &t.CreatedAt, &t.StartedAt, &t.FinishedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -229,7 +240,7 @@ func (s *Store) PostAIMessage(ctx context.Context, sessionID, content string, mc
 		return 0, "", err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE ai_sessions SET last_active_at = now(),
-		title = CASE WHEN title = '' THEN $2 ELSE title END WHERE id = $1`, sessionID, title)
+		title = CASE WHEN title = '' THEN @title ELSE title END WHERE id = @id`, momo.Named("id", sessionID), momo.Named("title", title))
 	if err != nil {
 		return 0, "", err
 	}
@@ -237,19 +248,19 @@ func (s *Store) PostAIMessage(ctx context.Context, sessionID, content string, mc
 		return 0, "", chat.ErrNotFound
 	}
 	var busy bool
-	if err := tx.QueryRowContext(ctx, activeAITask, sessionID).Scan(&busy); err != nil {
+	if err := tx.QueryRowContext(ctx, activeAITask, momo.Named("session_id", sessionID)).Scan(&busy); err != nil {
 		return 0, "", err
 	}
 	if busy {
 		return 0, "", chat.ErrTaskRunning
 	}
 	var msgID int64
-	if err := tx.QueryRowContext(ctx, `INSERT INTO ai_messages (session_id, role, content, context) VALUES ($1, 'user', $2, $3::jsonb) RETURNING id`,
-		sessionID, content, mcJSON).Scan(&msgID); err != nil {
+	if err := tx.QueryRowContext(ctx, `INSERT INTO ai_messages (session_id, role, content, context) VALUES (@session_id, 'user', @content, @context::jsonb) RETURNING id`,
+		momo.Named("session_id", sessionID), momo.Named("content", content), momo.Named("context", mcJSON)).Scan(&msgID); err != nil {
 		return 0, "", err
 	}
-	history, err := queryAIMessages(ctx, tx, `SELECT `+aiMessageCols+` FROM ai_messages WHERE session_id = $1 ORDER BY id DESC LIMIT $2`,
-		sessionID, window)
+	history, err := queryAIMessages(ctx, tx, aiMessageHistory,
+		momo.Named("session_id", sessionID), momo.Named("window", window))
 	if err != nil {
 		return 0, "", err
 	}
@@ -258,7 +269,7 @@ func (s *Store) PostAIMessage(ctx context.Context, sessionID, content string, mc
 	if err != nil {
 		return 0, "", err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE ai_messages SET task_id = $2 WHERE id = $1`, msgID, taskID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE ai_messages SET task_id = @task_id WHERE id = @id`, momo.Named("id", msgID), momo.Named("task_id", taskID)); err != nil {
 		return 0, "", err
 	}
 	return msgID, taskID, tx.Commit()
@@ -281,12 +292,14 @@ func (s *Store) AddAIMessage(ctx context.Context, m chat.Message) (int64, error)
 	defer func() { _ = tx.Rollback() }()
 	var id int64
 	err = tx.QueryRowContext(ctx, `INSERT INTO ai_messages (session_id, role, content, tool_calls, citations, proposal_id, task_id)
-		VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7) RETURNING id`,
-		m.SessionID, m.Role, m.Content, string(calls), string(cites), m.ProposalID, m.TaskID).Scan(&id)
+		VALUES (@session_id, @role, @content, @tool_calls::jsonb, @citations::jsonb, @proposal_id, @task_id) RETURNING id`,
+		momo.Named("session_id", m.SessionID), momo.Named("role", m.Role), momo.Named("content", m.Content),
+		momo.Named("tool_calls", string(calls)), momo.Named("citations", string(cites)),
+		momo.Named("proposal_id", m.ProposalID), momo.Named("task_id", m.TaskID)).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE ai_sessions SET last_active_at = now() WHERE id = $1`, m.SessionID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE ai_sessions SET last_active_at = now() WHERE id = @id`, momo.Named("id", m.SessionID)); err != nil {
 		return 0, err
 	}
 	return id, tx.Commit()
@@ -298,7 +311,7 @@ func (s *Store) OpenAIFindings(ctx context.Context, limit int) ([]chat.Finding, 
 	rows, err := s.db.QueryContext(ctx, `SELECT id::text, type, subject, severity, status, title, last_seen
 		FROM ai_findings WHERE status IN ('open', 'acknowledged')
 		ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, last_seen DESC
-		LIMIT $1`, limit)
+		LIMIT @limit`, momo.Named("limit", limit))
 	if err != nil {
 		return nil, err
 	}
