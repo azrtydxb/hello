@@ -49,6 +49,8 @@ var namedFiles = map[string]bool{
 	"backup.go":            true,
 	"faxes.go":             true,
 	"mail.go":              true,
+	"webchat.go":           true,
+	"webchat_sites.go":     true,
 }
 
 // TestStatementsBuild renders every statement the store's code passes as a
