@@ -581,6 +581,9 @@ func (m *Mem) UserConnection(_ context.Context, connectorID, userID int64) (Conn
 }
 
 func (m *Mem) SaveUserConnection(_ context.Context, connectorID, userID int64, t Tokens) (ConnectionRow, error) {
+	if userID == 0 {
+		return ConnectionRow{}, ErrNotFound // as PG: user 0 is the org connection, never a user's
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	k := [2]int64{connectorID, userID}
