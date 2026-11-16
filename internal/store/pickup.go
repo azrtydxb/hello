@@ -8,7 +8,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 )
@@ -97,7 +96,7 @@ func (s *Store) GetPickupGroup(ctx context.Context, id int64) (PickupGroup, erro
 	return gs[0], nil
 }
 
-func writePickupMembers(ctx context.Context, tx *sql.Tx, id int64, members []int64) error {
+func writePickupMembers(ctx context.Context, tx *dbTx, id int64, members []int64) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM pickup_group_members WHERE group_id = $1`, id); err != nil {
 		return err
 	}
@@ -115,7 +114,7 @@ func writePickupMembers(ctx context.Context, tx *sql.Tx, id int64, members []int
 // CreatePickupGroup inserts a pickup group with its members.
 func (s *Store) CreatePickupGroup(ctx context.Context, actor string, in PickupGroupInput, check Check) (PickupGroup, error) {
 	var g PickupGroup
-	err := s.configChange(ctx, actor, "create", "pickup_group", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "pickup_group", check, func(tx *dbTx) (int64, error) {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM pickup_groups`).Scan(&n); err != nil {
 			return 0, err
@@ -142,7 +141,7 @@ func (s *Store) CreatePickupGroup(ctx context.Context, actor string, in PickupGr
 // UpdatePickupGroup replaces a pickup group.
 func (s *Store) UpdatePickupGroup(ctx context.Context, actor string, id int64, in PickupGroupInput, check Check) (PickupGroup, error) {
 	var g PickupGroup
-	err := s.configChange(ctx, actor, "update", "pickup_group", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "pickup_group", check, func(tx *dbTx) (int64, error) {
 		res, err := tx.ExecContext(ctx, `UPDATE pickup_groups SET name = $2, updated_at = now() WHERE id = $1`, id, in.Name)
 		if err != nil {
 			return id, err
@@ -164,7 +163,7 @@ func (s *Store) UpdatePickupGroup(ctx context.Context, actor string, id int64, i
 
 // DeletePickupGroup removes a pickup group and, by cascade, its members.
 func (s *Store) DeletePickupGroup(ctx context.Context, actor string, id int64, check Check) error {
-	return s.configChange(ctx, actor, "delete", "pickup_group", check, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "pickup_group", check, func(tx *dbTx) (int64, error) {
 		res, err := tx.ExecContext(ctx, `DELETE FROM pickup_groups WHERE id = $1`, id)
 		if err != nil {
 			return id, err

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -60,7 +59,7 @@ func (s *Store) PutTTSSettings(ctx context.Context, actor string, c TTSChange) (
 		}
 		hint = keyHint(*c.APIKey)
 	}
-	err := s.provChange(ctx, actor, "update", "tts_settings", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "tts_settings", func(tx *dbTx) (string, bool, error) {
 		_, err := tx.ExecContext(ctx, `
 			UPDATE tts_settings SET
 				api_key_enc = COALESCE($1, api_key_enc),
@@ -79,7 +78,7 @@ func (s *Store) PutTTSSettings(ctx context.Context, actor string, c TTSChange) (
 
 // ClearTTSKey removes the stored key.
 func (s *Store) ClearTTSKey(ctx context.Context, actor string) (TTSSettings, error) {
-	err := s.provChange(ctx, actor, "delete", "tts_key", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "delete", "tts_key", func(tx *dbTx) (string, bool, error) {
 		_, err := tx.ExecContext(ctx,
 			`UPDATE tts_settings SET api_key_enc = NULL, key_hint = '', updated_at = now() WHERE id = 1`)
 		return "tts", false, err

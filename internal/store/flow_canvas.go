@@ -7,7 +7,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"time"
@@ -95,7 +94,7 @@ func (s *Store) GetFlowCanvas(ctx context.Context, id int64) (FlowCanvas, []Flow
 }
 
 type queryer interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryContext(context.Context, string, ...any) (*dbRows, error)
 }
 
 func (s *Store) flowCanvasNodes(ctx context.Context, q queryer, id int64) ([]FlowCanvasNode, error) {
@@ -118,7 +117,7 @@ func (s *Store) flowCanvasNodes(ctx context.Context, q queryer, id int64) ([]Flo
 // CreateFlowCanvas inserts an empty canvas.
 func (s *Store) CreateFlowCanvas(ctx context.Context, actor, name, description string) (FlowCanvas, error) {
 	var c FlowCanvas
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM flow_canvases`).Scan(&n); err != nil {
 			return err
@@ -144,7 +143,7 @@ func (s *Store) CreateFlowCanvas(ctx context.Context, actor, name, description s
 // UpdateFlowCanvas changes a canvas's name, description or saved view.
 func (s *Store) UpdateFlowCanvas(ctx context.Context, actor string, id int64, ch FlowCanvasChange) (FlowCanvas, error) {
 	var c FlowCanvas
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var viewport any
 		setVP := ch.Viewport != nil
 		if setVP {
@@ -172,7 +171,7 @@ func (s *Store) UpdateFlowCanvas(ctx context.Context, actor string, id int64, ch
 // DeleteFlowCanvas removes a canvas and its layout. The configuration the
 // canvas drew is untouched.
 func (s *Store) DeleteFlowCanvas(ctx context.Context, actor string, id int64) error {
-	return mapErr(s.tx(ctx, func(tx *sql.Tx) error {
+	return mapErr(s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM flow_canvases WHERE id = $1`, id)
 		if err != nil {
 			return err
@@ -201,7 +200,7 @@ type FlowLayoutWrite struct {
 func (s *Store) PutFlowLayout(ctx context.Context, actor string, id int64, w FlowLayoutWrite) (FlowCanvas, []FlowCanvasNode, error) {
 	var c FlowCanvas
 	var nodes []FlowCanvasNode
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var cur int64
 		if err := tx.QueryRowContext(ctx, `SELECT layout_version FROM flow_canvases WHERE id = $1 FOR UPDATE`, id).Scan(&cur); err != nil {
 			return err

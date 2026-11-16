@@ -107,9 +107,9 @@ func run(args []string) error {
 	case len(args) >= 2 && args[0] == "backup" && args[1] == "restore":
 		return backupRestore(ctx, cfg, db, log, args[2:], os.Getenv, os.Stdin, os.Stdout)
 	case len(args) >= 2 && args[0] == "user" && args[1] == "add":
-		return userAdd(ctx, store.New(db), args[2:], os.Stdin, os.Stdout)
+		return userAdd(ctx, store.New(db, log), args[2:], os.Stdin, os.Stdout)
 	case len(args) == 3 && args[0] == "user" && args[1] == "2fa-reset":
-		return user2FAReset(ctx, store.New(db), args[2], os.Stdout)
+		return user2FAReset(ctx, store.New(db, log), args[2], os.Stdout)
 	}
 	return fmt.Errorf("%s", usage)
 }
@@ -140,7 +140,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// register with a hello-sip node directly get the other nodes as backups.
 	sipNodes := &api.SIPNodeList{}
 	settings.SIPNodes = sipNodes.Addrs
-	st := store.New(db).WithSecretBox(box).WithProv(settings)
+	st := store.New(db, log).WithSecretBox(box).WithProv(settings)
 	go bootstrap(ctx, st, cfg.BootstrapAdminPassword, log)
 	go pruneSessions(ctx, st, log)
 	go seedFeatureCodes(ctx, st, log)

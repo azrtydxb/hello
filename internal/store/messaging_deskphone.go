@@ -20,10 +20,10 @@ import (
 	"github.com/azrtydxb/hello/internal/prov"
 )
 
-// dbQuery is what *sql.DB and *sql.Tx share.
+// dbQuery is what the pool and a transaction share.
 type dbQuery interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *dbRow
+	QueryContext(context.Context, string, ...any) (*dbRows, error)
 }
 
 // Name sources a contact lookup reports.
@@ -239,7 +239,7 @@ func (s *Store) UserPhoneVendors(ctx context.Context, userID int64) ([]prov.Vend
 // phone: text messaging off, a door station, a rate limit or a user without
 // an extension just mean nothing is queued. A message already queued for the
 // extension is not queued again, so a retry or a second assignment is quiet.
-func (s *Store) deliverToDeskPhone(ctx context.Context, tx *sql.Tx, convID, cm, userID int64) error {
+func (s *Store) deliverToDeskPhone(ctx context.Context, tx *dbTx, convID, cm, userID int64) error {
 	var (
 		chKind, peerKey, peerName, body, ext, extKind string
 		addrOn, userOn                                bool
@@ -313,7 +313,7 @@ func (s *Store) deliverToDeskPhone(ctx context.Context, tx *sql.Tx, convID, cm, 
 
 // deliverLastToDeskPhone hands the customer's latest message of a conversation
 // to the phones of the user it was just assigned to.
-func (s *Store) deliverLastToDeskPhone(ctx context.Context, tx *sql.Tx, convID, userID int64) error {
+func (s *Store) deliverLastToDeskPhone(ctx context.Context, tx *dbTx, convID, userID int64) error {
 	var cm int64
 	err := tx.QueryRowContext(ctx, `SELECT id FROM conversation_messages WHERE conversation_id = $1
 		AND direction = 'in' AND kind = 'message' ORDER BY id DESC LIMIT 1`, convID).Scan(&cm)

@@ -78,7 +78,7 @@ func scanPush(r interface{ Scan(...any) error }) (PhonePush, error) {
 // notifies the SIP nodes. An open push of the same kind for the phone is
 // returned instead of adding another. ok is false for a phone that cannot
 // be pushed (unbound or disabled).
-func queuePush(ctx context.Context, tx *sql.Tx, phoneID int64, kind, source, actor string) (p PhonePush, ok bool, err error) {
+func queuePush(ctx context.Context, tx *dbTx, phoneID int64, kind, source, actor string) (p PhonePush, ok bool, err error) {
 	var eligible bool
 	if err := tx.QueryRowContext(ctx, `SELECT device_id IS NOT NULL AND enabled FROM phones WHERE id = $1 FOR UPDATE`, phoneID).
 		Scan(&eligible); err != nil {
@@ -111,7 +111,7 @@ func queuePush(ctx context.Context, tx *sql.Tx, phoneID int64, kind, source, act
 // returns ErrPushUnbound for a phone with no device or one that is disabled.
 func (s *Store) QueuePush(ctx context.Context, actor string, phoneID int64, kind string) (PhonePush, error) {
 	var out PhonePush
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		p, ok, err := queuePush(ctx, tx, phoneID, kind, PushManual, actor)
 		if err != nil {
 			return err
@@ -129,7 +129,7 @@ func (s *Store) QueuePush(ctx context.Context, actor string, phoneID int64, kind
 // group, or of all phones when groupID is 0, and audits it once. Phones
 // that cannot be pushed are counted as skipped.
 func (s *Store) QueuePushGroup(ctx context.Context, actor string, groupID int64, kind string) (queued, skipped int, err error) {
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		queued, skipped = 0, 0
 		resource, rid := "phone", "all"
 		q := `SELECT id FROM phones ORDER BY id`
@@ -226,7 +226,7 @@ const pushLockKey = 0x68656c6c6f707368 // "hellopsh"
 // also writes off pushes whose node died.
 func (s *Store) ClaimPushes(ctx context.Context, node string, perMinute int) ([]PushJob, error) {
 	var jobs []PushJob
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		jobs = nil
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(pushLockKey)); err != nil {
 			return err
@@ -327,7 +327,7 @@ func (s *Store) AutoSyncPhones(ctx context.Context) (map[int64]string, error) {
 // resync in the same transaction. Only one control replica wins the change;
 // queued is false for the others.
 func (s *Store) AutoResync(ctx context.Context, phoneID int64, old, hash string) (queued bool, err error) {
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		queued = false
 		res, err := tx.ExecContext(ctx, `UPDATE phones SET sync_hash = $3 WHERE id = $1 AND COALESCE(sync_hash, '') = $2`, phoneID, old, hash)
 		if err != nil {

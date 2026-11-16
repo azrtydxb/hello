@@ -174,7 +174,7 @@ func run(args []string) error {
 	sipDB.SetMaxOpenConns(2)
 	sipDB.SetMaxIdleConns(2)
 	defer func() { _ = sipDB.Close() }()
-	controlStore := store.New(sipDB)
+	controlStore := store.New(sipDB, log)
 	settings := newSettings(controlStore, log.With("component", "settings"))
 	voicemailObjects := &lazyObjects{
 		endpoint: cfg.MinioEndpoint, access: cfg.MinioAccessKey, secret: cfg.MinioSecretKey,

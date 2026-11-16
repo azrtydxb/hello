@@ -38,7 +38,7 @@ type dialItem struct {
 }
 
 // loadDialItems reads every claim on the dial space inside tx.
-func loadDialItems(ctx context.Context, tx *sql.Tx) ([]dialItem, map[string]string, error) {
+func loadDialItems(ctx context.Context, tx *dbTx) ([]dialItem, map[string]string, error) {
 	var items []dialItem
 	rows, err := tx.QueryContext(ctx, `SELECT code, action FROM feature_codes`)
 	if err != nil {
@@ -156,7 +156,7 @@ func dialConflicts(items []dialItem, names map[string]string) map[string]string 
 
 // dialGuard runs change and refuses it, naming field, when it introduced an
 // overlap in the dial space.
-func dialGuard(ctx context.Context, tx *sql.Tx, field string, change func() error) error {
+func dialGuard(ctx context.Context, tx *dbTx, field string, change func() error) error {
 	items, names, err := loadDialItems(ctx, tx)
 	if err != nil {
 		return err
@@ -201,7 +201,7 @@ const (
 // its own table is skipped; a duplicate within a kind is the table's unique
 // index to refuse. Every create and every renumber of those objects runs this
 // one check, so the refusal is symmetric between all of them.
-func checkDialNumber(ctx context.Context, tx *sql.Tx, field, number, own string) error {
+func checkDialNumber(ctx context.Context, tx *dbTx, field, number, own string) error {
 	if number == "" {
 		return nil
 	}

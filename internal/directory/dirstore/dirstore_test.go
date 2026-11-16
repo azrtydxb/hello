@@ -78,7 +78,7 @@ func newRig(t *testing.T, ap directory.AutoProvision) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &rig{t: t, ctx: context.Background(), db: db, st: store.New(db), drv: &directory.Static{Res: &directory.Result{}}}
+	r := &rig{t: t, ctx: context.Background(), db: db, st: store.New(db, nil), drv: &directory.Static{Res: &directory.Result{}}}
 	pg := &directory.PG{DB: hellodb.New(db, slog.New(slog.DiscardHandler)), Box: box, Provisioner: &Provisioner{Store: r.st, Realm: "pbx.test"}}
 	r.e = &directory.Engine{Store: pg, Drivers: map[string]directory.Driver{directory.KindLDAP: r.drv}, Replica: "t"}
 	pw, name, on := "bind-password-123", "AD", true
@@ -208,7 +208,7 @@ func TestProvisionOnPostgres(t *testing.T) {
 
 func TestProvisionerPreferredAndCodes(t *testing.T) {
 	db := scratchDB(t)
-	st := store.New(db)
+	st := store.New(db, nil)
 	ctx := context.Background()
 	p := &Provisioner{Store: st, Realm: "pbx.test"}
 	if _, err := db.ExecContext(ctx, `INSERT INTO directory_connectors (kind, name) VALUES ('ldap', 'X')`); err != nil {

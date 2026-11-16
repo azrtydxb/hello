@@ -49,7 +49,7 @@ func scratch(t *testing.T) (*sql.DB, *store.Store) {
 	if _, err := migrate.Up(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	return db, store.New(db)
+	return db, store.New(db, nil)
 }
 
 // runsOf reads every ai_agent_runs row.

@@ -6172,3 +6172,79 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   failed 3/3 with the CI message `waiting after the first answer = []`, and
   passed with the fix. The copy was not kept. The failover test is
   unchanged. With the fix it passed 50/50 under `-race`.
+
+## momo Phase 3: the internal/store seam (2026-11-16, momo/store-seam)
+
+- **Scope: the seam only.** `internal/store` (81 files, about 1,400 call
+  sites) runs every statement on momo v0.14.0 through one file,
+  `internal/store/dbq.go`; the SQL text of every statement is unchanged and
+  keeps its `$n` binds. Converting files to `@name`, `momo.Query[T]` or model
+  writes is left to the per-domain PRs that follow. No schema change, no
+  migration, `go.mod` unchanged.
+- **Why `$n` can stay.** momo's raw path binds native `$n` on PostgreSQL as
+  positional argument n (`raw_args.go`, `appendRawDollar`), renumbering the
+  binds in order of first use, so the SQL PostgreSQL receives means the same.
+  One style per statement: a `$n` statement with a `?` or `@name` beside it,
+  a `$n` past the arguments and an argument no `$n` uses are
+  `momo.ErrValidation` at build. `TestStatementsBuild` reads the package's
+  source and builds every statement passed as a constant (1,326) on
+  `momo.NewOffline` with the call site's argument count; all build. 81 are
+  assembled at run time and are left to the DB-backed tests.
+- **How the seam keeps 1,400 call sites unchanged.** `dbq` is now an
+  interface of `momo.Querier` plus `database/sql`'s three query methods,
+  returning the store's `*dbRows`/`*dbRow`. `*dbPool` (the `*momo.DB` from
+  `internal/db.New` plus the `*sql.DB`) and `*dbTx` (momo's view of an open
+  `*sql.Tx` from `db.AdoptTx`, plus the `*sql.Tx`) implement it by embedding
+  the `momo.Querier`, so converted code passes them straight to momo.
+  `ExecContext` is `momo.Exec` with a rows-affected `sql.Result`;
+  `QueryContext` is `momo.RawRows`, whose Scan is `database/sql`'s, so NULL
+  handling and conversions are unchanged; `QueryRowContext` keeps
+  `*sql.Row`'s contract (error deferred to Scan, `sql.ErrNoRows` on no row,
+  first row only, Close's error reported). The change is a type swap:
+  `*sql.Tx` became `*dbTx` in 448 store signatures, `*sql.Rows`/`*sql.Row`
+  became `*dbRows`/`*dbRow` in the local query interfaces, and the store's
+  `db` field became `*dbPool`.
+- **Construction.** `store.New(db, log)`: the store builds its momo handle
+  over db with `internal/db.New(db, log)`, so the handle and the
+  `*sql.DB` that begins the transactions cannot be two databases. A nil log
+  discards. hello-control and hello-sip pass their telemetry logger; tests
+  pass nil.
+- **Transactions.** `BeginTx` still begins a `database/sql` transaction and
+  adopts it; the store commits or rolls back as before (momo never does).
+  So `configChangeID` (the `0x68656c6c6f636667` lock, baseline check,
+  change, audit, revision bump and `pg_notify` in one transaction) and
+  `RunBatch` (the context-carried batch transaction) are unchanged code on
+  the adopted transaction; the lock and NOTIFY statements are the same SQL.
+  `DialNumbersTaken` and `ProvisionDirectoryExtension` keep their `*sql.Tx`
+  parameter (the directory Provisioner passes the transaction the directory
+  store began through momo, as `pgxdriver.UnwrapSQLTx`) and adopt it.
+- **Raw on purpose.** BEGIN; `TryLock`'s pinned connection, whose session
+  holds the advisory lock; and `SchemaVersion`'s read of `goose_db_version`,
+  which goose owns until Phase 5.
+- **Prepared insert.** `InsertFetches` prepared its insert once per
+  transaction; it now runs the same statement text per row in the same
+  transaction (momo has no Prepare on raw SQL). pgx's per-connection
+  statement cache still prepares it once.
+- **mapErr, rewritten once.** A unique violation (`momo.ErrUniqueViolation`
+  or SQLSTATE 23505) is `ErrConflict: <constraint>`; a foreign-key violation
+  (`momo.ErrForeignKeyViolation` or SQLSTATE 23503) is
+  `ErrNotFound: <constraint>`, or the `InUseError` when the
+  `*pgconn.PgError` message starts "update or delete on table" (momo does
+  not expose the message, so this stays the pgconn fallback); everything
+  else is returned as is. The constraint comes from `momo.Error.Constraint`,
+  else the `*pgconn.PgError`. `TestMapErr` pins both forms.
+- **Errors callers see.** Errors that mapErr does not translate now read
+  `momo: <kind> (op=...): <driver error>` (a check violation still names its
+  constraint); `errors.Is`/`errors.As` still reach `sql.ErrNoRows`,
+  `sql.ErrTxDone`, the context errors and the `*pgconn.PgError`.
+  `queueFK`, `ivrFK`, `blocklistFK` and `pagingFK` keep working through
+  `errors.As`. Five `err == sql.ErrNoRows` became `errors.Is` (errorlint
+  only exempts `*sql.Row.Scan`; the seam returns the bare sentinel, so
+  both forms were already equal).
+- **Cost.** `BenchmarkSeam` over a driver that does no I/O: about 0.75 us
+  and 14 allocations per statement for momo's build, hooks and cursor, the
+  same with the production logger at info level. A PostgreSQL round trip is
+  100 us or more, so the layer is under 1% on hello-sip's per-call store
+  reads (DeviceSecret, time conditions, settings, queue callbacks).
+  hello-sip's configuration snapshot (`internal/snapshot.Load`) does not go
+  through the store; it is unchanged.

@@ -99,7 +99,7 @@ func TestFollowMeStore(t *testing.T) {
 		t.Fatalf("a code turned on an empty profile: %+v", p)
 	}
 	var n int
-	if err := s.db.QueryRow(`SELECT count(*) FROM follow_me WHERE extension_id = $1`, e102.ID).Scan(&n); err != nil || n != 0 {
+	if err := s.db.raw.QueryRow(`SELECT count(*) FROM follow_me WHERE extension_id = $1`, e102.ID).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("a code created a profile row for 102 (%d, %v)", n, err)
 	}
 
@@ -115,7 +115,7 @@ func TestFollowMeStore(t *testing.T) {
 	if err := s.DeleteExtension(ctx, "test", e101.ID, nil); err != nil {
 		t.Fatalf("delete of the owner: %v", err)
 	}
-	if err := s.db.QueryRow(`SELECT count(*) FROM follow_me_targets`).Scan(&n); err != nil || n != 0 {
+	if err := s.db.raw.QueryRow(`SELECT count(*) FROM follow_me_targets`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("%d targets left after the owner went (%v)", n, err)
 	}
 	if err := s.DeleteExtension(ctx, "test", e102.ID, nil); err != nil {

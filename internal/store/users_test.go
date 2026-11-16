@@ -37,7 +37,7 @@ func TestUserRoles(t *testing.T) {
 		if _, err := p.Up(ctx); err != nil {
 			t.Fatal(err)
 		}
-		us, err := New(db).ListUsers(ctx)
+		us, err := New(db, nil).ListUsers(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}

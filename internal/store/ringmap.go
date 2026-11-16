@@ -77,7 +77,7 @@ func (s *Store) GetRingMap(ctx context.Context) (RingMap, error) {
 // list removes them). ErrNotFound for a group that does not exist; a field
 // error for a tag, vendor or tone the ring map does not know.
 func (s *Store) ReplaceRingMap(ctx context.Context, actor string, groupID *int64, in []RingMapEntry) (RingMap, error) {
-	err := s.provChange(ctx, actor, "update", "ring_map", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "ring_map", func(tx *dbTx) (string, bool, error) {
 		rid := "global"
 		var gid any
 		if groupID != nil {

@@ -9,7 +9,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 )
@@ -116,7 +115,7 @@ func (s *Store) GetVoicemailGroup(ctx context.Context, id int64) (VoicemailGroup
 
 // writeVoicemailGroupMembers replaces the member list. Every member must have
 // a voicemail box: a member without one could not receive a copy.
-func writeVoicemailGroupMembers(ctx context.Context, tx *sql.Tx, id int64, members []int64) error {
+func writeVoicemailGroupMembers(ctx context.Context, tx *dbTx, id int64, members []int64) error {
 	if len(members) > MaxVoicemailGroupMembers {
 		return fieldError("members", fmt.Sprintf("at most %d members", MaxVoicemailGroupMembers))
 	}
@@ -148,7 +147,7 @@ func writeVoicemailGroupMembers(ctx context.Context, tx *sql.Tx, id int64, membe
 // CreateVoicemailGroup inserts a group with its members.
 func (s *Store) CreateVoicemailGroup(ctx context.Context, actor string, in VoicemailGroupInput, check Check) (VoicemailGroup, error) {
 	var g VoicemailGroup
-	err := s.configChange(ctx, actor, "create", "voicemail_group", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "voicemail_group", check, func(tx *dbTx) (int64, error) {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM voicemail_groups`).Scan(&n); err != nil {
 			return 0, err
@@ -180,7 +179,7 @@ func (s *Store) CreateVoicemailGroup(ctx context.Context, actor string, in Voice
 // at is refused: the references name its number.
 func (s *Store) UpdateVoicemailGroup(ctx context.Context, actor string, id int64, in VoicemailGroupInput, check Check) (VoicemailGroup, error) {
 	var g VoicemailGroup
-	err := s.configChange(ctx, actor, "update", "voicemail_group", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "voicemail_group", check, func(tx *dbTx) (int64, error) {
 		var cur string
 		if err := tx.QueryRowContext(ctx, `SELECT number FROM voicemail_groups WHERE id = $1`, id).Scan(&cur); err != nil {
 			return id, mapErr(err)
@@ -217,7 +216,7 @@ func (s *Store) UpdateVoicemailGroup(ctx context.Context, actor string, id int64
 // already delivered stay in the member boxes. A group an IVR menu, time
 // condition, queue or inbound route sends calls to is refused.
 func (s *Store) DeleteVoicemailGroup(ctx context.Context, actor string, id int64, check Check) error {
-	return s.configChange(ctx, actor, "delete", "voicemail_group", check, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "voicemail_group", check, func(tx *dbTx) (int64, error) {
 		var number string
 		if err := tx.QueryRowContext(ctx, `SELECT number FROM voicemail_groups WHERE id = $1`, id).Scan(&number); err != nil {
 			return id, mapErr(err)
@@ -235,7 +234,7 @@ func (s *Store) DeleteVoicemailGroup(ctx context.Context, actor string, id int64
 
 // refuseIfVoicemailGroupUsed returns an *InUseError naming what sends calls
 // to the group with this number.
-func refuseIfVoicemailGroupUsed(ctx context.Context, tx *sql.Tx, what, number string) error {
+func refuseIfVoicemailGroupUsed(ctx context.Context, tx *dbTx, what, number string) error {
 	var refs []string
 	for _, q := range []struct{ query, label string }{
 		{`SELECT name FROM inbound_routes WHERE destination_kind = 'voicemail_group' AND destination = $1 ORDER BY name`, "inbound route"},

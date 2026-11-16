@@ -79,7 +79,7 @@ func attachLines(ctx context.Context, q querier, ps []Phone) error {
 // boundElsewhere reports a conflict when the device is already a line of a
 // phone other than (phone, line): line 1 of any phone, or a further line of
 // any phone. phone 0 is a phone being created.
-func boundElsewhere(ctx context.Context, tx *sql.Tx, deviceID, phone int64, line int) error {
+func boundElsewhere(ctx context.Context, tx *dbTx, deviceID, phone int64, line int) error {
 	var other int64
 	switch err := tx.QueryRowContext(ctx, `SELECT id FROM phones WHERE device_id = $1 AND NOT (id = $2 AND $3 = 1)`,
 		deviceID, phone, line).Scan(&other); {
@@ -105,7 +105,7 @@ func boundElsewhere(ctx context.Context, tx *sql.Tx, deviceID, phone int64, line
 // phone already has a line on, and a device that is a line of any phone. It
 // bumps the configuration revision.
 func (s *Store) SetPhoneLine(ctx context.Context, actor string, phoneID int64, line int, b Binding, realm string) (p Phone, secretRotated bool, err error) {
-	err = s.provChange(ctx, actor, "set-line", "phone", func(tx *sql.Tx) (string, bool, error) {
+	err = s.provChange(ctx, actor, "set-line", "phone", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(phoneID, 10)
 		var (
 			mac, model string
@@ -171,7 +171,7 @@ func (s *Store) SetPhoneLine(ctx context.Context, actor string, phoneID int64, l
 // HA1 values but loses its sealed secret. It reports ErrNotFound when the
 // phone has no such line. It bumps the configuration revision.
 func (s *Store) ClearPhoneLine(ctx context.Context, actor string, phoneID int64, line int) (Phone, error) {
-	err := s.provChange(ctx, actor, "clear-line", "phone", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "clear-line", "phone", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(phoneID, 10)
 		var one int
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phones WHERE id = $1 FOR UPDATE`, phoneID).Scan(&one); err != nil {
@@ -196,7 +196,7 @@ func (s *Store) ClearPhoneLine(ctx context.Context, actor string, phoneID int64,
 }
 
 // lineDeviceIDs lists the devices of a phone's lines 2 and up.
-func lineDeviceIDs(ctx context.Context, tx *sql.Tx, phoneID int64) ([]int64, error) {
+func lineDeviceIDs(ctx context.Context, tx *dbTx, phoneID int64) ([]int64, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT device_id FROM phone_lines WHERE phone_id = $1 ORDER BY line`, phoneID)
 	if err != nil {
 		return nil, err

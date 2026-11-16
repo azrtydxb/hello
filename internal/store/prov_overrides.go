@@ -94,7 +94,7 @@ func (s *Store) ReplaceSettingOverrides(ctx context.Context, actor string, scope
 	if len(in) > prov.MaxOverridesPerScope {
 		return nil, fieldError("overrides", "at most "+strconv.Itoa(prov.MaxOverridesPerScope)+" settings")
 	}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var vendor prov.Vendor
 		if scope == prov.ScopePhone {
 			if err := tx.QueryRowContext(ctx, `SELECT vendor FROM phones WHERE id = $1 FOR UPDATE`, ownerID).Scan(&vendor); err != nil {

@@ -103,7 +103,7 @@ func ValidE164(s string) bool {
 
 // sealChannelCredentials seals a carrier account into the channel's row and
 // resets the channel's health: new credentials start from a clean state.
-func (s *Store) sealChannelCredentials(ctx context.Context, tx *sql.Tx, channelID int64, cfg provider.Config) error {
+func (s *Store) sealChannelCredentials(ctx context.Context, tx *dbTx, channelID int64, cfg provider.Config) error {
 	if s.box == nil {
 		return ErrNoSecretBox
 	}
@@ -170,7 +170,7 @@ func newAttemptID() (string, error) {
 // it was queued is failed here and never reaches the carrier.
 func (s *Store) ClaimOutbound(ctx context.Context, limit int) ([]messaging.OutboundJob, error) {
 	var jobs []messaging.OutboundJob
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		jobs = nil
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(outboundClaimLock)); err != nil {
 			return err
@@ -259,7 +259,7 @@ func (s *Store) ClaimOutbound(ctx context.Context, limit int) ([]messaging.Outbo
 }
 
 // failQueued fails a queued text that never reached the carrier.
-func (s *Store) failQueued(ctx context.Context, tx *sql.Tx, msgID, convID int64, code string) error {
+func (s *Store) failQueued(ctx context.Context, tx *dbTx, msgID, convID int64, code string) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE conversation_messages SET status = 'failed', error_code = $2 WHERE id = $1 AND status = 'queued'`,
 		msgID, code); err != nil {
 		return err
@@ -273,7 +273,7 @@ func (s *Store) failQueued(ctx context.Context, tx *sql.Tx, msgID, convID int64,
 // as unknown, and nothing sends it again.
 func (s *Store) FinishOutbound(ctx context.Context, job messaging.OutboundJob, res messaging.OutboundResult) error {
 	var kind string
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		kind = ""
 		if err := tx.QueryRowContext(ctx, `SELECT kind FROM msg_channels WHERE id = $1`, job.ChannelID).Scan(&kind); err != nil {
 			return err
@@ -337,7 +337,7 @@ func (s *Store) FinishOutbound(ctx context.Context, job messaging.OutboundJob, r
 // recordChannelHealth updates a channel after a carrier call: an accepted
 // text clears the failure streak, refused credentials stop the channel, and
 // five failures in a row mark it degraded.
-func (s *Store) recordChannelHealth(ctx context.Context, tx *sql.Tx, channelID int64, res messaging.OutboundResult) error {
+func (s *Store) recordChannelHealth(ctx context.Context, tx *dbTx, channelID int64, res messaging.OutboundResult) error {
 	switch {
 	case res.BadCredentials:
 		_, err := tx.ExecContext(ctx, `UPDATE msg_channels SET status = 'credentials_invalid',
@@ -362,7 +362,7 @@ func (s *Store) recordChannelHealth(ctx context.Context, tx *sql.Tx, channelID i
 // recordProviderOptOut records an opt-out the carrier reported (Twilio's
 // 21610) for the conversation's customer, as if they had texted STOP: the
 // carrier blocks them, so Hello's own list must agree.
-func (s *Store) recordProviderOptOut(ctx context.Context, tx *sql.Tx, convID int64) error {
+func (s *Store) recordProviderOptOut(ctx context.Context, tx *dbTx, convID int64) error {
 	var (
 		addressID int64
 		peerKey   string
@@ -431,7 +431,7 @@ func (s *Store) FinishPoll(ctx context.Context, job messaging.PollJob, res messa
 		changed bool
 		final   string
 	)
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		changed, final = false, ""
 		if res.BadCredentials {
 			_, err := tx.ExecContext(ctx, `UPDATE msg_channels SET status = 'credentials_invalid',
@@ -529,7 +529,7 @@ type StartInput struct {
 func (s *Store) StartConversation(ctx context.Context, acc InboxAccess, in StartInput) (Conversation, error) {
 	var convID int64
 	var sinkEvent *messaging.Event
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		sinkEvent = nil
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(firstContactLock)); err != nil {
 			return err

@@ -125,7 +125,7 @@ type MediaUpload struct {
 }
 
 // beginUpload inserts the pending row of an upload and names its key.
-func beginUpload(ctx context.Context, tx *sql.Tx, channelID int64, conv, user, visitor any, dir string, in MediaUploadInput) (MediaUpload, error) {
+func beginUpload(ctx context.Context, tx *dbTx, channelID int64, conv, user, visitor any, dir string, in MediaUploadInput) (MediaUpload, error) {
 	var (
 		up MediaUpload
 		at time.Time
@@ -156,7 +156,7 @@ func clip(s string, n int) string {
 // other channel is ErrMediaUnsupported.
 func (s *Store) BeginInboxUpload(ctx context.Context, acc InboxAccess, convID int64, in MediaUploadInput) (MediaUpload, error) {
 	var up MediaUpload
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var (
 			channelID int64
 			prov      string
@@ -210,7 +210,7 @@ func cleanMediaIDs(ids []int64) error {
 // attachUploads joins an agent's ready uploads to the message msgID they
 // were sent with. Each must be the caller's, made for this conversation, and
 // not sent before.
-func attachUploads(ctx context.Context, tx *sql.Tx, convID, msgID, userID int64, ids []int64) error {
+func attachUploads(ctx context.Context, tx *dbTx, convID, msgID, userID int64, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -250,7 +250,7 @@ func (s *Store) InboxMedia(ctx context.Context, acc InboxAccess, id int64) (Medi
 // their next message.
 func (s *Store) ChatBeginUpload(ctx context.Context, site ChatSite, visitorID int64, in MediaUploadInput) (MediaUpload, error) {
 	var up MediaUpload
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var err error
 		up, err = beginUpload(ctx, tx, site.ChannelID, nil, nil, visitorID, messaging.DirIn, in)
 		return err
@@ -259,7 +259,7 @@ func (s *Store) ChatBeginUpload(ctx context.Context, site ChatSite, visitorID in
 }
 
 // attachChatUploads joins a visitor's ready uploads to their message.
-func attachChatUploads(ctx context.Context, tx *sql.Tx, convID, msgID, visitorID int64, ids []int64) error {
+func attachChatUploads(ctx context.Context, tx *dbTx, convID, msgID, visitorID int64, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -324,7 +324,7 @@ func (s *Store) ConversationMedia(ctx context.Context, convID int64) ([]MediaFil
 // insertInboundMedia records the attachments of an inbound carrier message
 // as pending, in the ingest's transaction (spec M-25 step 3): the media
 // worker downloads them, and the message is visible meanwhile.
-func insertInboundMedia(ctx context.Context, tx *sql.Tx, convID, msgID, channelID int64, refs []provider.MediaRef) error {
+func insertInboundMedia(ctx context.Context, tx *dbTx, convID, msgID, channelID int64, refs []provider.MediaRef) error {
 	for _, ref := range refs {
 		src, err := json.Marshal(ref)
 		if err != nil {
@@ -347,7 +347,7 @@ func (s *Store) AddInboundMedia(ctx context.Context, messageID int64, refs []pro
 	if len(refs) > media.MaxPerMessage {
 		refs = refs[:media.MaxPerMessage]
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		var convID, channelID int64
 		if err := tx.QueryRowContext(ctx, `SELECT conversation_id, channel_id FROM conversation_messages WHERE id = $1 AND direction = 'in'`,
 			messageID).Scan(&convID, &channelID); err != nil {
@@ -365,7 +365,7 @@ const mediaLease = 5 * time.Minute
 // to this worker (FOR UPDATE SKIP LOCKED: each to one worker).
 func (s *Store) ClaimMediaFetch(ctx context.Context, limit int) ([]media.FetchJob, error) {
 	var out []media.FetchJob
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		out = nil
 		rows, err := tx.QueryContext(ctx, `
 			UPDATE message_media mm SET attempts = mm.attempts + 1, next_attempt_at = now() + make_interval(secs => $2)
@@ -401,7 +401,7 @@ func (s *Store) ClaimMediaFetch(ctx context.Context, limit int) ([]media.FetchJo
 // FinishMediaFetch records a download's outcome and tells the people who see
 // the conversation that the message changed.
 func (s *Store) FinishMediaFetch(ctx context.Context, job media.FetchJob, res media.FetchResult) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		var convID sql.NullInt64
 		var err error
 		switch res.Status {
@@ -561,7 +561,7 @@ func (s *Store) RedeemMediaLink(ctx context.Context, tokenHash []byte) (media.St
 
 // peerMedia lists the attachments of a peer's conversations and of their
 // chat uploads, for an erase.
-func peerMedia(ctx context.Context, tx *sql.Tx, peerKey string) ([]media.Garbage, error) {
+func peerMedia(ctx context.Context, tx *dbTx, peerKey string) ([]media.Garbage, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, object_key, TRUE FROM message_media
 		WHERE conversation_id IN (SELECT id FROM conversations WHERE peer_key = $1)
@@ -585,7 +585,7 @@ func peerMedia(ctx context.Context, tx *sql.Tx, peerKey string) ([]media.Garbage
 // SetChatSiteLogo records that a site's logo (stored at media.LogoKey) has
 // the type ctype.
 func (s *Store) SetChatSiteLogo(ctx context.Context, actor string, id int64, ctype string) (ChatSite, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE chat_sites SET logo_type = $2, logo_updated_at = now(), updated_at = now() WHERE id = $1`, id, ctype)
 		if err != nil {
 			return err
@@ -603,7 +603,7 @@ func (s *Store) SetChatSiteLogo(ctx context.Context, actor string, id int64, cty
 
 // ClearChatSiteLogo removes a site's logo; the caller removes the object.
 func (s *Store) ClearChatSiteLogo(ctx context.Context, actor string, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE chat_sites SET logo_type = '', logo_updated_at = NULL, updated_at = now() WHERE id = $1 AND logo_type <> ''`, id)
 		if err != nil {
 			return err

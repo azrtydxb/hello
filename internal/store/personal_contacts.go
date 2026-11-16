@@ -27,7 +27,7 @@ const personalBookName = "Personal"
 
 // requireLink checks, inside tx and holding a share lock on the user so a
 // concurrent unlink waits, that userID is linked to an extension.
-func requireLink(ctx context.Context, tx *sql.Tx, userID int64) error {
+func requireLink(ctx context.Context, tx *dbTx, userID int64) error {
 	var ext sql.NullInt64
 	err := tx.QueryRowContext(ctx, `SELECT extension_id FROM users WHERE id = $1 FOR SHARE`, userID).Scan(&ext)
 	if err != nil {
@@ -41,7 +41,7 @@ func requireLink(ctx context.Context, tx *sql.Tx, userID int64) error {
 
 // personalBook returns the id of the user's book, locked, creating it when
 // create is set; 0 when there is none and create is not set.
-func personalBook(ctx context.Context, tx *sql.Tx, userID int64, create bool) (int64, error) {
+func personalBook(ctx context.Context, tx *dbTx, userID int64, create bool) (int64, error) {
 	if create {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO phonebooks (kind, name, owner_user_id) VALUES ('personal', $2, $1)
 			ON CONFLICT (owner_user_id) WHERE kind = 'personal' DO NOTHING`, userID, personalBookName); err != nil {
@@ -59,7 +59,7 @@ func personalBook(ctx context.Context, tx *sql.Tx, userID int64, create bool) (i
 // personalRoom refuses a write that would leave the book with more than
 // phonebook.MaxPersonalEntries entries or the lookup index with more than
 // phonebook.MaxIndexEntries (spec P-17).
-func personalRoom(ctx context.Context, tx *sql.Tx, bookID int64, add int) error {
+func personalRoom(ctx context.Context, tx *dbTx, bookID int64, add int) error {
 	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM phonebook_entries WHERE book_id = $1`, bookID).Scan(&n); err != nil {
 		return err
@@ -74,7 +74,7 @@ func personalRoom(ctx context.Context, tx *sql.Tx, bookID int64, add int) error 
 // after, by id, and the id to continue after (0 on the last page).
 func (s *Store) ListContacts(ctx context.Context, userID, after int64, limit int) ([]phonebook.Entry, int64, error) {
 	out := []phonebook.Entry{}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		if err := requireLink(ctx, tx, userID); err != nil {
 			return err
 		}
@@ -104,7 +104,7 @@ func (s *Store) ListContacts(ctx context.Context, userID, after int64, limit int
 // ExportContacts returns every contact of the user in delivery order.
 func (s *Store) ExportContacts(ctx context.Context, userID int64) ([]phonebook.EntryInput, error) {
 	out := []phonebook.EntryInput{}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		if err := requireLink(ctx, tx, userID); err != nil {
 			return err
 		}
@@ -134,7 +134,7 @@ func (s *Store) ExportContacts(ctx context.Context, userID int64) ([]phonebook.E
 // book with the first one.
 func (s *Store) CreateContact(ctx context.Context, actor string, userID int64, in phonebook.EntryInput) (phonebook.Entry, error) {
 	var out phonebook.Entry
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		if err := requireLink(ctx, tx, userID); err != nil {
 			return err
 		}
@@ -164,7 +164,7 @@ func (s *Store) UpdateContact(ctx context.Context, actor string, userID, id int6
 	if err != nil {
 		return out, err
 	}
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		if err := requireLink(ctx, tx, userID); err != nil {
 			return err
 		}
@@ -192,7 +192,7 @@ func (s *Store) UpdateContact(ctx context.Context, actor string, userID, id int6
 
 // DeleteContact removes a contact of the user's book.
 func (s *Store) DeleteContact(ctx context.Context, actor string, userID, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		if err := requireLink(ctx, tx, userID); err != nil {
 			return err
 		}
@@ -222,7 +222,7 @@ func (s *Store) DeleteContact(ctx context.Context, actor string, userID, id int6
 // result must fit the personal book's and the index's limits. It returns
 // how many contacts the book held before.
 func (s *Store) ImportContacts(ctx context.Context, actor string, userID int64, in []phonebook.EntryInput, replace bool) (before int, err error) {
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		if err := requireLink(ctx, tx, userID); err != nil {
 			return err
 		}

@@ -134,7 +134,7 @@ func appendHistory(hist []byte, severity string, at time.Time) ([]byte, error) {
 // those of a type in skipResolve (a detector that failed this run proves
 // nothing about its candidates).
 func (s *Store) UpsertAIFindings(ctx context.Context, now time.Time, in []AIFindingInput, skipResolve []string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		for _, c := range in {
 			if len(c.Evidence) == 0 {
 				c.Evidence = json.RawMessage(`{}`)
@@ -153,7 +153,7 @@ func (s *Store) UpsertAIFindings(ctx context.Context, now time.Time, in []AIFind
 	})
 }
 
-func upsertFinding(ctx context.Context, tx *sql.Tx, now time.Time, c AIFindingInput) error {
+func upsertFinding(ctx context.Context, tx *dbTx, now time.Time, c AIFindingInput) error {
 	var id, sev, status string
 	var hist []byte
 	err := tx.QueryRowContext(ctx, `SELECT id, severity, status, severity_history FROM ai_findings
@@ -273,7 +273,7 @@ type AIExplained struct {
 // findings are touched; the ranks of the other open findings are cleared,
 // so a rank always belongs to the latest ranking.
 func (s *Store) SetAIExplanations(ctx context.Context, xs []AIExplained) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE ai_findings SET rank = NULL WHERE status = 'open'`); err != nil {
 			return err
 		}
@@ -309,7 +309,7 @@ func (s *Store) DismissAIFinding(ctx context.Context, actor string, userID int64
 
 func (s *Store) findingAction(ctx context.Context, actor, action, id, query string, args ...any) (AIFinding, error) {
 	var out AIFinding
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, query, append([]any{id}, args...)...)
 		if err != nil {
 			return err

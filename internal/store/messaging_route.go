@@ -150,7 +150,7 @@ func (s *Store) GetMsgRouting(ctx context.Context, addressID int64) (MsgRouting,
 }
 
 // checkRouteTarget verifies that a route names something the router can use.
-func checkRouteTarget(ctx context.Context, tx *sql.Tx, path, kind, target string) error {
+func checkRouteTarget(ctx context.Context, tx *dbTx, path, kind, target string) error {
 	if kind == messaging.RouteInbox {
 		if target != "" {
 			return fieldError(path, "the pool takes no target")
@@ -214,7 +214,7 @@ func checkRouteTarget(ctx context.Context, tx *sql.Tx, path, kind, target string
 // texts, a user must be able to take conversations, an extension must be
 // linked to a user, a ring group must exist.
 func (s *Store) PutMsgRouting(ctx context.Context, actor string, addressID int64, in MsgRoutingInput) (MsgRouting, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var one int
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM msg_addresses WHERE id = $1 FOR UPDATE`, addressID).Scan(&one); err != nil {
 			return err
@@ -262,7 +262,7 @@ type routerStore struct{ s *Store }
 // afterAssign runs in the transaction that gave a conversation to a user, for
 // whatever else an assignment must do: the customer's latest text follows the
 // conversation to the user's desk phone (a no-op unless both switches are on).
-func (s *Store) afterAssign(ctx context.Context, tx *sql.Tx, convID, userID int64) error {
+func (s *Store) afterAssign(ctx context.Context, tx *dbTx, convID, userID int64) error {
 	return s.deliverLastToDeskPhone(ctx, tx, convID, userID)
 }
 
@@ -363,7 +363,7 @@ const (
 // A channel that cannot send it (a carrier whose credentials were refused or
 // is not registered on this build, a customer address a carrier cannot text,
 // a trunk channel with no trunk) gets a line in the thread saying so.
-func (s *Store) systemText(ctx context.Context, tx *sql.Tx, c convRow, body, what string) (sent bool, err error) {
+func (s *Store) systemText(ctx context.Context, tx *dbTx, c convRow, body, what string) (sent bool, err error) {
 	_, sent, err = s.autoText(ctx, tx, c, body, what, messaging.SenderSystem, 0)
 	return sent, err
 }
@@ -372,7 +372,7 @@ func (s *Store) systemText(ctx context.Context, tx *sql.Tx, c convRow, body, wha
 // texts, the AI's holding line) or ai (an auto-reply, spec M-30a), with the
 // AI run that wrote it (0 for none). id is the stored message, 0 when none
 // went.
-func (s *Store) autoText(ctx context.Context, tx *sql.Tx, c convRow, body, what, sender string, aiRun int64) (id int64, sent bool, err error) {
+func (s *Store) autoText(ctx context.Context, tx *dbTx, c convRow, body, what, sender string, aiRun int64) (id int64, sent bool, err error) {
 	var (
 		prov, address, chStatus string
 		chEnabled, adEnabled    bool
@@ -470,7 +470,7 @@ func (rs routerStore) RouteNew(ctx context.Context, now time.Time, limit int) (r
 			more, replied bool
 			placed        messaging.Event
 		)
-		err := rs.s.tx(ctx, func(tx *sql.Tx) error {
+		err := rs.s.tx(ctx, func(tx *dbTx) error {
 			more, replied, placed = false, false, messaging.Event{}
 			var err error
 			more, replied, err = rs.s.routeOne(ctx, tx, now, &placed)
@@ -495,7 +495,7 @@ func (rs routerStore) RouteNew(ctx context.Context, now time.Time, limit int) (r
 
 // routeOne places one conversation; placed is set to the
 // conversation.assigned event when the route gave it to a user.
-func (s *Store) routeOne(ctx context.Context, tx *sql.Tx, now time.Time, placed *messaging.Event) (more, replied bool, err error) {
+func (s *Store) routeOne(ctx context.Context, tx *dbTx, now time.Time, placed *messaging.Event) (more, replied bool, err error) {
 	var (
 		c                                 convRow
 		status                            string
@@ -615,7 +615,7 @@ func (s *Store) routeOne(ctx context.Context, tx *sql.Tx, now time.Time, placed 
 // announceRouted tells everyone a routed conversation concerns: its assignee
 // or the pool it waits in get "new conversation" (the notice an agent is
 // emailed about), the supervisors get "assigned" so their lists refresh.
-func announceRouted(ctx context.Context, tx *sql.Tx, convID, assignee int64) error {
+func announceRouted(ctx context.Context, tx *dbTx, convID, assignee int64) error {
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(inboxEventLock)); err != nil {
 		return err
 	}
@@ -718,7 +718,7 @@ func (rs routerStore) Waiting(ctx context.Context, queueID int64, limit int) ([]
 // lock so two pods cannot both fill the last place.
 func (rs routerStore) Assign(ctx context.Context, convID, userID int64, q router.Queue) (messaging.AssignOutcome, error) {
 	out := messaging.AssignGone
-	err := rs.s.tx(ctx, func(tx *sql.Tx) error {
+	err := rs.s.tx(ctx, func(tx *dbTx) error {
 		out = messaging.AssignGone
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1::int, ($2::bigint % 2147483647)::int)`, agentLock, userID); err != nil {
 			return err
@@ -804,7 +804,7 @@ func (rs routerStore) NextRotation(ctx context.Context, queueID int64) (uint64, 
 
 // pool returns an assigned conversation to the waiting list: the assignee is
 // cleared, the history says why, the thread says so and the pool is told.
-func (s *Store) pool(ctx context.Context, tx *sql.Tx, c convRow, from int64, reason, line string) error {
+func (s *Store) pool(ctx context.Context, tx *dbTx, c convRow, from int64, reason, line string) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE conversations SET assignee_user_id = NULL, assigned_at = NULL WHERE id = $1 AND assignee_user_id = $2`,
 		c.ID, from); err != nil {
 		return err
@@ -839,7 +839,7 @@ const latestRouterAssignment = `(SELECT a.reason FROM conversation_assignments a
 func (rs routerStore) ReturnStale(ctx context.Context, now time.Time) (int, error) {
 	n := 0
 	var returned []int64
-	err := rs.s.tx(ctx, func(tx *sql.Tx) error {
+	err := rs.s.tx(ctx, func(tx *dbTx) error {
 		n, returned = 0, nil
 		rows, err := tx.QueryContext(ctx, `
 			SELECT c.id, c.channel_id, c.address_id, c.peer_key, c.status, c.assignee_user_id, q.text_reassign_seconds
@@ -905,7 +905,7 @@ func (s *Store) emitReturned(ctx context.Context, ids []int64) {
 func (rs routerStore) ReleaseOrphans(ctx context.Context) (int, error) {
 	n := 0
 	var returned []int64
-	err := rs.s.tx(ctx, func(tx *sql.Tx) error {
+	err := rs.s.tx(ctx, func(tx *dbTx) error {
 		n, returned = 0, nil
 		rows, err := tx.QueryContext(ctx, `
 			UPDATE conversations c SET queue_id = NULL FROM queues q

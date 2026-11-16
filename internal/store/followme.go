@@ -61,8 +61,8 @@ func (s *Store) GetFollowMe(ctx context.Context, id int64) (FollowMe, error) {
 }
 
 type fmQueryer interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryContext(ctx context.Context, query string, args ...any) (*dbRows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *dbRow
 }
 
 func getFollowMe(ctx context.Context, q fmQueryer, id int64) (FollowMe, error) {
@@ -110,7 +110,7 @@ type FollowMeInput struct {
 // that does not exist, and a profile with an unusable shape; the API checks
 // the same things first for a precise message.
 func (s *Store) PutFollowMe(ctx context.Context, actor string, id int64, in FollowMeInput) (FollowMe, error) {
-	err := s.configChangeID(ctx, actor, "update", "follow_me", nil, func(tx *sql.Tx) (string, error) {
+	err := s.configChangeID(ctx, actor, "update", "follow_me", nil, func(tx *dbTx) (string, error) {
 		var number string
 		if err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1`, id).Scan(&number); err != nil {
 			return "", err
@@ -146,7 +146,7 @@ func (s *Store) PutFollowMe(ctx context.Context, actor string, id int64, in Foll
 	return s.GetFollowMe(ctx, id)
 }
 
-func validateFollowMe(ctx context.Context, tx *sql.Tx, own string, in FollowMeInput) error {
+func validateFollowMe(ctx context.Context, tx *dbTx, own string, in FollowMeInput) error {
 	if in.Strategy != FollowMeSimultaneous && in.Strategy != FollowMeSequential {
 		return fieldError("strategy", "must be simultaneous or sequential")
 	}

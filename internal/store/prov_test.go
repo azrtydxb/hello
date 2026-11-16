@@ -62,7 +62,7 @@ func provStore(t *testing.T) (*Store, *sql.DB, int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := New(db).WithSecretBox(box).WithProv(ProvSettings{
+	st := New(db, nil).WithSecretBox(box).WithProv(ProvSettings{
 		PublicURL: "https://prov.hello.test", SIPServer: "192.0.2.1:5060", Domain: "hello.test",
 		Expiry: time.Hour, Resync: 24 * time.Hour, TokenGrace: time.Hour,
 		Deployment: map[prov.Vendor]bool{prov.Snom: true},

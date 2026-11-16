@@ -88,7 +88,7 @@ func newEnv(t *testing.T) *env {
 	if _, err := migrate.Up(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	st := store.New(db)
+	st := store.New(db, nil)
 	val, err := proposal.NewValidator(loadSpec(t), nil, st)
 	if err != nil {
 		t.Fatal(err)

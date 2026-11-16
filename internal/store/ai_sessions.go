@@ -76,7 +76,7 @@ func (s *Store) RenameAISession(ctx context.Context, id, title string) (chat.Ses
 
 // lockAISession serialises the writes of one session in tx; posts and
 // deletes take it so a check for a running task cannot race a new task.
-func lockAISession(ctx context.Context, tx *sql.Tx, id string) error {
+func lockAISession(ctx context.Context, tx *dbTx, id string) error {
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('hello:ai:session:' || $1::text))`, id)
 	return err
 }
@@ -151,7 +151,7 @@ func scanAIMessage(row interface{ Scan(...any) error }) (chat.Message, error) {
 }
 
 func queryAIMessages(ctx context.Context, q interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryContext(context.Context, string, ...any) (*dbRows, error)
 }, query string, args ...any) ([]chat.Message, error) {
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {

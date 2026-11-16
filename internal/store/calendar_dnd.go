@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 )
 
 // SetCalendarDND is the calendar poller's way to set DND (spec integrations
@@ -34,7 +33,7 @@ func (s *Store) SetCalendarDND(ctx context.Context, userID int64, on bool) (int,
 		return 0, nil
 	}
 	changed := 0
-	err := s.configChangeID(ctx, "calendar", "update", "extension", nil, func(tx *sql.Tx) (string, error) {
+	err := s.configChangeID(ctx, "calendar", "update", "extension", nil, func(tx *dbTx) (string, error) {
 		res, err := tx.ExecContext(ctx, upd, userID)
 		if err != nil {
 			return "", err

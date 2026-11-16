@@ -95,7 +95,7 @@ func (s *Store) PutSMTPSettings(ctx context.Context, actor string, in SMTPInput)
 			sealed = b
 		}
 	}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO smtp_settings (id, host, port, security, username, from_address, password_sealed)
 			VALUES (TRUE, $1, $2, $3, $4, $5, $6)
@@ -135,7 +135,7 @@ type EmailJob struct {
 // concurrent nodes split the work and no message is fanned out twice.
 func (s *Store) FanOutEmails(ctx context.Context, limit int) (int, error) {
 	n := 0
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		rows, err := tx.QueryContext(ctx, `
 			SELECT m.id FROM voicemail_messages m WHERE m.email_status = 'pending'
 			ORDER BY m.id LIMIT $1 FOR UPDATE OF m SKIP LOCKED`, limit)
@@ -237,7 +237,7 @@ type EmailResult struct {
 // over mark-as-read. It returns the audio object to remove when the message
 // was deleted ("" otherwise).
 func (s *Store) FinishEmail(ctx context.Context, id int64, r EmailResult) (removeObject string, err error) {
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		var msg int64
 		switch {
 		case r.Err == "":
@@ -267,7 +267,7 @@ func truncate(s string, n int) string {
 	return s
 }
 
-func settleMessage(ctx context.Context, tx *sql.Tx, msg int64, remove *string) error {
+func settleMessage(ctx context.Context, tx *dbTx, msg int64, remove *string) error {
 	var open, failed, del, read int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT count(*) FILTER (WHERE status IN ('pending', 'sending')),

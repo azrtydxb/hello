@@ -49,7 +49,7 @@ func (s *Store) GetInboxSLA(ctx context.Context) (InboxSLA, error) {
 
 // PutInboxSLA replaces the service-level targets.
 func (s *Store) PutInboxSLA(ctx context.Context, actor string, t InboxSLA) (InboxSLA, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE messaging_settings SET sla_first_response_seconds = $1, sla_resolution_seconds = $2`,
 			t.FirstResponseSeconds, t.ResolutionSeconds); err != nil {
 			return err

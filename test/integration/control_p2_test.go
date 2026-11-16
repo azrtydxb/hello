@@ -63,7 +63,7 @@ func p2Store(t *testing.T, ctx context.Context) (*sql.DB, *store.Store, string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return db, store.New(db).WithSecretBox(box), dsn
+	return db, store.New(db, nil).WithSecretBox(box), dsn
 }
 
 // TestRoutingChangesAuditedAndRevisioned drives every trunk, route, order

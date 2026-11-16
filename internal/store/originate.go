@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"time"
 )
@@ -131,7 +130,7 @@ func (s *Store) PutOriginateSettings(ctx context.Context, actor string, in Origi
 	if in.CountryPrefixes == nil {
 		in.CountryPrefixes = []string{}
 	}
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE originate_settings
 			SET destinations = $1, country_prefixes = $2::text[], auto_answer_allowed = $3`,
 			in.Destinations, in.CountryPrefixes, in.AutoAnswerAllowed); err != nil {

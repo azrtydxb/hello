@@ -175,7 +175,7 @@ func codesCollide(a, b string) bool {
 }
 
 // checkPageCode refuses a page code that collides with a feature code.
-func checkPageCode(ctx context.Context, tx *sql.Tx, code string) error {
+func checkPageCode(ctx context.Context, tx *dbTx, code string) error {
 	rows, err := tx.QueryContext(ctx, `SELECT code FROM feature_codes`)
 	if err != nil {
 		return err
@@ -196,7 +196,7 @@ func checkPageCode(ctx context.Context, tx *sql.Tx, code string) error {
 // checkPagingChannel refuses a multicast channel Hello cannot page: one that
 // does not exist, is not a paging channel, is disabled, or whose codec is
 // not G.711 (Hello does not transcode to G.722).
-func checkPagingChannel(ctx context.Context, tx *sql.Tx, id *int64) error {
+func checkPagingChannel(ctx context.Context, tx *dbTx, id *int64) error {
 	if id == nil {
 		return nil
 	}
@@ -218,7 +218,7 @@ func checkPagingChannel(ctx context.Context, tx *sql.Tx, id *int64) error {
 	return nil
 }
 
-func writePagingLists(ctx context.Context, tx *sql.Tx, id int64, in PagingGroupInput) error {
+func writePagingLists(ctx context.Context, tx *dbTx, id int64, in PagingGroupInput) error {
 	for _, q := range []string{
 		`DELETE FROM paging_group_members WHERE group_id = $1`,
 		`DELETE FROM paging_group_callers WHERE group_id = $1`,
@@ -257,7 +257,7 @@ func pagingFK(err error, field string) error {
 // CreatePagingGroup inserts a paging group with its lists.
 func (s *Store) CreatePagingGroup(ctx context.Context, actor string, in PagingGroupInput, check Check) (PagingGroup, error) {
 	var g PagingGroup
-	err := s.configChange(ctx, actor, "create", "paging_group", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "paging_group", check, func(tx *dbTx) (int64, error) {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM paging_groups`).Scan(&n); err != nil {
 			return 0, err
@@ -293,7 +293,7 @@ func (s *Store) CreatePagingGroup(ctx context.Context, actor string, in PagingGr
 // UpdatePagingGroup replaces a paging group.
 func (s *Store) UpdatePagingGroup(ctx context.Context, actor string, id int64, in PagingGroupInput, check Check) (PagingGroup, error) {
 	var g PagingGroup
-	err := s.configChange(ctx, actor, "update", "paging_group", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "paging_group", check, func(tx *dbTx) (int64, error) {
 		var cur string
 		if err := tx.QueryRowContext(ctx, `SELECT code FROM paging_groups WHERE id = $1`, id).Scan(&cur); err != nil {
 			return id, err
@@ -333,7 +333,7 @@ func (s *Store) UpdatePagingGroup(ctx context.Context, actor string, id int64, i
 
 // DeletePagingGroup removes a paging group and, by cascade, its lists.
 func (s *Store) DeletePagingGroup(ctx context.Context, actor string, id int64, check Check) error {
-	return s.configChange(ctx, actor, "delete", "paging_group", check, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "paging_group", check, func(tx *dbTx) (int64, error) {
 		var code string
 		if err := tx.QueryRowContext(ctx, `SELECT code FROM paging_groups WHERE id = $1`, id).Scan(&code); err != nil {
 			return id, err
@@ -351,7 +351,7 @@ func (s *Store) DeletePagingGroup(ctx context.Context, actor string, id int64, c
 
 // checkFeatureCodesAgainstPaging refuses a feature-code list whose codes
 // shadow a paging group's page code.
-func checkFeatureCodesAgainstPaging(ctx context.Context, tx *sql.Tx, codes []FeatureCode) error {
+func checkFeatureCodesAgainstPaging(ctx context.Context, tx *dbTx, codes []FeatureCode) error {
 	rows, err := tx.QueryContext(ctx, `SELECT code FROM paging_groups`)
 	if err != nil {
 		return err

@@ -109,7 +109,7 @@ func (s *Store) SaveCIMDClient(ctx context.Context, c oauth.Client) error {
 
 // RegisterClient implements oauth.Store.
 func (s *Store) RegisterClient(ctx context.Context, actor string, c oauth.Client) error {
-	return oauthErr(s.tx(ctx, func(tx *sql.Tx) error {
+	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO oauth_clients (client_id, kind, name, client_uri, redirect_uris, metadata)
 			VALUES ($1, 'dcr', $2, NULLIF($3, ''), $4::text[], $5::jsonb)`,
@@ -157,7 +157,7 @@ func (s *Store) Request(ctx context.Context, id string) (oauth.AuthRequest, erro
 
 // ApproveRequest implements oauth.Store.
 func (s *Store) ApproveRequest(ctx context.Context, actor, id string, userID int64, scopes auth.Scopes, codeHash []byte, codeExpires time.Time) error {
-	return oauthErr(s.tx(ctx, func(tx *sql.Tx) error {
+	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `
 			UPDATE oauth_requests SET user_id = $2, scopes = $3::text[], code_hash = $4, code_expires_at = $5
 			WHERE id = $1 AND expires_at > now() AND user_id IS NULL`,
@@ -174,7 +174,7 @@ func (s *Store) ApproveRequest(ctx context.Context, actor, id string, userID int
 
 // DenyRequest implements oauth.Store.
 func (s *Store) DenyRequest(ctx context.Context, actor, id string) error {
-	return oauthErr(s.tx(ctx, func(tx *sql.Tx) error {
+	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM oauth_requests WHERE id = $1 AND user_id IS NULL`, id)
 		if err != nil {
 			return err
@@ -187,7 +187,7 @@ func (s *Store) DenyRequest(ctx context.Context, actor, id string) error {
 }
 
 // insertTokens stores issued tokens (their hashes) in tx.
-func insertTokens(ctx context.Context, tx *sql.Tx, ts []oauth.Token) error {
+func insertTokens(ctx context.Context, tx *dbTx, ts []oauth.Token) error {
 	for _, t := range ts {
 		var grant, user any
 		if t.GrantID != 0 {
@@ -208,7 +208,7 @@ func insertTokens(ctx context.Context, tx *sql.Tx, ts []oauth.Token) error {
 
 // revokeGrants revokes the grants matching where (with args) and every
 // token issued under them.
-func revokeGrants(ctx context.Context, tx *sql.Tx, where string, args ...any) ([]int64, error) {
+func revokeGrants(ctx context.Context, tx *dbTx, where string, args ...any) ([]int64, error) {
 	//nolint:gosec // G202: where is a caller's constant condition; values are parameters.
 	rows, err := tx.QueryContext(ctx, `UPDATE oauth_grants SET revoked_at = now()
 		WHERE revoked_at IS NULL AND `+where+` RETURNING id`, args...)
@@ -240,7 +240,7 @@ func revokeGrants(ctx context.Context, tx *sql.Tx, where string, args ...any) ([
 func (s *Store) RedeemCode(ctx context.Context, actor string, codeHash []byte,
 	issue func(oauth.AuthRequest) (oauth.Grant, []oauth.Token, error)) error {
 	reused := false
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		q, err := scanRequest(tx.QueryRowContext(ctx, `SELECT `+requestCols+` FROM oauth_requests
 			WHERE code_hash = $1 FOR UPDATE`, codeHash))
 		if errors.Is(err, sql.ErrNoRows) {
@@ -331,7 +331,7 @@ func scanToken(r rowScanner, spent, revoked *sql.NullTime) (oauth.Token, error) 
 func (s *Store) Refresh(ctx context.Context, actor string, hash []byte, maxAge time.Duration,
 	issue func(old oauth.Token, g oauth.Grant) ([]oauth.Token, error)) error {
 	reused := false
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var spent, revoked sql.NullTime
 		old, err := scanToken(tx.QueryRowContext(ctx, `SELECT `+tokenCols+`, spent_at, revoked_at FROM oauth_tokens
 			WHERE hash = $1 AND kind = 'refresh' FOR UPDATE`, hash), &spent, &revoked)
@@ -406,7 +406,7 @@ func scanGrant(r rowScanner) (oauth.Grant, error) {
 	return g, json.Unmarshal([]byte(resources.String), &g.Resources)
 }
 
-func grantByID(ctx context.Context, tx *sql.Tx, id int64) (oauth.Grant, error) {
+func grantByID(ctx context.Context, tx *dbTx, id int64) (oauth.Grant, error) {
 	return scanGrant(tx.QueryRowContext(ctx, `SELECT `+grantCols+` FROM oauth_grants g
 		JOIN users u ON u.id = g.user_id JOIN oauth_clients c ON c.client_id = g.client_id
 		WHERE g.id = $1`, id))
@@ -415,7 +415,7 @@ func grantByID(ctx context.Context, tx *sql.Tx, id int64) (oauth.Grant, error) {
 // ClientCredentials implements oauth.Store.
 func (s *Store) ClientCredentials(ctx context.Context, clientID string, secretHash []byte,
 	issue func(oauth.Client) (oauth.Token, error)) error {
-	return oauthErr(s.tx(ctx, func(tx *sql.Tx) error {
+	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
 		var secretID int64
 		err := tx.QueryRowContext(ctx, `
 			SELECT s.id FROM oauth_client_secrets s JOIN oauth_clients c ON c.client_id = s.client_id
@@ -451,7 +451,7 @@ func (s *Store) ClientCredentials(ctx context.Context, clientID string, secretHa
 
 // RevokeToken implements oauth.Store.
 func (s *Store) RevokeToken(ctx context.Context, actor string, hash []byte) error {
-	return oauthErr(s.tx(ctx, func(tx *sql.Tx) error {
+	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
 		var (
 			kind  string
 			grant sql.NullInt64
@@ -496,7 +496,7 @@ func (s *Store) Grants(ctx context.Context, userID int64) ([]oauth.Grant, error)
 
 // RevokeGrant implements oauth.Store.
 func (s *Store) RevokeGrant(ctx context.Context, actor string, id, userID int64) error {
-	return oauthErr(s.tx(ctx, func(tx *sql.Tx) error {
+	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
 		ids, err := revokeGrants(ctx, tx, `id = $1 AND ($2::bigint = 0 OR user_id = $2::bigint)`, id, userID)
 		if err != nil {
 			return err
@@ -572,7 +572,7 @@ func (s *Store) ServiceAccount(ctx context.Context, id string) (oauth.Client, er
 
 // CreateServiceAccount implements oauth.Store.
 func (s *Store) CreateServiceAccount(ctx context.Context, actor string, c oauth.Client) (oauth.Client, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var taken bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM oauth_clients WHERE kind = 'service' AND name = $1)`,
 			c.Name).Scan(&taken); err != nil {
@@ -597,7 +597,7 @@ func (s *Store) CreateServiceAccount(ctx context.Context, actor string, c oauth.
 
 // UpdateServiceAccount implements oauth.Store.
 func (s *Store) UpdateServiceAccount(ctx context.Context, actor, id string, ch oauth.ServiceAccountChange) (oauth.Client, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var role, scopes, enabled any
 		if ch.Role != nil {
 			role = string(*ch.Role)
@@ -636,7 +636,7 @@ func (s *Store) UpdateServiceAccount(ctx context.Context, actor, id string, ch o
 
 // DeleteServiceAccount implements oauth.Store.
 func (s *Store) DeleteServiceAccount(ctx context.Context, actor, id string) error {
-	return oauthErr(s.tx(ctx, func(tx *sql.Tx) error {
+	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM oauth_clients WHERE client_id = $1 AND kind = 'service'`, id)
 		if err != nil {
 			return err
@@ -654,7 +654,7 @@ const maxLiveSecrets = 2
 // AddClientSecret implements oauth.Store.
 func (s *Store) AddClientSecret(ctx context.Context, actor, clientID string, hash []byte, expires *time.Time) (oauth.Secret, error) {
 	sc := oauth.Secret{ExpiresAt: expires}
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		// Lock the account so two concurrent adds cannot both see one
 		// live secret.
 		var kind string
@@ -687,7 +687,7 @@ func (s *Store) AddClientSecret(ctx context.Context, actor, clientID string, has
 // are revoked with it (a token does not record which secret issued it), so
 // a stolen secret's tokens stop on the next request.
 func (s *Store) RevokeClientSecret(ctx context.Context, actor, clientID string, secretID int64) error {
-	return oauthErr(s.tx(ctx, func(tx *sql.Tx) error {
+	return oauthErr(s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE oauth_client_secrets SET revoked_at = now()
 			WHERE id = $1 AND client_id = $2 AND revoked_at IS NULL`, secretID, clientID)
 		if err != nil {

@@ -165,7 +165,7 @@ func TestCandidateExpiry(t *testing.T) {
 func auditCount(t *testing.T, st *Store, action, resource, id string) int {
 	t.Helper()
 	var n int
-	if err := st.db.QueryRow(`SELECT count(*) FROM audit_events WHERE action = $1 AND resource = $2 AND resource_id = $3`,
+	if err := st.db.raw.QueryRow(`SELECT count(*) FROM audit_events WHERE action = $1 AND resource = $2 AND resource_id = $3`,
 		action, resource, id).Scan(&n); err != nil {
 		t.Fatal(err)
 	}

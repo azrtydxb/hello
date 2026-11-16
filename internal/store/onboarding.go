@@ -105,7 +105,7 @@ func (s *Store) CaptureCandidate(ctx context.Context, c prov.Candidate) (prov.Ca
 		return prov.CaptureStored, nil
 	}
 	out := prov.CaptureStored
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(onboardLockKey)); err != nil {
 			return err
 		}
@@ -202,7 +202,7 @@ func (s *Store) PruneCandidates(ctx context.Context) (int64, error) {
 // also put on the ignore list, so it is not recorded again. ErrNotFound when
 // the MAC is not queued.
 func (s *Store) DismissCandidate(ctx context.Context, actor, mac string, ignore bool) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		var vendor, model string
 		if err := tx.QueryRowContext(ctx,
 			`DELETE FROM onboarding_candidates WHERE mac = $1 RETURNING vendor, model`, mac).Scan(&vendor, &model); err != nil {
@@ -242,7 +242,7 @@ func (s *Store) ListIgnored(ctx context.Context) ([]IgnoredMAC, error) {
 
 // Unignore takes a MAC off the ignore list; ErrNotFound when it is not on it.
 func (s *Store) Unignore(ctx context.Context, actor, mac string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM onboarding_ignored WHERE mac = $1`, mac)
 		if err != nil {
 			return err
@@ -268,7 +268,7 @@ func (s *Store) AdoptCandidates(ctx context.Context, actor string, in []PhoneInp
 	if len(in) > 1 {
 		action = "adopt-batch"
 	}
-	err := s.provChange(ctx, actor, action, resource, func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, action, resource, func(tx *dbTx) (string, bool, error) {
 		for i, p := range in {
 			res, err := tx.ExecContext(ctx, `DELETE FROM onboarding_candidates WHERE mac = $1`, p.MAC)
 			if err != nil {

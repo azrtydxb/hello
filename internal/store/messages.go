@@ -243,7 +243,7 @@ func (s *Store) GetMessageSettings(ctx context.Context) (MessageSettings, error)
 }
 
 type rowQuerier interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryRowContext(context.Context, string, ...any) *dbRow
 }
 
 func getMessageSettings(ctx context.Context, q rowQuerier) (MessageSettings, error) {
@@ -255,7 +255,7 @@ func getMessageSettings(ctx context.Context, q rowQuerier) (MessageSettings, err
 
 // PutMessageSettings replaces the settings and audits it.
 func (s *Store) PutMessageSettings(ctx context.Context, actor string, m MessageSettings) (MessageSettings, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE message_settings SET enabled = $1, ttl_hours = $2, retention_days = $3,
 			rate_per_minute = $4, max_queued_per_extension = $5`,
 			m.Enabled, m.TTLHours, m.RetentionDays, m.RatePerMinute, m.MaxQueuedPerExtension); err != nil {
@@ -271,7 +271,7 @@ func (s *Store) PutMessageSettings(ctx context.Context, actor string, m MessageS
 
 // resolveMessageTargets returns the recipient extension numbers of a send
 // and its scope and scope reference.
-func resolveMessageTargets(ctx context.Context, tx *sql.Tx, in MessageInput) (recipients []string, scope, ref string, err error) {
+func resolveMessageTargets(ctx context.Context, tx *dbTx, in MessageInput) (recipients []string, scope, ref string, err error) {
 	switch in.TargetKind {
 	case MsgKindExtension:
 		var n, kind string
@@ -336,7 +336,7 @@ func resolveMessageTargets(ctx context.Context, tx *sql.Tx, in MessageInput) (re
 	return nil, "", "", fmt.Errorf("store: unknown message target kind %q", in.TargetKind)
 }
 
-func queryStrings(ctx context.Context, tx *sql.Tx, q string, args ...any) ([]string, error) {
+func queryStrings(ctx context.Context, tx *dbTx, q string, args ...any) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -374,7 +374,7 @@ func (s *Store) SendMessage(ctx context.Context, in MessageInput) (MessageSent, 
 		in.Sender = MsgSenderSystemName
 	}
 	text, raw := splitBody(in.ContentType, in.Body)
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		out = MessageSent{}
 		return s.sendMessageTx(ctx, tx, in, text, raw, &out)
 	})
@@ -383,7 +383,7 @@ func (s *Store) SendMessage(ctx context.Context, in MessageInput) (MessageSent, 
 
 // sendMessageTx is SendMessage inside the caller's transaction, so a send
 // can commit together with the row that caused it (an inbox reply).
-func (s *Store) sendMessageTx(ctx context.Context, tx *sql.Tx, in MessageInput, text *string, raw []byte, out *MessageSent) error {
+func (s *Store) sendMessageTx(ctx context.Context, tx *dbTx, in MessageInput, text *string, raw []byte, out *MessageSent) error {
 	set, err := getMessageSettings(ctx, tx)
 	if err != nil {
 		return err
@@ -718,7 +718,7 @@ func (s *Store) MaintainMessages(ctx context.Context) (expired, purged int64, er
 // deletes every finished message) and audits it.
 func (s *Store) PurgeMessages(ctx context.Context, actor string, olderThanDays int) (int64, error) {
 	var n int64
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE created_at < now() - make_interval(days => $1)
 			AND status IN ('delivered', 'failed')`, olderThanDays)
 		if err != nil {

@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"strconv"
 
 	"github.com/azrtydxb/hello/internal/phonebook"
@@ -13,7 +12,7 @@ import (
 // its own side key keeps it.
 func (s *Store) SetPhoneGroupSideKey(ctx context.Context, actor string, id int64, function string) (phonebook.Group, error) {
 	var out phonebook.Group
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET side_key = $2, updated_at = now() WHERE id = $1`, id, function)
 		if err != nil {
 			return err

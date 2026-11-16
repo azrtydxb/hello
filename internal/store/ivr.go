@@ -7,7 +7,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -214,7 +213,7 @@ func ValidIVRDigit(d string) bool {
 
 // checkIVRDestination verifies that a destination names something that
 // exists. self is the menu being written (its name, which may be new).
-func checkIVRDestination(ctx context.Context, tx *sql.Tx, d ivrDest) error {
+func checkIVRDestination(ctx context.Context, tx *dbTx, d ivrDest) error {
 	exists := func(query, what string) error {
 		var n int
 		if err := tx.QueryRowContext(ctx, query, d.Target).Scan(&n); err != nil {
@@ -268,7 +267,7 @@ func checkIVRDestination(ctx context.Context, tx *sql.Tx, d ivrDest) error {
 // checkIVRMenu verifies the references of a menu before it is written: the
 // number is free, the destinations exist and the automatic transitions
 // (timeout and invalid) do not loop.
-func checkIVRMenu(ctx context.Context, tx *sql.Tx, id int64, in IVRMenuInput) error {
+func checkIVRMenu(ctx context.Context, tx *dbTx, id int64, in IVRMenuInput) error {
 	if err := checkDialNumber(ctx, tx, "number", in.Number, numIVRMenu); err != nil {
 		return err
 	}
@@ -296,7 +295,7 @@ func checkIVRMenu(ctx context.Context, tx *sql.Tx, id int64, in IVRMenuInput) er
 // choice) lead back to itself through other menus: a caller who stays silent
 // would be passed round for ever. A loop through options needs the caller to
 // press a key each time, so it is allowed ("0 for the main menu").
-func checkIVRLoops(ctx context.Context, tx *sql.Tx, id int64, in IVRMenuInput) error {
+func checkIVRLoops(ctx context.Context, tx *dbTx, id int64, in IVRMenuInput) error {
 	rows, err := tx.QueryContext(ctx, `SELECT name, timeout_kind, timeout_target, invalid_kind, invalid_target FROM ivr_menus WHERE id <> $1`, id)
 	if err != nil {
 		return err
@@ -344,7 +343,7 @@ func reaches(next map[string][]string, from, want string, seen map[string]bool) 
 	return slices.ContainsFunc(next[from], func(n string) bool { return reaches(next, n, want, seen) })
 }
 
-func writeIVROptions(ctx context.Context, tx *sql.Tx, id int64, in IVRMenuInput) error {
+func writeIVROptions(ctx context.Context, tx *dbTx, id int64, in IVRMenuInput) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM ivr_menu_options WHERE menu_id = $1`, id); err != nil {
 		return err
 	}
@@ -376,7 +375,7 @@ func ivrFK(err error) error {
 // CreateIVRMenu inserts a menu with its options.
 func (s *Store) CreateIVRMenu(ctx context.Context, actor string, in IVRMenuInput, check Check) (IVRMenu, error) {
 	var m IVRMenu
-	err := s.configChange(ctx, actor, "create", "ivr_menu", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "ivr_menu", check, func(tx *dbTx) (int64, error) {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM ivr_menus`).Scan(&n); err != nil {
 			return 0, err
@@ -411,7 +410,7 @@ func (s *Store) CreateIVRMenu(ctx context.Context, actor string, in IVRMenuInput
 
 // ivrReferences names what points at the menu name: inbound routes, ring
 // groups, feature codes and other menus.
-func ivrReferences(ctx context.Context, tx *sql.Tx, id int64, name string) ([]string, error) {
+func ivrReferences(ctx context.Context, tx *dbTx, id int64, name string) ([]string, error) {
 	var refs []string
 	for _, q := range []struct {
 		query, label string
@@ -459,7 +458,7 @@ func inUseBy(what string, refs []string) error {
 // refused: the references name it.
 func (s *Store) UpdateIVRMenu(ctx context.Context, actor string, id int64, in IVRMenuInput, check Check) (IVRMenu, error) {
 	var m IVRMenu
-	err := s.configChange(ctx, actor, "update", "ivr_menu", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "ivr_menu", check, func(tx *dbTx) (int64, error) {
 		var cur string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM ivr_menus WHERE id = $1 FOR UPDATE`, id).Scan(&cur); err != nil {
 			return id, err
@@ -501,7 +500,7 @@ func (s *Store) UpdateIVRMenu(ctx context.Context, actor string, id int64, in IV
 // inbound route, a ring group, a feature code or another menu names is
 // refused.
 func (s *Store) DeleteIVRMenu(ctx context.Context, actor string, id int64, check Check) error {
-	return s.configChange(ctx, actor, "delete", "ivr_menu", check, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "ivr_menu", check, func(tx *dbTx) (int64, error) {
 		var name string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM ivr_menus WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
 			return id, err
@@ -535,7 +534,7 @@ func (s *Store) IVRMenuNameExists(ctx context.Context, name string) (bool, error
 // options or timeout and invalid exits point at target with one of kinds. It
 // guards the extension, ring group, paging group and announcement a menu
 // names against being deleted or renumbered under it.
-func refuseIfIVRPoints(ctx context.Context, tx *sql.Tx, what, target string, kinds ...string) error {
+func refuseIfIVRPoints(ctx context.Context, tx *dbTx, what, target string, kinds ...string) error {
 	k2 := kinds[0]
 	if len(kinds) > 1 {
 		k2 = kinds[1]
@@ -569,7 +568,7 @@ func refuseIfIVRPoints(ctx context.Context, tx *sql.Tx, what, target string, kin
 // requireIVRMenuTx refuses a reference to a menu that does not exist. It runs
 // in the configuration change's transaction, under the configuration lock,
 // so a menu cannot be deleted between the check and the write that names it.
-func requireIVRMenuTx(ctx context.Context, tx *sql.Tx, path, name string) error {
+func requireIVRMenuTx(ctx context.Context, tx *dbTx, path, name string) error {
 	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM ivr_menus WHERE name = $1`, name).Scan(&n); err != nil {
 		return err

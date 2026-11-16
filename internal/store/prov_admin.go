@@ -66,7 +66,7 @@ func (s *Store) GetProvTemplate(ctx context.Context, id int64) (ProvTemplate, er
 	return t, mapErr(err)
 }
 
-func saveVersion(ctx context.Context, tx *sql.Tx, actor string, t ProvTemplate) error {
+func saveVersion(ctx context.Context, tx *dbTx, actor string, t ProvTemplate) error {
 	files, _ := json.Marshal(t.Files)
 	_, err := tx.ExecContext(ctx, `INSERT INTO prov_template_versions (template_id, version, files, actor) VALUES ($1, $2, $3, $4)`,
 		t.ID, t.Version, string(files), actor)
@@ -76,7 +76,7 @@ func saveVersion(ctx context.Context, tx *sql.Tx, actor string, t ProvTemplate) 
 // CreateProvTemplate stores a validated template as version 1.
 func (s *Store) CreateProvTemplate(ctx context.Context, actor string, t prov.Template) (ProvTemplate, error) {
 	var out ProvTemplate
-	err := s.provChange(ctx, actor, "create", "prov_template", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "create", "prov_template", func(tx *dbTx) (string, bool, error) {
 		files, _ := json.Marshal(t.Files)
 		var err error
 		out, err = scanTemplate(tx.QueryRowContext(ctx, `
@@ -96,7 +96,7 @@ func (s *Store) CreateProvTemplate(ctx context.Context, actor string, t prov.Tem
 // returns the validation failures of the result.
 func (s *Store) UpdateProvTemplate(ctx context.Context, actor string, id int64, apply func(*prov.Template) []prov.FieldError) (ProvTemplate, error) {
 	var out ProvTemplate
-	err := s.provChange(ctx, actor, "update", "prov_template", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "prov_template", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(id, 10)
 		cur, err := scanTemplate(tx.QueryRowContext(ctx, `SELECT `+templateCols+` FROM prov_templates WHERE id = $1 FOR UPDATE`, id))
 		if err != nil {
@@ -122,7 +122,7 @@ func (s *Store) UpdateProvTemplate(ctx context.Context, actor string, id int64, 
 // DeleteProvTemplate removes a template; one a phone names as its override
 // is refused with the phone named.
 func (s *Store) DeleteProvTemplate(ctx context.Context, actor string, id int64) error {
-	return s.provChange(ctx, actor, "delete", "prov_template", func(tx *sql.Tx) (string, bool, error) {
+	return s.provChange(ctx, actor, "delete", "prov_template", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(id, 10)
 		var (
 			phone int64
@@ -189,7 +189,7 @@ func (s *Store) ListFirmware(ctx context.Context) ([]FirmwareFile, error) {
 // has is a conflict naming it.
 func (s *Store) CreateFirmware(ctx context.Context, actor string, f prov.Firmware) (FirmwareFile, error) {
 	var out FirmwareFile
-	err := s.provChange(ctx, actor, "create", "prov_firmware", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "create", "prov_firmware", func(tx *dbTx) (string, bool, error) {
 		var id int64
 		switch err := tx.QueryRowContext(ctx, `SELECT id FROM prov_firmware WHERE vendor = $1 AND filename = $2`, f.Vendor, f.Filename).Scan(&id); {
 		case err == nil:
@@ -215,7 +215,7 @@ func (s *Store) CreateFirmware(ctx context.Context, actor string, f prov.Firmwar
 // so a rendered firmware URL never points at a missing object.
 func (s *Store) DeleteFirmware(ctx context.Context, actor string, id int64) (string, error) {
 	var key string
-	err := s.provChange(ctx, actor, "delete", "prov_firmware", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "delete", "prov_firmware", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(id, 10)
 		var vendor, glob string
 		switch err := tx.QueryRowContext(ctx, `SELECT vendor, model_glob FROM prov_firmware_pins WHERE firmware_id = $1 LIMIT 1`, id).Scan(&vendor, &glob); {
@@ -293,7 +293,7 @@ func listMinimums(ctx context.Context, q querier) ([]prov.FirmwareMinimum, error
 // already sits below a new minimum stays stored but is no longer rendered.
 func (s *Store) PutFirmwareMinimums(ctx context.Context, actor string, rules []prov.FirmwareMinimum) ([]prov.FirmwareMinimum, error) {
 	var out []prov.FirmwareMinimum
-	err := s.provChange(ctx, actor, "update", "prov_firmware_minimums", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "prov_firmware_minimums", func(tx *dbTx) (string, bool, error) {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM prov_firmware_minimums`); err != nil {
 			return "", false, err
 		}
@@ -318,7 +318,7 @@ func (s *Store) PutFirmwareMinimums(ctx context.Context, actor string, rules []p
 // models the pin covers.
 func (s *Store) PutFirmwarePins(ctx context.Context, actor string, pins []FirmwarePin) ([]FirmwarePin, error) {
 	var out []FirmwarePin
-	err := s.provChange(ctx, actor, "update", "prov_firmware_pins", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "prov_firmware_pins", func(tx *dbTx) (string, bool, error) {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM prov_firmware_pins`); err != nil {
 			return "", false, err
 		}
@@ -408,7 +408,7 @@ func (s *Store) PutRedirectAccount(ctx context.Context, actor string, v prov.Ven
 	if c.Credentials != nil && s.box == nil {
 		return errors.New("store: no secret box to seal redirect credentials")
 	}
-	return s.provChange(ctx, actor, "update", "prov_redirect_account", func(tx *sql.Tx) (string, bool, error) {
+	return s.provChange(ctx, actor, "update", "prov_redirect_account", func(tx *dbTx) (string, bool, error) {
 		var enc []byte
 		if c.Credentials != nil {
 			b, err := json.Marshal(map[string]string(c.Credentials))
@@ -448,7 +448,7 @@ func (s *Store) PutRedirectAccount(ctx context.Context, actor string, v prov.Ven
 }
 
 // queueVendor queues every phone of v for registration.
-func (s *Store) queueVendor(ctx context.Context, tx *sql.Tx, v prov.Vendor) error {
+func (s *Store) queueVendor(ctx context.Context, tx *dbTx, v prov.Vendor) error {
 	if err := upsertJob(ctx, tx, `SELECT vendor, mac, 'register' FROM phones WHERE vendor = $1`, v); err != nil {
 		return err
 	}
@@ -459,7 +459,7 @@ func (s *Store) queueVendor(ctx context.Context, tx *sql.Tx, v prov.Vendor) erro
 
 // DeleteRedirectAccount removes a vendor's stored account and credentials.
 func (s *Store) DeleteRedirectAccount(ctx context.Context, actor string, v prov.Vendor) error {
-	return s.provChange(ctx, actor, "delete", "prov_redirect_account", func(tx *sql.Tx) (string, bool, error) {
+	return s.provChange(ctx, actor, "delete", "prov_redirect_account", func(tx *dbTx) (string, bool, error) {
 		res, err := tx.ExecContext(ctx, `DELETE FROM prov_redirect_accounts WHERE vendor = $1`, v)
 		if err != nil {
 			return string(v), false, err

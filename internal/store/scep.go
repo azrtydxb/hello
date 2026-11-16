@@ -187,7 +187,7 @@ func (s *Store) SetSCEPCA(ctx context.Context, actor, certPEM string, key *rsa.P
 	if err != nil {
 		return nil, err
 	}
-	err = s.provChange(ctx, actor, "create", "scep_ca", func(tx *sql.Tx) (string, bool, error) {
+	err = s.provChange(ctx, actor, "create", "scep_ca", func(tx *dbTx) (string, bool, error) {
 		var active sql.NullInt64
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM scep_ca WHERE active FOR UPDATE`).Scan(&active); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return "", false, err
@@ -252,7 +252,7 @@ func (s *Store) SCEPState(ctx context.Context, phoneID int64) (prov.SCEPPhone, e
 // SCEPIssue implements prov.SCEPStore.
 func (s *Store) SCEPIssue(ctx context.Context, in prov.SCEPIssue) (*x509.Certificate, error) {
 	var out *x509.Certificate
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var one int
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phones WHERE id = $1 FOR UPDATE`, in.PhoneID).Scan(&one); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -427,7 +427,7 @@ func (s *Store) ListSCEPCertificates(ctx context.Context, f SCEPCertFilter) ([]S
 // is on the CRL. ErrNotFound for an unknown id; a conflict when it is
 // already revoked.
 func (s *Store) RevokeSCEPCertificate(ctx context.Context, actor string, id int64, reason string) (SCEPCertificate, error) {
-	err := s.provChange(ctx, actor, "revoke", "scep_certificate", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "revoke", "scep_certificate", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
 		var revoked sql.NullTime
 		if err := tx.QueryRowContext(ctx, `SELECT revoked_at FROM scep_certificates WHERE id = $1 FOR UPDATE`, id).Scan(&revoked); err != nil {
@@ -451,7 +451,7 @@ func (s *Store) RevokeSCEPCertificate(ctx context.Context, actor string, id int6
 // RotateSCEPChallenge discards the phone's challenge password, used or not;
 // its next configuration carries a new one. ErrNotFound for an unknown phone.
 func (s *Store) RotateSCEPChallenge(ctx context.Context, actor string, phoneID int64) error {
-	return s.provChange(ctx, actor, "rotate", "scep_challenge", func(tx *sql.Tx) (string, bool, error) {
+	return s.provChange(ctx, actor, "rotate", "scep_challenge", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(phoneID, 10)
 		var one int
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phones WHERE id = $1`, phoneID).Scan(&one); err != nil {
@@ -542,7 +542,7 @@ func (s *Store) GetDot1XProfile(ctx context.Context, id int64) (Dot1XProfile, er
 // CreateDot1XProfile adds a profile.
 func (s *Store) CreateDot1XProfile(ctx context.Context, actor string, in Dot1XInput) (Dot1XProfile, error) {
 	var id int64
-	err := s.provChange(ctx, actor, "create", "dot1x_profile", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "create", "dot1x_profile", func(tx *dbTx) (string, bool, error) {
 		if err := s.checkDot1X(in, false); err != nil {
 			return "", false, err
 		}
@@ -570,7 +570,7 @@ func (s *Store) CreateDot1XProfile(ctx context.Context, actor string, in Dot1XIn
 // UpdateDot1XProfile replaces a profile; a nil password keeps the stored
 // one. ErrNotFound for an unknown id.
 func (s *Store) UpdateDot1XProfile(ctx context.Context, actor string, id int64, in Dot1XInput) (Dot1XProfile, error) {
-	err := s.provChange(ctx, actor, "update", "dot1x_profile", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "dot1x_profile", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
 		var has bool
 		if err := tx.QueryRowContext(ctx, `SELECT password_enc IS NOT NULL FROM dot1x_profiles WHERE id = $1 FOR UPDATE`, id).Scan(&has); err != nil {
@@ -620,7 +620,7 @@ func (s *Store) UpdateDot1XProfile(ctx context.Context, actor string, id int64, 
 // DeleteDot1XProfile removes a profile no phone group or Wi-Fi profile uses. ErrNotFound for
 // an unknown id; a conflict naming the groups otherwise.
 func (s *Store) DeleteDot1XProfile(ctx context.Context, actor string, id int64) error {
-	return s.provChange(ctx, actor, "delete", "dot1x_profile", func(tx *sql.Tx) (string, bool, error) {
+	return s.provChange(ctx, actor, "delete", "dot1x_profile", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
 		var one int
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM dot1x_profiles WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
@@ -699,7 +699,7 @@ func (s *Store) sealDot1X(id int64, pw *string) ([]byte, error) {
 	return s.box.Seal(*pw, prov.Dot1XPasswordAAD(id))
 }
 
-func dot1xNameFree(ctx context.Context, tx *sql.Tx, name string, self int64) error {
+func dot1xNameFree(ctx context.Context, tx *dbTx, name string, self int64) error {
 	var one int
 	err := tx.QueryRowContext(ctx, `SELECT 1 FROM dot1x_profiles WHERE lower(name) = lower($1) AND id <> $2`, strings.TrimSpace(name), self).Scan(&one)
 	switch {
@@ -741,7 +741,7 @@ func (s *Store) GetGroupSecurity(ctx context.Context, groupID int64) (GroupSecur
 // lifetime and wired profile. ErrNotFound for an unknown group; a field
 // error for an unknown profile or a lifetime outside 30 to 1825 days.
 func (s *Store) SetGroupSecurity(ctx context.Context, actor string, in GroupSecurity) (GroupSecurity, error) {
-	err := s.provChange(ctx, actor, "update", "phone_group_security", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "phone_group_security", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(in.GroupID, 10)
 		var one int
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1 FOR UPDATE`, in.GroupID).Scan(&one); err != nil {

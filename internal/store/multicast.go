@@ -79,7 +79,7 @@ func (s *Store) GetMulticastChannel(ctx context.Context, id int64) (phonebook.Ch
 
 // checkChannelAddress refuses an address and port another catalog channel
 // already has.
-func checkChannelAddress(ctx context.Context, tx *sql.Tx, id int64, in phonebook.ChannelInput) error {
+func checkChannelAddress(ctx context.Context, tx *dbTx, id int64, in phonebook.ChannelInput) error {
 	var label string
 	err := tx.QueryRowContext(ctx, `SELECT label FROM multicast_channels
 		WHERE group_id IS NULL AND address = $1 AND port = $2 AND id <> $3 ORDER BY id LIMIT 1`,
@@ -99,7 +99,7 @@ func channelEnabled(in phonebook.ChannelInput) bool { return in.Enabled == nil |
 // change: hello-sip sends pages to paging channels.
 func (s *Store) CreateMulticastChannel(ctx context.Context, actor string, in phonebook.ChannelInput) (phonebook.Channel, error) {
 	var out phonebook.Channel
-	err := s.configChange(ctx, actor, "create", "multicast_channel", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "multicast_channel", nil, func(tx *dbTx) (int64, error) {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM multicast_channels WHERE group_id IS NULL`).Scan(&n); err != nil {
 			return 0, err
@@ -167,7 +167,7 @@ func joinUsers(users []string) string {
 // while nothing that needs the old kind uses it.
 func (s *Store) UpdateMulticastChannel(ctx context.Context, actor string, id int64, in phonebook.ChannelInput) (phonebook.Channel, error) {
 	var out phonebook.Channel
-	err := s.configChange(ctx, actor, "update", "multicast_channel", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "multicast_channel", nil, func(tx *dbTx) (int64, error) {
 		cur, err := scanChannel(tx.QueryRowContext(ctx, `SELECT `+channelCols+` FROM multicast_channels
 			WHERE id = $1 AND group_id IS NULL FOR UPDATE`, id))
 		if err != nil {
@@ -196,7 +196,7 @@ func (s *Store) UpdateMulticastChannel(ctx context.Context, actor string, id int
 // DeleteMulticastChannel removes a catalog channel. A paging group that
 // sends to it refuses the delete; phone groups and phones drop it.
 func (s *Store) DeleteMulticastChannel(ctx context.Context, actor string, id int64) error {
-	return s.configChange(ctx, actor, "delete", "multicast_channel", nil, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "multicast_channel", nil, func(tx *dbTx) (int64, error) {
 		var label string
 		if err := tx.QueryRowContext(ctx, `SELECT label FROM multicast_channels WHERE id = $1 AND group_id IS NULL FOR UPDATE`, id).Scan(&label); err != nil {
 			return id, mapErr(err)

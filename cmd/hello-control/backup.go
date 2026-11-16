@@ -143,7 +143,7 @@ func backupRestore(ctx context.Context, cfg config.Control, db *sql.DB, log *slo
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *from == "" {
 		return errors.New(backupUsage)
 	}
-	st := store.New(db)
+	st := store.New(db, log)
 	svc, err := newBackupService(cfg, st, db, nil, nil, log)
 	if err != nil {
 		return err

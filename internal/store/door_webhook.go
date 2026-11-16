@@ -115,7 +115,7 @@ func (s *Store) GetDoorWebhook(ctx context.Context, id int64) (DoorWebhook, erro
 }
 
 // checkDoorWebhook validates an input against the rest of the configuration.
-func checkDoorWebhook(ctx context.Context, tx *sql.Tx, in DoorWebhookInput) error {
+func checkDoorWebhook(ctx context.Context, tx *dbTx, in DoorWebhookInput) error {
 	if !doorWebhookNameRe.MatchString(in.Name) {
 		return fieldError("name", "must be 1-64 of A-Z a-z 0-9 . _ - and space")
 	}
@@ -204,7 +204,7 @@ func (s *Store) CreateDoorWebhook(ctx context.Context, actor string, in DoorWebh
 		return DoorWebhook{}, "", err
 	}
 	var id int64
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM door_webhooks`).Scan(&n); err != nil {
 			return err
@@ -240,7 +240,7 @@ func (s *Store) CreateDoorWebhook(ctx context.Context, actor string, in DoorWebh
 
 // UpdateDoorWebhook replaces a webhook's settings; its secret stays.
 func (s *Store) UpdateDoorWebhook(ctx context.Context, actor string, id int64, in DoorWebhookInput) (DoorWebhook, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var one int
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM door_webhooks WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
 			return err
@@ -272,7 +272,7 @@ func (s *Store) RotateDoorWebhookSecret(ctx context.Context, actor string, id in
 	if err != nil {
 		return "", err
 	}
-	err = s.tx(ctx, func(tx *sql.Tx) error {
+	err = s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE door_webhooks SET secret_enc = $2, updated_at = now() WHERE id = $1`, id, sealed)
 		if err != nil {
 			return err
@@ -290,7 +290,7 @@ func (s *Store) RotateDoorWebhookSecret(ctx context.Context, actor string, id in
 
 // DeleteDoorWebhook removes a webhook.
 func (s *Store) DeleteDoorWebhook(ctx context.Context, actor string, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM door_webhooks WHERE id = $1`, id)
 		if err != nil {
 			return err

@@ -207,7 +207,7 @@ func TestPGSyncLifecycle(t *testing.T) {
 		t.Fatalf("create audits = %s", got)
 	}
 	// The users API sees the ownership.
-	users, err := store.New(r.db).ListUsers(r.ctx)
+	users, err := store.New(r.db, nil).ListUsers(r.ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

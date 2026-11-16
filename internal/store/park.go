@@ -83,7 +83,7 @@ func (s *Store) GetParkLot(ctx context.Context, id int64) (ParkLot, error) {
 // extension number or a ring group name is a validation error.
 func (s *Store) CreateParkLot(ctx context.Context, actor string, in ParkLotInput, check Check) (ParkLot, error) {
 	var l ParkLot
-	err := s.configChange(ctx, actor, "create", "park_lot", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "park_lot", check, func(tx *dbTx) (int64, error) {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM park_lots`).Scan(&n); err != nil {
 			return 0, err
@@ -108,7 +108,7 @@ func (s *Store) CreateParkLot(ctx context.Context, actor string, in ParkLotInput
 // the range shrinks past it, until they are retrieved or time out.
 func (s *Store) UpdateParkLot(ctx context.Context, actor string, id int64, in ParkLotInput, check Check) (ParkLot, error) {
 	var l ParkLot
-	err := s.configChange(ctx, actor, "update", "park_lot", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "park_lot", check, func(tx *dbTx) (int64, error) {
 		err := dialGuard(ctx, tx, "slotStart", func() error {
 			var err error
 			l, err = scanParkLot(tx.QueryRowContext(ctx, `UPDATE park_lots SET name = $2, slot_start = $3, slot_end = $4,
@@ -124,7 +124,7 @@ func (s *Store) UpdateParkLot(ctx context.Context, actor string, id int64, in Pa
 
 // DeleteParkLot removes a lot.
 func (s *Store) DeleteParkLot(ctx context.Context, actor string, id int64, check Check) error {
-	return s.configChange(ctx, actor, "delete", "park_lot", check, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "park_lot", check, func(tx *dbTx) (int64, error) {
 		res, err := tx.ExecContext(ctx, `DELETE FROM park_lots WHERE id = $1`, id)
 		if err != nil {
 			return id, err
@@ -135,7 +135,7 @@ func (s *Store) DeleteParkLot(ctx context.Context, actor string, id int64, check
 
 // checkNotSlot refuses a dialled value (field names it in the error) that a
 // park lot's slots already use.
-func checkNotSlot(ctx context.Context, tx *sql.Tx, field, number string) error {
+func checkNotSlot(ctx context.Context, tx *dbTx, field, number string) error {
 	n, err := strconv.Atoi(number)
 	if err != nil || strconv.Itoa(n) != number {
 		return nil // not a plain number: no slot is called that

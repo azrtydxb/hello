@@ -22,7 +22,7 @@ type execer interface {
 // QueueCallbacks is the PostgreSQL queue.CallbackStore. Every time it reads
 // is the database's clock (now()), so nodes with skewed clocks agree on
 // leases and due times.
-type QueueCallbacks struct{ db *sql.DB }
+type QueueCallbacks struct{ db *dbPool }
 
 var _ queue.CallbackStore = (*QueueCallbacks)(nil)
 

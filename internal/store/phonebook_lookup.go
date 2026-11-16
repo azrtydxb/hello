@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 
 	"github.com/azrtydxb/hello/internal/phonebook"
@@ -188,7 +189,7 @@ func (s *Store) exactMatch(ctx context.Context, src lookupSource, key string) (i
 			ORDER BY e.id LIMIT 1`, src.id, key).Scan(&id, &in.FirstName, &in.LastName, &in.Company)
 	}
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		return in, 0, false, nil
 	case err != nil:
 		return in, 0, false, err

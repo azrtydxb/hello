@@ -132,7 +132,7 @@ func (s *Store) GetSchedule(ctx context.Context, id int64) (Schedule, error) {
 	return ss[0], nil
 }
 
-func writeScheduleParts(ctx context.Context, tx *sql.Tx, id int64, in ScheduleInput) error {
+func writeScheduleParts(ctx context.Context, tx *dbTx, id int64, in ScheduleInput) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM schedule_ranges WHERE schedule_id = $1`, id); err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func writeScheduleParts(ctx context.Context, tx *sql.Tx, id int64, in ScheduleIn
 // CreateSchedule inserts a schedule with its ranges and calendars.
 func (s *Store) CreateSchedule(ctx context.Context, actor string, in ScheduleInput, check Check) (Schedule, error) {
 	var out Schedule
-	err := s.configChange(ctx, actor, "create", "schedule", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "schedule", check, func(tx *dbTx) (int64, error) {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM schedules`).Scan(&n); err != nil {
 			return 0, err
@@ -191,7 +191,7 @@ func (s *Store) CreateSchedule(ctx context.Context, actor string, in ScheduleInp
 // UpdateSchedule replaces a schedule.
 func (s *Store) UpdateSchedule(ctx context.Context, actor string, id int64, in ScheduleInput, check Check) (Schedule, error) {
 	var out Schedule
-	err := s.configChange(ctx, actor, "update", "schedule", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "schedule", check, func(tx *dbTx) (int64, error) {
 		res, err := tx.ExecContext(ctx, `UPDATE schedules SET name = $2, time_zone = $3, updated_at = now() WHERE id = $1`,
 			id, in.Name, in.TimeZone)
 		if err != nil {
@@ -214,7 +214,7 @@ func (s *Store) UpdateSchedule(ctx context.Context, actor string, id int64, in S
 
 // DeleteSchedule removes a schedule no time condition uses.
 func (s *Store) DeleteSchedule(ctx context.Context, actor string, id int64, check Check) error {
-	return s.configChange(ctx, actor, "delete", "schedule", check, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "schedule", check, func(tx *dbTx) (int64, error) {
 		var name string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM schedules WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
 			return id, err
@@ -383,7 +383,7 @@ func (s *Store) GetCalendar(ctx context.Context, id int64) (Calendar, error) {
 }
 
 // insertEntries writes entries (already normalised) to a calendar.
-func insertEntries(ctx context.Context, tx *sql.Tx, calendarID int64, entries []timecond.Entry) error {
+func insertEntries(ctx context.Context, tx *dbTx, calendarID int64, entries []timecond.Entry) error {
 	for _, e := range entries {
 		start, end := e.Start, e.End
 		if e.Yearly {
@@ -406,7 +406,7 @@ func insertEntries(ctx context.Context, tx *sql.Tx, calendarID int64, entries []
 // CreateCalendar inserts a calendar with its entries.
 func (s *Store) CreateCalendar(ctx context.Context, actor string, in CalendarInput, check Check) (Calendar, error) {
 	var out Calendar
-	err := s.configChange(ctx, actor, "create", "calendar", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "calendar", check, func(tx *dbTx) (int64, error) {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM calendars`).Scan(&n); err != nil {
 			return 0, err
@@ -434,7 +434,7 @@ func (s *Store) CreateCalendar(ctx context.Context, actor string, in CalendarInp
 // UpdateCalendar replaces a calendar and its entries.
 func (s *Store) UpdateCalendar(ctx context.Context, actor string, id int64, in CalendarInput, check Check) (Calendar, error) {
 	var out Calendar
-	err := s.configChange(ctx, actor, "update", "calendar", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "calendar", check, func(tx *dbTx) (int64, error) {
 		res, err := tx.ExecContext(ctx, `UPDATE calendars SET name = $2, description = $3, updated_at = now() WHERE id = $1`,
 			id, in.Name, in.Description)
 		if err != nil {
@@ -463,7 +463,7 @@ func (s *Store) UpdateCalendar(ctx context.Context, actor string, id int64, in C
 // MaxCalendarEntries entries.
 func (s *Store) ImportCalendarEntries(ctx context.Context, actor string, id int64, entries []timecond.Entry, replace bool, check Check) (Calendar, error) {
 	var out Calendar
-	err := s.configChange(ctx, actor, "import", "calendar", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "import", "calendar", check, func(tx *dbTx) (int64, error) {
 		var name string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM calendars WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
 			return id, err
@@ -497,7 +497,7 @@ func (s *Store) ImportCalendarEntries(ctx context.Context, actor string, id int6
 
 // DeleteCalendar removes a calendar no schedule consults.
 func (s *Store) DeleteCalendar(ctx context.Context, actor string, id int64, check Check) error {
-	return s.configChange(ctx, actor, "delete", "calendar", check, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "calendar", check, func(tx *dbTx) (int64, error) {
 		var name string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM calendars WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
 			return id, err
@@ -604,7 +604,7 @@ func (s *Store) GetTimeCondition(ctx context.Context, id int64) (TimeCondition, 
 // codes). It runs in the configuration change's transaction, under the
 // configuration lock, so a time condition cannot be deleted between the
 // check and the write that names it.
-func requireTimeConditionTx(ctx context.Context, tx *sql.Tx, path, name string) error {
+func requireTimeConditionTx(ctx context.Context, tx *dbTx, path, name string) error {
 	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM time_conditions WHERE name = $1`, name).Scan(&n); err != nil {
 		return err
@@ -632,7 +632,7 @@ func (in TimeConditionInput) destinations() []tcDest {
 // is written: the schedule, the destinations (and the voicemail box that
 // follows an announcement), the toggle number, and that no chain of time
 // conditions leads back to it. id is 0 for a new one.
-func checkTimeCondition(ctx context.Context, tx *sql.Tx, id int64, in TimeConditionInput) error {
+func checkTimeCondition(ctx context.Context, tx *dbTx, id int64, in TimeConditionInput) error {
 	var n int
 	// A taken name is a conflict (409) whatever else the request gets wrong,
 	// as the unique index would report it; checked first so a duplicate is
@@ -683,7 +683,7 @@ func checkTimeCondition(ctx context.Context, tx *sql.Tx, id int64, in TimeCondit
 
 // checkTimeConditionLoops refuses a time condition from which a chain of
 // time conditions leads back to it, whichever branch each takes.
-func checkTimeConditionLoops(ctx context.Context, tx *sql.Tx, id int64, in TimeConditionInput) error {
+func checkTimeConditionLoops(ctx context.Context, tx *dbTx, id int64, in TimeConditionInput) error {
 	rows, err := tx.QueryContext(ctx, `SELECT name, open_kind, open_target, closed_kind, closed_target, holiday_kind, holiday_target
 		FROM time_conditions WHERE id <> $1`, id)
 	if err != nil {
@@ -746,7 +746,7 @@ func destCols(d *timecond.Dest) (kind, target, then string) {
 // CreateTimeCondition inserts a time condition; it starts in automatic mode.
 func (s *Store) CreateTimeCondition(ctx context.Context, actor string, in TimeConditionInput, check Check) (TimeCondition, error) {
 	var out TimeCondition
-	err := s.configChange(ctx, actor, "create", "time_condition", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "time_condition", check, func(tx *dbTx) (int64, error) {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM time_conditions`).Scan(&n); err != nil {
 			return 0, err
@@ -777,7 +777,7 @@ func (s *Store) CreateTimeCondition(ctx context.Context, actor string, in TimeCo
 
 // tcReferences names what points at the time condition: inbound routes, ring
 // groups, feature codes, IVR menus and other time conditions.
-func tcReferences(ctx context.Context, tx *sql.Tx, id int64, name string) ([]string, error) {
+func tcReferences(ctx context.Context, tx *dbTx, id int64, name string) ([]string, error) {
 	var refs []string
 	for _, q := range []struct {
 		query, label string
@@ -811,7 +811,7 @@ func tcReferences(ctx context.Context, tx *sql.Tx, id int64, name string) ([]str
 // Renaming one that something points at is refused: the references name it.
 func (s *Store) UpdateTimeCondition(ctx context.Context, actor string, id int64, in TimeConditionInput, check Check) (TimeCondition, error) {
 	var out TimeCondition
-	err := s.configChange(ctx, actor, "update", "time_condition", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "time_condition", check, func(tx *dbTx) (int64, error) {
 		var cur string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM time_conditions WHERE id = $1 FOR UPDATE`, id).Scan(&cur); err != nil {
 			return id, err
@@ -847,7 +847,7 @@ func (s *Store) UpdateTimeCondition(ctx context.Context, actor string, id int64,
 
 // DeleteTimeCondition removes a time condition nothing points at.
 func (s *Store) DeleteTimeCondition(ctx context.Context, actor string, id int64, check Check) error {
-	return s.configChange(ctx, actor, "delete", "time_condition", check, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "time_condition", check, func(tx *dbTx) (int64, error) {
 		var name string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM time_conditions WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
 			return id, err
@@ -880,7 +880,7 @@ func (s *Store) SetTimeConditionOverride(ctx context.Context, actor string, id i
 		return TimeCondition{}, fieldError("override", `must be "auto", "open" or "closed"`)
 	}
 	var out TimeCondition
-	err := s.configChange(ctx, actor, "override", "time_condition", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "override", "time_condition", nil, func(tx *dbTx) (int64, error) {
 		if err := setOverride(ctx, tx, id, actor, mode); err != nil {
 			return id, err
 		}
@@ -893,7 +893,7 @@ func (s *Store) SetTimeConditionOverride(ctx context.Context, actor string, id i
 	return out, err
 }
 
-func setOverride(ctx context.Context, tx *sql.Tx, id int64, actor, mode string) error {
+func setOverride(ctx context.Context, tx *dbTx, id int64, actor, mode string) error {
 	var at any
 	if mode != timecond.OverrideAuto {
 		at = time.Now().UTC()
@@ -922,7 +922,7 @@ func (s *Store) ApplyTimeConditionToggle(ctx context.Context, actor, number, mod
 		return TimeCondition{}, fieldError("mode", `must be "toggle", "auto", "open" or "closed"`)
 	}
 	var out TimeCondition
-	err := s.configChange(ctx, actor, "override", "time_condition", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "override", "time_condition", nil, func(tx *dbTx) (int64, error) {
 		ts, err := listTimeConditions(ctx, tx, ` WHERE t.toggle_number = $1`, number)
 		if err != nil {
 			return 0, err

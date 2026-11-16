@@ -74,7 +74,7 @@ func newEnvConfig(t *testing.T, cfg Config, box *secret.Box) *env {
 	if _, err := migrate.Up(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	st := store.New(db).WithSecretBox(box).WithProv(cfg.Prov.Settings)
+	st := store.New(db, nil).WithSecretBox(box).WithProv(cfg.Prov.Settings)
 	hash, err := auth.HashPassword(testPassword)
 	if err != nil {
 		t.Fatal(err)

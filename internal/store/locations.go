@@ -115,7 +115,7 @@ func locationProblems(prefix string, ps []location.Problem) error {
 
 // writeLocation validates n against the stored tree and inserts it (id 0) or
 // updates it, inside the configuration change.
-func writeLocation(ctx context.Context, tx *sql.Tx, id int64, n location.Node) (int64, error) {
+func writeLocation(ctx context.Context, tx *dbTx, id int64, n location.Node) (int64, error) {
 	all, err := loadLocations(ctx, tx)
 	if err != nil {
 		return 0, err
@@ -166,7 +166,7 @@ func uniqueLocationName(err error) error {
 // CreateLocation adds a location. ValidationError for an invalid one.
 func (s *Store) CreateLocation(ctx context.Context, actor string, n location.Node) (Location, error) {
 	var id int64
-	err := s.provChange(ctx, actor, "create", "location", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "create", "location", func(tx *dbTx) (string, bool, error) {
 		var err error
 		id, err = writeLocation(ctx, tx, 0, n)
 		return strconv.FormatInt(id, 10), true, err
@@ -179,7 +179,7 @@ func (s *Store) CreateLocation(ctx context.Context, actor string, n location.Nod
 
 // UpdateLocation replaces a location's fields. The kind cannot change.
 func (s *Store) UpdateLocation(ctx context.Context, actor string, id int64, n location.Node) (Location, error) {
-	err := s.provChange(ctx, actor, "update", "location", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "location", func(tx *dbTx) (string, bool, error) {
 		_, err := writeLocation(ctx, tx, id, n)
 		return strconv.FormatInt(id, 10), true, err
 	})
@@ -192,7 +192,7 @@ func (s *Store) UpdateLocation(ctx context.Context, actor string, id int64, n lo
 // DeleteLocation removes a location that has nothing inside it and is
 // assigned to nothing; the error names what is in the way.
 func (s *Store) DeleteLocation(ctx context.Context, actor string, id int64) error {
-	return s.provChange(ctx, actor, "delete", "location", func(tx *sql.Tx) (string, bool, error) {
+	return s.provChange(ctx, actor, "delete", "location", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
 		var one int
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM locations WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
@@ -284,7 +284,7 @@ func (s *Store) SetLocationAssignment(ctx context.Context, actor, kind string, i
 	if table == "" {
 		return ErrNotFound
 	}
-	return s.provChange(ctx, actor, "update", "location_assignment", func(tx *sql.Tx) (string, bool, error) {
+	return s.provChange(ctx, actor, "update", "location_assignment", func(tx *dbTx) (string, bool, error) {
 		rid := kind + ":" + strconv.FormatInt(id, 10)
 		if locationID != nil {
 			var one int
@@ -320,7 +320,7 @@ func (s *Store) GetPhoneGroupEmergency(ctx context.Context, id int64) (PhoneEmer
 }
 
 // requireDialTarget checks that number is an extension or a ring group.
-func requireDialTarget(ctx context.Context, tx *sql.Tx, field, number string) error {
+func requireDialTarget(ctx context.Context, tx *dbTx, field, number string) error {
 	var one int
 	err := tx.QueryRowContext(ctx, `SELECT 1 FROM extensions WHERE number = $1 UNION ALL SELECT 1 FROM ring_groups WHERE name = $1 LIMIT 1`, number).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -332,7 +332,7 @@ func requireDialTarget(ctx context.Context, tx *sql.Tx, field, number string) er
 // SetPhoneGroupEmergency sets a group's E911 switch and alarm destination (an
 // extension or ring group number, empty for none).
 func (s *Store) SetPhoneGroupEmergency(ctx context.Context, actor string, id int64, in PhoneEmergency) (PhoneEmergency, error) {
-	err := s.provChange(ctx, actor, "update", "phone_group_emergency", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "phone_group_emergency", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
 		var one int
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
@@ -370,7 +370,7 @@ func (s *Store) GetEmergencySettings(ctx context.Context) (EmergencySettings, er
 // PutEmergencySettings replaces the emergency settings. The notify group must
 // be a ring group.
 func (s *Store) PutEmergencySettings(ctx context.Context, actor string, in EmergencySettings) (EmergencySettings, error) {
-	err := s.provChange(ctx, actor, "update", "emergency_settings", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "update", "emergency_settings", func(tx *dbTx) (string, bool, error) {
 		if in.NotifyGroup != "" {
 			var one int
 			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM ring_groups WHERE name = $1`, in.NotifyGroup).Scan(&one); err != nil {

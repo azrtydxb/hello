@@ -129,7 +129,7 @@ func (s *Store) RotateLDAPPassword(ctx context.Context, actor string, phoneID in
 		return "", conflict("LDAP is not enabled on this server")
 	}
 	pw := newLDAPPassword()
-	err := s.provChange(ctx, actor, "ldap-password-rotate", "phone", func(tx *sql.Tx) (string, bool, error) {
+	err := s.provChange(ctx, actor, "ldap-password-rotate", "phone", func(tx *dbTx) (string, bool, error) {
 		sid := strconv.FormatInt(phoneID, 10)
 		var cur []byte
 		err := tx.QueryRowContext(ctx, `SELECT ldap_password_enc FROM phones WHERE id = $1 FOR UPDATE`, phoneID).Scan(&cur)
@@ -222,7 +222,7 @@ func (s *Store) GetPhoneLDAP(ctx context.Context, phoneID int64) (PhoneLDAP, err
 // SetPhoneGroupLDAP turns the LDAP directory on or off for a group's phones.
 func (s *Store) SetPhoneGroupLDAP(ctx context.Context, actor string, id int64, enabled bool) (phonebook.Group, error) {
 	var out phonebook.Group
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET ldap_enabled = $2, updated_at = now() WHERE id = $1`, id, enabled)
 		if err != nil {
 			return err

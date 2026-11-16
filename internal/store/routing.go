@@ -15,10 +15,10 @@ import (
 	"github.com/azrtydxb/hello/internal/secmedia"
 )
 
-// querier is what both *sql.DB and *sql.Tx offer.
+// querier is what both the pool and a transaction offer.
 type querier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryContext(ctx context.Context, query string, args ...any) (*dbRows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *dbRow
 }
 
 // trunkAAD binds a sealed trunk password to its row (contract 3).
@@ -281,7 +281,7 @@ func getTrunk(ctx context.Context, q querier, id int64, suffix string) (Trunk, e
 // setPassword seals password for trunk id and stores it, or clears it when
 // password is "". The sealed value must open again under the same key
 // before it is stored.
-func (s *Store) setPassword(ctx context.Context, tx *sql.Tx, id int64, password string) error {
+func (s *Store) setPassword(ctx context.Context, tx *dbTx, id int64, password string) error {
 	var sealed []byte
 	if password != "" {
 		if s.box == nil {
@@ -308,7 +308,7 @@ func sessionTimersArg(v string) string {
 	return v
 }
 
-func writeDestinations(ctx context.Context, tx *sql.Tx, id int64, ds []routing.Destination) error {
+func writeDestinations(ctx context.Context, tx *dbTx, id int64, ds []routing.Destination) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM trunk_destinations WHERE trunk_id = $1`, id); err != nil {
 		return err
 	}
@@ -326,7 +326,7 @@ func writeDestinations(ctx context.Context, tx *sql.Tx, id int64, ds []routing.D
 func (s *Store) CreateTrunk(ctx context.Context, actor string, in TrunkInput, password string, check Check) (Trunk, error) {
 	var t Trunk
 	in.anonymousDefaults()
-	err := s.configChange(ctx, actor, "create", "trunk", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "trunk", check, func(tx *dbTx) (int64, error) {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO trunks (name, mode, username, realm, from_domain, register_expires,
 				options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging, geolocation,
@@ -359,7 +359,7 @@ func (s *Store) UpdateTrunk(ctx context.Context, actor string, id int64, pw Pass
 	apply func(in *TrunkInput, hasPassword bool) []routing.FieldError, check Check,
 ) (Trunk, error) {
 	var t Trunk
-	err := s.configChange(ctx, actor, "update", "trunk", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "trunk", check, func(tx *dbTx) (int64, error) {
 		cur, err := getTrunk(ctx, tx, id, "FOR UPDATE")
 		if err != nil {
 			return id, err
@@ -401,7 +401,7 @@ func (s *Store) UpdateTrunk(ctx context.Context, actor string, id int64, pw Pass
 }
 
 // routeNames returns the first column of query, sorted.
-func routeNames(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]string, error) {
+func routeNames(ctx context.Context, tx *dbTx, query string, args ...any) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -422,7 +422,7 @@ func routeNames(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]s
 // extensionRoutes names the routes that refer to the extension with this
 // id — inbound routes ringing it and outbound routes restricted to it as a
 // source — and locks the extension row.
-func extensionRoutes(ctx context.Context, tx *sql.Tx, id int64) (string, []string, error) {
+func extensionRoutes(ctx context.Context, tx *dbTx, id int64) (string, []string, error) {
 	var number string
 	if err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1 FOR UPDATE`, id).Scan(&number); err != nil {
 		return "", nil, err
@@ -438,7 +438,7 @@ func extensionRoutes(ctx context.Context, tx *sql.Tx, id int64) (string, []strin
 // outbound route would lose a trunk, and the schema would cascade-delete
 // inbound routes).
 func (s *Store) DeleteTrunk(ctx context.Context, actor string, id int64, check Check) error {
-	return s.configChange(ctx, actor, "delete", "trunk", check, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "trunk", check, func(tx *dbTx) (int64, error) {
 		var name string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM trunks WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
 			return id, err
@@ -611,7 +611,7 @@ func jsonArg(v any) (any, error) {
 }
 
 // checkTrunksExist reports each listed trunk id that does not exist.
-func checkTrunksExist(ctx context.Context, tx *sql.Tx, path string, ids []int64) error {
+func checkTrunksExist(ctx context.Context, tx *dbTx, path string, ids []int64) error {
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM trunks WHERE id = ANY($1)`, ids)
 	if err != nil {
 		return err
@@ -640,7 +640,7 @@ func checkTrunksExist(ctx context.Context, tx *sql.Tx, path string, ids []int64)
 	return nil
 }
 
-func writeOutbound(ctx context.Context, tx *sql.Tx, id int64, o OutboundRoute) error {
+func writeOutbound(ctx context.Context, tx *dbTx, id int64, o OutboundRoute) error {
 	if err := checkTrunksExist(ctx, tx, "trunks", o.Trunks); err != nil {
 		return err
 	}
@@ -686,7 +686,7 @@ func nonNil(s []string) []string {
 // Position are assigned.
 func (s *Store) CreateOutboundRoute(ctx context.Context, actor string, o OutboundRoute, check Check) (OutboundRoute, error) {
 	var out OutboundRoute
-	err := s.configChange(ctx, actor, "create", "outbound_route", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "outbound_route", check, func(tx *dbTx) (int64, error) {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO outbound_routes (position, name, match_kind, match)
 			VALUES ((SELECT COALESCE(max(position), 0) + 1 FROM outbound_routes), $1, $2, $3) RETURNING id`,
@@ -708,7 +708,7 @@ func (s *Store) UpdateOutboundRoute(ctx context.Context, actor string, id int64,
 	apply func(*OutboundRoute) []routing.FieldError, check Check,
 ) (OutboundRoute, error) {
 	var out OutboundRoute
-	err := s.configChange(ctx, actor, "update", "outbound_route", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "outbound_route", check, func(tx *dbTx) (int64, error) {
 		cur, err := getOutbound(ctx, tx, id, "FOR UPDATE")
 		if err != nil {
 			return id, err
@@ -731,8 +731,8 @@ func (s *Store) DeleteOutboundRoute(ctx context.Context, actor string, id int64,
 		deleteByID(ctx, `DELETE FROM outbound_routes WHERE id = $1`, id))
 }
 
-func deleteByID(ctx context.Context, query string, id int64) func(*sql.Tx) (int64, error) {
-	return func(tx *sql.Tx) (int64, error) {
+func deleteByID(ctx context.Context, query string, id int64) func(*dbTx) (int64, error) {
+	return func(tx *dbTx) (int64, error) {
 		res, err := tx.ExecContext(ctx, query, id)
 		if err != nil {
 			return id, err
@@ -825,7 +825,7 @@ func getInbound(ctx context.Context, q querier, id int64, suffix string) (Inboun
 	return rs[0], nil
 }
 
-func writeInbound(ctx context.Context, tx *sql.Tx, id int64, in InboundRoute) error {
+func writeInbound(ctx context.Context, tx *dbTx, id int64, in InboundRoute) error {
 	if in.TrunkID != nil {
 		if err := checkTrunksExist(ctx, tx, "trunkId", []int64{*in.TrunkID}); err != nil {
 			var v *ValidationError
@@ -857,7 +857,7 @@ func writeInbound(ctx context.Context, tx *sql.Tx, id int64, in InboundRoute) er
 // CreateInboundRoute appends a route after the last one.
 func (s *Store) CreateInboundRoute(ctx context.Context, actor string, in InboundRoute, check Check) (InboundRoute, error) {
 	var out InboundRoute
-	err := s.configChange(ctx, actor, "create", "inbound_route", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "inbound_route", check, func(tx *dbTx) (int64, error) {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO inbound_routes (position, name, did_kind, destination_kind, destination)
 			VALUES ((SELECT COALESCE(max(position), 0) + 1 FROM inbound_routes), $1, $2, $3, $4) RETURNING id`,
@@ -879,7 +879,7 @@ func (s *Store) UpdateInboundRoute(ctx context.Context, actor string, id int64,
 	apply func(*InboundRoute) []routing.FieldError, check Check,
 ) (InboundRoute, error) {
 	var out InboundRoute
-	err := s.configChange(ctx, actor, "update", "inbound_route", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "inbound_route", check, func(tx *dbTx) (int64, error) {
 		cur, err := getInbound(ctx, tx, id, "FOR UPDATE")
 		if err != nil {
 			return id, err
@@ -922,7 +922,7 @@ func (s *Store) ReorderRoutes(ctx context.Context, actor, kind string, ids []int
 	if !ok {
 		return fmt.Errorf("store: unknown route kind %q", kind)
 	}
-	return s.configChangeID(ctx, actor, "reorder", t.resource, check, func(tx *sql.Tx) (string, error) {
+	return s.configChangeID(ctx, actor, "reorder", t.resource, check, func(tx *dbTx) (string, error) {
 		rows, err := tx.QueryContext(ctx, t.lockIDs)
 		if err != nil {
 			return "", err

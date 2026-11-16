@@ -426,7 +426,7 @@ func TestPGEngagementHandshake(t *testing.T) {
 func TestPGUsersMappingsAndOwnership(t *testing.T) {
 	p, db := scratchPG(t)
 	ctx := context.Background()
-	st := store.New(db)
+	st := store.New(db, nil)
 	hash, err := auth.HashPassword("a-Long-Password-1")
 	if err != nil {
 		t.Fatal(err)

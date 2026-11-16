@@ -68,7 +68,7 @@ type NewClientDevice struct {
 // so two concurrent enrolments cannot both pass the limit.
 func (s *Store) CreateClientDevice(ctx context.Context, actor string, in NewClientDevice) (ClientDevice, error) {
 	var c ClientDevice
-	err := s.configChangeID(ctx, actor, "create", "device", nil, func(tx *sql.Tx) (string, error) {
+	err := s.configChangeID(ctx, actor, "create", "device", nil, func(tx *dbTx) (string, error) {
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id = $1 AND enabled FOR UPDATE`, in.UserID).Scan(&in.UserID); err != nil {
 			return "", err
 		}
@@ -140,7 +140,7 @@ func (s *Store) RefreshClientDevice(ctx context.Context, userID, id int64) (Clie
 // configuration revision moves, so hello-sip drops the device's
 // registrations and refuses its credentials within its refresh interval.
 func (s *Store) RevokeClientDevice(ctx context.Context, actor string, userID, id int64) error {
-	return s.configChange(ctx, actor, "revoke", "device", nil, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "revoke", "device", nil, func(tx *dbTx) (int64, error) {
 		res, err := tx.ExecContext(ctx, `UPDATE devices SET enabled = FALSE, updated_at = now()
 			WHERE id = $1 AND user_id = $2 AND kind <> 'desk' AND enabled`, id, userID)
 		if err != nil {

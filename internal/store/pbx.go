@@ -121,7 +121,7 @@ func (s *Store) UpdateVoicemailBox(ctx context.Context, actor string, extensionI
 		hash = []byte(h)
 	}
 	var b VoicemailBox
-	err := s.configChangeID(ctx, actor, "update", "voicemail_box", check, func(tx *sql.Tx) (string, error) {
+	err := s.configChangeID(ctx, actor, "update", "voicemail_box", check, func(tx *dbTx) (string, error) {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO voicemail_boxes (extension_id) VALUES ($1)
 			ON CONFLICT (extension_id) DO NOTHING`, extensionID); err != nil {
@@ -213,7 +213,7 @@ func (s *Store) GetVoicemailMessage(ctx context.Context, id int64) (VoicemailMes
 // UpdateVoicemailMessageHeard sets a message's heard flag (playing it in the
 // UI, or marking it unheard again).
 func (s *Store) UpdateVoicemailMessageHeard(ctx context.Context, actor string, id int64, heard bool) error {
-	return s.configChange(ctx, actor, "update", "voicemail_message", nil, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "update", "voicemail_message", nil, func(tx *dbTx) (int64, error) {
 		var box int64
 		err := tx.QueryRowContext(ctx,
 			`UPDATE voicemail_messages SET heard = $2 WHERE id = $1 RETURNING box_id`, id, heard).Scan(&box)
@@ -229,7 +229,7 @@ func (s *Store) UpdateVoicemailMessageHeard(ctx context.Context, actor string, i
 // object store.
 func (s *Store) DeleteVoicemailMessage(ctx context.Context, actor string, id int64) (string, error) {
 	var object string
-	err := s.configChange(ctx, actor, "delete", "voicemail_message", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "delete", "voicemail_message", nil, func(tx *dbTx) (int64, error) {
 		var box int64
 		if err := tx.QueryRowContext(ctx,
 			`SELECT minio_object, box_id FROM voicemail_messages WHERE id = $1`, id).Scan(&object, &box); err != nil {
@@ -257,7 +257,7 @@ func (s *Store) DeleteVoicemailMessage(ctx context.Context, actor string, id int
 
 // notifyMailbox queues the mailbox-changed NOTIFY in the changing
 // transaction, so it reaches the SIP nodes only if the change commits.
-func notifyMailbox(ctx context.Context, tx *sql.Tx, box int64) error {
+func notifyMailbox(ctx context.Context, tx *dbTx, box int64) error {
 	_, err := tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, MailboxChannel, strconv.FormatInt(box, 10))
 	return err
 }
@@ -485,7 +485,7 @@ type FeatureUpdate struct {
 // snapshot. Unlike the API paths it runs no routing check: a feature code
 // touches only the extension's own feature columns.
 func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureUpdate) error {
-	return s.configChangeID(ctx, actor, "update", "extension", nil, func(tx *sql.Tx) (string, error) {
+	return s.configChangeID(ctx, actor, "update", "extension", nil, func(tx *dbTx) (string, error) {
 		res, err := tx.ExecContext(ctx, `
 			UPDATE extensions SET
 				dnd = COALESCE($2, dnd),
@@ -684,7 +684,7 @@ func (s *Store) GetRingGroup(ctx context.Context, id int64) (RingGroup, error) {
 // CreateRingGroup inserts a group with its members.
 func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupInput, check Check) (RingGroup, error) {
 	var g RingGroup
-	err := s.configChange(ctx, actor, "create", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "ring_group", check, func(tx *dbTx) (int64, error) {
 		if err := checkRingGroupIVR(ctx, tx, "", in); err != nil {
 			return 0, err
 		}
@@ -719,7 +719,7 @@ func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupI
 // UpdateRingGroup replaces a group's fields and member list.
 func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in RingGroupInput, check Check) (RingGroup, error) {
 	var g RingGroup
-	err := s.configChange(ctx, actor, "update", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "ring_group", check, func(tx *dbTx) (int64, error) {
 		var cur string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM ring_groups WHERE id = $1`, id).Scan(&cur); err != nil {
 			return id, err
@@ -767,7 +767,7 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 // transaction: a new name must not be an IVR menu's or a conference room's
 // number, and an IVR or time condition failure destination must name an
 // existing one. cur is the stored name ("" on create).
-func checkRingGroupIVR(ctx context.Context, tx *sql.Tx, cur string, in RingGroupInput) error {
+func checkRingGroupIVR(ctx context.Context, tx *dbTx, cur string, in RingGroupInput) error {
 	if in.Name != cur {
 		if err := checkDialNumber(ctx, tx, "name", in.Name, numRingGroup); err != nil {
 			return err
@@ -805,7 +805,7 @@ func checkRingGroupIVR(ctx context.Context, tx *sql.Tx, cur string, in RingGroup
 // failure destination is target of kind ("extension" or "ring_group"):
 // a fallback names its target by number or name, so neither can change
 // or go while a group falls back to it.
-func refuseIfGroupFailsTo(ctx context.Context, tx *sql.Tx, what, target, kind string) error {
+func refuseIfGroupFailsTo(ctx context.Context, tx *dbTx, what, target, kind string) error {
 	rows, err := tx.QueryContext(ctx, `SELECT name FROM ring_groups WHERE failure_kind = $1 AND failure_target = $2 ORDER BY name`,
 		kind, target)
 	if err != nil {
@@ -849,7 +849,7 @@ func refuseIfGroupFailsTo(ctx context.Context, tx *sql.Tx, what, target, kind st
 
 // DeleteRingGroup removes a group and, by cascade, its members.
 func (s *Store) DeleteRingGroup(ctx context.Context, actor string, id int64, check Check) error {
-	return s.configChange(ctx, actor, "delete", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "ring_group", check, func(tx *dbTx) (int64, error) {
 		var name string
 		if err := tx.QueryRowContext(ctx, `SELECT name FROM ring_groups WHERE id = $1`, id).Scan(&name); err != nil {
 			return id, err
@@ -868,7 +868,7 @@ func (s *Store) DeleteRingGroup(ctx context.Context, actor string, id int64, che
 	})
 }
 
-func getGroupTx(ctx context.Context, tx *sql.Tx, id int64) (RingGroup, error) {
+func getGroupTx(ctx context.Context, tx *dbTx, id int64) (RingGroup, error) {
 	gs, err := listRingGroups(ctx, tx, ` WHERE g.id = $1`, id)
 	if err != nil {
 		return RingGroup{}, err
@@ -881,7 +881,7 @@ func getGroupTx(ctx context.Context, tx *sql.Tx, id int64) (RingGroup, error) {
 
 // writeGroupMembers replaces a group's member rows. Positions are unique per
 // group with a deferred constraint, so any order of inserts works.
-func writeGroupMembers(ctx context.Context, tx *sql.Tx, id int64, members []RingGroupMember) error {
+func writeGroupMembers(ctx context.Context, tx *dbTx, id int64, members []RingGroupMember) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM ring_group_members WHERE group_id = $1`, id); err != nil {
 		return err
 	}
@@ -934,7 +934,7 @@ func (s *Store) ListFeatureCodes(ctx context.Context) ([]FeatureCode, error) {
 // every code not in the list is removed, so the caller always sends the
 // complete configuration.
 func (s *Store) PutFeatureCodes(ctx context.Context, actor string, codes []FeatureCode, check Check) error {
-	return s.configChangeID(ctx, actor, "update", "feature_code", check, func(tx *sql.Tx) (string, error) {
+	return s.configChangeID(ctx, actor, "update", "feature_code", check, func(tx *dbTx) (string, error) {
 		if err := checkFeatureCodesAgainstPaging(ctx, tx, codes); err != nil {
 			return "", err
 		}

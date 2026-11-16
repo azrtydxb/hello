@@ -87,7 +87,7 @@ func (s *Store) GetDoorCamera(ctx context.Context, id int64) (DoorCamera, error)
 
 // SetDoorCamera sets door station id's camera.
 func (s *Store) SetDoorCamera(ctx context.Context, actor string, id int64, in DoorCameraInput) (DoorCamera, error) {
-	err := s.tx(ctx, func(tx *sql.Tx) error {
+	err := s.tx(ctx, func(tx *dbTx) error {
 		var kind string
 		if err := tx.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = $1 FOR UPDATE`, id).Scan(&kind); err != nil {
 			return err
@@ -139,7 +139,7 @@ func (s *Store) SetDoorCamera(ctx context.Context, actor string, id int64, in Do
 
 // DeleteDoorCamera removes door station id's camera.
 func (s *Store) DeleteDoorCamera(ctx context.Context, actor string, id int64) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	return s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM door_cameras WHERE extension_id = $1`, id)
 		if err != nil {
 			return err

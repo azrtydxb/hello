@@ -9,7 +9,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"strings"
 	"time"
@@ -158,7 +157,7 @@ func (s *Store) VideoStreamsOf(ctx context.Context, correlation string) ([]Video
 	return collectVideoStreams(rows)
 }
 
-func collectVideoStreams(rows *sql.Rows) ([]VideoStream, error) {
+func collectVideoStreams(rows *dbRows) ([]VideoStream, error) {
 	defer func() { _ = rows.Close() }()
 	out := []VideoStream{}
 	for rows.Next() {
@@ -289,7 +288,7 @@ func (s *Store) GetRecordingSettings(ctx context.Context) (RecordingSettings, er
 
 // SetVideoRetention changes the video retention (1 to 3650 days).
 func (s *Store) SetVideoRetention(ctx context.Context, actor string, days int) (RecordingSettings, error) {
-	err := s.configChange(ctx, actor, "update", "recording_settings", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "recording_settings", nil, func(tx *dbTx) (int64, error) {
 		_, err := tx.ExecContext(ctx, `UPDATE recording_settings SET video_retention_days = $1, updated_at = now() WHERE id = 1`, days)
 		return 1, err
 	})

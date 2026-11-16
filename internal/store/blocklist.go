@@ -161,7 +161,7 @@ func blocklistConflict(err error) error {
 // lockBlocklistRoom errors with ErrBlocklistFull unless room more entries
 // fit. The configuration lock configChange takes serialises writers, so the
 // count cannot move underneath it.
-func lockBlocklistRoom(ctx context.Context, tx *sql.Tx, room int) error {
+func lockBlocklistRoom(ctx context.Context, tx *dbTx, room int) error {
 	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM call_blocklist`).Scan(&n); err != nil {
 		return err
@@ -175,7 +175,7 @@ func lockBlocklistRoom(ctx context.Context, tx *sql.Tx, room int) error {
 // CreateBlocklistEntry adds an entry.
 func (s *Store) CreateBlocklistEntry(ctx context.Context, actor string, in BlocklistInput) (BlocklistEntry, error) {
 	var e BlocklistEntry
-	err := s.configChange(ctx, actor, "create", "blocklist", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "blocklist", nil, func(tx *dbTx) (int64, error) {
 		if err := lockBlocklistRoom(ctx, tx, 1); err != nil {
 			return 0, err
 		}
@@ -197,7 +197,7 @@ func (s *Store) CreateBlocklistEntry(ctx context.Context, actor string, in Block
 // may not see untouched.
 func (s *Store) UpdateBlocklistEntry(ctx context.Context, actor string, id int64, apply func(cur BlocklistInput) (BlocklistInput, error)) (BlocklistEntry, error) {
 	var e BlocklistEntry
-	err := s.configChange(ctx, actor, "update", "blocklist", nil, func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "blocklist", nil, func(tx *dbTx) (int64, error) {
 		cur, err := scanBlocklist(tx.QueryRowContext(ctx, `SELECT `+blocklistCols+blocklistFrom+` WHERE b.id = $1 FOR UPDATE OF b`, id))
 		if err != nil {
 			return id, err
@@ -219,7 +219,7 @@ func (s *Store) UpdateBlocklistEntry(ctx context.Context, actor string, id int64
 
 // DeleteBlocklistEntry removes an entry.
 func (s *Store) DeleteBlocklistEntry(ctx context.Context, actor string, id int64) error {
-	return s.configChange(ctx, actor, "delete", "blocklist", nil, func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "blocklist", nil, func(tx *dbTx) (int64, error) {
 		res, err := tx.ExecContext(ctx, `DELETE FROM call_blocklist WHERE id = $1`, id)
 		if err != nil {
 			return id, err
@@ -242,7 +242,7 @@ type BlocklistImportResult struct {
 // row carries no pattern.
 func (s *Store) ImportBlocklist(ctx context.Context, actor string, rows []BlocklistInput) (BlocklistImportResult, error) {
 	var res BlocklistImportResult
-	err := s.configChangeID(ctx, actor, "import", "blocklist", nil, func(tx *sql.Tx) (string, error) {
+	err := s.configChangeID(ctx, actor, "import", "blocklist", nil, func(tx *dbTx) (string, error) {
 		res = BlocklistImportResult{}
 		for i, in := range rows {
 			var inserted bool

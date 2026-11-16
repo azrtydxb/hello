@@ -172,8 +172,10 @@ func (s *Store) FailAITasks(ctx context.Context, replica, code, message string, 
 // key of its own: the AI scheduler and, with the integrations spec, the
 // directory sync, webhook sweeper and CRM refresher. Keys are namespaced
 // hello:<area>:<task> and must not collide with the configuration lock.
+// The lock is the pinned connection's session, so it stays on raw
+// database/sql (see dbq.go).
 func (s *Store) TryLock(ctx context.Context, key string) (func(), bool, error) {
-	conn, err := s.db.Conn(ctx)
+	conn, err := s.db.raw.Conn(ctx)
 	if err != nil {
 		return nil, false, err
 	}
