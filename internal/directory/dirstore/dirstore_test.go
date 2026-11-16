@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/directory"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/routing"
@@ -77,7 +79,7 @@ func newRig(t *testing.T, ap directory.AutoProvision) *rig {
 		t.Fatal(err)
 	}
 	r := &rig{t: t, ctx: context.Background(), db: db, st: store.New(db), drv: &directory.Static{Res: &directory.Result{}}}
-	pg := &directory.PG{DB: db, Box: box, Provisioner: &Provisioner{Store: r.st, Realm: "pbx.test"}}
+	pg := &directory.PG{DB: hellodb.New(db, slog.New(slog.DiscardHandler)), Box: box, Provisioner: &Provisioner{Store: r.st, Realm: "pbx.test"}}
 	r.e = &directory.Engine{Store: pg, Drivers: map[string]directory.Driver{directory.KindLDAP: r.drv}, Replica: "t"}
 	pw, name, on := "bind-password-123", "AD", true
 	r.c, err = r.e.Create(r.ctx, "admin", directory.ConnectorInput{Kind: directory.KindLDAP, Name: &name, Secret: &pw, Enabled: &on,
