@@ -34,8 +34,14 @@ var namedFiles = map[string]bool{
 	"config.go":       true,
 	"dialspace.go":    true,
 	"dirprovision.go": true,
+	"door.go":         true,
+	"door_camera.go":  true,
+	"door_open.go":    true,
+	"door_webhook.go": true,
 	"flow_canvas.go":  true,
+	"scep.go":         true,
 	"store.go":        true,
+	"wifi.go":         true,
 }
 
 // TestStatementsBuild renders every statement the store's code passes as a

@@ -27,8 +27,10 @@ Moved so far:
   (`internal/scim`) and the SSO store (`internal/sso`).
 - `internal/store`, at its seam, with the files of the core and
   configuration domain converted to `@name` binds: `store.go`, `batch.go`,
-  `config.go`, `dialspace.go`, `dirprovision.go` and `flow_canvas.go`. Its
-  other files still bind `$n` and move one domain at a time (below).
+  `config.go`, `dialspace.go`, `dirprovision.go` and `flow_canvas.go`; and
+  those of the security and door domain: `scep.go`, `wifi.go`, `door.go`,
+  `door_open.go`, `door_camera.go` and `door_webhook.go`. Its other files
+  still bind `$n` and move one domain at a time (below).
 
 Every package above builds its handle with `db.New` (or `db.NewPool`) where
 the binary constructs it, except `internal/store`, which builds its own in
