@@ -29,8 +29,12 @@ Moved so far:
   configuration domain converted to `@name` binds: `store.go`, `batch.go`,
   `config.go`, `dialspace.go`, `dirprovision.go` and `flow_canvas.go`; and
   those of the phonebook domain: `phonebook.go`, `phonebook_lookup.go`,
-  `personal_contacts.go` and `locations.go`. Its other files still bind
-  `$n` and move one domain at a time (below).
+  `personal_contacts.go` and `locations.go`; and those of the
+  provisioning domain: `prov.go`, `prov_admin.go`, `prov_handler.go`,
+  `prov_lines.go`, `prov_push.go`, `prov_overrides.go`, `prov_books.go`,
+  `prov_multicast.go`, `syslog.go`, `rtcpxr.go`, `clientquality.go` and
+  `clients.go`. Its other files still bind `$n` and move one domain at a
+  time (below).
 
 Every package above builds its handle with `db.New` (or `db.NewPool`) where
 the binary constructs it, except `internal/store`, which builds its own in

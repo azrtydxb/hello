@@ -31,6 +31,8 @@ import (
 // pull request that converts a file adds it here.
 var namedFiles = map[string]bool{
 	"batch.go":             true,
+	"clientquality.go":     true,
+	"clients.go":           true,
 	"config.go":            true,
 	"dialspace.go":         true,
 	"dirprovision.go":      true,
@@ -39,7 +41,17 @@ var namedFiles = map[string]bool{
 	"personal_contacts.go": true,
 	"phonebook.go":         true,
 	"phonebook_lookup.go":  true,
+	"prov.go":              true,
+	"prov_admin.go":        true,
+	"prov_books.go":        true,
+	"prov_handler.go":      true,
+	"prov_lines.go":        true,
+	"prov_multicast.go":    true,
+	"prov_overrides.go":    true,
+	"prov_push.go":         true,
+	"rtcpxr.go":            true,
 	"store.go":             true,
+	"syslog.go":            true,
 }
 
 // TestStatementsBuild renders every statement the store's code passes as a
@@ -389,6 +401,8 @@ func (r *fakeRows) Scan(dest ...any) error {
 		switch p := d.(type) {
 		case *int64:
 			*p = r.rows[r.i][i].(int64)
+		case *int:
+			*p = int(r.rows[r.i][i].(int64))
 		case *string:
 			*p = r.rows[r.i][i].(string)
 		default:
