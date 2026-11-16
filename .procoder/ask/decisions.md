@@ -6508,3 +6508,61 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   builds its three filter `Named` once for the count and the page.
   `TestRoutingRuntimeStatements` runs these on a recording driver so a
   misspelled name fails on the pull request tier.
+
+## momo Phase 3, domain 9: internal/store voicemail and media on @name (2026-11-16, momo/store-pbx)
+
+- **Scope.** `pbx.go`, `voicemail_groups.go`, `media.go`, `moh.go`,
+  `ringtones.go`, `tts.go`, `recording_links.go`, `video_recording.go` and
+  `cdr.go` in `internal/store` bind by name: every `$n` became `@name` with
+  `momo.Named`, through the seam, with the Scan code, `FOR UPDATE` and
+  `FOR UPDATE SKIP LOCKED`, error handling and SQL text otherwise
+  unchanged. The wide statements (UpdateVoicemailBox, ApplyFeatureUpdate,
+  the ring group INSERT and UPDATE, OpenVideoStream, UpdateVideoStream,
+  ListCDRs) keep their columns and expressions; each passes its values
+  inline as `momo.Named`, so the sweep checks every name. `internal/cdr`
+  (on momo since #372) is untouched. No schema change, no migration,
+  `go.mod` and `internal/db` unchanged.
+- **Parameter types unchanged for hello-sip's reads.** The call-plane
+  statements (VoicemailBoxByNumber, VerifyVoicemailPassword,
+  InsertVoicemailMessage, InsertVoicemailGroupMessage, SetVoicemailGreeting,
+  RemoveVoicemailMessage, SetVoicemailMessageHeard, InsertRecording,
+  OpenVideoStream, UpdateVideoStream) pass the same Go values as before, and
+  each bind is typed as PostgreSQL typed the old `$n`.
+- **Casts added for reused binds**, each to the type the old `$n` had:
+  UpdateVoicemailBox `@greeting::text`, `@unreachable::text`, `@busy::text`
+  (both uses; the columns are TEXT); ApplyFeatureUpdate `@dnd::boolean`
+  (both uses, as UpdateExtension); PutTTSSettings `@api_key_enc::bytea`
+  (both uses; the column is BYTEA); ListRecordings `@extension::text` (three
+  uses) and `@before::integer` (two uses); ListCDRs `@before::integer` (two
+  uses); CDRConcurrency `@from::timestamptz` and `@to::timestamptz` (two
+  uses each; the CTE's comparison with the TIMESTAMPTZ columns typed them
+  first); OpenVideoStream and UpdateVideoStream `@state::text` (two uses
+  each; the column is TEXT). Binds that were already cast on every use
+  (ListCDRs' direction, disposition and prefix, lookupWhere's conditions,
+  InsertVoicemailGroupMessage) keep their casts. Reused binds compared only
+  with columns of one type need none: refuseIfVoicemailGroupUsed's
+  `@number` (all TEXT), the follow-me UPDATE's `@id` (BIGINT).
+- **The cursor stays integer.** `($1 = 0 OR id < $1)` in ListCDRs and
+  ListRecordings typed `$1` as integer (from `= 0`), so those two now cast
+  `@before::integer`: the same plan, and the same out-of-range error for
+  a cursor above 2^31-1 as before. LookupCalls and LookupRecordings already
+  cast theirs to bigint and still do.
+- **Run-time statements.** lookupWhere takes the caller's
+  `momo.Named("before")` and `momo.Named("limit")` and appends one Named per
+  condition it adds (`@allowed`, `@extension`, `@digits`, `@suffix`,
+  `@from`, `@to`, `@call_id`), and none for a condition it leaves out.
+  listRingGroups, listVoicemailGroups and listMOH get `WHERE ... = @id` with
+  `momo.Named("id", ...)` together; ListVoicemailMessages' fragment binds
+  `@box_id`, SetVoicemailGreeting's SET binds `@object`, and
+  refuseIfVoicemailGroupUsed's four statements bind `@number`.
+  `TestMediaRuntimeStatements` (`media_offline_test.go`) runs each of them on
+  a recording driver, so a misspelled name fails on the pull request tier,
+  and `TestMailboxNotify` pins the mailbox NOTIFY
+  (`SELECT pg_notify($1, $2::text)` with `hello_mwi` and the box id).
+
+## CDR and recording list cursor type (ListCDRs, ListRecordings)
+
+The old `($1 = 0 OR id < $1)` typed the paging cursor as integer, so a cursor id above 2^31-1 is an out-of-range error. The momo conversion keeps that with `@before::integer`. Options:
+
+- Keep `::integer` (current behaviour, same plan).
+- Switch to `::bigint`, as LookupCalls and LookupRecordings already use: no cursor limit, a behaviour change.

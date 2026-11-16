@@ -45,6 +45,10 @@ Moved so far:
   features domain: `ivr.go`, `queues.go`, `queue_callbacks.go`,
   `followme.go`, `pickup.go`, `park.go`, `paging.go`, `ringmap.go`,
   `ringtag.go`, `conference.go` and `multicast.go`. Its other files still bind
+  `personal_contacts.go` and `locations.go`; and those of the voicemail and
+  media domain: `pbx.go`, `voicemail_groups.go`, `media.go`, `moh.go`,
+  `ringtones.go`, `tts.go`, `recording_links.go`, `video_recording.go` and
+  `cdr.go`. Its other files still bind
   `$n` and move one domain at a time (below).
   `personal_contacts.go` and `locations.go`; and those of the
   provisioning domain: `prov.go`, `prov_admin.go`, `prov_handler.go`,

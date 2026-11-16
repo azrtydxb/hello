@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/auth"
 )
 
@@ -47,14 +49,14 @@ const boxCols = `id, extension_id, password_hash <> '', email, greeting_object, 
 // GetVoicemailBox returns the box of extensionID.
 func (s *Store) GetVoicemailBox(ctx context.Context, extensionID int64) (VoicemailBox, error) {
 	b, err := scanBox(s.q(ctx).QueryRowContext(ctx,
-		`SELECT `+boxCols+` FROM voicemail_boxes WHERE extension_id = $1`, extensionID))
+		`SELECT `+boxCols+` FROM voicemail_boxes WHERE extension_id = @extension_id`, momo.Named("extension_id", extensionID)))
 	return b, mapErr(err)
 }
 
 // GetVoicemailBoxByID returns the box with id boxID.
 func (s *Store) GetVoicemailBoxByID(ctx context.Context, boxID int64) (VoicemailBox, error) {
 	b, err := scanBox(s.db.QueryRowContext(ctx,
-		`SELECT `+boxCols+` FROM voicemail_boxes WHERE id = $1`, boxID))
+		`SELECT `+boxCols+` FROM voicemail_boxes WHERE id = @id`, momo.Named("id", boxID)))
 	return b, mapErr(err)
 }
 
@@ -123,32 +125,34 @@ func (s *Store) UpdateVoicemailBox(ctx context.Context, actor string, extensionI
 	var b VoicemailBox
 	err := s.configChangeID(ctx, actor, "update", "voicemail_box", check, func(tx *dbTx) (string, error) {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO voicemail_boxes (extension_id) VALUES ($1)
-			ON CONFLICT (extension_id) DO NOTHING`, extensionID); err != nil {
+			INSERT INTO voicemail_boxes (extension_id) VALUES (@extension_id)
+			ON CONFLICT (extension_id) DO NOTHING`, momo.Named("extension_id", extensionID)); err != nil {
 			return "", err
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE voicemail_boxes SET
-				email = COALESCE($2, email),
-				password_hash = COALESCE($3, password_hash),
-				greeting_object = COALESCE($4, greeting_object),
-				unreachable_object = COALESCE($5, unreachable_object),
-				greeting_tts = CASE WHEN $4::text IS NOT NULL THEN $6::jsonb ELSE greeting_tts END,
-				unreachable_tts = CASE WHEN $5::text IS NOT NULL THEN $7::jsonb ELSE unreachable_tts END,
-				busy_object = COALESCE($8, busy_object),
-				name_object = COALESCE($9, name_object),
-				busy_tts = CASE WHEN $8::text IS NOT NULL THEN $10::jsonb ELSE busy_tts END,
-				prompt_language = CASE WHEN $11::boolean THEN NULLIF($12::text, '') ELSE prompt_language END,
+				email = COALESCE(@email, email),
+				password_hash = COALESCE(@password_hash, password_hash),
+				greeting_object = COALESCE(@greeting::text, greeting_object),
+				unreachable_object = COALESCE(@unreachable::text, unreachable_object),
+				greeting_tts = CASE WHEN @greeting::text IS NOT NULL THEN @greeting_tts::jsonb ELSE greeting_tts END,
+				unreachable_tts = CASE WHEN @unreachable::text IS NOT NULL THEN @unreachable_tts::jsonb ELSE unreachable_tts END,
+				busy_object = COALESCE(@busy::text, busy_object),
+				name_object = COALESCE(@name, name_object),
+				busy_tts = CASE WHEN @busy::text IS NOT NULL THEN @busy_tts::jsonb ELSE busy_tts END,
+				prompt_language = CASE WHEN @set_language::boolean THEN NULLIF(@prompt_language::text, '') ELSE prompt_language END,
 				updated_at = now()
-			WHERE extension_id = $1`,
-			extensionID, c.Email, hash, c.Greeting, c.Unreachable,
-			metaJSON(c.GreetingTTS), metaJSON(c.UnreachableTTS), c.Busy, c.Name, metaJSON(c.BusyTTS),
-			c.PromptLanguage != nil, strOrEmpty(c.PromptLanguage)); err != nil {
+			WHERE extension_id = @extension_id`,
+			momo.Named("extension_id", extensionID), momo.Named("email", c.Email), momo.Named("password_hash", hash),
+			momo.Named("greeting", c.Greeting), momo.Named("unreachable", c.Unreachable),
+			momo.Named("greeting_tts", metaJSON(c.GreetingTTS)), momo.Named("unreachable_tts", metaJSON(c.UnreachableTTS)),
+			momo.Named("busy", c.Busy), momo.Named("name", c.Name), momo.Named("busy_tts", metaJSON(c.BusyTTS)),
+			momo.Named("set_language", c.PromptLanguage != nil), momo.Named("prompt_language", strOrEmpty(c.PromptLanguage))); err != nil {
 			return "", err
 		}
 		var err error
 		b, err = scanBox(tx.QueryRowContext(ctx,
-			`SELECT `+boxCols+` FROM voicemail_boxes WHERE extension_id = $1`, extensionID))
+			`SELECT `+boxCols+` FROM voicemail_boxes WHERE extension_id = @extension_id`, momo.Named("extension_id", extensionID)))
 		return strconv.FormatInt(b.ID, 10), err
 	})
 	return b, err
@@ -183,11 +187,11 @@ func scanMessage(r interface{ Scan(...any) error }) (VoicemailMessage, error) {
 // ListVoicemailMessages returns a box's messages, newest first; unheardOnly
 // keeps the ones not played yet.
 func (s *Store) ListVoicemailMessages(ctx context.Context, boxID int64, unheardOnly bool) ([]VoicemailMessage, error) {
-	where := ` WHERE box_id = $1`
+	where := ` WHERE box_id = @box_id`
 	if unheardOnly {
 		where += ` AND NOT heard`
 	}
-	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+messageCols+` FROM voicemail_messages`+where+` ORDER BY id DESC`, boxID)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+messageCols+` FROM voicemail_messages`+where+` ORDER BY id DESC`, momo.Named("box_id", boxID))
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +210,7 @@ func (s *Store) ListVoicemailMessages(ctx context.Context, boxID int64, unheardO
 // GetVoicemailMessage returns one message.
 func (s *Store) GetVoicemailMessage(ctx context.Context, id int64) (VoicemailMessage, error) {
 	m, err := scanMessage(s.q(ctx).QueryRowContext(ctx,
-		`SELECT `+messageCols+` FROM voicemail_messages WHERE id = $1`, id))
+		`SELECT `+messageCols+` FROM voicemail_messages WHERE id = @id`, momo.Named("id", id)))
 	return m, mapErr(err)
 }
 
@@ -216,7 +220,7 @@ func (s *Store) UpdateVoicemailMessageHeard(ctx context.Context, actor string, i
 	return s.configChange(ctx, actor, "update", "voicemail_message", nil, func(tx *dbTx) (int64, error) {
 		var box int64
 		err := tx.QueryRowContext(ctx,
-			`UPDATE voicemail_messages SET heard = $2 WHERE id = $1 RETURNING box_id`, id, heard).Scan(&box)
+			`UPDATE voicemail_messages SET heard = @heard WHERE id = @id RETURNING box_id`, momo.Named("id", id), momo.Named("heard", heard)).Scan(&box)
 		if err != nil {
 			return id, err
 		}
@@ -232,10 +236,10 @@ func (s *Store) DeleteVoicemailMessage(ctx context.Context, actor string, id int
 	err := s.configChange(ctx, actor, "delete", "voicemail_message", nil, func(tx *dbTx) (int64, error) {
 		var box int64
 		if err := tx.QueryRowContext(ctx,
-			`SELECT minio_object, box_id FROM voicemail_messages WHERE id = $1`, id).Scan(&object, &box); err != nil {
+			`SELECT minio_object, box_id FROM voicemail_messages WHERE id = @id`, momo.Named("id", id)).Scan(&object, &box); err != nil {
 			return id, err
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM voicemail_messages WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM voicemail_messages WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -258,14 +262,14 @@ func (s *Store) DeleteVoicemailMessage(ctx context.Context, actor string, id int
 // notifyMailbox queues the mailbox-changed NOTIFY in the changing
 // transaction, so it reaches the SIP nodes only if the change commits.
 func notifyMailbox(ctx context.Context, tx *dbTx, box int64) error {
-	_, err := tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, MailboxChannel, strconv.FormatInt(box, 10))
+	_, err := tx.ExecContext(ctx, `SELECT pg_notify(@channel, @payload::text)`, momo.Named("channel", MailboxChannel), momo.Named("payload", strconv.FormatInt(box, 10)))
 	return err
 }
 
 // VoicemailCounts is a box's MWI summary: unheard and total messages.
 func (s *Store) VoicemailCounts(ctx context.Context, boxID int64) (unheard, total int64, err error) {
 	err = s.q(ctx).QueryRowContext(ctx,
-		`SELECT count(*) FILTER (WHERE NOT heard), count(*) FROM voicemail_messages WHERE box_id = $1`, boxID).
+		`SELECT count(*) FILTER (WHERE NOT heard), count(*) FROM voicemail_messages WHERE box_id = @box_id`, momo.Named("box_id", boxID)).
 		Scan(&unheard, &total)
 	return unheard, total, err
 }
@@ -322,7 +326,7 @@ func (s *Store) VoicemailBoxByNumber(ctx context.Context, number string) (Voicem
 	err := s.q(ctx).QueryRowContext(ctx, `
 		SELECT b.id, b.email, b.greeting_object, b.unreachable_object, b.busy_object, b.name_object, COALESCE(b.prompt_language, '')
 		FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id
-		WHERE e.number = $1`, number).
+		WHERE e.number = @number`, momo.Named("number", number)).
 		Scan(&b.ID, &b.Email, &b.GreetingObject, &b.UnreachableObject, &b.BusyObject, &b.NameObject, &b.PromptLanguage)
 	if errors.Is(err, sql.ErrNoRows) {
 		return VoicemailBox{}, false, nil
@@ -339,7 +343,7 @@ func (s *Store) VoicemailBoxByNumber(ctx context.Context, number string) (Voicem
 func (s *Store) VerifyVoicemailPassword(ctx context.Context, boxID int64, password string) (bool, error) {
 	var hash string
 	err := s.q(ctx).QueryRowContext(ctx,
-		`SELECT password_hash FROM voicemail_boxes WHERE id = $1`, boxID).Scan(&hash)
+		`SELECT password_hash FROM voicemail_boxes WHERE id = @id`, momo.Named("id", boxID)).Scan(&hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -358,8 +362,9 @@ func (s *Store) InsertVoicemailMessage(ctx context.Context, boxID int64, object,
 	var id int64
 	err := s.q(ctx).QueryRowContext(ctx, `
 		INSERT INTO voicemail_messages (box_id, minio_object, caller, caller_name, duration_ms)
-		VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		boxID, object, caller, callerName, durationMs).Scan(&id)
+		VALUES (@box_id, @minio_object, @caller, @caller_name, @duration_ms) RETURNING id`,
+		momo.Named("box_id", boxID), momo.Named("minio_object", object), momo.Named("caller", caller),
+		momo.Named("caller_name", callerName), momo.Named("duration_ms", durationMs)).Scan(&id)
 	return id, err
 }
 
@@ -385,15 +390,15 @@ func (s *Store) SetVoicemailGreeting(ctx context.Context, boxID int64, slot, obj
 	}
 	var prev string
 	if err := s.q(ctx).QueryRowContext(ctx,
-		`SELECT `+cols[0]+` FROM voicemail_boxes WHERE id = $1`, boxID).Scan(&prev); err != nil {
+		`SELECT `+cols[0]+` FROM voicemail_boxes WHERE id = @id`, momo.Named("id", boxID)).Scan(&prev); err != nil {
 		return "", mapErr(err)
 	}
-	set := cols[0] + ` = $2`
+	set := cols[0] + ` = @object`
 	if cols[1] != "" {
 		set += `, ` + cols[1] + ` = NULL`
 	}
 	if _, err := s.q(ctx).ExecContext(ctx,
-		`UPDATE voicemail_boxes SET `+set+`, updated_at = now() WHERE id = $1`, boxID, object); err != nil {
+		`UPDATE voicemail_boxes SET `+set+`, updated_at = now() WHERE id = @id`, momo.Named("id", boxID), momo.Named("object", object)); err != nil {
 		return "", err
 	}
 	return prev, nil
@@ -423,7 +428,7 @@ func (s *Store) SetVoicemailPIN(ctx context.Context, boxID int64, pin string) er
 		return err
 	}
 	res, err := s.q(ctx).ExecContext(ctx,
-		`UPDATE voicemail_boxes SET password_hash = $2, updated_at = now() WHERE id = $1`, boxID, h)
+		`UPDATE voicemail_boxes SET password_hash = @password_hash, updated_at = now() WHERE id = @id`, momo.Named("id", boxID), momo.Named("password_hash", h))
 	if err != nil {
 		return err
 	}
@@ -436,7 +441,7 @@ func (s *Store) SetVoicemailPIN(ctx context.Context, boxID int64, pin string) er
 func (s *Store) RemoveVoicemailMessage(ctx context.Context, boxID, id int64) (string, error) {
 	var object string
 	err := s.q(ctx).QueryRowContext(ctx,
-		`DELETE FROM voicemail_messages WHERE id = $1 AND box_id = $2 RETURNING minio_object`, id, boxID).Scan(&object)
+		`DELETE FROM voicemail_messages WHERE id = @id AND box_id = @box_id RETURNING minio_object`, momo.Named("id", id), momo.Named("box_id", boxID)).Scan(&object)
 	if err != nil {
 		return "", mapErr(err)
 	}
@@ -449,7 +454,7 @@ func (s *Store) RemoveVoicemailMessage(ctx context.Context, boxID, id int64) (st
 // played it (*97). The UI path is UpdateVoicemailMessageHeard, which audits.
 func (s *Store) SetVoicemailMessageHeard(ctx context.Context, id int64, heard bool) error {
 	res, err := s.q(ctx).ExecContext(ctx,
-		`UPDATE voicemail_messages SET heard = $2 WHERE id = $1`, id, heard)
+		`UPDATE voicemail_messages SET heard = @heard WHERE id = @id`, momo.Named("id", id), momo.Named("heard", heard))
 	if err != nil {
 		return err
 	}
@@ -488,16 +493,18 @@ func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureU
 	return s.configChangeID(ctx, actor, "update", "extension", nil, func(tx *dbTx) (string, error) {
 		res, err := tx.ExecContext(ctx, `
 			UPDATE extensions SET
-				dnd = COALESCE($2, dnd),
-				dnd_source = CASE WHEN $2::boolean IS NULL THEN dnd_source ELSE 'manual' END,
-				forward_always = COALESCE($3, forward_always),
-				forward_busy = COALESCE($4, forward_busy),
-				forward_no_answer = COALESCE($5, forward_no_answer),
-				call_waiting = COALESCE($6, call_waiting),
-				no_answer_rings = COALESCE($7, no_answer_rings),
+				dnd = COALESCE(@dnd::boolean, dnd),
+				dnd_source = CASE WHEN @dnd::boolean IS NULL THEN dnd_source ELSE 'manual' END,
+				forward_always = COALESCE(@forward_always, forward_always),
+				forward_busy = COALESCE(@forward_busy, forward_busy),
+				forward_no_answer = COALESCE(@forward_no_answer, forward_no_answer),
+				call_waiting = COALESCE(@call_waiting, call_waiting),
+				no_answer_rings = COALESCE(@no_answer_rings, no_answer_rings),
 				updated_at = now()
-			WHERE number = $1`,
-			u.Number, u.DND, u.ForwardAlways, u.ForwardBusy, u.ForwardNoAnswer, u.CallWaiting, u.NoAnswerRings)
+			WHERE number = @number`,
+			momo.Named("number", u.Number), momo.Named("dnd", u.DND), momo.Named("forward_always", u.ForwardAlways),
+			momo.Named("forward_busy", u.ForwardBusy), momo.Named("forward_no_answer", u.ForwardNoAnswer),
+			momo.Named("call_waiting", u.CallWaiting), momo.Named("no_answer_rings", u.NoAnswerRings))
 		if err != nil {
 			return "", err
 		}
@@ -506,12 +513,12 @@ func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureU
 		}
 		var id int64
 		if err := tx.QueryRowContext(ctx,
-			`SELECT id FROM extensions WHERE number = $1`, u.Number).Scan(&id); err != nil {
+			`SELECT id FROM extensions WHERE number = @number`, momo.Named("number", u.Number)).Scan(&id); err != nil {
 			return "", err
 		}
 		if u.BossDivert != nil {
-			res, err := tx.ExecContext(ctx, `UPDATE boss_links SET divert_on = $2, updated_at = now()
-				WHERE boss_extension_id = $1`, id, *u.BossDivert)
+			res, err := tx.ExecContext(ctx, `UPDATE boss_links SET divert_on = @divert_on, updated_at = now()
+				WHERE boss_extension_id = @id`, momo.Named("id", id), momo.Named("divert_on", *u.BossDivert))
 			if err != nil {
 				return "", err
 			}
@@ -523,9 +530,9 @@ func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureU
 			// An extension without a profile and a target has nothing to turn
 			// on; the feature code is answered before it gets here.
 			if _, err := tx.ExecContext(ctx, `
-				UPDATE follow_me SET enabled = $2, updated_at = now()
-				WHERE extension_id = $1 AND EXISTS (SELECT 1 FROM follow_me_targets t WHERE t.extension_id = $1)`,
-				id, *u.FollowMe); err != nil {
+				UPDATE follow_me SET enabled = @enabled, updated_at = now()
+				WHERE extension_id = @id AND EXISTS (SELECT 1 FROM follow_me_targets t WHERE t.extension_id = @id)`,
+				momo.Named("id", id), momo.Named("enabled", *u.FollowMe)); err != nil {
 				return "", err
 			}
 		}
@@ -625,7 +632,7 @@ func groupMembers(ctx context.Context, q querier, ids []int64) (map[int64][]Ring
 		       m.position, m.weight, m.delay
 		FROM ring_group_members m
 		LEFT JOIN extensions e ON e.id = m.extension_id
-		WHERE m.group_id = ANY($1) ORDER BY m.group_id, m.position`, ids)
+		WHERE m.group_id = ANY(@ids) ORDER BY m.group_id, m.position`, momo.Named("ids", ids))
 	if err != nil {
 		return nil, err
 	}
@@ -671,7 +678,7 @@ func (s *Store) ListRingGroups(ctx context.Context) ([]RingGroup, error) {
 
 // GetRingGroup returns one group with its members.
 func (s *Store) GetRingGroup(ctx context.Context, id int64) (RingGroup, error) {
-	gs, err := listRingGroups(ctx, s.q(ctx), ` WHERE g.id = $1`, id)
+	gs, err := listRingGroups(ctx, s.q(ctx), ` WHERE g.id = @id`, momo.Named("id", id))
 	if err != nil {
 		return RingGroup{}, err
 	}
@@ -701,9 +708,12 @@ func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupI
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO ring_groups (name, strategy, hunt, ring_timeout, member_delay, ignore_dnd, failure_kind, failure_target,
 			                         moh_class_id, moh_ringback, ring_tag, is_door)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''), $12) RETURNING id`,
-			in.Name, in.Strategy, in.Hunt, in.RingTimeout, in.MemberDelay, in.IgnoreDND, in.FailureKind, in.FailureTarget,
-			in.MOHClassID, in.MOHRingback, in.RingTag, in.IsDoor).Scan(&id); err != nil {
+			VALUES (@name, @strategy, @hunt, @ring_timeout, @member_delay, @ignore_dnd, @failure_kind, @failure_target,
+			        @moh_class_id, @moh_ringback, NULLIF(@ring_tag, ''), @is_door) RETURNING id`,
+			momo.Named("name", in.Name), momo.Named("strategy", in.Strategy), momo.Named("hunt", in.Hunt),
+			momo.Named("ring_timeout", in.RingTimeout), momo.Named("member_delay", in.MemberDelay), momo.Named("ignore_dnd", in.IgnoreDND),
+			momo.Named("failure_kind", in.FailureKind), momo.Named("failure_target", in.FailureTarget), momo.Named("moh_class_id", in.MOHClassID),
+			momo.Named("moh_ringback", in.MOHRingback), momo.Named("ring_tag", in.RingTag), momo.Named("is_door", in.IsDoor)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := writeGroupMembers(ctx, tx, id, in.Members); err != nil {
@@ -721,7 +731,7 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 	var g RingGroup
 	err := s.configChange(ctx, actor, "update", "ring_group", check, func(tx *dbTx) (int64, error) {
 		var cur string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM ring_groups WHERE id = $1`, id).Scan(&cur); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM ring_groups WHERE id = @id`, momo.Named("id", id)).Scan(&cur); err != nil {
 			return id, err
 		}
 		if cur != in.Name {
@@ -742,11 +752,14 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 			return id, err
 		}
 		res, err := tx.ExecContext(ctx, `
-			UPDATE ring_groups SET name = $2, strategy = $3, hunt = $4, ring_timeout = $5, member_delay = $6,
-			       ignore_dnd = $7, failure_kind = $8, failure_target = $9, moh_class_id = $10, moh_ringback = $11,
-			       ring_tag = NULLIF($12, ''), is_door = $13, updated_at = now()
-			WHERE id = $1`, id, in.Name, in.Strategy, in.Hunt, in.RingTimeout, in.MemberDelay, in.IgnoreDND,
-			in.FailureKind, in.FailureTarget, in.MOHClassID, in.MOHRingback, in.RingTag, in.IsDoor)
+			UPDATE ring_groups SET name = @name, strategy = @strategy, hunt = @hunt, ring_timeout = @ring_timeout, member_delay = @member_delay,
+			       ignore_dnd = @ignore_dnd, failure_kind = @failure_kind, failure_target = @failure_target, moh_class_id = @moh_class_id, moh_ringback = @moh_ringback,
+			       ring_tag = NULLIF(@ring_tag, ''), is_door = @is_door, updated_at = now()
+			WHERE id = @id`, momo.Named("id", id),
+			momo.Named("name", in.Name), momo.Named("strategy", in.Strategy), momo.Named("hunt", in.Hunt),
+			momo.Named("ring_timeout", in.RingTimeout), momo.Named("member_delay", in.MemberDelay), momo.Named("ignore_dnd", in.IgnoreDND),
+			momo.Named("failure_kind", in.FailureKind), momo.Named("failure_target", in.FailureTarget), momo.Named("moh_class_id", in.MOHClassID),
+			momo.Named("moh_ringback", in.MOHRingback), momo.Named("ring_tag", in.RingTag), momo.Named("is_door", in.IsDoor))
 		if err != nil {
 			return id, err
 		}
@@ -776,7 +789,7 @@ func checkRingGroupIVR(ctx context.Context, tx *dbTx, cur string, in RingGroupIn
 	switch in.FailureKind {
 	case "extension":
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM extensions WHERE number = $1`, in.FailureTarget).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM extensions WHERE number = @number`, momo.Named("number", in.FailureTarget)).Scan(&n); err != nil {
 			return err
 		}
 		if n == 0 {
@@ -787,7 +800,7 @@ func checkRingGroupIVR(ctx context.Context, tx *dbTx, cur string, in RingGroupIn
 			return fieldError("failureTarget", "a ring group cannot fail over to itself")
 		}
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM ring_groups WHERE name = $1`, in.FailureTarget).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM ring_groups WHERE name = @name`, momo.Named("name", in.FailureTarget)).Scan(&n); err != nil {
 			return err
 		}
 		if n == 0 {
@@ -806,8 +819,8 @@ func checkRingGroupIVR(ctx context.Context, tx *dbTx, cur string, in RingGroupIn
 // a fallback names its target by number or name, so neither can change
 // or go while a group falls back to it.
 func refuseIfGroupFailsTo(ctx context.Context, tx *dbTx, what, target, kind string) error {
-	rows, err := tx.QueryContext(ctx, `SELECT name FROM ring_groups WHERE failure_kind = $1 AND failure_target = $2 ORDER BY name`,
-		kind, target)
+	rows, err := tx.QueryContext(ctx, `SELECT name FROM ring_groups WHERE failure_kind = @kind AND failure_target = @target ORDER BY name`,
+		momo.Named("kind", kind), momo.Named("target", target))
 	if err != nil {
 		return err
 	}
@@ -826,7 +839,7 @@ func refuseIfGroupFailsTo(ctx context.Context, tx *dbTx, what, target, kind stri
 	// A follow-me profile names its extension and group targets the same way.
 	frows, err := tx.QueryContext(ctx, `
 		SELECT e.number FROM follow_me_targets t JOIN extensions e ON e.id = t.extension_id
-		WHERE t.kind = $1 AND t.target = $2 ORDER BY e.number`, kind, target)
+		WHERE t.kind = @kind AND t.target = @target ORDER BY e.number`, momo.Named("kind", kind), momo.Named("target", target))
 	if err != nil {
 		return err
 	}
@@ -851,7 +864,7 @@ func refuseIfGroupFailsTo(ctx context.Context, tx *dbTx, what, target, kind stri
 func (s *Store) DeleteRingGroup(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "ring_group", check, func(tx *dbTx) (int64, error) {
 		var name string
-		if err := tx.QueryRowContext(ctx, `SELECT name FROM ring_groups WHERE id = $1`, id).Scan(&name); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM ring_groups WHERE id = @id`, momo.Named("id", id)).Scan(&name); err != nil {
 			return id, err
 		}
 		if err := refuseIfIVRPoints(ctx, tx, "ring group "+name, name, IVRRingGroup); err != nil {
@@ -860,7 +873,7 @@ func (s *Store) DeleteRingGroup(ctx context.Context, actor string, id int64, che
 		if err := refuseIfGroupFailsTo(ctx, tx, "ring group "+name, name, "ring_group"); err != nil {
 			return id, err
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM ring_groups WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM ring_groups WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -869,7 +882,7 @@ func (s *Store) DeleteRingGroup(ctx context.Context, actor string, id int64, che
 }
 
 func getGroupTx(ctx context.Context, tx *dbTx, id int64) (RingGroup, error) {
-	gs, err := listRingGroups(ctx, tx, ` WHERE g.id = $1`, id)
+	gs, err := listRingGroups(ctx, tx, ` WHERE g.id = @id`, momo.Named("id", id))
 	if err != nil {
 		return RingGroup{}, err
 	}
@@ -882,7 +895,7 @@ func getGroupTx(ctx context.Context, tx *dbTx, id int64) (RingGroup, error) {
 // writeGroupMembers replaces a group's member rows. Positions are unique per
 // group with a deferred constraint, so any order of inserts works.
 func writeGroupMembers(ctx context.Context, tx *dbTx, id int64, members []RingGroupMember) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM ring_group_members WHERE group_id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM ring_group_members WHERE group_id = @group_id`, momo.Named("group_id", id)); err != nil {
 		return err
 	}
 	ids := make([]int64, 0, len(members))
@@ -895,7 +908,8 @@ func writeGroupMembers(ctx context.Context, tx *dbTx, id int64, members []RingGr
 	for _, m := range members {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO ring_group_members (group_id, extension_id, position, weight, delay)
-			VALUES ($1, NULLIF($2, 0), $3, $4, $5)`, id, m.ExtensionID, m.Position, m.Weight, m.Delay); err != nil {
+			VALUES (@group_id, NULLIF(@extension_id, 0), @position, @weight, @delay)`, momo.Named("group_id", id),
+			momo.Named("extension_id", m.ExtensionID), momo.Named("position", m.Position), momo.Named("weight", m.Weight), momo.Named("delay", m.Delay)); err != nil {
 			return err
 		}
 	}
@@ -953,9 +967,9 @@ func (s *Store) PutFeatureCodes(ctx context.Context, actor string, codes []Featu
 		err := dialGuard(ctx, tx, "items", func() error {
 			for _, c := range codes {
 				if _, err := tx.ExecContext(ctx, `
-					INSERT INTO feature_codes (code, action, argument) VALUES ($1, $2, $3)
+					INSERT INTO feature_codes (code, action, argument) VALUES (@code, @action, @argument)
 					ON CONFLICT (code) DO UPDATE SET action = EXCLUDED.action, argument = EXCLUDED.argument`,
-					c.Code, c.Action, c.Argument); err != nil {
+					momo.Named("code", c.Code), momo.Named("action", c.Action), momo.Named("argument", c.Argument)); err != nil {
 					return err
 				}
 			}
@@ -963,7 +977,7 @@ func (s *Store) PutFeatureCodes(ctx context.Context, actor string, codes []Featu
 			for i, c := range codes {
 				kept[i] = c.Code
 			}
-			_, err := tx.ExecContext(ctx, `DELETE FROM feature_codes WHERE code <> ALL($1)`, kept)
+			_, err := tx.ExecContext(ctx, `DELETE FROM feature_codes WHERE code <> ALL(@kept)`, momo.Named("kept", kept))
 			return err
 		})
 		return "list", err
