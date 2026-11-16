@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // RecordingLink is a recording link row. The token is never stored.
@@ -52,7 +54,9 @@ func (s *Store) CreateRecordingLink(ctx context.Context, actor string, recording
 	defer func() { _ = tx.Rollback() }()
 	l, err := scanLink(tx.QueryRowContext(ctx, `
 		INSERT INTO recording_links (token_hash, recording_id, expires_at, max_uses, created_by)
-		VALUES ($1, $2, $3, $4, $5) RETURNING `+linkCols, hash, recordingID, expires.UTC(), maxUses, actor))
+		VALUES (@token_hash, @recording_id, @expires_at, @max_uses, @created_by) RETURNING `+linkCols,
+		momo.Named("token_hash", hash), momo.Named("recording_id", recordingID), momo.Named("expires_at", expires.UTC()),
+		momo.Named("max_uses", maxUses), momo.Named("created_by", actor)))
 	if err != nil {
 		return RecordingLink{}, mapErr(err)
 	}
@@ -64,7 +68,7 @@ func (s *Store) CreateRecordingLink(ctx context.Context, actor string, recording
 
 // GetRecordingLink returns one link.
 func (s *Store) GetRecordingLink(ctx context.Context, id int64) (RecordingLink, error) {
-	l, err := scanLink(s.q(ctx).QueryRowContext(ctx, `SELECT `+linkCols+` FROM recording_links WHERE id = $1`, id))
+	l, err := scanLink(s.q(ctx).QueryRowContext(ctx, `SELECT `+linkCols+` FROM recording_links WHERE id = @id`, momo.Named("id", id)))
 	return l, mapErr(err)
 }
 
@@ -76,7 +80,7 @@ func (s *Store) RevokeRecordingLink(ctx context.Context, actor string, id int64)
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.ExecContext(ctx, `UPDATE recording_links SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1`, id)
+	res, err := tx.ExecContext(ctx, `UPDATE recording_links SET revoked_at = COALESCE(revoked_at, now()) WHERE id = @id`, momo.Named("id", id))
 	if err != nil {
 		return err
 	}
@@ -108,9 +112,9 @@ func (s *Store) UseRecordingLink(ctx context.Context, hash []byte) (object strin
 	err = s.q(ctx).QueryRowContext(ctx, `
 		UPDATE recording_links l SET uses = l.uses + 1, last_used_at = now()
 		FROM recordings r
-		WHERE l.token_hash = $1 AND r.id = l.recording_id AND l.revoked_at IS NULL AND l.expires_at > now()
+		WHERE l.token_hash = @token_hash AND r.id = l.recording_id AND l.revoked_at IS NULL AND l.expires_at > now()
 			AND (l.max_uses = 0 OR l.uses < l.max_uses)
-		RETURNING r.minio_object, l.id`, hash).Scan(&object, &id)
+		RETURNING r.minio_object, l.id`, momo.Named("token_hash", hash)).Scan(&object, &id)
 	if err == nil {
 		return object, id, LinkOK, nil
 	}
@@ -121,7 +125,7 @@ func (s *Store) UseRecordingLink(ctx context.Context, hash []byte) (object strin
 	var expires time.Time
 	var maxUses, uses int
 	err = s.q(ctx).QueryRowContext(ctx,
-		`SELECT revoked_at, expires_at, max_uses, uses FROM recording_links WHERE token_hash = $1`, hash).
+		`SELECT revoked_at, expires_at, max_uses, uses FROM recording_links WHERE token_hash = @token_hash`, momo.Named("token_hash", hash)).
 		Scan(&revoked, &expires, &maxUses, &uses)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -167,46 +171,48 @@ type LookupFilter struct {
 }
 
 // lookupWhere appends the filter's conditions over the cdr alias c and the
-// recording alias r to a query and returns the clause and its arguments,
-// numbered from len(args)+1.
+// recording alias r to a query and returns the clause and its arguments: args
+// with a momo.Named appended for each condition it adds, and only for those.
+// It binds @allowed, @extension, @digits, @suffix, @from, @to and @call_id,
+// so the caller's own statement must not use those names.
 func lookupWhere(f LookupFilter, args []any) (string, []any) {
 	var w []string
-	arg := func(v any) string {
-		args = append(args, v)
-		return "$" + strconv.Itoa(len(args))
+	arg := func(name string, v any) string {
+		args = append(args, momo.Named(name, v))
+		return "@" + name
 	}
-	text := func(v string) string { return arg(v) + "::text" }
+	text := func(name, v string) string { return arg(name, v) + "::text" }
 	parties := func(cond func(col string) string) string {
 		return "(" + cond("c.source") + " OR " + cond("c.destination") + " OR " + cond("c.original_destination") + ")"
 	}
 	if f.Restrict {
-		a := arg(pgTextArray(f.Allowed))
+		a := arg("allowed", pgTextArray(f.Allowed))
 		w = append(w, parties(func(col string) string { return col + " = ANY(" + a + "::text[])" }))
 	}
 	if f.Extension != "" {
-		a := text(f.Extension)
+		a := text("extension", f.Extension)
 		w = append(w, parties(func(col string) string { return col + " = " + a }))
 	}
 	if digits := onlyDigits(f.Number); digits != "" {
-		d := text(digits)
+		d := text("digits", digits)
 		suf := ""
 		if len(digits) >= 8 {
 			suf = digits[len(digits)-8:]
 		}
-		s := text(suf)
+		s := text("suffix", suf)
 		w = append(w, parties(func(col string) string {
 			nd := "regexp_replace(" + col + ", '[^0-9]', '', 'g')"
 			return "(" + nd + " = " + d + " OR (" + s + " <> '' AND right(" + nd + ", length(" + s + ")) = " + s + "))"
 		}))
 	}
 	if !f.From.IsZero() {
-		w = append(w, "COALESCE(c.start_time, r.created_at) >= "+arg(f.From.UTC())+"::timestamptz")
+		w = append(w, "COALESCE(c.start_time, r.created_at) >= "+arg("from", f.From.UTC())+"::timestamptz")
 	}
 	if !f.To.IsZero() {
-		w = append(w, "COALESCE(c.start_time, r.created_at) < "+arg(f.To.UTC())+"::timestamptz")
+		w = append(w, "COALESCE(c.start_time, r.created_at) < "+arg("to", f.To.UTC())+"::timestamptz")
 	}
 	if f.CallID != "" {
-		a := text(f.CallID)
+		a := text("call_id", f.CallID)
 		w = append(w, "(c.correlation_id = "+a+" OR c.sip_call_id = "+a+" OR r.correlation_id = "+a+")")
 	}
 	if f.Recorded {
@@ -264,14 +270,14 @@ type CallMatch struct {
 // LookupCalls returns up to limit calls matching f with id below before (0 =
 // newest), newest first, and the cursor for the next page ("" at the end).
 func (s *Store) LookupCalls(ctx context.Context, f LookupFilter, before int64, limit int) ([]CallMatch, string, error) {
-	where, args := lookupWhere(f, []any{before, limit + 1})
-	//nolint:gosec // G202: where is built from constants and numbered placeholders
+	where, args := lookupWhere(f, []any{momo.Named("before", before), momo.Named("limit", limit+1)})
+	//nolint:gosec // G202: where is built from constants and named placeholders
 	rows, err := s.q(ctx).QueryContext(ctx, `
 		SELECT c.id, c.correlation_id, c.sip_call_id, c.direction, c.kind, c.source, c.destination, c.original_destination,
 			c.start_time, c.answer_time, c.end_time, c.duration_ms, c.billable_ms, c.final_status, r.id
 		FROM cdrs c LEFT JOIN recordings r ON r.correlation_id = c.correlation_id
-		WHERE ($1::bigint = 0 OR c.id < $1::bigint) AND `+where+`
-		ORDER BY c.id DESC LIMIT $2`, args...)
+		WHERE (@before::bigint = 0 OR c.id < @before::bigint) AND `+where+`
+		ORDER BY c.id DESC LIMIT @limit`, args...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -302,11 +308,11 @@ func (s *Store) LookupCalls(ctx context.Context, f LookupFilter, before int64, l
 // id below before (0 = newest), newest first, and the next cursor. With
 // Restrict set a recording with no CDR yet is never returned.
 func (s *Store) LookupRecordings(ctx context.Context, f LookupFilter, before int64, limit int) ([]Recording, string, error) {
-	where, args := lookupWhere(f, []any{before, limit + 1})
-	//nolint:gosec // G202: where is built from constants and numbered placeholders
+	where, args := lookupWhere(f, []any{momo.Named("before", before), momo.Named("limit", limit+1)})
+	//nolint:gosec // G202: where is built from constants and named placeholders
 	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+recordingCols+recordingFrom+`
-		WHERE ($1::bigint = 0 OR r.id < $1::bigint) AND `+where+`
-		ORDER BY r.id DESC LIMIT $2`, args...)
+		WHERE (@before::bigint = 0 OR r.id < @before::bigint) AND `+where+`
+		ORDER BY r.id DESC LIMIT @limit`, args...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -337,7 +343,7 @@ func (s *Store) RecordingParties(ctx context.Context, id int64) ([]string, error
 	var src, dst, orig sql.NullString
 	err := s.q(ctx).QueryRowContext(ctx, `
 		SELECT c.source, c.destination, c.original_destination
-		FROM recordings r LEFT JOIN cdrs c ON c.correlation_id = r.correlation_id WHERE r.id = $1`, id).Scan(&src, &dst, &orig)
+		FROM recordings r LEFT JOIN cdrs c ON c.correlation_id = r.correlation_id WHERE r.id = @id`, momo.Named("id", id)).Scan(&src, &dst, &orig)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -362,7 +368,9 @@ func (s *Store) CreateConnectorRecordingLink(ctx context.Context, connectorID, r
 	defer func() { _ = tx.Rollback() }()
 	l, err := scanLink(tx.QueryRowContext(ctx, `
 		INSERT INTO recording_links (token_hash, recording_id, expires_at, max_uses, created_by, connector_id)
-		VALUES ($1, $2, $3, 0, $4, $5) RETURNING `+linkCols, hash, recordingID, expires.UTC(), actor, connectorID))
+		VALUES (@token_hash, @recording_id, @expires_at, 0, @created_by, @connector_id) RETURNING `+linkCols,
+		momo.Named("token_hash", hash), momo.Named("recording_id", recordingID), momo.Named("expires_at", expires.UTC()),
+		momo.Named("created_by", actor), momo.Named("connector_id", connectorID)))
 	if err != nil {
 		return RecordingLink{}, mapErr(err)
 	}
@@ -380,7 +388,7 @@ func (s *Store) RevokeConnectorRecordingLinks(ctx context.Context, connectorID i
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.ExecContext(ctx, `UPDATE recording_links SET revoked_at = now() WHERE connector_id = $1 AND revoked_at IS NULL`, connectorID)
+	res, err := tx.ExecContext(ctx, `UPDATE recording_links SET revoked_at = now() WHERE connector_id = @connector_id AND revoked_at IS NULL`, momo.Named("connector_id", connectorID))
 	if err != nil {
 		return 0, err
 	}

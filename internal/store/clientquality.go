@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"sync/atomic"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // ClientQualityRetention is how long a client's report is kept.
@@ -70,15 +72,19 @@ func (s *Store) RecordClientQuality(ctx context.Context, userID, deviceID int64,
 	res, err := s.db.ExecContext(ctx, `INSERT INTO cdr_client_quality
 		(call_id, device_id, user_id, codec, loss_pct, jitter_ms, rtt_ms, candidate_local, candidate_remote,
 		 video_width, video_height, video_fps, video_codec, duration_ms, reported_at)
-		SELECT $1, d.id, d.user_id, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now()
-		FROM devices d WHERE d.id = $2 AND d.user_id = $3 AND d.kind <> 'desk'
+		SELECT @call_id, d.id, d.user_id, @codec, @loss_pct, @jitter_ms, @rtt_ms, @candidate_local, @candidate_remote, @video_width,
+ @video_height, @video_fps, @video_codec, @duration_ms, now()
+		FROM devices d WHERE d.id = @device_id AND d.user_id = @user_id AND d.kind <> 'desk'
 		ON CONFLICT (call_id, device_id) DO UPDATE SET
 			codec = EXCLUDED.codec, loss_pct = EXCLUDED.loss_pct, jitter_ms = EXCLUDED.jitter_ms, rtt_ms = EXCLUDED.rtt_ms,
 			candidate_local = EXCLUDED.candidate_local, candidate_remote = EXCLUDED.candidate_remote,
 			video_width = EXCLUDED.video_width, video_height = EXCLUDED.video_height, video_fps = EXCLUDED.video_fps,
 			video_codec = EXCLUDED.video_codec, duration_ms = EXCLUDED.duration_ms, reported_at = now()`,
-		callID, deviceID, userID, in.Codec, in.LossPct, in.JitterMs, in.RTTMs, in.CandidateLocal, in.CandidateRemote,
-		w, h, fps, vc, in.DurationMs)
+		momo.Named("call_id", callID), momo.Named("device_id", deviceID), momo.Named("user_id", userID), momo.Named("codec", in.Codec),
+		momo.Named("loss_pct", in.LossPct), momo.Named("jitter_ms", in.JitterMs), momo.Named("rtt_ms", in.RTTMs),
+		momo.Named("candidate_local", in.CandidateLocal), momo.Named("candidate_remote", in.CandidateRemote),
+		momo.Named("video_width", w), momo.Named("video_height", h), momo.Named("video_fps", fps), momo.Named("video_codec", vc),
+		momo.Named("duration_ms", in.DurationMs))
 	if err != nil {
 		return fmt.Errorf("store: record client quality: %w", err)
 	}
@@ -86,7 +92,7 @@ func (s *Store) RecordClientQuality(ctx context.Context, userID, deviceID int64,
 		return err
 	}
 	if clientQualityWrites.Add(1)%1000 == 0 {
-		_, _ = s.db.ExecContext(ctx, `DELETE FROM cdr_client_quality WHERE reported_at < $1`, time.Now().Add(-ClientQualityRetention))
+		_, _ = s.db.ExecContext(ctx, `DELETE FROM cdr_client_quality WHERE reported_at < @cutoff`, momo.Named("cutoff", time.Now().Add(-ClientQualityRetention)))
 	}
 	return nil
 }
@@ -100,7 +106,7 @@ func (s *Store) clientQualityOf(ctx context.Context, cdrID int64) ([]ClientQuali
 		JOIN cdr_client_quality x ON x.call_id = c.sip_call_id OR (c.peer_call_id <> '' AND x.call_id = c.peer_call_id)
 		JOIN devices d ON d.id = x.device_id
 		LEFT JOIN extensions e ON e.id = d.extension_id
-		WHERE c.id = $1 ORDER BY x.reported_at, d.sip_username`, cdrID)
+		WHERE c.id = @id ORDER BY x.reported_at, d.sip_username`, momo.Named("id", cdrID))
 	if err != nil {
 		return nil, fmt.Errorf("store: client quality of cdr %d: %w", cdrID, err)
 	}
@@ -157,7 +163,7 @@ func (s *Store) ClientCandidateStats(ctx context.Context, since time.Time) (Clie
 		out.Local[t], out.Remote[t] = 0, 0
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT candidate_local, candidate_remote, count(*) FROM cdr_client_quality
-		WHERE reported_at >= $1 GROUP BY 1, 2`, since)
+		WHERE reported_at >= @since GROUP BY 1, 2`, momo.Named("since", since))
 	if err != nil {
 		return out, fmt.Errorf("store: client candidate stats: %w", err)
 	}

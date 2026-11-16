@@ -13,6 +13,8 @@ import (
 	"errors"
 	"strconv"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // PushChannel is the PostgreSQL channel a queued push notifies; SIP nodes
@@ -80,7 +82,7 @@ func scanPush(r interface{ Scan(...any) error }) (PhonePush, error) {
 // be pushed (unbound or disabled).
 func queuePush(ctx context.Context, tx *dbTx, phoneID int64, kind, source, actor string) (p PhonePush, ok bool, err error) {
 	var eligible bool
-	if err := tx.QueryRowContext(ctx, `SELECT device_id IS NOT NULL AND enabled FROM phones WHERE id = $1 FOR UPDATE`, phoneID).
+	if err := tx.QueryRowContext(ctx, `SELECT device_id IS NOT NULL AND enabled FROM phones WHERE id = @id FOR UPDATE`, momo.Named("id", phoneID)).
 		Scan(&eligible); err != nil {
 		return p, false, err
 	}
@@ -88,7 +90,7 @@ func queuePush(ctx context.Context, tx *dbTx, phoneID int64, kind, source, actor
 		return p, false, nil
 	}
 	p, err = scanPush(tx.QueryRowContext(ctx, `SELECT `+pushCols+` FROM phone_pushes
-		WHERE phone_id = $1 AND kind = $2 AND status = 'pending' ORDER BY id LIMIT 1`, phoneID, kind))
+		WHERE phone_id = @phone_id AND kind = @kind AND status = 'pending' ORDER BY id LIMIT 1`, momo.Named("phone_id", phoneID), momo.Named("kind", kind)))
 	switch {
 	case err == nil:
 		return p, true, nil
@@ -96,12 +98,12 @@ func queuePush(ctx context.Context, tx *dbTx, phoneID int64, kind, source, actor
 		return p, false, err
 	}
 	p, err = scanPush(tx.QueryRowContext(ctx, `
-		INSERT INTO phone_pushes (phone_id, kind, source, actor) VALUES ($1, $2, $3, $4)
-		RETURNING `+pushCols, phoneID, kind, source, actor))
+		INSERT INTO phone_pushes (phone_id, kind, source, actor) VALUES (@phone_id, @kind, @source, @actor)
+		RETURNING `+pushCols, momo.Named("phone_id", phoneID), momo.Named("kind", kind), momo.Named("source", source), momo.Named("actor", actor)))
 	if err != nil {
 		return p, false, err
 	}
-	if _, err = tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, PushChannel, strconv.FormatInt(p.ID, 10)); err != nil {
+	if _, err = tx.ExecContext(ctx, `SELECT pg_notify(@channel, @payload::text)`, momo.Named("channel", PushChannel), momo.Named("payload", strconv.FormatInt(p.ID, 10))); err != nil {
 		return p, false, err
 	}
 	return p, true, nil
@@ -136,12 +138,12 @@ func (s *Store) QueuePushGroup(ctx context.Context, actor string, groupID int64,
 		args := []any{}
 		if groupID != 0 {
 			var one int
-			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1`, groupID).Scan(&one); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = @id`, momo.Named("id", groupID)).Scan(&one); err != nil {
 				return err
 			}
 			resource, rid = "phone_group", strconv.FormatInt(groupID, 10)
-			q = `SELECT id FROM phones WHERE group_id = $1 ORDER BY id`
-			args = append(args, groupID)
+			q = `SELECT id FROM phones WHERE group_id = @group_id ORDER BY id`
+			args = append(args, momo.Named("group_id", groupID))
 		}
 		rows, err := tx.QueryContext(ctx, q, args...)
 		if err != nil {
@@ -197,7 +199,7 @@ func (s *Store) pushes(ctx context.Context, q string, args ...any) ([]PhonePush,
 
 // ListPhonePushes returns a phone's most recent pushes, newest first.
 func (s *Store) ListPhonePushes(ctx context.Context, phoneID int64, limit int) ([]PhonePush, error) {
-	return s.pushes(ctx, `SELECT `+pushCols+` FROM phone_pushes WHERE phone_id = $1 ORDER BY id DESC LIMIT $2`, phoneID, limit)
+	return s.pushes(ctx, `SELECT `+pushCols+` FROM phone_pushes WHERE phone_id = @phone_id ORDER BY id DESC LIMIT @limit`, momo.Named("phone_id", phoneID), momo.Named("limit", limit))
 }
 
 // LatestPhonePushes returns the newest push of every phone that has one.
@@ -228,26 +230,26 @@ func (s *Store) ClaimPushes(ctx context.Context, node string, perMinute int) ([]
 	var jobs []PushJob
 	err := s.tx(ctx, func(tx *dbTx) error {
 		jobs = nil
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(pushLockKey)); err != nil {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(@key)`, momo.Named("key", int64(pushLockKey))); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE phone_pushes SET status = 'failed', detail = 'node lost', finished_at = now()
-			WHERE status = 'sending' AND claimed_at < now() - make_interval(secs => $1)`, pushStaleAfter.Seconds()); err != nil {
+			WHERE status = 'sending' AND claimed_at < now() - make_interval(secs => @stale_after)`, momo.Named("stale_after", pushStaleAfter.Seconds())); err != nil {
 			return err
 		}
 		rows, err := tx.QueryContext(ctx, `
 			WITH used AS (SELECT count(*) AS n FROM phone_pushes WHERE claimed_at > now() - interval '1 minute'),
 			     pick AS (SELECT id FROM phone_pushes WHERE status = 'pending' ORDER BY id
-			              LIMIT greatest($2::int - (SELECT n FROM used), 0) FOR UPDATE SKIP LOCKED),
-			     upd AS (UPDATE phone_pushes SET status = 'sending', claimed_at = now(), claimed_by = $1
+			              LIMIT greatest(@per_minute::int - (SELECT n FROM used), 0) FOR UPDATE SKIP LOCKED),
+			     upd AS (UPDATE phone_pushes SET status = 'sending', claimed_at = now(), claimed_by = @node
 			             WHERE id IN (SELECT id FROM pick)
 			             RETURNING id, phone_id, kind)
 			SELECT u.id, u.phone_id, u.kind, p.vendor, COALESCE(d.sip_username, ''),
 			       COALESCE((SELECT jsonb_agg(ld.sip_username ORDER BY l.line) FROM phone_lines l
 			                 JOIN devices ld ON ld.id = l.device_id WHERE l.phone_id = u.phone_id), '[]'::jsonb)
 			FROM upd u JOIN phones p ON p.id = u.phone_id LEFT JOIN devices d ON d.id = p.device_id
-			ORDER BY u.id`, node, perMinute)
+			ORDER BY u.id`, momo.Named("node", node), momo.Named("per_minute", perMinute))
 		if err != nil {
 			return err
 		}
@@ -273,8 +275,8 @@ func (s *Store) ClaimPushes(ctx context.Context, node string, perMinute int) ([]
 // FinishPush records a claimed push's result.
 func (s *Store) FinishPush(ctx context.Context, id int64, status, detail string, contacts int) error {
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE phone_pushes SET status = $2, detail = $3, contacts = $4, finished_at = now()
-		WHERE id = $1 AND status = 'sending'`, id, status, detail, contacts)
+		UPDATE phone_pushes SET status = @status, detail = @detail, contacts = @contacts, finished_at = now()
+		WHERE id = @id AND status = 'sending'`, momo.Named("id", id), momo.Named("status", status), momo.Named("detail", detail), momo.Named("contacts", contacts))
 	if err != nil {
 		return err
 	}
@@ -329,7 +331,7 @@ func (s *Store) AutoSyncPhones(ctx context.Context) (map[int64]string, error) {
 func (s *Store) AutoResync(ctx context.Context, phoneID int64, old, hash string) (queued bool, err error) {
 	err = s.tx(ctx, func(tx *dbTx) error {
 		queued = false
-		res, err := tx.ExecContext(ctx, `UPDATE phones SET sync_hash = $3 WHERE id = $1 AND COALESCE(sync_hash, '') = $2`, phoneID, old, hash)
+		res, err := tx.ExecContext(ctx, `UPDATE phones SET sync_hash = @hash WHERE id = @id AND COALESCE(sync_hash, '') = @old`, momo.Named("id", phoneID), momo.Named("old", old), momo.Named("hash", hash))
 		if err != nil {
 			return err
 		}

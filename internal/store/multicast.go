@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/phonebook"
 )
 
@@ -29,8 +31,8 @@ func scanChannel(r interface{ Scan(...any) error }) (phonebook.Channel, error) {
 // enabled ones only when enabledOnly, by kind, priority and id.
 func catalogChannels(ctx context.Context, q querier, kind string, enabledOnly bool) ([]phonebook.Channel, error) {
 	rows, err := q.QueryContext(ctx, `SELECT `+channelCols+` FROM multicast_channels
-		WHERE group_id IS NULL AND ($1 = '' OR kind = $1) AND (enabled OR NOT $2)
-		ORDER BY kind, priority, id`, kind, enabledOnly)
+		WHERE group_id IS NULL AND (@kind::text = '' OR kind = @kind::text) AND (enabled OR NOT @enabled_only)
+		ORDER BY kind, priority, id`, momo.Named("kind", kind), momo.Named("enabled_only", enabledOnly))
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +75,7 @@ func (s *Store) ListMulticastChannels(ctx context.Context) ([]phonebook.Channel,
 
 // GetMulticastChannel returns one catalog channel.
 func (s *Store) GetMulticastChannel(ctx context.Context, id int64) (phonebook.Channel, error) {
-	c, err := scanChannel(s.q(ctx).QueryRowContext(ctx, `SELECT `+channelCols+` FROM multicast_channels WHERE id = $1 AND group_id IS NULL`, id))
+	c, err := scanChannel(s.q(ctx).QueryRowContext(ctx, `SELECT `+channelCols+` FROM multicast_channels WHERE id = @id AND group_id IS NULL`, momo.Named("id", id)))
 	return c, mapErr(err)
 }
 
@@ -82,8 +84,8 @@ func (s *Store) GetMulticastChannel(ctx context.Context, id int64) (phonebook.Ch
 func checkChannelAddress(ctx context.Context, tx *dbTx, id int64, in phonebook.ChannelInput) error {
 	var label string
 	err := tx.QueryRowContext(ctx, `SELECT label FROM multicast_channels
-		WHERE group_id IS NULL AND address = $1 AND port = $2 AND id <> $3 ORDER BY id LIMIT 1`,
-		in.Address, in.Port, id).Scan(&label)
+		WHERE group_id IS NULL AND address = @address AND port = @port AND id <> @id ORDER BY id LIMIT 1`,
+		momo.Named("address", in.Address), momo.Named("port", in.Port), momo.Named("id", id)).Scan(&label)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil
@@ -112,8 +114,9 @@ func (s *Store) CreateMulticastChannel(ctx context.Context, actor string, in pho
 		}
 		var err error
 		out, err = scanChannel(tx.QueryRowContext(ctx, `INSERT INTO multicast_channels (label, address, port, codec, priority, kind, enabled)
-			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING `+channelCols,
-			in.Label, in.Address, in.Port, in.Codec, in.Priority, in.Kind, channelEnabled(in)))
+			VALUES (@label, @address, @port, @codec, @priority, @kind, @enabled) RETURNING `+channelCols,
+			momo.Named("label", in.Label), momo.Named("address", in.Address), momo.Named("port", in.Port), momo.Named("codec", in.Codec),
+			momo.Named("priority", in.Priority), momo.Named("kind", in.Kind), momo.Named("enabled", channelEnabled(in))))
 		return out.ID, err
 	})
 	return out, err
@@ -123,13 +126,14 @@ func (s *Store) CreateMulticastChannel(ctx context.Context, actor string, in pho
 // must keep: paging groups and phone groups for a paging channel, phone
 // groups and phones for a PTT channel.
 func channelUsers(ctx context.Context, q querier, id int64, kind string) ([]string, error) {
-	query := `SELECT 'paging group ' || name FROM paging_groups WHERE multicast_channel_id = $1
-		UNION ALL SELECT 'phone group ' || g.name FROM phone_group_multicast l JOIN phone_groups g ON g.id = l.group_id WHERE l.channel_id = $1`
+	// Either query binds @id.
+	query := `SELECT 'paging group ' || name FROM paging_groups WHERE multicast_channel_id = @id
+		UNION ALL SELECT 'phone group ' || g.name FROM phone_group_multicast l JOIN phone_groups g ON g.id = l.group_id WHERE l.channel_id = @id`
 	if kind == phonebook.KindPTT {
-		query = `SELECT 'phone group ' || name FROM phone_groups WHERE ptt_channel_id = $1
-			UNION ALL SELECT 'phone ' || COALESCE(NULLIF(label, ''), mac) FROM phones WHERE ptt_channel_id = $1`
+		query = `SELECT 'phone group ' || name FROM phone_groups WHERE ptt_channel_id = @id
+			UNION ALL SELECT 'phone ' || COALESCE(NULLIF(label, ''), mac) FROM phones WHERE ptt_channel_id = @id`
 	}
-	rows, err := q.QueryContext(ctx, query+` ORDER BY 1 LIMIT 6`, id)
+	rows, err := q.QueryContext(ctx, query+` ORDER BY 1 LIMIT 6`, momo.Named("id", id))
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +173,7 @@ func (s *Store) UpdateMulticastChannel(ctx context.Context, actor string, id int
 	var out phonebook.Channel
 	err := s.configChange(ctx, actor, "update", "multicast_channel", nil, func(tx *dbTx) (int64, error) {
 		cur, err := scanChannel(tx.QueryRowContext(ctx, `SELECT `+channelCols+` FROM multicast_channels
-			WHERE id = $1 AND group_id IS NULL FOR UPDATE`, id))
+			WHERE id = @id AND group_id IS NULL FOR UPDATE`, momo.Named("id", id)))
 		if err != nil {
 			return id, mapErr(err)
 		}
@@ -185,9 +189,10 @@ func (s *Store) UpdateMulticastChannel(ctx context.Context, actor string, id int
 		if err := checkChannelAddress(ctx, tx, id, in); err != nil {
 			return id, err
 		}
-		out, err = scanChannel(tx.QueryRowContext(ctx, `UPDATE multicast_channels SET label = $2, address = $3, port = $4,
-			codec = $5, priority = $6, kind = $7, enabled = $8 WHERE id = $1 RETURNING `+channelCols,
-			id, in.Label, in.Address, in.Port, in.Codec, in.Priority, in.Kind, channelEnabled(in)))
+		out, err = scanChannel(tx.QueryRowContext(ctx, `UPDATE multicast_channels SET label = @label, address = @address, port = @port,
+			codec = @codec, priority = @priority, kind = @kind, enabled = @enabled WHERE id = @id RETURNING `+channelCols,
+			momo.Named("id", id), momo.Named("label", in.Label), momo.Named("address", in.Address), momo.Named("port", in.Port), momo.Named("codec", in.Codec),
+			momo.Named("priority", in.Priority), momo.Named("kind", in.Kind), momo.Named("enabled", channelEnabled(in))))
 		return id, err
 	})
 	return out, err
@@ -198,10 +203,10 @@ func (s *Store) UpdateMulticastChannel(ctx context.Context, actor string, id int
 func (s *Store) DeleteMulticastChannel(ctx context.Context, actor string, id int64) error {
 	return s.configChange(ctx, actor, "delete", "multicast_channel", nil, func(tx *dbTx) (int64, error) {
 		var label string
-		if err := tx.QueryRowContext(ctx, `SELECT label FROM multicast_channels WHERE id = $1 AND group_id IS NULL FOR UPDATE`, id).Scan(&label); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT label FROM multicast_channels WHERE id = @id AND group_id IS NULL FOR UPDATE`, momo.Named("id", id)).Scan(&label); err != nil {
 			return id, mapErr(err)
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT 'paging group ' || name FROM paging_groups WHERE multicast_channel_id = $1 ORDER BY 1 LIMIT 6`, id)
+		rows, err := tx.QueryContext(ctx, `SELECT 'paging group ' || name FROM paging_groups WHERE multicast_channel_id = @id ORDER BY 1 LIMIT 6`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -221,7 +226,7 @@ func (s *Store) DeleteMulticastChannel(ctx context.Context, actor string, id int
 		if len(users) > 0 {
 			return id, usedBy(label, users)
 		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM multicast_channels WHERE id = $1`, id)
+		_, err = tx.ExecContext(ctx, `DELETE FROM multicast_channels WHERE id = @id`, momo.Named("id", id))
 		return id, err
 	})
 }
@@ -231,7 +236,7 @@ func (s *Store) DeleteMulticastChannel(ctx context.Context, actor string, id int
 func checkCatalogChannel(ctx context.Context, q querier, path string, id int64, kind string) error {
 	var k string
 	var enabled bool
-	err := q.QueryRowContext(ctx, `SELECT kind, enabled FROM multicast_channels WHERE id = $1 AND group_id IS NULL`, id).Scan(&k, &enabled)
+	err := q.QueryRowContext(ctx, `SELECT kind, enabled FROM multicast_channels WHERE id = @id AND group_id IS NULL`, momo.Named("id", id)).Scan(&k, &enabled)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return fieldError(path, "no such multicast channel")
