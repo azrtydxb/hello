@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/secret"
 )
@@ -66,7 +68,7 @@ func (s *Store) TwoFactorStatus(ctx context.Context, id int64) (TwoFactorStatus,
 		SELECT u.totp_enabled_at, u.totp_secret_enc IS NOT NULL,
 			u.totp_required OR u.role = ANY(a.require_2fa_roles),
 			(SELECT count(*) FROM user_recovery_codes WHERE user_id = u.id)
-		FROM users u CROSS JOIN auth_settings a WHERE u.id = $1`, id).
+		FROM users u CROSS JOIN auth_settings a WHERE u.id = @id`, momo.Named("id", id)).
 		Scan(&enabled, &hasSec, &st.Required, &st.RecoveryLeft)
 	if err != nil {
 		return st, mapErr(err)
@@ -91,13 +93,14 @@ func (s *Store) BeginTOTPSetup(ctx context.Context, id int64, secretB32 string) 
 	}
 	return s.tx(ctx, func(tx *dbTx) error {
 		var enabled sql.NullTime
-		if err := tx.QueryRowContext(ctx, `SELECT totp_enabled_at FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&enabled); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT totp_enabled_at FROM users WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&enabled); err != nil {
 			return mapErr(err)
 		}
 		if enabled.Valid {
 			return ErrTOTPEnrolled
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE users SET totp_secret_enc = $2, totp_last_step = 0 WHERE id = $1`, id, sealed)
+		_, err := tx.ExecContext(ctx, `UPDATE users SET totp_secret_enc = @totp_secret_enc, totp_last_step = 0 WHERE id = @id`,
+			momo.Named("id", id), momo.Named("totp_secret_enc", sealed))
 		return err
 	})
 }
@@ -109,7 +112,7 @@ func (s *Store) openTOTP(ctx context.Context, tx *dbTx, id int64) (secretB32 str
 		at  sql.NullTime
 	)
 	if err = tx.QueryRowContext(ctx,
-		`SELECT totp_secret_enc, totp_enabled_at, totp_last_step FROM users WHERE id = $1 FOR UPDATE`, id).
+		`SELECT totp_secret_enc, totp_enabled_at, totp_last_step FROM users WHERE id = @id FOR UPDATE`, momo.Named("id", id)).
 		Scan(&enc, &at, &last); err != nil {
 		return "", false, 0, mapErr(err)
 	}
@@ -142,7 +145,8 @@ func (s *Store) EnableTOTP(ctx context.Context, id int64, code string, now time.
 			return ErrMFAInvalid
 		}
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE users SET totp_enabled_at = now(), totp_last_step = $2 WHERE id = $1`, id, step); err != nil {
+			`UPDATE users SET totp_enabled_at = now(), totp_last_step = @step WHERE id = @id`,
+			momo.Named("id", id), momo.Named("step", step)); err != nil {
 			return err
 		}
 		if plain, err = replaceRecoveryCodes(ctx, tx, id); err != nil {
@@ -157,12 +161,13 @@ func (s *Store) EnableTOTP(ctx context.Context, id int64, code string, now time.
 }
 
 func replaceRecoveryCodes(ctx context.Context, tx *dbTx, id int64) ([]string, error) {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM user_recovery_codes WHERE user_id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_recovery_codes WHERE user_id = @user_id`, momo.Named("user_id", id)); err != nil {
 		return nil, err
 	}
 	plain, hashes := auth.NewRecoveryCodes(auth.RecoveryCodeCount)
 	for _, h := range hashes {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO user_recovery_codes (user_id, code_hash) VALUES ($1, $2)`, id, h); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO user_recovery_codes (user_id, code_hash) VALUES (@user_id, @code_hash)`,
+			momo.Named("user_id", id), momo.Named("code_hash", h)); err != nil {
 			return nil, err
 		}
 	}
@@ -176,7 +181,8 @@ func replaceRecoveryCodes(ctx context.Context, tx *dbTx, id int64) ([]string, er
 func (s *Store) checkSecondFactor(ctx context.Context, tx *dbTx, id int64, code string, now time.Time) (ok, recovery bool, err error) {
 	if auth.LooksLikeRecoveryCode(code) {
 		res, err := tx.ExecContext(ctx,
-			`DELETE FROM user_recovery_codes WHERE user_id = $1 AND code_hash = $2`, id, auth.HashRecoveryCode(code))
+			`DELETE FROM user_recovery_codes WHERE user_id = @user_id AND code_hash = @code_hash`,
+			momo.Named("user_id", id), momo.Named("code_hash", auth.HashRecoveryCode(code)))
 		if err != nil {
 			return false, true, err
 		}
@@ -194,7 +200,7 @@ func (s *Store) checkSecondFactor(ctx context.Context, tx *dbTx, id int64, code 
 	if !ok {
 		return false, false, nil
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE users SET totp_last_step = $2 WHERE id = $1`, id, step)
+	_, err = tx.ExecContext(ctx, `UPDATE users SET totp_last_step = @step WHERE id = @id`, momo.Named("id", id), momo.Named("step", step))
 	return err == nil, false, err
 }
 
@@ -244,18 +250,18 @@ func (s *Store) withSecondFactor(ctx context.Context, id int64, code string, now
 
 func clearTOTP(ctx context.Context, tx *dbTx, id int64) error {
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE users SET totp_secret_enc = NULL, totp_enabled_at = NULL, totp_last_step = 0 WHERE id = $1`, id); err != nil {
+		UPDATE users SET totp_secret_enc = NULL, totp_enabled_at = NULL, totp_last_step = 0 WHERE id = @id`, momo.Named("id", id)); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM user_recovery_codes WHERE user_id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_recovery_codes WHERE user_id = @user_id`, momo.Named("user_id", id)); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `DELETE FROM auth_mfa_challenges WHERE user_id = $1`, id)
+	_, err := tx.ExecContext(ctx, `DELETE FROM auth_mfa_challenges WHERE user_id = @user_id`, momo.Named("user_id", id))
 	return err
 }
 
 func recordMFAFailure(ctx context.Context, tx *dbTx, id int64) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO auth_mfa_failures (user_id) VALUES ($1)`, id)
+	_, err := tx.ExecContext(ctx, `INSERT INTO auth_mfa_failures (user_id) VALUES (@user_id)`, momo.Named("user_id", id))
 	return err
 }
 
@@ -266,7 +272,8 @@ func (s *Store) CreateMFAChallenge(ctx context.Context, userID int64, hash []byt
 		return err
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO auth_mfa_challenges (token_hash, user_id, expires_at) VALUES ($1, $2, $3)`, hash, userID, expires)
+		`INSERT INTO auth_mfa_challenges (token_hash, user_id, expires_at) VALUES (@token_hash, @user_id, @expires_at)`,
+		momo.Named("token_hash", hash), momo.Named("user_id", userID), momo.Named("expires_at", expires))
 	return err
 }
 
@@ -297,7 +304,7 @@ func (s *Store) CompleteMFAChallenge(ctx context.Context, hash []byte, code stri
 		err := tx.QueryRowContext(ctx, `
 			SELECT c.user_id, c.expires_at, c.attempts FROM auth_mfa_challenges c
 			JOIN users u ON u.id = c.user_id AND u.enabled
-			WHERE c.token_hash = $1 FOR UPDATE OF c`, hash).Scan(&uid, &expires, &attempts)
+			WHERE c.token_hash = @token_hash FOR UPDATE OF c`, momo.Named("token_hash", hash)).Scan(&uid, &expires, &attempts)
 		if errors.Is(err, sql.ErrNoRows) {
 			invalid = true
 			return nil
@@ -307,11 +314,11 @@ func (s *Store) CompleteMFAChallenge(ctx context.Context, hash []byte, code stri
 		}
 		// Serialise every attempt for this user, so one TOTP step cannot be
 		// accepted twice by two challenges at once.
-		if err := tx.QueryRowContext(ctx, `SELECT username FROM users WHERE id = $1 FOR UPDATE`, uid).Scan(&res.Username); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT username FROM users WHERE id = @id FOR UPDATE`, momo.Named("id", uid)).Scan(&res.Username); err != nil {
 			return err
 		}
 		spend := func() error {
-			_, err := tx.ExecContext(ctx, `DELETE FROM auth_mfa_challenges WHERE token_hash = $1`, hash)
+			_, err := tx.ExecContext(ctx, `DELETE FROM auth_mfa_challenges WHERE token_hash = @token_hash`, momo.Named("token_hash", hash))
 			return err
 		}
 		if !expires.After(now) {
@@ -320,7 +327,8 @@ func (s *Store) CompleteMFAChallenge(ctx context.Context, hash []byte, code stri
 		}
 		var failures int
 		if err := tx.QueryRowContext(ctx,
-			`SELECT count(*) FROM auth_mfa_failures WHERE user_id = $1 AND at > $2`, uid, now.Add(-mfaFailureWindow)).
+			`SELECT count(*) FROM auth_mfa_failures WHERE user_id = @user_id AND at > @since`,
+			momo.Named("user_id", uid), momo.Named("since", now.Add(-mfaFailureWindow))).
 			Scan(&failures); err != nil {
 			return err
 		}
@@ -340,17 +348,17 @@ func (s *Store) CompleteMFAChallenge(ctx context.Context, hash []byte, code stri
 			if attempts+1 >= mfaAttemptsPerChallenge {
 				return spend()
 			}
-			_, err := tx.ExecContext(ctx, `UPDATE auth_mfa_challenges SET attempts = attempts + 1 WHERE token_hash = $1`, hash)
+			_, err := tx.ExecContext(ctx, `UPDATE auth_mfa_challenges SET attempts = attempts + 1 WHERE token_hash = @token_hash`, momo.Named("token_hash", hash))
 			return err
 		}
 		if err := spend(); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM auth_mfa_failures WHERE user_id = $1`, uid); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM auth_mfa_failures WHERE user_id = @user_id`, momo.Named("user_id", uid)); err != nil {
 			return err
 		}
 		res.UserID, res.Recovery = uid, recovery
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM user_recovery_codes WHERE user_id = $1`, uid).
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM user_recovery_codes WHERE user_id = @user_id`, momo.Named("user_id", uid)).
 			Scan(&res.RecoveryLeft); err != nil {
 			return err
 		}
@@ -390,14 +398,14 @@ func (s *Store) ResetTOTP(ctx context.Context, actor string, id int64, guard boo
 			enabled bool
 			at      sql.NullTime
 		)
-		if err := tx.QueryRowContext(ctx, `SELECT role, enabled, totp_enabled_at FROM users WHERE id = $1 FOR UPDATE`, id).
+		if err := tx.QueryRowContext(ctx, `SELECT role, enabled, totp_enabled_at FROM users WHERE id = @id FOR UPDATE`, momo.Named("id", id)).
 			Scan(&role, &enabled, &at); err != nil {
 			return mapErr(err)
 		}
 		if guard && at.Valid && role == auth.RoleAdmin && enabled {
 			var others int
 			if err := tx.QueryRowContext(ctx, `
-				SELECT count(*) FROM users WHERE role = 'admin' AND enabled AND totp_enabled_at IS NOT NULL AND id <> $1`, id).
+				SELECT count(*) FROM users WHERE role = 'admin' AND enabled AND totp_enabled_at IS NOT NULL AND id <> @id`, momo.Named("id", id)).
 				Scan(&others); err != nil {
 				return err
 			}
@@ -408,7 +416,7 @@ func (s *Store) ResetTOTP(ctx context.Context, actor string, id int64, guard boo
 		if err := clearTOTP(ctx, tx, id); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = @user_id`, momo.Named("user_id", id)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "reset-2fa", "user", strconv.FormatInt(id, 10))
@@ -418,7 +426,7 @@ func (s *Store) ResetTOTP(ctx context.Context, actor string, id int64, guard boo
 // ResetTOTPByName is the CLI's break-glass reset by login name.
 func (s *Store) ResetTOTPByName(ctx context.Context, actor, username string) error {
 	var id int64
-	if err := s.db.QueryRowContext(ctx, `SELECT id FROM users WHERE username = $1`, username).Scan(&id); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM users WHERE username = @username`, momo.Named("username", username)).Scan(&id); err != nil {
 		return mapErr(err)
 	}
 	return s.ResetTOTP(ctx, actor, id, false)
@@ -460,7 +468,7 @@ func (s *Store) SetRequire2FARoles(ctx context.Context, actor string, setter int
 		if roles == nil {
 			roles = []string{}
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE auth_settings SET require_2fa_roles = $1::text[]`, roles); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE auth_settings SET require_2fa_roles = @roles::text[]`, momo.Named("roles", roles)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "update", "auth_settings", "2fa")
@@ -470,7 +478,7 @@ func (s *Store) SetRequire2FARoles(ctx context.Context, actor string, setter int
 // requireActive2FA is ErrTwoFactorRequired unless user id has active 2FA.
 func requireActive2FA(ctx context.Context, tx *dbTx, id int64) error {
 	var on bool
-	err := tx.QueryRowContext(ctx, `SELECT totp_enabled_at IS NOT NULL FROM users WHERE id = $1`, id).Scan(&on)
+	err := tx.QueryRowContext(ctx, `SELECT totp_enabled_at IS NOT NULL FROM users WHERE id = @id`, momo.Named("id", id)).Scan(&on)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !on) {
 		return ErrTwoFactorRequired
 	}

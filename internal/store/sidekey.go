@@ -4,6 +4,8 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/phonebook"
 )
 
@@ -13,7 +15,8 @@ import (
 func (s *Store) SetPhoneGroupSideKey(ctx context.Context, actor string, id int64, function string) (phonebook.Group, error) {
 	var out phonebook.Group
 	err := s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET side_key = $2, updated_at = now() WHERE id = $1`, id, function)
+		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET side_key = @side_key, updated_at = now() WHERE id = @id`,
+			momo.Named("id", id), momo.Named("side_key", function))
 		if err != nil {
 			return err
 		}

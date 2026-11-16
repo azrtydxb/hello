@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/routing"
 )
@@ -206,8 +208,8 @@ func (s *Store) SetSCEPCA(ctx context.Context, actor, certPEM string, key *rsa.P
 		if _, err := tx.ExecContext(ctx, `UPDATE scep_ca SET active = FALSE WHERE active`); err != nil {
 			return "", false, err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO scep_ca (id, cert_pem, key_enc, source) VALUES ($1, $2, $3, $4)`,
-			id, strings.TrimSpace(certPEM)+"\n", enc, source); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO scep_ca (id, cert_pem, key_enc, source) VALUES (@id, @cert_pem, @key_enc, @source)`,
+			momo.Named("id", id), momo.Named("cert_pem", strings.TrimSpace(certPEM)+"\n"), momo.Named("key_enc", enc), momo.Named("source", source)); err != nil {
 			return "", false, err
 		}
 		return strconv.FormatInt(id, 10), false, nil
@@ -227,7 +229,7 @@ func (s *Store) SCEPState(ctx context.Context, phoneID int64) (prov.SCEPPhone, e
 		days sql.NullInt64
 	)
 	err := s.db.QueryRowContext(ctx, `SELECT g.scep_enabled, g.scep_validity_days FROM phones p
-		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = $1`, phoneID).Scan(&on, &days)
+		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = @id`, momo.Named("id", phoneID)).Scan(&on, &days)
 	if errors.Is(err, sql.ErrNoRows) {
 		return prov.SCEPPhone{}, prov.ErrNotFound
 	}
@@ -254,7 +256,7 @@ func (s *Store) SCEPIssue(ctx context.Context, in prov.SCEPIssue) (*x509.Certifi
 	var out *x509.Certificate
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phones WHERE id = $1 FOR UPDATE`, in.PhoneID).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phones WHERE id = @id FOR UPDATE`, momo.Named("id", in.PhoneID)).Scan(&one); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return prov.ErrNotFound
 			}
@@ -265,9 +267,10 @@ func (s *Store) SCEPIssue(ctx context.Context, in prov.SCEPIssue) (*x509.Certifi
 		// that keeps its key is a new issue, not a retry.
 		var existing string
 		err := tx.QueryRowContext(ctx, `SELECT cert_pem FROM scep_certificates
-			WHERE phone_id = $1 AND ca_id = $2 AND key_sha256 = $3 AND revoked_at IS NULL AND not_after > now()
-			  AND issued_at > now() - make_interval(secs => $4)
-			ORDER BY issued_at DESC LIMIT 1`, in.PhoneID, in.CAID, in.KeySHA256, prov.SCEPRetryWindow.Seconds()).Scan(&existing)
+			WHERE phone_id = @phone_id AND ca_id = @ca_id AND key_sha256 = @key_sha256 AND revoked_at IS NULL AND not_after > now()
+			  AND issued_at > now() - make_interval(secs => @window)
+			ORDER BY issued_at DESC LIMIT 1`,
+			momo.Named("phone_id", in.PhoneID), momo.Named("ca_id", in.CAID), momo.Named("key_sha256", in.KeySHA256), momo.Named("window", prov.SCEPRetryWindow.Seconds())).Scan(&existing)
 		switch {
 		case err == nil:
 			out, err = parseCertPEM(existing)
@@ -279,7 +282,7 @@ func (s *Store) SCEPIssue(ctx context.Context, in prov.SCEPIssue) (*x509.Certifi
 		switch {
 		case in.Challenge != "" && in.RenewalSerial == "":
 			var enc []byte
-			err := tx.QueryRowContext(ctx, `SELECT challenge_enc FROM scep_challenges WHERE phone_id = $1 FOR UPDATE`, in.PhoneID).Scan(&enc)
+			err := tx.QueryRowContext(ctx, `SELECT challenge_enc FROM scep_challenges WHERE phone_id = @phone_id FOR UPDATE`, momo.Named("phone_id", in.PhoneID)).Scan(&enc)
 			if errors.Is(err, sql.ErrNoRows) {
 				return prov.ErrSCEPRefused
 			}
@@ -296,14 +299,14 @@ func (s *Store) SCEPIssue(ctx context.Context, in prov.SCEPIssue) (*x509.Certifi
 			if !prov.ChallengeEqual(want, in.Challenge) {
 				return prov.ErrSCEPRefused
 			}
-			if _, err := tx.ExecContext(ctx, `DELETE FROM scep_challenges WHERE phone_id = $1`, in.PhoneID); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM scep_challenges WHERE phone_id = @phone_id`, momo.Named("phone_id", in.PhoneID)); err != nil {
 				return err
 			}
 		case in.RenewalSerial != "" && in.Challenge == "":
 			kind = "renewal"
 			err := tx.QueryRowContext(ctx, `SELECT 1 FROM scep_certificates
-				WHERE serial = $1 AND phone_id = $2 AND ca_id = $3 AND revoked_at IS NULL AND not_after > now()`,
-				strings.ToLower(in.RenewalSerial), in.PhoneID, in.CAID).Scan(&one)
+				WHERE serial = @serial AND phone_id = @phone_id AND ca_id = @ca_id AND revoked_at IS NULL AND not_after > now()`,
+				momo.Named("serial", strings.ToLower(in.RenewalSerial)), momo.Named("phone_id", in.PhoneID), momo.Named("ca_id", in.CAID)).Scan(&one)
 			if errors.Is(err, sql.ErrNoRows) {
 				return prov.ErrSCEPRefused
 			}
@@ -320,9 +323,10 @@ func (s *Store) SCEPIssue(ctx context.Context, in prov.SCEPIssue) (*x509.Certifi
 		certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}))
 		if _, err := tx.ExecContext(ctx, `INSERT INTO scep_certificates
 			(ca_id, phone_id, mac, serial, subject, key_sha256, cert_pem, kind, not_before, not_after)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-			in.CAID, in.PhoneID, in.MAC, prov.SerialHex(cert.SerialNumber), cert.Subject.String(), in.KeySHA256,
-			certPEM, kind, cert.NotBefore, cert.NotAfter); err != nil {
+			VALUES (@ca_id, @phone_id, @mac, @serial, @subject, @key_sha256, @cert_pem, @kind, @not_before, @not_after)`,
+			momo.Named("ca_id", in.CAID), momo.Named("phone_id", in.PhoneID), momo.Named("mac", in.MAC),
+			momo.Named("serial", prov.SerialHex(cert.SerialNumber)), momo.Named("subject", cert.Subject.String()), momo.Named("key_sha256", in.KeySHA256),
+			momo.Named("cert_pem", certPEM), momo.Named("kind", kind), momo.Named("not_before", cert.NotBefore), momo.Named("not_after", cert.NotAfter)); err != nil {
 			return err
 		}
 		if err := insertAudit(ctx, tx, "phone:"+in.MAC, "scep_"+kind, "scep_certificate", prov.SerialHex(cert.SerialNumber)); err != nil {
@@ -345,7 +349,7 @@ func parseCertPEM(s string) (*x509.Certificate, error) {
 // SCEPRevoked implements prov.SCEPStore.
 func (s *Store) SCEPRevoked(ctx context.Context, caID int64) ([]x509.RevocationListEntry, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT serial, revoked_at FROM scep_certificates
-		WHERE ca_id = $1 AND revoked_at IS NOT NULL AND not_after > now() - interval '1 day' ORDER BY revoked_at`, caID)
+		WHERE ca_id = @ca_id AND revoked_at IS NOT NULL AND not_after > now() - interval '1 day' ORDER BY revoked_at`, momo.Named("ca_id", caID))
 	if err != nil {
 		return nil, err
 	}
@@ -398,7 +402,7 @@ func scanSCEPCert(sc interface{ Scan(...any) error }) (SCEPCertificate, error) {
 
 // ListSCEPCertificates lists issued certificates, newest first, at most 1000.
 func (s *Store) ListSCEPCertificates(ctx context.Context, f SCEPCertFilter) ([]SCEPCertificate, error) {
-	q := `SELECT ` + scepCertCols + ` FROM scep_certificates WHERE ($1::bigint IS NULL OR phone_id = $1)`
+	q := `SELECT ` + scepCertCols + ` FROM scep_certificates WHERE (@phone_id::bigint IS NULL OR phone_id = @phone_id::bigint)`
 	switch f.Status {
 	case "active":
 		q += ` AND revoked_at IS NULL AND not_after > now()`
@@ -407,7 +411,7 @@ func (s *Store) ListSCEPCertificates(ctx context.Context, f SCEPCertFilter) ([]S
 	case "revoked":
 		q += ` AND revoked_at IS NOT NULL`
 	}
-	rows, err := s.db.QueryContext(ctx, q+` ORDER BY issued_at DESC, id DESC LIMIT 1000`, f.PhoneID)
+	rows, err := s.db.QueryContext(ctx, q+` ORDER BY issued_at DESC, id DESC LIMIT 1000`, momo.Named("phone_id", f.PhoneID))
 	if err != nil {
 		return nil, err
 	}
@@ -430,7 +434,7 @@ func (s *Store) RevokeSCEPCertificate(ctx context.Context, actor string, id int6
 	err := s.provChange(ctx, actor, "revoke", "scep_certificate", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
 		var revoked sql.NullTime
-		if err := tx.QueryRowContext(ctx, `SELECT revoked_at FROM scep_certificates WHERE id = $1 FOR UPDATE`, id).Scan(&revoked); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT revoked_at FROM scep_certificates WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&revoked); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return rid, false, ErrNotFound
 			}
@@ -439,13 +443,13 @@ func (s *Store) RevokeSCEPCertificate(ctx context.Context, actor string, id int6
 		if revoked.Valid {
 			return rid, false, conflict("the certificate is already revoked")
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE scep_certificates SET revoked_at = now(), revoke_reason = $2 WHERE id = $1`, id, reason)
+		_, err := tx.ExecContext(ctx, `UPDATE scep_certificates SET revoked_at = now(), revoke_reason = @revoke_reason WHERE id = @id`, momo.Named("id", id), momo.Named("revoke_reason", reason))
 		return rid, false, err
 	})
 	if err != nil {
 		return SCEPCertificate{}, err
 	}
-	return scanSCEPCert(s.db.QueryRowContext(ctx, `SELECT `+scepCertCols+` FROM scep_certificates WHERE id = $1`, id))
+	return scanSCEPCert(s.db.QueryRowContext(ctx, `SELECT `+scepCertCols+` FROM scep_certificates WHERE id = @id`, momo.Named("id", id)))
 }
 
 // RotateSCEPChallenge discards the phone's challenge password, used or not;
@@ -454,13 +458,13 @@ func (s *Store) RotateSCEPChallenge(ctx context.Context, actor string, phoneID i
 	return s.provChange(ctx, actor, "rotate", "scep_challenge", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(phoneID, 10)
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phones WHERE id = $1`, phoneID).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phones WHERE id = @id`, momo.Named("id", phoneID)).Scan(&one); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return rid, false, ErrNotFound
 			}
 			return rid, false, err
 		}
-		_, err := tx.ExecContext(ctx, `DELETE FROM scep_challenges WHERE phone_id = $1`, phoneID)
+		_, err := tx.ExecContext(ctx, `DELETE FROM scep_challenges WHERE phone_id = @phone_id`, momo.Named("phone_id", phoneID))
 		return rid, false, err
 	})
 }
@@ -476,12 +480,12 @@ func (s *Store) scepChallenge(ctx context.Context, phoneID int64) (string, error
 	if err != nil {
 		return "", err
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO scep_challenges (phone_id, challenge_enc) VALUES ($1, $2)
-		ON CONFLICT (phone_id) DO NOTHING`, phoneID, fresh); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO scep_challenges (phone_id, challenge_enc) VALUES (@phone_id, @challenge_enc)
+		ON CONFLICT (phone_id) DO NOTHING`, momo.Named("phone_id", phoneID), momo.Named("challenge_enc", fresh)); err != nil {
 		return "", err
 	}
 	var enc []byte
-	if err := s.db.QueryRowContext(ctx, `SELECT challenge_enc FROM scep_challenges WHERE phone_id = $1`, phoneID).Scan(&enc); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT challenge_enc FROM scep_challenges WHERE phone_id = @phone_id`, momo.Named("phone_id", phoneID)).Scan(&enc); err != nil {
 		return "", err
 	}
 	c, err := s.box.Open(enc, prov.SCEPChallengeAAD(phoneID))
@@ -532,7 +536,7 @@ func (s *Store) ListDot1XProfiles(ctx context.Context) ([]Dot1XProfile, error) {
 
 // GetDot1XProfile returns one profile; ErrNotFound when there is none.
 func (s *Store) GetDot1XProfile(ctx context.Context, id int64) (Dot1XProfile, error) {
-	p, err := scanDot1X(s.db.QueryRowContext(ctx, `SELECT `+dot1xCols+` FROM dot1x_profiles d WHERE d.id = $1`, id))
+	p, err := scanDot1X(s.db.QueryRowContext(ctx, `SELECT `+dot1xCols+` FROM dot1x_profiles d WHERE d.id = @id`, momo.Named("id", id)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -557,8 +561,10 @@ func (s *Store) CreateDot1XProfile(ctx context.Context, actor string, in Dot1XIn
 			return "", false, err
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO dot1x_profiles (id, name, method, identity, anonymous_identity, password_enc, ca_cert_pem, server_domain)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, id, strings.TrimSpace(in.Name), in.Method, in.Identity, in.AnonymousIdentity, enc,
-			normPEM(in.CACertPEM), in.ServerDomain)
+			VALUES (@id, @name, @method, @identity, @anonymous_identity, @password_enc, @ca_cert_pem, @server_domain)`,
+			momo.Named("id", id), momo.Named("name", strings.TrimSpace(in.Name)), momo.Named("method", in.Method), momo.Named("identity", in.Identity),
+			momo.Named("anonymous_identity", in.AnonymousIdentity), momo.Named("password_enc", enc), momo.Named("ca_cert_pem", normPEM(in.CACertPEM)),
+			momo.Named("server_domain", in.ServerDomain))
 		return strconv.FormatInt(id, 10), false, err
 	})
 	if err != nil {
@@ -573,7 +579,7 @@ func (s *Store) UpdateDot1XProfile(ctx context.Context, actor string, id int64, 
 	err := s.provChange(ctx, actor, "update", "dot1x_profile", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
 		var has bool
-		if err := tx.QueryRowContext(ctx, `SELECT password_enc IS NOT NULL FROM dot1x_profiles WHERE id = $1 FOR UPDATE`, id).Scan(&has); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT password_enc IS NOT NULL FROM dot1x_profiles WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&has); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return rid, false, ErrNotFound
 			}
@@ -584,7 +590,7 @@ func (s *Store) UpdateDot1XProfile(ctx context.Context, actor string, id int64, 
 		}
 		if in.Method == prov.Dot1XEAPMD5 {
 			var n int
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM wifi_profiles WHERE dot1x_id = $1`, id).Scan(&n); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM wifi_profiles WHERE dot1x_id = @dot1x_id`, momo.Named("dot1x_id", id)).Scan(&n); err != nil {
 				return rid, false, err
 			}
 			if n > 0 {
@@ -594,9 +600,10 @@ func (s *Store) UpdateDot1XProfile(ctx context.Context, actor string, id int64, 
 		if err := dot1xNameFree(ctx, tx, in.Name, id); err != nil {
 			return rid, false, err
 		}
-		q := `UPDATE dot1x_profiles SET name = $2, method = $3, identity = $4, anonymous_identity = $5, ca_cert_pem = $6,
-			server_domain = $7, updated_at = now()`
-		args := []any{id, strings.TrimSpace(in.Name), in.Method, in.Identity, in.AnonymousIdentity, normPEM(in.CACertPEM), in.ServerDomain}
+		q := `UPDATE dot1x_profiles SET name = @name, method = @method, identity = @identity, anonymous_identity = @anonymous_identity,
+			ca_cert_pem = @ca_cert_pem, server_domain = @server_domain, updated_at = now()`
+		args := []any{momo.Named("id", id), momo.Named("name", strings.TrimSpace(in.Name)), momo.Named("method", in.Method), momo.Named("identity", in.Identity),
+			momo.Named("anonymous_identity", in.AnonymousIdentity), momo.Named("ca_cert_pem", normPEM(in.CACertPEM)), momo.Named("server_domain", in.ServerDomain)}
 		switch {
 		case in.Method == prov.Dot1XEAPTLS:
 			q += `, password_enc = NULL`
@@ -605,10 +612,10 @@ func (s *Store) UpdateDot1XProfile(ctx context.Context, actor string, id int64, 
 			if err != nil {
 				return rid, false, err
 			}
-			q += `, password_enc = $8`
-			args = append(args, enc)
+			q += `, password_enc = @password_enc`
+			args = append(args, momo.Named("password_enc", enc))
 		}
-		_, err := tx.ExecContext(ctx, q+` WHERE id = $1`, args...)
+		_, err := tx.ExecContext(ctx, q+` WHERE id = @id`, args...)
 		return rid, false, err
 	})
 	if err != nil {
@@ -623,14 +630,14 @@ func (s *Store) DeleteDot1XProfile(ctx context.Context, actor string, id int64) 
 	return s.provChange(ctx, actor, "delete", "dot1x_profile", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(id, 10)
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM dot1x_profiles WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM dot1x_profiles WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&one); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return rid, false, ErrNotFound
 			}
 			return rid, false, err
 		}
 		var names []string
-		rows, err := tx.QueryContext(ctx, `SELECT name FROM phone_groups WHERE wired_dot1x_id = $1 ORDER BY lower(name)`, id)
+		rows, err := tx.QueryContext(ctx, `SELECT name FROM phone_groups WHERE wired_dot1x_id = @dot1x_id ORDER BY lower(name)`, momo.Named("dot1x_id", id))
 		if err != nil {
 			return rid, false, err
 		}
@@ -650,7 +657,7 @@ func (s *Store) DeleteDot1XProfile(ctx context.Context, actor string, id int64) 
 			return rid, false, conflict("the profile is the wired 802.1X profile of phone group %s", strings.Join(names, ", "))
 		}
 		var wifi []string
-		wrows, err := tx.QueryContext(ctx, `SELECT name FROM wifi_profiles WHERE dot1x_id = $1 ORDER BY lower(name)`, id)
+		wrows, err := tx.QueryContext(ctx, `SELECT name FROM wifi_profiles WHERE dot1x_id = @dot1x_id ORDER BY lower(name)`, momo.Named("dot1x_id", id))
 		if err != nil {
 			return rid, false, err
 		}
@@ -669,7 +676,7 @@ func (s *Store) DeleteDot1XProfile(ctx context.Context, actor string, id int64) 
 		if len(wifi) > 0 {
 			return rid, false, conflict("the profile authenticates the Wi-Fi profile %s", strings.Join(wifi, ", "))
 		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM dot1x_profiles WHERE id = $1`, id)
+		_, err = tx.ExecContext(ctx, `DELETE FROM dot1x_profiles WHERE id = @id`, momo.Named("id", id))
 		return rid, false, err
 	})
 }
@@ -701,7 +708,7 @@ func (s *Store) sealDot1X(id int64, pw *string) ([]byte, error) {
 
 func dot1xNameFree(ctx context.Context, tx *dbTx, name string, self int64) error {
 	var one int
-	err := tx.QueryRowContext(ctx, `SELECT 1 FROM dot1x_profiles WHERE lower(name) = lower($1) AND id <> $2`, strings.TrimSpace(name), self).Scan(&one)
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM dot1x_profiles WHERE lower(name) = lower(@name) AND id <> @id`, momo.Named("name", strings.TrimSpace(name)), momo.Named("id", self)).Scan(&one)
 	switch {
 	case err == nil:
 		return conflict("an 802.1X profile named %q exists", strings.TrimSpace(name))
@@ -726,7 +733,7 @@ func normPEM(s string) string {
 func (s *Store) GetGroupSecurity(ctx context.Context, groupID int64) (GroupSecurity, error) {
 	g := GroupSecurity{GroupID: groupID}
 	var wired sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT scep_enabled, scep_validity_days, wired_dot1x_id FROM phone_groups WHERE id = $1`, groupID).
+	err := s.db.QueryRowContext(ctx, `SELECT scep_enabled, scep_validity_days, wired_dot1x_id FROM phone_groups WHERE id = @id`, momo.Named("id", groupID)).
 		Scan(&g.SCEPEnabled, &g.CertValidityDays, &wired)
 	if errors.Is(err, sql.ErrNoRows) {
 		return g, ErrNotFound
@@ -744,7 +751,7 @@ func (s *Store) SetGroupSecurity(ctx context.Context, actor string, in GroupSecu
 	err := s.provChange(ctx, actor, "update", "phone_group_security", func(tx *dbTx) (string, bool, error) {
 		rid := strconv.FormatInt(in.GroupID, 10)
 		var one int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1 FOR UPDATE`, in.GroupID).Scan(&one); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = @id FOR UPDATE`, momo.Named("id", in.GroupID)).Scan(&one); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return rid, false, ErrNotFound
 			}
@@ -754,15 +761,16 @@ func (s *Store) SetGroupSecurity(ctx context.Context, actor string, in GroupSecu
 			return rid, false, fieldError("certValidityDays", "must be 30 to 1825")
 		}
 		if in.WiredDot1XID != nil {
-			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM dot1x_profiles WHERE id = $1`, *in.WiredDot1XID).Scan(&one); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM dot1x_profiles WHERE id = @id`, momo.Named("id", *in.WiredDot1XID)).Scan(&one); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return rid, false, fieldError("wiredDot1xProfileId", "no such 802.1X profile")
 				}
 				return rid, false, err
 			}
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE phone_groups SET scep_enabled = $2, scep_validity_days = $3, wired_dot1x_id = $4, updated_at = now() WHERE id = $1`,
-			in.GroupID, in.SCEPEnabled, in.CertValidityDays, in.WiredDot1XID)
+		_, err := tx.ExecContext(ctx, `UPDATE phone_groups SET scep_enabled = @scep_enabled, scep_validity_days = @scep_validity_days,
+			wired_dot1x_id = @wired_dot1x_id, updated_at = now() WHERE id = @id`,
+			momo.Named("id", in.GroupID), momo.Named("scep_enabled", in.SCEPEnabled), momo.Named("scep_validity_days", in.CertValidityDays), momo.Named("wired_dot1x_id", in.WiredDot1XID))
 		return rid, false, err
 	})
 	if err != nil {
@@ -782,7 +790,7 @@ func (s *Store) securityInfo(ctx context.Context, phoneID int64, v prov.Vendor, 
 		wired sql.NullInt64
 	)
 	if err := s.db.QueryRowContext(ctx, `SELECT g.scep_enabled, g.wired_dot1x_id FROM phones p
-		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = $1`, phoneID).Scan(&on, &wired); err != nil {
+		LEFT JOIN phone_groups g ON g.id = p.group_id WHERE p.id = @id`, momo.Named("id", phoneID)).Scan(&on, &wired); err != nil {
 		return nil, nil, err
 	}
 	var info *prov.SCEPInfo

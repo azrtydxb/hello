@@ -25,10 +25,27 @@ Moved so far:
   transaction is momo's and whose hooks still get the `*sql.Tx` behind it.
 - The directory sync store (`internal/directory`), the SCIM store
   (`internal/scim`) and the SSO store (`internal/sso`).
+- `internal/store`, at its seam. Its files move to `@name` binds one
+  domain at a time (below); the files still on `$n` are those not listed
+  here. Converted so far:
+  - core and configuration: `store.go`, `batch.go`, `config.go`, `dialspace.go`, `dirprovision.go`, `flow_canvas.go`
+  - phonebook: `phonebook.go`, `phonebook_lookup.go`, `personal_contacts.go`, `locations.go`
+  - security and door: `scep.go`, `wifi.go`, `door.go`, `door_open.go`, `door_camera.go`, `door_webhook.go`
 - `internal/store`, at its seam, with the files of the core and
   configuration domain converted to `@name` binds: `store.go`, `batch.go`,
+  `config.go`, `dialspace.go`, `dirprovision.go` and `flow_canvas.go`, and
+  of the faxes, mail and backup domain: `faxes.go`, `mail.go` and
+  `backup.go`. Its other files still bind `$n` and move one domain at a time (below).
   `config.go`, `dialspace.go`, `dirprovision.go` and `flow_canvas.go`; and
+  those of the users and authentication domain: `users.go`, `totp.go`,
+  `oauth.go`, `ldap.go`, `onboarding.go` and `sidekey.go`. Its other files
+  still bind `$n` and move one domain at a time (below).
   those of the phonebook domain: `phonebook.go`, `phonebook_lookup.go`,
+  `personal_contacts.go` and `locations.go`; and those of the call
+  features domain: `ivr.go`, `queues.go`, `queue_callbacks.go`,
+  `followme.go`, `pickup.go`, `park.go`, `paging.go`, `ringmap.go`,
+  `ringtag.go`, `conference.go` and `multicast.go`. Its other files still bind
+  `$n` and move one domain at a time (below).
   `personal_contacts.go` and `locations.go`; and those of the
   provisioning domain: `prov.go`, `prov_admin.go`, `prov_handler.go`,
   `prov_lines.go`, `prov_push.go`, `prov_overrides.go`, `prov_books.go`,

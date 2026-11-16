@@ -11,6 +11,8 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/queue"
 )
 
@@ -50,12 +52,12 @@ func scanCallback(r interface{ Scan(...any) error }) (queue.Callback, error) {
 func (q *QueueCallbacks) settle(ctx context.Context, db execer, queueID int64) error {
 	if _, err := db.ExecContext(ctx, `UPDATE queue_callbacks SET status = 'expired', result = 'expired', finished_at = now(),
 		claimed_by = '', lease_until = NULL
-		WHERE queue_id = $1 AND status IN ('waiting', 'dialling') AND expires_at <= now()`, queueID); err != nil {
+		WHERE queue_id = @queue_id AND status IN ('waiting', 'dialling') AND expires_at <= now()`, momo.Named("queue_id", queueID)); err != nil {
 		return err
 	}
 	_, err := db.ExecContext(ctx, `UPDATE queue_callbacks SET status = 'failed', result = 'node_lost', finished_at = now(),
 		claimed_by = '', lease_until = NULL
-		WHERE queue_id = $1 AND status = 'dialling' AND lease_until < now() AND attempts >= $2`, queueID, queue.CallbackMaxAttempts)
+		WHERE queue_id = @queue_id AND status = 'dialling' AND lease_until < now() AND attempts >= @max_attempts`, momo.Named("queue_id", queueID), momo.Named("max_attempts", queue.CallbackMaxAttempts))
 	return err
 }
 
@@ -68,14 +70,14 @@ func (q *QueueCallbacks) Request(ctx context.Context, queueID int64, number, nam
 	defer func() { _ = tx.Rollback() }()
 	// Serialise the requests of one queue, so the cap and the coalescing
 	// cannot be raced past by two callers at once.
-	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM queues WHERE id = $1 FOR UPDATE`, queueID); err != nil {
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM queues WHERE id = @id FOR UPDATE`, momo.Named("id", queueID)); err != nil {
 		return queue.Callback{}, false, err
 	}
 	if err := q.settle(ctx, tx, queueID); err != nil {
 		return queue.Callback{}, false, err
 	}
 	row := tx.QueryRowContext(ctx, `SELECT `+callbackCols+` FROM queue_callbacks
-		WHERE queue_id = $1 AND number = $2 AND status IN ('waiting', 'dialling')`, queueID, number)
+		WHERE queue_id = @queue_id AND number = @number AND status IN ('waiting', 'dialling')`, momo.Named("queue_id", queueID), momo.Named("number", number))
 	if c, err := scanCallback(row); err == nil {
 		return c, false, tx.Commit()
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -83,22 +85,23 @@ func (q *QueueCallbacks) Request(ctx context.Context, queueID int64, number, nam
 	}
 	var open int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM queue_callbacks
-		WHERE queue_id = $1 AND status IN ('waiting', 'dialling')`, queueID).Scan(&open); err != nil {
+		WHERE queue_id = @queue_id AND status IN ('waiting', 'dialling')`, momo.Named("queue_id", queueID)).Scan(&open); err != nil {
 		return queue.Callback{}, false, err
 	}
 	if open >= queue.CallbackMaxWaiting {
 		return queue.Callback{}, false, queue.ErrCallbackFull
 	}
 	c, err := scanCallback(tx.QueryRowContext(ctx, `INSERT INTO queue_callbacks (queue_id, number, caller_name, position_key, expires_at)
-		VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5)) RETURNING `+callbackCols,
-		queueID, number, name, positionKey, queue.CallbackTTL.Seconds()))
+		VALUES (@queue_id, @number, @caller_name, @position_key, now() + make_interval(secs => @ttl)) RETURNING `+callbackCols,
+		momo.Named("queue_id", queueID), momo.Named("number", number), momo.Named("caller_name", name), momo.Named("position_key", positionKey), momo.Named("ttl", queue.CallbackTTL.Seconds())))
 	if err != nil {
 		return queue.Callback{}, false, err
 	}
 	return c, true, tx.Commit()
 }
 
-const callbackDue = `queue_id = $1 AND ((status = 'waiting' AND next_attempt_at <= now())
+// callbackDue binds @queue_id.
+const callbackDue = `queue_id = @queue_id AND ((status = 'waiting' AND next_attempt_at <= now())
 	OR (status = 'dialling' AND lease_until < now()))`
 
 // Head implements queue.CallbackStore.
@@ -107,7 +110,7 @@ func (q *QueueCallbacks) Head(ctx context.Context, queueID int64) (queue.Callbac
 		return queue.Callback{}, false, err
 	}
 	c, err := scanCallback(q.db.QueryRowContext(ctx, `SELECT `+callbackCols+` FROM queue_callbacks
-		WHERE `+callbackDue+` ORDER BY position_key, id LIMIT 1`, queueID))
+		WHERE `+callbackDue+` ORDER BY position_key, id LIMIT 1`, momo.Named("queue_id", queueID)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return queue.Callback{}, false, nil
 	}
@@ -127,10 +130,10 @@ func (q *QueueCallbacks) Claim(ctx context.Context, queueID int64, node string) 
 		return queue.Callback{}, false, err
 	}
 	c, err := scanCallback(tx.QueryRowContext(ctx, `UPDATE queue_callbacks SET status = 'dialling', attempts = attempts + 1,
-		claimed_by = $2, lease_until = now() + make_interval(secs => $3)
+		claimed_by = @node, lease_until = now() + make_interval(secs => @lease)
 		WHERE id = (SELECT id FROM queue_callbacks WHERE `+callbackDue+`
 			ORDER BY position_key, id FOR UPDATE SKIP LOCKED LIMIT 1)
-		RETURNING `+callbackCols, queueID, node, queue.CallbackLease.Seconds()))
+		RETURNING `+callbackCols, momo.Named("queue_id", queueID), momo.Named("node", node), momo.Named("lease", queue.CallbackLease.Seconds())))
 	if errors.Is(err, sql.ErrNoRows) {
 		return queue.Callback{}, false, tx.Commit()
 	}
@@ -142,8 +145,8 @@ func (q *QueueCallbacks) Claim(ctx context.Context, queueID int64, node string) 
 
 // Renew implements queue.CallbackStore.
 func (q *QueueCallbacks) Renew(ctx context.Context, id int64, node string) error {
-	res, err := q.db.ExecContext(ctx, `UPDATE queue_callbacks SET claimed_by = $2, lease_until = now() + make_interval(secs => $3)
-		WHERE id = $1 AND status = 'dialling'`, id, node, queue.CallbackLease.Seconds())
+	res, err := q.db.ExecContext(ctx, `UPDATE queue_callbacks SET claimed_by = @node, lease_until = now() + make_interval(secs => @lease)
+		WHERE id = @id AND status = 'dialling'`, momo.Named("id", id), momo.Named("node", node), momo.Named("lease", queue.CallbackLease.Seconds()))
 	if err != nil {
 		return err
 	}
@@ -164,12 +167,12 @@ func callbackRow(res sql.Result) error {
 // Fail implements queue.CallbackStore.
 func (q *QueueCallbacks) Fail(ctx context.Context, id int64, node, result string) (bool, error) {
 	var status string
-	err := q.db.QueryRowContext(ctx, `UPDATE queue_callbacks SET result = $3, claimed_by = '', lease_until = NULL,
-		status = CASE WHEN attempts >= $4 THEN 'failed' ELSE 'waiting' END,
-		next_attempt_at = now() + make_interval(secs => $5),
-		finished_at = CASE WHEN attempts >= $4 THEN now() END
-		WHERE id = $1 AND status = 'dialling' AND claimed_by = $2 RETURNING status`,
-		id, node, result, queue.CallbackMaxAttempts, queue.CallbackRetryAfter.Seconds()).Scan(&status)
+	err := q.db.QueryRowContext(ctx, `UPDATE queue_callbacks SET result = @result, claimed_by = '', lease_until = NULL,
+		status = CASE WHEN attempts >= @max_attempts THEN 'failed' ELSE 'waiting' END,
+		next_attempt_at = now() + make_interval(secs => @retry_after),
+		finished_at = CASE WHEN attempts >= @max_attempts THEN now() END
+		WHERE id = @id AND status = 'dialling' AND claimed_by = @node RETURNING status`,
+		momo.Named("id", id), momo.Named("node", node), momo.Named("result", result), momo.Named("max_attempts", queue.CallbackMaxAttempts), momo.Named("retry_after", queue.CallbackRetryAfter.Seconds())).Scan(&status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, queue.ErrCallbackNotFound
 	}
@@ -178,9 +181,9 @@ func (q *QueueCallbacks) Fail(ctx context.Context, id int64, node, result string
 
 // Connect implements queue.CallbackStore.
 func (q *QueueCallbacks) Connect(ctx context.Context, id int64, node, agent string) error {
-	res, err := q.db.ExecContext(ctx, `UPDATE queue_callbacks SET status = 'connected', agent = $3, result = 'connected',
+	res, err := q.db.ExecContext(ctx, `UPDATE queue_callbacks SET status = 'connected', agent = @agent, result = 'connected',
 		claimed_by = '', lease_until = NULL, finished_at = now()
-		WHERE id = $1 AND status = 'dialling' AND claimed_by = $2`, id, node, agent)
+		WHERE id = @id AND status = 'dialling' AND claimed_by = @node`, momo.Named("id", id), momo.Named("node", node), momo.Named("agent", agent))
 	if err != nil {
 		return err
 	}
@@ -191,7 +194,7 @@ func (q *QueueCallbacks) Connect(ctx context.Context, id int64, node, agent stri
 func (q *QueueCallbacks) Cancel(ctx context.Context, queueID, id int64) error {
 	res, err := q.db.ExecContext(ctx, `UPDATE queue_callbacks SET status = 'cancelled', result = 'cancelled',
 		claimed_by = '', lease_until = NULL, finished_at = now()
-		WHERE id = $1 AND queue_id = $2 AND status IN ('waiting', 'dialling')`, id, queueID)
+		WHERE id = @id AND queue_id = @queue_id AND status IN ('waiting', 'dialling')`, momo.Named("id", id), momo.Named("queue_id", queueID))
 	if err != nil {
 		return err
 	}
@@ -223,7 +226,7 @@ func (q *QueueCallbacks) Due(ctx context.Context) (map[int64]int64, error) {
 func (q *QueueCallbacks) Dialling(ctx context.Context, queueID int64) (int, error) {
 	var n int
 	err := q.db.QueryRowContext(ctx, `SELECT count(*) FROM queue_callbacks
-		WHERE queue_id = $1 AND status = 'dialling' AND lease_until >= now()`, queueID).Scan(&n)
+		WHERE queue_id = @queue_id AND status = 'dialling' AND lease_until >= now()`, momo.Named("queue_id", queueID)).Scan(&n)
 	return n, err
 }
 
@@ -232,8 +235,8 @@ func (q *QueueCallbacks) List(ctx context.Context, queueID int64) ([]queue.Callb
 	if err := q.settle(ctx, q.db, queueID); err != nil {
 		return nil, err
 	}
-	rows, err := q.db.QueryContext(ctx, `SELECT `+callbackCols+` FROM queue_callbacks WHERE queue_id = $1
-		ORDER BY id DESC LIMIT 500`, queueID)
+	rows, err := q.db.QueryContext(ctx, `SELECT `+callbackCols+` FROM queue_callbacks WHERE queue_id = @queue_id
+		ORDER BY id DESC LIMIT 500`, momo.Named("queue_id", queueID))
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +255,7 @@ func (q *QueueCallbacks) List(ctx context.Context, queueID int64) ([]queue.Callb
 // Purge implements queue.CallbackStore.
 func (q *QueueCallbacks) Purge(ctx context.Context) error {
 	_, err := q.db.ExecContext(ctx, `DELETE FROM queue_callbacks
-		WHERE finished_at IS NOT NULL AND finished_at < now() - make_interval(secs => $1)`, queue.CallbackKeep.Seconds())
+		WHERE finished_at IS NOT NULL AND finished_at < now() - make_interval(secs => @keep)`, momo.Named("keep", queue.CallbackKeep.Seconds()))
 	return err
 }
 
@@ -260,7 +263,7 @@ func (q *QueueCallbacks) Purge(ctx context.Context) error {
 // the API's 404.
 func (s *Store) CallbackExists(ctx context.Context, queueID, id int64) (bool, error) {
 	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM queue_callbacks WHERE id = $1 AND queue_id = $2`, id, queueID).Scan(&n); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM queue_callbacks WHERE id = @id AND queue_id = @queue_id`, momo.Named("id", id), momo.Named("queue_id", queueID)).Scan(&n); err != nil {
 		return false, err
 	}
 	return n > 0, nil

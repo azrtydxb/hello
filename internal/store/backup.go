@@ -11,6 +11,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/backup"
 )
 
@@ -96,13 +98,15 @@ func (s *Store) PutBackupSettings(ctx context.Context, actor string, in backup.S
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO backup_settings (id, enabled, cron, kind, s3_endpoint, s3_bucket, s3_region, s3_path_style,
 			                             s3_keys_sealed, keep_count, notify_email)
-			VALUES (TRUE, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-			ON CONFLICT (id) DO UPDATE SET enabled = $1, cron = $2, kind = $3, s3_endpoint = $4, s3_bucket = $5,
-				s3_region = $6, s3_path_style = $7, keep_count = $9, notify_email = $10, updated_at = now(),
-				s3_keys_sealed = CASE WHEN $11::boolean THEN NULL WHEN $8::bytea IS NOT NULL THEN $8::bytea
+			VALUES (TRUE, @enabled, @cron, @kind, @s3_endpoint, @s3_bucket, @s3_region, @s3_path_style, @s3_keys_sealed, @keep_count, @notify_email)
+			ON CONFLICT (id) DO UPDATE SET enabled = @enabled, cron = @cron, kind = @kind, s3_endpoint = @s3_endpoint, s3_bucket = @s3_bucket,
+				s3_region = @s3_region, s3_path_style = @s3_path_style, keep_count = @keep_count, notify_email = @notify_email, updated_at = now(),
+				s3_keys_sealed = CASE WHEN @clear_keys::boolean THEN NULL WHEN @s3_keys_sealed::bytea IS NOT NULL THEN @s3_keys_sealed::bytea
 				                      ELSE backup_settings.s3_keys_sealed END`,
-			in.Enabled, in.Cron, in.Kind, in.S3Endpoint, in.S3Bucket, in.S3Region, in.S3PathStyle,
-			sealed, in.KeepCount, in.NotifyEmail, clearKeys); err != nil {
+			momo.Named("enabled", in.Enabled), momo.Named("cron", in.Cron), momo.Named("kind", in.Kind),
+			momo.Named("s3_endpoint", in.S3Endpoint), momo.Named("s3_bucket", in.S3Bucket), momo.Named("s3_region", in.S3Region),
+			momo.Named("s3_path_style", in.S3PathStyle), momo.Named("s3_keys_sealed", sealed), momo.Named("keep_count", in.KeepCount),
+			momo.Named("notify_email", in.NotifyEmail), momo.Named("clear_keys", clearKeys)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "update", "backup_settings", "1")
@@ -133,30 +137,34 @@ func (s *Store) InsertRun(ctx context.Context, r backup.Run) (int64, error) {
 	var id int64
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO backup_runs (kind, status, attempt, started_at, object_key)
-		VALUES ($1, $2, $3, $4, $5) RETURNING id`, r.Kind, r.Status, r.Attempt, r.StartedAt, r.ObjectKey).Scan(&id)
+		VALUES (@kind, @status, @attempt, @started_at, @object_key) RETURNING id`,
+		momo.Named("kind", r.Kind), momo.Named("status", r.Status), momo.Named("attempt", r.Attempt),
+		momo.Named("started_at", r.StartedAt), momo.Named("object_key", r.ObjectKey)).Scan(&id)
 	return id, err
 }
 
 // FinishRun records a run's outcome.
 func (s *Store) FinishRun(ctx context.Context, r backup.Run) error {
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE backup_runs SET status = $2, finished_at = $3, db_bytes = $4, object_count = $5, object_bytes = $6,
-			archive_bytes = $7, error_class = $8
-		WHERE id = $1`, r.ID, r.Status, r.FinishedAt, r.DBBytes, r.ObjectCount, r.ObjectBytes, r.ArchiveBytes, r.ErrorClass)
+		UPDATE backup_runs SET status = @status, finished_at = @finished_at, db_bytes = @db_bytes, object_count = @object_count,
+			object_bytes = @object_bytes, archive_bytes = @archive_bytes, error_class = @error_class
+		WHERE id = @id`, momo.Named("id", r.ID), momo.Named("status", r.Status), momo.Named("finished_at", r.FinishedAt),
+		momo.Named("db_bytes", r.DBBytes), momo.Named("object_count", r.ObjectCount), momo.Named("object_bytes", r.ObjectBytes),
+		momo.Named("archive_bytes", r.ArchiveBytes), momo.Named("error_class", r.ErrorClass))
 	return err
 }
 
 // FailRunning marks every running row failed (its holder died).
 func (s *Store) FailRunning(ctx context.Context, at time.Time) error {
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE backup_runs SET status = 'failed', error_class = 'interrupted', finished_at = $1
-		WHERE status = 'running'`, at)
+		UPDATE backup_runs SET status = 'failed', error_class = 'interrupted', finished_at = @finished_at
+		WHERE status = 'running'`, momo.Named("finished_at", at))
 	return err
 }
 
 // Runs lists runs, newest first.
 func (s *Store) Runs(ctx context.Context, limit int) ([]backup.Run, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+runCols+` FROM backup_runs ORDER BY started_at DESC, id DESC LIMIT $1`, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+runCols+` FROM backup_runs ORDER BY started_at DESC, id DESC LIMIT @limit`, momo.Named("limit", limit))
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +182,7 @@ func (s *Store) Runs(ctx context.Context, limit int) ([]backup.Run, error) {
 
 // GetRun returns one run, backup.ErrNotFound when absent.
 func (s *Store) GetRun(ctx context.Context, id int64) (backup.Run, error) {
-	r, err := scanRun(s.db.QueryRowContext(ctx, `SELECT `+runCols+` FROM backup_runs WHERE id = $1`, id))
+	r, err := scanRun(s.db.QueryRowContext(ctx, `SELECT `+runCols+` FROM backup_runs WHERE id = @id`, momo.Named("id", id)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return backup.Run{}, backup.ErrNotFound
 	}
@@ -183,7 +191,7 @@ func (s *Store) GetRun(ctx context.Context, id int64) (backup.Run, error) {
 
 // DeleteRun removes a run row.
 func (s *Store) DeleteRun(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM backup_runs WHERE id = $1`, id)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM backup_runs WHERE id = @id`, momo.Named("id", id))
 	if err != nil {
 		return err
 	}
@@ -195,14 +203,14 @@ func (s *Store) DeleteRun(ctx context.Context, id int64) error {
 
 // DeleteRunByKey removes the rows of an archive that retention removed.
 func (s *Store) DeleteRunByKey(ctx context.Context, key string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM backup_runs WHERE object_key = $1`, key)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM backup_runs WHERE object_key = @object_key`, momo.Named("object_key", key))
 	return err
 }
 
 // ScheduledSince lists scheduled runs started at or after t, newest first.
 func (s *Store) ScheduledSince(ctx context.Context, t time.Time) ([]backup.Run, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+runCols+` FROM backup_runs
-		WHERE kind = 'scheduled' AND started_at >= $1 ORDER BY started_at DESC, id DESC`, t)
+		WHERE kind = 'scheduled' AND started_at >= @since ORDER BY started_at DESC, id DESC`, momo.Named("since", t))
 	if err != nil {
 		return nil, err
 	}
@@ -230,8 +238,9 @@ func (s *Store) LastSuccess(ctx context.Context) (time.Time, bool, error) {
 func (s *Store) AdoptArchive(ctx context.Context, key string, size int64, at time.Time) error {
 	return s.tx(ctx, func(tx *dbTx) error {
 		res, err := tx.ExecContext(ctx, `
-			UPDATE backup_runs SET status = 'succeeded', archive_bytes = $2, finished_at = COALESCE(finished_at, $3)
-			WHERE object_key = $1 AND status = 'running'`, key, size, at)
+			UPDATE backup_runs SET status = 'succeeded', archive_bytes = @archive_bytes, finished_at = COALESCE(finished_at, @at)
+			WHERE object_key = @object_key AND status = 'running'`,
+			momo.Named("object_key", key), momo.Named("archive_bytes", size), momo.Named("at", at))
 		if err != nil {
 			return err
 		}
@@ -240,8 +249,9 @@ func (s *Store) AdoptArchive(ctx context.Context, key string, size int64, at tim
 		}
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO backup_runs (kind, status, started_at, finished_at, archive_bytes, object_key)
-			SELECT 'scheduled', 'succeeded', $3, $3, $2, $1
-			WHERE NOT EXISTS (SELECT 1 FROM backup_runs WHERE object_key = $1)`, key, size, at)
+			SELECT 'scheduled', 'succeeded', @at::timestamptz, @at::timestamptz, @archive_bytes::bigint, @object_key::text
+			WHERE NOT EXISTS (SELECT 1 FROM backup_runs WHERE object_key = @object_key::text)`,
+			momo.Named("object_key", key), momo.Named("archive_bytes", size), momo.Named("at", at))
 		return err
 	})
 }
@@ -262,11 +272,10 @@ func (s *Store) BumpRevision(ctx context.Context, atLeast int64) error {
 	return s.tx(ctx, func(tx *dbTx) error {
 		var rev int64
 		if err := tx.QueryRowContext(ctx,
-			`UPDATE schema_info SET config_revision = GREATEST(config_revision, $1::bigint) + 1 RETURNING config_revision`,
-			atLeast).Scan(&rev); err != nil {
+			`UPDATE schema_info SET config_revision = GREATEST(config_revision, @at_least::bigint) + 1 RETURNING config_revision`,
+			momo.Named("at_least", atLeast)).Scan(&rev); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, NotifyChannel, itoa(rev))
-		return err
+		return notifyConfig(ctx, tx, rev)
 	})
 }

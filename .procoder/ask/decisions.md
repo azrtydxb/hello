@@ -6320,6 +6320,112 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   `SELECT pg_advisory_xact_lock(@key)` with `int64(bookLockKey)`, rendered
   as one bigint bind as before.
 
+## momo Phase 3, domain 5: internal/store security and door on @name (2026-11-16, momo/store-door)
+
+- **Scope.** `scep.go`, `wifi.go`, `door.go`, `door_open.go`,
+  `door_camera.go` and `door_webhook.go` in `internal/store` bind by name:
+  every `$n` became `@name` with `momo.Named`, through the seam with the
+  Scan code, `FOR UPDATE`, `mapErr` and the no-row checks as they were. No
+  schema change, no migration.
+- **Secrets unchanged.** The sealed values (the SCEP CA key, the challenges,
+  the 802.1X and Wi-Fi secrets, the door-open code, the camera password, the
+  webhook secret) are sealed, bound and opened as before, with the same
+  additional data; only the bind is by name. Nothing logs an argument value
+  (a build error names the statement and the bind, not its value).
+- **door_open is the configuration of the DTMF `*50` path.** Its statements keep
+  their meaning and parameter types (bigint id, bytea code, boolean). The
+  SIP node reads the codes through `internal/snapshot`, which is unchanged.
+- **Casts.** ListSCEPCertificates casts both uses of `@phone_id` to bigint,
+  as the old `$1::bigint` typed its single bind. SetDoorCamera's upsert
+  casts the `ELSE @password_enc::bytea` use in its CASE; the other reused
+  binds there (`@kind`, `@url`, `@username`, `@password_enc` in VALUES) and
+  wifiInfo's two `@phone_id` uses are typed by their columns.
+- **Run-time statements bind by name too.** UpdateDot1XProfile appends
+  `@password_enc` with its fragment only; memberOf's four statements bind
+  `@extension_id`; sealWifi's statement (`wifiSetPSK`) binds `@id` and
+  `@enc`; replaceWifiAssignments' pair binds `@owner` and `@profile_id`.
+  These, the `wifiIDs` reads and ListSCEPCertificates are assembled or
+  passed at run time, so the DB tier checks them, not
+  `TestStatementsBuild`.
+
+## momo Phase 3, domain 3: internal/store faxes, mail and backup on @name (2026-11-16, momo/store-fax-mail)
+
+- **Scope.** `faxes.go`, `mail.go` and `backup.go` in `internal/store` bind
+  by name: every `$n` became `@name` with `momo.Named`, through the seam,
+  with the SQL text, `FOR UPDATE` / `SKIP LOCKED`, Scan targets and error
+  handling unchanged. No schema change, no migration, `go.mod` and
+  `internal/db` unchanged.
+- **Reused binds carry the old type.** fax Finish casts `@object_key::text`
+  in `NULLIF(...)` and `@object_key::text <> ''`, and `@mail_to::text <> ''`
+  (its `mail_to = @mail_to` use takes the column's type). AdoptArchive's
+  `INSERT ... SELECT` casts every select-list use to its column's type,
+  `@at::timestamptz` (twice), `@archive_bytes::bigint` and
+  `@object_key::text`, and `@object_key::text` in its `NOT EXISTS`, since a
+  select-list bind cannot type itself once it is a bind of its own. The
+  `@name` uses in DeleteFaxDestination's IVR read compare with TEXT columns,
+  and the upserts' (PutSMTPSettings, PutBackupSettings) repeated uses are
+  each a column's value; the sealed bytes and the clear flag were already
+  cast (`::bytea`, `::boolean`).
+- **ListFaxes' assembled WHERE.** Each filter condition carries its own
+  `@name` (`@direction`, `@status`, `@before`, `@owners`) and its Named goes
+  in only with it; the limit is `@limit`. The statement PostgreSQL receives
+  is the one it received before (`TestListFaxesSends` pins it, values in
+  order). The `fmt.Sprintf` of placeholder numbers, and its gosec
+  suppression, are gone.
+- **DeleteFaxDestination's in-use reads** are now the constants
+  `faxDestRoutes` and `faxDestMenus`, with the same text, so
+  `TestFaxStatementsOffline` builds them (the sweep cannot see a statement
+  taken from a struct field) along with every ListFaxes filter combination.
+- **BumpRevision's NOTIFY** goes through `notifyConfig`, which sends the
+  same `SELECT pg_notify($1, $2::text)` with `hello_config` and the revision
+  as the code did inline.
+- **SchemaVersion stays raw** (`s.db.raw`): goose owns `goose_db_version`
+  until the migration engine moves (Phase 5).
+
+## momo Phase 3, domain 2: internal/store users and authentication on @name (2026-11-16, momo/store-users)
+
+- **Scope.** `users.go`, `totp.go`, `oauth.go`, `ldap.go`, `onboarding.go` and `sidekey.go` in `internal/store` (130 calls) bind by name, following the recipe in `docs/database.md`. Call sites, Scan code, error mapping (`mapErr`, `oauthErr`, the `sql.ErrNoRows` checks), `FOR UPDATE` locks and the SQL text are otherwise unchanged. No schema change, no migration; `go.mod` and `internal/db` unchanged.
+- **Authentication paths kept as they were.** Token, code and secret hashes are bound as before (the same `[]byte` values); the last-admin, last-break-glass and last-enrolled-admin checks, the MFA throttling (5 attempts per challenge, 10 failures per user per 10 minutes) and every audit write stay in the same transaction as the change they record.
+- **Casts added for reused binds.** UpdateAccount `@password_hash::text` on its COALESCE use (the other use was already cast; `password_hash` is TEXT). CaptureCandidate's refresh `@vendor::text` on both uses (`vendor` is TEXT; the `<> 'generic'` use alone would type it from a literal). Reused binds that already had a cast (`@before::bigint`, `@user_id::bigint`, `@ttl::float8`) keep it on every use. Reused binds compared with columns of one type on each side need none: revokeClientDevices `@user_id`, CaptureCandidate `@mac` (TEXT in phones, onboarding_candidates and onboarding_ignored), PruneOAuth `@cutoff` (timestamptz columns).
+- **revokeGrants takes a caller's fragment that binds by name.** Its callers pass the fragment's `momo.Named` values with it (`id = @id`; `id = @id AND (@user_id::bigint = 0 OR ...)`; the reused-code fragment binds `@user_id`, `@client_id` and `@created_at`). The token update it runs binds `@ids`, so a fragment must not use that name.
+- **The onboarding advisory lock is unchanged.** `SELECT pg_advisory_xact_lock(@key)` with `onboardLockKey` (`0x68656c6c6f6f6e62`) reaches PostgreSQL as before.
+- **Hermetic test for the statements assembled at run time.** `TestUsersDynamicStatements` runs UserExtensions, UserExtension, UserVoicemailMessage, UserCDRs, PruneOAuth and revokeGrants (with each caller's fragment) on the recording fake driver, so a misspelled name in them fails on the pull request tier too. TestStatementsBuild builds 1,323 constant statements, 169 of them with `@name` binds.
+
+## momo Phase 3, domain 7: internal/store call features on @name (2026-11-16, momo/store-callfeatures)
+
+- **Scope.** `ivr.go`, `queues.go`, `queue_callbacks.go`, `followme.go`,
+  `pickup.go`, `park.go`, `paging.go`, `ringmap.go`, `ringtag.go`,
+  `conference.go` and `multicast.go` in `internal/store` bind by name:
+  every `$n` became `@name` with `momo.Named`, through the seam, with the
+  Scan code, locks, error handling and SQL text otherwise unchanged. No
+  schema change, no migration, `go.mod` and `internal/db` unchanged.
+  `prov_multicast.go` belongs to the provisioning domain and is not part of
+  this change.
+- **hello-sip's queue callback claims unchanged.** `queue_callbacks.go`
+  keeps `SELECT 1 FROM queues WHERE id = @id FOR UPDATE` (Request) and the
+  Claim's `FOR UPDATE SKIP LOCKED LIMIT 1` sub-select. Its statements on
+  the call path (settle's two UPDATEs, Request, Head, Claim, Renew, Fail,
+  Connect, Due, Dialling, Purge) keep their parameter types: every bind is
+  typed by its column or by `make_interval(secs => ...)` as before.
+  `callbackDue` binds `@queue_id`. Fail's `@max_attempts` is used twice,
+  each against `attempts` (INTEGER), so needs no cast.
+- **One cast added.** `catalogChannels` (multicast.go) uses `@kind` twice:
+  `@kind::text = '' OR kind = @kind::text`, the type the old `$1` got from
+  `$1 = ''`. Every other reused bind compares with columns of one type on
+  each use (`@name` in queueReferences and ivrReferences, `@target` in
+  queueTextReferences and refuseIfIVRPoints, `@kind`/`@kind2` there, `@id`
+  in channelUsers); ringmap's `@group_id::bigint` was cast already.
+- **Run-time statements.** `listQueues`, `listIVRMenus`, `listPagingGroups`
+  and `listPickupGroups` take a WHERE fragment with its `momo.Named`
+  (`WHERE ... id = @id` with `momo.Named("id", id)`). The queue INSERT and
+  UPDATE build their placeholder and SET lists from `queueWriteCols`, each
+  column binding as `@<column>`, and `QueueInput.args` returns one
+  `momo.Named` per column. The IVR destination check, the follow-me target
+  check, the paging list deletes, ring tag usage reads and
+  `channelUsers` pick a statement at run time; each candidate binds the
+  same name (`@target`, `@group_id`, `@name`, `@id`).
+  `setConferencePIN`'s `UPDATE ... SET <col>` binds `@sealed` and `@id`.
+
 ## momo Phase 3, domain 8: internal/store provisioning on @name (2026-11-16, momo/store-prov)
 
 - **Scope.** `prov.go`, `prov_admin.go`, `prov_handler.go`, `prov_lines.go`,
