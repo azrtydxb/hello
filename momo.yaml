@@ -1,0 +1,40 @@
+# momo (github.com/azrtydxb/momo) settings for Hello's database layer.
+#
+# Goose stays the migration tool (migrations/, internal/migrate): this file
+# has no migrate section and momo applies no migration. momo is the query
+# layer only, adopted one package at a time (docs/database.md).
+#
+# The models in internal/db/models are generated from a database that goose
+# migrated, for the tables listed in introspect.only. Regenerate them after a
+# goose migration that changes one of those tables (docs/database.md,
+# "Regenerating the models"):
+#
+#   HELLO_MODELS_DATABASE_URL=postgres://...  # a database goose migrated to the latest version
+#   go run github.com/azrtydxb/momo/cmd/momo@v0.14.0 generate --from-db HELLO_MODELS_DATABASE_URL --no-snapshot --overwrite
+#   go run github.com/azrtydxb/momo/cmd/momo@v0.14.0 generate
+#
+# TestMomoModelsMatchSchema (test/integration) fails until they are current.
+version: 1
+packages:
+  - ./internal/db/models
+dialects: [postgres]
+introspect:
+  package: models
+  out: internal/db/models
+  # The modeled tables. Add a table here when its package moves to momo.
+  only:
+    - crm_connectors
+    - crm_connections
+    - crm_oauth_states
+    - crm_call_logs
+    - crm_user_map
+  uuid: google
+  # Every NOT NULL column with a default gets the dbdefault tag, so a model
+  # insert leaves it to PostgreSQL; a non-zero constant default is a pointer
+  # (nil keeps the default, non-nil is always written).
+  dbdefault: all
+  types:
+    inet: { go: string }
+    cidr: { go: string }
+    "inet[]": { go: "[]string" }
+    "cidr[]": { go: "[]string" }
