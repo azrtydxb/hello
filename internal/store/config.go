@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/auth"
 )
 
@@ -107,7 +109,7 @@ func (s *Store) ListExtensions(ctx context.Context) ([]Extension, error) {
 
 // GetExtension returns one extension.
 func (s *Store) GetExtension(ctx context.Context, id int64) (Extension, error) {
-	e, err := scanExtension(s.q(ctx).QueryRowContext(ctx, `SELECT `+extensionCols+` FROM extensions WHERE id = $1`, id))
+	e, err := scanExtension(s.q(ctx).QueryRowContext(ctx, `SELECT `+extensionCols+` FROM extensions WHERE id = @id`, momo.Named("id", id)))
 	return e, mapErr(err)
 }
 
@@ -138,15 +140,17 @@ func (s *Store) CreateExtensionKind(ctx context.Context, actor, number, name, ex
 		var err error
 		e, err = scanExtension(tx.QueryRowContext(ctx,
 			`INSERT INTO extensions (number, name, external_number, kind, door_targets, voicemail_enabled, directory_hidden)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING `+extensionCols,
-			number, name, externalNumber, kind, targets.JSON(), kind == ExtensionUser, kind == ExtensionDoor))
+			 VALUES (@number, @name, @external_number, @kind, @door_targets, @voicemail_enabled, @directory_hidden) RETURNING `+extensionCols,
+			momo.Named("number", number), momo.Named("name", name), momo.Named("external_number", externalNumber),
+			momo.Named("kind", kind), momo.Named("door_targets", targets.JSON()),
+			momo.Named("voicemail_enabled", kind == ExtensionUser), momo.Named("directory_hidden", kind == ExtensionDoor)))
 		if err != nil {
 			return 0, err
 		}
 		if kind == ExtensionDoor {
 			return e.ID, nil
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO voicemail_boxes (extension_id) VALUES ($1) ON CONFLICT (extension_id) DO NOTHING`, e.ID)
+		_, err = tx.ExecContext(ctx, `INSERT INTO voicemail_boxes (extension_id) VALUES (@extension_id) ON CONFLICT (extension_id) DO NOTHING`, momo.Named("extension_id", e.ID))
 		return e.ID, err
 	})
 	return e, err
@@ -212,20 +216,27 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 			return id, err
 		}
 		e, err = scanExtension(tx.QueryRowContext(ctx, `
-			UPDATE extensions SET number = COALESCE($2, number), name = COALESCE($3, name),
-			       external_number = COALESCE($4, external_number), dnd = COALESCE($5, dnd),
-			       dnd_source = CASE WHEN $5::boolean IS NULL THEN dnd_source ELSE 'manual' END,
-			       forward_always = COALESCE($6, forward_always), forward_busy = COALESCE($7, forward_busy),
-			       forward_no_answer = COALESCE($8, forward_no_answer), voicemail_enabled = COALESCE($9, voicemail_enabled),
-			       record_default = COALESCE($10, record_default), allow_intercom = COALESCE($11, allow_intercom),
-			       directory_hidden = COALESCE($12, directory_hidden), call_waiting = COALESCE($13, call_waiting),
-			       moh_class_id = CASE WHEN $15 THEN NULL ELSE COALESCE($14, moh_class_id) END,
-			       no_answer_rings = COALESCE($16, no_answer_rings), anonymous_outbound = COALESCE($17, anonymous_outbound),
-			       phone_send_anonymous = COALESCE($18, phone_send_anonymous), kind = $19, door_targets = $20,
-			       video_allowed = COALESCE($21, video_allowed), record_video = COALESCE($22, record_video), updated_at = now()
-			WHERE id = $1 RETURNING `+extensionCols, id, c.Number, c.Name, c.ExternalNumber,
-			c.DND, c.ForwardAlways, c.ForwardBusy, c.ForwardNoAnswer, c.VoicemailEnabled, c.RecordDefault, c.AllowIntercom, c.DirectoryHidden, c.CallWaiting,
-			c.MOHClassID, c.ClearMOHClass, c.NoAnswerRings, c.AnonymousOutbound, c.PhoneSendAnonymous, kind, targets.JSON(), c.VideoAllowed, c.RecordVideo))
+			UPDATE extensions SET number = COALESCE(@number, number), name = COALESCE(@name, name),
+			       external_number = COALESCE(@external_number, external_number), dnd = COALESCE(@dnd::boolean, dnd),
+			       dnd_source = CASE WHEN @dnd::boolean IS NULL THEN dnd_source ELSE 'manual' END,
+			       forward_always = COALESCE(@forward_always, forward_always), forward_busy = COALESCE(@forward_busy, forward_busy),
+			       forward_no_answer = COALESCE(@forward_no_answer, forward_no_answer), voicemail_enabled = COALESCE(@voicemail_enabled, voicemail_enabled),
+			       record_default = COALESCE(@record_default, record_default), allow_intercom = COALESCE(@allow_intercom, allow_intercom),
+			       directory_hidden = COALESCE(@directory_hidden, directory_hidden), call_waiting = COALESCE(@call_waiting, call_waiting),
+			       moh_class_id = CASE WHEN @clear_moh_class THEN NULL ELSE COALESCE(@moh_class_id, moh_class_id) END,
+			       no_answer_rings = COALESCE(@no_answer_rings, no_answer_rings), anonymous_outbound = COALESCE(@anonymous_outbound, anonymous_outbound),
+			       phone_send_anonymous = COALESCE(@phone_send_anonymous, phone_send_anonymous), kind = @kind, door_targets = @door_targets,
+			       video_allowed = COALESCE(@video_allowed, video_allowed), record_video = COALESCE(@record_video, record_video), updated_at = now()
+			WHERE id = @id RETURNING `+extensionCols,
+			momo.Named("id", id), momo.Named("number", c.Number), momo.Named("name", c.Name), momo.Named("external_number", c.ExternalNumber),
+			momo.Named("dnd", c.DND), momo.Named("forward_always", c.ForwardAlways), momo.Named("forward_busy", c.ForwardBusy),
+			momo.Named("forward_no_answer", c.ForwardNoAnswer), momo.Named("voicemail_enabled", c.VoicemailEnabled),
+			momo.Named("record_default", c.RecordDefault), momo.Named("allow_intercom", c.AllowIntercom),
+			momo.Named("directory_hidden", c.DirectoryHidden), momo.Named("call_waiting", c.CallWaiting),
+			momo.Named("moh_class_id", c.MOHClassID), momo.Named("clear_moh_class", c.ClearMOHClass),
+			momo.Named("no_answer_rings", c.NoAnswerRings), momo.Named("anonymous_outbound", c.AnonymousOutbound),
+			momo.Named("phone_send_anonymous", c.PhoneSendAnonymous), momo.Named("kind", kind),
+			momo.Named("door_targets", targets.JSON()), momo.Named("video_allowed", c.VideoAllowed), momo.Named("record_video", c.RecordVideo)))
 		if err != nil {
 			return id, err
 		}
@@ -252,10 +263,10 @@ func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64, che
 		if err := refuseIfGroupFailsTo(ctx, tx, "extension "+number, number, "extension"); err != nil {
 			return id, err
 		}
-		if err := boundPhone(ctx, tx, `d.extension_id = $1`, id); err != nil {
+		if err := boundPhone(ctx, tx, `d.extension_id = @id`, id); err != nil {
 			return id, err
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM extensions WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM extensions WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}
@@ -304,7 +315,7 @@ func scanDevice(r interface{ Scan(...any) error }) (Device, error) {
 // ListDevices returns every device ordered by SIP username, only those of
 // kind when kind is not empty.
 func (s *Store) ListDevices(ctx context.Context, kind string) ([]Device, error) {
-	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE ($1 = '' OR kind = $1) ORDER BY sip_username`, kind)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE (@kind::text = '' OR kind = @kind::text) ORDER BY sip_username`, momo.Named("kind", kind))
 	if err != nil {
 		return nil, err
 	}
@@ -322,7 +333,7 @@ func (s *Store) ListDevices(ctx context.Context, kind string) ([]Device, error) 
 
 // GetDevice returns one device.
 func (s *Store) GetDevice(ctx context.Context, id int64) (Device, error) {
-	d, err := scanDevice(s.q(ctx).QueryRowContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE id = $1`, id))
+	d, err := scanDevice(s.q(ctx).QueryRowContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE id = @id`, momo.Named("id", id)))
 	return d, mapErr(err)
 }
 
@@ -344,8 +355,9 @@ func (s *Store) CreateDevice(ctx context.Context, actor string, in NewDevice) (D
 		var err error
 		d, err = scanDevice(tx.QueryRowContext(ctx, `
 			INSERT INTO devices (extension_id, sip_username, realm, ha1_md5, ha1_sha256, enabled)
-			VALUES ($1, $2, $3, $4, $5, $6) RETURNING `+deviceCols,
-			in.ExtensionID, in.SIPUsername, in.Realm, md5Hex, shaHex, in.Enabled))
+			VALUES (@extension_id, @sip_username, @realm, @ha1_md5, @ha1_sha256, @enabled) RETURNING `+deviceCols,
+			momo.Named("extension_id", in.ExtensionID), momo.Named("sip_username", in.SIPUsername), momo.Named("realm", in.Realm),
+			momo.Named("ha1_md5", md5Hex), momo.Named("ha1_sha256", shaHex), momo.Named("enabled", in.Enabled)))
 		return d.ID, err
 	})
 	return d, err
@@ -367,7 +379,7 @@ func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enable
 		if extensionID != nil {
 			// A client belongs to the extension its owner is linked to.
 			var kind string
-			if err := tx.QueryRowContext(ctx, `SELECT kind FROM devices WHERE id = $1`, id).Scan(&kind); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT kind FROM devices WHERE id = @id`, momo.Named("id", id)).Scan(&kind); err != nil {
 				return id, err
 			}
 			if kind != "desk" {
@@ -376,10 +388,12 @@ func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enable
 		}
 		var err error
 		d, err = scanDevice(tx.QueryRowContext(ctx, `
-			UPDATE devices SET enabled = COALESCE($2, enabled), extension_id = COALESCE($3, extension_id),
-			       srtp = COALESCE($4, srtp), srtp_keyex = COALESCE($5, srtp_keyex),
-			       media_ice = COALESCE($6, media_ice), updated_at = now()
-			WHERE id = $1 RETURNING `+deviceCols, id, enabled, extensionID, m.SRTP, m.KeyEx, m.ICE))
+			UPDATE devices SET enabled = COALESCE(@enabled, enabled), extension_id = COALESCE(@extension_id, extension_id),
+			       srtp = COALESCE(@srtp, srtp), srtp_keyex = COALESCE(@srtp_keyex, srtp_keyex),
+			       media_ice = COALESCE(@media_ice, media_ice), updated_at = now()
+			WHERE id = @id RETURNING `+deviceCols,
+			momo.Named("id", id), momo.Named("enabled", enabled), momo.Named("extension_id", extensionID),
+			momo.Named("srtp", m.SRTP), momo.Named("srtp_keyex", m.KeyEx), momo.Named("media_ice", m.ICE)))
 		return id, err
 	})
 	return d, err
@@ -391,7 +405,7 @@ func (s *Store) RotateDeviceSecret(ctx context.Context, actor string, id int64, 
 	var d Device
 	err := s.configChange(ctx, actor, "rotate-secret", "device", nil, func(tx *dbTx) (int64, error) {
 		var username, mode string
-		if err := tx.QueryRowContext(ctx, `SELECT sip_username, auth_mode FROM devices WHERE id = $1 FOR UPDATE`, id).Scan(&username, &mode); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT sip_username, auth_mode FROM devices WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&username, &mode); err != nil {
 			return id, err
 		}
 		if mode == "derived" {
@@ -401,7 +415,7 @@ func (s *Store) RotateDeviceSecret(ctx context.Context, actor string, id int64, 
 		// renderer (spec S-2): re-seal it so the phone picks the new one up
 		// at its next fetch.
 		var bound bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM phones WHERE device_id = $1) OR EXISTS (SELECT 1 FROM phone_lines WHERE device_id = $1)`, id).Scan(&bound); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM phones WHERE device_id = @id) OR EXISTS (SELECT 1 FROM phone_lines WHERE device_id = @id)`, momo.Named("id", id)).Scan(&bound); err != nil {
 			return id, err
 		}
 		if bound {
@@ -412,14 +426,15 @@ func (s *Store) RotateDeviceSecret(ctx context.Context, actor string, id int64, 
 				return id, err
 			}
 			var err error
-			d, err = scanDevice(tx.QueryRowContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE id = $1`, id))
+			d, err = scanDevice(tx.QueryRowContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE id = @id`, momo.Named("id", id)))
 			return id, err
 		}
 		md5Hex, shaHex := auth.HA1(username, realm, secret)
 		var err error
 		d, err = scanDevice(tx.QueryRowContext(ctx, `
-			UPDATE devices SET realm = $2, ha1_md5 = $3, ha1_sha256 = $4, updated_at = now()
-			WHERE id = $1 RETURNING `+deviceCols, id, realm, md5Hex, shaHex))
+			UPDATE devices SET realm = @realm, ha1_md5 = @ha1_md5, ha1_sha256 = @ha1_sha256, updated_at = now()
+			WHERE id = @id RETURNING `+deviceCols,
+			momo.Named("id", id), momo.Named("realm", realm), momo.Named("ha1_md5", md5Hex), momo.Named("ha1_sha256", shaHex)))
 		return id, err
 	})
 	return d, err
@@ -428,10 +443,10 @@ func (s *Store) RotateDeviceSecret(ctx context.Context, actor string, id int64, 
 // DeleteDevice removes a device.
 func (s *Store) DeleteDevice(ctx context.Context, actor string, id int64) error {
 	return s.configChange(ctx, actor, "delete", "device", nil, func(tx *dbTx) (int64, error) {
-		if err := boundPhone(ctx, tx, `d.id = $1`, id); err != nil {
+		if err := boundPhone(ctx, tx, `d.id = @id`, id); err != nil {
 			return id, err
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM devices WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM devices WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return id, err
 		}

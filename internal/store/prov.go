@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/prov/redirect"
@@ -1184,14 +1186,14 @@ func (s *Store) PhoneFetchStates(ctx context.Context, staleBefore time.Time) (ne
 }
 
 // boundPhone names the phone bound to one of a set of devices, for the
-// 409 that refuses deleting them (contract 8).
+// 409 that refuses deleting them (contract 8). where binds arg as @id.
 func boundPhone(ctx context.Context, tx *dbTx, where string, arg int64) error {
 	var (
 		mac string
 		id  int64
 	)
 	err := tx.QueryRowContext(ctx, `SELECT p.id, p.mac FROM phones p JOIN devices d ON d.id = p.device_id
-		OR d.id IN (SELECT device_id FROM phone_lines WHERE phone_id = p.id) WHERE `+where+` LIMIT 1`, arg).Scan(&id, &mac) //nolint:gosec // G202: where is a caller's constant condition
+		OR d.id IN (SELECT device_id FROM phone_lines WHERE phone_id = p.id) WHERE `+where+` LIMIT 1`, momo.Named("id", arg)).Scan(&id, &mac) //nolint:gosec // G202: where is a caller's constant condition
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil

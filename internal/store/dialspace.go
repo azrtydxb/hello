@@ -26,6 +26,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/azrtydxb/momo"
 )
 
 // dialItem is one claimed piece of the dial space.
@@ -213,7 +215,7 @@ func checkDialNumber(ctx context.Context, tx *dbTx, field, number, own string) e
 			UNION ALL SELECT 'conference room', 'the number of conference room ' || name, number FROM conference_rooms
 			UNION ALL SELECT 'queue', 'the number of queue ' || name, number FROM queues
 			UNION ALL SELECT 'voicemail group', 'the number of voicemail group ' || name, number FROM voicemail_groups
-		) t WHERE n = $1 AND kind <> $2 LIMIT 1`, number, own).Scan(&what)
+		) t WHERE n = @number AND kind <> @own LIMIT 1`, momo.Named("number", number), momo.Named("own", own)).Scan(&what)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return checkNotSlot(ctx, tx, field, number)

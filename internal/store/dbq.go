@@ -6,8 +6,11 @@ package store
 // (ExecContext, QueryContext, QueryRowContext, BeginTx, Commit, Rollback),
 // and every statement made through them is a momo raw statement on the
 // store's *momo.DB or on momo's view of an open *sql.Tx (internal/db.AdoptTx).
-// The SQL keeps its native $n placeholders, which momo binds on PostgreSQL as
-// positional arguments; files move to @name binds one domain at a time.
+// A statement binds by name (@name with momo.Named), or, in a file not yet
+// converted, with native $n placeholders, which momo binds on PostgreSQL as
+// positional arguments; files move to @name one domain at a time
+// (docs/database.md lists the recipe). A converted file is listed in
+// namedFiles (dbq_offline_test.go), which then refuses a $n in it.
 //
 // Transactions are still begun by database/sql and adopted, so a *sql.Tx
 // stays available to code outside the store that takes one (the directory
@@ -161,3 +164,20 @@ func (r *dbRow) Scan(dest ...any) error {
 
 // Err reports the error of running the statement, without scanning.
 func (r *dbRow) Err() error { return r.err }
+
+// one is the first row of a momo.Query or momo.Scalars read, or
+// sql.ErrNoRows when the read returned none, so that mapErr (ErrNotFound) and
+// the store's errors.Is(err, sql.ErrNoRows) checks treat it as they treat
+// QueryRowContext's Scan. A read error is returned as is.
+//
+//	rev, err := one(momo.Scalars[int64](ctx, s.q(ctx), `SELECT config_revision FROM schema_info`))
+func one[T any](rows []T, err error) (T, error) {
+	var zero T
+	if err != nil {
+		return zero, err
+	}
+	if len(rows) == 0 {
+		return zero, sql.ErrNoRows
+	}
+	return rows[0], nil
+}

@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // ErrLayoutStale is returned by PutFlowLayout when the canvas's layout moved
@@ -85,7 +87,7 @@ func (s *Store) ListFlowCanvases(ctx context.Context) ([]FlowCanvas, error) {
 
 // GetFlowCanvas returns one canvas and the positions saved on it.
 func (s *Store) GetFlowCanvas(ctx context.Context, id int64) (FlowCanvas, []FlowCanvasNode, error) {
-	c, err := scanFlowCanvas(s.q(ctx).QueryRowContext(ctx, `SELECT `+flowCanvasCols+` FROM flow_canvases c WHERE c.id = $1`, id))
+	c, err := scanFlowCanvas(s.q(ctx).QueryRowContext(ctx, `SELECT `+flowCanvasCols+` FROM flow_canvases c WHERE c.id = @id`, momo.Named("id", id)))
 	if err != nil {
 		return c, nil, mapErr(err)
 	}
@@ -98,7 +100,7 @@ type queryer interface {
 }
 
 func (s *Store) flowCanvasNodes(ctx context.Context, q queryer, id int64) ([]FlowCanvasNode, error) {
-	rows, err := q.QueryContext(ctx, `SELECT node_id, x, y, collapsed FROM flow_canvas_nodes WHERE canvas_id = $1 ORDER BY node_id`, id)
+	rows, err := q.QueryContext(ctx, `SELECT node_id, x, y, collapsed FROM flow_canvas_nodes WHERE canvas_id = @canvas_id ORDER BY node_id`, momo.Named("canvas_id", id))
 	if err != nil {
 		return nil, err
 	}
@@ -126,12 +128,12 @@ func (s *Store) CreateFlowCanvas(ctx context.Context, actor, name, description s
 			return &InUseError{Msg: "too many canvases"}
 		}
 		var id int64
-		if err := tx.QueryRowContext(ctx, `INSERT INTO flow_canvases (name, description, created_by) VALUES ($1, $2, $3) RETURNING id`,
-			name, description, actor).Scan(&id); err != nil {
+		if err := tx.QueryRowContext(ctx, `INSERT INTO flow_canvases (name, description, created_by) VALUES (@name, @description, @created_by) RETURNING id`,
+			momo.Named("name", name), momo.Named("description", description), momo.Named("created_by", actor)).Scan(&id); err != nil {
 			return err
 		}
 		var err error
-		c, err = scanFlowCanvas(tx.QueryRowContext(ctx, `SELECT `+flowCanvasCols+` FROM flow_canvases c WHERE c.id = $1`, id))
+		c, err = scanFlowCanvas(tx.QueryRowContext(ctx, `SELECT `+flowCanvasCols+` FROM flow_canvases c WHERE c.id = @id`, momo.Named("id", id)))
 		if err != nil {
 			return err
 		}
@@ -150,16 +152,17 @@ func (s *Store) UpdateFlowCanvas(ctx context.Context, actor string, id int64, ch
 			viewport = []byte(*ch.Viewport)
 		}
 		res, err := tx.ExecContext(ctx, `UPDATE flow_canvases SET
-			name = COALESCE($2, name), description = COALESCE($3, description),
-			viewport = CASE WHEN $4 THEN $5::jsonb ELSE viewport END, updated_at = now()
-			WHERE id = $1`, id, ch.Name, ch.Description, setVP, viewport)
+			name = COALESCE(@name, name), description = COALESCE(@description, description),
+			viewport = CASE WHEN @set_viewport THEN @viewport::jsonb ELSE viewport END, updated_at = now()
+			WHERE id = @id`, momo.Named("id", id), momo.Named("name", ch.Name), momo.Named("description", ch.Description),
+			momo.Named("set_viewport", setVP), momo.Named("viewport", viewport))
 		if err != nil {
 			return err
 		}
 		if err := requireRow(res); err != nil {
 			return err
 		}
-		c, err = scanFlowCanvas(tx.QueryRowContext(ctx, `SELECT `+flowCanvasCols+` FROM flow_canvases c WHERE c.id = $1`, id))
+		c, err = scanFlowCanvas(tx.QueryRowContext(ctx, `SELECT `+flowCanvasCols+` FROM flow_canvases c WHERE c.id = @id`, momo.Named("id", id)))
 		if err != nil {
 			return err
 		}
@@ -172,7 +175,7 @@ func (s *Store) UpdateFlowCanvas(ctx context.Context, actor string, id int64, ch
 // canvas drew is untouched.
 func (s *Store) DeleteFlowCanvas(ctx context.Context, actor string, id int64) error {
 	return mapErr(s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM flow_canvases WHERE id = $1`, id)
+		res, err := tx.ExecContext(ctx, `DELETE FROM flow_canvases WHERE id = @id`, momo.Named("id", id))
 		if err != nil {
 			return err
 		}
@@ -202,7 +205,7 @@ func (s *Store) PutFlowLayout(ctx context.Context, actor string, id int64, w Flo
 	var nodes []FlowCanvasNode
 	err := s.tx(ctx, func(tx *dbTx) error {
 		var cur int64
-		if err := tx.QueryRowContext(ctx, `SELECT layout_version FROM flow_canvases WHERE id = $1 FOR UPDATE`, id).Scan(&cur); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT layout_version FROM flow_canvases WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&cur); err != nil {
 			return err
 		}
 		if cur != w.LayoutVersion {
@@ -210,14 +213,16 @@ func (s *Store) PutFlowLayout(ctx context.Context, actor string, id int64, w Flo
 		}
 		for _, n := range w.Nodes {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO flow_canvas_nodes (canvas_id, node_id, x, y, collapsed)
-				VALUES ($1, $2, $3, $4, $5)
+				VALUES (@canvas_id, @node_id, @x, @y, @collapsed)
 				ON CONFLICT (canvas_id, node_id) DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y, collapsed = EXCLUDED.collapsed`,
-				id, n.Node, n.X, n.Y, n.Collapsed); err != nil {
+				momo.Named("canvas_id", id), momo.Named("node_id", n.Node), momo.Named("x", n.X), momo.Named("y", n.Y),
+				momo.Named("collapsed", n.Collapsed)); err != nil {
 				return err
 			}
 		}
 		for _, n := range w.Remove {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM flow_canvas_nodes WHERE canvas_id = $1 AND node_id = $2`, id, n); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM flow_canvas_nodes WHERE canvas_id = @canvas_id AND node_id = @node_id`,
+				momo.Named("canvas_id", id), momo.Named("node_id", n)); err != nil {
 				return err
 			}
 		}
@@ -230,23 +235,24 @@ func (s *Store) PutFlowLayout(ctx context.Context, actor string, id int64, w Flo
 				if w.Keep[n.Node] {
 					continue
 				}
-				if _, err := tx.ExecContext(ctx, `DELETE FROM flow_canvas_nodes WHERE canvas_id = $1 AND node_id = $2`, id, n.Node); err != nil {
+				if _, err := tx.ExecContext(ctx, `DELETE FROM flow_canvas_nodes WHERE canvas_id = @canvas_id AND node_id = @node_id`,
+					momo.Named("canvas_id", id), momo.Named("node_id", n.Node)); err != nil {
 					return err
 				}
 			}
 		}
 		var total int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM flow_canvas_nodes WHERE canvas_id = $1`, id).Scan(&total); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM flow_canvas_nodes WHERE canvas_id = @canvas_id`, momo.Named("canvas_id", id)).Scan(&total); err != nil {
 			return err
 		}
 		if total > MaxFlowCanvasNodes {
 			return &InUseError{Msg: "too many nodes on one canvas"}
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE flow_canvases SET layout_version = layout_version + 1, updated_at = now() WHERE id = $1`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE flow_canvases SET layout_version = layout_version + 1, updated_at = now() WHERE id = @id`, momo.Named("id", id)); err != nil {
 			return err
 		}
 		var err error
-		c, err = scanFlowCanvas(tx.QueryRowContext(ctx, `SELECT `+flowCanvasCols+` FROM flow_canvases c WHERE c.id = $1`, id))
+		c, err = scanFlowCanvas(tx.QueryRowContext(ctx, `SELECT `+flowCanvasCols+` FROM flow_canvases c WHERE c.id = @id`, momo.Named("id", id)))
 		if err != nil {
 			return err
 		}

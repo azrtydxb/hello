@@ -11,26 +11,86 @@ is no second connection pool. Statements are logged at debug level with the
 component `db`, and at warn when slower than `db.SlowQuery`; argument values
 are never logged.
 
-Moved so far: `internal/crm` (`crm.PG`) and the CDR writer (`internal/cdr`),
-which runs on hello-sip's pgx pool through `db.NewPool`, in the pool's own
-query execution mode. `internal/webhook` (`webhook.PG`) takes its advisory
-locks through momo's `advisory` package with the same keys as before.
+Moved so far:
+
+- `internal/crm` (`crm.PG`).
+- The CDR writer (`internal/cdr`), which runs on hello-sip's pgx pool through
+  `db.NewPool`, in the pool's own query execution mode.
+- `internal/slack` (`slack.PG`).
+- `internal/ai/proposal` (the proposal store) and `internal/ai/detect` (the
+  detectors' reads).
+- `internal/webhook` (`webhook.PG`), which takes its advisory locks through
+  momo's `advisory` package with the same keys as before.
+- `internal/events` (the event ingest and history), whose ingest
+  transaction is momo's and whose hooks still get the `*sql.Tx` behind it.
+- The directory sync store (`internal/directory`), the SCIM store
+  (`internal/scim`) and the SSO store (`internal/sso`).
+- `internal/store`, at its seam, with the files of the core and
+  configuration domain converted to `@name` binds: `store.go`, `batch.go`,
+  `config.go`, `dialspace.go`, `dirprovision.go` and `flow_canvas.go`. Its
+  other files still bind `$n` and move one domain at a time (below).
+
+Every package above builds its handle with `db.New` (or `db.NewPool`) where
+the binary constructs it, except `internal/store`, which builds its own in
+`store.New`.
 
 `internal/store` runs on momo at its seam (`internal/store/dbq.go`): its
 pool and its transactions are types with `database/sql`'s method set
 (`ExecContext`, `QueryContext`, `QueryRowContext`, `BeginTx`) whose every
 statement is a momo raw statement, on the store's `*momo.DB` or on momo's
-view of the open `*sql.Tx` (`db.AdoptTx`). Its SQL still binds `$n`, which
-momo accepts on PostgreSQL as positional arguments (one placeholder style per
-statement: a `$n` statement cannot also use `?` or `@name`); files move to
-`@name` one domain at a time. The handle and the transaction types are
-`momo.Querier`s, so converted code passes them straight to `momo.Exec`,
-`momo.Query[T]` and the builders. Transactions are still begun by
-`database/sql` and adopted, so methods that take a caller's `*sql.Tx` (the
-directory Provisioner's) keep it. Three things stay raw: BEGIN, `TryLock`'s
-pinned session-lock connection, and `SchemaVersion`'s read of
-`goose_db_version`. `TestStatementsBuild` builds every constant statement the
-store passes to the seam on the offline handle, from the package source.
+view of the open `*sql.Tx` (`db.AdoptTx`). A converted file binds `@name`;
+an unconverted one still binds `$n`, which momo accepts on PostgreSQL as
+positional arguments (one placeholder style per statement: a `$n` statement
+cannot also use `?` or `@name`). The handle and the transaction types are
+`momo.Querier`s, so code can also pass them straight to `momo.Exec`,
+`momo.Query[T]`, `momo.Scalars[V]` and the builders. Transactions are still
+begun by `database/sql` and adopted, so methods that take a caller's
+`*sql.Tx` (the directory Provisioner's) keep it. Three things stay raw:
+BEGIN, `TryLock`'s pinned session-lock connection, and `SchemaVersion`'s read
+of `goose_db_version`. `TestStatementsBuild` builds every constant statement
+the store passes to the seam or to momo's raw functions on the offline
+handle, from the package source, with the call site's `momo.Named` names.
+
+### Converting an internal/store file to @name
+
+One domain (a group of files) per pull request. Call sites keep going
+through the seam: `s.q(ctx)`, `s.db` or the `*dbTx` keep their
+`ExecContext`, `QueryContext` and `QueryRowContext` calls and their Scan
+code; only the SQL text and the arguments change. For each file:
+
+1. Replace every `$n` with `@name`, named after the column or the meaning
+   (`@id`, `@extension_id`, `@cutoff`), and pass `momo.Named("name", v)`
+   for each name instead of the positional value. Add the `momo` import.
+   Order of the `Named` arguments does not matter; each name is passed once.
+2. A `$n` used more than once becomes one `@name` used more than once.
+   momo renders one bind per use, so PostgreSQL types each use on its own,
+   where before it typed the single `$n` once. Cast every use to the type
+   PostgreSQL inferred for the old `$n` wherever a use cannot type itself or
+   could type differently:
+   `@cutoff::timestamptz IS NULL OR created_at < @cutoff::timestamptz`,
+   `(@kind::text = '' OR kind = @kind::text)`,
+   `COALESCE(@dnd::boolean, dnd) ... CASE WHEN @dnd::boolean IS NULL`. A use
+   compared with a column of the same type on each side needs no cast
+   (`device_id = @id ... OR ... device_id = @id`).
+3. Keep everything else as it was: the SQL text, `FOR UPDATE` and
+   `SKIP LOCKED`, the advisory lock keys (the configuration lock is
+   `lockConfig`, key `0x68656c6c6f636667`; the NOTIFY is `notifyConfig`),
+   the Scan destinations and the error handling (`mapErr`,
+   `errors.Is(err, sql.ErrNoRows)`, `requireRow`).
+4. A statement assembled at run time (a WHERE built from fragments) binds by
+   name too: each fragment carries its `@name` and the caller appends the
+   matching `momo.Named` only with the fragment (a `Named` no `@name` uses
+   fails the build, as does an `@name` without one). A helper that takes a caller's SQL fragment
+   documents the names it binds (`boundPhone` binds `@id`).
+5. Add the file to `namedFiles` in `internal/store/dbq_offline_test.go`.
+   `TestStatementsBuild` then builds every constant statement of the file
+   with its `Named` names (a misspelled or unused name fails) and refuses a
+   `$n` left in it. Run `go test ./internal/store/`, then the DB tier in CI.
+6. A single-row read written with `momo.Query[T]` or `momo.Scalars[V]`
+   goes through `one(...)` (`dbq.go`), which returns `sql.ErrNoRows` for no
+   row, as `QueryRowContext`'s Scan does, so `mapErr` and the no-row checks
+   are unchanged (`ConfigRevision` is the example). A list read keeps its
+   empty, non-nil slice.
 
 ## Writing a statement
 
