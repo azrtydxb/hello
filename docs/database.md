@@ -46,6 +46,12 @@ Moved so far:
   `followme.go`, `pickup.go`, `park.go`, `paging.go`, `ringmap.go`,
   `ringtag.go`, `conference.go` and `multicast.go`. Its other files still bind
   `$n` and move one domain at a time (below).
+  `personal_contacts.go` and `locations.go`; and those of the
+  provisioning domain: `prov.go`, `prov_admin.go`, `prov_handler.go`,
+  `prov_lines.go`, `prov_push.go`, `prov_overrides.go`, `prov_books.go`,
+  `prov_multicast.go`, `syslog.go`, `rtcpxr.go`, `clientquality.go` and
+  `clients.go`. Its other files still bind `$n` and move one domain at a
+  time (below).
 
 Every package above builds its handle with `db.New` (or `db.NewPool`) where
 the binary constructs it, except `internal/store`, which builds its own in

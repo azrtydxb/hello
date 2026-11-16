@@ -10,6 +10,8 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/prov"
 )
@@ -26,7 +28,7 @@ import (
 // the group's, else the defaults.
 func (s *Store) multicastInfo(ctx context.Context, phoneID int64, v prov.Vendor, model string) (*prov.MulticastInfo, *prov.PTTInfo, *prov.PagingOptions, error) {
 	var group, override sql.NullInt64
-	err := s.q(ctx).QueryRowContext(ctx, `SELECT group_id, ptt_channel_id FROM phones WHERE id = $1`, phoneID).Scan(&group, &override)
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT group_id, ptt_channel_id FROM phones WHERE id = @id`, momo.Named("id", phoneID)).Scan(&group, &override)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, nil, prov.ErrNotFound
 	}

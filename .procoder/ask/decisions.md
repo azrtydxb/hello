@@ -6425,3 +6425,50 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   `channelUsers` pick a statement at run time; each candidate binds the
   same name (`@target`, `@group_id`, `@name`, `@id`).
   `setConferencePIN`'s `UPDATE ... SET <col>` binds `@sealed` and `@id`.
+
+## momo Phase 3, domain 8: internal/store provisioning on @name (2026-11-16, momo/store-prov)
+
+- **Scope.** `prov.go`, `prov_admin.go`, `prov_handler.go`, `prov_lines.go`,
+  `prov_push.go`, `prov_overrides.go`, `prov_books.go`, `prov_multicast.go`,
+  `syslog.go`, `rtcpxr.go`, `clientquality.go` and `clients.go` in
+  `internal/store` bind by name: every `$n` became `@name` with
+  `momo.Named`, through the seam, with the Scan code, locks (`FOR UPDATE`,
+  `FOR UPDATE OF p`, `FOR UPDATE SKIP LOCKED`), error handling and SQL text
+  otherwise unchanged. No schema change, no migration, `go.mod` and
+  `internal/db` unchanged. `boundPhone` keeps the `@id` binding it got in
+  the core domain.
+- **Configuration lock and NOTIFY through the core helpers.** `provChange`
+  takes the configuration lock with `lockConfig` and `bumpRevision`
+  notifies with `notifyConfig`: the same statements, key
+  (`0x68656c6c6f636667`) and channel as the inline `$1` calls they replace.
+- **Push lock key and channel unchanged.** `ClaimPushes` still sends
+  `SELECT pg_advisory_xact_lock(@key)` with `int64(pushLockKey)`, and
+  `queuePush` still notifies `PushChannel` with the push id as text.
+- **DeviceSecret unchanged for hello-sip.** Its lookup binds `@username`
+  once against `devices.sip_username` (TEXT), so PostgreSQL receives the
+  same statement with one text parameter; a recording test pins it.
+- **Casts added for reused binds.** `UpdatePhone`'s `@serial::text` on its
+  `NULLIF` use (the `IS NULL` use was already cast). `RotatePhoneToken`'s
+  `@immediate::boolean` and `@rearm::boolean`, each used in two
+  `CASE WHEN`s. `MarkFetched`'s `@at::timestamptz` on its three uses and
+  `@file::text` on its two (one of them a `NOT LIKE` with no column).
+  `PutRedirectAccount`'s `@enabled::boolean` on both `COALESCE`s and
+  `@credentials_enc::bytea` on its `COALESCE` with the column (its `VALUES`
+  use is typed by the column). Every cast names the type PostgreSQL had
+  inferred for the old `$n`.
+- **Reused binds left uncast** because every use compares with, or is
+  assigned to, a column of one type: `PhoneByToken` and `MarkFetched`'s
+  `@hash` (BYTEA), `checkPhoneRefs`' `ANY(@numbers)` and `blfKeys`'
+  `@number` (TEXT, extensions and conference rooms), `attachLines`'
+  `ANY(@ids)` and `SetPhoneLine`'s `@phone_id` (BIGINT),
+  `PhoneFetchStates`' `@stale_before` (TIMESTAMPTZ),
+  `RecordRedirectCheck`'s `@result` (TEXT), and the already-cast
+  `@ip::inet`, `@before::bigint`, `@kind::text` and `@settings::jsonb`.
+- **Run-time statements.** `upsertJob` takes its caller's VALUES or SELECT
+  with the `Named` arguments that source binds. `jobDone` passes `@vendor`,
+  `@mac` and `@seq` and its caller's update binds those plus its own
+  names. `QueuePushGroup` adds `momo.Named("group_id", ...)` only together
+  with its `WHERE group_id = @group_id` query. `ownerIs` documents that it
+  binds `@group_id` and `@phone_id`. `prov_offline_test.go` builds these on
+  a recording driver (a batch context, so no database), as
+  `TestStatementsBuild` cannot see them.
