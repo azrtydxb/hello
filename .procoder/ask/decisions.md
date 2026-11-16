@@ -6248,3 +6248,47 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   reads (DeviceSecret, time conditions, settings, queue callbacks).
   hello-sip's configuration snapshot (`internal/snapshot.Load`) does not go
   through the store; it is unchanged.
+
+## momo Phase 3, domain 1: internal/store core and configuration on @name (2026-11-16, momo/store-core)
+
+- **Scope.** `store.go`, `batch.go`, `config.go`, `dialspace.go`,
+  `dirprovision.go` and `flow_canvas.go` in `internal/store` (77 calls)
+  bind by name: every `$n` became `@name` with `momo.Named`. Call sites keep
+  going through the seam (`ExecContext`, `QueryContext`, `QueryRowContext`
+  on `s.q(ctx)`, `s.db` or the `*dbTx`) with their Scan code; the SQL text
+  is otherwise unchanged. No schema change, no migration, `go.mod` and
+  `internal/db` unchanged.
+- **Reused binds carry the old type.** momo renders one bind per use of an
+  `@name`, where PostgreSQL typed the old single `$n` once. Each use that
+  could type differently is cast to the type the `$n` had:
+  ListConfigBatches `@cutoff::timestamptz` (both uses), ListDevices
+  `@kind::text` (both uses; `kind` is TEXT, and the `@kind = ''` use alone
+  would otherwise be untyped), UpdateExtension `@dnd::boolean` (both uses).
+  The token lookup's three `@hash` uses and RotateDeviceSecret's two `@id`
+  uses compare with bytea and bigint columns, so need none.
+- **Lock key and NOTIFY unchanged.** The configuration lock and the revision
+  NOTIFY moved into `lockConfig` and `notifyConfig` (used by configChangeID,
+  RunBatch and bumpConfigRevision), which send exactly
+  `SELECT pg_advisory_xact_lock($1)` with `0x68656c6c6f636667` and
+  `SELECT pg_notify($1, $2::text)` with `hello_config` and the revision;
+  `TestConfigLockAndNotify` pins both on a recording driver.
+- **boundPhone (prov.go) binds `@id`.** Its only callers are DeleteExtension
+  and DeleteDevice, whose WHERE fragments are in config.go; the fragment and
+  the bind move together, so prov.go's one statement changed here, ahead of
+  the provisioning domain.
+- **Shared helper `one` (dbq.go).** The first row of a `momo.Query` or
+  `momo.Scalars` read, or `sql.ErrNoRows` for none, so `mapErr` and the
+  no-row checks behave as with `QueryRowContext`. ConfigRevision uses it
+  (`momo.Scalars[int64]`); `TestOne` pins it.
+- **TestStatementsBuild learned momo.Named.** It builds every constant
+  statement passed to the seam or to `momo.Exec`, `momo.Query`,
+  `momo.Scalars` and `momo.RawRows`, with a `momo.Named(name, nil)` for each
+  `momo.Named` argument of the call site (one Named per distinct `@name` for
+  a call that spreads a slice), so a misspelled or unused name fails on the
+  pull request tier. `namedFiles` lists the converted files; a `$n` left in
+  one of them fails the test. The seam file itself is no longer swept (its
+  three momo calls are its callers' statements). 1,326 constant statements
+  build, 60 of them with `@name` binds; 81 are assembled at run time.
+- **Recipe for domains 2 to 13** is in `docs/database.md` ("Converting an
+  internal/store file to @name"), which also lists every package on momo
+  now.

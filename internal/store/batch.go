@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/routing"
 )
 
@@ -153,7 +155,7 @@ func (s *Store) RunBatch(ctx context.Context, dryRun bool, fn func(context.Conte
 		return BatchOutcome{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(configLockKey)); err != nil {
+	if err := lockConfig(ctx, tx); err != nil {
 		return BatchOutcome{}, err
 	}
 	b := &Batch{s: s, tx: tx, checkPtr: map[uintptr]bool{}, dryRun: dryRun}
@@ -182,7 +184,7 @@ func (s *Store) RunBatch(ctx context.Context, dryRun bool, fn func(context.Conte
 			`UPDATE schema_info SET config_revision = config_revision + 1 RETURNING config_revision`).Scan(&rev); err != nil {
 			return BatchOutcome{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, NotifyChannel, itoa(rev)); err != nil {
+		if err := notifyConfig(ctx, tx, rev); err != nil {
 			return BatchOutcome{}, err
 		}
 		out.Revision = rev
@@ -192,12 +194,14 @@ func (s *Store) RunBatch(ctx context.Context, dryRun bool, fn func(context.Conte
 		reverts = rec.Reverts
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO config_batches (id, actor, via, base_revision, revision, ops, results, reverts)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		b.id, rec.Actor, rec.Via, rec.BaseRevision, out.Revision, []byte(rec.Ops), []byte(rec.Results), reverts); err != nil {
+		VALUES (@id, @actor, @via, @base_revision, @revision, @ops, @results, @reverts)`,
+		momo.Named("id", b.id), momo.Named("actor", rec.Actor), momo.Named("via", rec.Via),
+		momo.Named("base_revision", rec.BaseRevision), momo.Named("revision", out.Revision),
+		momo.Named("ops", []byte(rec.Ops)), momo.Named("results", []byte(rec.Results)), momo.Named("reverts", reverts)); err != nil {
 		return BatchOutcome{}, mapErr(err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM config_batches WHERE created_at < now() - make_interval(secs => $1)`,
-		BatchRetention.Seconds()); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM config_batches WHERE created_at < now() - make_interval(secs => @secs)`,
+		momo.Named("secs", BatchRetention.Seconds())); err != nil {
 		return BatchOutcome{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -296,7 +300,8 @@ func (s *Store) ListConfigBatches(ctx context.Context, before time.Time, limit i
 		cutoff = before
 	}
 	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+configBatchCols+` FROM config_batches b
-		WHERE ($1::timestamptz IS NULL OR b.created_at < $1) ORDER BY b.created_at DESC, b.id LIMIT $2`, cutoff, limit)
+		WHERE (@cutoff::timestamptz IS NULL OR b.created_at < @cutoff::timestamptz) ORDER BY b.created_at DESC, b.id LIMIT @limit`,
+		momo.Named("cutoff", cutoff), momo.Named("limit", limit))
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +325,7 @@ func (s *Store) GetConfigBatch(ctx context.Context, id string) (ConfigBatch, err
 	}
 	var ops, results []byte
 	c, err := scanConfigBatch(s.q(ctx).QueryRowContext(ctx, `SELECT `+configBatchCols+`, b.ops, b.results
-		FROM config_batches b WHERE b.id = $1`, id), &ops, &results)
+		FROM config_batches b WHERE b.id = @id`, momo.Named("id", id)), &ops, &results)
 	if err != nil {
 		return ConfigBatch{}, mapErr(err)
 	}
@@ -358,7 +363,7 @@ type NodeLayout struct {
 // NodeLayouts returns every canvas position of a node, so a delete can be
 // reverted with the node back where it was.
 func (s *Store) NodeLayouts(ctx context.Context, node string) ([]NodeLayout, error) {
-	rows, err := s.q(ctx).QueryContext(ctx, `SELECT canvas_id, x, y, collapsed FROM flow_canvas_nodes WHERE node_id = $1 ORDER BY canvas_id`, node)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT canvas_id, x, y, collapsed FROM flow_canvas_nodes WHERE node_id = @node_id ORDER BY canvas_id`, momo.Named("node_id", node))
 	if err != nil {
 		return nil, err
 	}
@@ -380,22 +385,23 @@ func (s *Store) NodeLayouts(ctx context.Context, node string) ([]NodeLayout, err
 func (s *Store) PlaceNode(ctx context.Context, actor, node string, ls []NodeLayout) error {
 	for _, l := range ls {
 		var n int
-		if err := s.q(ctx).QueryRowContext(ctx, `SELECT count(*) FROM flow_canvas_nodes WHERE canvas_id = $1`, l.CanvasID).Scan(&n); err != nil {
+		if err := s.q(ctx).QueryRowContext(ctx, `SELECT count(*) FROM flow_canvas_nodes WHERE canvas_id = @canvas_id`, momo.Named("canvas_id", l.CanvasID)).Scan(&n); err != nil {
 			return mapErr(err)
 		}
 		if n >= MaxFlowCanvasNodes {
 			return &InUseError{Msg: "too many nodes on one canvas"}
 		}
-		res, err := s.q(ctx).ExecContext(ctx, `UPDATE flow_canvases SET layout_version = layout_version + 1, updated_at = now() WHERE id = $1`, l.CanvasID)
+		res, err := s.q(ctx).ExecContext(ctx, `UPDATE flow_canvases SET layout_version = layout_version + 1, updated_at = now() WHERE id = @id`, momo.Named("id", l.CanvasID))
 		if err != nil {
 			return err
 		}
 		if c, _ := res.RowsAffected(); c == 0 {
 			return ErrNotFound
 		}
-		if _, err := s.q(ctx).ExecContext(ctx, `INSERT INTO flow_canvas_nodes (canvas_id, node_id, x, y, collapsed) VALUES ($1, $2, $3, $4, $5)
+		if _, err := s.q(ctx).ExecContext(ctx, `INSERT INTO flow_canvas_nodes (canvas_id, node_id, x, y, collapsed) VALUES (@canvas_id, @node_id, @x, @y, @collapsed)
 			ON CONFLICT (canvas_id, node_id) DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y, collapsed = EXCLUDED.collapsed`,
-			l.CanvasID, node, l.X, l.Y, l.Collapsed); err != nil {
+			momo.Named("canvas_id", l.CanvasID), momo.Named("node_id", node), momo.Named("x", l.X), momo.Named("y", l.Y),
+			momo.Named("collapsed", l.Collapsed)); err != nil {
 			return mapErr(err)
 		}
 		if err := insertAudit(ctx, s.q(ctx), actor, "layout", "flow_canvas", itoa(l.CanvasID)); err != nil {
@@ -414,10 +420,10 @@ func (s *Store) PruneLayout(ctx context.Context, live []string) (int, error) {
 	}
 	var n int
 	err := s.q(ctx).QueryRowContext(ctx, `WITH del AS (
-			DELETE FROM flow_canvas_nodes WHERE NOT (node_id = ANY($1::text[])) RETURNING canvas_id
+			DELETE FROM flow_canvas_nodes WHERE NOT (node_id = ANY(@live::text[])) RETURNING canvas_id
 		), bump AS (
 			UPDATE flow_canvases SET layout_version = layout_version + 1, updated_at = now()
 			WHERE id IN (SELECT canvas_id FROM del) RETURNING id
-		) SELECT count(*) FROM del`, live).Scan(&n)
+		) SELECT count(*) FROM del`, momo.Named("live", live)).Scan(&n)
 	return n, mapErr(err)
 }

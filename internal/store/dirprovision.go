@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strconv"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/routing"
 )
@@ -160,13 +162,15 @@ func (s *Store) ProvisionDirectoryExtension(ctx context.Context, sqlTx *sql.Tx, 
 	}
 	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO extensions (number, name, external_number, kind, door_targets, voicemail_enabled, directory_hidden, provisioned_by)
-		VALUES ($1, $2, '', $3, $4, $5, FALSE, $6) RETURNING id`,
-		number, name, ExtensionUser, DoorTargets{}.JSON(), in.Voicemail, in.ConnectorID).Scan(&res.ExtensionID); err != nil {
+		VALUES (@number, @name, '', @kind, @door_targets, @voicemail_enabled, FALSE, @provisioned_by) RETURNING id`,
+		momo.Named("number", number), momo.Named("name", name), momo.Named("kind", ExtensionUser),
+		momo.Named("door_targets", DoorTargets{}.JSON()), momo.Named("voicemail_enabled", in.Voicemail),
+		momo.Named("provisioned_by", in.ConnectorID)).Scan(&res.ExtensionID); err != nil {
 		return res, err
 	}
 	res.Number = number
-	if _, err := tx.ExecContext(ctx, `INSERT INTO voicemail_boxes (extension_id, email) VALUES ($1, $2)
-		ON CONFLICT (extension_id) DO UPDATE SET email = EXCLUDED.email`, res.ExtensionID, email); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO voicemail_boxes (extension_id, email) VALUES (@extension_id, @email)
+		ON CONFLICT (extension_id) DO UPDATE SET email = EXCLUDED.email`, momo.Named("extension_id", res.ExtensionID), momo.Named("email", email)); err != nil {
 		return res, err
 	}
 	if err := insertAudit(ctx, tx, actor, "create", "extension", strconv.FormatInt(res.ExtensionID, 10)); err != nil {
@@ -182,8 +186,9 @@ func (s *Store) ProvisionDirectoryExtension(ctx context.Context, sqlTx *sql.Tx, 
 		md5Hex, shaHex := auth.HA1(username, in.Realm, auth.NewDeviceSecret())
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO devices (extension_id, sip_username, realm, ha1_md5, ha1_sha256, enabled)
-			VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id`,
-			res.ExtensionID, username, in.Realm, md5Hex, shaHex).Scan(&res.DeviceID); err != nil {
+			VALUES (@extension_id, @sip_username, @realm, @ha1_md5, @ha1_sha256, TRUE) RETURNING id`,
+			momo.Named("extension_id", res.ExtensionID), momo.Named("sip_username", username), momo.Named("realm", in.Realm),
+			momo.Named("ha1_md5", md5Hex), momo.Named("ha1_sha256", shaHex)).Scan(&res.DeviceID); err != nil {
 			return res, err
 		}
 		if err := insertAudit(ctx, tx, actor, "create", "device", strconv.FormatInt(res.DeviceID, 10)); err != nil {
@@ -217,7 +222,7 @@ func freeSIPUsername(ctx context.Context, tx *dbTx, base string) (string, error)
 			name = base + "-" + strconv.Itoa(i)
 		}
 		var exists bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM devices WHERE sip_username = $1)`, name).Scan(&exists); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM devices WHERE sip_username = @sip_username)`, momo.Named("sip_username", name)).Scan(&exists); err != nil {
 			return "", err
 		}
 		if !exists {

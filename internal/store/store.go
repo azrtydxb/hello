@@ -173,8 +173,9 @@ func insertAudit(ctx context.Context, q interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, actor, action, resource, resourceID string) error {
 	_, err := q.ExecContext(ctx,
-		`INSERT INTO audit_events (actor, action, resource, resource_id, via) VALUES ($1, $2, $3, $4, $5)`,
-		actor, action, resource, resourceID, auditVia(ctx))
+		`INSERT INTO audit_events (actor, action, resource, resource_id, via) VALUES (@actor, @action, @resource, @resource_id, @via)`,
+		momo.Named("actor", actor), momo.Named("action", action), momo.Named("resource", resource),
+		momo.Named("resource_id", resourceID), momo.Named("via", auditVia(ctx)))
 	return err
 }
 
@@ -238,7 +239,7 @@ func (s *Store) configChangeID(ctx context.Context, actor, action, resource stri
 		return insertAudit(ctx, b.tx, actor, action, resource, id)
 	}
 	return s.tx(ctx, func(tx *dbTx) error {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(configLockKey)); err != nil {
+		if err := lockConfig(ctx, tx); err != nil {
 			return err
 		}
 		// The errors the saved configuration already has (a stricter engine
@@ -283,8 +284,7 @@ func (s *Store) configChangeID(ctx context.Context, actor, action, resource stri
 			`UPDATE schema_info SET config_revision = config_revision + 1 RETURNING config_revision`).Scan(&rev); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, NotifyChannel, strconv.FormatInt(rev, 10))
-		return err
+		return notifyConfig(ctx, tx, rev)
 	})
 }
 
@@ -296,7 +296,21 @@ func bumpConfigRevision(ctx context.Context, tx *dbTx) error {
 		`UPDATE schema_info SET config_revision = config_revision + 1 RETURNING config_revision`).Scan(&rev); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, NotifyChannel, strconv.FormatInt(rev, 10))
+	return notifyConfig(ctx, tx, rev)
+}
+
+// lockConfig takes the configuration lock (configLockKey) for the rest of
+// q's transaction.
+func lockConfig(ctx context.Context, q dbq) error {
+	_, err := q.ExecContext(ctx, `SELECT pg_advisory_xact_lock(@key)`, momo.Named("key", int64(configLockKey)))
+	return err
+}
+
+// notifyConfig tells the nodes, on NotifyChannel, that the configuration
+// moved to rev; PostgreSQL delivers it when q's transaction commits.
+func notifyConfig(ctx context.Context, q dbq, rev int64) error {
+	_, err := q.ExecContext(ctx, `SELECT pg_notify(@channel, @payload::text)`,
+		momo.Named("channel", NotifyChannel), momo.Named("payload", strconv.FormatInt(rev, 10)))
 	return err
 }
 
@@ -362,7 +376,7 @@ func configPath(ctx context.Context, tx *dbTx, cfg routing.Config, resource, id 
 		}
 	case "extension":
 		var number string
-		err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1`, n).Scan(&number)
+		err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = @id`, momo.Named("id", n)).Scan(&number)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
 		}
@@ -396,9 +410,7 @@ func (s *Store) Audit(ctx context.Context, actor, action, resource, resourceID s
 
 // ConfigRevision returns the current configuration revision.
 func (s *Store) ConfigRevision(ctx context.Context) (int64, error) {
-	var rev int64
-	err := s.q(ctx).QueryRowContext(ctx, `SELECT config_revision FROM schema_info`).Scan(&rev)
-	return rev, err
+	return one(momo.Scalars[int64](ctx, s.q(ctx), `SELECT config_revision FROM schema_info`))
 }
 
 // Users, sessions and tokens.
@@ -418,9 +430,9 @@ func (s *Store) CreateFirstUser(ctx context.Context, username, passwordHash stri
 		var id int64
 		err := tx.QueryRowContext(ctx, `
 			INSERT INTO users (username, password_hash, role)
-			SELECT $1, $2, 'admin' WHERE NOT EXISTS (SELECT 1 FROM users)
+			SELECT @username, @password_hash, 'admin' WHERE NOT EXISTS (SELECT 1 FROM users)
 			ON CONFLICT (username) DO NOTHING
-			RETURNING id`, username, passwordHash).Scan(&id)
+			RETURNING id`, momo.Named("username", username), momo.Named("password_hash", passwordHash)).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -440,20 +452,21 @@ func (s *Store) UserByName(ctx context.Context, username string) (int64, string,
 		hash string
 	)
 	err := s.q(ctx).QueryRowContext(ctx,
-		`SELECT id, password_hash FROM users WHERE username = $1`, username).Scan(&id, &hash)
+		`SELECT id, password_hash FROM users WHERE username = @username`, momo.Named("username", username)).Scan(&id, &hash)
 	return id, hash, mapErr(err)
 }
 
 // CreateSession stores a session by the hash of its cookie value.
 func (s *Store) CreateSession(ctx context.Context, userID int64, hash []byte, expires time.Time) error {
 	_, err := s.q(ctx).ExecContext(ctx,
-		`INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)`, hash, userID, expires)
+		`INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (@token_hash, @user_id, @expires_at)`,
+		momo.Named("token_hash", hash), momo.Named("user_id", userID), momo.Named("expires_at", expires))
 	return err
 }
 
 // DeleteSession removes a session.
 func (s *Store) DeleteSession(ctx context.Context, hash []byte) error {
-	_, err := s.q(ctx).ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = $1`, hash)
+	_, err := s.q(ctx).ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = @token_hash`, momo.Named("token_hash", hash))
 	return err
 }
 
@@ -473,7 +486,7 @@ func (s *Store) SessionActor(ctx context.Context, hash []byte) (auth.Actor, erro
 		SELECT u.id, u.username, u.role, u.must_change_password,
 			u.totp_enabled_at IS NULL AND (u.totp_required OR u.role = ANY(a.require_2fa_roles))
 		FROM sessions s JOIN users u ON u.id = s.user_id CROSS JOIN auth_settings a
-		WHERE s.token_hash = $1 AND s.expires_at > now() AND u.enabled`, hash).
+		WHERE s.token_hash = @token_hash AND s.expires_at > now() AND u.enabled`, momo.Named("token_hash", hash)).
 		Scan(&a.UserID, &a.Username, &a.Role, &a.MustChangePassword, &a.MustEnrollMFA)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
@@ -484,7 +497,7 @@ func (s *Store) SessionActor(ctx context.Context, hash []byte) (auth.Actor, erro
 // UserActor implements auth.Lookup for the in-product agent.
 func (s *Store) UserActor(ctx context.Context, id int64) (auth.Actor, error) {
 	a := auth.Actor{UserID: id}
-	err := s.q(ctx).QueryRowContext(ctx, `SELECT username, role, must_change_password FROM users WHERE id = $1 AND enabled`, id).
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT username, role, must_change_password FROM users WHERE id = @id AND enabled`, momo.Named("id", id)).
 		Scan(&a.Username, &a.Role, &a.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
@@ -503,7 +516,7 @@ func (s *Store) UserActor(ctx context.Context, id int64) (auth.Actor, error) {
 const tokenActorSQL = `
 WITH pat AS (
 	UPDATE api_tokens t SET last_used_at = now() FROM users u
-	WHERE t.token_hash = $1 AND u.id = t.user_id AND u.enabled AND t.revoked_at IS NULL
+	WHERE t.token_hash = @hash AND u.id = t.user_id AND u.enabled AND t.revoked_at IS NULL
 	  AND (t.expires_at IS NULL OR t.expires_at > now())
 	RETURNING t.id, u.id AS uid, u.username, u.role, t.kind, to_json(t.scopes)::text AS scopes,
 		''::text AS client_id, '[]'::text AS resources, ''::text AS service, NULL::text AS extension_scope, u.must_change_password AS must_change
@@ -518,12 +531,12 @@ WITH pat AS (
 	JOIN oauth_clients c ON c.client_id = o.client_id
 	LEFT JOIN users u ON u.id = o.user_id
 	LEFT JOIN oauth_grants g ON g.id = o.grant_id
-	WHERE o.hash = $1 AND o.kind = 'access' AND o.revoked_at IS NULL AND o.expires_at > now()
+	WHERE o.hash = @hash AND o.kind = 'access' AND o.revoked_at IS NULL AND o.expires_at > now()
 	  AND (o.grant_id IS NULL OR g.revoked_at IS NULL)
 	  AND (c.kind <> 'service' OR c.enabled) AND (o.user_id IS NULL OR u.enabled)
 ), touch AS (
 	UPDATE oauth_grants g SET last_used_at = now() FROM oauth_tokens o
-	WHERE o.hash = $1 AND o.kind = 'access' AND g.id = o.grant_id
+	WHERE o.hash = @hash AND o.kind = 'access' AND g.id = o.grant_id
 )
 SELECT * FROM pat UNION ALL SELECT * FROM oat`
 
@@ -535,7 +548,7 @@ func (s *Store) TokenActor(ctx context.Context, hash []byte) (auth.Actor, error)
 		scopes, resources sql.NullString
 		extScope          sql.NullString
 	)
-	err := s.q(ctx).QueryRowContext(ctx, tokenActorSQL, hash).Scan(&a.TokenID, &a.UserID, &a.Username, &a.Role,
+	err := s.q(ctx).QueryRowContext(ctx, tokenActorSQL, momo.Named("hash", hash)).Scan(&a.TokenID, &a.UserID, &a.Username, &a.Role,
 		&kind, &scopes, &a.ClientID, &resources, &a.ServiceName, &extScope, &a.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
@@ -614,7 +627,7 @@ type NewToken struct {
 func (s *Store) ListTokens(ctx context.Context, userID int64) ([]Token, error) {
 	rows, err := s.q(ctx).QueryContext(ctx, `
 		SELECT id, name, kind, to_json(scopes)::text, created_at, expires_at, last_used_at FROM api_tokens
-		WHERE user_id = $1 AND revoked_at IS NULL ORDER BY id`, userID)
+		WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY id`, momo.Named("user_id", userID))
 	if err != nil {
 		return nil, err
 	}
@@ -651,8 +664,9 @@ func (s *Store) CreateToken(ctx context.Context, actor string, userID int64, in 
 	err := s.tx(ctx, func(tx *dbTx) error {
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO api_tokens (user_id, name, token_hash, kind, scopes, expires_at)
-			VALUES ($1, $2, $3, $4, $5::text[], $6) RETURNING id, created_at`,
-			userID, in.Name, hash, t.Kind, scopes, in.ExpiresAt).Scan(&t.ID, &t.CreatedAt); err != nil {
+			VALUES (@user_id, @name, @token_hash, @kind, @scopes::text[], @expires_at) RETURNING id, created_at`,
+			momo.Named("user_id", userID), momo.Named("name", in.Name), momo.Named("token_hash", hash),
+			momo.Named("kind", t.Kind), momo.Named("scopes", scopes), momo.Named("expires_at", in.ExpiresAt)).Scan(&t.ID, &t.CreatedAt); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "create", "api_token", strconv.FormatInt(t.ID, 10))
@@ -663,7 +677,7 @@ func (s *Store) CreateToken(ctx context.Context, actor string, userID int64, in 
 // DeleteToken revokes one of userID's API tokens.
 func (s *Store) DeleteToken(ctx context.Context, actor string, userID, id int64) error {
 	return s.tx(ctx, func(tx *dbTx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM api_tokens WHERE id = $1 AND user_id = $2`, id, userID)
+		res, err := tx.ExecContext(ctx, `DELETE FROM api_tokens WHERE id = @id AND user_id = @user_id`, momo.Named("id", id), momo.Named("user_id", userID))
 		if err != nil {
 			return err
 		}
