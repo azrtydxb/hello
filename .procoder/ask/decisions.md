@@ -6293,6 +6293,33 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   internal/store file to @name"), which also lists every package on momo
   now.
 
+## momo Phase 3, domain 4: internal/store phonebook and contacts on @name (2026-11-16, momo/store-phonebook)
+
+- **Scope.** `phonebook.go`, `phonebook_lookup.go`, `personal_contacts.go`
+  and `locations.go` in `internal/store` bind by name: every `$n` became
+  `@name` with `momo.Named`, through the seam, with the Scan code, locks
+  (`FOR UPDATE`, `FOR SHARE`), error handling and SQL text otherwise
+  unchanged. No schema change, no migration, `go.mod` and `internal/db`
+  unchanged.
+- **Caller-name lookup keeps its plans.** `phonebook_lookup.go`'s six
+  statements use each bind once, so momo renders the same SQL with the same
+  `$1`, `$2` in the same order and PostgreSQL infers the same parameter
+  types; no cast was needed or added.
+- **No casts added in this domain.** The two reused binds compare with
+  columns of one type on every use: `requireDialTarget`'s `@number`
+  (`extensions.number` and `ring_groups.name`, both TEXT) and
+  `listAssignments`' `@location_id` fragment, appended to three SELECTs
+  whose `location_id` columns are all BIGINT.
+- **Run-time statements.** `listAssignments` passes its
+  `momo.Named("location_id", ...)` only together with its WHERE fragment,
+  `WHERE location_id = @location_id`. `writeLocation` builds its Named slice once and
+  spreads it into the INSERT and, with `momo.Named("id", id)` appended, the
+  UPDATE. `SetLocationAssignment`'s `UPDATE <table>` binds `@location_id`
+  and `@id`.
+- **Book lock key unchanged.** `CreatePhonebook` still sends
+  `SELECT pg_advisory_xact_lock(@key)` with `int64(bookLockKey)`, rendered
+  as one bigint bind as before.
+
 ## momo Phase 3, domain 5: internal/store security and door on @name (2026-11-16, momo/store-door)
 
 - **Scope.** `scep.go`, `wifi.go`, `door.go`, `door_open.go`,
