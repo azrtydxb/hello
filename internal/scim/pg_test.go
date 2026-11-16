@@ -59,8 +59,9 @@ func pgDB(t *testing.T) *sql.DB {
 func TestPGStore(t *testing.T) {
 	db := pgDB(t)
 	ctx := context.Background()
-	p := &PG{DB: db}
-	eng := &directory.Engine{Store: &directory.PG{DB: hellodb.New(db, slog.New(slog.DiscardHandler))}, Drivers: map[string]directory.Driver{directory.KindSCIM: Driver{Store: p}}, Replica: "pg"}
+	m := hellodb.New(db, slog.New(slog.DiscardHandler))
+	p := &PG{DB: m}
+	eng := &directory.Engine{Store: &directory.PG{DB: m}, Drivers: map[string]directory.Driver{directory.KindSCIM: Driver{Store: p}}, Replica: "pg"}
 	on, name := true, "Okta"
 	c, err := eng.Create(ctx, "admin", directory.ConnectorInput{Kind: directory.KindSCIM, Name: &name, Enabled: &on,
 		Options: &directory.Options{LoginMethod: directory.LoginOIDC, OIDCProvider: directory.KindEntra}})

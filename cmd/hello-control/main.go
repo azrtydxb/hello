@@ -289,7 +289,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// sync users; one replica runs a connector, the one holding its lock.
 	// SCIM (spec integrations P10): identity providers push to /scim/v2; the
 	// pushed resources are the source of the scim connector kind.
-	scimStore := &scim.PG{DB: db}
+	scimStore := &scim.PG{DB: hellodb.New(db, log)}
 	dirEngine := &directory.Engine{
 		// Range auto-provisioning (P12) creates extensions through the
 		// configuration store, with its numbering rules and routing check.

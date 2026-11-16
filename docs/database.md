@@ -13,7 +13,8 @@ are never logged.
 
 Moved so far: `internal/crm` (`crm.PG`), the CDR writer (`internal/cdr`),
 which runs on hello-sip's pgx pool through `db.NewPool`, in the pool's own
-query execution mode, and the directory sync store (`directory.PG`).
+query execution mode, the directory sync store (`directory.PG`) and the SCIM
+store (`scim.PG`).
 
 ## Writing a statement
 
