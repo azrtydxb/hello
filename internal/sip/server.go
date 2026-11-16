@@ -339,6 +339,9 @@ type Server struct {
 	// parkQ runs the park commands for one call in the order they were
 	// sent (pickup.go).
 	parkQ parkQueues
+	// late holds the forks that ended without a 2xx while a crossing 2xx
+	// may still arrive (late2xx.go).
+	late lateForks
 	// bgMu guards bgClosed: once shutdown waits for bg, a late call event
 	// (a call ending as the node stops) must not start more work on it.
 	bgMu     sync.Mutex
@@ -578,6 +581,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 		sipgo.WithUserAgentTransactionLayerOptions(
 			sip.WithTransactionLayerLogger(s.log),
 			sip.WithTransactionLayerUnhandledResponseHandler(func(r *sip.Response) {
+				if s.endLateAnswer(r) {
+					return
+				}
 				s.log.Debug("unmatched SIP response", "code", r.StatusCode)
 			}),
 		),

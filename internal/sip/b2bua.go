@@ -1863,6 +1863,9 @@ func (l *leg) drive(report func(legEvent)) {
 		}
 		l.c.mu.Unlock()
 	}
+	// A 2xx that crossed the CANCEL (or this final response) can still
+	// arrive after the transaction is gone: it is ACKed and hung up.
+	s.awaitLateAnswer(l)
 	report(legEvent{leg: l, kind: evFailed, code: code, reason: reason})
 }
 

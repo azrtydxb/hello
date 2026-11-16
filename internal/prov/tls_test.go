@@ -187,20 +187,38 @@ func TestGrandstreamSRTPMode(t *testing.T) {
 		t.Error("P183 or P60078 is written for a phone on UDP")
 	}
 	for _, v := range []Vendor{Yealink, Poly, Fanvil} {
-		d := renderSample(false)
-		d.Phone.Vendor = v
-		d.Server.Transport, d.Server.SRTP = "tls", "required"
-		files := map[Vendor]string{Yealink: "805ec0aabbcc.cfg", Poly: "805ec0aabbcc-hello.cfg", Fanvil: "805ec0aabbcc.cfg"}
-		models := map[Vendor]string{Yealink: "T54W", Poly: "VVX 450", Fanvil: "X5U"}
-		d.Phone.Model = models[v]
-		out, err := Render(context.Background(), builtinFor(t, v), files[v], d)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if s := strings.ToLower(string(out)); strings.Contains(s, "srtp") {
+		s := renderOtherVendor(t, v, func(d *RenderData) { d.Server.Transport, d.Server.SRTP = "tls", "required" })
+		if strings.Contains(s, "srtp") {
 			t.Errorf("%s template writes an SRTP key that is not confirmed from vendor documentation", v)
 		}
 	}
+}
+
+// renderOtherVendor renders the main config of a non-Grandstream vendor from
+// renderSample after edit, and returns it lower-cased with the sample's
+// provisioning token removed. The token is 52 random base32 letters, so it
+// spells a word a test forbids: "nat" in about one render in 650, "dtls" or
+// "srtp" in about one in 21,000. With it removed, a forbidden word can come
+// only from the template.
+func renderOtherVendor(t *testing.T, v Vendor, edit func(*RenderData)) string {
+	t.Helper()
+	files := map[Vendor]string{Yealink: "805ec0aabbcc.cfg", Poly: "805ec0aabbcc-hello.cfg", Fanvil: "805ec0aabbcc.cfg"}
+	models := map[Vendor]string{Yealink: "T54W", Poly: "VVX 450", Fanvil: "X5U"}
+	d := renderSample(false)
+	d.Phone.Vendor, d.Phone.Model = v, models[v]
+	edit(&d)
+	tok := strings.TrimSuffix(strings.TrimPrefix(d.Prov.URL, "https://prov.hello.test/p/"), "/")
+	if len(tok) != TokenLen {
+		t.Fatalf("cannot find the token in the sample provisioning URL %q", d.Prov.URL)
+	}
+	out, err := Render(context.Background(), builtinFor(t, v), files[v], d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), tok) {
+		t.Fatalf("%s config does not carry the provisioning token", v)
+	}
+	return strings.ToLower(strings.ReplaceAll(string(out), tok, ""))
 }
 
 // TestGrandstreamDTLSAndICE fails if the Grandstream SRTP Key Exchange
@@ -277,18 +295,17 @@ func TestGrandstreamDTLSAndICE(t *testing.T) {
 		t.Error("GrandstreamICEKey does not follow the templates")
 	}
 	for _, v := range []Vendor{Yealink, Poly, Fanvil} {
-		d := renderSample(false)
-		d.Phone.Vendor = v
-		d.Server.Transport, d.Server.SRTP, d.Server.SRTPKeyEx, d.Server.ICE = "tls", "required", "dtls", "ice"
-		files := map[Vendor]string{Yealink: "805ec0aabbcc.cfg", Poly: "805ec0aabbcc-hello.cfg", Fanvil: "805ec0aabbcc.cfg"}
-		models := map[Vendor]string{Yealink: "T54W", Poly: "VVX 450", Fanvil: "X5U"}
-		d.Phone.Model = models[v]
-		out, err := Render(context.Background(), builtinFor(t, v), files[v], d)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if s := strings.ToLower(string(out)); strings.Contains(s, "dtls") || strings.Contains(s, "ice") && strings.Contains(s, "nat") {
+		with := renderOtherVendor(t, v, func(d *RenderData) {
+			d.Server.Transport, d.Server.SRTP, d.Server.SRTPKeyEx, d.Server.ICE = "tls", "required", "dtls", "ice"
+		})
+		if strings.Contains(with, "dtls") || strings.Contains(with, "ice") && strings.Contains(with, "nat") {
 			t.Errorf("%s template writes a DTLS or ICE key that is not confirmed from vendor documentation", v)
+		}
+		// Whatever the key is called, the device's key exchange and ICE
+		// settings must not change a byte of this vendor's config.
+		without := renderOtherVendor(t, v, func(d *RenderData) { d.Server.Transport, d.Server.SRTP = "tls", "required" })
+		if with != without {
+			t.Errorf("%s config changes with the device's DTLS key exchange or ICE setting", v)
 		}
 	}
 }

@@ -860,20 +860,32 @@ func busy() calleeFn {
 
 func ringForever() calleeFn { return answerAfter(make(chan struct{})) }
 
-// answerOnCancel rings; when the CANCEL arrives it answers 200 on the wire
-// before the transaction's 487, reproducing a 200 crossing the CANCEL.
-func answerOnCancel() calleeFn {
+// answerOnCancel rings; when the CANCEL arrives it answers 200 on the wire,
+// reproducing a 200 crossing the CANCEL. With late487 false the 200 goes out
+// before the transaction's 487; with late487 true a 487 goes out first and
+// the 200 after it, as when a forking proxy in front of the phone forwards a
+// 2xx after it has forwarded the 487 (RFC 3261 §16.7), or the two datagrams
+// swap places. Either way Hello must ACK, then BYE, the 200.
+func answerOnCancel(late487 bool) calleeFn {
 	return func(p *phone, req *sip.Request, tx sip.ServerTransaction, dss *sipgo.DialogServerSession) {
 		_ = dss.Respond(180, "Ringing", nil)
 		tx.OnCancel(func(*sip.Request) {
+			// The responses are built from the dialog's INVITE, which
+			// carries the dialog's To tag.
+			if late487 {
+				_ = p.srv.WriteResponse(sip.NewResponseFromRequest(dss.InviteRequest, 487, "Request Terminated", nil))
+				// sipgo handles each datagram on its own goroutine: let the
+				// 487 be handled before the 200 is sent.
+				time.Sleep(100 * time.Millisecond)
+			}
 			res := sip.NewResponseFromRequest(dss.InviteRequest, 200, "OK", []byte(p.sdpText()))
 			res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 			res.AppendHeader(sip.HeaderClone(&p.contact))
 			_ = p.srv.WriteResponse(res)
-			// Let the 200 be processed before the transaction's 487: sipgo
-			// handles each datagram on its own goroutine, and a 487 handled
-			// first would complete the client transaction and drop the 200.
-			time.Sleep(100 * time.Millisecond)
+			if !late487 {
+				// Let the 200 be handled before the transaction's 487.
+				time.Sleep(100 * time.Millisecond)
+			}
 		})
 		<-dss.Context().Done()
 		push(p.cancels, req)
