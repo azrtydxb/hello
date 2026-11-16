@@ -269,7 +269,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	evSvc.Hooks = append(evSvc.Hooks, hooks.Hook())
 	// Slack notifications (spec integrations P17): queued in the same
 	// ingest transaction, sent by a worker on each replica.
-	slackSvc := &slack.Service{Store: &slack.PG{DB: db}, Box: box, PublicURL: cfg.AI.PublicURL, Log: log.With("component", "slack")}
+	slackSvc := &slack.Service{Store: &slack.PG{DB: hellodb.New(db, log)}, Box: box, PublicURL: cfg.AI.PublicURL, Log: log.With("component", "slack")}
 	evSvc.Hooks = append(evSvc.Hooks, slackSvc.Hook())
 	slackWorker := &slack.Worker{Svc: slackSvc, Metrics: slack.NewMetrics(metrics.Registry), Log: log.With("component", "slack")}
 	go slackWorker.Run(ctx)
@@ -414,7 +414,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			_ = ln.Close()
 			return fmt.Errorf("ai proposals: %w", err)
 		}
-		props := proposal.NewStore(db, validator)
+		props := proposal.NewStore(hellodb.New(db, log), validator)
 		props.OnStatus = func(source string, st proposal.Status) {
 			agent.Metrics().Proposal(proposalSource(source), string(st))
 		}
@@ -446,7 +446,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		// and explain findings through it when it answers.
 		if cfg.AIAgent.AIOpsInterval > 0 {
 			env := &detect.Env{
-				DB: db, Store: st, Live: vk, Cluster: vk,
+				DB: hellodb.New(db, log), Store: st, Live: vk, Cluster: vk,
 				VKFunc:        vk.Client,
 				AuthFailLimit: cfg.AuthFailLimit,
 				Log:           log,

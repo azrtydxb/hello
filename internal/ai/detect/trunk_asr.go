@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // trunk_asr_drop (spec S-19): per trunk, at least asrMinAttempts outbound
@@ -26,32 +28,22 @@ type asrCounts struct {
 
 func trunkASRDrop(ctx context.Context, r *Run) ([]Candidate, error) {
 	cut := r.Now.Add(-asrWindow)
-	rows, err := r.DB.QueryContext(ctx, `SELECT trunk_name,
-		count(*) FILTER (WHERE start_time >= $1),
-		count(*) FILTER (WHERE start_time >= $1 AND answer_time IS NOT NULL),
-		count(*) FILTER (WHERE start_time < $1),
-		count(*) FILTER (WHERE start_time < $1 AND answer_time IS NOT NULL)
-		FROM cdrs WHERE start_time >= $2 AND start_time <= $3 AND trunk_name <> '' AND direction = 'outbound'
-		GROUP BY trunk_name`, cut, cut.Add(-asrBaseline), r.Now)
+	rows, err := momo.Query[momo.Row5[string, int64, int64, int64, int64]](ctx, r.DB, `SELECT trunk_name,
+		count(*) FILTER (WHERE start_time >= @cut),
+		count(*) FILTER (WHERE start_time >= @cut AND answer_time IS NOT NULL),
+		count(*) FILTER (WHERE start_time < @cut),
+		count(*) FILTER (WHERE start_time < @cut AND answer_time IS NOT NULL)
+		FROM cdrs WHERE start_time >= @from AND start_time <= @now AND trunk_name <> '' AND direction = 'outbound'
+		GROUP BY trunk_name`, momo.Named("cut", cut), momo.Named("from", cut.Add(-asrBaseline)), momo.Named("now", r.Now))
 	if err != nil {
 		return nil, err
 	}
 	var all []asrCounts
-	for rows.Next() {
-		var c asrCounts
-		if err := rows.Scan(&c.Trunk, &c.Recent, &c.RecentAns, &c.Base, &c.BaseA); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
+	for _, row := range rows {
+		c := asrCounts{Trunk: row.C1, Recent: row.C2, RecentAns: row.C3, Base: row.C4, BaseA: row.C5}
 		if dropped(c) {
 			all = append(all, c)
 		}
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	var out []Candidate
 	for _, c := range all {
@@ -79,27 +71,23 @@ type failStatus struct {
 // dominantFailure returns the SIP final status with at least asrStatusShare
 // percent of the trunk's failed attempts since cut, or the zero value.
 func dominantFailure(ctx context.Context, r *Run, trunk string, cut time.Time) (failStatus, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT final_status, count(*) FROM cdrs
-		WHERE start_time >= $1 AND start_time <= $3 AND trunk_name = $2 AND direction = 'outbound' AND answer_time IS NULL
-		GROUP BY final_status ORDER BY count(*) DESC, final_status`, cut, trunk, r.Now)
+	rows, err := momo.Query[momo.Row2[int, int64]](ctx, r.DB, `SELECT final_status, count(*) FROM cdrs
+		WHERE start_time >= @cut AND start_time <= @now AND trunk_name = @trunk AND direction = 'outbound' AND answer_time IS NULL
+		GROUP BY final_status ORDER BY count(*) DESC, final_status`, momo.Named("cut", cut), momo.Named("trunk", trunk), momo.Named("now", r.Now))
 	if err != nil {
 		return failStatus{}, err
 	}
-	defer func() { _ = rows.Close() }()
 	var top failStatus
 	var total int64
-	for rows.Next() {
-		var f failStatus
-		if err := rows.Scan(&f.Status, &f.N); err != nil {
-			return failStatus{}, err
-		}
+	for _, row := range rows {
+		f := failStatus{Status: row.C1, N: row.C2}
 		if top.N == 0 {
 			top = f
 		}
 		total += f.N
 	}
-	if err := rows.Err(); err != nil || total == 0 || top.N*100 < asrStatusShare*total {
-		return failStatus{}, err
+	if total == 0 || top.N*100 < asrStatusShare*total {
+		return failStatus{}, nil
 	}
 	return top, nil
 }

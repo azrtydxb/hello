@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -19,6 +20,7 @@ import (
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/apispec"
 	"github.com/azrtydxb/hello/internal/auth"
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -91,7 +93,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ps := proposal.NewStore(db, val)
+	ps := proposal.NewStore(hellodb.New(db, slog.New(slog.DiscardHandler)), val)
 	agent, _, _ := aifake.Service(t, aifake.Config())
 	h := api.Handler(api.Config{Store: st, Batches: st, AIAgent: agent, SIPDomain: "hello.test", SessionTTL: time.Hour, Proposals: ps})
 	val.SetHandler(h)

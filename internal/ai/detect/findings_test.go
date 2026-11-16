@@ -15,6 +15,7 @@ import (
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/store"
+	"github.com/azrtydxb/momo"
 )
 
 func upsert(t *testing.T, st *store.Store, at time.Time, cs ...store.AIFindingInput) {
@@ -61,7 +62,7 @@ func TestFindingsLifecycle(t *testing.T) {
 			}
 		}
 		// the database refuses a second live row for the candidate
-		_, err := env.DB.Exec(`INSERT INTO ai_findings (id, candidate_id, type, subject, severity, title)
+		_, err := momo.Exec(context.Background(), env.DB, `INSERT INTO ai_findings (id, candidate_id, type, subject, severity, title)
 			VALUES (gen_random_uuid(), 'trunk_down:a', 'trunk_down', 'a', 'info', 'x')`)
 		if err == nil {
 			t.Fatal("a second open finding for one candidate was accepted")
@@ -170,8 +171,8 @@ func TestFindingsLifecycle(t *testing.T) {
 		if _, err := st.DismissAIFinding(ctx, "user:op", uid, "00000000-0000-0000-0000-000000000000", "x"); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("unknown id = %v", err)
 		}
-		var n int
-		if err := env.DB.QueryRow(`SELECT count(*) FROM audit_events WHERE resource = 'ai_finding' AND action = 'acknowledge'`).Scan(&n); err != nil || n != 1 {
+		n, err := momo.Scalars[int](ctx, env.DB, `SELECT count(*) FROM audit_events WHERE resource = 'ai_finding' AND action = 'acknowledge'`)
+		if err != nil || len(n) != 1 || n[0] != 1 {
 			t.Fatalf("audit rows = %d, %v", n, err)
 		}
 	})
