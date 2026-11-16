@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	github.com/azrtydxb/go-ai-sdk v0.8.0
+	github.com/azrtydxb/momo v0.14.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/emiago/sipgo v1.7.3
 	github.com/go-asn1-ber/asn1-ber v1.5.8
@@ -71,9 +72,11 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/sync v0.25.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
+	golang.org/x/tools v0.52.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/ini.v1 v1.67.3 // indirect
 )

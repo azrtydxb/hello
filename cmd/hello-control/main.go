@@ -21,6 +21,7 @@ import (
 	"github.com/azrtydxb/hello/internal/apispec"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/directory"
 	"github.com/azrtydxb/hello/internal/directory/dirstore"
 	"github.com/azrtydxb/hello/internal/events"
@@ -251,7 +252,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	// appends to, store it, and fan it out to the SSE clients of this pod.
 	// CRM connectors (spec integrations I-47): their hook queues calls in
 	// the ingest transaction, so it is registered before the service runs.
-	crmSvc := newCRM(cfg, st, db, box, vk, metrics.Registry, &crmLinks{Store: st, PublicURL: cfg.AI.PublicURL}, crmAudio{st: st, objs: objs}, log)
+	crmSvc := newCRM(cfg, st, hellodb.New(db, log), box, vk, metrics.Registry, &crmLinks{Store: st, PublicURL: cfg.AI.PublicURL}, crmAudio{st: st, objs: objs}, log)
 	evSvc := &events.Service{
 		Hooks: []events.TxHook{crmSvc.Hook},
 		DB:    db, Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,

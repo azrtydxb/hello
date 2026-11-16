@@ -3,12 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/momo"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/azrtydxb/hello/internal/api"
@@ -49,10 +49,11 @@ type crmWiring struct {
 	calendar *crm.CalendarWorker
 }
 
-// newCRM builds the CRM services. Recording links (spec I-33, I-53) come
+// newCRM builds the CRM services on db, the momo handle over the pool
+// (internal/db). Recording links (spec I-33, I-53) come
 // from the recording-link store of integrations phase P4 (crmLinks); a connector
 // that uploads the audio itself (Pipedrive) reads it through audio.
-func newCRM(cfg config.Control, st *store.Store, db *sql.DB, box *secret.Box, vk *api.LazyValkey, reg prometheus.Registerer, links crm.LinkMinter, audio crm.AudioSource, log *slog.Logger) *crmWiring {
+func newCRM(cfg config.Control, st *store.Store, db *momo.DB, box *secret.Box, vk *api.LazyValkey, reg prometheus.Registerer, links crm.LinkMinter, audio crm.AudioSource, log *slog.Logger) *crmWiring {
 	repo := &crm.PG{DB: db, Box: box}
 	// A self-hosted Odoo or Bitrix24 sits on a private address, so the CRM
 	// client may reach the same private ranges webhooks may.

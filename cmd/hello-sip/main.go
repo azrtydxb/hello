@@ -36,6 +36,7 @@ import (
 	_ "github.com/azrtydxb/hello/internal/crm/salesforce"  // registers the Salesforce connector
 	_ "github.com/azrtydxb/hello/internal/crm/zendesk"     // registers the zendesk connector
 	_ "github.com/azrtydxb/hello/internal/crm/zoho"        // registers the Zoho CRM connector
+	hellodb "github.com/azrtydxb/hello/internal/db"
 	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/fax"
 	"github.com/azrtydxb/hello/internal/lifecycle"
@@ -191,7 +192,7 @@ func run(args []string) error {
 	// CRM caller names (spec integrations I-47): a cache-first lookup that
 	// the SIP path bounds to a few hundred milliseconds. The CRM query runs
 	// in the background, so a slow CRM never holds a call.
-	crmRepo := &crm.PG{DB: sipDB, Box: box}
+	crmRepo := &crm.PG{DB: hellodb.New(sipDB, log), Box: box}
 	crmTokens := &crm.TokenManager{Repo: crmRepo, Providers: crm.DefaultProvider(safehttp.NewClient(safehttp.Options{Timeout: crm.LookupTimeout, Allow: cfg.IntegrationsAllowedCIDRs})),
 		Log: log.With("component", "crm")}
 	crmLookup := &crm.Lookup{Repo: crmRepo, Tokens: crmTokens, Cache: crm.ValkeyCache{Client: func() valkey.Client { return vk }}, Log: log.With("component", "crm")}
