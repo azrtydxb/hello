@@ -6370,3 +6370,10 @@ tx.Commit()` and the errors returned (ErrSuppressed, ErrNotOpen,
   a recording driver, so a misspelled name fails on the pull request tier,
   and `TestMailboxNotify` pins the mailbox NOTIFY
   (`SELECT pg_notify($1, $2::text)` with `hello_mwi` and the box id).
+
+## CDR and recording list cursor type (ListCDRs, ListRecordings)
+
+The old `($1 = 0 OR id < $1)` typed the paging cursor as integer, so a cursor id above 2^31-1 is an out-of-range error. The momo conversion keeps that with `@before::integer`. Options:
+
+- Keep `::integer` (current behaviour, same plan).
+- Switch to `::bigint`, as LookupCalls and LookupRecordings already use: no cursor limit, a behaviour change.
