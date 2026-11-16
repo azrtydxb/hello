@@ -158,7 +158,7 @@ func run(args []string) error {
 		return fmt.Errorf("database pool: %w", err)
 	}
 	defer pool.Close()
-	cdrs := cdr.NewWriter(pool, cdr.NewDroppedCounter(metrics.Registry), log.With("component", "cdr"))
+	cdrs := cdr.NewWriter(hellodb.NewPool(pool, log), cdr.NewDroppedCounter(metrics.Registry), log.With("component", "cdr"))
 	// Call events (spec integrations I-34, I-35): a bounded queue appended to
 	// the Valkey stream hello:events from a goroutine; the call path never
 	// waits on it. The CDR writer publishes call.completed after the record

@@ -17,6 +17,7 @@ import (
 	"github.com/azrtydxb/momo"
 	"github.com/azrtydxb/momo/driver/pgxdriver"
 	"github.com/azrtydxb/momo/momolog"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // SlowQuery is how long a statement may take before its log line is raised
@@ -29,8 +30,19 @@ const SlowQuery = 500 * time.Millisecond
 // than SlowQuery is logged at warn. Argument values are never logged,
 // because sealed tokens and secrets are statement arguments.
 func New(db *sql.DB, log *slog.Logger) *momo.DB {
-	return momo.New(pgxdriver.FromSQLDB(db),
-		momo.WithHook(momolog.New(log.With("component", "db"), momolog.Level(slog.LevelDebug), momolog.SlowOver(SlowQuery))))
+	return momo.New(pgxdriver.FromSQLDB(db), logHook(log))
+}
+
+// NewPool returns the momo handle over a pgx pool (hello-sip's CDR writer),
+// logged as New logs. Statements run in the pool's own query execution mode
+// (pgxpool's default caches prepared statements), not momo's default for the
+// native driver, so they reach PostgreSQL as the pool sent them before.
+func NewPool(pool *pgxpool.Pool, log *slog.Logger) *momo.DB {
+	return momo.New(pgxdriver.New(pool, pgxdriver.WithExecMode(pool.Config().ConnConfig.DefaultQueryExecMode)), logHook(log))
+}
+
+func logHook(log *slog.Logger) momo.Option {
+	return momo.WithHook(momolog.New(log.With("component", "db"), momolog.Level(slog.LevelDebug), momolog.SlowOver(SlowQuery)))
 }
 
 // AdoptTx returns m's view of tx, a transaction raw database/sql code began:
