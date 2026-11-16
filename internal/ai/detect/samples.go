@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/azrtydxb/momo"
 )
 
 // Sample kinds.
@@ -38,8 +40,8 @@ func putSampleAt(ctx context.Context, e *Env, kind, subject string, at time.Time
 	if err != nil {
 		return err
 	}
-	_, err = e.DB.ExecContext(ctx, `INSERT INTO ai_samples (kind, subject, at, value) VALUES ($1, $2, $3, $4)
-		ON CONFLICT DO NOTHING`, kind, subject, at, b)
+	_, err = momo.Exec(ctx, e.DB, `INSERT INTO ai_samples (kind, subject, at, value) VALUES (@kind, @subject, @at, @value)
+		ON CONFLICT DO NOTHING`, momo.Named("kind", kind), momo.Named("subject", subject), momo.Named("at", at), momo.Named("value", b))
 	if err != nil {
 		return fmt.Errorf("write %s sample: %w", kind, err)
 	}
@@ -48,26 +50,20 @@ func putSampleAt(ctx context.Context, e *Env, kind, subject string, at time.Time
 
 // history returns every subject's samples of kind since, oldest first.
 func history[T any](ctx context.Context, e *Env, kind string, since time.Time) (map[string][]Sample[T], error) {
-	rows, err := e.DB.QueryContext(ctx, `SELECT subject, at, value FROM ai_samples
-		WHERE kind = $1 AND at >= $2 ORDER BY subject, at`, kind, since)
+	rows, err := momo.Query[momo.Row3[string, time.Time, []byte]](ctx, e.DB, `SELECT subject, at, value FROM ai_samples
+		WHERE kind = @kind AND at >= @since ORDER BY subject, at`, momo.Named("kind", kind), momo.Named("since", since))
 	if err != nil {
 		return nil, fmt.Errorf("read %s samples: %w", kind, err)
 	}
-	defer func() { _ = rows.Close() }()
 	out := map[string][]Sample[T]{}
-	for rows.Next() {
-		var subject string
-		var s Sample[T]
-		var raw []byte
-		if err := rows.Scan(&subject, &s.At, &raw); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(raw, &s.V); err != nil {
+	for _, row := range rows {
+		s := Sample[T]{At: row.C2}
+		if err := json.Unmarshal(row.C3, &s.V); err != nil {
 			continue // a sample of another shape is not evidence
 		}
-		out[subject] = append(out[subject], s)
+		out[row.C1] = append(out[row.C1], s)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // since reports when the trailing run of samples satisfying pred began; ok

@@ -2,7 +2,6 @@ package detect
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"slices"
 	"testing"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/momo"
 )
 
 var _ ai.Agent = (*AIOps)(nil)
@@ -235,7 +235,7 @@ func testTrunkDown(t *testing.T) {
 
 func testASRDrop(t *testing.T) {
 	// attempts adds n CDRs of a trunk, answered of them answered.
-	add := func(db *sql.DB, trunk string, n, answered int, at time.Time, status int) {
+	add := func(db *momo.DB, trunk string, n, answered int, at time.Time, status int) {
 		for i := range n {
 			addCDR(t, db, cdr{id: i, trunk: trunk, start: at.Add(time.Duration(i) * time.Second), answered: i < answered, status: status})
 		}

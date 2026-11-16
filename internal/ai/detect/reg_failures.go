@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/momo"
 	"github.com/valkey-io/valkey-go"
 )
 
@@ -92,21 +93,13 @@ func regFailures(ctx context.Context, r *Run) ([]Candidate, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.DB.QueryContext(ctx, `SELECT sip_username FROM devices WHERE enabled`)
+	users, err := momo.Scalars[string](ctx, r.DB, `SELECT sip_username FROM devices WHERE enabled`)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	enabled := map[string]bool{}
-	for rows.Next() {
-		var u string
-		if err := rows.Scan(&u); err != nil {
-			return nil, err
-		}
+	enabled := make(map[string]bool, len(users))
+	for _, u := range users {
 		enabled[u] = true
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	return evalRegFailures(att, enabled, r.Now), nil
 }
