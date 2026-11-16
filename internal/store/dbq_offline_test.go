@@ -51,6 +51,21 @@ var namedFiles = map[string]bool{
 	"ringmap.go":           true,
 	"ringtag.go":           true,
 	"store.go":             true,
+	"door.go":              true,
+	"door_camera.go":       true,
+	"door_open.go":         true,
+	"door_webhook.go":      true,
+	"scep.go":              true,
+	"wifi.go":              true,
+	"backup.go":            true,
+	"faxes.go":             true,
+	"mail.go":              true,
+	"ldap.go":              true,
+	"oauth.go":             true,
+	"onboarding.go":        true,
+	"sidekey.go":           true,
+	"totp.go":              true,
+	"users.go":             true,
 }
 
 // TestStatementsBuild renders every statement the store's code passes as a

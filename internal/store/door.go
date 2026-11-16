@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/azrtydxb/momo"
+
 	"github.com/azrtydxb/hello/internal/prov"
 )
 
@@ -75,7 +77,7 @@ func checkDoorTargets(ctx context.Context, tx *dbTx, self int64, t DoorTargets) 
 			return fieldError(path, "a door station cannot call itself")
 		}
 		var kind string
-		err := tx.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = $1`, id).Scan(&kind)
+		err := tx.QueryRowContext(ctx, `SELECT kind FROM extensions WHERE id = @id`, momo.Named("id", id)).Scan(&kind)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fieldError(path, "extension does not exist")
 		}
@@ -92,7 +94,7 @@ func checkDoorTargets(ctx context.Context, tx *dbTx, self int64, t DoorTargets) 
 			return fieldError(path, "ring group is listed twice")
 		}
 		var one int
-		err := tx.QueryRowContext(ctx, `SELECT 1 FROM ring_groups WHERE id = $1`, id).Scan(&one)
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM ring_groups WHERE id = @id`, momo.Named("id", id)).Scan(&one)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fieldError(path, "ring group does not exist")
 		}
@@ -113,7 +115,7 @@ func checkDoorTargets(ctx context.Context, tx *dbTx, self int64, t DoorTargets) 
 func doorChange(ctx context.Context, tx *dbTx, id int64, c *ExtensionChange) (string, DoorTargets, error) {
 	var cur string
 	var raw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT kind, door_targets FROM extensions WHERE id = $1 FOR UPDATE`, id).Scan(&cur, &raw); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT kind, door_targets FROM extensions WHERE id = @id FOR UPDATE`, momo.Named("id", id)).Scan(&cur, &raw); err != nil {
 		return "", DoorTargets{}, err
 	}
 	kind, targets := cur, parseDoorTargets(raw)
@@ -164,24 +166,24 @@ func afterKindChange(ctx context.Context, tx *dbTx, e Extension) error {
 		return nil
 	}
 	// A user has no door-open code (migration 00054).
-	if _, err := tx.ExecContext(ctx, `DELETE FROM door_open WHERE extension_id = $1`, e.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM door_open WHERE extension_id = @extension_id`, momo.Named("extension_id", e.ID)); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO voicemail_boxes (extension_id) VALUES ($1) ON CONFLICT (extension_id) DO NOTHING`, e.ID)
+	_, err := tx.ExecContext(ctx, `INSERT INTO voicemail_boxes (extension_id) VALUES (@extension_id) ON CONFLICT (extension_id) DO NOTHING`, momo.Named("extension_id", e.ID))
 	return err
 }
 
 // memberOf names the first group, queue or pickup group the extension is a
-// member of, or "".
+// member of, or "". Each statement binds the extension as @extension_id.
 func memberOf(ctx context.Context, tx *dbTx, id int64) (string, error) {
 	for _, q := range []struct{ what, sql string }{
-		{"ring group", `SELECT g.name FROM ring_group_members m JOIN ring_groups g ON g.id = m.group_id WHERE m.extension_id = $1 LIMIT 1`},
-		{"paging group", `SELECT g.name FROM paging_group_members m JOIN paging_groups g ON g.id = m.group_id WHERE m.extension_id = $1 LIMIT 1`},
-		{"pickup group", `SELECT g.name FROM pickup_group_members m JOIN pickup_groups g ON g.id = m.group_id WHERE m.extension_id = $1 LIMIT 1`},
-		{"queue", `SELECT g.name FROM queue_members m JOIN queues g ON g.id = m.queue_id WHERE m.extension_id = $1 LIMIT 1`},
+		{"ring group", `SELECT g.name FROM ring_group_members m JOIN ring_groups g ON g.id = m.group_id WHERE m.extension_id = @extension_id LIMIT 1`},
+		{"paging group", `SELECT g.name FROM paging_group_members m JOIN paging_groups g ON g.id = m.group_id WHERE m.extension_id = @extension_id LIMIT 1`},
+		{"pickup group", `SELECT g.name FROM pickup_group_members m JOIN pickup_groups g ON g.id = m.group_id WHERE m.extension_id = @extension_id LIMIT 1`},
+		{"queue", `SELECT g.name FROM queue_members m JOIN queues g ON g.id = m.queue_id WHERE m.extension_id = @extension_id LIMIT 1`},
 	} {
 		var name string
-		err := tx.QueryRowContext(ctx, q.sql, id).Scan(&name)
+		err := tx.QueryRowContext(ctx, q.sql, momo.Named("extension_id", id)).Scan(&name)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -198,7 +200,7 @@ func memberOf(ctx context.Context, tx *dbTx, id int64) (string, error) {
 func checkNoDoor(ctx context.Context, tx *dbTx, path string, ids []int64) error {
 	for _, id := range ids {
 		var number string
-		err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1 AND kind = 'door'`, id).Scan(&number)
+		err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = @id AND kind = 'door'`, momo.Named("id", id)).Scan(&number)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -220,13 +222,13 @@ func (s *Store) DoorStationsFor(ctx context.Context, number string) ([]prov.Door
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT s.number, s.name FROM extensions s, extensions p
-		WHERE p.number = $1 AND s.kind = 'door' AND (
+		WHERE p.number = @number AND s.kind = 'door' AND (
 			EXISTS (SELECT 1 FROM ring_group_members m JOIN ring_groups g ON g.id = m.group_id
 			        WHERE m.extension_id = p.id AND g.is_door)
 			OR s.door_targets->'extensions' @> to_jsonb(p.id)
 			OR EXISTS (SELECT 1 FROM ring_group_members m
 			           WHERE m.extension_id = p.id AND s.door_targets->'ringGroups' @> to_jsonb(m.group_id)))
-		ORDER BY s.number LIMIT $2`, number, prov.MaxDoorStations)
+		ORDER BY s.number LIMIT @limit`, momo.Named("number", number), momo.Named("limit", prov.MaxDoorStations))
 	if err != nil {
 		return nil, err
 	}
