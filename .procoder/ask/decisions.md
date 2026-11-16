@@ -5755,6 +5755,40 @@ answered, whatever the order.
   without `momo generate` fails too. The failure prints the regenerate
   commands and the expected files; the commands are in docs/database.md.
 
+## momo Phase 1: the CDR insert on named binds (2026-11-16, feat/momo-p1-cdr)
+
+- **Named binds, not a model insert.** The CDR statement is one
+  data-modifying CTE: the `cdrs` row, then its page, follow-me and queue
+  legs from JSON arrays through `jsonb_array_elements ... WITH ORDINALITY`,
+  which momo cannot build (G10). A model insert would split it into four
+  statements and a transaction, which changes the writer's failure modes,
+  so the SQL text stays and only its 40 `$n` became `@name` binds named
+  after their columns (`insertArgs`). `TestInsertBindsEveryColumn` pins
+  that each `cdrs` column is bound by its own name in the same position;
+  the old tests that read `args[32]` now read `answered_by`.
+- **Frozen SQL.** The rendered statement and the id lookup are registered
+  in the package's own `momo.QueryRegistry` (`cdr.Queries`) and frozen by
+  `momotest.QueryGolden` in `internal/cdr/testdata/queries/postgres.sql`
+  (rewrite with `MOMO_UPDATE_GOLDEN=1`). A package registry instead of
+  `momo.RegisterQuery`'s process-wide one, so the golden file lists only
+  this package's statements whatever else the test binary links; the
+  mechanism is the same. The golden file shows the statement PostgreSQL
+  receives: identical to the old text except that the leg arrays are
+  `$38`/`$39`/`$40` (page, follow-me, queue) and video is `$37`.
+- **Same pool, same execution mode.** hello-sip's writer keeps its pgx pool
+  (4 connections). `internal/db.NewPool` wraps it with momo's native pgx
+  driver and passes the pool's own `DefaultQueryExecMode` (pgxpool's
+  default caches prepared statements), so the statement reaches PostgreSQL
+  as before instead of in momo's default exec mode.
+- **Writer behaviour unchanged.** Queue size, `Enqueue` dropping when full,
+  the retry loop with its backoff, the shutdown flush and the 5 s write
+  timeout are untouched; only `write` and `publish` changed. The
+  call.completed id lookup now always runs through the momo handle (before,
+  only when the handle could `QueryRow`, which the pool always could); zero
+  rows still emit the events with cdrId 0 and log at debug.
+- **Stacked on the crm pilot.** This branch needs `internal/db` and the
+  momo pin from feat/momo-p1-crm and merges after it.
+
 ## Two flakes: Grandstream DTLS/ICE test token, CANCEL crossing a 200 (2026-11-16, fix/flakes-cancel-gs)
 
 - **TestGrandstreamDTLSAndICE: the random token spelled a forbidden word.**
