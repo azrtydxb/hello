@@ -11,9 +11,9 @@ is no second connection pool. Statements are logged at debug level with the
 component `db`, and at warn when slower than `db.SlowQuery`; argument values
 are never logged.
 
-Moved so far: `internal/crm` (`crm.PG`) and the CDR writer (`internal/cdr`),
+Moved so far: `internal/crm` (`crm.PG`), the CDR writer (`internal/cdr`),
 which runs on hello-sip's pgx pool through `db.NewPool`, in the pool's own
-query execution mode.
+query execution mode, and the SSO store (`sso.PG`).
 
 ## Writing a statement
 

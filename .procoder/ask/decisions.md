@@ -5838,3 +5838,29 @@ answered, whatever the order.
   at GOMAXPROCS=2. The CI failure did not reproduce locally. New test on
   old code: "487 before 200" failed 50/50 with the CI message ("timed out waiting for ACK to the callee's crossing 200"); "200 before 487" failed 0/50. New test with the fix: 0/50 for
   each order.
+
+## momo Phase 2: the SSO store (2026-11-16, momo/sso)
+
+- **Scope.** `internal/sso/pg.go`, all 21 raw call sites, moves to momo
+  v0.14.0; `sso.PG.DB` is a `*momo.DB`, built inline in hello-control. The
+  other matches a grep finds in the package (`URL.Query()` in ssotest) are
+  not SQL. Independent of the directory and SCIM pull requests (no shared
+  type), so it branches from main.
+- **Same SQL, named binds, positional scans.** Every statement keeps its
+  text with `@name` binds; rows are scanned by the existing
+  `scanProvider`/`scanUser` through `momo.RawRows`, and `queryRow` returns
+  `sql.ErrNoRows`, so `mapErr`'s ErrNotFound is unchanged. No bind is
+  reused, so no cast was added.
+- **Transactions and errors unchanged.** SaveProvider, SetSSORequired
+  (the `FOR UPDATE` count of enabled break-glass admins, then the update),
+  Link, Unlink and CreateUser run in `momo.DB.Tx` with their audit rows. A
+  unique violation of the identity or the username is still ErrLinked
+  (`momo.ErrUniqueViolation` or the 23505 `*pgconn.PgError` check it
+  always made), and a refused CreateUser rolls back the user with its
+  identity. Link and CreateUser now share the identity insert
+  (`insertIdentity`); the statement is the one both ran.
+- **Tests.** `TestPGStatementsBuild` runs every method on a scripted momo
+  driver (the same as the directory package's) on the PR tier.
+  `TestStoreContractMem`/`PG` run the same provider, policy, user-lookup,
+  identity and just-in-time assertions on Mem and PG; the known differences
+  are in the test's comment.
